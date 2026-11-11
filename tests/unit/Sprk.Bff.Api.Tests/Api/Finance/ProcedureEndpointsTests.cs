@@ -107,6 +107,19 @@ public sealed class ProcedureEndpointsTests
         public readonly Mock<RuleSetService> RuleSets = NewRuleSets();
         public readonly Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService> Jobs = NewJobs();
         public Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig Files { get; private set; } = new();
+
+        /// <summary>Fix round 5 (F2): the drafting job's per-version lock, the real store over an in-memory cache, so a test can hold it as a run does.</summary>
+        public readonly Sprk.Bff.Api.Services.Jobs.IdempotencyService Locks = NewLocks();
+
+        /// <summary>The REAL caller-rights evaluator over a recording data source (fix round 5: the /draft handler's reject-rights calls).</summary>
+        internal static AuthorizationService NewAuthorization(IAccessDataSource access) => new(
+            access, new IAuthorizationRule[] { new OperationAccessRule(NullLogger<OperationAccessRule>.Instance) }, NullLogger<AuthorizationService>.Instance);
+
+        internal static Sprk.Bff.Api.Services.Jobs.IdempotencyService NewLocks() => new(
+            new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+                Microsoft.Extensions.Options.Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+            NullLogger<Sprk.Bff.Api.Services.Jobs.IdempotencyService>.Instance);
+
         private WebApplication _app = null!;
         public HttpClient Client = null!;
         public IServiceProvider Services => _app.Services;
@@ -142,9 +155,14 @@ public sealed class ProcedureEndpointsTests
                 o.Enabled = ebillingEnabled;
                 o.MaxSubmissionFileSizeMb = maxFileMb;
             });
-            // Fix round 4 (EB-D-216): by default a /draft supersedes nothing (a first draft: no per-row check, no deactivation).
+            // Fix round 4 (EB-D-216): by default a /draft supersedes nothing (a first draft: no deactivation).
             host.RuleSets.Setup(r => r.PlanRedraftAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(RuleSetOutcome<RedraftPlan>.Done(new RedraftPlan(Array.Empty<SupersededDraft>())));
+            // Fix round 5 (EB-D-216a): /draft asks the reject rights on the Procedure's rule set (SetId, of ProcedureId, not record-scoped).
+            host.RuleSets.Setup(r => r.ProcedureRuleSetIdAsync(ProcedureId, It.IsAny<CancellationToken>())).ReturnsAsync(SetId);
+            host.RuleSets.Setup(r => r.ProcedureOfRuleSetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(ProcedureId);
+            host.RuleSets.Setup(r => r.RecordHomeOfRuleSetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((RecordRuleSetHome?)null);
+            builder.Services.AddSingleton<Sprk.Bff.Api.Services.Jobs.IIdempotencyService>(host.Locks);
             builder.Services.AddSingleton(host.RuleSets.Object);
             builder.Services.AddSingleton(host.Jobs.Object);
             builder.Services.AddSingleton(host.Files.Service);
@@ -200,6 +218,9 @@ public sealed class ProcedureEndpointsTests
             }
 
             Access.Grant(ProcedureSet, ProcedureId, AccessRights.Read | AccessRights.Write);
+
+            // Fix round 5 (EB-D-216a): /draft asks Read on the Procedure's rule set, as the reject route does.
+            Access.Grant("sprk_rulesets", SetId, AccessRights.Read);
 
             // Fix round 1: the version routes ask the caller's own rights on the version first (the file store's check).
             Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read | AccessRights.Write);
@@ -746,6 +767,113 @@ public sealed class ProcedureEndpointsTests
         host.Jobs.Verify(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // ── Fix round 5 (EB-D-216a, F2): the reject rights, the scope assertion and the job's lock ─────────────────────────────────────
+
+    private static SupersededDraft Superseded(Guid? ruleSet = null, Guid? procedureVersion = null) =>
+        new(Guid.NewGuid(), new[] { Guid.NewGuid() }, ruleSet ?? SetId, new[] { procedureVersion ?? VersionId });
+
+    [Fact(DisplayName = "116 fix 5 (EB-D-216a) must-fire: /draft without DecideRule()'s Write on sprk_policyversion is 403; nothing read, deactivated or queued")]
+    public async Task Draft_WithoutTheDecideRulePrivilege_Is403_AndReachesNothing()
+    {
+        await using var host = await Host.StartAsync();
+        host.Probe.Release(BillingAdminAuthorization.WritePolicyVersionPrivilege);
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Probe.Calls.Select(c => c.Privilege).Should().Contain(BillingAdminAuthorization.WritePolicyVersionPrivilege, "a reject needs it, so a redraft does");
+        host.VerifyNothingReached(); // no draft state read, nothing deactivated, nothing queued
+    }
+
+    [Fact(DisplayName = "116 fix 5 (EB-D-216a) must-not-fire: /draft asks every DecideRule() privilege on its declaration, as the reject route does")]
+    public void Draft_DeclaresEveryDecideRulePrivilege()
+    {
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.Request.RouteValues["procedureId"] = ProcedureId.ToString();
+        var context = new Microsoft.AspNetCore.Http.DefaultEndpointFilterInvocationContext(http);
+
+        var declared = BillingAdminAuthorization.DraftProcedureVersion(context).Checks;
+
+        declared.Should().Contain(BillingAdminAuthorization.DecideRule().Checks);
+        declared.Should().Contain(BillingAdminAuthorization.DraftRules().Checks);
+        declared.Should().OnlyHaveUniqueItems();
+    }
+
+    [Theory(DisplayName = "116 fix 5 (EB-D-216a item 3) must-fire: a superseded draft outside the checked rule set or this version refuses the whole call 409, nothing deactivated or queued")]
+    [InlineData("ruleset")]
+    [InlineData("version")]
+    public async Task Draft_ASupersededDraftOutsideTheCheckedScope_Is409_AndWritesNothing(string outside)
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        var stray = outside == "ruleset" ? Superseded(ruleSet: Guid.NewGuid()) : Superseded(procedureVersion: Guid.NewGuid());
+        host.RuleSets.Setup(r => r.PlanRedraftAsync(VersionId, SourceFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<RedraftPlan>.Done(new RedraftPlan(new[] { Superseded(), stray })));
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeRedraftScopeMismatch);
+        host.RuleSets.Verify(r => r.DeactivateSupersededDraftsAsync(It.IsAny<Guid>(), It.IsAny<RedraftPlan>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 5 (EB-D-216a item 3) must-fire: a version whose rule set is not the one the rights were asked on is 409, before any plan")]
+    public async Task Draft_TheVersionsRuleSetIsNotTheCheckedOne_Is409()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source() with { RuleSetId = Guid.NewGuid() }));
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeRedraftScopeMismatch);
+        host.RuleSets.Verify(r => r.PlanRedraftAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 5 (F2, fix b) must-fire: while a drafting run holds the version's lock, /draft is 409 drafting_in_progress and plans, deactivates and queues nothing")]
+    public async Task Draft_WhileARunHoldsTheLock_Is409_AndTouchesNothing()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        (await host.Locks.TryAcquireProcessingLockAsync(
+            BillingRuleDraftJobHandlerLockKey(), Sprk.Bff.Api.Services.Jobs.Handlers.BillingRuleDraftJobHandler.LockDuration)).Should().BeTrue("the run takes its lock");
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be(ProcedureEndpoints.CodeDraftingInProgress);
+        host.RuleSets.Verify(r => r.PlanRedraftAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.RuleSets.Verify(r => r.DeactivateSupersededDraftsAsync(It.IsAny<Guid>(), It.IsAny<RedraftPlan>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "116 fix 5 (F2, fix b) must-not-fire: /draft releases the version's lock once the run is queued, so the run can take it")]
+    public async Task Draft_ReleasesTheLock_SoTheRunCanTakeIt()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(Source()));
+        var heldWhileQueueing = false;
+        host.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<Sprk.Bff.Api.Services.Jobs.JobContract>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                heldWhileQueueing = !await host.Locks.TryAcquireProcessingLockAsync(BillingRuleDraftJobHandlerLockKey(), TimeSpan.FromSeconds(1));
+            });
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        heldWhileQueueing.Should().BeTrue("the plan, the deactivation and the queueing run under the lock");
+        (await host.Locks.TryAcquireProcessingLockAsync(BillingRuleDraftJobHandlerLockKey(), TimeSpan.FromSeconds(1))).Should().BeTrue("released after");
+    }
+
+    private static string BillingRuleDraftJobHandlerLockKey() => Sprk.Bff.Api.Services.Jobs.Handlers.BillingRuleDraftJobHandler.LockKeyFor(VersionId);
+
     [Fact(DisplayName = "116 must-fire: PUT /file over the size limit by Content-Length is 413 before the body is read; nothing stored")]
     public async Task File_OverTheLimitByContentLength_Is413_BeforeAnything()
     {
@@ -1206,7 +1334,8 @@ public sealed class ProcedureEndpointsTests
         var jobs = Host.NewJobs();
 
         var result = await ProcedureEndpoints.DraftVersionRules(
-            d.Procedure, versionId, h.Service(), jobs.Object, rig.Service, http, NullLogger<RuleSetService>.Instance, CancellationToken.None);
+            d.Procedure, versionId, h.Service(), jobs.Object, rig.Service, Host.NewAuthorization(new FinAuth.RecordingAccessDataSource()), Host.NewLocks(),
+            http, NullLogger<RuleSetService>.Instance, CancellationToken.None);
 
         jobs.VerifyNoOtherCalls();
         var problem = result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject.ProblemDetails;

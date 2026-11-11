@@ -446,19 +446,6 @@ public sealed class StoredFileService
         _probe.GetCallerRightsForAuthorizationGateAsync(callerBearerToken, parent.EntitySet, parent.Id, ct);
 
     /// <summary>
-    /// Task 116 fix round 4 (EB-D-216): the caller's own rights on each of <paramref name="rows"/>, asked as the user through the same probe as
-    /// <see cref="GetCallerRightsOnParentAsync"/>, in order; null where Dataverse gave no answer. The version drafting route asks it for every
-    /// superseded draft row a redraft deactivates. A fault throws.
-    /// </summary>
-    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="CallerRecordAccessProbe.GetCallerRightsForRecordsOrUnknownAsync"/>,
-    /// which this forwards to unchanged. (2) Extension — the drafting route already asks the version's rights through this service's probe;
-    /// this exposes the same probe's batch question rather than a second registration path. (3) Cost of doing nothing — the redraft could not
-    /// check the caller's Write on the rows it deactivates (EB-D-216 condition 1).</remarks>
-    internal Task<IReadOnlyList<AccessRights?>> GetCallerRightsOnRowsOrUnknownAsync(
-        string? callerBearerToken, IReadOnlyList<(string EntitySet, Guid RecordId)> rows, CancellationToken ct) =>
-        _probe.GetCallerRightsForRecordsOrUnknownAsync(callerBearerToken, rows, ct);
-
-    /// <summary>
     /// Task 116 fix round 2: the refusals <see cref="UploadForCallerAsync"/> would give for the request itself (the row's name and type rules,
     /// a length the size column holds, a store that can stage now: <see cref="CanStageAsync"/>), decided with no write (fix round 3: the
     /// stage check's cached environment read is the only read), so a route can answer them before it changes anything. Null: the upload goes

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
@@ -52,7 +53,9 @@ public sealed record ProcedureVersionFileStored(Guid ProcedureVersionId, Guid Fi
 /// the owner reason code; 422 <c>procedure.too_many_rules</c>; 500 <c>procedure.write_failed</c>.</para>
 /// <para><b>Task 116 (model 5.3, 7.2).</b> POST <c>…/versions/{versionId}/draft</c> queues the drafting job (202) and answers 400
 /// <c>procedure.not_billing</c>, 409 <c>procedure_version.not_draft</c> / <c>ruleset.already_drafted</c> / <c>procedure.retired</c> /
-/// <c>procedure.ruleset_missing</c> / <c>ruleset.retired</c>, 422 <c>ruleset.source_missing</c>, 503 <c>ruleset.draft_not_queued</c>. PUT
+/// <c>procedure.ruleset_missing</c> / <c>ruleset.retired</c>, 422 <c>ruleset.source_missing</c>, 503 <c>ruleset.draft_not_queued</c>; a redraft
+/// also 404 <c>ruleset.not_found</c> (no Read on the rule set), 409 <c>ruleset.drafting_in_progress</c> / <c>ruleset.redraft_scope_mismatch</c> /
+/// <c>ruleset.draft_changed</c>, 422 <c>ruleset.redraft_too_large</c>, 503 <c>ruleset.redraft_outcome_unknown</c> / <c>ruleset.redraft_not_queued</c>. PUT
 /// <c>…/versions/{versionId}/file</c> stores the version's source file (multipart, replacing the earlier one) and answers 400
 /// <c>procedure_version.file_missing</c>, 409 <c>procedure_version.not_draft</c> / <c>procedure.retired</c> / the owner code, 413
 /// <c>procedure_version.file_too_large</c>, 500 <c>procedure_version.file_write_failed</c>, 503 <c>stored_file.store_not_configured</c>. On both,
@@ -280,8 +283,8 @@ public static class ProcedureEndpoints
         Map(await service.RetireVersionAsync(procedureId, versionId, ct), http);
 
     internal static async Task<IResult> DraftVersionRules(
-        Guid procedureId, Guid versionId, RuleSetService ruleSets, JobSubmissionService jobs, StoredFileService files, HttpContext http,
-        ILogger<RuleSetService> logger, CancellationToken ct)
+        Guid procedureId, Guid versionId, RuleSetService ruleSets, JobSubmissionService jobs, StoredFileService files,
+        AuthorizationService authorization, IIdempotencyService locks, HttpContext http, ILogger<RuleSetService> logger, CancellationToken ct)
     {
         // The source, the version's state and a finished run are decided here, so the admin hears 404 / 409 / 422 now, not from a dead-lettered job.
         // Fix round 1: the route checks the caller's rights on the version before its other answers (an unknown version first, then those rights).
@@ -295,6 +298,17 @@ public static class ProcedureEndpoints
         if (answerNow)
         {
             return denied!;
+        }
+
+        // Fix round 5 (EB-D-216a): a redraft takes the drafts it supersedes out of review, so the caller must hold what a REJECT of them needs,
+        // asked as the caller and before anything about the version's drafts is read (rights, then reads, then the transaction). The
+        // privileges are DecideRule()'s, on the route's declaration; here, through the reject route's own calls, Read on the Procedure's rule
+        // set (the version's uniform 404, its record too when it is record-scoped) and Write on that set's Procedure. Row-level rights on
+        // draft rows are not the gate; the redraft asks the reject rights as the caller (EB-D-216a).
+        var checkedRuleSet = await CallerRejectRightsRefusalAsync(procedureId, ruleSets, authorization, http, logger, ct);
+        if (checkedRuleSet.Refusal is { } refused)
+        {
+            return refused;
         }
 
         var found = await ruleSets.GetDraftSourceAsync(procedureId, versionId, ct);
@@ -321,46 +335,156 @@ public static class ProcedureEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = RuleSetService.CodeAlreadyDrafted });
         }
 
-        // Fix round 4 (EB-D-216): a redraft deactivates the drafts it supersedes, never deletes them. The rows are planned first; the caller's own
-        // Write on EVERY one of them is asked as the user before any write (none denied, none unanswered, or nothing changes); then the
-        // application deactivates them all or none (re-checked as Drafts first; a draft published in between is a 409). A first draft plans
-        // nothing and asks nothing.
+        // Fix round 5 (EB-D-216a, item 3): the rights above were asked on the Procedure's rule set; the version must draft into that same set.
+        if (checkedRuleSet.RuleSetId != source.RuleSetId)
+        {
+            return ScopeMismatch(versionId, source.RuleSetId, "the version's rule set is not the one the rights were checked on", http, logger);
+        }
+
+        // Fix round 5 (F2, fix b): the plan, the deactivation and the queueing run under the drafting job's own per-version lock (the same key
+        // and store), so a run still storing its rules (its marker not yet written) cannot have part of its output deactivated under it.
+        var lockKey = BillingRuleDraftJobHandler.LockKeyFor(versionId);
+        var lockOwner = $"redraft:{Guid.NewGuid():N}";
+        if (!await locks.TryAcquireProcessingLockAsync(lockKey, lockOwner, RedraftLockDuration, ct))
+        {
+            logger.LogWarning("Procedure Version {ProcedureVersionId}: a drafting run holds the version's lock; the redraft was refused", versionId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                detail: "Rules are being drafted for this Procedure Version right now. Nothing was changed; try again when that run has finished.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = CodeDraftingInProgress });
+        }
+
+        try
+        {
+            return await PlanDeactivateAndQueueAsync(procedureId, versionId, source, checkedRuleSet.RuleSetId!.Value, ruleSets, jobs, http, logger, ct);
+        }
+        finally
+        {
+            await locks.ReleaseProcessingLockAsync(lockKey, lockOwner, CancellationToken.None);
+        }
+    }
+
+    /// <summary>How long the redraft holds the drafting job's per-version lock at most: a few reads and one transaction, far below the job's own.</summary>
+    internal static readonly TimeSpan RedraftLockDuration = TimeSpan.FromMinutes(5);
+
+    /// <summary>Fix round 5 (F2): a drafting run holds the version's lock (409); nothing was read about its drafts or changed.</summary>
+    internal const string CodeDraftingInProgress = "ruleset.drafting_in_progress";
+
+    /// <summary>Fix round 5 (EB-D-216a): a draft the redraft would supersede is outside the rule set or Procedure Version it checked (409).</summary>
+    internal const string CodeRedraftScopeMismatch = "ruleset.redraft_scope_mismatch";
+
+    /// <summary>Fix round 5 (uac-r2 addition 3): the earlier drafts were deactivated, but the drafting job could not be queued (503).</summary>
+    internal const string CodeRedraftNotQueued = "ruleset.redraft_not_queued";
+
+    /// <summary>
+    /// The redraft's writes, under the job's lock (fix rounds 4 and 5): plan the superseded drafts (only those made before the current source
+    /// file); refuse the whole call if any of them lies outside the checked rule set or this Procedure Version; deactivate them all or none, as
+    /// the application; then queue the run. Once the deactivation has been sent, the queueing runs on <see cref="CancellationToken.None"/>, so a
+    /// client that disconnects never leaves inactive drafts with no run queued; a queue failure after it answers 503
+    /// <see cref="CodeRedraftNotQueued"/> (a retry plans nothing and queues the run).
+    /// </summary>
+    private static async Task<IResult> PlanDeactivateAndQueueAsync(
+        Guid procedureId, Guid versionId, DraftSource source, Guid checkedRuleSetId, RuleSetService ruleSets, JobSubmissionService jobs,
+        HttpContext http, ILogger logger, CancellationToken ct)
+    {
         var plan = await ruleSets.PlanRedraftAsync(versionId, source.FileId, ct);
         if (plan.Kind != RuleSetOutcomeKind.Done)
         {
             return Map(plan, http);
         }
 
-        if (plan.Value!.Drafts.Count > 0)
+        // Every superseded draft is the checked rule set's, under this version (so under the route's Procedure, which GetDraftSourceAsync
+        // confirmed). By construction they all are; a draft that is not refuses the whole call before anything is written.
+        if (plan.Value!.Drafts.FirstOrDefault(d => d.RuleSetId != checkedRuleSetId || d.ProcedureVersionIds.Any(v => v != versionId)) is { } outside)
         {
-            if (await CallerWriteOnEveryRowRefusalAsync(files, plan.Value, versionId, http, logger, ct) is { } refused)
-            {
-                return refused;
-            }
+            return ScopeMismatch(versionId, outside.RuleSetId,
+                $"superseded draft {outside.PolicyId} is outside rule set {checkedRuleSetId} or Procedure Version {versionId} (Procedure {procedureId})", http, logger);
+        }
 
+        var deactivatedAny = false;
+        if (plan.Value.Drafts.Count > 0)
+        {
             var deactivated = await ruleSets.DeactivateSupersededDraftsAsync(versionId, plan.Value, ct);
             if (deactivated.Kind != RuleSetOutcomeKind.Done)
             {
                 return Map(deactivated, http);
             }
+
+            deactivatedAny = true;
         }
 
         var jobId = Guid.NewGuid();
         var statusUrl = $"{RuleSetEndpoints.Route}/{source.RuleSetId}";
         try
         {
-            await jobs.SubmitJobAsync(BillingRuleDraftJobHandler.BuildJob(jobId, versionId, CallerOid(http), http.TraceIdentifier), ct);
+            await jobs.SubmitJobAsync(
+                BillingRuleDraftJobHandler.BuildJob(jobId, versionId, CallerOid(http), http.TraceIdentifier), deactivatedAny ? CancellationToken.None : ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (deactivatedAny || ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the drafting job could not be queued ({ExceptionType})", versionId, ex.GetType().Name);
-            return Results.Problem(
-                statusCode: StatusCodes.Status503ServiceUnavailable, detail: "The drafting job could not be queued. Try again shortly.",
-                extensions: new Dictionary<string, object?> { ["errorCode"] = CodeDraftNotQueued });
+            logger.LogError(ex, "Procedure Version {ProcedureVersionId}: the drafting job could not be queued ({ExceptionType}); earlier drafts deactivated: {Deactivated}",
+                versionId, ex.GetType().Name, deactivatedAny);
+            return deactivatedAny
+                ? Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    detail: "The earlier drafts of this version were already replaced, but the drafting run could not be queued. Start drafting again to queue it.",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = CodeRedraftNotQueued })
+                : Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable, detail: "The drafting job could not be queued. Try again shortly.",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = CodeDraftNotQueued });
         }
 
         logger.LogInformation("Procedure Version {ProcedureVersionId}: drafting job {JobId} queued", versionId, jobId);
         return Results.Accepted(statusUrl, new ProcedureVersionDraftAccepted(versionId, source.RuleSetId, jobId, statusUrl));
+    }
+
+    private static IResult ScopeMismatch(Guid versionId, Guid ruleSetId, string why, HttpContext http, ILogger logger)
+    {
+        logger.LogError("Procedure Version {ProcedureVersionId}: {ReasonCode}: {Why} (rule set {RuleSetId}); nothing was changed",
+            versionId, CodeRedraftScopeMismatch, why, ruleSetId);
+        return Results.Problem(
+            statusCode: StatusCodes.Status409Conflict,
+            detail: "An earlier draft of this version does not belong to its Procedure's rule set. Nothing was changed; contact support.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = CodeRedraftScopeMismatch });
+    }
+
+    /// <summary>
+    /// Fix round 5 (EB-D-216a): the reject route's rights on the route Procedure's rule set, as the caller, before any draft state is read:
+    /// <see cref="RuleSetEndpoints.CallerAccessToTheRuleSetRefusalAsync"/> (Read on the set, the uniform 404; its record too when record-scoped)
+    /// and <see cref="BillingAdminAuthorization.CallerRightsOnTheRuleSetsProcedureRefusalAsync"/> (Write on the set's Procedure). The set is
+    /// found app-only from the Procedure; a Procedure with no rule set has nothing to supersede and is answered by the source read (409
+    /// <c>procedure.ruleset_missing</c>), so its rule set id is null. A fault finding the set is 403 <c>system_failure</c>.
+    /// </summary>
+    private static async Task<(Guid? RuleSetId, IResult? Refusal)> CallerRejectRightsRefusalAsync(
+        Guid procedureId, RuleSetService ruleSets, AuthorizationService authorization, HttpContext http, ILogger logger, CancellationToken ct)
+    {
+        Guid? ruleSetId;
+        try
+        {
+            ruleSetId = await ruleSets.ProcedureRuleSetIdAsync(procedureId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Procedure {ProcedureId}: its rule set could not be read for the redraft's rights; denying (fail closed)", procedureId);
+            return (null, ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier));
+        }
+
+        if (ruleSetId is not { } id)
+        {
+            return (null, null);
+        }
+
+        // Fix round 6 (NFR-01): the id in this URL is the VERSION's, so the set's uniform 404 is answered as the missing-version body (the
+        // same bytes as an unknown version id); the set check logs its own line as before.
+        var access = await RuleSetEndpoints.CallerAccessToTheRuleSetRefusalAsync(http, id, ruleSets, authorization, logger, ct);
+        if (access is IStatusCodeHttpResult { StatusCode: StatusCodes.Status404NotFound })
+        {
+            return (id, VersionNotFound(VersionNotFoundForDraft, http));
+        }
+
+        var refusal = access
+            ?? await BillingAdminAuthorization.CallerRightsOnTheRuleSetsProcedureRefusalAsync(http, id, "write", ruleSets, authorization, logger, ct);
+        return (id, refusal);
     }
 
     /// <summary>
@@ -559,57 +683,6 @@ public static class ProcedureEndpoints
             : (ProblemDetailsHelper.Forbidden(
                 FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure Version.", traceId: http.TraceIdentifier), false);
     }
-
-    /// <summary>Fix round 4 (EB-D-216): the answer when the caller's rights on a superseded draft could not be read (nothing changed).</summary>
-    internal const string CodeRedraftUnverified = "ruleset.redraft_unverified";
-
-    /// <summary>
-    /// Fix round 4 (EB-D-216, condition 1): the caller's own Write, asked as the user in ONE question, on every row <paramref name="plan"/> names
-    /// (each superseded policy version, then each policy). Null: every row is writable. Any row without Write is 403 <c>insufficient_rights</c>;
-    /// any row Dataverse gave no answer for, or a fault, is 503 <see cref="CodeRedraftUnverified"/>. Either way the redraft stops before any write.
-    /// </summary>
-    internal static async Task<IResult?> CallerWriteOnEveryRowRefusalAsync(
-        StoredFileService files, RedraftPlan plan, Guid versionId, HttpContext http, ILogger logger, CancellationToken ct)
-    {
-        var rows = plan.Rows
-            .Select(r => (r.Table == RuleSetService.PolicyEntity ? PolicyEntitySet : PolicyVersionEntitySet, r.Id))
-            .ToList();
-        IReadOnlyList<AccessRights?> answers;
-        try
-        {
-            answers = await files.GetCallerRightsOnRowsOrUnknownAsync(TokenHelper.ExtractBearerTokenOrNull(http), rows, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "Procedure Version {ProcedureVersionId}: the caller's rights on the superseded drafts could not be read ({ExceptionType}); nothing changed",
-                versionId, ex.GetType().Name);
-            return RedraftUnverified();
-        }
-
-        if (answers.Count != rows.Count || answers.Any(a => a is null))
-        {
-            logger.LogWarning("Procedure Version {ProcedureVersionId}: Dataverse gave no answer for the caller's rights on a superseded draft; nothing changed", versionId);
-            return RedraftUnverified();
-        }
-
-        if (answers.Any(a => !a!.Value.HasFlag(AccessRights.Write)))
-        {
-            logger.LogWarning("Procedure Version {ProcedureVersionId}: the caller lacks Write on a superseded draft; nothing changed", versionId);
-            return ProblemDetailsHelper.Forbidden(
-                FinanceAuthorizationFilter.InsufficientRightsReasonCode,
-                detail: "You need Write on every earlier draft of this version that drafting again replaces.", traceId: http.TraceIdentifier);
-        }
-
-        return null;
-    }
-
-    private static IResult RedraftUnverified() =>
-        Results.Problem(
-            statusCode: StatusCodes.Status503ServiceUnavailable, detail: "Your rights on the earlier drafts could not be checked. Nothing was changed; try again shortly.",
-            extensions: new Dictionary<string, object?> { ["errorCode"] = CodeRedraftUnverified });
-
-    internal const string PolicyEntitySet = "sprk_policies";
-    internal const string PolicyVersionEntitySet = "sprk_policyversions";
 
     /// <summary>The unknown-version 404 (<c>procedure.version_not_found</c>) with the route's own text; the same body as no Read on it.</summary>
     internal static IResult VersionNotFound(string detail, HttpContext http) =>

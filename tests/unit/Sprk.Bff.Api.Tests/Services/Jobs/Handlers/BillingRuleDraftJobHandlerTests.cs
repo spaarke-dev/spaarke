@@ -91,9 +91,9 @@ public sealed class BillingRuleDraftJobHandlerTests
             Files.SeedFile(FileId, new StoredFileParent(StoredFileParentKind.ProcedureVersion, VersionId), new byte[] { 1, 2, 3 },
                 purpose: StoredFilePurpose.ProcedureSource);
 
-            Lock.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            Lock.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => LockAvailable);
-            Lock.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            Lock.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             RuleSets.Setup(r => r.GetDraftSourceAsync(VersionId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(RuleSetOutcome<DraftSource>.Done(new DraftSource(VersionId, ProcedureId, SetId, FileId, "ocg.pdf", false)));
@@ -525,7 +525,7 @@ public sealed class BillingRuleDraftJobHandlerTests
         rig.Files.Gateway.Calls.Should().BeEmpty("the source file is never read");
         rig.Ai.VerifyNoOtherCalls();
         rig.Stored.Should().BeNull();
-        rig.Lock.Verify(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never, "a lock this delivery never held is not released");
+        rig.Lock.Verify(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never, "a lock this delivery never held is not released");
     }
 
     [Fact]
@@ -541,9 +541,40 @@ public sealed class BillingRuleDraftJobHandlerTests
         var key = BillingRuleDraftJobHandler.LockKeyPrefix + VersionId.ToString("N");
         foreach (var r in new[] { rig, failing })
         {
-            r.Lock.Verify(l => l.TryAcquireProcessingLockAsync(key, BillingRuleDraftJobHandler.LockDuration, It.IsAny<CancellationToken>()), Times.Once);
-            r.Lock.Verify(l => l.ReleaseProcessingLockAsync(key, It.IsAny<CancellationToken>()), Times.Once);
+            r.Lock.Verify(l => l.TryAcquireProcessingLockAsync(key, It.Is<string>(o => o.StartsWith("billing-rule-draft-run:")), BillingRuleDraftJobHandler.LockDuration, It.IsAny<CancellationToken>()), Times.Once);
+            r.Lock.Verify(l => l.ReleaseProcessingLockAsync(key, It.Is<string>(o => o.StartsWith("billing-rule-draft-run:")), It.IsAny<CancellationToken>()), Times.Once);
         }
+    }
+
+    [Fact(DisplayName = "116 fix 6 (K-4) must-fire: a run that outlived its lock never releases the lock the redraft route took after it")]
+    public async Task Process_ARunThatLostItsLock_LeavesTheRoutesLockInPlace()
+    {
+        var rig = new Rig();
+        var locks = new IdempotencyService(
+            new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+                Microsoft.Extensions.Options.Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+            NullLogger<IdempotencyService>.Instance);
+        var key = BillingRuleDraftJobHandler.LockKeyFor(VersionId);
+        const string route = "redraft:route-owner";
+        var routeTook = false;
+        rig.RuleSets.Setup(r => r.GetDraftSourceAsync(VersionId, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                // Mid-run, the run's lock reaches its TTL (the ownerless removal is what an expiry does) and the route takes it.
+                await locks.ReleaseProcessingLockAsync(key, CancellationToken.None);
+                routeTook = await locks.TryAcquireProcessingLockAsync(key, route, TimeSpan.FromMinutes(5), CancellationToken.None);
+                return RuleSetOutcome<DraftSource>.Done(new DraftSource(VersionId, ProcedureId, SetId, FileId, "ocg.pdf", false));
+            });
+        var handler = new BillingRuleDraftJobHandler(rig.RuleSets.Object, rig.Ai.Object, rig.Files.Service, rig.Text.Object, locks, rig.Log);
+
+        await handler.ProcessAsync(Job(), CancellationToken.None);
+
+        routeTook.Should().BeTrue();
+        (await locks.TryAcquireProcessingLockAsync(key, "another-taker", TimeSpan.FromMinutes(5), CancellationToken.None))
+            .Should().BeFalse("the route still holds the lock: the run's release left it in place");
+        await locks.ReleaseProcessingLockAsync(key, route, CancellationToken.None);
+        (await locks.TryAcquireProcessingLockAsync(key, "another-taker", TimeSpan.FromMinutes(5), CancellationToken.None))
+            .Should().BeTrue("the route's own release frees it");
     }
 
     // ── the clause quote ────────────────────────────────────────────────────────────────────────

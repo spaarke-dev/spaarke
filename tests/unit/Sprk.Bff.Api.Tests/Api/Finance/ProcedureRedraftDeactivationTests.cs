@@ -1,30 +1,38 @@
+using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Tests.Services.Finance;
 using Xunit;
+using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 using Harness = Sprk.Bff.Api.Tests.Services.Finance.RuleSetServiceTests.Harness;
 
 namespace Sprk.Bff.Api.Tests.Api.Finance;
 
 /// <summary>
-/// ebilling-r1 task 116 fix round 4 (EB-D-216): a redraft deactivates the drafts it supersedes and never deletes them. The <c>/draft</c> handler
-/// runs over the REAL rule set service (the 076 store double: real queries, row versions, all-or-nothing transactions) and the REAL file store
-/// (its rights probe double), as fix round 3 did.
+/// ebilling-r1 task 116 fix rounds 4 and 5 (EB-D-216, EB-D-216a): a redraft deactivates the drafts it supersedes and never deletes them, after
+/// the caller's reject rights (DecideRule's privileges on the route's declaration, then Read on the version's rule set and Write on its
+/// Procedure, as the caller). The <c>/draft</c> handler runs over the REAL rule set service (the 076 store double: real queries, row versions,
+/// all-or-nothing transactions), the REAL file store (its rights probe double), the REAL caller-rights evaluator (over a recording data source)
+/// and the REAL lock store (over an in-memory cache).
 /// </summary>
-/// <remarks>Maintain-class (ADR-038): the five conditions uac-r2 set on EB-D-216, and round 3's K1.</remarks>
+/// <remarks>Maintain-class (ADR-038): the conditions uac-r2 set on EB-D-216 as revised by EB-D-216a, round 3's K1 and round 5's re-check items.</remarks>
 public sealed class ProcedureRedraftDeactivationTests
 {
     private static readonly Guid CallerOid = Guid.NewGuid();
@@ -50,12 +58,20 @@ public sealed class ProcedureRedraftDeactivationTests
     {
         public readonly Harness H = new();
         public readonly StoredFileRig Rig = new();
+        public readonly FinAuth.RecordingAccessDataSource Access = new();
+        public readonly IdempotencyService Locks = ProcedureEndpointsTests.Host.NewLocks();
         public readonly Mock<JobSubmissionService> Jobs = ProcedureEndpointsTests.Host.NewJobs();
         public Harness.Drafting D = null!;
         public Guid NewFile;
         public readonly List<JobContract> Queued = new();
+        public readonly List<CancellationToken> QueuedTokens = new();
 
-        public static async Task<World> DraftedAndReplacedAsync(bool replace = true, bool grantRows = true)
+        /// <summary>When set, the queue refuses the job (a Service Bus outage).</summary>
+        public Exception? QueueFault;
+
+        /// <param name="replace">Replace the first file with a second one.</param>
+        /// <param name="beforeReplace">Runs after the first run's drafts are stored and reviewed, before the second file is uploaded.</param>
+        public static async Task<World> DraftedAndReplacedAsync(bool replace = true, Action<World>? beforeReplace = null)
         {
             var w = new World();
             w.D = w.H.DraftVersion();
@@ -65,6 +81,7 @@ public sealed class ProcedureRedraftDeactivationTests
 
             // A reviewer accepts one draft (an in-place write: modifiedon moves off createdon).
             w.H.ConcurrentWrite("sprk_policyversion", w.VersionOf(Q2), new Dictionary<string, object> { ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Accepted) });
+            beforeReplace?.Invoke(w);
 
             if (replace)
             {
@@ -72,19 +89,29 @@ public sealed class ProcedureRedraftDeactivationTests
                 w.H.Row(StoredFileSchema.Entity, w.D.File)[StoredFileSchema.Status] = new OptionSetValue((int)StoredFileStatus.Removed);
             }
 
-            w.Rig.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, w.D.Version, ReadWrite);
-            if (grantRows)
-            {
-                foreach (var (table, id) in w.DraftRows())
-                {
-                    w.Rig.Probe.Grant(table == "sprk_policy" ? ProcedureEndpoints.PolicyEntitySet : ProcedureEndpoints.PolicyVersionEntitySet, id, ReadWrite);
-                }
-            }
-
+            w.GrantTheRejectRights();
             w.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
-                .Callback((JobContract job, CancellationToken _) => w.Queued.Add(job))
-                .Returns(Task.CompletedTask);
+                .Returns((JobContract job, CancellationToken token) =>
+                {
+                    token.ThrowIfCancellationRequested(); // the real sender honours the caller's token
+                    if (w.QueueFault is { } fault)
+                    {
+                        return Task.FromException(fault);
+                    }
+
+                    w.Queued.Add(job);
+                    w.QueuedTokens.Add(token);
+                    return Task.CompletedTask;
+                });
             return w;
+        }
+
+        /// <summary>What a reject of the drafts needs, as the caller: Read and Write on the version, Read on the set, Write on the Procedure.</summary>
+        public void GrantTheRejectRights()
+        {
+            Rig.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, D.Version, ReadWrite);
+            Access.Grant("sprk_rulesets", D.RuleSet, AccessRights.Read);
+            Access.Grant(BillingAdminAuthorization.ProcedureEntitySet, D.Procedure, ReadWrite);
         }
 
         public Guid VersionOf(string quote) =>
@@ -102,12 +129,49 @@ public sealed class ProcedureRedraftDeactivationTests
 
         public int? Status(string table, Guid id) => H.Row(table, id).GetAttributeValue<OptionSetValue>("statuscode")?.Value;
 
-        public async Task<IResult> DraftAsync(Guid? version = null)
+        /// <summary>Queries of draft state (policies, policy versions, the Procedure Version and its files) the service sent.</summary>
+        public IEnumerable<QueryExpression> DraftStateReads() => H.Queries.Where(q =>
+            q.EntityName is "sprk_policy" or "sprk_policyversion" or ProcedureEntity.VersionEntity or StoredFileSchema.Entity);
+
+        public async Task<IResult> DraftAsync(Guid? version = null, CancellationToken ct = default)
         {
-            var http = new DefaultHttpContext();
+            var http = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("oid", CallerOid.ToString()) }, "test")),
+                TraceIdentifier = "trace-redraft", // one trace id, so two answers can be compared byte for byte
+            };
             http.Request.Headers.Authorization = "Bearer caller-token";
             return await ProcedureEndpoints.DraftVersionRules(
-                D.Procedure, version ?? D.Version, H.Service(), Jobs.Object, Rig.Service, http, NullLogger<RuleSetService>.Instance, CancellationToken.None);
+                D.Procedure, version ?? D.Version, H.Service(), Jobs.Object, Rig.Service, ProcedureEndpointsTests.Host.NewAuthorization(Access), Locks,
+                http, NullLogger<RuleSetService>.Instance, ct);
+        }
+
+        /// <summary><paramref name="count"/> untouched drafts of this version, seeded as a run's output (the application created them, nobody changed them).</summary>
+        public void SeedUntouchedDrafts(int count)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var policy = new Entity("sprk_policy", Guid.NewGuid())
+                {
+                    ["sprk_name"] = $"Seeded {i}",
+                    ["sprk_policycode"] = $"{RuleSetService.DraftCodePrefix}{D.RuleSet:N}-{100 + i:D3}",
+                    ["sprk_ruleset"] = new EntityReference("sprk_ruleset", D.RuleSet),
+                    ["sprk_enabled"] = false,
+                    [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+                };
+                H.Seed(policy);
+                H.SetCreatedBy(policy.Id, H.Identity);
+                var version = new Entity("sprk_policyversion", Guid.NewGuid())
+                {
+                    ["sprk_policy"] = new EntityReference("sprk_policy", policy.Id),
+                    ["sprk_versionnumber"] = 1,
+                    ["sprk_proposalstatus"] = new OptionSetValue((int)ProposalState.Proposed),
+                    [RuleSetService.ProcedureVersionColumn] = new EntityReference(ProcedureEntity.VersionEntity, D.Version),
+                    [RuleSetService.PublishStateColumn] = new OptionSetValue(RuleSetService.PublishStateDraft),
+                };
+                H.Seed(version);
+                H.SetCreatedBy(version.Id, H.Identity);
+            }
         }
     }
 
@@ -116,13 +180,23 @@ public sealed class ProcedureRedraftDeactivationTests
     private static string? ErrorCodeOf(IResult result) =>
         result is ProblemHttpResult p && p.ProblemDetails.Extensions.TryGetValue("errorCode", out var code) ? code?.ToString() : null;
 
-    // ── Condition 1: per-row Write, as the user, all or nothing; no Delete ──────────────────────────────────────
+    private static string? ReasonCodeOf(IResult result) =>
+        result is ProblemHttpResult p && p.ProblemDetails.Extensions.TryGetValue("reasonCode", out var code) ? code?.ToString() : null;
 
-    [Fact(DisplayName = "116 fix 4 (EB-D-216 c1) must-fire: a redraft deactivates every superseded draft (reviewed and untouched), deletes nothing, after asking the caller's Write on each row")]
-    public async Task Redraft_DeactivatesEverySupersededDraft_AfterThePerRowChecks()
+    // ── EB-D-216a: the reject rights, as the caller; no per-row Write ────────────────────────────────────────────
+
+    [Fact(DisplayName = "116 fix 5 (EB-D-216a) must-not-fire, realistic shape: the store REFUSES row-level Write on every draft and the redraft still succeeds through the reject rights")]
+    public async Task Redraft_RowLevelWriteRefusedOnEveryDraft_StillSucceeds_ThroughTheRejectRights()
     {
         var w = await World.DraftedAndReplacedAsync();
         var rows = w.DraftRows();
+        foreach (var (table, id) in rows)
+        {
+            // Row-level rights on draft rows are not the gate: the store answers Read at most, never Write, and the redraft still goes ahead.
+            var set = table == "sprk_policy" ? "sprk_policies" : "sprk_policyversions";
+            w.Rig.Probe.Grant(set, id, AccessRights.Read);
+            w.Access.Grant(set, id, AccessRights.Read);
+        }
 
         var result = await w.DraftAsync();
 
@@ -135,54 +209,94 @@ public sealed class ProcedureRedraftDeactivationTests
 
         w.H.Writes.Should().NotContain(x => x.Kind == RuleSetServiceTests.Write.Delete, "a redraft never deletes");
         w.H.DeleteAttempts.Should().BeEmpty();
-        var asked = w.Rig.Probe.Calls.Select(c => (c.Set, c.Id, c.Token)).ToList();
-        foreach (var (table, id) in rows)
+        w.Access.Calls.Select(c => (c.Set, c.Id)).Should().BeEquivalentTo(new[]
         {
-            var set = table == "sprk_policy" ? ProcedureEndpoints.PolicyEntitySet : ProcedureEndpoints.PolicyVersionEntitySet;
-            asked.Should().Contain((set, id, "caller-token"), "the caller's own Write on every row it deactivates, asked as the user");
-        }
-
+            ("sprk_rulesets", w.D.RuleSet), (BillingAdminAuthorization.ProcedureEntitySet, w.D.Procedure),
+        }, "the reject route's two questions, as the caller; none per draft row");
+        w.Access.Calls.Should().OnlyContain(c => c.HasToken);
+        w.Rig.Probe.Calls.Select(c => c.Set).Should().Equal(new[] { StoredFileSchema.ProcedureVersionEntitySet }, "only the version's own rights");
         w.Queued.Should().ContainSingle();
     }
 
-    [Fact(DisplayName = "116 fix 4 (c1, peer check) must-fire: no Write on the SECOND of several rows: 403 and nothing at all written, no job")]
-    public async Task Redraft_NoWriteOnTheSecondRow_Is403_AndWritesNothing()
+    private static async Task<(int Status, string Body)> ExecuteAsync(IResult result)
+    {
+        var http = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        var body = new MemoryStream();
+        http.Response.Body = body;
+        await result.ExecuteAsync(http);
+        return (http.Response.StatusCode, System.Text.Encoding.UTF8.GetString(body.ToArray()));
+    }
+
+    [Fact(DisplayName = "116 fix 5/6 (EB-D-216a, NFR-01) must-fire: no Read on the version's rule set is the MISSING-VERSION 404, byte for byte; no draft state read, nothing deactivated or queued")]
+    public async Task Redraft_NoReadOnTheRuleSet_Is404_AndTouchesNothing()
     {
         var w = await World.DraftedAndReplacedAsync();
-        var second = w.DraftRows()[1];
-        w.Rig.Probe.Grant(ProcedureEndpoints.PolicyVersionEntitySet, second.Id, AccessRights.Read);
+        var missing = await ExecuteAsync(await w.DraftAsync(Guid.NewGuid()));
+        w.Access.Grant("sprk_rulesets", w.D.RuleSet, AccessRights.None);
         var writes = w.H.Writes.Count;
+        w.H.Queries.Clear();
 
         var result = await w.DraftAsync();
 
-        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
-        w.H.Writes.Count.Should().Be(writes, "nothing at all is written");
+        StatusOf(result).Should().Be(StatusCodes.Status404NotFound);
+        ErrorCodeOf(result).Should().Be(ProcedureService.CodeVersionNotFound);
+        missing.Status.Should().Be(StatusCodes.Status404NotFound);
+        (await ExecuteAsync(result)).Body.Should().Be(missing.Body, "denied is the same as unknown for the id in the URL (the version's)");
+        w.DraftStateReads().Should().BeEmpty("a caller without the rights learns nothing about the version's drafts");
+        w.H.Writes.Count.Should().Be(writes);
         w.H.Transactions.Should().BeEmpty();
         w.DraftRows().Should().OnlyContain(r => w.State(r.Table, r.Id) == null, "every draft is still active");
         w.Queued.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "116 fix 4 (c1) must-fire: a row Dataverse gives no answer for: 503 and nothing written, no job")]
-    public async Task Redraft_AnUnansweredRow_Is503_AndWritesNothing()
+    [Fact(DisplayName = "116 fix 5 (EB-D-216a) must-fire: Read but no Write on the rule set's Procedure is 403; no draft state read, nothing deactivated or queued")]
+    public async Task Redraft_NoWriteOnTheProcedure_Is403_AndTouchesNothing()
     {
         var w = await World.DraftedAndReplacedAsync();
-        w.Rig.Probe.Unknown.Add((ProcedureEndpoints.PolicyEntitySet, w.PolicyOf(Q3)));
+        w.Access.Grant(BillingAdminAuthorization.ProcedureEntitySet, w.D.Procedure, AccessRights.Read);
         var writes = w.H.Writes.Count;
+        w.H.Queries.Clear();
 
         var result = await w.DraftAsync();
 
-        StatusOf(result).Should().Be(StatusCodes.Status503ServiceUnavailable);
-        ErrorCodeOf(result).Should().Be(ProcedureEndpoints.CodeRedraftUnverified);
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+        ReasonCodeOf(result).Should().Be(FinanceAuthorizationFilter.InsufficientRightsReasonCode);
+        w.DraftStateReads().Should().BeEmpty();
         w.H.Writes.Count.Should().Be(writes);
+        w.H.Transactions.Should().BeEmpty();
+        w.DraftRows().Should().OnlyContain(r => w.State(r.Table, r.Id) == null);
         w.Queued.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "116 fix 4 (c1) must-not-fire: a first draft supersedes nothing and asks no per-row question (202)")]
-    public async Task FirstDraft_AsksNoPerRowQuestion()
+    [Fact(DisplayName = "116 fix 5 (EB-D-216a, rights first) must-fire: without the rights, a draft that changed in between is not reported (no draft_changed), only the 404")]
+    public async Task Redraft_WithoutTheRights_LearnsNothingAboutAChangedDraft()
+    {
+        var w = await World.DraftedAndReplacedAsync();
+        w.Access.Grant("sprk_rulesets", w.D.RuleSet, AccessRights.None);
+        w.H.AfterQuery = q =>
+        {
+            if (q.EntityName == "sprk_policy")
+            {
+                w.H.ConcurrentWrite("sprk_policyversion", w.VersionOf(Q1),
+                    new Dictionary<string, object> { [RuleSetService.PublishStateColumn] = new OptionSetValue(RuleSetService.PublishStatePublished) });
+            }
+        };
+
+        var result = await w.DraftAsync();
+
+        StatusOf(result).Should().Be(StatusCodes.Status404NotFound);
+        ErrorCodeOf(result).Should().NotBe(RuleSetService.CodeDraftChanged);
+    }
+
+    [Fact(DisplayName = "116 fix 4 (c1) must-not-fire: a first draft supersedes nothing (202); only the reject rights and the version's own are asked")]
+    public async Task FirstDraft_SupersedesNothing()
     {
         var w = new World();
         w.D = w.H.DraftVersion();
-        w.Rig.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, w.D.Version, ReadWrite);
+        w.GrantTheRejectRights();
         w.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
         var result = await w.DraftAsync();
@@ -192,7 +306,7 @@ public sealed class ProcedureRedraftDeactivationTests
         w.H.Transactions.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "116 fix 4 (c1/c2) must-not-fire: a copy-forward draft and a published rule are neither asked about nor deactivated")]
+    [Fact(DisplayName = "116 fix 4 (c1/c2) must-not-fire: a copy-forward draft and a published rule are not deactivated")]
     public async Task CopyForwardAndPublishedRules_AreUntouched()
     {
         var w = await World.DraftedAndReplacedAsync();
@@ -216,8 +330,6 @@ public sealed class ProcedureRedraftDeactivationTests
         {
             w.State("sprk_policyversion", id).Should().BeNull();
         }
-
-        w.Rig.Probe.Calls.Select(c => c.Id).Should().NotContain(new[] { copyPolicy, copyVersion, draftOfIt, publishedPolicy, publishedVersion });
     }
 
     // ── Condition 2: only drafts still in Draft; 409 on a publish in between ────────────────────────────────────
@@ -345,14 +457,215 @@ public sealed class ProcedureRedraftDeactivationTests
         w.H.DeleteAttempts.Should().BeEmpty();
     }
 
+    // ── Round 5 F2: a run still storing its rules ────────────────────────────────────────────────────────────────
+
+    /// <summary>A run of the CURRENT file (the first one) that has stored its rules, and one policy whose version it has not created yet, but no marker.</summary>
+    private static async Task<(World W, Guid VersionlessPolicy)> ARunStillStoringAsync()
+    {
+        var w = await World.DraftedAndReplacedAsync(replace: false);
+        // The run's list and marker are not written yet.
+        var version = w.H.Row(ProcedureEntity.VersionEntity, w.D.Version);
+        version.Attributes.Remove(RuleSetService.VersionDraftedColumn);
+        version.Attributes.Remove(RuleSetService.VersionNotConvertedListColumn);
+        // ...and it is between the two creates of its next rule: the policy exists, its version does not.
+        var policy = new Entity("sprk_policy", Guid.NewGuid())
+        {
+            ["sprk_name"] = "Next rule",
+            ["sprk_policycode"] = $"{RuleSetService.DraftCodePrefix}{w.D.RuleSet:N}-099",
+            ["sprk_ruleset"] = new EntityReference("sprk_ruleset", w.D.RuleSet),
+            ["sprk_enabled"] = false,
+            [RuleDomains.PolicyDomainColumn] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+        };
+        w.H.Seed(policy);
+        w.H.SetCreatedBy(policy.Id, w.H.Identity);
+        return (w, policy.Id);
+    }
+
+    [Fact(DisplayName = "116 fix 5 (F2, fix a) must-fire: drafts of a run of the CURRENT file (marker not yet written) are never planned or deactivated by /draft, nor a policy whose version is not created yet")]
+    public async Task Redraft_DuringARunOfTheCurrentFile_DeactivatesNoneOfItsOutput()
+    {
+        var (w, versionless) = await ARunStillStoringAsync();
+        var untouched = new (string Table, Guid Id)[] { ("sprk_policyversion", w.VersionOf(Q1)), ("sprk_policy", w.PolicyOf(Q1)), ("sprk_policyversion", w.VersionOf(Q3)), ("sprk_policy", w.PolicyOf(Q3)) };
+
+        var plan = await w.H.Service().PlanRedraftAsync(w.D.Version, w.D.File, CancellationToken.None);
+        var result = await w.DraftAsync();
+
+        plan.Value!.Drafts.Should().BeEmpty("a run of the current file owns its output; its compensation runs under its lock");
+        StatusOf(result).Should().Be(StatusCodes.Status202Accepted);
+        foreach (var (table, id) in untouched)
+        {
+            w.State(table, id).Should().BeNull($"{table} {id} is the running job's output");
+        }
+
+        w.State("sprk_policy", versionless).Should().BeNull("a policy is never deactivated before its version is created");
+        w.H.Transactions.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "116 fix 5 (F2, fix b) must-fire: while that run holds the version's lock, /draft is 409 drafting_in_progress and reads no draft, deactivates nothing, queues nothing")]
+    public async Task Redraft_WhileTheRunHoldsTheLock_Is409()
+    {
+        var (w, _) = await ARunStillStoringAsync();
+        (await w.Locks.TryAcquireProcessingLockAsync(BillingRuleDraftJobHandler.LockKeyFor(w.D.Version), BillingRuleDraftJobHandler.LockDuration))
+            .Should().BeTrue();
+        w.H.Queries.Clear();
+
+        var result = await w.DraftAsync();
+
+        StatusOf(result).Should().Be(StatusCodes.Status409Conflict);
+        ErrorCodeOf(result).Should().Be(ProcedureEndpoints.CodeDraftingInProgress);
+        w.H.Queries.Should().NotContain(q => q.EntityName == "sprk_policy" || q.EntityName == "sprk_policyversion", "nothing is planned under a running job");
+        w.H.Transactions.Should().BeEmpty();
+        w.Queued.Should().BeEmpty();
+    }
+
+    // ── Round 5 F1: a deactivation whose outcome is unknown ──────────────────────────────────────────────────────
+
+    [Theory(DisplayName = "116 fix 5 (F1) must-fire: a deactivation transaction with no answer is 503 'may have been applied', no job; a retry converges (each rule inactive once, one run queued)")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Redraft_TransactionOutcomeUnknown_Is503_AndARetryConverges(bool committed)
+    {
+        var w = await World.DraftedAndReplacedAsync();
+        var once = true;
+        if (committed)
+        {
+            w.H.TransactionCommitsButAnswersUnknown = _ => once && !(once = false);
+        }
+        else
+        {
+            w.H.TransactionGivesNoAnswer = _ => once && !(once = false);
+        }
+
+        var first = await w.DraftAsync();
+
+        StatusOf(first).Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ErrorCodeOf(first).Should().Be(RuleSetService.CodeRedraftOutcomeUnknown);
+        ((ProblemHttpResult)first).ProblemDetails.Detail.Should().Contain("may already have been replaced").And.Contain("Try again");
+        w.Queued.Should().BeEmpty();
+
+        var retry = await w.DraftAsync();
+
+        StatusOf(retry).Should().Be(StatusCodes.Status202Accepted);
+        w.DraftRows().Should().OnlyContain(r => w.State(r.Table, r.Id) == RuleSetService.StateInactive);
+        w.H.Transactions.Should().HaveCount(committed ? 1 : 2, committed ? "the retry has nothing left to deactivate" : "the retry deactivates them");
+        w.Queued.Should().ContainSingle();
+    }
+
+    // ── Round 5 K2: an inactive version on a planned rule ────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "116 fix 5 (K2) must-not-fire: a planned rule that also has an INACTIVE version is still deactivated (only active versions are compared)")]
+    public async Task Redraft_APlannedRuleWithAnInactiveVersion_IsDeactivated()
+    {
+        var w = await World.DraftedAndReplacedAsync();
+        var inactive = w.H.AddVersion(w.PolicyOf(Q2), 2, ProposalState.Proposed, quote: "an older wording");
+        w.H.Row("sprk_policyversion", inactive)["statecode"] = new OptionSetValue(RuleSetService.StateInactive);
+        w.H.Row("sprk_policyversion", inactive)[RuleSetService.ProcedureVersionColumn] = new EntityReference(ProcedureEntity.VersionEntity, w.D.Version);
+
+        var result = await w.DraftAsync();
+
+        StatusOf(result).Should().Be(StatusCodes.Status202Accepted);
+        w.DraftRows().Should().OnlyContain(r => w.State(r.Table, r.Id) == RuleSetService.StateInactive);
+        w.Queued.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "116 fix 5 (K2) must-fire: an ACTIVE version added to a planned rule since the plan is still a 409")]
+    public async Task Deactivate_AnActiveVersionAddedSinceThePlan_Is409()
+    {
+        var w = await World.DraftedAndReplacedAsync();
+        var service = w.H.Service();
+        var plan = (await service.PlanRedraftAsync(w.D.Version, w.NewFile, CancellationToken.None)).Value!;
+        w.H.AddVersion(w.PolicyOf(Q2), 2, ProposalState.Proposed, quote: "a new wording");
+
+        var outcome = await service.DeactivateSupersededDraftsAsync(w.D.Version, plan, CancellationToken.None);
+
+        outcome.ErrorCode.Should().Be(RuleSetService.CodeDraftChanged);
+        w.H.Transactions.Should().BeEmpty();
+    }
+
+    // ── Round 5 K2: the transaction cap ──────────────────────────────────────────────────────────────────────────
+
+    [Theory(DisplayName = "116 fix 5 (K2) the transaction cap: a plan of more rows than one transaction holds is 422 redraft_too_large with nothing written; one of exactly the cap goes through")]
+    [InlineData(498, StatusCodes.Status422UnprocessableEntity)] // 3 rules + 498 = 501 rules, 1,002 rows
+    [InlineData(497, StatusCodes.Status202Accepted)] // 500 rules, 1,000 rows
+    public async Task Redraft_OverTheTransactionCap_Is422_AndWritesNothing(int seeded, int expected)
+    {
+        var w = await World.DraftedAndReplacedAsync(beforeReplace: x => x.SeedUntouchedDrafts(seeded));
+        var writes = w.H.Writes.Count;
+
+        var result = await w.DraftAsync();
+
+        StatusOf(result).Should().Be(expected);
+        if (expected == StatusCodes.Status422UnprocessableEntity)
+        {
+            ErrorCodeOf(result).Should().Be(RuleSetService.CodeRedraftTooLarge);
+            ((ProblemHttpResult)result).ProblemDetails.Detail.Should().Contain(RuleSetService.MaxPerTransaction.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            w.H.Writes.Count.Should().Be(writes);
+            w.H.Transactions.Should().BeEmpty();
+            w.DraftRows().Should().OnlyContain(r => w.State(r.Table, r.Id) == null);
+            w.Queued.Should().BeEmpty();
+        }
+        else
+        {
+            w.H.Transactions.Should().ContainSingle().Which.Should().HaveCount(RuleSetService.MaxPerTransaction);
+        }
+    }
+
+    // ── Round 5 (uac-r2 addition 3): the queue fails after the deactivation ──────────────────────────────────────
+
+    [Fact(DisplayName = "116 fix 5 (addition 3) must-fire: the queue fails after the deactivation committed: 503 redraft_not_queued, never a 2xx; a retry plans nothing, the job's check does not block, and the run is queued")]
+    public async Task Redraft_QueueFailsAfterTheDeactivation_Is503_AndARetryQueues()
+    {
+        var w = await World.DraftedAndReplacedAsync();
+        w.QueueFault = new InvalidOperationException("simulated Service Bus outage");
+
+        var first = await w.DraftAsync();
+
+        StatusOf(first).Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ErrorCodeOf(first).Should().Be(ProcedureEndpoints.CodeRedraftNotQueued);
+        ((ProblemHttpResult)first).ProblemDetails.Detail.Should().Contain("already replaced").And.Contain("again");
+        w.DraftRows().Should().OnlyContain(r => w.State(r.Table, r.Id) == RuleSetService.StateInactive);
+
+        w.QueueFault = null;
+        var service = w.H.Service();
+        (await service.PlanRedraftAsync(w.D.Version, w.NewFile, CancellationToken.None)).Value!.Drafts.Should().BeEmpty();
+        (await service.RemoveUntouchedDraftsAsync(w.D.Version, w.NewFile, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done,
+            "no superseded draft remains active, so the job's check does not block");
+        var retry = await w.DraftAsync();
+
+        StatusOf(retry).Should().Be(StatusCodes.Status202Accepted);
+        w.H.Transactions.Should().ContainSingle("the retry has nothing to deactivate");
+        w.Queued.Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "116 fix 5 (addition 3) must-fire: a client that disconnects once the deactivation is sent still gets the run queued (the commit and the queueing ignore its token)")]
+    public async Task Redraft_ClientDisconnectsDuringTheCommit_TheRunIsStillQueued()
+    {
+        var w = await World.DraftedAndReplacedAsync();
+        using var cts = new CancellationTokenSource();
+        w.H.TransactionCommitsButAnswersUnknown = _ =>
+        {
+            cts.Cancel(); // the client goes away while the transaction commits
+            return false;
+        };
+
+        var result = await w.DraftAsync(ct: cts.Token);
+
+        StatusOf(result).Should().Be(StatusCodes.Status202Accepted);
+        w.DraftRows().Should().OnlyContain(r => w.State(r.Table, r.Id) == RuleSetService.StateInactive);
+        w.Queued.Should().ContainSingle("inactive drafts are never left with no run queued");
+        w.QueuedTokens.Single().CanBeCanceled.Should().BeFalse();
+        w.H.Entities.Invocations.Where(i => i.Method.Name == nameof(IGenericEntityService.ExecuteTransactionAsync))
+            .Select(i => (CancellationToken)i.Arguments[1]).Should().ContainSingle().Which.CanBeCanceled.Should().BeFalse();
+    }
+
     // ── Round 3 K1: a probe fault answers every id alike ─────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "116 fix 4 (K1) must-fire: when the version rights probe faults, an unknown id and an existing version give the same answer from the same reads")]
     public async Task ProbeFault_UnknownAndExistingVersion_AnswerAlike()
     {
-        async Task<(int Status, string? Code, string[] Reads)> Run(bool exists)
+        async Task<(int Status, string? Code, string[] Reads, int RightsAsked)> Run(bool exists)
         {
-            var w = await World.DraftedAndReplacedAsync(replace: false, grantRows: false);
+            var w = await World.DraftedAndReplacedAsync(replace: false);
             w.Rig.Probe.Fault = new HttpRequestException("simulated Dataverse fault");
             w.H.Entities.Invocations.Clear();
             var result = await w.DraftAsync(exists ? w.D.Version : Guid.NewGuid());
@@ -360,7 +673,7 @@ public sealed class ProcedureRedraftDeactivationTests
                 .Select(i => i.Method.Name + ":" + (i.Arguments.FirstOrDefault() is QueryExpression q ? q.EntityName : i.Arguments.FirstOrDefault())).ToArray();
             w.Queued.Should().BeEmpty();
             var problem = result is ProblemHttpResult p ? p.ProblemDetails : null;
-            return (StatusOf(result), problem is null ? null : $"{problem.Detail}|{string.Join(",", problem.Extensions.Select(e => $"{e.Key}={e.Value}").Where(e => !e.StartsWith("trace", StringComparison.OrdinalIgnoreCase)))}", reads);
+            return (StatusOf(result), problem is null ? null : $"{problem.Detail}|{string.Join(",", problem.Extensions.Select(e => $"{e.Key}={e.Value}").Where(e => !e.StartsWith("trace", StringComparison.OrdinalIgnoreCase)))}", reads, w.Access.Calls.Count);
         }
 
         var unknown = await Run(exists: false);
@@ -371,5 +684,6 @@ public sealed class ProcedureRedraftDeactivationTests
         existing.Code.Should().Be(unknown.Code);
         existing.Reads.Should().Equal(unknown.Reads, "the version is not read before the fault is answered");
         existing.Reads.Should().BeEmpty();
+        existing.RightsAsked.Should().Be(0, "nothing else is asked either");
     }
 }

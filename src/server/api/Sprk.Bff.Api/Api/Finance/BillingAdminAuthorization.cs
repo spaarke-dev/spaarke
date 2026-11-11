@@ -222,15 +222,17 @@ public static class BillingAdminAuthorization
     /// <summary>
     /// Start drafting a Procedure Version's rules (task 116, model 5.3): <see cref="DraftRules"/> (the billing-admin marker plus Create on both
     /// policy tables) AND the caller's own Write on the route's Procedure. An unreadable route id yields no check, which the filter denies.
-    /// Fix round 4 (EB-D-216): no Delete check (round 2's is gone): a redraft deactivates the drafts it supersedes, never deletes them, and the
-    /// route itself asks the caller's own Write, as the user, on each row it deactivates (<c>ProcedureEndpoints.CallerWriteOnEveryRowRefusalAsync</c>).
+    /// Fix round 4 (EB-D-216): no Delete check (round 2's is gone): a redraft deactivates the drafts it supersedes, never deletes them.
+    /// Fix round 5 (EB-D-216a): the redraft takes the drafts it supersedes out of review, so the caller also holds what a reject of them needs:
+    /// <see cref="DecideRule"/>'s privileges here, then, in the handler, Read on the version's rule set and Write on its Procedure (the reject
+    /// route's <c>RequireAccessToTheRuleSet</c> and <see cref="RequireWriteOnTheRuleSetsProcedure"/>, asked through the same calls).
     /// </summary>
     public static FinanceAuthorizationTargets DraftProcedureVersion(EndpointFilterInvocationContext context)
     {
         var record = FinanceAuthorizationTargets.FromRoute(context, ProcedureRouteKey, ProcedureEntitySet, "write");
         return record.Checks.Count == 0
             ? record // no id, no check: the filter denies
-            : FinanceAuthorizationTargets.Authorize(record.Checks.Concat(DraftRules().Checks).ToArray());
+            : FinanceAuthorizationTargets.Authorize(record.Checks.Concat(DraftRules().Checks).Concat(DecideRule().Checks).Distinct().ToArray());
     }
 
     /// <summary>Publish a version: as <see cref="WriteProcedure"/>, plus Write on both policy tables (it puts policy versions in force).</summary>
@@ -278,44 +280,57 @@ public static class BillingAdminAuthorization
                 return await next(context); // the route constraint guarantees a guid; the service answers anything else
             }
 
-            Guid? procedureId;
-            try
-            {
-                procedureId = await services.GetRequiredService<RuleSetService>().ProcedureOfRuleSetAsync(ruleSetId, http.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
-                    "Rule set {RuleSetId}: its Procedure could not be read for the Procedure {Operation} check; denying (fail closed)", ruleSetId, operation);
-                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
-            }
-
-            if (procedureId is not { } id || id == Guid.Empty)
-            {
-                return await next(context);
-            }
-
-            // The caller's own rights on the Procedure, asked of Dataverse as the caller (the Procedure routes' check). Denied only when Dataverse
-            // answered and the right is not held; no answer (a fault, a throttle, no identity) is system_failure, never insufficient_rights.
-            var caller = new InvoiceContextService.InvoiceCaller(
-                CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
             var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
-            var outcome = await CallerReadCheck.CheckAsync(
-                services.GetRequiredService<AuthorizationService>(), caller, ProcedureEntitySet, operation, id, logger,
-                $"Rule set {ruleSetId}: caller {operation} on its Procedure", http.RequestAborted);
-            if (outcome == CallerReadOutcome.Readable)
-            {
-                return await next(context);
-            }
-
-            // uac-r2 re-check round 3 (F1): the detail names the right, so the user sees what is missing; a no-answer carries the generic detail.
-            return outcome == CallerReadOutcome.Refused
-                ? ProblemDetailsHelper.Forbidden(
-                    FinanceAuthorizationFilter.InsufficientRightsReasonCode,
-                    detail: $"You need {(operation == "write" ? "Write" : "Read")} on this rule set's Procedure.",
-                    traceId: http.TraceIdentifier)
-                : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            return await CallerRightsOnTheRuleSetsProcedureRefusalAsync(
+                    http, ruleSetId, operation, services.GetRequiredService<RuleSetService>(), services.GetRequiredService<AuthorizationService>(), logger,
+                    http.RequestAborted)
+                ?? await next(context);
         };
+
+    /// <summary>
+    /// The body of <see cref="RequireWriteOnTheRuleSetsProcedure"/> and <see cref="RequireReadOnTheRuleSetsProcedure"/> for a rule set id the caller
+    /// already has (task 116 fix round 5, EB-D-216a: the Procedure Version drafting route asks it for the version's rule set, which is not a route
+    /// value there). Null: go on (the right is held, or the set has no Procedure). Otherwise the filter's own 403.
+    /// </summary>
+    internal static async Task<IResult?> CallerRightsOnTheRuleSetsProcedureRefusalAsync(
+        HttpContext http, Guid ruleSetId, string operation, RuleSetService ruleSets, AuthorizationService authorization, ILogger logger, CancellationToken ct)
+    {
+        Guid? procedureId;
+        try
+        {
+            procedureId = await ruleSets.ProcedureOfRuleSetAsync(ruleSetId, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Rule set {RuleSetId}: its Procedure could not be read for the Procedure {Operation} check; denying (fail closed)", ruleSetId, operation);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        if (procedureId is not { } id || id == Guid.Empty)
+        {
+            return null;
+        }
+
+        // The caller's own rights on the Procedure, asked of Dataverse as the caller (the Procedure routes' check). Denied only when Dataverse
+        // answered and the right is not held; no answer (a fault, a throttle, no identity) is system_failure, never insufficient_rights.
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+        var outcome = await CallerReadCheck.CheckAsync(
+            authorization, caller, ProcedureEntitySet, operation, id, logger, $"Rule set {ruleSetId}: caller {operation} on its Procedure", ct);
+        if (outcome == CallerReadOutcome.Readable)
+        {
+            return null;
+        }
+
+        // uac-r2 re-check round 3 (F1): the detail names the right, so the user sees what is missing; a no-answer carries the generic detail.
+        return outcome == CallerReadOutcome.Refused
+            ? ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode,
+                detail: $"You need {(operation == "write" ? "Write" : "Read")} on this rule set's Procedure.",
+                traceId: http.TraceIdentifier)
+            : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+    }
 
     private const string RuleSetRouteKey = "ruleSetId";
 

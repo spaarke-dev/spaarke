@@ -59,6 +59,9 @@ public class BillingRuleDraftJobHandler : IJobHandler
     /// <summary>Processing-lock key prefix; one drafting run per Procedure Version at a time (task 116).</summary>
     internal const string LockKeyPrefix = "billing-rule-draft:";
 
+    /// <summary>The processing-lock key of one Procedure Version; the <c>/draft</c> route takes the same lock around a redraft (task 116 fix round 5).</summary>
+    internal static string LockKeyFor(Guid procedureVersionId) => LockKeyPrefix + procedureVersionId.ToString("N");
+
     /// <summary>Longer than the worst run (eight Standard-tier calls plus the writes), so a live run is never overtaken; a dead run's lock expires.</summary>
     internal static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(20);
 
@@ -107,7 +110,11 @@ public class BillingRuleDraftJobHandler : IJobHandler
         }
 
         var versionId = payload.ProcedureVersionId;
-        var lockKey = LockKeyPrefix + versionId.ToString("N");
+        var lockKey = LockKeyFor(versionId);
+        // Fix round 6 (K-4): this delivery's own owner id, unique per delivery (never the job id: a still-running duplicate delivery must not
+        // take the lock over). It releases only while it still holds the lock, so a run that outlived the lock's TTL never removes a lock the
+        // redraft route (or another delivery) took after it.
+        var lockOwner = $"billing-rule-draft-run:{job.JobId:N}:{Guid.NewGuid():N}";
         var lockHeld = false;
         try
         {
@@ -118,7 +125,7 @@ public class BillingRuleDraftJobHandler : IJobHandler
             // 0. One run per Procedure Version at a time. The queue does not de-duplicate, and a run can outlast the message lock, so a second
             //    delivery (a double click, two admins, a redelivery) would otherwise store every rule twice. Not acquired: try again later;
             //    by then the first run has finished and the marker makes this one a no-op.
-            lockHeld = await _idempotency.TryAcquireProcessingLockAsync(lockKey, LockDuration, ct);
+            lockHeld = await _idempotency.TryAcquireProcessingLockAsync(lockKey, lockOwner, LockDuration, ct);
             if (!lockHeld)
             {
                 _logger.LogWarning("Billing rule draft job {JobId}: another delivery is drafting Procedure Version {ProcedureVersionId}", job.JobId, versionId);
@@ -251,7 +258,7 @@ public class BillingRuleDraftJobHandler : IJobHandler
             {
                 try
                 {
-                    await _idempotency.ReleaseProcessingLockAsync(lockKey, CancellationToken.None);
+                    await _idempotency.ReleaseProcessingLockAsync(lockKey, lockOwner, CancellationToken.None);
                 }
                 catch (Exception ex)
                 {

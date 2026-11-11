@@ -363,9 +363,14 @@ public partial class RouteAuthorizationGuardTests
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
             + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. Task 116 adds two routes in this file (the count of endpoint "
             + "files is unchanged): POST .../versions/{versionId}/draft -- BillingAdminAuthorization.DraftProcedureVersion: Write on the Procedure "
-            + "(Record path) plus DraftRules() (Write on sprk_ruleset, Create on sprk_policy and sprk_policyversion), no Delete check (EB-D-216); then, "
-            + "in the handler, the caller's own Write as the user on EACH superseded draft row a redraft deactivates (every sprk_policyversion and its "
-            + "sprk_policy; any denied 403, any unanswered 503, nothing written), and the application deactivates them all or none; PUT .../versions/{versionId}/file "
+            + "(Record path) plus DraftRules() (Write on sprk_ruleset, Create on sprk_policy and sprk_policyversion) plus DecideRule()'s privileges "
+            + "(what a reject of the drafts needs), no Delete check (EB-D-216); then, in the handler, the version's own Read and Write (K1), and "
+            + "BEFORE any read of draft state the reject route's two caller checks on the version's rule set, by the same bodies its filters run: "
+            + "RuleSetEndpoints.CallerAccessToTheRuleSetRefusalAsync (Read on the set, answered as the missing-version 404, its record when "
+            + "record-scoped) and BillingAdminAuthorization.CallerRightsOnTheRuleSetsProcedureRefusalAsync (Write on its Procedure, 403) "
+            + "(EB-D-216a: row-level rights on draft rows are not the gate). A superseded draft outside the checked set or version is 409 "
+            + "ruleset.redraft_scope_mismatch, nothing written; the route holds the drafting job's per-version lock around plan, deactivate and "
+            + "queue (409 ruleset.drafting_in_progress when a run holds it), and the application deactivates the drafts all or none; PUT .../versions/{versionId}/file "
             + "-- WriteProcedure, then the file store's own step 0 and the caller's Write on the version (UploadForCallerAsync). On both, a version of "
             + "another Procedure is the unknown-id 404. The eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate,
@@ -1224,9 +1229,10 @@ public partial class RouteAuthorizationGuardTests
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
         new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:270) and, when set, asks the caller's own Write on "
-            + "sprk_procedures via CallerReadCheck.CheckAsync (:289); a read fault or an unanswered question is 403 system_failure (:276, :303) "
-            + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:301) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:319); a read fault or an unanswered question is 403 system_failure (:307, :332) "
+            + "(ebilling-r1 081, uac D; /draft added in re-check round 2; the body is CallerRightsOnTheRuleSetsProcedureRefusalAsync (:295), "
+            + "which the Procedure Version /draft handler also calls for the version's rule set, task 116 fix round 5)."),
         new CreditedForm("RequireWriteOnTheVersionsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
             "Reads the Procedure of the route's procedureVersionId app-only (RateCardImportEndpoints.cs:148, :241) and asks the caller's own Write "
             + "on sprk_procedures via CallerReadCheck.CheckAsync (:159, :267); a read fault or an unanswered question is 403 system_failure "
@@ -1238,15 +1244,16 @@ public partial class RouteAuthorizationGuardTests
             + "read fault or an unanswered question 403 system_failure (:206, :217, :280); it records the version it checked (:231) and the "
             + "service refuses 409 ratecard.version_changed if the card names another (ebilling-r1 085 fix round 1, uac-r2 approved)."),
         new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:270) and CallerReadCheck.CheckAsync "
-            + "(:289) asking Read; denied is 403 insufficient_rights (:300), an unanswered question or a read fault 403 system_failure (:276, :303) "
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:301) and CallerReadCheck.CheckAsync "
+            + "(:319) asking Read; denied is 403 insufficient_rights (:329), an unanswered question or a read fault 403 system_failure (:307, :332) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
         new CreditedForm("RequireAccessToTheRuleSet", "Api/Finance/RuleSetEndpoints.cs",
-            "Asks the caller's own Read on the route rule set via CallerReadCheck.CheckAsync (RuleSetEndpoints.cs:574) and answers anything but "
-            + "Readable with the uniform 404 ruleset.not_found (:579) before reading the set; then reads the set's record home app-only "
-            + "(:585, a fault is 403 system_failure :590) and, for a record-scoped set, asks the caller's Read on its core record through "
-            + "FinanceAuthorizationFilter.CallerHoldsRightsAsync, the record routes' own check (:608); a refusal, a fault or no single core "
-            + "record is the same 404 (:602, :619), and only then 409 ruleset.record_scoped (:627) (ebilling-r1 089e)."),
+            "Asks the caller's own Read on the route rule set via CallerReadCheck.CheckAsync (RuleSetEndpoints.cs:468) and answers anything but "
+            + "Readable with the uniform 404 ruleset.not_found (:473) before reading the set; then reads the set's record home app-only "
+            + "(:479, a fault is 403 system_failure :484) and, for a record-scoped set, asks the caller's Read on its core record through "
+            + "FinanceAuthorizationFilter.CallerHoldsRightsAsync, the record routes' own check (:502); a refusal, a fault or no single core "
+            + "record is the same 404 (:496, :513), and only then 409 ruleset.record_scoped (:528) (ebilling-r1 089e; the body is "
+            + "CallerAccessToTheRuleSetRefusalAsync, which the Procedure Version /draft handler also calls, task 116 fix round 5)."),
         new CreditedForm("RequireReadOnTheOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
             "Reads the route record's stored override through ProcedureAssignmentService.SubjectOfOverrideAsync "
             + "(ProcedureAssignmentEndpoints.cs:346) and asks the caller's own Read on the Procedure or rule it overrides via "

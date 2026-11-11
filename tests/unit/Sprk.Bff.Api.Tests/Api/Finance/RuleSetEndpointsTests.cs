@@ -337,6 +337,35 @@ public sealed class RuleSetEndpointsTests
         host.Service.Verify(s => s.DecideAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<long>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
     }
 
+    [Theory(DisplayName = "116 fix 5 (EB-D-216a, rights first) must-fire: on a deactivated draft, a caller without the reject rights gets the 404 or 403, never draft_inactive; the service is never asked")]
+    [MemberData(nameof(ProposalRoutes))]
+    public async Task ProposalRoute_OnADeactivatedDraft_WithoutTheRights_LearnsNothingAboutItsState(string method, string url)
+    {
+        foreach (var (setRights, procedureRights, expected) in new[]
+        {
+            (AccessRights.None, AccessRights.Read | AccessRights.Write, HttpStatusCode.NotFound),
+            (AccessRights.Read, AccessRights.Read, HttpStatusCode.Forbidden),
+        })
+        {
+            await using var host = await Host.StartAsync();
+            var procedureId = Guid.NewGuid();
+            host.Service.Setup(s => s.ProcedureOfRuleSetAsync(SetId, It.IsAny<CancellationToken>())).ReturnsAsync(procedureId);
+            host.Access.Grant("sprk_rulesets", SetId, setRights);
+            host.Access.Grant("sprk_procedures", procedureId, procedureRights);
+            host.Service.Setup(s => s.EditAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<ProposalEdit>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(RuleSetOutcome<ProposalEdited>.Refused(409, RuleSetService.CodeDraftInactive, "deactivated"));
+            host.Service.Setup(s => s.DecideAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<long>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+                .ReturnsAsync(RuleSetOutcome<ProposalView>.Refused(409, RuleSetService.CodeDraftInactive, "deactivated"));
+
+            var response = await host.Client.SendAsync(Req(method, url, content: ProposalBody(url)));
+
+            response.StatusCode.Should().Be(expected);
+            (await response.Content.ReadAsStringAsync()).Should().NotContain(RuleSetService.CodeDraftInactive);
+            host.Service.Verify(s => s.EditAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<ProposalEdit>(), It.IsAny<CancellationToken>()), Times.Never);
+            host.Service.Verify(s => s.DecideAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<long>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never);
+        }
+    }
+
     [Theory(DisplayName = "081 uac D: on a Procedure's rule set, Write on that Procedure lets the edit or decision through")]
     [MemberData(nameof(ProposalRoutes))]
     public async Task ProposalRoute_OnAProceduresSet_WithWriteOnTheProcedure_ReachesTheService(string method, string url)

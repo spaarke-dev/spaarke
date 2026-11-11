@@ -446,77 +446,91 @@ public static class RuleSetEndpoints
                 return Map(RuleSetService.RuleSetNotFound<object>(), http); // the route constraint guarantees a guid
             }
 
-            var userId = CallerResolution.ResolveObjectId(http.User) ?? string.Empty;
-            var token = TokenHelper.ExtractBearerTokenOrNull(http);
-            var authorization = services.GetRequiredService<AuthorizationService>();
-
-            // (A) The set itself, as the caller. Refused and no answer are both the uniform 404: a set id that does not exist may answer either.
-            var setRead = await CallerReadCheck.CheckAsync(
-                authorization, new InvoiceContextService.InvoiceCaller(userId, token), "sprk_rulesets", "read", ruleSetId, logger,
-                $"Rule set {ruleSetId}: caller read on the set", http.RequestAborted);
-            if (setRead != CallerReadOutcome.Readable)
-            {
-                return Map(RuleSetService.RuleSetNotFound<object>(), http);
-            }
-
-            RecordRuleSetHome? home;
-            try
-            {
-                home = await services.GetRequiredService<RuleSetService>().RecordHomeOfRuleSetAsync(ruleSetId, http.RequestAborted);
-            }
-            catch (Exception ex) when (!http.RequestAborted.IsCancellationRequested)
-            {
-                logger.LogError(ex, "Rule set {RuleSetId}: its record could not be read for the record check; denying (fail closed)", ruleSetId);
-                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
-            }
-
-            if (home is null)
-            {
-                return await next(context); // not record-scoped, or no set: unchanged
-            }
-
-            // (B) The record, through the record routes' own evaluator, as the caller. Any refusal or fault is the uniform 404.
-            if (home.CoreTable is not { } coreTable || !RecordHomes.TryGetValue(coreTable, out var record) || home.CoreId == Guid.Empty)
-            {
-                logger.LogWarning("Rule set {RuleSetId}: record-scoped with no single core record; denying (fail closed)", ruleSetId);
-                return Map(RuleSetService.RuleSetNotFound<object>(), http);
-            }
-
-            bool recordReadable;
-            try
-            {
-                recordReadable = userId.Length > 0 && await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
-                    authorization, userId, record.EntitySet, home.CoreId, "read", token, http.RequestAborted);
-            }
-            catch (Exception ex) when (!http.RequestAborted.IsCancellationRequested)
-            {
-                logger.LogWarning(ex, "Rule set {RuleSetId}: the record check on {EntitySet} faulted; denying (fail closed)", ruleSetId, record.EntitySet);
-                recordReadable = false;
-            }
-
-            if (!recordReadable)
-            {
-                return Map(RuleSetService.RuleSetNotFound<object>(), http);
-            }
-
-            var routes = $"{ProcedureAssignmentEndpoints.Route}/{record.Segment}/{home.CoreId}";
-            logger.LogWarning(
-                "Rule set {RuleSetId}: {ReasonCode}: a record-scoped set ({RecordKind} {RecordId}) was asked for on {Method} {Path}",
-                ruleSetId, CodeRecordScoped, record.Kind, home.CoreId, http.Request.Method, http.Request.Path.Value);
-            return Results.Problem(
-                statusCode: StatusCodes.Status409Conflict,
-                title: "This rule set belongs to one record",
-                detail: $"This rule set holds the changed rules of one {record.Kind}. It is not read or changed here: use that {record.Kind}'s "
-                    + $"override routes, {routes}/rule-overrides/change or {routes}/rule-overrides/exclude to change a rule, and "
-                    + $"{routes}/overrides/{{overrideId}} to remove one.",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = CodeRecordScoped,
-                    ["recordKind"] = record.Kind,
-                    ["recordId"] = home.CoreId,
-                    ["overridesRoute"] = routes,
-                });
+            return await CallerAccessToTheRuleSetRefusalAsync(
+                    http, ruleSetId, services.GetRequiredService<RuleSetService>(), services.GetRequiredService<AuthorizationService>(), logger,
+                    http.RequestAborted)
+                ?? await next(context);
         });
+
+    /// <summary>
+    /// The body of <see cref="RequireAccessToTheRuleSet"/> for a rule set id the caller already has (task 116 fix round 5, EB-D-216a: the
+    /// Procedure Version drafting route asks it for the version's rule set, which is not a route value there). Null: go on (the set is readable
+    /// and not record-scoped, or there is no such set). Otherwise the filter's own answer: the uniform 404, 403 <c>system_failure</c> on a fault
+    /// reading the set's home, or 409 <see cref="CodeRecordScoped"/>.
+    /// </summary>
+    internal static async Task<IResult?> CallerAccessToTheRuleSetRefusalAsync(
+        HttpContext http, Guid ruleSetId, RuleSetService ruleSets, AuthorizationService authorization, ILogger logger, CancellationToken ct)
+    {
+        var userId = CallerResolution.ResolveObjectId(http.User) ?? string.Empty;
+        var token = TokenHelper.ExtractBearerTokenOrNull(http);
+
+        // (A) The set itself, as the caller. Refused and no answer are both the uniform 404: a set id that does not exist may answer either.
+        var setRead = await CallerReadCheck.CheckAsync(
+            authorization, new InvoiceContextService.InvoiceCaller(userId, token), "sprk_rulesets", "read", ruleSetId, logger,
+            $"Rule set {ruleSetId}: caller read on the set", ct);
+        if (setRead != CallerReadOutcome.Readable)
+        {
+            return Map(RuleSetService.RuleSetNotFound<object>(), http);
+        }
+
+        RecordRuleSetHome? home;
+        try
+        {
+            home = await ruleSets.RecordHomeOfRuleSetAsync(ruleSetId, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Rule set {RuleSetId}: its record could not be read for the record check; denying (fail closed)", ruleSetId);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        if (home is null)
+        {
+            return null; // not record-scoped, or no set: unchanged
+        }
+
+        // (B) The record, through the record routes' own evaluator, as the caller. Any refusal or fault is the uniform 404.
+        if (home.CoreTable is not { } coreTable || !RecordHomes.TryGetValue(coreTable, out var record) || home.CoreId == Guid.Empty)
+        {
+            logger.LogWarning("Rule set {RuleSetId}: record-scoped with no single core record; denying (fail closed)", ruleSetId);
+            return Map(RuleSetService.RuleSetNotFound<object>(), http);
+        }
+
+        bool recordReadable;
+        try
+        {
+            recordReadable = userId.Length > 0 && await FinanceAuthorizationFilter.CallerHoldsRightsAsync(
+                authorization, userId, record.EntitySet, home.CoreId, "read", token, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Rule set {RuleSetId}: the record check on {EntitySet} faulted; denying (fail closed)", ruleSetId, record.EntitySet);
+            recordReadable = false;
+        }
+
+        if (!recordReadable)
+        {
+            return Map(RuleSetService.RuleSetNotFound<object>(), http);
+        }
+
+        var routes = $"{ProcedureAssignmentEndpoints.Route}/{record.Segment}/{home.CoreId}";
+        logger.LogWarning(
+            "Rule set {RuleSetId}: {ReasonCode}: a record-scoped set ({RecordKind} {RecordId}) was asked for on {Method} {Path}",
+            ruleSetId, CodeRecordScoped, record.Kind, home.CoreId, http.Request.Method, http.Request.Path.Value);
+        return Results.Problem(
+            statusCode: StatusCodes.Status409Conflict,
+            title: "This rule set belongs to one record",
+            detail: $"This rule set holds the changed rules of one {record.Kind}. It is not read or changed here: use that {record.Kind}'s "
+                + $"override routes, {routes}/rule-overrides/change or {routes}/rule-overrides/exclude to change a rule, and "
+                + $"{routes}/overrides/{{overrideId}} to remove one.",
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = CodeRecordScoped,
+                ["recordKind"] = record.Kind,
+                ["recordId"] = home.CoreId,
+                ["overridesRoute"] = routes,
+            });
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Responses (ADR-019: ProblemDetails with a stable errorCode)

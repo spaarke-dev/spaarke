@@ -75,8 +75,8 @@ public sealed class BillingRuleDraftRetryTests
             text.Setup(t => t.ExtractAsync(It.IsAny<Stream>(), "guidelines.pdf", It.IsAny<CancellationToken>()))
                 .ReturnsAsync(TextExtractionResult.Succeeded(DocumentText, TextExtractionMethod.Native));
             var gate = new Mock<IIdempotencyService>();
-            gate.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
-            gate.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            gate.Setup(l => l.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+            gate.Setup(l => l.ReleaseProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             Ai.Setup(a => a.DraftRulesAsync(It.IsAny<BillingRuleDraftRequest>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() =>
                 {
