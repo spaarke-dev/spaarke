@@ -94,8 +94,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // that person, but the mapping is the playbook's configuration (its author, who may not be the runner), never theirs.
         // Master merge after #2253: so it is asked as WriteIdentity.AppOnly (every set, AccessColumns included) even when the
         // write impersonates the runner; WriteIdentity.Caller is the field-mapping push's only.
+        // #2250 (owner decision, option 2): asked as WriteIdentity.Playbook (every AppOnly set, plus a root's Assigned-To
+        // columns), so a playbook's output mapping never causes an Assigned-To grant.
         if (InheritedAccessPermission.RefuseAppOnlyWrite(
-                entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
+                entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.Playbook) is { } documentRefusal)
         {
             throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
         }
