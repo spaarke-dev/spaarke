@@ -104,8 +104,12 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
         var body = await List();
 
         body.Value.Select(d => d.SprkDocumentid).Should().Equal(new[] { plain }, @case);
-        body.Truncated.Should().BeFalse("a document the rule hides is not a fault");
+        body.Truncated.Should().Be(PastTheBound(@case),
+            "a document the rule hides is not a fault; one hidden past the chain bound is a cap, and caps are visible (#2669, NFR-03)");
     }
+
+    /// <summary>#2669: the hidden cases whose chain cannot be known within the bound (a fourth hop, or a cycle).</summary>
+    private static bool PastTheBound(string @case) => @case is "four-hop-chain" or "cycle" or "own-visible-link-four-hop-chain";
 
     [Theory]
     [MemberData(nameof(VisibleCases))]
@@ -514,12 +518,163 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
             .And.NotContain(eml.ToString());
     }
 
-    /// <summary>Records every formatted line at every level (the cost line is Debug below the threshold).</summary>
+    // ── #2669: a document hidden past the chain bound is a visible cap (NFR-03) ───────────────────────────────────
+
+    private const string PastBoundCode = "[EXT-DOCUMENT-CHAIN-PAST-BOUND]";
+
+    /// <summary>The structured fields the past-bound warning may carry, and nothing else (no name, no title).</summary>
+    private static readonly string[] PastBoundFields = { "Table", "DocumentId", "Hops", "Plane", "Reason", "{OriginalFormat}" };
+
+    [Theory]
+    [InlineData("four-hop-chain", "chain_too_long", 3)]
+    [InlineData("cycle", "chain_cycle", 2)]
+    public async Task List_ARowHiddenPastTheChainBound_SaysTruncated_AndWarnsOncePerRow(string @case, string reason, int hops)
+    {
+        var plain = Doc("plain");
+        var hidden = Seed(@case);
+        var logger = new CapturingLogger();
+
+        var body = await ListThrough(logger);
+
+        body.Value.Select(d => d.SprkDocumentid).Should().Equal(new[] { plain }, "the row is still withheld");
+        body.Truncated.Should().BeTrue("a row hidden past the chain bound is a cap, and caps are visible");
+        AssertOnePastBoundWarning(logger, hidden, reason, hops, plane: "contact");
+    }
+
+    [Fact]
+    public async Task List_RowsHiddenOnlyForAnOrdinaryReason_AreNotACap_NotTruncated_AndNoPastBoundWarning()
+    {
+        var plain = Doc("plain");
+        Seed("own-restricted");
+        Seed("parent-eml-restricted");
+        Seed("grandparent-restricted");
+        Seed("internal-only-communication");
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, X);
+        Doc("not granted: also filed to secure X", extra: ("_sprk_matter_value", X));
+        var logger = new CapturingLogger();
+
+        var body = await ListThrough(logger);
+
+        body.Value.Select(d => d.SprkDocumentid).Should().Equal(new[] { plain });
+        body.Truncated.Should().BeFalse("Restricted, an internal-only communication and a root not granted are decisions, not caps");
+        logger.Entries.Should().NotContain(e => e.Line.Contains(PastBoundCode));
+    }
+
+    [Fact]
+    public async Task List_AChainOfExactlyMaxHops_IsShown_NotTruncated_AndNoPastBoundWarning()
+    {
+        ExternalDocumentNarrowing.MaxHops.Should().Be(3, "the chain below is exactly the bound");
+        var atTheBound = Doc("three parents", parent: Ancestor(parent: Ancestor(parent: Ancestor())));
+        var logger = new CapturingLogger();
+
+        var body = await ListThrough(logger);
+
+        body.Value.Select(d => d.SprkDocumentid).Should().Equal(new[] { atTheBound });
+        body.Truncated.Should().BeFalse();
+        logger.Entries.Should().NotContain(e => e.Line.Contains(PastBoundCode));
+    }
+
+    [Theory]
+    [InlineData("chain_too_long", 3)]
+    [InlineData("chain_cycle", 2)]
+    public async Task DocumentsModuleFetch_ARowHiddenPastTheChainBound_SaysTruncated_AndWarnsOncePerRow(string reason, int hops)
+    {
+        var row = ModuleRow("past the bound", parent: reason == "chain_too_long"
+            ? Ancestor(parent: Ancestor(parent: Ancestor(parent: Ancestor())))
+            : CycleParent());
+        var logger = new CapturingLogger();
+
+        var body = await FetchDocumentsLogged(Reader(P), _fixture.NewService(), logger, ModuleRow("plain"), row);
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("plain");
+        body.Truncated.Should().BeTrue();
+        AssertOnePastBoundWarning(logger, ((Guid)row["sprk_documentid"]!).ToString(), reason, hops, plane: "contact");
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_OrdinaryHiding_AndAChainOfExactlyMaxHops_NotTruncated_AndNoPastBoundWarning()
+    {
+        var logger = new CapturingLogger();
+
+        var body = await FetchDocumentsLogged(Reader(P), _fixture.NewService(), logger,
+            ModuleRow("plain"),
+            ModuleRow("own restricted", permission: Restricted),
+            ModuleRow("under a Restricted .eml", parent: Ancestor(permission: Restricted)),
+            ModuleRow("three parents", parent: Ancestor(parent: Ancestor(parent: Ancestor()))));
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("plain", "three parents");
+        body.Truncated.Should().BeFalse();
+        logger.Entries.Should().NotContain(e => e.Line.Contains(PastBoundCode));
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_ASystemUserFlaggedExternal_WarnsWithTheSystemUserPlane()
+    {
+        var identity = new Mock<ISystemUserIdentityResolver>();
+        identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var row = ModuleRow("past the bound", parent: CycleParent());
+        var logger = new CapturingLogger();
+
+        var body = await FetchDocumentsLogged(SystemUser(), _fixture.Data.NewService(identity: identity.Object), logger, row);
+
+        body.Entities.Should().BeEmpty();
+        body.Truncated.Should().BeTrue();
+        AssertOnePastBoundWarning(logger, ((Guid)row["sprk_documentid"]!).ToString(), "chain_cycle", 2, plane: "systemuser");
+    }
+
+    /// <summary>The parent of a document whose chain loops: parent a → b → a.</summary>
+    private Guid CycleParent()
+    {
+        var a = Guid.NewGuid();
+        var b = Ancestor(parent: a);
+        Ancestor(id: a, parent: b);
+        return a;
+    }
+
+    private static void AssertOnePastBoundWarning(CapturingLogger logger, string documentId, string reason, int hops, string plane)
+    {
+        var warning = logger.Entries.Should().ContainSingle(e => e.Line.Contains(PastBoundCode)).Subject;
+        warning.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+        warning.Line.Should().Contain("table=sprk_document").And.Contain($"id={documentId}").And.Contain($"hops={hops}")
+            .And.Contain($"plane={plane}").And.Contain($"reason={reason}");
+        warning.Keys.Should().BeEquivalentTo(PastBoundFields, "table, row id, hops, plane and reason only: never a name or title");
+    }
+
+    /// <summary>The external list, read through a REAL data service over the fixture's data whose log is captured.</summary>
+    private async Task<ExternalCollectionResponse<ExternalDocumentDto>> ListThrough(CapturingLogger logger)
+    {
+        var service = new ExternalDataService(
+            new HttpClient(_fixture.Data),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                .Build(),
+            new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
+            logger,
+            _fixture.Data.FilingReader);
+        return await service.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, P, Reader(P));
+    }
+
+    private static async Task<FetchResponseDto> FetchDocumentsLogged(
+        CallerPrincipal caller, ExternalDataService data, CapturingLogger logger, params IReadOnlyDictionary<string, object?>[] rows)
+    {
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto("sprk_document", GridFetch, PagingCookie: null),
+            caller, Registry(), new FetchXmlEntityExtractor(),
+            (request, _) => Task.FromResult(new FetchResponseDto(ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null)),
+            data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, logger, CancellationToken.None,
+            data.GetLiveParentRootsAsync);
+        return result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!;
+    }
+
+    /// <summary>Records every formatted line at every level (the cost line is Debug below the threshold), with its level and
+    /// the structured field names it carried.</summary>
     private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<ExternalDataService>
     {
-        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _lines = new();
+        private readonly System.Collections.Concurrent.ConcurrentQueue<(Microsoft.Extensions.Logging.LogLevel Level, string Line, IReadOnlyList<string> Keys)> _entries = new();
 
-        public IReadOnlyList<string> Lines => _lines.ToList();
+        public IReadOnlyList<string> Lines => _entries.Select(e => e.Line).ToList();
+
+        public IReadOnlyList<(Microsoft.Extensions.Logging.LogLevel Level, string Line, IReadOnlyList<string> Keys)> Entries => _entries.ToList();
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -527,7 +682,8 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
 
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
             TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            _lines.Enqueue(formatter(state, exception));
+            _entries.Enqueue((logLevel, formatter(state, exception),
+                state is IEnumerable<KeyValuePair<string, object?>> fields ? fields.Select(f => f.Key).ToList() : new List<string>()));
     }
 
     // ── Seeding ──────────────────────────────────────────────────────────────────────────────────────────────
