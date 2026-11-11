@@ -170,6 +170,19 @@ public class ExternalInvoiceVisibilityGuardTests
             "Reviewed 130b. An internal static helper trimming the line description to the excerpt a firm sees; no read.",
         ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::RuleRead"] =
             "Reviewed 130b. A private record of a rule's name, number and rule set; no read.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ProjectRejectionAsync"] =
+            "Reviewed 130c. A Rejected submission's findings, behind GetForSubmissionAsync: the submission id was admitted by the route's filter. "
+            + "Reads only that submission's own stored findings; a fault is a status-only Degraded outcome. It reads nothing of the derived invoice "
+            + "unless invoiceDecided is true (the filter decided that invoice by the invoice rule).",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::BuildRejectionItemsAsync"] =
+            "Reviewed 130c. Shapes the stored findings; asks the clause reader, the rule names and the Signals of the derived invoice ONLY when "
+            + "invoiceDecided is true (otherwise no citation and no firm reason), and reads no live invoice line.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadFindingsJsonAsync"] =
+            "Reviewed 130c. Reads the findings text of the one admitted submission, app-only (the column is field-secured to the BFF identity); "
+            + "no invoice-family row beyond that submission.",
+        ["Sprk.Bff.Api.Services.Finance.FirmFindingsProjection::ReadRejectionSignalsAsync"] =
+            "Reviewed 130c. Reads the firm reasons of Signals the BFF writer created (WriterCreatedRecord) for the derived invoice the caller "
+            + "decided, only after BuildRejectionItemsAsync's invoiceDecided check; a Signal naming another invoice is dropped.",
     };
 
     /// <summary>

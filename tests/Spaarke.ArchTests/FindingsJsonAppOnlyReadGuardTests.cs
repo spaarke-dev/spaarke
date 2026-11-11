@@ -64,6 +64,7 @@ public sealed class FindingsJsonAppOnlyReadGuardTests
         typeof(InvoiceLineAddService),
         typeof(InvoiceBlockedHold), // task 165a: reads it app-only (the IGenericEntityService its callers pass) for the recorded outcome the FR-20 hold decides from; never writes it
         typeof(RuleSetService), // task 083: GetFirmClauseAsync reads the invoice's own submission app-only (IGenericEntityService, InvoiceBlockedHold.ReadOwnSubmissionAsync) for the procedureSnapshot member only; never writes it
+        typeof(FirmFindingsProjection), // task 130c (FR-18): reads a Rejected submission's stored findings app-only (its IGenericEntityService), through FirmRejectionFindings' allow-list parse; never writes it
     ];
 
     /// <summary>

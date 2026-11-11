@@ -359,3 +359,162 @@ Branch `task/ebilling-130b-fix7` from `task/ebilling-130b-fix1` at `42cfdbce1b`.
 - **Change.** One helper (`HasReadableCore`, the core-record union over a table's core columns) serves the invoice's row and the submission's own row; `DecideSubmissionAsync` applies it right after the own-row read and before the secure-roots check. Every other outcome is unchanged.
 - **Tests** (`FirmOutcomeScopeTests`): must-fire `ASubmission_WhoseRowNamesOnlyAnUnreadableCore_OnTheSecondRead_Is403_AndNothingIsProjected` (the own row names only a core the caller cannot read, known not secure; the secure status is never asked); `ASubmission_NotFoundOnTheSecondRead_Is403_AndNothingIsProjected` (the own-row read finds no record).
 - Guard text: the ledger's `AddFirmOutcomeAuthorizationFilter` citations re-cited to the edited lines.
+
+## 130c: a rejected submission's findings (FR-18)
+
+Branch `task/ebilling-130c` from `task/ebilling-130b-fix1` at `ecf694a8d1`. Closes 130a open question 1 (where a rejection finding's content comes from): the submission's OWN stored findings. No new route, no new caller of `FirmFindingsProjection`.
+
+### What was built
+
+- `Services/Finance/FirmRejectionFindings.cs` (new, internal): the allow-list parse of `sprk_invoicesubmission.sprk_findingsjson` for the firm view. Stable log codes `EBILLING-FIRM-OUTCOME-REJECTION-FINDINGS-DROPPED` (counts only: malformed / unknown rule type / over the cap) and `EBILLING-FIRM-OUTCOME-REJECTION-FINDINGS-UNREADABLE` (a document that cannot be read as a whole).
+- `Services/Finance/FirmFindingsProjection.cs`: `GetForSubmissionAsync` on a Rejected submission now calls `ProjectRejectionAsync` (it returned status only). New contract members: `FirmOutcomeDecision.RejectionFinding`; `FirmOutcomeItem.LineNumber` (int?, one-based) and `FirmOutcomeItem.ValuesRead` (list of `FirmOutcomeValueRead(Name, Value)`), both omitted from the JSON when null, so every existing item serializes as before.
+- Tests: new cases in `FirmFindingsProjectionTests` and `FirmOutcomeScopeTests` (listed under Results). ArchTests: `FindingsJsonAppOnlyReadGuardTests` (the projection is now a reviewed reader of the column; row 18 of `notes/122-findings-json-field-secure.md`) and `ExternalInvoiceVisibilityGuardTests` (four reviewed `NotInvoiceSurfaces` entries for the new private members).
+
+### The JSON shape consumed (field names only)
+
+Root: `kind`, `findings[]`. Per finding: `ruleType`, `rejects`, `policyVersionId`, `subject`, `line`, `reasonCode` (required, never shown), `detailWithheld`, `valuesRead[]` with `name` and `value`. Never read: `clause`, `clauseLocation`, `policyId`, `policyCode`, `consequence`, `heldBecause`, `suggestedAdjustment`, `confidence`, `belowReliabilityThreshold`, the per-value `line`, `signalPlan`, `pipelineFindings`, `codingFindings`, `lineFindings`, `procedureSnapshot`, `invoiceId`, `trackingNumber`.
+
+### Rules as built
+
+| Rule | Behaviour |
+|---|---|
+| Which submissions | A Rejected submission whose stored `kind` is `AutoRejected`. A `Blocked` outcome (also Rejected in status) is an internal hold awaiting a reviewer, not a decision a firm was given (FR-38): no finding. Any other kind: no finding. |
+| Which findings | `rejects` true only. A finding that did not reject is skipped silently (not a defect). |
+| Unknown rule type (FR-24) | Refused whatever else the entry says, even when it does not reject: the name must be exactly a defined `RuleType` member (not a number, not a comma-joined list whose OR is another member), in the Billing domain, and not the system marker `SubmissionIntegrity`. |
+| Malformed | A non-object entry, a wrong-typed member, a missing or empty policy version, a missing reason code, a line subject without a line (or an invoice subject with one), a `rejects` that is not a boolean, a rejection by a type that can never reject (including an AI observation, I-5), a non-string value: dropped. |
+| Logging | One Warning per read: stable code plus counts. No content, no ids of the finding. |
+| Bounds | 200 findings (the outcome's `notShownCount` says how many more valid rejection findings were left out, 130c fix round 2), 20 values per finding, 200 characters per value (trimmed with "..."; a cut never splits a surrogate pair). |
+| Line | `LineNumber` = stored zero-based index + 1, i.e. the Nth line the submission read from the invoice (not a number printed on the invoice); null for an invoice-level finding. Never a line id; no live line is read. |
+| Values read | Name and value, trimmed and truncated (not "as stored"), nothing else (no confidence). Only values extracted from the invoice (see "130c fix round 1"). A Duplicate finding and a `detailWithheld` finding project none (a Duplicate quotes an EARLIER invoice the caller may not see: D-112, D-176). |
+| Citation (the rule and the clause) | Exactly as an invoice item's (130b fix round 2): only when `RuleSetService.GetFirmClauseAsync` publishes text for that version on the submission's derived invoice AND the rule set's Procedure is not InternalStandard; otherwise none (no rule name, label, version, section or quote). A fault deciding it omits it; it is never a guess. No ids. |
+| Firm reason | From a `sprk_signal` the BFF writer created (`WriterCreatedRecord`), for the derived invoice, the finding's policy version and its line (the derived line id; none for an invoice-level finding), first non-blank `sprk_firmreason` in creation order. Independent of the citation gate. A fault, or an unknown writer id, makes the outcome Degraded (503), as for a decided line. |
+| Invoice not decided | `invoiceDecided` false (the derived invoice did not exist when the route's filter ran): the findings keep their line and values (the submission's own), but there is no citation, no firm reason, and nothing of the invoice is read (no clause call, no Signal, no rule row, no writer id). |
+| Faults | Reading the stored findings, the rules or the Signals: status only, `Degraded` (route 503). A fault reading the Procedure type (or the firm flag) omits the citation and is not a fault of the outcome (`CitableVersionsAsync` catches it). A stored document that cannot be read, or has no usable rejection finding: status only, not degraded (route 200), with the stable-coded Warning when it was unreadable. |
+
+### Decisions taken inside the brief (for review)
+
+1. Flag off shows NO citation at all (no rule name, no rule set label), following 130b fix round 2 (the owner ruling that supersedes the earlier "rule name and reason" reading of D-79). The brief's D-79 line says "reason + rule set name only"; a rule set name cannot be shown because the POML forbids reading `sprk_ruleset.sprk_name` and the clause reader returns no label with the flag off. Open question 1.
+2. The rule type is validated but not projected: it is a category of an internal rule, and the owner ruling publishes the rule only as the firm flag allows.
+3. `rejects` true is the definition of a rejection finding (073's stored decision), not "every stored finding". A firm is not shown flagged findings that did not reject.
+4. A Blocked outcome projects no finding even though its submission status is Rejected.
+5. The firm reason is read from Signals (the only stored home of `sprk_firmreason`), not composed from the reason code; `reasonCode` is validated and never shown, because no firm-text composer for it exists.
+
+### Component justification (CLAUDE.md section 11)
+
+`FirmRejectionFindings` (internal parser) and the new projection members:
+
+1. Existing: `InvoiceReviewReadService.ParsedFindings` (private; the INTERNAL reader: confidence, stored clause, suggestion, Signal plan) and `InvoiceSubmissionAfterSteps.StoredFindings` (the writers' reader). The projection's own citation, clause, rule-name and Signal-read helpers are reused unchanged.
+2. Extension: neither existing parser can be narrowed to an allow-list without a second rule set inside it, and neither refuses an unknown rule type (FR-24). A small second parser with a closed member list is the smaller surface.
+3. Cost of doing nothing: FR-18's on-screen report (and the PDF, FR-40) cannot be built, or is built by copying the internal reader's members (confidence, the internal clause).
+
+### BFF hygiene (section 10)
+
+Placement: BFF, `Services/Finance` beside the projection (B4 live request). No package, no endpoint, no DI change. No HIGH CVE introduced (no package reference changed). Publish size: not re-measured (one small internal class and one projection method group; no package change).
+
+### Known limits
+
+- `sprk_signal.sprk_firmreason` still has no writer (130a decision 3): until one exists the firm reason of a rejection finding is empty in production, as an invoice item's is.
+- Which Signal belongs to a finding is decided by (invoice, policy version, derived line id). If the Signal writer subjects a line finding differently, the reason is absent (fail closed), never wrong.
+- A rejected submission whose derived invoice was never created shows its findings without citation or reason.
+
+### 130c fix round 1
+
+Changes after the first adversarial review pass (closed set of items):
+
+- **F1-a, which values are shown.** The projection shows a value only when the stored entry names the invoice field it was extracted from (the persister writes `field` from the finding's extracted-field reference; a value read from the system's own tables has none). Every other value is dropped. As a backstop, a value whose text parses as an identifier is dropped. `field` is now read, but only for whether it is present. No per-type reference-value list was added.
+- **F1-b, a missing field is named.** A value with no text is kept as an empty value (name kept) for a finding that is not withheld and not a Duplicate, so a RequiredData rejection tells the firm which field is missing. RequiredData stores that value through the extracted-field helpers, so its `field` is present and the F1-a rule keeps it. The same applies to any extracted value that was read as empty. (Corrected in fix round 2: this does NOT include the credit-test reads of an ApprovedRate finding. `WithCreditTestReads` creates those with null confidence, and `SubmissionRejectionRule` holds any finding that lists a read with unknown confidence, so such a finding never rejects and is never projected.)
+- **F3, tests use the writer's real shape.** The stored entries in the new tests come from `InvoiceSubmissionPersister.FindingEntryJson` over findings produced by the real `ApprovedRateHandler` and `RequiredDataHandler` (through the existing handler test kit). The hand-built fixtures use real reject-capable reason codes instead of a made-up one.
+- **K1, parse faults.** The call to the parser in `ProjectRejectionAsync` is inside fault handling: any exception other than the caller's own cancellation is treated as an unreadable document (status only, `Degraded` false, the stable UNREADABLE Warning, no content). The parser is replaceable through an internal init-only member so the test can inject a fault.
+- **K2, reject-capable reasons only.** An entry is malformed (dropped, counted in the DROPPED Warning) unless `BillingRuleCatalogue.IsRejectCapableReason(type, reasonCode)` holds and the type is not hold-only.
+- **K3, value name cap.** A value name over 100 characters drops the value.
+- **K4, notes corrected.** A fault reading the Procedure type omits the citation; it does not make the outcome Degraded. Values are trimmed and truncated, not "as stored".
+
+Results (fix round 1): filtered run (`FirmFindingsProjectionTests` + the `FirmOutcome*` classes) 177 passed, 0 failed (8 new tests). Fail-before: with the F1-a, F1-b, K1, K2 and K3 changes temporarily reverted, 13 of the 177 fail, including every new test (the real-shape ApprovedRate test, the extracted-field test, the two-RequiredData test, the parser-fault test, the reason test and the name-cap test); the files were restored and their SHA-256 verified. Full `Spaarke.ArchTests`: 2183 passed, 0 failed. The existing integration fixture in `FirmOutcomeScopeTests` now stores real reason codes and the writer's `field` member.
+
+### Results (130c)
+
+- Filtered run (`FirmFindingsProjectionTests` + the `FirmOutcome*` classes, including `FirmOutcomeScopeTests`): 169 passed, 0 failed.
+- Fail-before proofs (the real code temporarily replaced, the suite run, the real code restored and its SHA-256 verified):
+  - Old behaviour (a rejected outcome returns the status only): 27 of the 165 tests in the two classes fail, among them the must-fire two-findings test, the route happy path and the route 503 test.
+  - FR-24 (security-class): the unknown-rule-type refusal replaced by a plain enum parse: the seeded unknown-type test fails (1 of 94 in the projection class).
+  - EB-D-208: the writer-created conditions dropped from the Signal read: 3 tests fail (the firm-reason test, the writer-id test, the route happy path).
+- ArchTests: the full `Spaarke.ArchTests` run on the final tree, 2183 passed, 0 failed (includes the reviewed-reader guard for the field-secured column, the invoice-visibility guard's new reviewed entries, the caller-boundary guard and the writer-created single-source guard).
+
+### 130c fix round 2
+
+Branch `task/ebilling-130c-f2` from `task/ebilling-130c` at `adb765caa3`, pushed to `task/ebilling-130c` (fast-forward).
+
+- **F1, the findings cap is no longer silent.** `FirmRejectionFindings.Parse` now returns `ParseResult(Findings, NotShown)`; `NotShown` is the number of valid rejecting findings past `MaxFindings` (200, unchanged). `FirmOutcome` gains an optional last member `NotShownCount` (int?, default null, `JsonIgnore(WhenWritingNull)`, the same convention as `FirmOutcomeItem.LineNumber`), set by `ProjectRejectionAsync` when `NotShown > 0`. Malformed and refused entries are not counted in it: they are not findings this build could show (they stay in the DROPPED Warning). Every other outcome, and a rejection at or under the cap, serializes exactly as before. No client reads the outcome contract (grep of `src/**` for the routes, `FirmOutcome` and `rejectionFinding` found nothing), so there is no consumer to update; 131/133/134 will read `notShownCount`.
+- **K1, AI-assigned fields.** A value whose stored `field` satisfies `BillingFieldNames.IsAiAssigned` (the coding Action's codes and every `Observation.*` field) is not projected: it is model output, not the firm's invoice. The firm-billed codes (`BilledTaskCode` and the others) are extracted fields and are still shown.
+- **K2, a merge-fragile test.** `Rejected_ARealApprovedRateFinding_ProjectsOnlyTheValuesExtractedFromTheInvoice` no longer names the handler's reference values. Its precondition is generic: the real finding's `ValuesRead` has entries with no extracted field (and at least one is an identifier), none of those names appears in the output, and every projected name is an extracted one.
+- **K4, wording.** `LineNumber` is the one-based position of the Nth line the submission read from the invoice, not a number printed on the invoice. Fixed in `FirmOutcomeItem`'s doc comment and in the "Rules as built" Line row above. (The contract's other XML docs and the endpoint had no matching wording.)
+- **K5, the notes, and reachability proven through the real decision.** The fix-round-1 F1-b bullet is corrected in place. Credit-test reads (`WithCreditTestReads`, `HandlerContext.cs`) are created with null confidence, and `SubmissionRejectionRule.DecideFinding` holds any finding whose read field has unknown confidence (`read_field_confidence_unknown`), so they cannot appear on a rejecting finding. The new tests run `SubmissionRejectionRule.Decide` over findings from the handler kit instead of forcing `Rejects = true`, and store them with the persister's own `FindingEntryJson`:
+  - an ApprovedRate finding on a fee line with neither hours nor amount lists both as null-valued reads; the decision holds it (`ReadFieldConfidenceUnknown`, outcome Accepted); stored beside a rejecting finding it is not projected;
+  - a RequiredData missing-field finding (`firmInvoiceNumber` null, confidence known and at or above the threshold) **is reachable**: the decision rejects it (outcome Rejected) and the projection shows the field name with an empty value. The confidence comes from the facts' field-confidence map, as the kit supplies it.
+- **K6, robustness.**
+  1. The 200-character cut no longer splits a surrogate pair: if the last kept character is a high surrogate the cut steps back one character.
+  2. A fault while reading one entry (for example a string whose escape cannot be decoded, which makes `GetString()` throw) drops and counts only that entry as malformed. The document stays readable and the other entries are shown. The fault is caught per entry in `Parse` (`InvalidOperationException`, `ArgumentException`, `FormatException`, `JsonException`); a value that fails makes its entry malformed, the same as a wrong-typed value.
+  3. A document that cannot be parsed as a whole still takes the UNREADABLE path (status only, stable code, nothing shown).
+
+Tests (`FirmFindingsProjectionTests`; the replaced `Rejected_FindingsOverTheCap_AreCountedNotShown` pinned the silent behaviour):
+
+- must-fire: 250 rejecting findings give 200 shown, `NotShownCount` 50, `"notShownCount":50` in the body and "50 over the cap" in the Warning; an AI-assigned value is not projected; a 201-character value ending in an emoji truncates cleanly (and serializes to valid UTF-8); one undecodable entry among good ones drops only that entry;
+- must-not-fire: 1, 199 and 200 findings, and every other outcome, have no `notShownCount`; only valid rejecting findings past the cap count; an emoji inside the cut is kept; a whole-document parse fault is still UNREADABLE with no DROPPED Warning;
+- reachability (K5): the two tests above.
+
+### Results (130c fix round 2)
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- `FirmFindingsProjectionTests`: 114 passed, 0 failed (102 before; 12 net new).
+- Filtered unit run (`FirmOutcome`, `FirmFindingsProjection`, `Billing`, `SubmissionRejectionRule`, `FirmRejection`): 2403 passed, 0 failed.
+- Fail-before:
+  - the two production files put back to `adb765caa3`: the test project does not compile (`FirmRejectionFindings.ParseResult` and `FirmOutcome.NotShownCount` do not exist);
+  - the new behaviours mutated (NotShownCount always null, AI check removed, surrogate step-back removed, per-entry catch removed): 5 of 114 fail (the 250-finding cap test, the cap-count test, the AI-assigned test, the emoji test, the undecodable-entry test). The K5 reachability tests and the K2 rewrite pass before and after by design: they pin existing behaviour. Both production files were restored from copies; their SHA-256 matched (`CE96D5AB...D6D0EF7`, `AF2F136C...A985CD`).
+- ArchTests (full): 2183 total, 2183 passed, 0 failed (run from the worktree's own path).
+
+### 130c fix round 3
+
+Branch `task/ebilling-130c-f3` from `task/ebilling-130c` at `9a84a1f346`, pushed to `task/ebilling-130c` (fast-forward). A hardening round; no new service, package or registration.
+
+- **G, a catalogue-driven guard on the value boundary.** The projection shows a value only when its stored entry has a non-empty `field` (extracted from the firm's own invoice) that the AI did not assign. That holds because each handler leaves `field` off its reference values (approved rate, rate card, core-record dates and status, prior-invoice data). `StoredFindingValueBoundaryTests` (`tests/unit/domain/Signals/Billing/Handlers`, beside `BillingHandlerKit`) now guards it. It iterates `BillingRuleCatalogue.RejectCapableReasons` over every Billing type, and for each (type, reason) runs the REAL handler through `BillingHandlerKit.Run` with reference data present and set up so the handler fires (rate card below the billed rate; core-record window dates, a closed record and a closed-to-billing status; a prior invoice with the same number; an aged invoice date; an expense code and an expense over the cap; missing required fields). Each finding is stored through `InvoiceSubmissionPersister.FindingEntryJson` and the stored shape is checked:
+  - every value entry with a non-empty `field` names a `BillingFieldNames` extracted-field constant (the constants are found by reflection: not the observation prefix, not AI-assigned);
+  - every reference value (no extracted field on the finding) is stored with no `field`, and the reference names each fixture lists (for example `approvedRate`, `rateCard.id`, `coreRecord.openDate`, `duplicateOf.trackingNumber`) are present and stored with no `field`, so a handler that attaches an extracted field to one fails even if it flags it consistently;
+  - the reason's finding is produced (the test cannot pass vacuously), and the projection's own parse of the stored document shows no reference value (a Duplicate shows none at all).
+  A dictionary of fixtures keyed by (type, reason) must equal the catalogue's reject-capable set, so a new reject-capable reason without a fixture fails, and the theory has one case per catalogue entry. All ten reasons (ApprovedRate 1, ExpenseRule 2, InvoiceAge 1, CoreRecordWindow 4, Duplicate 1, RequiredData 1) were driven to a finding through the kit; none was left out.
+- **K-a, the AI-assigned skip ignores case.** `FirmRejectionFindings` uses a local `IsAiAssignedField` (the trimmed name, `OrdinalIgnoreCase`, same set and the same `Observation.` prefix as `BillingFieldNames.IsAiAssigned`). `BillingFieldNames` and `SubmissionRejectionRule` are unchanged. Before: `taskcode` and `observation.x` were projected. After: both are skipped; `observationx` (no dot) and `BilledTaskCode` are still projected.
+- **K-b, a list is not presented as complete when rejecting entries were dropped.** `ParseResult.NotShown` and `FirmOutcome.NotShownCount` now count rejecting findings that could not be shown: those past the cap (as before) plus entries with `rejects` true that were dropped as malformed, undecodable, of an unknown or refused rule type, or of a type or reason that cannot reject. Entries with `rejects` false or absent, a `rejects` that is not a boolean, entries that are not objects, and every entry of a non-AutoRejected document (a Blocked hold) are not counted. A rejected submission where every rejecting entry was dropped now returns no items with `NotShownCount` set (previously it looked like a rejection with nothing to say). The XML doc on `NotShownCount` reads "rejecting findings that could not be shown". The DROPPED Warning is unchanged (codes and counts only).
+- **K-c.** In the K5 test whose shown rejecting entry is invoice-level, the vacuous `LineNumber.Should().NotBe(3)` is now `LineNumber.Should().BeNull()`.
+
+Tests (`FirmFindingsProjectionTests`, 114 to 119; `StoredFindingValueBoundaryTests`, 12 new):
+
+- must-fire: casing variants of AI-assigned fields are skipped; 3 valid and 1 malformed rejecting entry give 3 shown and `NotShownCount` 1; every kind of dropped rejecting entry is counted; all-malformed gives no items and `NotShownCount` N; the catalogue guard, one case per reject-capable reason;
+- must-not-fire: `observationx` and `BilledTaskCode` are projected; held, non-rejecting, non-boolean-flag, non-object and Blocked-document entries are not counted;
+- three existing tests gained the matching `NotShownCount` assertion (malformed 9, unknown-type 6, undecodable 1).
+
+### Results (130c fix round 3)
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- Filtered unit run (`FirmOutcome`, `FirmFindingsProjection`, `FirmRejection`, `Billing`, `SubmissionRejectionRule`, `StoredFindingValueBoundary`): 2420 passed, 0 failed (2403 before; 17 new).
+- Fail-before:
+  - K-a and K-b mutated off (the AI check back to the ordinal `BillingFieldNames.IsAiAssigned`, the rejecting-entry count removed, the empty-list outcome without the count): 7 of 119 `FirmFindingsProjectionTests` fail (the K-a test, the three new K-b must-fire tests, and the three existing tests that gained the count assertion); the must-not-fire test passes. Both production files were restored from copies and their SHA-256 matched (`78900960...232872`, `1dd83fce...cc4f233`).
+  - G: one reference value in `ApprovedRateHandler` temporarily given an extracted field: the ApprovedRate case fails ("approvedRate is reference data"). One fixture key (Duplicate) removed: the Duplicate case and the fixtures-equal-the-catalogue test fail. The handler (SHA-256 `6941eb94...2106ca`) and the test file (`942d6c86...cfa8`) were restored and verified.
+- ArchTests (full, from the worktree's own path): 2183 total, 2183 passed, 0 failed.
+
+### 130c fix round 4
+
+Branch `task/ebilling-130c-f4` from `task/ebilling-130c` at `a357a5c7e1`, pushed to `task/ebilling-130c` (fast-forward). A hardening round; no new service, package or registration, and `BillingFieldNames` is unchanged.
+
+- **The value filter is an allow-list.** Before: a value with a non-empty `field` was shown unless the field was AI-assigned, so a field name the projection did not recognise was shown. After: a value is shown only when its trimmed `field` equals, `OrdinalIgnoreCase`, a `BillingFieldNames` constant that names a field of the firm's invoice (not `ObservationPrefix`, not AI-assigned). The AI-assigned skip stays as well (defence in depth). The empty-value rule is unchanged: an allowed field with no text shows with an empty value.
+- **Where the allowed set comes from.** `BillingFieldNames` exposes no set of extracted names, so `FirmRejectionFindings` builds one static read-only set once from the `public const string` fields of `BillingFieldNames` (reflection, the approach `StoredFindingValueBoundaryTests` already uses), minus the observation prefix and the AI-assigned names. A constant added to `BillingFieldNames` is allowed with no second list to keep in step. `StoredFindingValueBoundaryTests` keeps its own independent derivation and is unchanged.
+- **Tests (`FirmFindingsProjectionTests`, 119 to 121).**
+  - must-fire: an entry whose values carry fields `line.internalScore`, a truncated `Rat` and the bare observation prefix still shows (its line number), while those values do not; the allowed `Rate` value beside them does.
+  - must-not-fire: every extracted-field constant, as named, upper-cased and lower-cased with padding, still shows its value.
+  - The fix round 3 K-a test now also expects a name that only resembles an AI-assigned one (`observationx`) not to show, because it is not an extracted field.
+
+### Results (130c fix round 4)
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings.
+- `FirmFindingsProjectionTests`: 121 passed, 0 failed (119 before; 2 new).
+- Filtered unit run (`FirmOutcome`, `FirmFindingsProjection`, `FirmRejection`, `Billing`, `SubmissionRejectionRule`, `StoredFindingValueBoundary`): 2422 passed, 0 failed (2420 before; 2 new). `StoredFindingValueBoundaryTests` is unchanged.
+- Fail-before: with the allow-list mutated off (the check reduced to the AI-assigned skip alone; a non-constant mutation), 2 of 121 `FirmFindingsProjectionTests` fail (the new must-fire test and the updated K-a test); the must-not-fire test passes before and after by design. The production file was restored from a copy; its SHA-256 matched (`d56b2f11368e1d69...`).
+- ArchTests (full, from the worktree's own path): 2183 total, 2183 passed, 0 failed.

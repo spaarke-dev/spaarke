@@ -21,7 +21,7 @@ public enum FirmOutcomeKind
     /// <summary>The submission is Received or Processing: status and billed total only.</summary>
     SubmissionInProgress,
 
-    /// <summary>The submission was rejected (the rejection findings are not projected yet; see the 130a notes).</summary>
+    /// <summary>The submission was rejected: the findings that rejected it, from its own stored findings (130c, FR-18); none when it has none.</summary>
     SubmissionRejected,
 
     /// <summary>The invoice is In Review: its decided and reviewer-added lines with the reviewer's reason, and no approved total (EB-D-202).</summary>
@@ -64,6 +64,9 @@ public enum FirmOutcomeDecision
 
     /// <summary>An invoice-level adjustment (a percent or fixed write-down).</summary>
     Adjustment,
+
+    /// <summary>A finding that rejected a submission (FR-18): its line, the values read and, when the firm flag publishes it, the rule and clause.</summary>
+    RejectionFinding,
 }
 
 /// <summary>
@@ -72,6 +75,12 @@ public enum FirmOutcomeDecision
 /// </summary>
 /// <param name="TrackingNumber">The tracking number the firm was given on submission.</param>
 /// <param name="StatusLabel">What the firm sees as the status.</param>
+/// <param name="NotShownCount">
+/// A rejected submission only (130c fix rounds 2 and 3): the number of rejecting findings that could not be shown: those beyond the most that
+/// are shown (200), and stored entries that claim to reject but were dropped as malformed or refused (an unknown rule type, or a type or reason
+/// that cannot reject), so the list in <see cref="Items"/> is known to be incomplete. Null (omitted from the
+/// JSON) when every rejecting finding is shown, and for every other outcome.
+/// </param>
 public sealed record FirmOutcome(
     FirmOutcomeKind Kind,
     string? TrackingNumber,
@@ -79,7 +88,8 @@ public sealed record FirmOutcome(
     decimal? BilledTotal,
     decimal? ApprovedTotal,
     IReadOnlyList<FirmOutcomeItem> Items,
-    bool Degraded);
+    bool Degraded,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? NotShownCount = null);
 
 /// <summary>One decided or reviewer-added line, or one invoice-level adjustment, with the reviewer's reason and the rules behind it.</summary>
 /// <param name="LineId">The invoice line, for a line item; null for an adjustment.</param>
@@ -93,6 +103,15 @@ public sealed record FirmOutcome(
 /// (never substituted). NOT a citation and not gated by the firm flag (130b fix round 2): shown whether or not the rule is cited. Empty for an
 /// invoice-level adjustment (it resolves no Signal).
 /// </param>
+/// <param name="LineNumber">
+/// A rejection finding only (130c): the one-based position of the line it is about, counting the lines in the order the submission read
+/// them from the invoice (the Nth line read; it is not a number printed on the invoice); null for an invoice-level finding and for every
+/// other item (omitted from the JSON). Never a line id, and never read from a live line.
+/// </param>
+/// <param name="ValuesRead">
+/// A rejection finding only (130c): the values the rule read, as the submission stored them (name and value, nothing else); null for every other
+/// item (omitted from the JSON), empty when the finding shows none (a Duplicate, a withheld detail, nothing stored).
+/// </param>
 public sealed record FirmOutcomeItem(
     FirmOutcomeDecision Decision,
     Guid? LineId,
@@ -100,7 +119,12 @@ public sealed record FirmOutcomeItem(
     FirmOutcomeAdjustment? Adjustment,
     string? Reason,
     IReadOnlyList<string> FirmReasons,
-    IReadOnlyList<FirmOutcomeCitation> Citations);
+    IReadOnlyList<FirmOutcomeCitation> Citations,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? LineNumber = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<FirmOutcomeValueRead>? ValuesRead = null);
+
+/// <summary>One value a rule read for a rejection finding (130c): its name and the value as the submission stored it.</summary>
+public sealed record FirmOutcomeValueRead(string Name, string Value);
 
 /// <param name="DescriptionExcerpt">The first part of the line's description as billed.</param>
 /// <param name="ApprovedAmount">The reviewer's figure for the line.</param>
@@ -151,6 +175,13 @@ public delegate Task<FirmClauseText> FirmClauseReader(Guid policyVersionId, Guid
 /// every other case, including a fault reading the flag or the Procedure's type, the citation is omitted entirely; the line, the reviewer's
 /// reason and the firm reasons (<see cref="FirmOutcomeItem.FirmReasons"/>, which are not citation fields) stay. There is no member for a Procedure Library document, container, drive item or link, nor for any policy, version, rule set or
 /// Procedure id.</para>
+/// <para><b>A rejected submission (130c, FR-18).</b> One <see cref="FirmOutcomeDecision.RejectionFinding"/> item per finding that rejected it,
+/// built from the submission's OWN stored findings (<see cref="FirmRejectionFindings"/>: an allow-list parse that refuses an unknown rule type
+/// and drops a malformed entry): its one-based line number and the values the rule read, as stored. The rule and clause (the citation) and the
+/// firm reason follow the same rules as an invoice item's, for the submission's derived invoice and only when the caller decided it:
+/// the citation as <see cref="RuleSetService.GetFirmClauseAsync"/> and the InternalStandard check publish it, and the firm reason only from a
+/// Signal the BFF writer created, whatever the citation says. A live invoice line is never read and nothing is re-extracted. A Blocked
+/// submission (an internal hold) projects no finding.</para>
 /// <para><b>Fail closed.</b> No exception other than cancellation leaves this class. A fault reading the header, or a header with no status,
 /// gives an <see cref="FirmOutcomeKind.Unavailable"/> outcome; a fault after it gives the status only, flagged
 /// <see cref="FirmOutcome.Degraded"/> (a fault deciding a citation omits that citation instead). A closed state at the time of the request
@@ -189,6 +220,9 @@ public sealed class FirmFindingsProjection
     private readonly FirmClauseReader _clauses;
     private readonly Func<CancellationToken, Task<Guid>> _writerUserId;
     private readonly ILogger<FirmFindingsProjection> _logger;
+
+    /// <summary>The stored-findings parser (<see cref="FirmRejectionFindings.Parse"/>); replaceable by the test assembly to inject a parser fault.</summary>
+    internal Func<string?, ILogger, Guid, FirmRejectionFindings.ParseResult> ParseRejectionFindings { get; init; } = FirmRejectionFindings.Parse;
 
     /// <param name="writerUserId">The <c>systemuserid</c> of the identity that creates every Decision Record (<c>BillingDecisionRecorder.WriterUserIdAsync</c>).
     /// Asked at most once per projection, and only when the invoice has decided lines to give a reason to; a fault, or an empty id, degrades the
@@ -304,14 +338,15 @@ public sealed class FirmFindingsProjection
     /// <summary>
     /// The firm outcome of <paramref name="submissionId"/>, or null when it does not exist. Received or Processing: status (and the billed total
     /// once its invoice exists and was decided) only; a fault reading that total is Degraded, never a null total. Accepted: the invoice's
-    /// outcome. Rejected: status only (the rejection findings are not projected yet). Failed or an unknown status:
-    /// <see cref="FirmOutcomeKind.Closed"/>.
+    /// outcome. Rejected: the findings that rejected it, from the submission's OWN stored findings (130c, FR-18; never a live line, never a
+    /// re-run of the extraction). Failed or an unknown status: <see cref="FirmOutcomeKind.Closed"/>.
     /// </summary>
     /// <param name="invoiceDecided">
     /// Whether the caller decided the submission's derived invoice by the invoice rule (the route's <c>FirmOutcomeScope.InvoiceDecided</c>; an
     /// internal caller that shows the invoice passes true). False (130b fix round 2, F1): nothing is read from that invoice. Received or
     /// Processing is the status with no billed total; Accepted is <see cref="FirmOutcomeKind.Unavailable"/> (a 503: the retry is decided
-    /// afresh, now that the invoice exists).
+    /// afresh, now that the invoice exists). Rejected (130c): the findings still show their line and values (the submission's own), but with no
+    /// citation and no firm reason, because both name the invoice (the clause reader and the Signals are keyed by it).
     /// </param>
     /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
     public async Task<FirmOutcome?> GetForSubmissionAsync(Guid submissionId, bool invoiceDecided, CancellationToken ct)
@@ -388,7 +423,7 @@ public sealed class FirmFindingsProjection
 
                 return accepted;
             case (int)InvoiceSubmissionStatus.Rejected:
-                return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
+                return await ProjectRejectionAsync(submissionId, tracking, invoiceDecided, ct).ConfigureAwait(false);
             case (int)InvoiceSubmissionStatus.Failed:
                 return Closed(tracking, "Failed");
             default:
@@ -810,6 +845,169 @@ public sealed class FirmFindingsProjection
         }
 
         return rules;
+    }
+
+    // ── Rejection findings (130c, FR-18) ──
+
+    private static readonly string[] RejectionSignalColumns =
+    [
+        "sprk_policyversion", "sprk_firmreason", "sprk_regardinginvoice", "sprk_regardinginvoiceline", "createdon",
+    ];
+
+    /// <summary>
+    /// A Rejected submission's outcome: the findings that rejected it, from the submission's OWN stored findings. A fault reading them, or
+    /// anything after, is the status only, Degraded (fail closed); a stored copy with no usable rejection finding is the status only, not a fault.
+    /// </summary>
+    private async Task<FirmOutcome> ProjectRejectionAsync(Guid submissionId, string? tracking, bool invoiceDecided, CancellationToken ct)
+    {
+        string? json;
+        try
+        {
+            json = await ReadFindingsJsonAsync(submissionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsFault(ex, ct))
+        {
+            LogFault(ex, "the submission's stored findings", submissionId);
+            return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], true);
+        }
+
+        FirmRejectionFindings.ParseResult parsed;
+        try
+        {
+            parsed = ParseRejectionFindings(json, _logger, submissionId);
+        }
+        catch (Exception ex) when (IsFault(ex, ct))
+        {
+            // Whatever the cause, a stored copy that cannot be parsed is an unreadable one: the status only, with the stable code (no content).
+            _logger.LogDebug(ex, "Firm outcome rejection findings parse fault detail");
+            FirmRejectionFindings.LogUnreadable(_logger, submissionId);
+            return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false);
+        }
+
+        var findings = parsed.Findings;
+        if (findings.Count == 0)
+        {
+            // Nothing could be shown; if the stored copy held rejecting entries that were dropped, the outcome says how many.
+            return new FirmOutcome(
+                FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], false, parsed.NotShown > 0 ? parsed.NotShown : null);
+        }
+
+        try
+        {
+            var items = await BuildRejectionItemsAsync(submissionId, findings, invoiceDecided, ct).ConfigureAwait(false);
+
+            // Rejecting findings left out (past the cap, or dropped as malformed or refused) are counted, so the list is never read as the whole of it.
+            return new FirmOutcome(
+                FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, items, false, parsed.NotShown > 0 ? parsed.NotShown : null);
+        }
+        catch (Exception ex) when (IsFault(ex, ct))
+        {
+            LogFault(ex, "the rejection findings", submissionId);
+            return new FirmOutcome(FirmOutcomeKind.SubmissionRejected, tracking, "Rejected", null, null, [], true);
+        }
+    }
+
+    /// <summary>
+    /// One item per rejection finding: its one-based line number and the values read (both from the stored finding), and, only for the
+    /// invoice the caller decided: the citation as the firm flag publishes it (exactly as an invoice item's, 130b fix round 2) and the firm
+    /// reason of the writer-created Signal that finding raised (independent of the citation gate). Reads no live invoice line and runs no
+    /// extraction.
+    /// </summary>
+    private async Task<IReadOnlyList<FirmOutcomeItem>> BuildRejectionItemsAsync(
+        Guid submissionId, IReadOnlyList<FirmRejectionFindings.Finding> findings, bool invoiceDecided, CancellationToken ct)
+    {
+        var invoiceId = InvoiceSubmissionPersister.InvoiceIdFor(submissionId);
+        var rules = new Dictionary<Guid, RuleRead>();
+        var clauses = new Dictionary<Guid, FirmClauseText>();
+        var citable = new HashSet<Guid>();
+        var signals = new List<Entity>();
+        if (invoiceDecided)
+        {
+            // The clause reader and the Signals are keyed by the invoice, so they are asked only for an invoice the caller decided.
+            var versionIds = findings.Select(f => f.PolicyVersionId).Distinct().OrderBy(id => id).ToList();
+            rules = await ReadRulesAsync(versionIds, ct).ConfigureAwait(false);
+            foreach (var versionId in rules.Keys)
+            {
+                clauses[versionId] = await ReadClauseAsync(versionId, invoiceId, ct).ConfigureAwait(false);
+            }
+
+            citable = await CitableVersionsAsync(rules, clauses, invoiceId, ct).ConfigureAwait(false);
+            if (rules.Count > 0)
+            {
+                var writer = await _writerUserId(ct).ConfigureAwait(false);
+                signals = await ReadRejectionSignalsAsync(invoiceId, rules.Keys.ToList(), writer, ct).ConfigureAwait(false);
+            }
+        }
+
+        var items = new List<FirmOutcomeItem>(findings.Count);
+        foreach (var finding in findings.OrderBy(f => f.LineIndex ?? int.MaxValue))
+        {
+            var version = finding.PolicyVersionId;
+            var lineId = finding.LineIndex is { } index ? InvoiceSubmissionPersister.LineIdFor(submissionId, index) : (Guid?)null;
+            var reason = signals
+                .Where(s => s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id == version
+                    && s.GetAttributeValue<EntityReference>("sprk_regardinginvoiceline")?.Id == lineId)
+                .OrderBy(s => s.GetAttributeValue<DateTime?>("createdon")).ThenBy(s => s.Id)
+                .Select(s => NullIfBlank(s.GetAttributeValue<string>("sprk_firmreason")))
+                .FirstOrDefault(r => r is not null);
+
+            items.Add(new FirmOutcomeItem(
+                FirmOutcomeDecision.RejectionFinding,
+                null,
+                null,
+                null,
+                null,
+                reason is null ? [] : [reason],
+                citable.Contains(version) ? [Cite(rules[version], clauses[version])] : [],
+                finding.LineIndex is { } zeroBased ? zeroBased + 1 : null,
+                finding.ValuesRead.Select(v => new FirmOutcomeValueRead(v.Name, v.Value)).ToList()));
+        }
+
+        return items;
+    }
+
+    /// <summary>The submission's stored findings text (app-only; the column is field-secured to the BFF identity). Null when absent.</summary>
+    private async Task<string?> ReadFindingsJsonAsync(Guid submissionId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
+        {
+            ColumnSet = new ColumnSet(InvoiceSubmissionPersister.SubmissionFindingsJson),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(FinanceBaseValues.SubmissionKeyColumn, ConditionOperator.Equal, submissionId);
+        var page = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return page.Entities.FirstOrDefault(r => r.Id == submissionId)?.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
+    }
+
+    /// <summary>
+    /// The Signals the BFF writer created for the decided invoice and these rule versions (<see cref="WriterCreatedRecord"/>: a Signal anyone
+    /// else created is never read; the writer id comes from the caller and a fault propagates, so an unknown writer is never "no Signal").
+    /// A Signal counts only when it names this invoice and one of the versions, whatever the query gave back.
+    /// </summary>
+    private async Task<List<Entity>> ReadRejectionSignalsAsync(Guid invoiceId, IReadOnlyList<Guid> versionIds, Guid writer, CancellationToken ct)
+    {
+        var found = new List<Entity>();
+        foreach (var chunk in versionIds.OrderBy(id => id).Chunk(ChunkSize))
+        {
+            var query = new QueryExpression(SignalEntity)
+            {
+                ColumnSet = new ColumnSet(RejectionSignalColumns),
+                Criteria = new FilterExpression(LogicalOperator.And),
+                PageInfo = new PagingInfo { PageNumber = 1, Count = PageSize },
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("sprk_regardinginvoice", ConditionOperator.Equal, invoiceId);
+            query.Criteria.AddCondition("sprk_policyversion", ConditionOperator.In, chunk.Cast<object>().ToArray());
+            WriterCreatedRecord.AddConditions(query.Criteria, writer);
+            query.AddOrder($"{SignalEntity}id", OrderType.Ascending);
+            found.AddRange(await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false));
+        }
+
+        return found
+            .Where(s => s.GetAttributeValue<EntityReference>("sprk_regardinginvoice")?.Id == invoiceId
+                && s.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id is { } version && versionIds.Contains(version))
+            .ToList();
     }
 
     // ── Helpers ──

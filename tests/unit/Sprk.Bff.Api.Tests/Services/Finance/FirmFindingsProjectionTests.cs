@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
@@ -6,9 +8,12 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Domain.Signals.Billing.Handlers;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
@@ -99,7 +104,7 @@ public sealed class FirmFindingsProjectionTests
                         "sprk_invoice" => Invoices,
                         "sprk_billingevent" => Lines.Where(r => SatisfiesNestedFilters(r, query.Criteria)).ToList(),
                         "sprk_decisionrecord" => Records.Where(r => SatisfiesWriterConditions(r, query.Criteria)).ToList(),
-                        "sprk_signal" => Signals,
+                        "sprk_signal" => Signals.Where(r => SatisfiesWriterConditions(r, query.Criteria)).ToList(),
                         "sprk_policyversion" => Versions,
                         "sprk_policy" => Policies,
                         "sprk_invoicesubmission" => Submissions,
@@ -125,7 +130,7 @@ public sealed class FirmFindingsProjectionTests
         /// <summary>When set, the writer id the projection is told (default <see cref="WriterId"/>); <see cref="Guid.Empty"/> is an unknown writer.</summary>
         public Guid? WriterIdAnswered;
 
-        public FirmFindingsProjection Projection() => new(
+        public FirmFindingsProjection Projection(Func<string?, ILogger, Guid, FirmRejectionFindings.ParseResult>? parse = null) => new(
             Entities.Object,
             (version, invoice, ct) =>
             {
@@ -138,7 +143,10 @@ public sealed class FirmFindingsProjectionTests
                 WriterCalls++;
                 return WriterFault is { } fault ? Task.FromException<Guid>(fault) : Task.FromResult(WriterIdAnswered ?? WriterId);
             },
-            Logger);
+            Logger)
+        {
+            ParseRejectionFindings = parse ?? FirmRejectionFindings.Parse,
+        };
 
         /// <summary>
         /// The store applies the query's writer rule (<see cref="WriterCreatedRecord"/>: <c>createdby</c> equal to the writer, <c>createdonbehalfby</c>
@@ -350,6 +358,44 @@ public sealed class FirmFindingsProjectionTests
             };
             Submissions.Add(submission);
             return submission;
+        }
+
+        /// <summary>A Rejected submission whose stored findings are <paramref name="findingsJson"/> (130c).</summary>
+        public Entity AddRejectedSubmission(string? findingsJson)
+        {
+            var submission = AddSubmission((int)InvoiceSubmissionStatus.Rejected);
+            if (findingsJson is not null)
+            {
+                submission["sprk_findingsjson"] = findingsJson;
+            }
+
+            return submission;
+        }
+
+        /// <summary>A Signal raised for a rejection finding (130c): on the derived invoice (and the finding's line), by the BFF writer unless told otherwise.</summary>
+        public Entity AddRejectionSignal(
+            Guid version, int? lineIndex, string? firmReason, Guid? createdBy = null, Guid? onBehalfOf = null, Guid? invoice = null)
+        {
+            var signal = new Entity("sprk_signal", Guid.NewGuid())
+            {
+                ["sprk_firmreason"] = firmReason,
+                ["createdon"] = new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc),
+                ["sprk_policyversion"] = new EntityReference("sprk_policyversion", version),
+                ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", invoice ?? InvoiceId),
+                ["createdby"] = new EntityReference("systemuser", createdBy ?? WriterId),
+            };
+            if (onBehalfOf is not null)
+            {
+                signal["createdonbehalfby"] = new EntityReference("systemuser", onBehalfOf.Value);
+            }
+
+            if (lineIndex is { } index)
+            {
+                signal["sprk_regardinginvoiceline"] = new EntityReference("sprk_billingevent", LineId(index + 1));
+            }
+
+            Signals.Add(signal);
+            return signal;
         }
 
         /// <summary>A Reduced line decided with a reason, its record and one Signal that record resolved.</summary>
@@ -1293,4 +1339,1075 @@ public sealed class FirmFindingsProjectionTests
         FirmFindingsProjection.Excerpt(null).Should().BeNull();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 130c (FR-18): a Rejected submission projects its findings from its OWN stored findings
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    private const string InternalClause = "INTERNAL stored clause quote";
+    private const string InternalSentence = "INTERNAL Signal plan sentence";
+
+    /// <summary>A real reject-capable reason code of the rule type (the catalogue's first, in ordinal order); a fixed one for a type that has none.</summary>
+    private static string RealReason(string ruleType) =>
+        Enum.TryParse<RuleType>(ruleType, out var type) && Enum.IsDefined(type) && RuleDomains.IsBilling(type)
+            && BillingRuleCatalogue.RejectCapableReasons(type).OrderBy(c => c, StringComparer.Ordinal).FirstOrDefault() is { } reason
+            ? reason
+            : BillingReasonCodes.RateAboveApproved;
+
+    /// <summary>The writer records a reference value (read from the system's own tables) with no field; an extracted value has one.</summary>
+    private static bool IsReferenceName(string name) =>
+        name.StartsWith("approvedRate", StringComparison.Ordinal) || name.StartsWith("rateCard", StringComparison.Ordinal)
+        || name.StartsWith("duplicateOf", StringComparison.Ordinal);
+
+    /// <summary>One stored <c>findings[]</c> entry, in the shape <c>InvoiceSubmissionPersister.FindingEntryJson</c> writes.</summary>
+    private static JsonObject Stored(
+        string ruleType, Guid version, int? line, bool rejects = true, bool withheld = false, string? reason = null,
+        params (string Name, string? Value)[] values) => new()
+    {
+        ["index"] = 0,
+        ["ruleType"] = ruleType,
+        ["policyId"] = PolicyA.ToString("D"),
+        ["policyCode"] = "BILL-INTERNAL-CODE",
+        ["policyVersionId"] = version.ToString("D"),
+        ["clause"] = InternalClause,
+        ["clauseLocation"] = "INTERNAL location",
+        ["subject"] = line is null ? "Invoice" : "Line",
+        ["line"] = line,
+        ["reasonCode"] = reason ?? RealReason(ruleType),
+        ["detailWithheld"] = withheld,
+        ["consequence"] = rejects ? "Reject" : "Flag",
+        ["rejects"] = rejects,
+        ["heldBecause"] = null,
+        ["valuesRead"] = new JsonArray(values.Select(v => (JsonNode)new JsonObject
+        {
+            ["name"] = v.Name,
+            ["value"] = v.Value,
+            ["line"] = line,
+            ["field"] = IsReferenceName(v.Name) ? null : "Rate",
+            ["confidence"] = 0.42m,
+            ["belowReliabilityThreshold"] = false,
+        }).ToArray()),
+    };
+
+    private static string StoredDocument(string kind, params JsonNode?[] entries) => new JsonObject
+    {
+        ["schema"] = 1,
+        ["kind"] = kind,
+        ["reasonCode"] = BillingReasonCodes.RateAboveApproved,
+        ["findings"] = new JsonArray(entries),
+        ["signalPlan"] = new JsonArray(new JsonObject { ["sentence"] = InternalSentence }),
+    }.ToJsonString();
+
+    private static string RejectedDocument(params JsonNode?[] entries) => StoredDocument("AutoRejected", entries);
+
+    private static List<string> Warnings(World world) => world.Logger.Lines.Where(l => l.Level == LogLevel.Warning).Select(l => l.Message).ToList();
+
+    private static World TwoFindingsWorld()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("RequiredData", VersionB, null, values: ("invoice.firmInvoiceNumber", null)),
+            Stored("ApprovedRate", VersionA, 2, values: [("line.rate", "450.00"), ("line.hours", "2.5"), ("approvedRate", "400.00")])));
+        return world;
+    }
+
+    [Fact(DisplayName = "130c must-fire: a rejected submission with two stored findings projects both with line, values read, rule and clause (flag on)")]
+    public async Task Rejected_TwoStoredFindings_ProjectLineValuesReadRuleAndClause_WhenTheFlagIsOn()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().NotBeNull();
+        outcome!.Kind.Should().Be(FirmOutcomeKind.SubmissionRejected);
+        outcome.Degraded.Should().BeFalse();
+        outcome.StatusLabel.Should().Be("Rejected");
+        outcome.TrackingNumber.Should().Be("TRK-1");
+        outcome.BilledTotal.Should().BeNull();
+        outcome.Items.Should().HaveCount(2);
+
+        var line = outcome.Items[0]; // line findings first, the invoice-level finding last
+        line.Decision.Should().Be(FirmOutcomeDecision.RejectionFinding);
+        line.LineNumber.Should().Be(3, "the stored line index is zero-based; the firm's invoice numbers its lines from one");
+        line.LineId.Should().BeNull();
+        line.Line.Should().BeNull("a rejected submission's live lines are never read");
+        line.ValuesRead.Should().Equal(new FirmOutcomeValueRead("line.rate", "450.00"), new FirmOutcomeValueRead("line.hours", "2.5"));
+        line.Citations.Should().ContainSingle().Which.Should().BeEquivalentTo(new FirmOutcomeCitation("Travel time", FirmLabel, 3, ClauseSection, ClauseQuote));
+
+        var invoiceLevel = outcome.Items[1];
+        invoiceLevel.LineNumber.Should().BeNull();
+        invoiceLevel.ValuesRead.Should().Equal(
+            [new FirmOutcomeValueRead("invoice.firmInvoiceNumber", "")], "a missing field is shown by its name, with an empty value");
+        invoiceLevel.Citations.Should().ContainSingle().Which.RuleName.Should().Be("Block billing");
+
+        world.Reads("sprk_billingevent").Should().Be(0, "a rejected submission's outcome never reads the live invoice lines");
+        world.Reads("sprk_invoice").Should().Be(0);
+        world.Reads("sprk_decisionrecord").Should().Be(0);
+        world.ClauseCalls.Should().BeEquivalentTo([VersionA, VersionB]);
+    }
+
+    [Fact(DisplayName = "130c: only the stored values and rule fields are projected; the stored clause, sentence, policy code and confidence never are")]
+    public async Task Rejected_NothingInternalInTheStoredFindingsIsProjected()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+
+        var json = JsonSerializer.Serialize(await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None));
+
+        json.Should().Contain(ClauseQuote).And.Contain("Your rate is above the agreed rate.");
+        json.Should().NotContain(InternalClause).And.NotContain(InternalSentence).And.NotContain("INTERNAL location")
+            .And.NotContain("BILL-INTERNAL-CODE").And.NotContain("0.42").And.NotContain(BillingReasonCodes.RateAboveApproved).And.NotContain("400.00").And.NotContain("Internal rule set name")
+            .And.NotContain("Internal procedure name");
+        world.Queries.Where(q => q.EntityName == "sprk_invoicesubmission").Should().OnlyContain(
+            q => q.ColumnSet.Columns.All(c => c == "sprk_processingstatus" || c == "sprk_trackingnumber" || c == "sprk_findingsjson"));
+    }
+
+    [Fact(DisplayName = "130c D-79: flag off gives no clause, section, label, version or rule name; the line, the values and the firm reason stay")]
+    public async Task Rejected_FlagOff_ShowsNoCitation_ButTheLineValuesAndTheFirmReason()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FirmClauseText.None;
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        outcome.Items.Should().OnlyContain(i => i.Citations.Count == 0);
+        outcome.Items[0].LineNumber.Should().Be(3);
+        outcome.Items[0].ValuesRead.Should().HaveCount(2);
+        outcome.Items[0].FirmReasons.Should().Equal("Your rate is above the agreed rate.");
+        outcome.Items[1].FirmReasons.Should().BeEmpty();
+        JsonSerializer.Serialize(outcome).Should().NotContain(ClauseQuote).And.NotContain(ClauseSection).And.NotContain(FirmLabel)
+            .And.NotContain("Travel time").And.NotContain("Block billing").And.NotContain("Internal rule set name");
+    }
+
+    [Fact(DisplayName = "130c: an InternalStandard Procedure's rule is never cited, whatever its flag; its firm reason still shows")]
+    public async Task Rejected_AnInternalStandardRule_IsNeverCited()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+        world.Procedures[0]["sprk_proceduretype"] = new OptionSetValue((int)ProcedureType.InternalStandard);
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        outcome.Items.Should().OnlyContain(i => i.Citations.Count == 0);
+        outcome.Items[0].FirmReasons.Should().ContainSingle();
+        JsonSerializer.Serialize(outcome).Should().NotContain(ClauseQuote).And.NotContain("Travel time").And.NotContain(FirmLabel);
+    }
+
+    [Fact(DisplayName = "130c: a clause-reader fault cites nothing and is not a fault of the outcome (still the findings, not Degraded)")]
+    public async Task Rejected_AClauseReaderFault_CitesNothing_AndStillProjects()
+    {
+        var world = TwoFindingsWorld();
+        world.ClauseFault = true;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Degraded.Should().BeFalse();
+        outcome.Items.Should().HaveCount(2);
+        outcome.Items.Should().OnlyContain(i => i.Citations.Count == 0);
+        outcome.Items[0].ValuesRead.Should().HaveCount(2);
+    }
+
+    [Fact(DisplayName = "130c: a clause the invoice's snapshot did not apply gives no text, so no citation (version-keyed, per finding)")]
+    public async Task Rejected_OnlyTheVersionTheClauseReaderPublishes_IsCited()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = v => v == VersionA ? FlagOnText : FirmClauseText.None;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].Citations.Should().ContainSingle();
+        outcome.Items[1].Citations.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130c: an invoice the caller did not decide is never asked about: findings keep their line and values, but no citation, no firm reason")]
+    public async Task Rejected_AnUndecidedInvoice_ShowsNoCitationAndNoReason_AndReadsNothingOfIt()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+        world.AddRejectionSignal(VersionA, 2, "Your rate is above the agreed rate.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        outcome.Items.Should().OnlyContain(i => i.Citations.Count == 0 && i.FirmReasons.Count == 0);
+        outcome.Items[0].ValuesRead.Should().HaveCount(2);
+        world.ClauseCalls.Should().BeEmpty();
+        world.WriterCalls.Should().Be(0);
+        foreach (var entity in new[] { "sprk_invoice", "sprk_billingevent", "sprk_signal", "sprk_policyversion", "sprk_policy", "sprk_ruleset", "sprk_procedure" })
+        {
+            world.Reads(entity).Should().Be(0, entity);
+        }
+    }
+
+    [Fact(DisplayName = "130c FR-24 (security-class, seeded): an unknown rule type is refused fail-closed, however the entry is shaped, and never shown raw")]
+    public async Task Rejected_AnUnknownRuleType_IsRefused_WithAWarningThatCarriesNoContent()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("SECRET-NEW-RULE-TYPE", VersionA, 1, values: ("secret.name", "SECRET-VALUE-1")),       // a name this build does not know
+            Stored("100000004", VersionA, 1, values: ("secret.name", "SECRET-VALUE-2")),                    // a number (ApprovedRate's), never accepted as a name
+            Stored("999999999", VersionA, 1, values: ("secret.name", "SECRET-VALUE-3")),                    // an undefined number
+            Stored("Threshold", VersionA, 1, values: ("secret.name", "SECRET-VALUE-4")),                    // a known type of another domain
+            Stored("SubmissionIntegrity", VersionA, 1, values: ("secret.name", "SECRET-VALUE-5")),          // the system marker: no rule body, no clause
+            Stored("SECRET-NEW-NONREJECT", VersionA, 1, rejects: false, values: ("secret.name", "SECRET-VALUE-6")), // unknown even when it does not reject
+            Stored("ApprovedTimekeeper, ApprovedRate", VersionA, 1, values: ("secret.name", "SECRET-VALUE-7")),  // a joined list whose OR is another defined member
+            Stored("ApprovedRate", VersionA, 4, values: ("line.rate", "450.00"))));                          // the one known finding
+        world.Clause = _ => FlagOnText;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle("only the finding of a known Billing rule type is shown").Which.LineNumber.Should().Be(5);
+        JsonSerializer.Serialize(outcome).Should().NotContain("SECRET");
+        var warning = Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Subject;
+        warning.Should().Contain("7 stored finding(s)").And.Contain("7 of an unknown rule type").And.Contain("0 malformed");
+        outcome.NotShownCount.Should().Be(6, "six of the seven refused entries claim to reject");
+        Warnings(world).Concat(world.Logger.Lines.Select(l => l.Message)).Should().NotContain(m => m.Contains("SECRET") || m.Contains("450.00"));
+    }
+
+    [Fact(DisplayName = "130c: a malformed or unknown-shaped entry is dropped (fail closed) with a Warning that carries a stable code and counts only")]
+    public async Task Rejected_AMalformedEntry_IsDropped_WithAWarningThatCarriesNoContent()
+    {
+        var world = new World();
+        var noVersion = Stored("ApprovedRate", VersionA, 1, values: ("secret.name", "SECRET-VALUE-A"));
+        noVersion.Remove("policyVersionId");
+        var badLine = Stored("ApprovedRate", VersionA, 1, values: ("secret.name", "SECRET-VALUE-B"));
+        badLine["line"] = "one";
+        var lineSubjectNoLine = Stored("ApprovedRate", VersionA, null, values: ("secret.name", "SECRET-VALUE-C"));
+        lineSubjectNoLine["subject"] = "Line";
+        var invoiceSubjectWithLine = Stored("ApprovedRate", VersionA, 2, values: ("secret.name", "SECRET-VALUE-D"));
+        invoiceSubjectWithLine["subject"] = "Invoice";
+        var badValues = Stored("ApprovedRate", VersionA, 1);
+        badValues["valuesRead"] = "SECRET-VALUE-E";
+        var numericValue = Stored("ApprovedRate", VersionA, 1);
+        numericValue["valuesRead"] = new JsonArray(new JsonObject { ["name"] = "secret.name", ["value"] = 999999 });
+        var emptyVersion = Stored("ApprovedRate", Guid.Empty, 1, values: ("secret.name", "SECRET-VALUE-F"));
+        var rejectsNotBool = Stored("ApprovedRate", VersionA, 1, values: ("secret.name", "SECRET-VALUE-G"));
+        rejectsNotBool["rejects"] = "yes";
+        var aiRejects = Stored("AiObservation", VersionA, 1, values: ("secret.name", "SECRET-VALUE-H")); // an AI observation never rejects (I-5)
+        var noReason = Stored("ApprovedRate", VersionA, 1, values: ("secret.name", "SECRET-VALUE-I"));
+        noReason.Remove("reasonCode");
+        world.AddRejectedSubmission(RejectedDocument(
+            noVersion, badLine, lineSubjectNoLine, invoiceSubjectWithLine, badValues, numericValue, emptyVersion, rejectsNotBool, aiRejects, noReason,
+            JsonValue.Create("SECRET-VALUE-J"), JsonValue.Create(7), null, new JsonArray(),
+            Stored("ApprovedRate", VersionA, 0, values: ("line.rate", "450.00"))));
+        world.Clause = _ => FlagOnText;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.LineNumber.Should().Be(1);
+        outcome.Degraded.Should().BeFalse();
+        JsonSerializer.Serialize(outcome).Should().NotContain("SECRET");
+        var warning = Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Subject;
+        warning.Should().Contain("14 stored finding(s)").And.Contain("14 malformed").And.Contain("0 of an unknown rule type");
+        outcome.NotShownCount.Should().Be(9, "nine of the fourteen claim to reject; the 'yes' flag and the four non-objects do not");
+        world.Logger.Lines.Select(l => l.Message).Should().NotContain(m => m.Contains("SECRET") || m.Contains("450.00"));
+    }
+
+    [Theory(DisplayName = "130c: a stored document that cannot be read gives the status only (not a fault), with a stable-coded Warning and no content")]
+    [InlineData("{ \"kind\": \"AutoRejected\", \"findings\": [ SECRET-BROKEN")]
+    [InlineData("[ \"SECRET-NOT-AN-OBJECT\" ]")]
+    [InlineData("{ \"kind\": \"AutoRejected\", \"findings\": \"SECRET-NOT-AN-ARRAY\" }")]
+    public async Task Rejected_AnUnreadableStoredDocument_IsStatusOnly_WithAStableCodedWarning(string stored)
+    {
+        var world = new World();
+        world.AddRejectedSubmission(stored);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
+        world.Logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains(FirmRejectionFindings.UnreadableCode));
+        world.Logger.Lines.Select(l => l.Message).Should().NotContain(m => m.Contains("SECRET"));
+    }
+
+    [Theory(DisplayName = "130c: no stored findings, an empty list, or a column that was never written is the status only")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("{ \"kind\": \"AutoRejected\", \"findings\": [] }")]
+    public async Task Rejected_WithNoStoredFindings_IsStatusOnly(string? stored)
+    {
+        var world = new World();
+        world.AddRejectedSubmission(stored);
+
+        (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))
+            .Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
+        Warnings(world).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130c FR-38: a Blocked submission (an internal hold, Rejected in status) and non-rejecting findings project no finding")]
+    public async Task Rejected_ABlockedHold_AndFindingsThatDidNotReject_AreNeverProjected()
+    {
+        var blocked = new World();
+        blocked.AddRejectedSubmission(StoredDocument("Blocked", Stored("ApprovedRate", VersionA, 1, values: ("line.rate", "450.00"))));
+        (await blocked.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!.Items.Should().BeEmpty();
+        blocked.Reads("sprk_policyversion").Should().Be(0);
+
+        var accepted = new World();
+        accepted.AddRejectedSubmission(StoredDocument("Accepted", Stored("ApprovedRate", VersionA, 1, values: ("line.rate", "450.00"))));
+        (await accepted.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!.Items.Should().BeEmpty();
+
+        var flagged = new World();
+        flagged.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 1, rejects: false, values: ("line.rate", "450.00")),
+            Stored("ExpenseRule", VersionA, 2, values: ("expense", "12.00"))));
+        var outcome = await flagged.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+        outcome!.Items.Should().ContainSingle().Which.LineNumber.Should().Be(3);
+        Warnings(flagged).Should().BeEmpty("a finding that did not reject is not a defect");
+    }
+
+    [Fact(DisplayName = "130c D-112/D-176: a Duplicate finding and a withheld detail project no values read")]
+    public async Task Rejected_ADuplicateAndAWithheldDetail_ProjectNoValues()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("Duplicate", VersionA, null, values: ("duplicateOf.trackingNumber", "TRK-EARLIER")),
+            Stored("ApprovedRate", VersionB, 1, withheld: true, values: ("line.rate", "450.00")),
+            Stored("ExpenseRule", VersionB, 2, values: ("expense", "12.00"))));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(3);
+        outcome.Items[0].ValuesRead.Should().BeEmpty(); // line 1, withheld
+        outcome.Items[1].ValuesRead.Should().ContainSingle().Which.Should().BeEquivalentTo(new FirmOutcomeValueRead("expense", "12.00"));
+        outcome.Items[2].ValuesRead.Should().BeEmpty(); // the Duplicate (invoice level, last)
+        JsonSerializer.Serialize(outcome).Should().NotContain("TRK-EARLIER").And.NotContain("450.00");
+    }
+
+    [Fact(DisplayName = "130c: values read are bounded in count and length")]
+    public async Task Rejected_ValuesRead_AreBounded()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0, values: Enumerable.Range(0, 30).Select(i => ($"value.{i}", (string?)new string('x', 500))).ToArray())));
+
+        var item = (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None))!.Items.Single();
+
+        item.ValuesRead.Should().HaveCount(FirmRejectionFindings.MaxValuesPerFinding);
+        item.ValuesRead!.Should().OnlyContain(v => v.Value.Length <= FirmRejectionFindings.MaxValueTextLength + 3);
+    }
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    [Fact(DisplayName = "130c fix 2 (F1, must-fire): 250 rejecting findings show 200 and the outcome says 50 are not shown (in the body and the Warning)")]
+    public async Task Rejected_FindingsOverTheCap_AreShownUpToTheCap_AndTheOutcomeCountsTheRest()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Enumerable.Range(0, 250).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)).ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        FirmRejectionFindings.MaxFindings.Should().Be(200);
+        outcome!.Items.Should().HaveCount(200);
+        outcome.NotShownCount.Should().Be(50);
+        outcome.Degraded.Should().BeFalse();
+        outcome.Items.Select(i => i.LineNumber).Should().Equal(Enumerable.Range(1, 200).Select(i => (int?)i), "the first 200 in stored order");
+        JsonSerializer.Serialize(outcome, WebJson).Should().Contain("\"notShownCount\":50");
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode) && m.Contains("50 over the cap"));
+    }
+
+    [Theory(DisplayName = "130c fix 2 (F1, must-not-fire): at or under the cap the member is absent from the outcome and from the JSON")]
+    [InlineData(1)]
+    [InlineData(199)]
+    [InlineData(200)]
+    public async Task Rejected_FindingsAtOrUnderTheCap_HaveNoNotShownCount(int count)
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Enumerable.Range(0, count).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)).ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(count);
+        outcome.NotShownCount.Should().BeNull();
+        JsonSerializer.Serialize(outcome, WebJson).Should().NotContainEquivalentOf("notShownCount");
+        Warnings(world).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130c fix 2 (F1): past the cap, only valid rejecting findings are counted; an entry that does not claim to reject adds nothing")]
+    public async Task Rejected_TheNotShownCount_CountsOnlyValidRejectingFindingsPastTheCap()
+    {
+        var world = new World();
+        var entries = Enumerable.Range(0, 200).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)).ToList();
+        entries.Add(JsonValue.Create("not an entry"));                                   // malformed
+        entries.Add(Stored("ApprovedRate", VersionA, 300, rejects: false));              // not a rejection
+        entries.AddRange(Enumerable.Range(400, 3).Select(i => (JsonNode?)Stored("ApprovedRate", VersionA, i)));
+        world.AddRejectedSubmission(RejectedDocument(entries.ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(200);
+        outcome.NotShownCount.Should().Be(3);
+    }
+
+    [Fact(DisplayName = "130c fix 2 (F1): every other outcome omits the member (existing shapes serialize as before)")]
+    public async Task OtherOutcomes_OmitTheNotShownCount()
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+
+        var json = JsonSerializer.Serialize(await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None), WebJson);
+
+        json.Should().NotContainEquivalentOf("notShownCount");
+    }
+
+    [Fact(DisplayName = "130c EB-D-208: a firm reason comes only from a Signal the BFF writer created, for this invoice, rule version and line")]
+    public async Task Rejected_TheFirmReason_ComesOnlyFromAWriterCreatedSignalOfThisFinding()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+        var user = Guid.Parse("20000000-0000-4000-8000-0000000000c9");
+        world.AddRejectionSignal(VersionA, 2, "A USER's reason.", createdBy: user);
+        world.AddRejectionSignal(VersionA, 2, "ON BEHALF reason.", onBehalfOf: user);
+        world.AddRejectionSignal(VersionA, 2, "ANOTHER INVOICE reason.", invoice: OtherInvoiceId);
+        world.AddRejectionSignal(VersionA, 3, "ANOTHER LINE reason.");
+        world.AddRejectionSignal(VersionA, null, "INVOICE-LEVEL signal on a line finding.");
+        world.AddRejectionSignal(VersionB, 2, "ANOTHER RULE reason.");
+        world.AddRejectionSignal(VersionA, 2, "   ");
+        world.AddRejectionSignal(VersionA, 2, "The writer's reason.");
+        world.AddRejectionSignal(VersionB, null, "The invoice-level reason.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items[0].FirmReasons.Should().Equal("The writer's reason.");
+        outcome.Items[1].FirmReasons.Should().Equal("The invoice-level reason.");
+        JsonSerializer.Serialize(outcome).Should().NotContainAny("A USER", "ON BEHALF", "ANOTHER", "INVOICE-LEVEL signal");
+    }
+
+    [Theory(DisplayName = "130c: a writer id that cannot be obtained (a fault, or an empty id) gives the status only, Degraded; no Signal is read")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Rejected_AWriterIdThatCannotBeObtained_IsDegraded(bool fault)
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+        world.AddRejectionSignal(VersionA, 2, "The writer's reason.");
+        if (fault)
+        {
+            world.WriterFault = new InvalidOperationException("writer connection down");
+        }
+        else
+        {
+            world.WriterIdAnswered = Guid.Empty;
+        }
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], true));
+        world.Reads("sprk_signal").Should().Be(0);
+    }
+
+    [Theory(DisplayName = "130c: a fault reading the rules or the Signals after the findings gives the status only, Degraded")]
+    [InlineData("sprk_policyversion")]
+    [InlineData("sprk_policy")]
+    [InlineData("sprk_signal")]
+    public async Task Rejected_AFaultAfterTheFindings_IsDegraded_NeverPartial(string faulting)
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+        world.FaultingEntities.Add(faulting);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], true));
+    }
+
+    [Fact(DisplayName = "130c: the rejection projection carries no id, no document link and no Procedure or rule-set member")]
+    public async Task Rejected_TheProjection_CarriesNoIds_AndNoLink()
+    {
+        var world = TwoFindingsWorld();
+        world.Clause = _ => FlagOnText;
+        world.AddRejectionSignal(VersionA, 2, "The writer's reason.");
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        var json = JsonSerializer.Serialize(outcome);
+        Regex.IsMatch(json, "[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}").Should().BeFalse("no policy, version, rule set, Procedure, line or invoice id");
+        foreach (var id in new[] { PolicyA, PolicyB, VersionA, VersionB, RuleSetA, ProcedureA, InvoiceId, SubmissionId, LineId(3) })
+        {
+            json.Should().NotContain(id.ToString("D")).And.NotContain(id.ToString("N"));
+        }
+
+        var names = new List<string>();
+        CollectNames(JsonDocument.Parse(json).RootElement, names);
+        names.Should().Contain(["LineNumber", "ValuesRead", "Citations", "FirmReasons"]);
+        names.Should().NotContain(n => new[] { "document", "container", "drive", "link", "url", "uri", "procedure", "ruleset" }
+            .Any(bad => n.Contains(bad, StringComparison.OrdinalIgnoreCase)));
+        json.Should().NotContainAny("http:", "https:", "/drives/", "sharepoint");
+
+        // Every declared member of the new shapes too.
+        var declared = new[] { typeof(FirmOutcomeItem), typeof(FirmOutcomeValueRead) }.SelectMany(t => t.GetProperties()).Select(p => p.Name).ToList();
+        declared.Should().NotContain(n => n.Contains("Document", StringComparison.Ordinal) || n.Contains("Link", StringComparison.Ordinal)
+            || n.Contains("Url", StringComparison.Ordinal) || n.Contains("Procedure", StringComparison.Ordinal) || n.Contains("RuleSet", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "130c: the two new item members are omitted from an invoice item's JSON (the existing contract is unchanged)")]
+    public async Task AnInvoiceItem_OmitsTheRejectionOnlyMembers()
+    {
+        var world = new World();
+        world.AddReducedWithCitation(1, "Reason.", VersionA, "Firm reason.");
+
+        var json = JsonSerializer.Serialize((await world.Projection().GetForInvoiceAsync(InvoiceId, CancellationToken.None))!.Items.Single());
+
+        json.Should().NotContain("lineNumber").And.NotContain("valuesRead").And.NotContain("LineNumber").And.NotContain("ValuesRead");
+    }
+
+    [Fact(DisplayName = "130c: a rejected submission's outcome is built from stored findings alone (no live line, no invoice, no Decision Record read)")]
+    public async Task Rejected_ReadsOnlyTheStoredFindings_NeverTheLiveInvoice()
+    {
+        var world = TwoFindingsWorld();
+        world.AddLine(3, InvoiceLineStatus.Reduced, 100m, 60m); // a live line the stored findings must not be replaced by
+        world.Clause = _ => FlagOnText;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        outcome.Items.Should().OnlyContain(i => i.Line == null && i.LineId == null && i.Decision == FirmOutcomeDecision.RejectionFinding);
+        world.Reads("sprk_billingevent").Should().Be(0);
+        world.Reads("sprk_invoice").Should().Be(0);
+        world.Reads("sprk_decisionrecord").Should().Be(0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 130c fix round 1
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The stored entry the persister's OWN builder writes for a real handler finding that rejected the submission (no copy of its logic).</summary>
+    private static JsonObject RealEntry(BillingFinding finding, int index)
+    {
+        var decision = new FindingDecision
+        {
+            Index = index,
+            Finding = finding,
+            Consequence = BillingConsequence.Reject,
+            Rejects = true,
+            ValuesRead = finding.ValuesRead,
+        };
+        var entry = InvoiceSubmissionPersister.FindingEntryJson(index, finding, decision, scrub: false);
+        entry["policyVersionId"] = VersionA.ToString("D"); // the fixture's rule version (the handler kit's own id is not a fixture row)
+        return entry;
+    }
+
+    [Fact(DisplayName = "130c fix 1 (F3, F1-a): a real ApprovedRate finding, stored by the persister's own builder, projects only values extracted from the invoice: no identifier, no rate-card or approved-rate reference value")]
+    public async Task Rejected_ARealApprovedRateFinding_ProjectsOnlyTheValuesExtractedFromTheInvoice()
+    {
+        var finding = BillingHandlerKit.Run(
+                BillingHandlerKit.Rule("""{"type":"ApprovedRate","tolerancePercent":0}"""),
+                BillingHandlerKit.Facts(BillingHandlerKit.Fee(2) with { BilledRate = 650m, ApprovedRate = BillingHandlerKit.Rate(575m) }))
+            .Should().ContainSingle().Subject;
+        finding.ReasonCode.Should().Be(BillingReasonCodes.RateAboveApproved);
+        // Generic precondition (it does not name the handler's reference values, which later tasks may rename): the finding reads values that
+        // have no extracted field, and at least one of them is an identifier.
+        var referenceNames = finding.ValuesRead.Where(v => !v.ExtractedField.HasValue).Select(v => v.Name).ToList();
+        referenceNames.Should().NotBeEmpty("the fixture must carry the reference values the writer stores, or this test proves nothing");
+        finding.ValuesRead.Any(v => !v.ExtractedField.HasValue && Guid.TryParse(v.Value, out _))
+            .Should().BeTrue("a stored reference value is an identifier");
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(RealEntry(finding, 0)));
+        world.Clause = _ => FlagOnText;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        var item = outcome!.Items.Should().ContainSingle().Subject;
+        item.LineNumber.Should().Be(3);
+        item.ValuesRead.Should().Contain(new FirmOutcomeValueRead("line.rate", "650.00"), "the rate extracted from the firm's own invoice is shown");
+        item.ValuesRead!.Count(v => Guid.TryParse(v.Value, out _)).Should().Be(0, "no value is an identifier");
+        item.ValuesRead!.Select(v => v.Name).Should().NotContain(referenceNames, "no value the handler read without an extracted field is projected");
+        item.ValuesRead!.Select(v => v.Name).Should().OnlyContain(n => finding.ValuesRead.Any(v => v.Name == n && v.ExtractedField.HasValue));
+        var json = JsonSerializer.Serialize(outcome);
+        json.Should().NotContain("07100000-0000-4000-8000-0000000000c1").And.NotContain("07100000-0000-4000-8000-0000000000c2");
+        Regex.IsMatch(json, "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}").Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "130c fix 1 (F1-a): a stored value with no field, or whose text is an identifier, is never projected; a value with a field is")]
+    public async Task Rejected_AValueWithNoField_OrAnIdentifierText_IsDropped()
+    {
+        var entry = Stored("ApprovedRate", VersionA, 0, values: [("line.rate", "450.00"), ("reference.value", "REF-1"), ("line.timekeeperName", "11111111-2222-4333-8444-555555555555")]);
+        var values = (JsonArray)entry["valuesRead"]!;
+        ((JsonObject)values[1]!)["field"] = null;                       // read from the system's own tables
+        var emptyField = new JsonObject { ["name"] = "empty.field", ["value"] = "X-1", ["field"] = "  " };
+        values.Add(emptyField);
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entry));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Single().ValuesRead.Should().Equal(new FirmOutcomeValueRead("line.rate", "450.00"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("REF-1").And.NotContain("X-1").And.NotContain("11111111-2222");
+    }
+
+    [Fact(DisplayName = "130c fix 1 (F1-b): two real RequiredData missing-field findings project two items, each naming its own missing field with an empty value")]
+    public async Task Rejected_TwoRealRequiredDataFindings_EachNameTheirOwnMissingField()
+    {
+        var facts = BillingHandlerKit.Facts(BillingHandlerKit.Fee(0)) with
+        {
+            Invoice = BillingHandlerKit.Invoice() with { FirmInvoiceNumber = null, InvoiceDate = null },
+        };
+        var findings = BillingHandlerKit.Run(BillingHandlerKit.Rule("""{"type":"RequiredData","fields":["firmInvoiceNumber","invoiceDate"]}"""), facts);
+        findings.Should().HaveCount(2);
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(findings.Select((f, i) => (JsonNode?)RealEntry(f, i)).ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        outcome.Items.Select(i => i.ValuesRead!.Single()).Should().BeEquivalentTo(
+            [new FirmOutcomeValueRead("invoice.firmInvoiceNumber", ""), new FirmOutcomeValueRead("invoice.invoiceDate", "")]);
+    }
+
+    [Fact(DisplayName = "130c fix 1 (F1-b): a Duplicate or withheld finding still projects no value, empty or not")]
+    public async Task Rejected_ADuplicateOrWithheldFinding_ProjectsNoEmptyValueEither()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("Duplicate", VersionA, null, values: ("invoice.firmInvoiceNumber", null)),
+            Stored("RequiredData", VersionB, 1, withheld: true, values: ("line.narrative", null))));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().HaveCount(2);
+        outcome.Items.Should().OnlyContain(i => i.ValuesRead!.Count == 0);
+    }
+
+    [Fact(DisplayName = "130c fix 1 (K1): a fault of the parser itself gives the status only with the stable UNREADABLE code, never an exception")]
+    public async Task Rejected_AParserFault_IsStatusOnly_WithTheUnreadableCode()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(Stored("ApprovedRate", VersionA, 0, values: ("line.rate", "450.00"))));
+
+        var outcome = await world.Projection((_, _, _) => throw new InvalidOperationException("SECRET parser fault"))
+            .GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
+        world.Logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains(FirmRejectionFindings.UnreadableCode));
+        world.Logger.Lines.Where(l => l.Level == LogLevel.Warning).Select(l => l.Message).Should().NotContain(m => m.Contains("SECRET"));
+    }
+
+    [Fact(DisplayName = "130c fix 1 (K1): the caller's own cancellation during the parse is not swallowed")]
+    public async Task Rejected_ACancellationDuringTheParse_Propagates()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(Stored("ApprovedRate", VersionA, 0, values: ("line.rate", "450.00"))));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = () => world.Projection((_, _, _) => throw new OperationCanceledException(cts.Token))
+            .GetForSubmissionAsync(SubmissionId, invoiceDecided: true, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact(DisplayName = "130c fix 1 (K2): a hold-only type, or a reason the type cannot reject on, is a damaged entry and is dropped; a real reject-capable reason is kept")]
+    public async Task Rejected_OnlyARejectCapableReasonOfARejectingType_IsKept()
+    {
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedTimekeeper", VersionA, 1, reason: "approved_timekeeper.not_approved", values: ("line.timekeeperName", "Jane")), // hold-only
+            Stored("ApprovedRate", VersionA, 2, reason: BillingReasonCodes.RateNoRateInForce, values: ("line.rate", "450.00")),              // not reject-capable
+            Stored("ApprovedRate", VersionA, 3, reason: "rate.over", values: ("line.rate", "450.00")),                                      // not a reason at all
+            Stored("ApprovedRate", VersionA, 4, reason: BillingReasonCodes.RateAboveApproved, values: ("line.rate", "450.00"))));            // real
+        world.Clause = _ => FlagOnText;
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.LineNumber.Should().Be(5);
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Which.Should().Contain("3 malformed");
+    }
+
+    [Fact(DisplayName = "130c fix 1 (K3): a value name over the cap is dropped; one at the cap is kept")]
+    public async Task Rejected_AValueNameOverTheCap_IsDropped()
+    {
+        var atCap = new string('n', FirmRejectionFindings.MaxValueNameLength);
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0, values: [(atCap, "1"), (atCap + "x", "2")])));
+
+        var item = (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None))!.Items.Single();
+
+        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead(atCap, "1"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 130c fix round 2
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "130c fix 2 (K1, must-fire): a value whose field the AI assigned is never projected; a firm-billed code and a plain extracted field are")]
+    public async Task Rejected_AnAiAssignedValue_IsNeverProjected()
+    {
+        var entry = Stored("ApprovedRate", VersionA, 0, values:
+        [
+            ("line.rate", "450.00"),
+            ("line.taskCode", "AI-TASK"),
+            ("line.activityCode", "AI-ACTIVITY"),
+            ("line.expenseCode", "AI-EXPENSE"),
+            ("observation.blockBilling", "AI-OBSERVATION"),
+            ("observation.padded", "AI-PADDED"),
+            ("line.billedTaskCode", "L110"),
+        ]);
+        var fields = new[]
+        {
+            BillingFieldNames.Rate, BillingFieldNames.TaskCode, BillingFieldNames.ActivityCode, BillingFieldNames.ExpenseCode,
+            BillingFieldNames.ObservationBlockBilling, " " + BillingFieldNames.ObservationVagueDescription + " ", BillingFieldNames.BilledTaskCode,
+        };
+        var values = (JsonArray)entry["valuesRead"]!;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            ((JsonObject)values[i]!)["field"] = fields[i];
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entry));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Single().ValuesRead.Should().Equal(
+            new FirmOutcomeValueRead("line.rate", "450.00"), new FirmOutcomeValueRead("line.billedTaskCode", "L110"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("AI-");
+    }
+
+    // ── K5: reachability through the real decision (SubmissionRejectionRule.Decide) ──
+
+    private static readonly EbillingSettings DecisionSettings = new() { ReliabilityThreshold = 0.90m, ReferenceMissingCap = 0.80m, ArithmeticFailCap = 0.50m };
+
+    private static JsonObject DecidedEntry(FindingDecision decided)
+    {
+        var entry = InvoiceSubmissionPersister.FindingEntryJson(decided.Index, decided.Finding, decided, scrub: false);
+        entry["policyVersionId"] = VersionA.ToString("D");
+        return entry;
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K5): an ApprovedRate finding carrying the credit-test placeholders is held by the real decision, never rejected, so it is not projected")]
+    public async Task Rejected_AnApprovedRateFindingWithCreditTestPlaceholders_IsHeldByTheDecision_AndNeverProjected()
+    {
+        // A fee line with neither hours nor amount: the credit test has nothing to judge, so the finding lists both as unknown reads.
+        var line = BillingHandlerKit.Fee(2) with { BilledRate = 650m, ApprovedRate = BillingHandlerKit.Rate(575m), Hours = null, Amount = null };
+        var finding = BillingHandlerKit.Run(
+                BillingHandlerKit.Rule("""{"type":"ApprovedRate","tolerancePercent":0}"""), BillingHandlerKit.Facts(line))
+            .Should().ContainSingle().Subject;
+        finding.ReasonCode.Should().Be(BillingReasonCodes.RateAboveApproved);
+        var placeholders = finding.ValuesRead.Where(v => v.ExtractedField.HasValue && v.Confidence is null && v.Value is null).ToList();
+        placeholders.Should().HaveCount(2, "the credit test lists hours and amount as null-valued reads with unknown confidence");
+
+        var decision = SubmissionRejectionRule.Decide([finding], _ => (int)BillingConsequence.Reject, DecisionSettings);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Accepted);
+        var held = decision.Findings.Should().ContainSingle().Subject;
+        held.Rejects.Should().BeFalse();
+        held.HeldBecause.Should().Be(SubmissionHoldReasons.ReadFieldConfidenceUnknown);
+
+        // Stored as the persister stores it, beside a finding that did reject: only the rejecting one is projected.
+        var rejecting = BillingHandlerKit.Run(
+            BillingHandlerKit.Rule("""{"type":"RequiredData","fields":["firmInvoiceNumber"]}"""),
+            BillingHandlerKit.Facts(BillingHandlerKit.Fee(0)) with { Invoice = BillingHandlerKit.Invoice() with { FirmInvoiceNumber = null } });
+        var rejectingDecision = SubmissionRejectionRule.Decide(rejecting, _ => (int)BillingConsequence.Reject, DecisionSettings);
+        rejectingDecision.Findings.Should().ContainSingle().Which.Rejects.Should().BeTrue();
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(DecidedEntry(decision.Findings[0]), DecidedEntry(rejectingDecision.Findings[0] with { Index = 1 })));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var shown = outcome!.Items.Should().ContainSingle("the held ApprovedRate finding is a Flag, not a rejection").Subject;
+        shown.ValuesRead.Should().ContainSingle().Which.Name.Should().Be("invoice.firmInvoiceNumber");
+        shown.LineNumber.Should().BeNull("the one shown finding is the RequiredData rejection, which is about the invoice, not a line");
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K5): a RequiredData missing-field finding with a known confidence rejects through the real decision, and projects the empty value")]
+    public async Task Rejected_ARequiredDataMissingFieldWithKnownConfidence_RejectsThroughTheDecision_AndProjectsTheEmptyValue()
+    {
+        var facts = BillingHandlerKit.Facts(BillingHandlerKit.Fee(0)) with
+        {
+            Invoice = BillingHandlerKit.Invoice() with { FirmInvoiceNumber = null },
+        };
+        var findings = BillingHandlerKit.Run(BillingHandlerKit.Rule("""{"type":"RequiredData","fields":["firmInvoiceNumber"]}"""), facts);
+        var finding = findings.Should().ContainSingle().Subject;
+        finding.ValuesRead.Should().ContainSingle(v => v.ExtractedField.HasValue && v.Value == null && v.Confidence >= 0.90m,
+            "the missing field is an extracted read with no text and a known confidence");
+
+        var decision = SubmissionRejectionRule.Decide(findings, _ => (int)BillingConsequence.Reject, DecisionSettings);
+
+        decision.Outcome.Should().Be(SubmissionOutcome.Rejected);
+        var decided = decision.DecidingFindings.Should().ContainSingle().Subject;
+        decided.HeldBecause.Should().BeNull();
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(DecidedEntry(decided)));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.ValuesRead.Should().Equal(new FirmOutcomeValueRead("invoice.firmInvoiceNumber", ""));
+    }
+
+    // ── K6: robustness ──
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-fire): a 201-character value ending in an emoji is cut without splitting the surrogate pair")]
+    public async Task Rejected_AValueEndingInAnEmoji_IsTruncatedWithoutSplittingThePair()
+    {
+        const string emoji = "\U0001F600";
+        var tooLong = new string('x', FirmRejectionFindings.MaxValueTextLength - 1) + emoji; // 199 + 2 = 201 characters; the cut would fall inside the pair
+        tooLong.Length.Should().Be(201);
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(Stored("ApprovedRate", VersionA, 0, values: ("line.narrative", tooLong))));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var value = outcome!.Items.Single().ValuesRead!.Single().Value;
+        value.Should().Be(new string('x', FirmRejectionFindings.MaxValueTextLength - 1) + "...");
+        value.Any(char.IsSurrogate).Should().BeFalse("no half of a pair is left");
+        var strict = new System.Text.UTF8Encoding(false, throwOnInvalidBytes: true);
+        var act = () => strict.GetBytes(JsonSerializer.Serialize(outcome));
+        act.Should().NotThrow("the outcome serializes to valid text");
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-not-fire): a whole emoji inside the cut is kept; a value at the cap is not touched")]
+    public async Task Rejected_AnEmojiInsideTheCut_IsKept()
+    {
+        const string emoji = "\U0001F600";
+        var inside = new string('x', FirmRejectionFindings.MaxValueTextLength - 2) + emoji + "y";   // 198 + 2 + 1 = 201: the cut falls after the pair
+        var atCap = new string('z', FirmRejectionFindings.MaxValueTextLength - 2) + emoji;           // exactly 200
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(Stored("ApprovedRate", VersionA, 0, values: [("line.a", inside), ("line.b", atCap)])));
+
+        var values = (await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None))!
+            .Items.Single().ValuesRead!;
+
+        values[0].Value.Should().Be(new string('x', FirmRejectionFindings.MaxValueTextLength - 2) + emoji + "...");
+        values[1].Value.Should().Be(atCap);
+    }
+
+    private const string BadSurrogateMarker = "BADSURROGATEMARKER";
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-fire): one entry whose value cannot be decoded is dropped and counted on its own; the others are shown and the document stays readable")]
+    public async Task Rejected_OneEntryThatCannotBeDecoded_DropsOnlyThatEntry()
+    {
+        var document = RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0, values: ("line.rate", "450.00")),
+            Stored("ApprovedRate", VersionA, 1, values: ("line.rate", BadSurrogateMarker)),
+            Stored("ApprovedRate", VersionA, 2, values: ("line.rate", "475.00")))
+            .Replace(BadSurrogateMarker, "\\ud800"); // a lone surrogate escape: the document parses, reading the string fails
+        var world = new World();
+        world.AddRejectedSubmission(document);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Degraded.Should().BeFalse();
+        outcome.Items.Select(i => i.LineNumber).Should().Equal(1, 3);
+        outcome.Items.SelectMany(i => i.ValuesRead!).Select(v => v.Value).Should().Equal("450.00", "475.00");
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Which.Should().Contain("1 stored finding(s)").And.Contain("1 malformed");
+        Warnings(world).Should().NotContain(m => m.Contains(FirmRejectionFindings.UnreadableCode));
+        outcome.NotShownCount.Should().Be(1, "the dropped entry was a rejecting one");
+    }
+
+    [Fact(DisplayName = "130c fix 2 (K6, must-not-fire): a document that is malformed as a whole is still unreadable: status only, the stable UNREADABLE code, no entry shown")]
+    public async Task Rejected_AWholeDocumentThatCannotBeParsed_IsStillUnreadable()
+    {
+        var good = Stored("ApprovedRate", VersionA, 0, values: ("line.rate", "450.00")).ToJsonString();
+        var stored = "{ \"kind\": \"AutoRejected\", \"findings\": [ " + good + ", { \"ruleType\": \"ApprovedRate\", \"valuesRead\": [ SECRET-BROKEN";
+        var world = new World();
+        world.AddRejectedSubmission(stored);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false));
+        world.Logger.Lines.Should().ContainSingle(l => l.Level == LogLevel.Warning && l.Message.Contains(FirmRejectionFindings.UnreadableCode));
+        Warnings(world).Should().NotContain(m => m.Contains(FirmRejectionFindings.DroppedCode) || m.Contains("SECRET"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // 130c fix round 3
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "130c fix 3 (K-a, must-fire): an AI-assigned field is skipped whatever its casing; a name that only resembles one is not an extracted field, so it is not projected either (fix 4)")]
+    public async Task Rejected_TheAiAssignedSkip_IgnoresCase_ButNeedsTheExactNameOrPrefix()
+    {
+        var entry = Stored("ApprovedRate", VersionA, 0, values:
+        [
+            ("line.lower", "AI-LOWER"),
+            ("line.upper", "AI-UPPER"),
+            ("line.observation", "AI-OBSERVATION"),
+            ("line.observationUpper", "AI-OBSERVATION-UPPER"),
+            ("line.noDot", "NO-DOT"),
+            ("line.billed", "L110"),
+            ("line.rate", "450.00"),
+        ]);
+        var fields = new[] { "taskcode", "ACTIVITYCODE", "observation.x", " OBSERVATION.BlockBilling ", "observationx", "BilledTaskCode", "Rate" };
+        var values = (JsonArray)entry["valuesRead"]!;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            ((JsonObject)values[i]!)["field"] = fields[i];
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entry));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Single().ValuesRead.Should().Equal(
+            new FirmOutcomeValueRead("line.billed", "L110"), new FirmOutcomeValueRead("line.rate", "450.00"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("AI-").And.NotContain("NO-DOT");
+    }
+
+    [Fact(DisplayName = "130c fix 4 (must-fire): a value whose field is not a known extracted field is not shown, while its entry still is")]
+    public async Task Rejected_AValueWithAnUnknownField_IsNotProjected_ButTheEntryStillIs()
+    {
+        var entry = Stored("ApprovedRate", VersionA, 4, values:
+        [
+            ("line.internalScore", "UNKNOWN-FIELD-VALUE"),
+            ("line.rate", "450.00"),
+            ("line.blank", "BLANK-FIELD-VALUE"),
+            ("line.prefixOnly", "PREFIX-VALUE"),
+        ]);
+        var fields = new[] { "line.internalScore", "Rate", "Rat", BillingFieldNames.ObservationPrefix };
+        var values = (JsonArray)entry["valuesRead"]!;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            ((JsonObject)values[i]!)["field"] = fields[i];
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entry));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        var item = outcome!.Items.Should().ContainSingle().Subject;
+        item.LineNumber.Should().Be(5);
+        item.ValuesRead.Should().Equal(new FirmOutcomeValueRead("line.rate", "450.00"));
+        JsonSerializer.Serialize(outcome).Should().NotContain("UNKNOWN-FIELD-VALUE").And.NotContain("BLANK-FIELD-VALUE").And.NotContain("PREFIX-VALUE");
+    }
+
+    [Fact(DisplayName = "130c fix 4 (must-not-fire): every extracted field constant still shows its value, whatever its case or padding")]
+    public async Task Rejected_EveryExtractedFieldConstant_StillShows_IncludingCaseAndPaddingVariants()
+    {
+        var extracted = typeof(BillingFieldNames)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .Where(n => n != BillingFieldNames.ObservationPrefix && !BillingFieldNames.IsAiAssigned(n))
+            .ToList();
+        extracted.Should().NotBeEmpty().And.Contain([BillingFieldNames.Rate, BillingFieldNames.Hours, BillingFieldNames.BilledTaskCode]);
+
+        // Each constant three ways: as named, upper-cased, and lower-cased with padding. Entries hold at most MaxValuesPerFinding values.
+        var fields = extracted.SelectMany(n => new[] { n, n.ToUpperInvariant(), "  " + n.ToLowerInvariant() + " " }).ToList();
+        var chunks = fields.Chunk(FirmRejectionFindings.MaxValuesPerFinding).ToList();
+        var entries = new List<JsonNode?>();
+        var expected = new List<string>();
+        for (var c = 0; c < chunks.Count; c++)
+        {
+            var entry = Stored("ApprovedRate", VersionA, c, values: chunks[c].Select((f, i) => ($"c{c}v{i}", (string?)$"SHOWN-{c}-{i}")).ToArray());
+            var array = (JsonArray)entry["valuesRead"]!;
+            for (var i = 0; i < chunks[c].Length; i++)
+            {
+                ((JsonObject)array[i]!)["field"] = chunks[c][i];
+                expected.Add($"c{c}v{i}");
+            }
+
+            entries.Add(entry);
+        }
+
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entries.ToArray()));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.SelectMany(item => item.ValuesRead ?? []).Select(v => v.Name).Should().Equal(expected);
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-fire): 3 valid and 1 malformed rejecting entry show 3 and count 1 not shown")]
+    public async Task Rejected_ADroppedRejectingEntry_IsCounted_NextToTheShownOnes()
+    {
+        var malformed = Stored("ApprovedRate", VersionA, 9, values: ("secret.name", "SECRET-VALUE"));
+        malformed.Remove("policyVersionId");
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            Stored("ApprovedRate", VersionA, 0), Stored("ApprovedRate", VersionA, 1), malformed, Stored("ApprovedRate", VersionA, 2)));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Select(i => i.LineNumber).Should().Equal(1, 2, 3);
+        outcome.NotShownCount.Should().Be(1);
+        outcome.Degraded.Should().BeFalse();
+        JsonSerializer.Serialize(outcome, WebJson).Should().Contain("\"notShownCount\":1").And.NotContain("SECRET");
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-fire): every kind of dropped rejecting entry is counted (malformed, unknown type, hold-only type, non-rejecting reason, undecodable)")]
+    public async Task Rejected_EveryKindOfDroppedRejectingEntry_IsCounted()
+    {
+        var undecodable = Stored("ApprovedRate", VersionA, 5, values: ("line.rate", BadSurrogateMarker));
+        var noSubject = Stored("ApprovedRate", VersionA, 6);
+        noSubject.Remove("subject");
+        var document = RejectedDocument(
+            Stored("SECRET-NEW-RULE-TYPE", VersionA, 1),                                                // unknown type
+            Stored("ApprovedTimekeeper", VersionA, 2, reason: "approved_timekeeper.not_approved"),      // hold-only
+            Stored("ApprovedRate", VersionA, 3, reason: BillingReasonCodes.RateNoRateInForce),          // reason cannot reject
+            noSubject,                                                                                  // malformed
+            undecodable)                                                                                // cannot be decoded
+            .Replace(BadSurrogateMarker, "\\ud800");
+        var world = new World();
+        world.AddRejectedSubmission(document);
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().BeEmpty();
+        outcome.NotShownCount.Should().Be(5);
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-fire): when every rejecting entry is malformed the outcome shows none and counts them all (status only, not degraded)")]
+    public async Task Rejected_AllRejectingEntriesMalformed_ShowsNone_AndCountsAll()
+    {
+        var entries = Enumerable.Range(0, 4).Select(i =>
+        {
+            var entry = Stored("ApprovedRate", VersionA, i, values: ("secret.name", "SECRET-VALUE"));
+            entry["policyVersionId"] = "not a guid";
+            return (JsonNode?)entry;
+        }).ToArray();
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(entries));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: true, CancellationToken.None);
+
+        outcome.Should().BeEquivalentTo(new FirmOutcome(FirmOutcomeKind.SubmissionRejected, "TRK-1", "Rejected", null, null, [], false, 4));
+        JsonSerializer.Serialize(outcome, WebJson).Should().Contain("\"notShownCount\":4").And.NotContain("SECRET");
+        Warnings(world).Should().ContainSingle(m => m.Contains(FirmRejectionFindings.DroppedCode)).Which.Should().Contain("4 malformed");
+    }
+
+    [Fact(DisplayName = "130c fix 3 (K-b, must-not-fire): a held or non-rejecting entry, or a non-rejecting document, adds nothing to the count")]
+    public async Task Rejected_EntriesThatDoNotReject_AreNeverCounted()
+    {
+        var held = Stored("ApprovedRate", VersionA, 1, rejects: false);
+        held["heldBecause"] = "read_field_confidence_unknown";
+        var notRejectingMalformed = Stored("ApprovedRate", VersionA, 2, rejects: false);
+        notRejectingMalformed.Remove("policyVersionId");
+        var noRejectsMember = Stored("ApprovedRate", VersionA, 3);
+        noRejectsMember.Remove("rejects");
+        var rejectsNotBool = Stored("ApprovedRate", VersionA, 4);
+        rejectsNotBool["rejects"] = "yes";
+        var world = new World();
+        world.AddRejectedSubmission(RejectedDocument(
+            held,
+            notRejectingMalformed,
+            noRejectsMember,
+            rejectsNotBool,
+            Stored("SECRET-NEW-NONREJECT", VersionA, 5, rejects: false),                                // unknown type that does not reject
+            JsonValue.Create("not an entry"),
+            Stored("ApprovedRate", VersionA, 6)));
+
+        var outcome = await world.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+
+        outcome!.Items.Should().ContainSingle().Which.LineNumber.Should().Be(7);
+        outcome.NotShownCount.Should().BeNull();
+        JsonSerializer.Serialize(outcome, WebJson).Should().NotContainEquivalentOf("notShownCount");
+
+        var blocked = new World();
+        var broken = Stored("ApprovedRate", VersionA, 1);
+        broken.Remove("policyVersionId");
+        blocked.AddRejectedSubmission(StoredDocument("Blocked", broken, Stored("SECRET-NEW-RULE-TYPE", VersionA, 2)));
+        var hold = await blocked.Projection().GetForSubmissionAsync(SubmissionId, invoiceDecided: false, CancellationToken.None);
+        hold!.Items.Should().BeEmpty();
+        hold.NotShownCount.Should().BeNull("an internal hold is not a rejection the firm was given");
+    }
 }
