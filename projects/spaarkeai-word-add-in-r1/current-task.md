@@ -35,7 +35,7 @@
 ## Peers (SendMessage by session name; check `ListAgents` — several moved to Claude Desktop on 2026-11-08)
 - `uac-r2` (Desktop): dev BFF deploys, roles. A held message means the owner approves it in that session.
 - `field-mapping-r1` (Desktop; the VS Code session `-69` is retiring): field mapping. Nothing open with them (030b read OK, acknowledged).
-- `spaarke-wt-ebilling-r1-c7`: ebilling.
+- `ebilling-r1` (Desktop since 2026-11-11; VS Code `-c7` retired): ebilling. Owner approved their next work→master merge on 2026-11-11, which carries 095c-2..4 and 095a/095b/151e. It is waiting on a master sync and a test fix. They will send the master SHA, then the dev SHA.
 - `ontology-r1` (Desktop, since 2026-11-08; the VS Code session `-38` is retiring): ontology, including its dev BFF before/after notices.
 - `provisioning-r1` (Desktop): customer provisioning.
 
