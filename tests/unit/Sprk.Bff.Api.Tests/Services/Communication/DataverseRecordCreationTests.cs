@@ -83,7 +83,8 @@ public class DataverseRecordCreationTests
         return new CommunicationService(
             CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object, emlGenerationService),
             senderValidator,
-            communicationDataverse ?? Mock.Of<ICommunicationDataverseService>(),
+            // Issue #2033: a send as user needs the caller's enabled systemuser, so by default the caller resolves to one.
+            communicationDataverse ?? ResolvingCaller(),
             _genericEntityServiceMock.Object,
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not tested here
@@ -818,6 +819,8 @@ public class DataverseRecordCreationTests
     private ICommunicationDataverseService ParentFound(Guid? parentThreadId, bool foundByGraphId = false)
     {
         var comm = new Mock<ICommunicationDataverseService>();
+        comm.Setup(c => c.QuerySystemUserByAzureAdOidAsync(CallerOid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserId);
         var parent = new DataverseEntity("sprk_communication", ReplyParentId);
         if (foundByGraphId)
         {
@@ -1004,8 +1007,9 @@ public class DataverseRecordCreationTests
     [Fact]
     public async Task SendAsync_SharedMailboxWhenCallerOidUnresolvable_CreatesRecordWithoutSentByAndLogsWarning()
     {
-        // The default ICommunicationDataverseService double resolves no systemuser for the oid.
-        var response = await CreateService().SendAsync(CreateValidRequest(), CallerContext());
+        // This ICommunicationDataverseService double resolves no systemuser for the oid.
+        var response = await CreateService(communicationDataverse: Mock.Of<ICommunicationDataverseService>())
+            .SendAsync(CreateValidRequest(), CallerContext());
 
         response.CommunicationId.Should().NotBeNull("the email is sent and its record is still created");
         _capturedEntity!.Attributes.ContainsKey("sprk_sentby").Should().BeFalse();

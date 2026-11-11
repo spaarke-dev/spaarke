@@ -15,8 +15,10 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// Uses managed identity (app-only) tokens to read sprk_projects, sprk_documents,
 /// sprk_todos, contacts, and accounts from Dataverse.
 ///
-/// All data access is gated by the ExternalCallerAuthorizationFilter — only records
-/// belonging to projects in the caller's ExternalCallerContext.Participations are served.
+/// This service does not authorize. On the /api/v1/external routes the caller and its record
+/// scope are resolved upstream by the group-level CallerPrincipalAuthorizationFilter (a
+/// <see cref="CallerPrincipal"/>) and by each route's own checks; any other caller must
+/// authorize before it reads through this service.
 ///
 /// ADR-009: Redis caching not applied here — participation is cached by ExternalParticipationService.
 ///          Individual data queries are short-lived; add caching only if profiling shows need.
