@@ -265,13 +265,13 @@ public class SecureChildShareReconciliationJobDirectPassTests
 
     private static DateTime Since(JobRunResult run) => Direct(run).GetProperty("since").GetDateTime();
 
-    /// <summary>The run's error message as the job words it: the secure-child part (this world has no secure child to fail),
-    /// then <paramref name="direct"/> (empty when the Direct pass is Ok).</summary>
+    /// <summary>The run's error message as the job words it: the secure-child part (this world has no secure child, so none is
+    /// left not updated or held), then <paramref name="direct"/> (empty when the Direct pass is Ok).</summary>
     private static string ErrorMessageWith(JobRunResult run, string direct)
     {
-        var root = Root(run);
-        return $"{root.GetProperty("notUpdated").GetInt32()} child(ren) not updated and {root.GetProperty("held").GetInt32()} held"
-               + direct + "; the next run retries.";
+        Root(run).GetProperty("notUpdated").GetInt32().Should().Be(0);
+        Root(run).GetProperty("held").GetInt32().Should().Be(0);
+        return "0 child(ren) not updated and 0 held" + direct + "; the next run retries.";
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -405,6 +405,7 @@ public class SecureChildShareReconciliationJobDirectPassTests
         var recovered = await RunAsync(job);
 
         recovered.Success.Should().BeTrue(recovered.ErrorMessage);
+        Int(recovered, "carriedIn").Should().Be(1, "the unresolved run kept the carry it could not work");
         Granted(message).Should().BeTrue();
         Since(recovered).Should().Be((T0 - Job.DirectOverlap).UtcDateTime, "the unresolved run did not move the watermark");
     }
@@ -461,9 +462,10 @@ public class SecureChildShareReconciliationJobDirectPassTests
     [Fact]
     public async Task ExecuteAsync_TheListingsAndTheSweep_AskDataverseForAStableOldestFirstAndIdOrder()
     {
-        // The in-memory world tie-breaks every answer by id, so a dropped or wrong order is invisible in its answers. Dataverse
-        // returns an unordered TopCount page in no defined order, and the watermark (a capped listing's last row) and the sweep
-        // cursor (the slice's last id) are only right over these orders — so the query is the contract asserted here.
+        // The in-memory world answers in id order before it applies a query's own orders, so a dropped id tie-break, or a dropped
+        // id order on the sweep, is invisible in its answers. Dataverse returns an unordered TopCount page in no defined order, and
+        // the watermark (a capped listing's last row) and the sweep cursor (the slice's last id) are only right over these orders —
+        // so the query is the contract asserted here.
         DirectMessageWithContent();
 
         await RunAsync(NewJob());
@@ -635,22 +637,27 @@ public class SecureChildShareReconciliationJobDirectPassTests
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task ExecuteAsync_MoreDueThanTheBudget_WorksTheLowestIdsFirst_CarriesTheRestInIdOrder_AndWarns()
+    public async Task ExecuteAsync_MoreDueThanTheBudget_WorksTheOldestChangesFirst_CarriesTheRest_AndWorksTheCarryInIdOrder()
     {
+        // The higher the id, the older the change: the listing (oldest change first) leaves the carry in DESCENDING id order, so
+        // only the carry's own ordering makes the next run work its lowest ids first.
         const int due = 400;
-        var messages = DirectMessages(due, _ => (T0 - TimeSpan.FromMinutes(5)).UtcDateTime); // one change time: id order decides
+        var ids = SortedIds(due);
+        var start = (T0 - TimeSpan.FromMinutes(40)).UtcDateTime;
+        var messages = DirectMessages(due, i => start.AddSeconds(due - i), i => ids[i]);
         var job = NewJob();
         var context = RunContext();
 
         var first = await job.ExecuteAsync(context, CancellationToken.None);
 
         Int(first, "listed").Should().Be(due);
-        Int(first, "examined").Should().Be(PriorityBudget, "the sweep's slice went to ids already in the budget");
         Int(first, "swept").Should().Be(Job.DirectSweepReserve, "what is left of the run's budget after the priority work");
-        Int(first, "carried").Should().Be(due - PriorityBudget);
+        Int(first, "examined").Should().Be(PriorityBudget + Job.DirectSweepReserve, "the oldest changes, then the sweep's lowest ids");
+        Int(first, "carried").Should().Be(due - PriorityBudget, "the swept messages that were also left over are still carried");
         Bool(first, "capReached").Should().BeTrue();
-        messages.Take(PriorityBudget).Should().OnlyContain(m => Granted(m));
-        messages.Skip(PriorityBudget).Should().NotContain(m => Granted(m));
+        messages.Skip(due - PriorityBudget).Should().OnlyContain(m => Granted(m), "the oldest changes are the highest ids");
+        messages.Take(Job.DirectSweepReserve).Should().OnlyContain(m => Granted(m), "the sweep's slice");
+        messages.Skip(Job.DirectSweepReserve).Take(due - PriorityBudget - Job.DirectSweepReserve).Should().NotContain(m => Granted(m));
         _log.Single(LogLevel.Warning, "[DIRECT-SHARES]", ("RunId", context.RunId), ("Total", due), ("Budget", PriorityBudget),
             ("LeftOver", due - PriorityBudget));
 
@@ -658,8 +665,9 @@ public class SecureChildShareReconciliationJobDirectPassTests
         var second = await RunAsync(job);
 
         Int(second, "carriedIn").Should().Be(due - PriorityBudget);
-        messages.Take(2 * PriorityBudget).Should().OnlyContain(m => Granted(m), "the carry is worked lowest id first");
-        messages.Skip(2 * PriorityBudget).Should().NotContain(m => Granted(m));
+        messages.Take(PriorityBudget).Should().OnlyContain(m => Granted(m), "the carry is worked lowest id first");
+        messages.Skip(PriorityBudget).Take(due - 2 * PriorityBudget).Should().NotContain(m => Granted(m),
+            "the carry's highest ids wait for the next run");
         Int(second, "carried").Should().Be(due - 2 * PriorityBudget);
     }
 
@@ -670,7 +678,10 @@ public class SecureChildShareReconciliationJobDirectPassTests
     {
         // An inherent multi-record arrange: the carry cap is 1,000 messages, reached in one run without capping any one listing
         // (at most MaxDirectListedPerTable - 1 rows each), across the messages' own rows and two content tables.
-        var recently = (T0 - TimeSpan.FromMinutes(5)).UtcDateTime;
+        var job = NewJob();
+        await RunAsync(job); // sets the watermark: T0 - overlap
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var recently = (T0 + TimeSpan.FromMinutes(1)).UtcDateTime; // changed after the watermark
         var perListing = Job.MaxDirectListedPerTable - 1;
         var thread = DirectThread();
         for (var i = 0; i < PriorityBudget + toCarry; i++)
@@ -684,7 +695,6 @@ public class SecureChildShareReconciliationJobDirectPassTests
             ContentRow(i < 2 * perListing ? Attachment : Participant, Message(thread, OwnedBy(DirectTeam)), recently);
         }
 
-        var job = NewJob();
         var context = RunContext();
 
         var first = await job.ExecuteAsync(context, CancellationToken.None);
@@ -702,11 +712,10 @@ public class SecureChildShareReconciliationJobDirectPassTests
         _time.Advance(TimeSpan.FromMinutes(2));
         var second = await RunAsync(job);
 
-        // No watermark is set when the carry overflows, so the next run on this instance looks back an hour from its own start again.
         Since(second).Should().Be(overflows
-            ? (_time.GetUtcNow() - Job.DirectInitialLookback).UtcDateTime
-            : (T0 - Job.DirectOverlap).UtcDateTime,
-            overflows ? "a carry past its cap drops messages, so the watermark is not moved" : "a run within the cap moves the watermark");
+            ? (T0 - Job.DirectOverlap).UtcDateTime
+            : (T0 + TimeSpan.FromMinutes(2) - Job.DirectOverlap).UtcDateTime,
+            overflows ? "a carry past its cap drops messages, so the watermark is held" : "a run within the cap moves the watermark");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -775,8 +784,25 @@ public class SecureChildShareReconciliationJobDirectPassTests
         var second = await RunAsync(job);
 
         Bool(first, "listingCapped").Should().BeTrue();
+        Int(first, "listed").Should().Be(Job.MaxDirectListedPerTable + 1, "500 messages, and the one message 500 attachments name");
         Since(second).Should().Be(start.AddSeconds(Job.MaxDirectListedPerTable - 1),
             "past the earlier last row, the other listing still has unlisted changes");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ACappedListingWithNothingLeftOver_IsStillACappedRun()
+    {
+        var gone = Guid.NewGuid(); // 500 changed attachments, all naming one message (no longer there: it settles as not found)
+        for (var i = 0; i < Job.MaxDirectListedPerTable; i++)
+            ContentRow(Attachment, gone, (T0 - TimeSpan.FromMinutes(5)).UtcDateTime);
+
+        var run = await RunAsync(NewJob());
+
+        Int(run, "listed").Should().Be(1);
+        Int(run, "carried").Should().Be(0, "one message is far inside the budget");
+        Bool(run, "listingCapped").Should().BeTrue();
+        Bool(run, "capReached").Should().BeTrue("a capped listing leaves changed rows for the next runs");
+        _log.Single(LogLevel.Warning, "[SECURE-CHILD-SHARES] heartbeat", ("DirectCapReached", true));
     }
 
     [Fact]
