@@ -54,9 +54,15 @@ namespace Sprk.Bff.Api.Services.Access;
 /// </remarks>
 internal static class SecureChildLineage
 {
-    /// <summary>One table: its entity set (for POA writes) and its lookups to parents (column → target table).</summary>
-    internal sealed record Table(string LogicalName, string EntitySet, IReadOnlyDictionary<string, string> Lookups)
+    /// <summary>One table: its entity set (for POA writes), its lookups to parents (column → target table) and its external
+    /// marker (unified-access-control-r2 task 191b: what an external caller's visibility asks of the row itself; required, so
+    /// a table cannot be added without that decision).</summary>
+    internal sealed record Table(
+        string LogicalName, string EntitySet, IReadOnlyDictionary<string, string> Lookups, ExternalMarker External)
     {
+        /// <summary>Task 191b: the table's own external marker (<see cref="ExternalMarker"/>). Never null.</summary>
+        public ExternalMarker External { get; init; } = External ?? throw new ArgumentNullException(nameof(External));
+
         /// <summary>UAC task 194b: <see cref="Lookups"/>' columns in declaration order, the ownership primary order (see the
         /// class remarks).</summary>
         public IReadOnlyList<string> LookupOrder { get; init; } = Lookups.Keys.ToArray();
@@ -148,8 +154,9 @@ internal static class SecureChildLineage
     internal static readonly IReadOnlySet<string> Roots = new HashSet<string>(
         Enum.GetValues<ExternalGrantRootType>().Select(ExternalGrantRoot.LogicalNameFor), StringComparer.OrdinalIgnoreCase);
 
-    private static Table T(string logicalName, string entitySet, params (string Column, string Target)[] lookups) =>
-        new(logicalName, entitySet, lookups.ToDictionary(l => l.Column, l => l.Target, StringComparer.OrdinalIgnoreCase))
+    private static Table T(
+        string logicalName, string entitySet, ExternalMarker external, params (string Column, string Target)[] lookups) =>
+        new(logicalName, entitySet, lookups.ToDictionary(l => l.Column, l => l.Target, StringComparer.OrdinalIgnoreCase), external)
         {
             LookupOrder = lookups.Select(l => l.Column).ToArray(),
         };
@@ -178,32 +185,32 @@ internal static class SecureChildLineage
     /// <summary>Every child table, keyed by logical name.</summary>
     internal static readonly IReadOnlyDictionary<string, Table> Children = new[]
     {
-        T("sprk_agreement", "sprk_agreements",
+        T("sprk_agreement", "sprk_agreements", ExternalMarker.None,
             Regarding("sprk_document", Matter, Project)),
-        T("sprk_analysis", "sprk_analysises",
+        T("sprk_analysis", "sprk_analysises", ExternalMarker.DocumentText,
             new[] { ("sprk_documentid", "sprk_document"), ("sprk_outputfileid", "sprk_document") }
                 .Concat(Regarding("sprk_budget", "sprk_communication", "sprk_document", "sprk_invoice", Matter, Project, WorkAssignment))
                 .ToArray()),
-        T("sprk_analysisoutput", "sprk_analysisoutputs",
+        T("sprk_analysisoutput", "sprk_analysisoutputs", ExternalMarker.DocumentText,
             ("sprk_analysisid", "sprk_analysis")),
-        T("sprk_attachmentartifact", "sprk_attachmentartifacts",
+        T("sprk_attachmentartifact", "sprk_attachmentartifacts", ExternalMarker.Never,
             ("sprk_document", "sprk_document"), ("sprk_emailartifact", "sprk_emailartifact")),
         // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (ebilling-r1 task 010, live spaarkedev1 2026-10-15).
-        T("sprk_billingevent", "sprk_billingevents",
+        T("sprk_billingevent", "sprk_billingevents", ExternalMarker.None,
             ("sprk_invoice", "sprk_invoice"), ("sprk_matter", Matter), ("sprk_project", Project),
             ("sprk_regardingworkassignment", WorkAssignment)),
-        T("sprk_budget", "sprk_budgets",
+        T("sprk_budget", "sprk_budgets", ExternalMarker.None,
             ("sprk_matter", Matter), ("sprk_project", Project)),
         // Ontology platform R1 task 044 (D-33/D-38): the revision a decision records is owned by the secure team under a Secure
         // matter, so it is a child of its budget and its matter (live: sprk_budgetrevision.sprk_budget, .sprk_matter).
-        T("sprk_budgetrevision", "sprk_budgetrevisions",
+        T("sprk_budgetrevision", "sprk_budgetrevisions", ExternalMarker.None,
             ("sprk_budget", "sprk_budget"), ("sprk_matter", Matter)),
         // unified-access-control-r2 task 194 F1-b: a budget's buckets are its children (solution XML,
         // sprk_BudgetBucket/Entity.xml: lookup sprk_budget; entity set sprk_budgetbuckets). Without this row a Secure
         // budget was isolated and its buckets were not. No core stamp (CoreAncestorResolver): a bucket files nothing.
-        T("sprk_budgetbucket", "sprk_budgetbuckets",
+        T("sprk_budgetbucket", "sprk_budgetbuckets", ExternalMarker.None,
             ("sprk_budget", "sprk_budget")),
-        T("sprk_communication", "sprk_communications",
+        T("sprk_communication", "sprk_communications", ExternalMarker.Predicate(ExternalOwnRule.Communication065),
             new[] { ("sprk_communicationthread", "sprk_communicationthread") }
                 .Concat(Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment))
                 .ToArray()) with
@@ -217,11 +224,11 @@ internal static class SecureChildLineage
                 .Append("sprk_communicationthread")
                 .ToArray(),
         },
-        T("sprk_communicationattachment", "sprk_communicationattachments",
+        T("sprk_communicationattachment", "sprk_communicationattachments", ExternalMarker.None,
             ("sprk_communication", "sprk_communication"), ("sprk_document", "sprk_document")),
-        T("sprk_communicationparticipant", "sprk_communicationparticipants",
+        T("sprk_communicationparticipant", "sprk_communicationparticipants", ExternalMarker.None,
             ("sprk_communication", "sprk_communication")),
-        T("sprk_communicationthread", "sprk_communicationthreads",
+        T("sprk_communicationthread", "sprk_communicationthreads", ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen),
             Regarding("sprk_analysis", "sprk_budget", "sprk_event", "sprk_invoice", Matter, Project, WorkAssignment)),
         // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Typed core
         // lookups read live, spaarkedev1 2026-10-07: sprk_corerecordtype (a catalog row) and sprk_corerecordid (a string) are
@@ -234,7 +241,7 @@ internal static class SecureChildLineage
         // keep them; the stamp follows the subject, the typed core does not, so stamp == core is no reason to retire one.
         // ebilling-r1 task 026 (FR-15, D-94): + the invoice-line subject, sprk_regardinginvoiceline -> sprk_billingevent (live
         // spaarkedev1 2026-10-16). An explicit tuple: Regarding("sprk_billingevent") would build sprk_regardingbillingevent.
-        T("sprk_decisionrecord", "sprk_decisionrecords",
+        T("sprk_decisionrecord", "sprk_decisionrecords", ExternalMarker.None,
             new[]
                 {
                     ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment),
@@ -247,7 +254,7 @@ internal static class SecureChildLineage
         // drifts silently; DocumentLinkVocabularyGuardTests), minus the links that are relationships rather than filing
         // (contact, organization, vendor organization, email) and the service request (see the remarks); plus the three
         // document→document / →version lookups that are not record links.
-        T("sprk_document", "sprk_documents",
+        T("sprk_document", "sprk_documents", ExternalMarker.Predicate(ExternalOwnRule.DocumentNarrowing),
             DocumentLinkFields.All
                 .Where(f => !DocumentLinksThatAreNotFiling.Contains(f.TargetEntityLogicalName))
                 .Select(f => (f.LogicalName, f.TargetEntityLogicalName))
@@ -258,22 +265,22 @@ internal static class SecureChildLineage
                 })
                 .OrderBy(l => DocumentPrimaryRank(l.Item1)) // 194b: stable, so each group keeps its declaration order
                 .ToArray()),
-        T("sprk_emailartifact", "sprk_emailartifacts",
+        T("sprk_emailartifact", "sprk_emailartifacts", ExternalMarker.Never,
             ("sprk_document", "sprk_document")),
-        T("sprk_emailreviewlog", "sprk_emailreviewlogs",
+        T("sprk_emailreviewlog", "sprk_emailreviewlogs", ExternalMarker.Never,
             ("sprk_communication", "sprk_communication")),
-        T("sprk_event", "sprk_events",
+        T("sprk_event", "sprk_events", ExternalMarker.None,
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_event", "sprk_invoice",
                 Matter, Project, "sprk_reportcard", WorkAssignment)),
-        T("sprk_eventlog", "sprk_eventlogs",
+        T("sprk_eventlog", "sprk_eventlogs", ExternalMarker.None,
             ("sprk_event", "sprk_event")),
-        T("sprk_fileversion", "sprk_fileversions",
+        T("sprk_fileversion", "sprk_fileversions", ExternalMarker.None,
             ("sprk_document", "sprk_document")),
         // ebilling-r1 task 013 (FR-05): + sprk_regardingworkassignment (task 012, live spaarkedev1 2026-10-15). Two other task
         // 012 lookups are left out pending unified-access-control-r2: sprk_supersedesinvoice (the invoice a resubmission
         // replaces — not a filing; as a lineage parent it would also join ParentLineage and the external invoices module's
         // live-parent rule) and sprk_billingexport (an export batch is not a codified table). Task 013 notes, section 10.
-        T("sprk_invoice", "sprk_invoices",
+        T("sprk_invoice", "sprk_invoices", ExternalMarker.Predicate(ExternalOwnRule.InvoiceSource),
             new[] { ("sprk_matter", Matter), ("sprk_project", Project) }
                 .Concat(Regarding("sprk_agreement", WorkAssignment)).ToArray()),
         // ebilling-r1 task 013 (FR-05, D-82): the invoice family's new tables, lookups read live, spaarkedev1 2026-10-15
@@ -283,7 +290,7 @@ internal static class SecureChildLineage
         // A submission's core record comes first, then its submitted PDF, so a row read with these columns names its core
         // record as its ownership primary; the invoice and the report it produced, and the submission it resubmits, follow
         // (UAC-r2 ruling on RecordFamilyEdges, 2026-10-28: outputs and a peer, not its filing).
-        T("sprk_invoicesubmission", "sprk_invoicesubmissions",
+        T("sprk_invoicesubmission", "sprk_invoicesubmissions", ExternalMarker.None,
             Regarding(Matter, Project, WorkAssignment).Concat(new[]
             {
                 ("sprk_document", "sprk_document"), ("sprk_invoice", "sprk_invoice"), ("sprk_reportdocument", "sprk_document"),
@@ -291,17 +298,17 @@ internal static class SecureChildLineage
             }).ToArray()),
         // Its sprk_decisionrecord lookup is left out: a Decision Record is stamped outside the access taxonomy and nothing is
         // filed under one but a Signal (CoreAncestorResolver.StampedOutsideAccessTaxonomy, uac-r2's condition 3).
-        T("sprk_invoiceapproval", "sprk_invoiceapprovals",
+        T("sprk_invoiceapproval", "sprk_invoiceapprovals", ExternalMarker.None,
             new[] { ("sprk_invoice", "sprk_invoice") }
                 .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
-        T("sprk_externalidentifier", "sprk_externalidentifiers",
+        T("sprk_externalidentifier", "sprk_externalidentifiers", ExternalMarker.None,
             Regarding("sprk_invoice", Matter, Project, WorkAssignment)),
-        T("sprk_invoicecorrection", "sprk_invoicecorrections",
+        T("sprk_invoicecorrection", "sprk_invoicecorrections", ExternalMarker.None,
             new[] { ("sprk_invoice", "sprk_invoice"), ("sprk_invoiceline", "sprk_billingevent") }
                 .Concat(Regarding(Matter, Project, WorkAssignment)).ToArray()),
-        T("sprk_kpiassessment", "sprk_kpiassessments",
+        T("sprk_kpiassessment", "sprk_kpiassessments", ExternalMarker.None,
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_reportcard", "sprk_reportcard")),
-        T("sprk_memo", "sprk_memos",
+        T("sprk_memo", "sprk_memos", ExternalMarker.None,
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
                     "sprk_invoice", Matter, Project, WorkAssignment)
                 .Concat(new[] { ("sprk_reportcard", "sprk_reportcard") }).ToArray()),
@@ -312,23 +319,23 @@ internal static class SecureChildLineage
         // ebilling-r1 task 089a (procedure model 5.2, agreed with unified-access-control-r2; ontology F3-e): a rule of a
         // record-scoped rule set is that set's child (live spaarkedev1 2026-11-03: sprk_policy.sprk_ruleset). A Procedure's or
         // a legacy set has no record lookup, so it is never reached and its rules stay outside the family.
-        T("sprk_policy", "sprk_policies",
+        T("sprk_policy", "sprk_policies", ExternalMarker.None,
             ("sprk_matter", Matter), ("sprk_ruleset", "sprk_ruleset")),
-        T("sprk_policyversion", "sprk_policyversions",
+        T("sprk_policyversion", "sprk_policyversions", ExternalMarker.None,
             ("sprk_policy", "sprk_policy")),
         // ebilling-r1 task 089a (procedure model 5.1, 5.2): a Procedure assignment or override is a secure child of the one
         // record it names (live spaarkedev1 2026-11-03: sprk_matter, sprk_project, sprk_workassignment, one set per row). Its
         // other lookups cite and file nothing (RecordOwnershipResolver.CitationLookups): the Procedure, the pinned Procedure
         // Version and the excluded rule.
-        T("sprk_procedureassignment", "sprk_procedureassignments",
+        T("sprk_procedureassignment", "sprk_procedureassignments", ExternalMarker.None,
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         // ebilling-r1 task 089a (procedure model 5.2): a record-scoped rule set (sprk_scope Record or Firm record) is a secure
         // child of its record; one record lookup per core type (live spaarkedev1 2026-11-03), RemoveLink. A Procedure's or a
         // legacy set has none of them set, so it is never reached. sprk_procedure, sprk_firm and sprk_sourcedocument are not
         // filing (a Procedure set carries the Procedure; a legacy uploaded set carries its source document, a CitationLookups entry).
-        T("sprk_ruleset", "sprk_rulesets",
+        T("sprk_ruleset", "sprk_rulesets", ExternalMarker.None,
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
-        T("sprk_reportcard", "sprk_reportcards",
+        T("sprk_reportcard", "sprk_reportcards", ExternalMarker.None,
             Regarding(Matter, Project)),
         // spaarke-ontology-platform-r1 task 039 (owner D-33/D-36; reviewed by unified-access-control-r2 on #1355). Lookups
         // read live, spaarkedev1 2026-10-07: the typed core lookup sprk_matter, the subject's regarding lookups and the
@@ -339,7 +346,7 @@ internal static class SecureChildLineage
         // the rule and its version are family tables now, but a
         // Signal CITES the rule that raised it and is not filed under it (RecordOwnershipResolver.CitationLookups).
         // ebilling-r1 task 026 (FR-15, D-94): + sprk_regardinginvoiceline -> sprk_billingevent, as on the Decision Record row.
-        T("sprk_signal", "sprk_signals",
+        T("sprk_signal", "sprk_signals", ExternalMarker.None,
             new[]
                 {
                     ("sprk_matter", Matter), ("sprk_decisionrecord", "sprk_decisionrecord"),
@@ -348,9 +355,9 @@ internal static class SecureChildLineage
                 .Concat(Regarding("sprk_communication", "sprk_document", "sprk_event", "sprk_invoice", Matter, Project,
                     "sprk_todo", WorkAssignment))
                 .ToArray()),
-        T("sprk_spendsignal", "sprk_spendsignals",
+        T("sprk_spendsignal", "sprk_spendsignals", ExternalMarker.None,
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_snapshot", "sprk_spendsnapshot")),
-        T("sprk_spendsnapshot", "sprk_spendsnapshots",
+        T("sprk_spendsnapshot", "sprk_spendsnapshots", ExternalMarker.None,
             ("sprk_matter", Matter), ("sprk_project", Project)),
         // ebilling-r1 task 086 (procedure model 5.2, EB-D-148; lookups and entity set read live, spaarkedev1 2026-10-27): an INVOICE Stored
         // File is its invoice's child and a leaf (no table names a Stored File as a parent; it is not an ownership parent). ONE lineage
@@ -358,9 +365,9 @@ internal static class SecureChildLineage
         // purpose: sprk_procedureversion and sprk_billingexport (a Procedure-source or export file is not a secure child, model 5.2 / F4-c,
         // so a row with no sprk_invoice is never reached), and sprk_sourcedocument / sprk_sourcecommunication (no root's walk reaches a
         // Stored File through its source; they stay in the row's own question as secure-if-any parents after the invoice, uac-r2 194b re-check K).
-        T("sprk_storedfile", "sprk_storedfiles",
+        T("sprk_storedfile", "sprk_storedfiles", ExternalMarker.None,
             ("sprk_invoice", "sprk_invoice")),
-        T("sprk_todo", "sprk_todos",
+        T("sprk_todo", "sprk_todos", ExternalMarker.None,
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
                 "sprk_invoice", Matter, Project, "sprk_reportcard", WorkAssignment)),
     }.ToDictionary(t => t.LogicalName, StringComparer.OrdinalIgnoreCase);
@@ -386,4 +393,122 @@ internal static class SecureChildLineage
 
     /// <summary>True for one of the three secure-root tables.</summary>
     internal static bool IsRoot(string? logicalName) => logicalName is not null && Roots.Contains(logicalName);
+
+    // ── unified-access-control-r2 task 191b: the external markers (#2179 design v2 §3.3) ─────────────────────────────
+
+    /// <summary>
+    /// Task 191b: tables OUTSIDE the lineage (they name no parent a walk can follow, so they are not <see cref="Children"/>)
+    /// that still declare an external marker, so the registry stays the ONE map of what an external caller may never read.
+    /// <c>sprk_affinity</c> holds sender addresses, subject keywords and participant sets learned from filed email
+    /// (<c>AffinityStore</c>): communication content with no record to inherit from.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, ExternalMarker> OutsideLineage =
+        new Dictionary<string, ExternalMarker>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_affinity"] = ExternalMarker.Never,
+        };
+
+    /// <summary>Task 191b: the marker a table declares (<see cref="Children"/>, then <see cref="OutsideLineage"/>);
+    /// <c>null</c> for a root and for a table the registry does not know.</summary>
+    internal static ExternalMarker? ExternalMarkerOf(string? logicalName) =>
+        logicalName is null ? null
+        : Children.TryGetValue(logicalName, out var table) ? table.External
+        : OutsideLineage.TryGetValue(logicalName, out var marker) ? marker
+        : null;
+
+    /// <summary>
+    /// Task 191b: every table whose marker is <see cref="ExternalMarkerKind.Never"/>: the communication-content tables an
+    /// external caller never reads, whatever they are filed under. Derived from the markers, never listed again
+    /// (<c>ExternalCallerCommunicationGuard.RefusedContentTables</c> is this set).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> NeverExternalTables = new HashSet<string>(
+        Children.Values.Where(t => t.External.Kind == ExternalMarkerKind.Never).Select(t => t.LogicalName)
+            .Concat(OutsideLineage.Where(kv => kv.Value.Kind == ExternalMarkerKind.Never).Select(kv => kv.Key)),
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 191b: the tables whose rows carry text derived from a document (<see cref="ExternalMarker.CarriesDocumentText"/>),
+    /// keyed by logical name. Derived from the markers (<c>ExternalCallerCommunicationGuard</c>'s document-derived tables are
+    /// built from it).
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, Table> DocumentTextTables =
+        Children.Values.Where(t => t.External.CarriesDocumentText)
+            .ToDictionary(t => t.LogicalName, StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>Task 191b: the three kinds of external marker a registry table declares (#2179 design v2 §3.3).</summary>
+internal enum ExternalMarkerKind
+{
+    /// <summary>No rule of its own: only what the row inherits (its roots' Restricted, and the taint of its lineage parents).</summary>
+    None = 0,
+
+    /// <summary>An own-row rule (<see cref="ExternalOwnRule"/>), on top of what the row inherits.</summary>
+    Predicate = 1,
+
+    /// <summary>Never externally visible, whatever it is filed under.</summary>
+    Never = 2,
+}
+
+/// <summary>Task 191b: the own-row rule of a <see cref="ExternalMarkerKind.Predicate"/> marker. Each names an EXISTING rule;
+/// the predicate (<c>ExternalVisibility</c>) calls it and never re-implements it.</summary>
+internal enum ExternalOwnRule
+{
+    /// <summary>No own rule (a <see cref="ExternalMarkerKind.None"/> or <see cref="ExternalMarkerKind.Never"/> marker).</summary>
+    None = 0,
+
+    /// <summary>The task 065 rule: flag explicitly false, a thread set, that thread explicitly Open now
+    /// (<c>CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync</c>).</summary>
+    Communication065,
+
+    /// <summary>The thread reads explicitly Open now (<c>CommunicationOpenThreadGate.ReadOpenThreadIdsAsync</c>).</summary>
+    ThreadOpen,
+
+    /// <summary>Task 188's document narrowing (<c>ExternalDocumentNarrowing</c>, through the app-only seam), and a legacy
+    /// Procedure Library document (its drive is the Procedure Library container) is never visible.</summary>
+    DocumentNarrowing,
+
+    /// <summary>ebilling (a′): the invoice predicate (<c>ExternalInvoiceVisibility.DecideAsync</c>).</summary>
+    InvoiceSource,
+}
+
+/// <summary>
+/// Task 191b: what an external caller's visibility asks of a registry table's OWN row (#2179 design v2 §3.3). Required on
+/// every <see cref="SecureChildLineage.Table"/>, so a new table cannot be registered without that decision.
+/// </summary>
+/// <remarks>Instances are the four statics and <see cref="Predicate"/>; nothing else can make one.</remarks>
+internal sealed record ExternalMarker
+{
+    private ExternalMarker(ExternalMarkerKind kind, ExternalOwnRule rule, bool carriesDocumentText)
+    {
+        Kind = kind;
+        Rule = rule;
+        CarriesDocumentText = carriesDocumentText;
+    }
+
+    /// <summary>The marker's kind.</summary>
+    public ExternalMarkerKind Kind { get; }
+
+    /// <summary>The own-row rule (only on a <see cref="ExternalMarkerKind.Predicate"/> marker).</summary>
+    public ExternalOwnRule Rule { get; }
+
+    /// <summary>
+    /// A <see cref="ExternalMarkerKind.None"/> row that ALSO carries text derived from its documents (an analysis, an
+    /// analysis output): the assistant's tools hide it by its documents (task 188 slice C). The predicate needs nothing extra
+    /// for it: its document lookups are lineage edges, so the taint closure already hides it with them.
+    /// </summary>
+    public bool CarriesDocumentText { get; }
+
+    /// <summary>Only inherited taint applies.</summary>
+    public static ExternalMarker None { get; } = new(ExternalMarkerKind.None, ExternalOwnRule.None, carriesDocumentText: false);
+
+    /// <summary>Only inherited taint applies, and the row carries a document's text (<see cref="CarriesDocumentText"/>).</summary>
+    public static ExternalMarker DocumentText { get; } = new(ExternalMarkerKind.None, ExternalOwnRule.None, carriesDocumentText: true);
+
+    /// <summary>Never externally visible.</summary>
+    public static ExternalMarker Never { get; } = new(ExternalMarkerKind.Never, ExternalOwnRule.None, carriesDocumentText: false);
+
+    /// <summary>An own-row rule on top of inherited taint.</summary>
+    public static ExternalMarker Predicate(ExternalOwnRule rule) => rule == ExternalOwnRule.None
+        ? throw new ArgumentOutOfRangeException(nameof(rule), rule, "A predicate marker names its own-row rule.")
+        : new(ExternalMarkerKind.Predicate, rule, carriesDocumentText: false);
 }

@@ -526,8 +526,10 @@ public class SecureChildLineageTests
             RecordShareLevels.ChildMirrorMask(table, 327703 | 524288 | 32).Should().Be(1, $"{table} is a hard-deny table");
 
         // Which hard-deny tables are secure-lineage children today (the others are covered by name all the same).
+        // Task 191b: ebilling 086 / 089a made the stored file, the Procedure assignment and the record-scoped rule set secure
+        // children too (this pin still named only the two #2084 tables, so it failed on master).
         SecureChildLineage.Children.Keys.Where(RecordOwnershipResolver.IsRestrictedContentTable)
-            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion");
+            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion", "sprk_procedureassignment", "sprk_ruleset", "sprk_storedfile");
     }
 
     [Fact]
@@ -619,5 +621,78 @@ public class SecureChildLineageTests
     {
         var blank = () => RecordShareLevels.ChildMirrorRights(" ", 1);
         blank.Should().Throw<ArgumentException>();
+    }
+
+    // ── unified-access-control-r2 task 191b: the external markers ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Task 191b (#2179 design v2 §3.3): every registry table's marker, pinned. A table added without a decision does not
+    /// compile (the marker is a required positional argument); a marker changed by accident fails here.
+    /// </summary>
+    [Fact]
+    public void EveryTable_DeclaresTheExpectedExternalMarker()
+    {
+        var expected = new Dictionary<string, ExternalMarker>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_communication"] = ExternalMarker.Predicate(ExternalOwnRule.Communication065),
+            ["sprk_communicationthread"] = ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen),
+            ["sprk_document"] = ExternalMarker.Predicate(ExternalOwnRule.DocumentNarrowing),
+            ["sprk_invoice"] = ExternalMarker.Predicate(ExternalOwnRule.InvoiceSource),
+            ["sprk_emailartifact"] = ExternalMarker.Never,
+            ["sprk_attachmentartifact"] = ExternalMarker.Never,
+            ["sprk_emailreviewlog"] = ExternalMarker.Never,
+            ["sprk_analysis"] = ExternalMarker.DocumentText,
+            ["sprk_analysisoutput"] = ExternalMarker.DocumentText,
+        };
+
+        foreach (var table in SecureChildLineage.Children.Values)
+        {
+            table.External.Should().NotBeNull($"{table.LogicalName} declares a marker");
+            table.External.Should().Be(
+                expected.TryGetValue(table.LogicalName, out var marker) ? marker : ExternalMarker.None,
+                $"{table.LogicalName}'s external marker");
+        }
+
+        SecureChildLineage.OutsideLineage.Should().BeEquivalentTo(
+            new Dictionary<string, ExternalMarker> { ["sprk_affinity"] = ExternalMarker.Never });
+    }
+
+    /// <summary>Task 191b: the communication-content tables (the guard's refused list) are the registry's Never markers.</summary>
+    [Fact]
+    public void NeverExternalTables_AreTheCommunicationContentTables()
+    {
+        SecureChildLineage.NeverExternalTables.Should().BeEquivalentTo(
+            "sprk_emailartifact", "sprk_attachmentartifact", "sprk_emailreviewlog", "sprk_affinity");
+        SecureChildLineage.ExternalMarkerOf("sprk_affinity").Should().Be(ExternalMarker.Never);
+        SecureChildLineage.ExternalMarkerOf("sprk_matter").Should().BeNull("a root declares no marker: its own flags decide it");
+        SecureChildLineage.ExternalMarkerOf("sprk_unknown").Should().BeNull();
+    }
+
+    [Fact]
+    public void ExternalMarker_Predicate_RefusesNoRule_AndTheKindsAreDistinct()
+    {
+        var none = () => ExternalMarker.Predicate(ExternalOwnRule.None);
+        none.Should().Throw<ArgumentOutOfRangeException>();
+
+        ExternalMarker.None.Kind.Should().Be(ExternalMarkerKind.None);
+        ExternalMarker.DocumentText.Kind.Should().Be(ExternalMarkerKind.None);
+        ExternalMarker.DocumentText.CarriesDocumentText.Should().BeTrue();
+        ExternalMarker.None.CarriesDocumentText.Should().BeFalse();
+        ExternalMarker.Never.Kind.Should().Be(ExternalMarkerKind.Never);
+        ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen).Should().Be(ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen));
+        ExternalMarker.None.Should().NotBe(ExternalMarker.DocumentText);
+    }
+
+    /// <summary>Task 191b: the predicate's two document edges are registry lookups of the document (a renamed column would
+    /// silently stop the chain bound or the chain member's link skip).</summary>
+    [Fact]
+    public void TheDocumentChainAndLinkColumns_AreDocumentLookups()
+    {
+        var document = SecureChildLineage.Children["sprk_document"];
+
+        document.Lookups[Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.ParentDocumentAttribute]
+            .Should().Be("sprk_document");
+        document.Lookups[Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.RelatedCommunicationAttribute]
+            .Should().Be("sprk_communication");
     }
 }
