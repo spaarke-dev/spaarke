@@ -174,7 +174,7 @@ All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133
 - 9c382eb8ae: `/draft` returns the no-Read 404 before reading the version; the "Procedure row missing" body is now the version 404.
 - 0854ddff14: the take-back writes `ClearedNotConverted`.
 
-Build 0/0; ArchTests 2200/2200; filtered 9461/0. **Running:** a scoped Sonnet re-check of `61d133463d..cf323d251f`. The draft-supersede behaviour is still excluded pending the owner. After that: the (c) build if the owner picks it, the ledger prose, a scoped re-check, then the diff to uac-r2.
+Build 0/0; ArchTests 2200/2200; filtered 9461/0. **The round 3 re-check APPROVED it** (Sonnet). Two Ks were folded into round 4: the probe-fault 403 must come before the version read, and the stale notes lines. The draft-supersede behaviour is still excluded pending the owner. After that: the (c) build if the owner picks it, the ledger prose, a scoped re-check, then the diff to uac-r2.
 
 Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
 
@@ -184,7 +184,7 @@ provisioning's task 267 (#2618, not on master) puts the ontology writer in its o
 
 ## Owed to peers
 
-- **provisioning-r1** (reachable again 2026-11-10; wants ONE message at the master merge; the ontology writer unit's default team is excluded from our reader profiles and needs no grant: ontology-r1 confirmed it reads no field-secured column as itself):
+- **provisioning-r1** (owed now: the default-team exclusion fix SHA. Their ratchet `1c922dff6b` lists our 4 scripts; they drop them in whichever merge meets our fix. We copy only `scripts/common/OntologyWriterUnit.ps1` from `77446a5222`.) (reachable again 2026-11-10; wants ONE message at the master merge; the ontology writer unit's default team is excluded from our reader profiles and needs no grant: ontology-r1 confirmed it reads no field-secured column as itself):
   - the 166 grants plus `-Verify` (seven columns; Writers read/create/update on the stamp's BFF app users; Readers read on every business unit's default team; no other profile; smoke checks);
   - the DEF-059 and 166 master SHA plus the SpaarkeMaster version;
   - the 089d SHA;
