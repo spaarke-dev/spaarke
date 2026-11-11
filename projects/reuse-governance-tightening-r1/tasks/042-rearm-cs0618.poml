@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>5(e) Re-arm the CS0618 obsolete-API check</title>
+    <phase>5 Quality tooling</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies build configuration and .cs callers across the solution, possibly tests</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting build change with an unknown number of callers across BFF, provisioning and tests; high-risk item in the risk register</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>config, refactoring, bff-api</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Remove CS0618 from WarningsNotAsErrors in Directory.Build.props, delete its stale justification, make a clean Release build of Spaarke.sln pass by migrating callers, and use a narrow DiagnosticId suppression only where a caller cannot migrate now; ship it as its own PR.</prompt>
+  <role>SPAARKE platform developer. Expert in MSBuild, C# compiler diagnostics and the BFF.</role>
+  <goal>CS0618 is a build error again under TreatWarningsAsErrors; a clean Release build passes; every remaining suppression is a named DiagnosticId with a one-line reason.</goal>
+
+  <context>
+    <background>spec.md FR-12; design.md section 7.5; OQ-15. Directory.Build.props line 6 TreatWarningsAsErrors, line 18 stale comment (DemoProvisioningOptions has no [Obsolete] member now), line 41 the CS0618 downgrade. [Obsolete] today: 3 in the BFF (EmailProcessingOptions.cs, ApproveRequestDto.cs, GenericAnalysisHandler.cs), 1 in Spaarke.Dataverse Models.cs, 17 provisioning rejection-code constants in Sprk.Provisioning.ControlPlane.Core.</background>
+    <relevant-files>
+      <file role="modify">Directory.Build.props</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/EmailProcessingOptions.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/Registration/ApproveRequestDto.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/Models.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/BffDeployRejectionCodes.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The blanket CS0618 suppression does not come back in any form (no NoWarn, no WarningsNotAsErrors CS0618, no file-wide pragma).</constraint>
+    <constraint source="project">Spaarke callers of a superseded member migrate to the replacement. Framework/NuGet obsoletions under one hour each are fixed; the rest are filed (project-defer-issue-tracking) and listed in the PR (OQ-15).</constraint>
+    <constraint source="project">Only callers that cannot migrate now get a DiagnosticId on the member (for example SPRK001) and a narrow suppression of that ID at the call site or in WarningsNotAsErrors by that ID, each with a one-line reason.</constraint>
+    <constraint source="project">A comment beside the setting says that marking a member [Obsolete] now fails every existing caller, so the marking change must migrate them or use a narrow DiagnosticId suppression. No new skill steps, tests or baselines.</constraint>
+    <constraint source="bff-extensions">If any file under src/server/api/Sprk.Bff.Api changes, measure the publish-size delta against a fresh master build (expected 0), confirm no new HIGH CVE, and state the placement justification (no new surface) in the PR (NFR-07).</constraint>
+    <constraint source="project">Own PR: commit only this task's files; ask the owner before opening the PR. Run code-review and adr-check regardless of rigor.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>Directory.Build.props</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/rules/bff-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Warnings as errors" location="Directory.Build.props">TreatWarningsAsErrors with a WarningsNotAsErrors list and a justifying comment block.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Remove CS0618 from line 41 and the stale comment at line 18.</step>
+    <step order="2">dotnet build Spaarke.sln -c Release --no-incremental; list every CS0618 error by member and caller.</step>
+    <step order="3">For each: migrate a Spaarke caller; fix a framework/NuGet obsoletion if under one hour; otherwise file it and apply the narrow DiagnosticId suppression with a reason.</step>
+    <step order="4">For the provisioning rejection-code constants: Grep for in-repo callers; none means nothing to do; callers that must keep them get the narrow DiagnosticId path.</step>
+    <step order="5">Add the explanatory comment beside the setting.</step>
+    <step order="6">Rebuild clean (Release) and run dotnet test for the affected test projects.</step>
+    <step order="7">If BFF files changed: publish-size delta and CVE check.</step>
+    <step order="8">Commit only this task's files. With the owner's OK, open the PR from a branch based on origin/master (temporary worktree plus cherry-pick; remove it with scripts/worktree/Remove-WorktreeSafe.ps1). The PR lists obsoletions fixed or filed.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If more than 25 CS0618 errors appear, STOP after step 2 and report the list to the owner before migrating.</trigger>
+    <trigger>If migrating a caller changes an API contract or wire format (for example ApproveRequestDto), STOP and escalate (root CLAUDE.md section 6).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">dotnet build Spaarke.sln -c Release --no-incremental; dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Directory.Build.props</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CS0618 no longer appears in WarningsNotAsErrors or NoWarn; the line-18 comment is gone.</criterion>
+    <criterion testable="true">dotnet build Spaarke.sln -c Release --no-incremental passes.</criterion>
+    <criterion testable="true">Every remaining suppression names a specific DiagnosticId and carries a one-line reason.</criterion>
+    <criterion testable="true">The PR body lists framework/NuGet obsoletions fixed and filed (with issue links).</criterion>
+    <criterion testable="true">Negative: adding a new call to an [Obsolete] Spaarke member fails the build (verify once locally, then revert).</criterion>
+    <criterion testable="true">Affected test projects pass; if BFF files changed, publish-size delta is recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>The negative criterion is the one seeding proof for this guard: it is the whole point of the change.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

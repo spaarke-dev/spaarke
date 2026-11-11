@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Build the capability index</title>
+    <phase>1 Capability index</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new file under .claude/patterns with explicit project constraints (FR-01)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Choosing the canonical component for ~30 cross-domain concepts is semantic judgment across the whole repo</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+    <deps>none</deps>
+    <tags>config, refactoring</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create .claude/patterns/CAPABILITY-INDEX.md: a hand-curated concept-to-component lookup of about 30 rows, every cell verified against the repo, so that task authors and reviewers find the canonical component for a capability even when it goes by another name (gap G1).</prompt>
+  <role>SPAARKE platform developer maintaining AI procedure files. Expert in the repo layout (BFF, shared client packages, patterns, ADRs).</role>
+  <goal>.claude/patterns/CAPABILITY-INDEX.md exists with 25-35 verified rows in five columns, all paths written as backticked repo paths that scripts/quality/Test-InstructionPaths.ps1 checks, and a recorded proof that a dead path in it is reported.</goal>
+
+  <context>
+    <background>design.md section 3 and spec.md FR-01. The seed list in design.md section 3.2 scopes the rows; it is a hypothesis, not a source of truth. Row 30 (rich-text / document editing) deliberately records two answers (Compose and RichTextEditor) and points to item 4.</background>
+    <relevant-files>
+      <file role="new">.claude/patterns/CAPABILITY-INDEX.md</file>
+      <file role="canonical-reference">projects/reuse-governance-tightening-r1/design.md</file>
+      <file role="canonical-reference">.claude/patterns/INDEX.md</file>
+      <file role="canonical-reference">scripts/quality/Test-InstructionPaths.ps1</file>
+      <file role="canonical-reference">.claude/adr/INDEX.md</file>
+      <file role="canonical-reference">CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisites</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every cell written in this task is verified with Grep or Glob first; a seed row whose component cannot be found is dropped or corrected, never copied as-is (FR-01).</constraint>
+    <constraint source="project">In this file, every canonical component and every ADR is a plain backticked repo path (for example `.claude/adr/ADR-028-spaarke-auth-architecture.md`); a package is named by its `src/client/shared/...` folder; a symbol goes in its own column, never appended to the path.</constraint>
+    <constraint source="project">Columns are exactly: Capability, Synonyms, Canonical component, Symbol, Governing ADR, Extension point. A row may link a .claude/patterns pointer file for the how-to.</constraint>
+    <constraint source="project">Do not create CapabilityIndexTests.cs or any new lint, test or baseline (design.md section 10.7).</constraint>
+    <constraint source="project">Where no single canonical component exists, the row names both candidates and says so; do not pick one silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/reuse-governance-tightening-r1/design.md</file>
+      <file>projects/reuse-governance-tightening-r1/spec.md</file>
+      <file>.claude/patterns/INDEX.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Backticked path checking" location="scripts/quality/Test-InstructionPaths.ps1">Paths must start with a known top-level folder and contain no glob, placeholder or URL characters to be checked.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read design.md section 3 and the root CLAUDE.md section 13 and 17 tables (most reliable starting paths).</step>
+    <step order="2">For each of the 30 seed capabilities, Grep/Glob the canonical component, its symbol, its extension point and its governing concise ADR; record synonyms an author might search for.</step>
+    <step order="3">Write the file: a 5-line header (purpose, how to use, "update the row in the same PR when a canonical component or extension point changes"), then the table.</step>
+    <step order="4">Run pwsh scripts/quality/Test-InstructionPaths.ps1 and confirm no new missing path is attributed to CAPABILITY-INDEX.md.</step>
+    <step order="5">Proof: in an uncommitted local edit, add one dead backticked path, re-run the checker, confirm it is reported exactly once, then revert the edit. Record the command and output in projects/reuse-governance-tightening-r1/notes/001-index-proof.md.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+    <step order="7">If any seed row was dropped or changed materially, list it with the reason in the proof note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If more than 5 seed capabilities have no identifiable canonical component, STOP and report to the owner rather than inventing rows.</trigger>
+    <trigger>If Test-InstructionPaths.ps1 does not scan .claude/patterns/*.md as design.md section 3.5 states, STOP and escalate: the enforcement choice for this file depends on it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>.claude/patterns/INDEX.md and its 94 pointer files map task type to pattern, not concept or synonym to canonical component; Glob for .claude/patterns/CAPABILITY-INDEX.md returned nothing (2026-11-10).</existing>
+    <extension>No. Pointer files are capped at 25 lines and organised by domain, and a 30-row table inside INDEX.md would mix two different lookups.</extension>
+    <cost-of-doing-nothing>task-create Step 3.5.6 keeps passing "none found" for a capability that exists under another name, because the author only Greps the name they thought of (G1).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">pwsh scripts/quality/Test-InstructionPaths.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/patterns/CAPABILITY-INDEX.md</output>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/001-index-proof.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The file has 25-35 data rows and the six columns named in the constraints.</criterion>
+    <criterion testable="true">Every canonical-component and ADR cell is a backticked repo path that exists (Test-Path true for each).</criterion>
+    <criterion testable="true">Test-InstructionPaths.ps1 reports no new missing path for CAPABILITY-INDEX.md.</criterion>
+    <criterion testable="true">Negative: a seeded dead path in a local copy is reported exactly once; the proof note records it, and the committed file contains no dead path.</criterion>
+    <criterion testable="true">The rich-text / document-editing row names both components and points to item 4.</criterion>
+    <criterion testable="true">No new test, lint rule, script or baseline file is added.</criterion>
+  </acceptance-criteria>
+
+  <notes>Rows 3, 8, 10, 11, 12, 14, 15, 18 in the seed list point at .claude/patterns pointer files; the canonical component cell must be the code file the pointer targets, with the pointer file linked for the how-to.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Add the reuse scan to design-to-spec Step 3</title>
+    <phase>2 Reuse scan</phase>
+    <gate>blocked until 010 is go</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies a skill's contract under explicit project constraints (FR-04)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authoring a new procedure step and rewriting a skill's own constraint is pattern authoring</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+    <deps>010</deps>
+    <tags>config</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Only if task 010 recorded "go": replace design-to-spec Step 3's "quick Grep/Glob" exception with one code-mapper reuse scan, define the notes/reuse-scan.md contract, route 2+ candidates to Step 5 and Owner Clarifications, and rewrite the two lines that forbid comprehensive discovery.</prompt>
+  <role>SPAARKE platform developer maintaining AI procedure files.</role>
+  <goal>design-to-spec SKILL.md runs one scan in Step 3, writes notes/reuse-scan.md at Step 4, raises 2+ candidates in Step 5, and its Constraints line (~40) and Step 3 scope limitation (~162) say this scan is the single allowed discovery pass.</goal>
+
+  <context>
+    <background>spec.md FR-04; design.md sections 4.0, 4.1, 4.2. Plan Mode is read-only, so the scan runs during Step 3 and the file is written when Step 4 starts writing. Use the effort recorded by task 010 (low unless the owner approved medium).</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/design-to-spec/SKILL.md</file>
+      <file role="modify">.claude/skills/design-to-spec/references/spec-template.md</file>
+      <file role="canonical-reference">projects/reuse-governance-tightening-r1/notes/reuse-scan-dry-run.md</file>
+      <file role="canonical-reference">.claude/agents/code-mapper.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Go decision and the effort level</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Precondition: task 010's note says go. If it says no-go, this task is cancelled; do nothing.</constraint>
+    <constraint source="project">Do not renumber or rename Step 2.5, Step 3 or any other step (external contract). Add the scan inside Step 3.</constraint>
+    <constraint source="project">The scan launches exactly one code-mapper agent with model sonnet and the recorded effort, with the design.md section 4.1 return schema. code-mapper.md is not edited.</constraint>
+    <constraint source="project">reuse-scan.md contract: per capability, the searches run, candidates with path:line, and the orchestrator's verdict (extend target, owner question, or none found with searches); plus a plan-level duplication check.</constraint>
+    <constraint source="project">The spec template's Owner Clarifications and New Components table refer to reuse-scan.md where applicable; no new required spec heading.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/reuse-governance-tightening-r1/design.md</file>
+      <file>.claude/skills/design-to-spec/SKILL.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>.claude/constraints/agent-cost.md</file>
+    </files>
+    <patterns>
+      <pattern name="Agent finds, orchestrator judges" location="projects/reuse-governance-tightening-r1/design.md">Section 4.2.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm task 010 recorded go and read the effort decision.</step>
+    <step order="2">Edit Step 3: the scan (extract capabilities, launch the agent, judge, hold the result for Step 4).</step>
+    <step order="3">Edit Step 4 (write reuse-scan.md) and Step 5 (2+ candidates become a review question, recorded under Owner Clarifications).</step>
+    <step order="4">Rewrite the Constraints line (~40) and Step 3 scope limitation (~162).</step>
+    <step order="5">Run grep -rn "design-to-spec.*Step" and confirm no citation broke.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the edit would require renumbering a step, STOP and escalate (external contract).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Grep for step citations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/skills/design-to-spec/SKILL.md</output>
+    <output type="docs">.claude/skills/design-to-spec/references/spec-template.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 3 launches exactly one code-mapper agent naming model and effort, with the return schema.</criterion>
+    <criterion testable="true">Step 4 writes projects/{name}/notes/reuse-scan.md; Step 5 raises 2+ candidates as an owner question recorded under Owner Clarifications.</criterion>
+    <criterion testable="true">The Constraints line and the Step 3 scope limitation no longer forbid this scan and still keep all other discovery in project-pipeline.</criterion>
+    <criterion testable="true">Negative: no step number or heading changed; code-mapper.md unchanged.</criterion>
+    <criterion testable="true">Negative: if 010 is no-go, this task is cancelled and no file changed.</criterion>
+  </acceptance-criteria>
+
+  <notes>Skill-directive hot path; keep edits local.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

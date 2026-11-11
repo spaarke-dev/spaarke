@@ -1,0 +1,12 @@
+# Decisions — Reuse Governance Tightening R1
+
+> Full decision log. The project `CLAUDE.md` keeps the one-line binding outcome; rationale lives here or in `design.md` §11.
+
+| Date | Decision | Source |
+|---|---|---|
+| 2026-11-10 | OQ-1..OQ-16 decided | design.md §11 |
+| 2026-11-10 | Fable ROI review trims applied; cuts recorded | design.md §10.7 |
+| 2026-11-10 | SpaarkeAi hot-path corrected N → Y; XML declaration added to design.md | /design-to-spec Owner Clarifications |
+| 2026-11-10 | PR shape: items 1–3 one PR; item 4 own PR(s); item-5 sub-items own PRs; one adversarial pass over 1–4 | spec.md NFR-05 |
+| 2026-11-10 | Dry-run pass rule (both caught → go; one missed → owner decides on `medium`; both missed → no-go) | spec.md FR-03 |
+| 2026-11-10 | Item 4 execution waits on owner approval per package, also in autonomous mode | spec.md FR-08 |

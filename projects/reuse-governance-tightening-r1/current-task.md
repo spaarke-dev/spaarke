@@ -5,9 +5,9 @@
 
 ---
 
-**Phase**: `spec.md` written (2026-11-10, `/design-to-spec`, owner-approved design). Awaiting the owner's spec review. **No tasks exist yet** (no plan or POMLs).
-**Active task**: none.
-**Next action**: when the owner approves `spec.md`, run `/project-pipeline projects/reuse-governance-tightening-r1`. **Do not start it until the owner says so.**
+**Phase**: `/project-pipeline` ran 2026-11-11 (owner-approved spec). README, plan, project CLAUDE.md, `notes/decisions.md` and 19 POMLs + `tasks/TASK-INDEX.md` exist; Completeness Lint PASS (19 clean).
+**Active task**: none — execution not started.
+**Next action**: after commit, push and GitHub registration (Epic #427), start Wave 1: task 001 in the main session, with 041 + 042 as Group A sub-agents (see TASK-INDEX "Parallel Execution Plan"). Owner gates: 010, 030, 035, and each PR.
 **design-to-spec outcomes**: SpaarkeAi hot-path corrected to **Y** (item 4's three actions change `src/solutions/SpaarkeAi`) and the XML `<hot-path-declaration>` added to design.md. Owner accepted defaults: items 1–3 one PR, item 4 package actions their own PR(s), one adversarial pass over 1–4; dry-run rule both-caught→go / one-missed→owner sees `medium` cost / both-missed→no-go; FR-09 waits on owner approval of `package-reviews.md`.
 
 ## Where things stand (2026-11-10)

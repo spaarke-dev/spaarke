@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>5(c) Knowledge-refresh staleness watchdog</title>
+    <phase>5 Quality tooling</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies a CI workflow (integration) under explicit constraints (FR-11)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One more check modelled on the existing quality-alert matrix job</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ci-cd, config</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a check to nightly-health.yml that raises quality alert monthly/knowledge-refresh when the newest dated heading in knowledge/REFRESH-LOG.md is more than 35 days old, and name it in REFRESH-PROCEDURE.md; ship it as its own PR.</prompt>
+  <role>SPAARKE platform developer. Expert in GitHub Actions and the quality-alert plumbing.</role>
+  <goal>The check exists, decides failing/ok from the newest `## YYYY-MM-DD` heading, uses the existing quality-alert action, and is documented.</goal>
+
+  <context>
+    <background>spec.md FR-11; design.md section 7.3. Newest REFRESH-LOG entry is 2026-08-26, so the check fires on landing; that is intended. No cloud routine (design.md section 10.7).</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/nightly-health.yml</file>
+      <file role="modify">knowledge/REFRESH-PROCEDURE.md</file>
+      <file role="modify">docs/procedures/ci-cd-workflow.md</file>
+      <file role="canonical-reference">knowledge/REFRESH-LOG.md</file>
+      <file role="canonical-reference">.github/actions/quality-alert/action.yml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The check reads the newest `## YYYY-MM-DD` heading of any kind; more than 35 days old means failing, otherwise ok. It never fails the workflow (NFR-01).</constraint>
+    <constraint source="project">Alert wiring copies the existing quality-alert call in nightly-health.yml (around line 1256), including dry-run off the default branch.</constraint>
+    <constraint source="project">No scheduled agent, no cloud routine, no draft-PR automation.</constraint>
+    <constraint source="project">Own PR: commit only this task's files; ask the owner before opening the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>knowledge/REFRESH-PROCEDURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Quality alert per check" location=".github/workflows/nightly-health.yml">Matrix job with a decide step and the quality-alert action.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add monthly/knowledge-refresh to the alert matrix with a decide step parsing REFRESH-LOG.md.</step>
+    <step order="2">Add one line to REFRESH-PROCEDURE.md and the check to ci-cd-workflow.md "Quality alerts".</step>
+    <step order="3">Run workflow_dispatch on the branch; confirm the decided status is failing (dry-run) given the 2026-08-26 entry.</step>
+    <step order="4">Commit only this task's files. With the owner's OK, open the PR from a branch based on origin/master (temporary worktree plus cherry-pick; remove it with scripts/worktree/Remove-WorktreeSafe.ps1).</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If REFRESH-LOG.md headings do not follow `## YYYY-MM-DD`, STOP and report rather than guessing a format.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">gh workflow run nightly-health.yml --ref work/reuse-governance-tightening-r1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/nightly-health.yml</output>
+    <output type="docs">knowledge/REFRESH-PROCEDURE.md</output>
+    <output type="docs">docs/procedures/ci-cd-workflow.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A workflow_dispatch run decides failing for monthly/knowledge-refresh with the current log (newest 2026-08-26), and the workflow itself succeeds.</criterion>
+    <criterion testable="true">Negative: a log whose newest heading is within 35 days decides ok (verify by running the decide script locally against a temp copy).</criterion>
+    <criterion testable="true">REFRESH-PROCEDURE.md and ci-cd-workflow.md name the check.</criterion>
+    <criterion testable="true">Negative: no scheduled agent or new workflow file is added.</criterion>
+  </acceptance-criteria>
+
+  <notes>Task 020 edits the same two files later and depends on this task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
