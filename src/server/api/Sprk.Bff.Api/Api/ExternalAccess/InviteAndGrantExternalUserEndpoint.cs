@@ -310,7 +310,7 @@ public static class InviteAndGrantExternalUserEndpoint
         try
         {
             preCheck = await GrantExternalAccessEndpoint.CheckGrantAsync(
-                preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling, today,
+                preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling,
                 dataverseClient, participations, accessibleRecords, binder.Store, logger, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)

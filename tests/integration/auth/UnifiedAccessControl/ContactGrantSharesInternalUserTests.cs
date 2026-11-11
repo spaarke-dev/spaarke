@@ -739,14 +739,15 @@ public class ContactGrantSharesInternalUserTests
     }
 
     /// <summary>
-    /// Task 193 G4a (B-F5): a LAPSED higher grant confers nothing, so it does not block a narrowed re-add (never-lower counts
-    /// only rows that still give access). The colleague's workforce-app access is restored at the granted level with a valid
-    /// date, on the same row, paired with them.
+    /// Owner round 80 (task 113, live gate G2) on the Add person path: a NARROWED re-add over a LAPSED higher grant is still the
+    /// never-lower refusal for the paired grant. The share stands; the colleague is not made visible in the workforce app
+    /// (<c>would_lower_existing</c>); the lapsed row keeps its level and date, and is not paired. (Task 193 G4a had restored it
+    /// at the lower level; reverted at the master merge: it overturned the owner-gated rule. Owner question in the PR.)
     /// </summary>
     [Fact]
-    public async Task G4a_Grant_Narrowed_OverALapsedHigherGrant_RestoresIt_AndTheColleagueIsVisible()
+    public async Task Grant_Narrowed_OverALapsedHigherGrant_SharesOnly_AndNeverLowersIt()
     {
-        var (contact, user) = Colleague();
+        var (contact, _) = Colleague();
         var lapsed = _h.Grants.Seed(ExternalGrantRootType.Matter, _matter, contact, null, (int)ExternalAccessLevel.FullAccess,
             Today.AddDays(-5));
         const AccessRights collaborateOnly = AccessRights.Read | AccessRights.Write | AccessRights.Append
@@ -754,12 +755,12 @@ public class ContactGrantSharesInternalUserTests
 
         var result = await Grant(contact, ExternalAccessLevel.FullAccess, callerRights: collaborateOnly);
 
-        var body = result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!;
-        body.WorkforceApp.Should().Be(new WorkforceAppAccess(true, null, ExternalGrantLifecycle.DefaultExpiry(Today), lapsed.Id),
-            "the lapsed grant gave nothing, so restoring it lowers no one's access");
+        result.Should().BeOfType<Ok<GrantAccessResponse>>().Subject.Value!.WorkforceApp
+            .Should().Be(WorkforceAppAccess.NotGiven(ExternalGrantLifecycle.WouldLowerExistingReasonCode));
         var row = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
-        row.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
-        _h.Grants.PairedUsers[lapsed.Id].Should().Be(user);
+        row.AccessLevel.Should().Be((int)ExternalAccessLevel.FullAccess, "the ceiling never quietly lowers a stored level");
+        row.ExpiresDate.Should().Be(Today.AddDays(-5), "nothing is restored");
+        _h.Grants.PairedUsers.Should().NotContainKey(lapsed.Id);
     }
 
     /// <summary>The must-not-fire twin: a LIVE higher grant still refuses the narrowed re-add; only the share stands.</summary>

@@ -438,8 +438,8 @@ platform Share button. Dataverse still caps what a share can do by the person's 
   A request above the ceiling is **narrowed** (the response says `narrowed`), not refused. A share is also capped at the
   caller's own rights.
 - **Never lower by accident.** If a request was narrowed and the person already holds more, the write is refused (409
-  `would_lower_existing`). Only access still in effect counts: a lapsed grant is not "more". An explicit downgrade is
-  allowed.
+  `would_lower_existing`). A lapsed grant at a higher level counts too (owner round 80): a narrowed re-add never quietly
+  lowers the stored level. An explicit downgrade is allowed.
 - **Expiry.** Default today + 90 days (Date Only, UTC). The Manage Access **Expiration** command sets one date on every
   active external grant of the record at once. Re-adding over a lapsed grant restores it with today + 90 days. An
   undated grant (written outside Spaarke) confers nothing until the daily reconciliation dates it.
