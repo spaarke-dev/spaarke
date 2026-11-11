@@ -261,8 +261,9 @@ public sealed class ExternalVisibilityTests
     [Fact]
     public async Task DocumentsBelowAVisibleCommunication_AreVisibleToThreeHops_AndUndecidedAtFour()
     {
-        var communication = _world.Communication(internalOnly: false, _world.Thread(Open), _world.Root());
-        var chain = Chain(communication, length: 5);
+        var matter = _world.Root();
+        var communication = _world.Communication(internalOnly: false, _world.Thread(Open), matter);
+        var chain = Chain(communication, length: 5, matter);
 
         var result = await Decide(chain.Select(d => ("sprk_document", d)).ToArray());
 
@@ -462,13 +463,44 @@ public sealed class ExternalVisibilityTests
         result.For("sprk_billingevent", line).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
     }
 
+    /// <summary>An (a′) decision whose read failed for one invoice is a fault of the whole decision (one notion of a fault):
+    /// every row is Undecided and the result says Faulted.</summary>
     [Fact]
-    public async Task AnInvoiceWhoseDecisionFailed_IsUndecided()
+    public async Task AnInvoiceWhoseDecisionFailed_FaultsTheDecision()
     {
-        var invoice = _world.Add("sprk_invoice", ("sprk_matter", _world.Root()));
+        var matter = _world.Root();
+        var invoice = _world.Add("sprk_invoice", ("sprk_matter", matter));
+        var todo = _world.Add("sprk_todo", ("sprk_regardingmatter", matter));
         _world.InvoiceReasons[invoice] = InvoiceHiddenReason.ReadFailed;
 
-        (await DecideOne("sprk_invoice", invoice)).Reason.Should().Be(ExternalVisibilityReason.InvoiceUndecided);
+        var result = await Decide(("sprk_invoice", invoice), ("sprk_todo", todo));
+
+        result.Faulted.Should().BeTrue();
+        result.For("sprk_invoice", invoice).Reason.Should().Be(ExternalVisibilityReason.ReadFailed);
+        result.For("sprk_todo", todo).Reason.Should().Be(ExternalVisibilityReason.ReadFailed);
+    }
+
+    /// <summary>A rule that answers "my read failed" without throwing (188's or (a′)'s faulted result) faults the decision
+    /// exactly as a throw does.</summary>
+    [Theory]
+    [InlineData("documents")]
+    [InlineData("invoices")]
+    public async Task ARuleThatAnswersFaulted_FaultsTheDecision(string rule)
+    {
+        var matter = _world.Root();
+        var document = _world.Document(matter: matter);
+        var invoice = _world.Add("sprk_invoice", ("sprk_matter", matter));
+        var todo = _world.Add("sprk_todo", ("sprk_regardingmatter", matter));
+        var readers = rule == "documents"
+            ? _world.Readers() with { Documents = (_, _) => Task.FromResult(DocumentNarrowingResult.ReadFailed) }
+            : _world.Readers() with { Invoices = (ids, _) => Task.FromResult(InvoiceVisibilityResult.ReadFailed(ids)) };
+
+        var result = await ExternalVisibility.DecideAsync(
+            new[] { ("sprk_document", document), ("sprk_invoice", invoice), ("sprk_todo", todo) }, readers, CancellationToken.None);
+
+        result.Faulted.Should().BeTrue();
+        foreach (var (table, id) in new[] { ("sprk_document", document), ("sprk_invoice", invoice), ("sprk_todo", todo) })
+            result.For(table, id).Reason.Should().Be(ExternalVisibilityReason.ReadFailed, table);
     }
 
     // ── Fail closed ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -488,6 +520,69 @@ public sealed class ExternalVisibilityTests
     public async Task ARowThatDoesNotComeBack_IsUndecided()
     {
         (await DecideOne("sprk_todo", Guid.NewGuid())).Reason.Should().Be(ExternalVisibilityReason.RowNotFound);
+    }
+
+    /// <summary>Hidden beats Undecided whatever the order the findings were made in: an unreadable link found first does not
+    /// mask a hidden communication found after it.</summary>
+    [Fact]
+    public async Task AHiddenFinding_BeatsAnEarlierUndecidedOne()
+    {
+        var matter = _world.Root();
+        var todo = _world.Add("sprk_todo",
+            ("sprk_regardingcommunication", _world.Communication(internalOnly: true, _world.Thread(Open), matter)));
+        _world.Entity("sprk_todo", todo)["sprk_regardingevent"] = "not-a-reference";
+
+        var decision = await DecideOne("sprk_todo", todo);
+
+        decision.Verdict.Should().Be(ExternalVisibilityVerdict.Hidden);
+        decision.Reason.Should().Be(ExternalVisibilityReason.CommunicationHidden);
+    }
+
+    /// <summary>A closure that reaches no root is never Visible: external access is granted on roots only (a parentless row, a
+    /// rootless cycle, a Signal whose core is a service request).</summary>
+    [Theory]
+    [InlineData("parentless")]
+    [InlineData("rootlessCycle")]
+    [InlineData("serviceRequestCore")]
+    public async Task ARowWhoseClosureReachesNoRoot_IsUndecided(string shape)
+    {
+        (string Table, Guid Id) row;
+        switch (shape)
+        {
+            case "parentless":
+                row = ("sprk_todo", _world.Add("sprk_todo"));
+                break;
+            case "rootlessCycle":
+                var first = Guid.NewGuid();
+                var second = _world.Add("sprk_event", ("sprk_regardingevent", first));
+                _world.Add("sprk_event", id: first, ("sprk_regardingevent", second));
+                row = ("sprk_event", second);
+                break;
+            default:
+                row = ("sprk_signal", _world.Add("sprk_signal",
+                    corePair: (_world.RecordType("sprk_servicerequest"), Guid.NewGuid().ToString())));
+                break;
+        }
+
+        var decision = await DecideOne(row.Table, row.Id);
+
+        decision.Verdict.Should().Be(ExternalVisibilityVerdict.Undecided);
+        decision.Reason.Should().Be(ExternalVisibilityReason.NoRoot);
+    }
+
+    /// <summary>Known limit (fail closed): a chain member's own communication link is 188's question, not the closure's, so a
+    /// document whose only way to a root runs through its parent document's communication link reaches no root.</summary>
+    [Fact]
+    public async Task ADocumentWhoseOnlyRootIsThroughAChainMembersCommunication_IsUndecided()
+    {
+        var communication = _world.Communication(internalOnly: false, _world.Thread(Open), _world.Root());
+        var eml = _world.Document(communication: communication);
+        var attachment = _world.Document(parent: eml);
+
+        var result = await Decide(("sprk_document", eml), ("sprk_document", attachment));
+
+        result.For("sprk_document", eml).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
+        result.For("sprk_document", attachment).Reason.Should().Be(ExternalVisibilityReason.NoRoot);
     }
 
     [Fact]
@@ -619,6 +714,27 @@ public sealed class ExternalVisibilityTests
         _world.NarrowingAsked.Should().BeEquivalentTo(new[] { attachment }, "the parent is the attachment's 188 walk's to decide");
     }
 
+    /// <summary>The closure keeps 188's chain bound itself: even when the document seam answers Visible, a parent-document
+    /// chain past <see cref="ExternalDocumentNarrowing.MaxHops"/> hops is Undecided, never Visible.</summary>
+    [Fact]
+    public async Task TheClosureBoundsTheDocumentChain_EvenWhenTheSeamSaysVisible()
+    {
+        var matter = _world.Root();
+        var communication = _world.Communication(internalOnly: false, _world.Thread(Open), matter);
+        var chain = Chain(communication, length: 5, matter);
+        var readers = _world.Readers() with
+        {
+            Documents = (ids, _) => Task.FromResult(DocumentNarrowingResult.NotNarrowed(
+                ids.Select(id => new DocumentNarrowingRow(id, default, Guid.Empty, Guid.Empty)))),
+        };
+
+        var result = await ExternalVisibility.DecideAsync(
+            new[] { ("sprk_document", chain[3]), ("sprk_document", chain[4]) }, readers, CancellationToken.None);
+
+        result.For("sprk_document", chain[3]).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
+        result.For("sprk_document", chain[4]).Reason.Should().Be(ExternalVisibilityReason.ChainTooLong);
+    }
+
     // ── The AI guard's two lists, now derived from the registry (results unchanged) ─────────────────────────────
 
     [Fact]
@@ -649,12 +765,13 @@ public sealed class ExternalVisibilityTests
     // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>A document linked to <paramref name="communication"/>, then <paramref name="length"/> - 1 documents each the
-    /// child of the one before; every document has a current version. Index = hops below the linked document.</summary>
-    private List<Guid> Chain(Guid communication, int length)
+    /// child of the one before (each filed under <paramref name="matter"/> when given); every document has a current version.
+    /// Index = hops below the linked document.</summary>
+    private List<Guid> Chain(Guid communication, int length, Guid? matter = null)
     {
-        var chain = new List<Guid> { _world.Document(communication: communication) };
+        var chain = new List<Guid> { _world.Document(communication: communication, matter: matter) };
         for (var i = 1; i < length; i++)
-            chain.Add(_world.Document(parent: chain[i - 1]));
+            chain.Add(_world.Document(parent: chain[i - 1], matter: matter));
         foreach (var document in chain)
             _world.Version(document);
         return chain;

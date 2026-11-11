@@ -48,8 +48,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// to-do's regarding document, a canonical copy) asks that document's own 188 verdict.</para>
 /// <para><b>Fail closed.</b> A row or parent that does not come back, a lookup value that is not a reference, a malformed core
 /// pair or a type the catalog maps to no core table, a table the registry does not know, an unreadable root, a 188 chain that
-/// cannot be known and an invoice decision that failed are Undecided, never Visible. A failed read of any kind makes EVERY row
-/// Undecided (<see cref="ExternalVisibilityResult.Faulted"/>); cancellation propagates. A row the decision was not asked about is
+/// cannot be known, an invoice decision that failed and a closure that reaches no root (a parentless row, a rootless cycle) are
+/// Undecided, never Visible. A failed read of any kind, thrown or answered as faulted by a rule, makes EVERY row Undecided
+/// (<see cref="ExternalVisibilityResult.Faulted"/>); cancellation propagates. A row the decision was not asked about is
 /// Undecided. Hidden beats Undecided, which beats Visible.</para>
 /// <para><b>Whose reads.</b> Every reader in <see cref="Readers"/> must be the BFF's app-only one (the external plane's): this is a
 /// security check, so a column field security masks for a user can never read as "no parent" or "no link".</para>
@@ -122,7 +123,18 @@ internal static class ExternalVisibility
 
         try
         {
-            var decided = await new Run(readers, ct).DecideAsync(asked).ConfigureAwait(false);
+            var run = new Run(readers, ct);
+            var decided = await run.DecideAsync(asked).ConfigureAwait(false);
+            if (run.Faulted)
+            {
+                // A rule answered "my read failed" rather than throwing (188's DocumentNarrowingResult.ReadFailed, an (a′)
+                // decision with a failed read): the same as a throw, so a caller sees ONE notion of a fault.
+                readers.Logger.LogWarning(
+                    "[EXTERNAL-VISIBILITY] {LogEvent} a rule's read failed; every one of the {Rows} rows is undecided.",
+                    LogEvent, asked.Count);
+                return AllFailed(asked);
+            }
+
             readers.Logger.LogDebug(
                 "[EXTERNAL-VISIBILITY] {LogEvent} decided {Rows} rows: visible={Visible} hidden={Hidden} undecided={Undecided}; {Reasons}",
                 LogEvent, decided.Count,
@@ -137,12 +149,14 @@ internal static class ExternalVisibility
             readers.Logger.LogWarning(
                 "[EXTERNAL-VISIBILITY] {LogEvent} a read failed ({ErrorType}); every one of the {Rows} rows is undecided.",
                 LogEvent, ex.GetType().Name, asked.Count);
-            return new ExternalVisibilityResult(
-                asked.ToDictionary(n => n, n => new ExternalVisibilityDecision(
-                    ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed, n.Table, n.Id)),
-                faulted: true);
+            return AllFailed(asked);
         }
     }
+
+    private static ExternalVisibilityResult AllFailed(IReadOnlyList<Node> asked) =>
+        new(asked.ToDictionary(n => n, n => new ExternalVisibilityDecision(
+                ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed, n.Table, n.Id)),
+            faulted: true);
 
     /// <summary>The 188 reasons that say the document cannot be decided (Undecided), rather than that the rule hides it.</summary>
     internal static bool IsUndecidable(DocumentNarrowingReason reason) => reason is
@@ -204,6 +218,9 @@ internal static class ExternalVisibility
     {
         private readonly Dictionary<Node, Entity?> _rows = new();
         private readonly Dictionary<Guid, string?> _coreTables = new();
+
+        /// <summary>A rule came back faulted instead of throwing: the whole decision is a fault.</summary>
+        internal bool Faulted { get; private set; }
 
         internal async Task<Dictionary<Node, ExternalVisibilityDecision>> DecideAsync(IReadOnlyList<Node> asked)
         {
@@ -456,6 +473,7 @@ internal static class ExternalVisibility
             if (documents.Count > 0)
             {
                 var narrowing = await readers.Documents(documents, ct).ConfigureAwait(false);
+                Faulted |= narrowing.Faulted;
                 foreach (var id in documents)
                 {
                     var reason = narrowing.Faulted ? DocumentNarrowingReason.ReadFailed : narrowing.ReasonFor(id);
@@ -473,6 +491,7 @@ internal static class ExternalVisibility
             if (invoices.Count > 0)
             {
                 var decision = await readers.Invoices(invoices, ct).ConfigureAwait(false);
+                Faulted |= decision.AnyFaulted;
                 foreach (var id in invoices.Where(id => !decision.IsVisible(id)))
                 {
                     var undecidable = decision.IsFaultedFor(id) || decision.HiddenReason(id) is not { } reason || IsUndecidable(reason);
@@ -486,7 +505,9 @@ internal static class ExternalVisibility
         }
 
         /// <summary>A subject's answer: the first Hidden finding, else the first Undecided, else Visible. The subject's own
-        /// findings come first, then its parents' in the order the walk reached them.</summary>
+        /// findings come first, then its parents' in the order the walk reached them. A row whose closure reaches no root is
+        /// Undecided (<see cref="ExternalVisibilityReason.NoRoot"/>): external access is granted on roots only, so a closure
+        /// that reaches none (a parentless row, a cycle with no way out) is never Visible.</summary>
         private static ExternalVisibilityDecision Combine(
             Subject subject, IReadOnlyDictionary<Node, ExternalVisibilityDecision> own,
             IReadOnlyDictionary<Node, ExternalVisibilityDecision> narrowed)
@@ -506,8 +527,11 @@ internal static class ExternalVisibility
             if (hidden >= 0)
                 return findings[hidden];
             var undecided = findings.FindIndex(f => f.Verdict != ExternalVisibilityVerdict.Visible);
-            return undecided >= 0
-                ? findings[undecided]
+            if (undecided >= 0)
+                return findings[undecided];
+            return subject.Roots.Count == 0
+                ? new ExternalVisibilityDecision(
+                    ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.NoRoot, subject.Node.Table, subject.Node.Id)
                 : new ExternalVisibilityDecision(
                     ExternalVisibilityVerdict.Visible, ExternalVisibilityReason.Visible, subject.Node.Table, subject.Node.Id);
         }
@@ -582,6 +606,9 @@ internal enum ExternalVisibilityReason
 
     /// <summary>A table the registry does not know.</summary>
     UnknownTable,
+
+    /// <summary>The row's closure reaches no root (a parentless row, or a cycle with no way out): nothing grants it.</summary>
+    NoRoot,
 
     /// <summary>A row the decision was not asked about.</summary>
     NotAsked,
