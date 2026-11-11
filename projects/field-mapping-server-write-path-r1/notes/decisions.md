@@ -1045,3 +1045,7 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
 ## 2026-11-09 — Direct message audience (owner)
 
 - Option A approved: a Direct message records both participants itself, `sprk_sentby` and a new `sprk_directrecipient` (lookup to systemuser), both stamped by the BFF at create and secured in 054b together with the message's thread lookup. The audience UAC-r2 task 198 grants to is exactly that pair; it is never read from the thread. Option C (the Direct team owns threads) was rejected: "threads do not move" stands. Detail in `tasks/054-direct-message-owner-team.poml`.
+
+## 2026-11-10 — Outbound Direct messages go through the pair thread (owner)
+
+- Option (a) approved: an outbound Direct message (a Message send with no `ThreadId` and no record filing) whose addressees resolve on the server to exactly one internal, enabled, non-application user other than the sender is filed into the Direct thread of that pair (`IDirectThreadAccessService.FindOrCreateDirectThreadAsync(sender, recipient)`), so piece 2 stamps `sprk_sentby` + `sprk_directrecipient` on it. Recipient resolution compares systemuser ids only. Any other send keeps today's path and gets no recipient (fail closed). Inbound stays fail-closed. UAC-r2 reviews the change (it changes how Direct threads are created and shared). Option (b), defer, was rejected. Detail: `notes/task-054-notes.md`, "054a piece 2b".
