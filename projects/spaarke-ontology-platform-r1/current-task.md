@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-11-10 late evening (by context-handoff, before compaction). State only: history is in git log, task
+> **Last Updated**: 2026-11-11 afternoon (by context-handoff, before compaction). State only: history is in git log, task
 > `<completion>` blocks and `notes/handoff-history/2026-11.md` (the previous checkpoint is archived there verbatim). Standing rules:
 > [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-218). Deferred work: one
 > self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-150**). Sub-agents never edit this file.
@@ -13,13 +13,15 @@
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
 | **Active task** | None in progress. **177 is ✅** (PR #2666 squash-merged to docs as `52d02a66f3`; completion record + TASK-INDEX committed). |
 | **Open PR** | None. docs→master [#2674](https://github.com/spaarke-dev/spaarke/pull/2674) (task 177) **merged 2026-11-11 as master `c152d7d0b1`** (merge commit). CI: 43 pass; the non-required `Server tests (office scope) (api-office)` leg hit its 20-min hang guard twice — same stall point as `work/field-mapping-server-write-path-r1` (no 177 code), existing issue **#1504**; locally the same selection on this branch ran 567 pass / 7 skip / 0 fail in 13.9 min with `--blame-hang`. |
-| **Next Action** | 1) Owner, uac-r2, R3 told master `c152d7d0b1` (word-add-in session not running — tell it when it reappears). uac-r2 put the deploy order to the owner as their D-2 (fm 054b field security first, then one dev BFF from master with mcp-r1); they message us when it lands. 2) Dev deploy only with the owner's go given in uac-r2's session (D-126); deploy note: `sprk_document` needs `sprk_accesspermission` + `sprk_accessinheritance` (on dev already). 3) Then 176/177 smoke on dev (Open items). |
+| **Next Action** | 1) Merge **#2695** (non-ontology fix, master) on green: outgoing email association status → Resolved when the send files it (owner "Fix it now" + "file replies" 2026-11-11). Branch `fix/outgoing-email-association-status`, worktree `C:\wtoas` (remove with Remove-WorktreeSafe after merge). Dev backfill of 76 rows DONE (owner-approved). 2) 176 smoke still owed: needs an open Revise-budget Work Item on dev (test data = owner's go); tell uac-r2 when it runs. 3) Tell word-add-in-r1 master `c152d7d0b1` when it reappears. |
 | **Uncommitted** | None. |
 
 ## Open items
 
 **Owner**
-- **176 + 177 smoke on dev:** needs a deploy carrying master with 176/177, then the owner sends one Budget inquiry from Revise budget; verify by query: `sprk_regardingmatter` + `sprk_regardingservicerequest`, `sprk_isinternalonly` true, Private thread, archived .eml **linked to the matter** (177 A3), shows in the matter's Messages. uac-r2 is waiting for the 176 result. Live dev BFF before: (verify) — read the DLL ProductVersion (CLAUDE.md §6) and run the ancestor check before any smoke.
+- **Dev BFF = `dc4f28ded8`** (local merge of master `df93d2029c` + mcp-r1 spike; DLL read 2026-11-11; contains 177; NOT #2689, D-3, D-5, #2695).
+- **177 smoke PASSED on dev 2026-11-11** (owner, Assign Work task email): Outgoing, internal-only, `sprk_regardingmatter` set, .eml document on the same matter, shows in Messages + Documents. Sent to uac-r2.
+- **176 smoke NOT RUN:** no open Revise-budget Work Item on dev to send a Budget inquiry from; verify `sprk_regardingmatter` + `sprk_regardingservicerequest`, internal-only, Private thread, .eml on the matter, Messages. Note: after #2695 deploys, inquiry replies auto-file (Resolved) instead of Suggested; `ConfirmSuggestedAssociationAsync` then no-ops (owner-approved).
 - UAT still open: 161 (Revise budget on REAL-2026-123456.02), 162 (uploads in Create Work Assignment / Project / Invoice), 111 row 4, 114, 105, #2394 (project create as Core User), check 6 (composer); then close 114, 158–163, 166. **090 held.**
 - 3 zz- communication deletes need the owner's yes: `c73b1661-5dda-f111-84e8-00224829aef9`, `c93b1661-5dda-f111-84e8-00224829aef9`, `16613093-2fdb-f111-84e7-000d3a9c9c16`.
 - DEF-059 (#2635, ebilling's): owner leans option C (new read-only role); our position recorded in the archived checkpoint.
