@@ -147,6 +147,7 @@ $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 if ($Apply -and $Verify) { throw '-Apply and -Verify are separate modes; run -Apply first, then -Verify.' }
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
+. (Join-Path $PSScriptRoot 'common/OntologyWriterUnit.ps1')
 if ($Target -eq 'ReportCatalog' -and $ClientNoLongerWritesPointers) { throw '-ClientNoLongerWritesPointers applies to -Target DocumentPointers only.' }
 if ($Target -ne 'ReportCatalog' -and $BffWritesCatalogPointers) { throw '-BffWritesCatalogPointers applies to -Target ReportCatalog only.' }
 if ($Target -eq 'DocumentNarrowingLinks' -and $ClientNoLongerWritesPointers) { throw '-ClientNoLongerWritesPointers applies to -Target DocumentPointers only.' }
@@ -244,8 +245,16 @@ else {
 
 if ($reader) {
     $onReader = @($reader.teamprofiles_association | ForEach-Object { $_.teamid.ToString().ToLowerInvariant() })
-    $defaultTeams = @((Invoke-DvGet 'teams?$select=teamid,name&$filter=isdefault eq true&$expand=businessunitid($select=name)').value)
-    if ($defaultTeams.Count -eq 0) { Report 'FAIL' '(p2) no business-unit default team was read — the query is wrong' }
+    $allDefaultTeams = @((Invoke-DvGet 'teams?$select=teamid,name,_businessunitid_value&$filter=isdefault eq true&$expand=businessunitid($select=name)').value)
+    if ($allDefaultTeams.Count -eq 0) { Report 'FAIL' '(p2) no business-unit default team was read — the query is wrong' }
+    # Task 267 (#2618): every default team but the ontology writer unit's belongs on the reader profile; that one must be in NO
+    # field-security profile (H7b S24), so finding it there is a FAIL.
+    $defaultTeamSplit = Split-DvDefaultTeamsByOntologyWriterUnit -Api $Api -Headers $headers -DefaultTeams $allDefaultTeams
+    $defaultTeams = $defaultTeamSplit.ReaderTeams
+    foreach ($t in $defaultTeamSplit.WriterUnitTeams) {
+        if ($onReader -contains $t.teamid.ToString().ToLowerInvariant()) { Report 'FAIL' "(p2) default team '$($t.name)' of the '$OntologyWriterBusinessUnitName' business unit is on the reader profile -- the ontology writer's unit team must be in NO field-security profile (H7b S24 refuses it); remove it by hand" }
+        else { Report 'OK' "(p2) the '$OntologyWriterBusinessUnitName' business unit's default team is not on the reader profile" }
+    }
     foreach ($t in $defaultTeams) {
         if ($onReader -contains $t.teamid.ToString().ToLowerInvariant()) { Report 'OK' "(p2) reader profile on default team '$($t.name)' (BU '$($t.businessunitid.name)')" }
         else { Report 'FAIL' "(p2) default team '$($t.name)' (BU '$($t.businessunitid.name)') is NOT on the reader profile — its users would read the columns EMPTY; run Set-RecordCreatorPersonSchema.ps1 -Apply" }
