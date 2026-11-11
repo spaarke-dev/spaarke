@@ -4,7 +4,7 @@
     <title>Build the capability index</title>
     <phase>1 Capability index</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new file under .claude/patterns with explicit project constraints (FR-01)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -97,6 +97,8 @@
     <criterion testable="true">The rich-text / document-editing row names both components and points to item 4.</criterion>
     <criterion testable="true">No new test, lint rule, script or baseline file is added.</criterion>
   </acceptance-criteria>
+
+  <completion-notes>Completed 2026-11-11. 32 rows, 126 backticked paths and 66 symbols verified (0 missing). The checker reports 0 findings for the file; a seeded dead path was reported exactly once (notes/001-index-proof.md, with seed-row changes). Found in passing and filed: node-executor-authoring.md still names ActionType (renamed ExecutorType 2026-06-28); two Test-InstructionPaths false positives on master (ADR-028 comma line list, FAILURE-MODES .claude/worktrees). rework: none task 001</completion-notes>
 
   <notes>Rows 3, 8, 10, 11, 12, 14, 15, 18 in the seed list point at .claude/patterns pointer files; the canonical component cell must be the code file the pointer targets, with the pointer file linked for the how-to.</notes>
 

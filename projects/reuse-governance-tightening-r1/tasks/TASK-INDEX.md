@@ -4,7 +4,7 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel | Rigor | Model / effort |
 |----|-------|-------|--------|--------------|----------|-------|----------------|
-| 001 | Build the capability index | 1 | 🔲 [open] | none | — (.claude, main) | STANDARD | opus / high |
+| 001 | Build the capability index | 1 | ✅ [done] | none | — (.claude, main) | STANDARD | opus / high |
 | 002 | Wire the capability index into the reuse gate | 1 | 🔲 [open] | 001 | — (.claude, main) | STANDARD | sonnet / high |
 | 010 | Reuse-scan dry-run and owner go/no-go | 2 | 🔲 [open] | 001 | — (main, owner gate) | STANDARD | opus / high |
 | 011 | Add the reuse scan to design-to-spec Step 3 (if go) | 2 | 🔲 [open] | 010 | — (.claude, main) | STANDARD | opus / high |
