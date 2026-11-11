@@ -249,11 +249,20 @@ internal static class ResubmissionOfWriteControlFixtures
     internal sealed class CallerBackedAllocator(IDataverseUserClient user) : ITrackingNumberAllocator
     {
         public async Task<TrackingNumberResult> CreateSubmissionAsync(
-            Guid submissionId, Guid firmId, string firmInvoiceNumber, IReadOnlyDictionary<string, object>? fields = null, CancellationToken ct = default)
+            Guid submissionId, Guid? firmId, string firmInvoiceNumber, IReadOnlyDictionary<string, object>? fields = null, CancellationToken ct = default)
         {
             await user.PostAsync("sprk_invoicesubmissions", "{}", ct);
             return TrackingNumberResult.Refused("control");
         }
+
+        public Task<bool> NumbersSubmissionsWithoutFirmAsync(CancellationToken ct = default) => Task.FromResult(false);
+
+        public Task<bool> ScopeColumnExistsAsync(CancellationToken ct = default) => Task.FromResult(false);
+
+        public Task<RenumberResult> RenumberSubmissionAsync(
+            Guid submissionId, string rowVersion, Guid firmId, string firmInvoiceNumber, Func<RenumberCandidate, RenumberApply> buildApply,
+            CancellationToken ct = default) =>
+            Task.FromResult(new RenumberResult(RenumberOutcome.Refused, null, null, "control"));
     }
 
     /// <summary>A table and no client: the shape of <c>SecureChildLineage</c>. Also names the column (C1's must-fire).</summary>

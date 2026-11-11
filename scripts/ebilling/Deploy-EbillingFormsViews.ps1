@@ -125,8 +125,14 @@ $Spec = [ordered]@{
     sprk_invoicesubmission = @{
         Form = 'Replace'; FormName = 'Information'
         Sections = @(
-            @{ Name = 'general'; Label = 'Submission'; Cols = 'sprk_name', 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_submissionsequence', 'sprk_vendororg', 'sprk_submitter', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_ponumber', 'sprk_outcomereasoncode', 'sprk_adminattention', 'sprk_correlationid', 'ownerid' }
-            @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument' }
+            @{ Name = 'general'; Label = 'Submission'; Cols = 'sprk_name', 'sprk_trackingnumber', 'sprk_firminvoicenumber', 'sprk_submissionsequence', 'sprk_vendororg', 'sprk_submitter', 'sprk_channel', 'sprk_processingstatus', 'sprk_receivedon', 'sprk_ponumber', 'sprk_outcomereasoncode', 'sprk_adminattention', 'sprk_correlationid', 'ownerid'
+                # Task 095c-4: the firm (setting it natively bypasses the pipeline and the tracking scope) and the outcome reason (it holds
+                # the invoice: firm_missing, Blocked) are written only by the BFF's typed writers: disabled on the form.
+                ReadOnly = 'sprk_vendororg', 'sprk_outcomereasoncode' }
+            # Task 165c: the invoice link, the source document and the correction target are written only by the BFF (the submission's own
+            # invoice and its source): read-only on the form, like the firm.
+            @{ Name = 'links'; Label = 'Resulting invoice and documents'; Cols = 'sprk_invoice', 'sprk_resubmissionof', 'sprk_document', 'sprk_reportdocument'
+                ReadOnly = 'sprk_invoice', 'sprk_document', 'sprk_resubmissionof' }
             @{ Name = 'regarding'; Label = 'Regarding'; Cols = 'sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingworkassignment' }
             @{ Name = 'findings'; Label = 'Firm notice'; Cols = 'sprk_firmnoticetext' }  # task 122 (#2235): sprk_findingsjson is BFF-only, never on a form
         )
@@ -145,7 +151,7 @@ $Spec = [ordered]@{
     }
     sprk_billingexport     = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_senttoapdate', 'sprk_csvdocument', 'sprk_jsondocument', 'ownerid'
+        Sections = @(@{ Name = 'general'; Label = 'Export batch'; Cols = 'sprk_name', 'sprk_exportstatus', 'sprk_invoicecount', 'sprk_totalamount', 'sprk_formats', 'sprk_failurereason', 'sprk_senttoapdate', 'ownerid'
                 # Task 151c-1a: the BFF is the one writer of the Sent to AP Date (set once, never overwritten): disabled on the form.
                 ReadOnly = 'sprk_senttoapdate' }
             @{ Name = 'mapping'; Label = 'Mapping snapshot'; Cols = 'sprk_mappingsnapshot' })
@@ -172,7 +178,10 @@ $Spec = [ordered]@{
                 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal'
                 ReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal' })
         # IInvoiceTotalsService is the one owner of the five totals (I-1): disabled, never editable on a form.
-        ForceReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal'
+        # Task 095c-4: the firm is set only by the submission pipeline (and 095d's assign-firm); a native edit would bypass it: disabled.
+        # Task 166 (EB-D-200): the billed total is server-written too (the submission create; the Invoice Review correction), so it is disabled as well.
+        # The quick-create form is not touched by this script: its sprk_totalamount control is disabled in the SpaarkeMaster source.
+        ForceReadOnly = 'sprk_feestotal', 'sprk_expensestotal', 'sprk_lineadjustmentstotal', 'sprk_invoiceadjustmentstotal', 'sprk_approvedtotal', 'sprk_vendororg', 'sprk_totalamount'
     }
     sprk_billingevent      = @{
         Form = 'Section'; FormName = 'Billing Event main form'

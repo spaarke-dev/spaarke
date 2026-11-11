@@ -79,7 +79,10 @@ internal sealed record FromEmailSubmitInput
     /// <summary>The email's communication (the Stored Files' <c>sprk_sourcecommunication</c>).</summary>
     public required Guid CommunicationId { get; init; }
     public required InvoiceCoreRecord CoreRecord { get; init; }
-    public required Guid FirmId { get; init; }
+
+    /// <summary>The firm, or null for none (task 095c-2: the route has already checked the tracking-scope phase and, for a Correction, that
+    /// the replaced invoice has no firm either). The empty id is never "no firm".</summary>
+    public required Guid? FirmId { get; init; }
 
     /// <summary>Trimmed (D-91).</summary>
     public required string FirmInvoiceNumber { get; init; }

@@ -74,6 +74,7 @@ public sealed record ReviewFlagsDto(bool CanRead, bool CanDecide);
 /// <param name="Rate">The billed rate of a Fee line, the unit cost of an Expense line.</param>
 /// <param name="HighestSeverity"><c>Info</c>, <c>Warning</c> or <c>Critical</c>; null when the line has no finding.</param>
 /// <param name="Fields">Per extracted field: its page, bounding box and confidence (the Document tab and the low-confidence marker).</param>
+/// <param name="ReviewerAdded">EB-D-193: the reviewer added this line through Add line (<c>provenance.source = "reviewer"</c> on its extraction JSON and its id derived from the marker's decision id); the firm did not bill it. False for every intake line, and for a line whose extraction is empty or unreadable.</param>
 /// <param name="LineFindings">EB-D-175 / EB-D-176: why the line is Flagged when no policy finding says so: the AI did not check it (<c>coding.not_returned</c>) or it has no description (<c>line.no_description</c>). Empty for a line with neither, and for a submission stored before these were written. Not counted in <see cref="FindingCount"/> or <see cref="HighestSeverity"/>, which describe the policy findings.</param>
 public sealed record ReviewLineDto(
     Guid Id,
@@ -98,7 +99,8 @@ public sealed record ReviewLineDto(
     string? HighestSeverity,
     IReadOnlyList<ReviewFindingDto> Findings,
     IReadOnlyDictionary<string, ReviewFieldDto> Fields,
-    IReadOnlyList<ReviewLineFindingDto> LineFindings);
+    IReadOnlyList<ReviewLineFindingDto> LineFindings,
+    bool ReviewerAdded);
 
 /// <summary>The roster entry a fee line's timekeeper name matched (046), with its classification.</summary>
 public sealed record ReviewTimekeeperDto(Guid Id, string? Name, int? Classification);
@@ -148,6 +150,8 @@ public sealed record ReviewSuggestionDto(string Kind, decimal? Amount);
 /// <param name="DetailWithheld">The values read are not returned: a duplicate across a secure wall (D-112, at write time), or a Duplicate whose
 /// earlier invoice the caller cannot read (D-176, at read time).</param>
 /// <param name="Overridden">The submission this finding blocked was overridden (an <c>override-submission</c> Decision Record exists for the invoice).</param>
+// ebilling-r1 082c-2 fix round 1 (uac-r2 K4): PolicyCode (a record rule's is its BRR- code) sits next to PolicyId on the INTERNAL review route only.
+// If any external module or SPA surface maps this DTO, it must go through ProcedureRulesOnDate.ForReaders() (base code + record-rule flag) first.
 public sealed record ReviewFindingDto(
     string RuleType,
     string PolicyCode,
@@ -367,6 +371,8 @@ public sealed class InvoiceReviewReadService
         InvoiceTotalsService.LineStatus, InvoiceTotalsService.LineApprovedAmount, LineReason, LineReviewedBy, LineReviewedOn,
         InvoiceTotalsService.LineAdjustmentMethod, InvoiceTotalsService.LineAdjustmentValue,
         InvoiceTotalsService.VersionNumber,
+        // 164a fix round K2: the reviewer-added rule (ExtractionProvenance.IsReviewerAdded) reads the line's invoice.
+        InvoiceTotalsService.LineInvoiceLookup,
     ];
 
     private static readonly string[] SubmissionColumns =
@@ -447,7 +453,7 @@ public sealed class InvoiceReviewReadService
         foreach (var row in lineRows.OrderBy(l => bySequence[l.Id]).ThenBy(l => l.Id))
         {
             var sequence = bySequence[row.Id];
-            // The plan and the findings are both keyed on the line INDEX (D-176 K4): a row whose sequence was edited cannot pair one index's findings with another's plan sentence.
+            // The plan and the findings are both keyed on the line INDEX (D-176 K4): a row whose sequence differs from the findings' index cannot pair one index's findings with another's plan sentence.
             var planSubject = submission is null ? row.Id : InvoiceSubmissionPersister.LineIdFor(submission.Dto.SubmissionId, sequence - 1);
             var findings = FindingsFor(parsed, "Line", sequence - 1, planSubject, overridden, withheld);
             lines.Add(ToLine(row, sequence, findings, LineFindingsFor(parsed, sequence - 1), roster: rosterTask.Result, threshold));
@@ -485,6 +491,35 @@ public sealed class InvoiceReviewReadService
         query.Criteria.AddCondition($"{InvoiceEntity}id", ConditionOperator.Equal, invoiceId);
         var page = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return page.Entities.FirstOrDefault();
+    }
+
+    /// <summary>The invoice header facts the firm projection (ebilling-r1 task 130a) reads: status code, tracking number, billed and approved totals.</summary>
+    /// <param name="StatusCode">The <c>statuscode</c> as read; null when the row carries none (130b fix round 2: never turned into a code).</param>
+    internal sealed record InvoiceHeaderFacts(int? StatusCode, string? TrackingNumber, decimal? Billed, decimal? Approved);
+
+    /// <summary>
+    /// ebilling-r1 task 130a: the header facts of <paramref name="invoiceId"/> (app-only, one read), or null when the invoice does not exist. Kept
+    /// here, beside <see cref="ReadInvoiceAsync"/>, so the field-secured totals are named by this reviewed reader and not by a second type. A read
+    /// fault propagates.
+    /// </summary>
+    internal static async Task<InvoiceHeaderFacts?> ReadHeaderFactsAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
+    {
+        var query = new QueryExpression(InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(
+                "statuscode", InvoiceReviewService.InvTrackingNumber, InvoiceTotalsService.InvoiceBilledTotal, InvoiceTotalsService.InvoiceApprovedTotal),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition($"{InvoiceEntity}id", ConditionOperator.Equal, invoiceId);
+        var page = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return page.Entities.FirstOrDefault(r => r.Id == invoiceId) is { } row
+            ? new InvoiceHeaderFacts(
+                row.GetAttributeValue<OptionSetValue>("statuscode")?.Value,
+                row.GetAttributeValue<string>(InvoiceReviewService.InvTrackingNumber),
+                Money(row, InvoiceTotalsService.InvoiceBilledTotal),
+                Money(row, InvoiceTotalsService.InvoiceApprovedTotal))
+            : null;
     }
 
     internal static QueryExpression LineQuery(Guid invoiceId)
@@ -525,18 +560,10 @@ public sealed class InvoiceReviewReadService
         return page.Entities.FirstOrDefault() is { Id: var id } && id != Guid.Empty ? id : null;
     }
 
+    /// <summary>The invoice's own submission (task 165a: never another submission linked to the invoice); null when it is not linked.</summary>
     private async Task<SubmissionRead?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct)
     {
-        var query = new QueryExpression(SubmissionEntity)
-        {
-            ColumnSet = new ColumnSet(SubmissionColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        query.AddOrder("createdon", OrderType.Descending);
-        var page = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        var row = page.Entities.FirstOrDefault();
+        var row = await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, SubmissionColumns, ct).ConfigureAwait(false);
         if (row is null)
         {
             return null;
@@ -729,7 +756,8 @@ public sealed class InvoiceReviewReadService
             severity,
             findings,
             extraction.Fields,
-            lineFindings);
+            lineFindings,
+            ExtractionProvenance.IsReviewerAdded(row));
     }
 
     /// <summary>The label the screen shows for a status: Pending is shown as Processing (D-58, prototype F-1).</summary>

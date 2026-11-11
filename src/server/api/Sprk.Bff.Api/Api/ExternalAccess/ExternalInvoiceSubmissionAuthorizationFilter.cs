@@ -51,7 +51,8 @@ public static class ExternalInvoiceSubmissionAuthorizationFilterExtensions
                 services.GetRequiredService<ExternalParticipationService>(),
                 services.GetRequiredService<InvoiceSubmissionService>(),
                 services.GetRequiredService<ILogger<ExternalInvoiceSubmissionAuthorizationFilter>>(),
-                services.GetService<ExternalInvoiceSubmissionHiding>());
+                services.GetService<ExternalInvoiceSubmissionHiding>(),
+                services.GetService<ExternalInvoiceHiding>());
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -118,16 +119,20 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     private readonly InvoiceSubmissionService _submissions;
     private readonly ILogger<ExternalInvoiceSubmissionAuthorizationFilter> _logger;
     private readonly ExternalInvoiceSubmissionHiding? _hideSubmissions;
+    private readonly ExternalInvoiceHiding? _hideInvoices;
 
     /// <param name="hideSubmissions">ebilling-r1 task 098 (review round 4b): the submission decision the list applies too. Null
     /// withholds every submission on the read-one route (fail closed).</param>
+    /// <param name="hideInvoices">ebilling-r1 task 130-0 fix round 1: the caller-aware invoice seam the list applies too (a submission
+    /// follows its invoice). Null withholds a submission with an invoice on the read-one route (fail closed).</param>
     public ExternalInvoiceSubmissionAuthorizationFilter(
         ExternalInvoiceSubmissionAccess access,
         InvoiceCoreRecordKind? coreKind,
         ExternalParticipationService participations,
         InvoiceSubmissionService submissions,
         ILogger<ExternalInvoiceSubmissionAuthorizationFilter> logger,
-        ExternalInvoiceSubmissionHiding? hideSubmissions = null)
+        ExternalInvoiceSubmissionHiding? hideSubmissions = null,
+        ExternalInvoiceHiding? hideInvoices = null)
     {
         _access = access;
         _coreKind = coreKind;
@@ -135,6 +140,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         _submissions = submissions;
         _logger = logger;
         _hideSubmissions = hideSubmissions;
+        _hideInvoices = hideInvoices;
     }
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -312,7 +318,7 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         try
         {
             visible = await ExternalInvoiceSubmissionEndpoints.VisibleSubmissionsAsync(
-                principal, new[] { view }, _hideSubmissions, _logger, http.RequestAborted);
+                principal, new[] { view }, _hideSubmissions, _logger, http.RequestAborted, _hideInvoices);
         }
         catch (SdapProblemException ex)
         {
@@ -383,26 +389,36 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
     /// A contact that is not Active confers no firms (the UAC task 137 rule, <c>AccessibleRecordSetService</c>: a deactivated contact's grants
     /// confer nothing), read LIVE and remembered for the request, so it is the read the principal's own composition already made.
     /// </summary>
-    internal static async Task<(IReadOnlyList<Guid> Firms, bool Unreadable)> ReadCallerFirmsAsync(
-        CallerPrincipal principal, ExternalParticipationService participations, ILogger logger, CancellationToken ct)
+    internal static Task<(IReadOnlyList<Guid> Firms, bool Unreadable)> ReadCallerFirmsAsync(
+        CallerPrincipal principal, ExternalParticipationService participations, ILogger logger, CancellationToken ct) =>
+        ReadContactFirmsAsync(principal.ContactId, principal.ContactUnreadable, participations, logger, ct);
+
+    /// <summary>
+    /// Task 130-0b: the contact-keyed core of <see cref="ReadCallerFirmsAsync"/>, the ONE definition of a contact's firms. The contact plane
+    /// passes its principal's contact; the assistant tools pass the contact of the caller's systemuser (<see cref="ReadSystemUserFirmsAsync"/>).
+    /// <paramref name="contactUnreadable"/>: the reads that decide the contact failed (unknown, never "no firm"). <see cref="Guid.Empty"/>: no
+    /// contact (no firm).
+    /// </summary>
+    internal static async Task<(IReadOnlyList<Guid> Firms, bool Unreadable)> ReadContactFirmsAsync(
+        Guid contactId, bool contactUnreadable, ExternalParticipationService participations, ILogger logger, CancellationToken ct)
     {
-        if (principal.ContactUnreadable)
+        if (contactUnreadable)
         {
             return (Array.Empty<Guid>(), true);
         }
 
-        if (principal.ContactId == Guid.Empty)
+        if (contactId == Guid.Empty)
         {
             return (Array.Empty<Guid>(), false);
         }
 
-        switch (await participations.ReadContactStateAsync(principal.ContactId, ct))
+        switch (await participations.ReadContactStateAsync(contactId, ct))
         {
             case ContactRecordState.Active:
                 break;
             case ContactRecordState.Inactive:
                 logger.LogWarning(
-                    "[EBILLING-FIRMS] Contact {ContactId} is not Active: it confers no firms (UAC task 137).", principal.ContactId);
+                    "[EBILLING-FIRMS] Contact {ContactId} is not Active: it confers no firms (UAC task 137).", contactId);
                 return (Array.Empty<Guid>(), false);
             default:
                 return (Array.Empty<Guid>(), true);
@@ -413,19 +429,34 @@ internal sealed class ExternalInvoiceSubmissionAuthorizationFilter : IEndpointFi
         ActiveOrgMemberships memberships;
         try
         {
-            memberships = await participations.ReadOrganizationMembershipsAsync(principal.ContactId, ct);
+            memberships = await participations.ReadOrganizationMembershipsAsync(contactId, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogWarning(ex,
                 "[EBILLING-FIRMS] The organization memberships of contact {ContactId} could not be read; the caller's firms are unknown.",
-                principal.ContactId);
+                contactId);
             return (Array.Empty<Guid>(), true);
         }
 
         return memberships.Unreadable
             ? (Array.Empty<Guid>(), true)
             : (memberships.ConferringOrganizationIds.Distinct().ToList(), false);
+    }
+
+    /// <summary>
+    /// Task 130-0b: the firms of an assistant caller, a systemuser, through the same core (<see cref="ReadContactFirmsAsync"/>). The
+    /// contact is the identity resolution's (<c>IIdentityNormalizationService.ResolveAsync</c> → <c>PersonIdentity.ContactId</c>, task 141).
+    /// A failed systemuser or contact-binding read makes the firms unknown; no linked contact is no firm; a linked contact gives its firms.
+    /// </summary>
+    internal static async Task<(IReadOnlyList<Guid> Firms, bool Unreadable)> ReadSystemUserFirmsAsync(
+        Guid systemUserId, Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        ExternalParticipationService participations, ILogger logger, CancellationToken ct)
+    {
+        var person = await identity.ResolveAsync(systemUserId, ct);
+        var contactUnreadable = (person.Faults & (Sprk.Bff.Api.Services.Ai.Membership.Models.IdentityReadFaults.SystemUser
+            | Sprk.Bff.Api.Services.Ai.Membership.Models.IdentityReadFaults.ContactBinding)) != 0;
+        return await ReadContactFirmsAsync(person.ContactId ?? Guid.Empty, contactUnreadable, participations, logger, ct);
     }
 
     private static IResult Unverifiable() =>

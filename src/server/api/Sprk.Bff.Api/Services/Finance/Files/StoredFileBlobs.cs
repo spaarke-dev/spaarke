@@ -12,9 +12,10 @@ using Sprk.Bff.Api.Infrastructure.Storage;
 namespace Sprk.Bff.Api.Services.Finance.Files;
 
 /// <summary>
-/// The blob half of the Finance file store (ebilling-r1 task 090; procedure-and-file-model section 4.2): write-once staging under the
-/// tenant-partitioned name, streamed SHA-256 verification, the malware-scan verdict from the Defender index tag, pinned reads,
-/// deletes and the listing the reconcile job walks. It holds no Dataverse logic; <see cref="StoredFileService"/> owns the rows.
+/// The blob half of the Finance file store (ebilling-r1 task 090; procedure-and-file-model section 4.2): staging that is write-once per
+/// content (the same verified bytes may be rewritten on reuse, DEF-044, owner 2026-11-05) under the tenant-partitioned name, streamed
+/// SHA-256 verification, the malware-scan verdict from the Defender index tag, pinned reads, deletes and the listing the reconcile job
+/// walks. It holds no Dataverse logic; <see cref="StoredFileService"/> owns the rows.
 /// </summary>
 /// <remarks>
 /// <para><b>Placement and lifetime.</b> Singleton: one managed-identity <see cref="BlobGateway"/> over the shared
@@ -69,6 +70,9 @@ public sealed class StoredFileBlobs
     /// reads it back (<see cref="StoredFileService.ReadStagedSourceAsync"/>): the source document, its communication, its version, the
     /// attachment identity, and, on a from-email Invoice part only, the ordinals of the Supporting parts staged with it and a file
     /// extension. Written only when the spec carries them; values are ASCII.
+    /// <para>Task 118b-2: <see cref="MetadataEmlParts"/> also carries, on a from-document attempt's FIRST supporting part
+    /// (<c>document-part-1</c>), the numbers of every part of that attempt (1 to N); its other parts carry none. The key keeps its name
+    /// (it is on staged blobs already).</para>
     /// </summary>
     internal const string MetadataSourceDocument = "sourcedocument", MetadataSourceCommunication = "sourcecommunication",
         MetadataSourceVersion = "sourceversion", MetadataSourceAttachment = "sourceattachment", MetadataEmlParts = "emlparts",
@@ -243,12 +247,23 @@ public sealed class StoredFileBlobs
 
     /// <summary>
     /// Stages <paramref name="content"/> under <paramref name="fileId"/> (section 4.2): the length is checked FIRST (a length that
-    /// does not fit <c>sprk_sizebytes</c> refuses before any storage call), then the SHA-256 is computed, then one write-once create
-    /// (<c>If-None-Match: *</c>) with the metadata. An existing blob with the same SHA-256, length and source (document, communication
-    /// and attachment identity, task 094) is reused (a retry); one with different bytes or another source refuses and is left unchanged. A non-seekable stream is buffered to a temporary file first (bounded by the
-    /// same limit). The stream is read from its current position.
+    /// does not fit <c>sprk_sizebytes</c> refuses before any storage call), then the SHA-256 is computed, then one create that writes
+    /// only when no blob of that name exists (<c>If-None-Match: *</c>) with the metadata. An existing blob with the same SHA-256, length
+    /// and source (document, communication and attachment identity, task 094) is reused (a retry); one with different bytes or another
+    /// source refuses and is left unchanged. A non-seekable stream is buffered to a temporary file first (bounded by the same limit).
+    /// The stream is read from its current position.
+    /// <para><b>Write-once per content (DEF-044, owner option B, 2026-11-05).</b> A reuse is not a no-op: the same verified bytes (the
+    /// staged content, whose SHA-256 was just computed and equals the blob's recorded one) are WRITTEN BACK under
+    /// <c>If-Match: &lt;the existing blob's ETag&gt;</c>, with the blob's own content type and metadata. The write moves the ETag, so a
+    /// cleanup delete that judged the blob before this retry (the reconcile job's row-less delete, a compensation) is refused (412) and
+    /// the blob survives; it also moves Last-Modified and makes Defender scan the blob again, so the file reads Pending until that scan
+    /// lands, as any freshly staged file does (a metadata-only write would move Last-Modified WITHOUT a rescan and leave it Pending
+    /// for good). A 412 on the rewrite means someone else changed the blob since it was read: it is read and judged once more, and a
+    /// second 412 is the retryable failure below. A blob deleted since it was read is created afresh. The bytes are streamed from
+    /// <paramref name="content"/> (or its temporary file), never held in a second buffer.</para>
     /// </summary>
-    /// <exception cref="RequestFailedException">A storage fault (the caller retries; nothing is half-written: the create is atomic).</exception>
+    /// <exception cref="RequestFailedException">A storage fault (the caller retries; nothing is half-written: each write is atomic).</exception>
+    /// <exception cref="InvalidOperationException">The blob kept changing under the reuse (two 412s) or flapped between created and gone: the retryable failure.</exception>
     public async Task<StageResult> StageAsync(
         StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, Stream content, string contentType, Guid? submissionId,
         CancellationToken ct, IReadOnlyDictionary<string, string>? sourceMetadata = null)
@@ -329,36 +344,93 @@ public sealed class StoredFileBlobs
                 metadata.TryAdd(key, value);
             }
 
-            var outcome = await gateway.CreateIfNotExistsAsync(container, name, source, contentType, metadata, ct).ConfigureAwait(false);
-            if (outcome == BlobCreateOutcome.Created)
+            var created = await gateway.CreateIfNotExistsAsync(container, name, source, contentType, metadata, ct).ConfigureAwait(false);
+            if (created.Outcome == BlobCreateOutcome.Created)
             {
-                return StageResult.Staged(new StagedBlob(container, name, sha256, length, Reused: false));
+                return StageResult.Staged(new StagedBlob(container, name, sha256, length, Reused: false, created.ETag));
             }
 
             var existing = await gateway.GetPropertiesAsync(container, name, ct).ConfigureAwait(false)
                 ?? throw new InvalidOperationException($"Blob {container}/{name} existed at create but not at the read that followed; retry.");
 
-            if (existing.Metadata.TryGetValue(MetadataSha256, out var existingSha)
-                && string.Equals(existingSha, sha256, StringComparison.Ordinal)
-                && existing.ContentLength == length)
+            // A create that finds no blob (it was deleted since the read below): the same create as the first one.
+            async Task<StageResult?> CreateAfreshAsync()
             {
-                if (SameSource(existing.Metadata, metadata))
-                {
-                    return StageResult.Staged(new StagedBlob(container, name, sha256, length, Reused: true));
-                }
-
-                // Task 094 (review round 5): the same bytes staged from ANOTHER source (document, communication or eml part) are not
-                // this request's retry; reusing them would write a row whose source facts the blob does not carry.
-                _logger.LogWarning(
-                    "Stored file stage refused: blob {Container}/{BlobName} was staged from another source; left unchanged ({Code})",
-                    container, name, StoredFileRefusal.ContentConflict);
-                return StageResult.Refused(StoredFileRefusal.ContentConflict);
+                source.Position = start;
+                var again = await gateway.CreateIfNotExistsAsync(container, name, source, contentType, metadata, ct).ConfigureAwait(false);
+                return again.Outcome == BlobCreateOutcome.Created
+                    ? StageResult.Staged(new StagedBlob(container, name, sha256, length, Reused: false, again.ETag))
+                    : null;
             }
 
-            _logger.LogWarning(
-                "Stored file stage refused: blob {Container}/{BlobName} already holds different bytes; left unchanged ({Code})",
-                container, name, StoredFileRefusal.ContentConflict);
-            return StageResult.Refused(StoredFileRefusal.ContentConflict);
+            for (var attempt = 1; ; attempt++)
+            {
+                if (!existing.Metadata.TryGetValue(MetadataSha256, out var existingSha)
+                    || !string.Equals(existingSha, sha256, StringComparison.Ordinal)
+                    || existing.ContentLength != length)
+                {
+                    _logger.LogWarning(
+                        "Stored file stage refused: blob {Container}/{BlobName} already holds different bytes; left unchanged ({Code})",
+                        container, name, StoredFileRefusal.ContentConflict);
+                    return StageResult.Refused(StoredFileRefusal.ContentConflict);
+                }
+
+                if (!SameSource(existing.Metadata, metadata))
+                {
+                    // Task 094 (review round 5): the same bytes staged from ANOTHER source (document, communication or eml part) are
+                    // not this request's retry; reusing them would write a row whose source facts the blob does not carry.
+                    _logger.LogWarning(
+                        "Stored file stage refused: blob {Container}/{BlobName} was staged from another source; left unchanged ({Code})",
+                        container, name, StoredFileRefusal.ContentConflict);
+                    return StageResult.Refused(StoredFileRefusal.ContentConflict);
+                }
+
+                // The same verified bytes (hashed above; equal to the blob's recorded SHA-256 and length), back onto the blob that was
+                // just read: its own content type and ITS metadata, whole (a write replaces metadata, so none is dropped: the SHA-256,
+                // purpose, submission, environment marker and source facts the readers and the reconcile job use stay as they were).
+                source.Position = start;
+                var rewrite = await gateway.OverwriteIfMatchAsync(
+                    container, name, source, existing.ContentType, existing.Metadata, existing.ETag, ct).ConfigureAwait(false);
+                switch (rewrite.Outcome)
+                {
+                    case BlobOverwriteOutcome.Overwritten:
+                        return StageResult.Staged(new StagedBlob(container, name, sha256, length, Reused: true, rewrite.ETag));
+
+                    case BlobOverwriteOutcome.NotFound:
+                        // Deleted between the read and the rewrite: nothing to reuse, so this stage is the blob's first write.
+                        if (await CreateAfreshAsync().ConfigureAwait(false) is { } fresh)
+                        {
+                            return fresh;
+                        }
+
+                        break;
+
+                    default:
+                        _logger.LogInformation(
+                            "Stored file stage: blob {Container}/{BlobName} changed after it was read (412) while it was being reused (attempt {Attempt})",
+                            container, name, attempt);
+                        break;
+                }
+
+                if (attempt == 2)
+                {
+                    throw new InvalidOperationException($"Blob {container}/{name} kept changing while it was being reused; retry.");
+                }
+
+                // Read it again and judge it again (the one retry). A blob gone by now is created afresh.
+                var reread = await gateway.GetPropertiesAsync(container, name, ct).ConfigureAwait(false);
+                if (reread is null)
+                {
+                    if (await CreateAfreshAsync().ConfigureAwait(false) is { } recreated)
+                    {
+                        return recreated;
+                    }
+
+                    throw new InvalidOperationException($"Blob {container}/{name} existed at create but not at the read that followed; retry.");
+                }
+
+                existing = reread;
+            }
         }
         finally
         {
@@ -369,10 +441,17 @@ public sealed class StoredFileBlobs
         }
     }
 
-    /// <summary>The source keys a reused stage must carry exactly as the request does (absent on one side and present on the other differs).</summary>
-    private static readonly string[] SourceIdentityKeys = [MetadataSourceDocument, MetadataSourceCommunication, MetadataSourceAttachment];
+    /// <summary>
+    /// The source keys a reused stage must carry exactly as the request does (absent on one side and present on the other differs). Task
+    /// 118b-2: the parts list (<see cref="MetadataEmlParts"/>) is one of them, so a stage left by a request with ANOTHER set of parts (a
+    /// from-document attempt's first part lists every part) is a conflict, never reused: reusing it would make the commit read that other
+    /// set and copy files this request did not name. For from-email the list is fixed by the key the ids derive from (the same email,
+    /// record and marks), so a retry of the same request carries the same list.
+    /// </summary>
+    private static readonly string[] SourceIdentityKeys =
+        [MetadataSourceDocument, MetadataSourceCommunication, MetadataSourceAttachment, MetadataEmlParts];
 
-    /// <summary>True when the existing blob's source document, communication and attachment (eml part) identity equal the request's.</summary>
+    /// <summary>True when the existing blob's source document, communication, attachment (eml part) identity and parts list equal the request's.</summary>
     private static bool SameSource(IReadOnlyDictionary<string, string> existing, IReadOnlyDictionary<string, string> requested) =>
         SourceIdentityKeys.All(key => string.Equals(
             existing.TryGetValue(key, out var had) ? had : null,

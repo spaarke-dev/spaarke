@@ -788,6 +788,11 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "statuscode",
             // r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
             "sprk_totalamount_base",
+            // ebilling-r1 082c-2 (owner 2026-11-04; uac-r2 approved with conditions): the partner-readable review detail, NOT grid-derived.
+            "sprk_reviewdetail",
+            // ebilling-r1 task 130-0 fix round 2 (K3, D-28; lead-approved, uac-r2 accepted with conditions): the work assignment
+            // scope dimension, NOT grid-derived; ValidateReadableColumns requires every dimension attribute to be readable.
+            "sprk_regardingworkassignment",
         },
         ["sprk_workassignment"] = new[]
         {
@@ -840,6 +845,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
             "statuscode", // the 2026-10-17 addition above; on both sides, so the shrink comparison is unchanged
             "sprk_totalamount_base", // r3 task 002 addition (owner 2026-10-29); on both sides so the shrink comparison is unchanged
+            "sprk_reviewdetail", // ebilling-r1 082c-2 addition (owner 2026-11-04, uac-r2); on both sides so the shrink comparison is unchanged
+            "sprk_regardingworkassignment", // ebilling-r1 130-0 fix round 2 addition (K3, D-28); on both sides so the shrink comparison is unchanged
         },
         ["sprk_workassignment"] = new[]
         {

@@ -17,9 +17,16 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// "unknown membership", never as the answer — a truncated sweep reported as success is precisely the
 /// failure this type exists to make unsayable.
 /// </param>
+/// <param name="UnreadableRows">
+/// Fix round 3e: the number of junction rows whose lookup column was not returned by the read (absent from the row, which
+/// is not the same as an explicit null "not filed"). Such a row cannot be attributed to anyone, so it is UNRESOLVED: a
+/// caller counts it in the same counter it keeps for any other member it could not resolve (the sweep then reports not-Ok
+/// and the next run decides it again). Zero for a complete read.
+/// </param>
 internal readonly record struct OrganizationMemberSet(
     IReadOnlyList<Guid> ContactIds,
-    bool ExceededBound);
+    bool ExceededBound,
+    int UnreadableRows = 0);
 
 /// <summary>
 /// Reads <c>sprk_contactorganization</c> — the contact↔organization membership junction — in the
@@ -116,13 +123,15 @@ internal static class ExternalOrganizationMembership
         if (rows.Count > MaxMembersPerSweep)
             return new OrganizationMemberSet(Array.Empty<Guid>(), ExceededBound: true);
 
+        // Fix round 3e: a row that did not carry the contact column is unresolved (counted), never "no member". An explicit
+        // null (the junction row names no contact) is still skipped.
         var contactIds = rows
-            .Where(r => r.ContactId.HasValue)
+            .Where(r => r.ContactRead && r.ContactId.HasValue)
             .Select(r => r.ContactId!.Value)
             .Distinct()
             .ToList();
 
-        return new OrganizationMemberSet(contactIds, ExceededBound: false);
+        return new OrganizationMemberSet(contactIds, ExceededBound: false, UnreadableRows: rows.Count(r => !r.ContactRead));
     }
 
     /// <summary>
@@ -155,23 +164,37 @@ internal static class ExternalOrganizationMembership
         if (rows.Count > MaxMembersPerSweep)
             return new OrganizationMemberSet(Array.Empty<Guid>(), ExceededBound: true);
 
+        // Fix round 3e: as above, for the organization column.
         var organizationIds = rows
-            .Where(r => r.OrganizationId is { } id && id != Guid.Empty)
+            .Where(r => r.OrganizationRead && r.OrganizationId is { } id && id != Guid.Empty)
             .Select(r => r.OrganizationId!.Value)
             .Distinct()
             .ToList();
 
-        return new OrganizationMemberSet(organizationIds, ExceededBound: false);
+        return new OrganizationMemberSet(organizationIds, ExceededBound: false, UnreadableRows: rows.Count(r => !r.OrganizationRead));
     }
 
-    /// <summary>Minimal projection of a <c>sprk_contactorganization</c> junction row.</summary>
+    /// <summary>
+    /// Minimal projection of a <c>sprk_contactorganization</c> junction row. Fix round 3e: each setter records that its column
+    /// was PRESENT in the row (an explicit JSON null included), so a column the read did not return is told apart from one that
+    /// is not filed. <see cref="ContactRead"/> / <see cref="OrganizationRead"/> are false for an absent column.
+    /// </summary>
     internal sealed class ContactOrganizationRow
     {
+        private Guid? _contactId;
+        private Guid? _organizationId;
+
         [JsonPropertyName("_sprk_contact_value")]
-        public Guid? ContactId { get; set; }
+        public Guid? ContactId { get => _contactId; set { _contactId = value; ContactRead = true; } }
 
         /// <summary>Slice C2c: read only by <see cref="QueryActiveOrganizationsOfContactAsync"/>.</summary>
         [JsonPropertyName("_sprk_organization_value")]
-        public Guid? OrganizationId { get; set; }
+        public Guid? OrganizationId { get => _organizationId; set { _organizationId = value; OrganizationRead = true; } }
+
+        /// <summary>The contact column was present in the row.</summary>
+        internal bool ContactRead { get; private set; }
+
+        /// <summary>The organization column was present in the row.</summary>
+        internal bool OrganizationRead { get; private set; }
     }
 }

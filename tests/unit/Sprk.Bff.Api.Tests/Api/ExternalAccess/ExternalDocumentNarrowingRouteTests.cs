@@ -232,7 +232,10 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
                 return Task.FromResult(new FetchResponseDto(ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
             },
             data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, NullLogger.Instance, CancellationToken.None,
-            data.GetLiveParentRootsAsync);
+            data.GetLiveParentRootsAsync,
+            // ebilling-r1 task 130-0b F3b: the route passes the chain reader (the invoice links up a row's parent chain); a row that
+            // has a parent and is given no reader is undecidable, so it is hidden.
+            readDocumentChains: data.ReadModuleDocumentAncestorLinksAsync);
 
         executed.Should().Contain("name=\"sprk_accesspermission\"").And.Contain("name=\"sprk_parentdocument\"")
             .And.Contain("name=\"sprk_relatedcommunication\"");
@@ -622,6 +625,90 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
         AssertOnePastBoundWarning(logger, ((Guid)row["sprk_documentid"]!).ToString(), "chain_cycle", 2, plane: "systemuser");
     }
 
+    // ── The narrowing's bound and the invoice walk's bound on the same chain ─────────────────────────────────────
+
+    private const string InvoiceWalkPastBoundCode = "[" + InvoiceLinks.WalkPastTheBoundEvent + "]";
+
+    /// <summary>
+    /// A chain of exactly <see cref="ExternalDocumentNarrowing.MaxHops"/> parent documents whose top parent is also filed under a
+    /// service request: an edge the invoice walk follows (its hop counts, <see cref="InvoiceLinks.MaxWalkHops"/>) and the narrowing
+    /// does not. When the service request comes back the row is shown; when it does not, the invoice walk cannot decide the chain,
+    /// so the row is hidden and the list says truncated (fail closed), with no past-bound warning from either walk.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DocumentsModuleFetch_AChainOfExactlyMaxHops_WithAParentOnlyTheInvoiceWalkReads_IsShownOnlyWhenThatParentComesBack(bool seeded)
+    {
+        var serviceRequest = Guid.NewGuid();
+        var top = Ancestor();
+        _fixture.Data.SetColumn("sprk_documents", "sprk_documentid", top.ToString(), "_sprk_relatedservicerequest_value", serviceRequest.ToString());
+        if (seeded)
+            _fixture.Data.AddFilingRow("sprk_servicerequest", serviceRequest);
+        var logger = new CapturingLogger();
+
+        var body = await FetchDocumentsLogged(Reader(P), _fixture.NewService(), logger,
+            ModuleRow("plain"),
+            ModuleRow("three parents", parent: Ancestor(parent: Ancestor(parent: top))));
+
+        if (seeded)
+        {
+            body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("plain", "three parents");
+            body.Truncated.Should().BeFalse();
+        }
+        else
+        {
+            body.Entities.Select(r => r["sprk_documentname"]).Should().Equal(new[] { "plain" }, "a parent that does not come back is undecidable");
+            body.Truncated.Should().BeTrue("a row hidden because its chain cannot be decided is a fault, and the list says so");
+        }
+
+        logger.Entries.Should().NotContain(e => e.Line.Contains(PastBoundCode), "the narrowing decided the chain within its bound");
+        logger.Entries.Should().NotContain(e => e.Line.Contains(InvoiceWalkPastBoundCode), "the invoice walk stayed within its bound");
+    }
+
+    /// <summary>
+    /// Both bounds on the same chains of parent documents. Both walks count a hop as one parent row read (an edge), so a chain of
+    /// N parents is N hops for each: the narrowing shows it up to <see cref="ExternalDocumentNarrowing.MaxHops"/> and hides it past
+    /// that with its past-bound warning; the invoice walk alone decides it up to <see cref="InvoiceLinks.MaxWalkHops"/> and leaves
+    /// it undecidable past that with its own warning.
+    /// </summary>
+    [Theory]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public async Task AChainOfNParents_IsDecidedByEachWalkWithinItsOwnBound(int parents)
+    {
+        ExternalDocumentNarrowing.MaxHops.Should().Be(3);
+        InvoiceLinks.MaxWalkHops.Should().Be(5);
+        Guid? first = null;
+        for (var i = 0; i < parents; i++)
+            first = Ancestor(parent: first);
+        var row = ModuleRow("n parents", parent: first);
+        var data = _fixture.NewService();
+
+        var narrowingLog = new CapturingLogger();
+        var body = await FetchDocumentsLogged(Reader(P), data, narrowingLog, row);
+        if (parents <= ExternalDocumentNarrowing.MaxHops)
+        {
+            body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("n parents");
+            body.Truncated.Should().BeFalse();
+            narrowingLog.Entries.Should().NotContain(e => e.Line.Contains(PastBoundCode));
+        }
+        else
+        {
+            body.Entities.Should().BeEmpty();
+            body.Truncated.Should().BeTrue();
+            AssertOnePastBoundWarning(narrowingLog, ((Guid)row["sprk_documentid"]!).ToString(), "chain_too_long",
+                ExternalDocumentNarrowing.MaxHops, plane: "contact");
+        }
+
+        var (chains, failed) = await data.ReadModuleDocumentAncestorLinksAsync("sprk_document", new[] { row }, "sprk_documentid", CancellationToken.None);
+        failed.Should().BeFalse();
+        chains.Should().ContainSingle().Which.ChainUndecidable.Should().Be(parents > InvoiceLinks.MaxWalkHops,
+            "the invoice walk decides a chain of up to MaxWalkHops parents, and no more");
+    }
+
     /// <summary>The parent of a document whose chain loops: parent a → b → a.</summary>
     private Guid CycleParent()
     {
@@ -662,7 +749,10 @@ public sealed class ExternalDocumentNarrowingRouteTests : IClassFixture<External
             caller, Registry(), new FetchXmlEntityExtractor(),
             (request, _) => Task.FromResult(new FetchResponseDto(ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null)),
             data.GetNonSecureRootsAsync, data.NarrowDocumentsAsync, logger, CancellationToken.None,
-            data.GetLiveParentRootsAsync);
+            data.GetLiveParentRootsAsync,
+            // The route passes the invoice chain reader (ExternalModuleDataEndpoints' route handler); a row that has a parent
+            // and is given no reader is undecidable, so it is hidden.
+            readDocumentChains: data.ReadModuleDocumentAncestorLinksAsync);
         return result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!;
     }
 

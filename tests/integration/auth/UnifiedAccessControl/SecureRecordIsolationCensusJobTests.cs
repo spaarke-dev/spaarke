@@ -101,6 +101,16 @@ public class SecureRecordIsolationCensusJobTests
             _directory.Depth(OwnerRole, privilegeId, PrivilegeDepth.Basic);
         }
 
+        // ebilling-r1 (NFR-05 depth list): the environment also has the hard-deny tables' Reads the codified set does not list
+        // (none since task 086 codified sprk_storedfile) — iterated FROM the list, held by no role here.
+        foreach (var (logicalName, privilegeName) in SecureBuRoleDepthAssertion.RestrictedContentPrivileges
+                     .Where(e => SecureRecordOwnerRoleSet.Embedded.Tables.All(t => !string.Equals(t.PrivilegeName, e.PrivilegeName, StringComparison.OrdinalIgnoreCase))))
+        {
+            var privilegeId = Guid.NewGuid();
+            _directory.Privilege(privilegeId, privilegeName);
+            _codifiedChildPrivileges[logicalName] = privilegeId;
+        }
+
         _directory.User(Admin, "Ralph Admin", RootBu, accessMode: 0, isDisabled: false, isApplication: false, SysAdminRole);
         _directory.User(TestUser, "Test User 1", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false, BasicUserSiblingCopy);
         _directory.User(AppUser, "# mi-bff-api-dev", RootBu, accessMode: 4, isDisabled: false, isApplication: true);
@@ -300,6 +310,33 @@ public class SecureRecordIsolationCensusJobTests
         result.Success.Should().BeFalse();
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("prvReadsprk_Memo"));
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(moved.ToString()));
+    }
+
+    /// <summary>
+    /// ebilling-r1 (089a review F3): an NFR-05 depth-list privilege the environment lacks (<c>sprk_storedfile</c>) leaves that
+    /// table ungraded. Since task 086 every depth-list entry is codified, so the verdict reaches the job only where clause 5
+    /// cannot grade (089a review K6): a second owner role here. It is ONE Error line naming it beside clause 5's role-count
+    /// Error, never Critical (neither is an exposure), and the run reports <c>findings</c>, not <c>isolated</c>.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenADepthListPrivilegeDoesNotExistInTheEnvironment_LogsOneErrorNamingIt_NotCritical()
+    {
+        _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_storedfile"]);
+        var secondOwnerRole = Guid.Parse("00000000-0000-0000-0000-0000000003c2");
+        _directory.Role(secondOwnerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, secondOwnerRole);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse("a table whose isolation is unknown is not reported as isolated");
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error
+                                                 && e.Message.Contains(nameof(SecureBuVerdict.RestrictedContentPrivilegeNotResolved))
+                                                 && e.Message.Contains("prvReadsprk_StoredFile"));
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error
+                                                 && e.Message.Contains(nameof(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege))
+                                                 && e.Message.Contains("2 role(s)"));
+        _log.Entries.Where(e => e.Level == LogLevel.Error).Should().HaveCount(2);
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical, "an ungraded table is not an exposure");
+        _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=findings"));
     }
 
     /// <summary>A missing GUARDED privilege still stops the run: clause 1 cannot be graded without it.</summary>

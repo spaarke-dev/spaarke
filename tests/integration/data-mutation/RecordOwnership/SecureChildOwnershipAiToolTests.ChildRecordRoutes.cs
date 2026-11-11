@@ -441,11 +441,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [InlineData("sprk_servicerequest")]
     [InlineData("sprk_communication")]
     [InlineData("account")]
+    // ebilling-r1 task 096b (EB-D-201): invoices and their lines are created only by submission, Add line and extraction.
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_billingevent")]
     public async Task ChildCreate_OfATableOutsideTheCensus_IsRefused400(string table)
     {
         var result = await CreateChild(table, new() { ["sprk_name"] = "x" });
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        _user.Posts.Should().BeEmpty("no write as the caller");
         ReasonCode(result).Should().Be(ChildRecordEndpoints.UnsupportedTableCode);
         _appCreates.Should().BeEmpty();
     }
@@ -458,13 +462,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         { "sprk_todo", "sprk_RegardingMatter" },
         { "sprk_event", "sprk_RegardingMatter" },
         { "sprk_memo", "sprk_RegardingMatter" },
-        { "sprk_invoice", "sprk_Matter" },
         { "sprk_reportcard", "sprk_RegardingMatter" },
         { "sprk_analysis", "sprk_RegardingMatter" },
         { "sprk_document", "sprk_Matter" },
         { "sprk_budget", "sprk_Matter" },
         { "sprk_kpiassessment", "sprk_Matter" },
-        { "sprk_billingevent", "sprk_matter" },
+        // ebilling-r1 task 164a-1 (uac-r2 Q6): sprk_billingevent left the route; its refusal is in
+        // SecureChildOwnershipAiToolTests.InvoiceFamilyGuard.cs. Task 096b (EB-D-201): so did sprk_invoice (the same file, and
+        // ChildCreate_OfATableOutsideTheCensus_IsRefused400).
     };
 
     [Fact]

@@ -1097,6 +1097,9 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::RejectInvoiceAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.SignalEvaluationService::UpsertSignalAsync"] = "Writes sprk_spendsignal only (SignalEntity).",
+        // ebilling-r1 task 095d-2b-2: the re-run's after-commit Signal steps record their state on the submission.
+        ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionRerun::WriteSignalStateAsync"] =
+            "Writes sprk_invoicesubmission only (FinanceBaseValues.SubmissionEntity): sprk_findingsjson and sprk_adminattention, a payload it builds itself.",
         // ebilling-r1 (D-104): the rollup's write moved into WriteRollupAsync, whose one caller passes BuildRollupFields.
         ["Sprk.Bff.Api.Services.Finance.FinanceRollupService::WriteRollupAsync"] =
             "Writes its own rollup fields (BuildRollupFields, then BuildPendingSpendFields) to sprk_matter or sprk_project only " +

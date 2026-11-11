@@ -109,6 +109,7 @@ function Invoke-DvWrite([string]$Method, [string]$Path, $Body, [hashtable]$Extra
 }
 
 . (Join-Path $PSScriptRoot '..' 'common' 'DataverseSolutionMembership.ps1')
+. (Join-Path $PSScriptRoot '../common/OntologyWriterUnit.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 $script:Wrote = $false
 function Report([string]$State, [string]$What) {
@@ -135,14 +136,24 @@ $reader = $null
 if ($readers.Count -eq 1) { $reader = $readers[0]; Report 'OK' "(p1) profile '$ReaderProfileName' exists" }
 else { Report 'FAIL' "(p1) $($readers.Count) profile(s) named '$ReaderProfileName' - exactly one is required; it is created by scripts/Set-RecordCreatorPersonSchema.ps1 (this script never creates it)" }
 
-if ($reader) {
-    $onReader = @($reader.teamprofiles_association | ForEach-Object { $_.teamid.ToString().ToLowerInvariant() })
-    $defaultTeams = @((Invoke-DvGet 'teams?$select=teamid,name&$filter=isdefault eq true&$expand=businessunitid($select=name)').value)
+# The ontology writer's business unit's default team (scripts/common/OntologyWriterUnit.ps1) is left out of the set that must hold the
+# reader profile, and is a FAIL when it does hold it (reported, never removed).
+function Test-ReaderOnDefaultTeam([string[]]$OnReader, $ReaderProfileId) {
+    $defaultTeams = @((Invoke-DvGet 'teams?$select=teamid,name,_businessunitid_value&$filter=isdefault eq true&$expand=businessunitid($select=name)').value)
     if ($defaultTeams.Count -eq 0) { Report 'FAIL' '(p2) no business-unit default team was read - the query is wrong' }
-    foreach ($t in $defaultTeams) {
-        if ($onReader -contains $t.teamid.ToString().ToLowerInvariant()) { Report 'OK' "(p2) reader profile on default team '$($t.name)' (BU '$($t.businessunitid.name)')" }
+    $split = Split-DvDefaultTeamsByOntologyWriterUnit -Api $Api -Headers $headers -DefaultTeams $defaultTeams
+    $left = @($split.WriterUnitTeams | ForEach-Object { "'$($_.name)' ($($_.teamid))" })
+    Report 'INFO' "(p2) ontology writer business unit: default team left out of the reader profile: $(if ($left.Count) { $left -join ', ' } else { 'none' })"
+    foreach ($w in @(Get-DvOntologyWriterUnitTeamsOnProfile -Api $Api -Headers $headers -ProfileId $ReaderProfileId -WriterUnitTeams $split.WriterUnitTeams)) {
+        Report 'FAIL' "(p2) the ontology writer business unit's default team '$($w.name)' holds the reader profile - it must hold no field-security profile. Removing it is a team change (the owner's); this script never removes a member"
+    }
+    foreach ($t in $split.ReaderTeams) {
+        if ($OnReader -contains $t.teamid.ToString().ToLowerInvariant()) { Report 'OK' "(p2) reader profile on default team '$($t.name)' (BU '$($t.businessunitid.name)')" }
         else { Report 'FAIL' "(p2) default team '$($t.name)' (BU '$($t.businessunitid.name)') is NOT on the reader profile - its users would read the firm reason EMPTY. Adding it is a team change (the owner's); this script never makes it" }
     }
+}
+if ($reader) {
+    Test-ReaderOnDefaultTeam @($reader.teamprofiles_association | ForEach-Object { $_.teamid.ToString().ToLowerInvariant() }) $reader.fieldsecurityprofileid
 }
 
 $ontologyWriter = @((Invoke-DvGet "systemusers?`$select=systemuserid,fullname&`$filter=applicationid eq $OntologyWriterApplicationId").value) | Select-Object -First 1

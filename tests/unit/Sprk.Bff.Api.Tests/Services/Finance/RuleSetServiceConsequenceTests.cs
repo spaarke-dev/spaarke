@@ -153,6 +153,7 @@ public sealed class RuleSetServiceConsequenceTests
         var real = await h.Service().PublishAsync(set, Effective, default);
         await using var host = await RuleSetEndpointsTests.Host.StartAsync();
         host.Service.Setup(s => s.PublishAsync(set, It.IsAny<DateOnly>(), It.IsAny<CancellationToken>())).ReturnsAsync(real);
+        host.Access.Grant("sprk_rulesets", set, Spaarke.Dataverse.AccessRights.Read); // 089e: the by-id routes ask the caller's Read on the set
 
         var response = await host.Client.SendAsync(RateCardImportEndpointsTests.Req(
             "POST", $"/api/finance/rulesets/{set}/publish", content: JsonContent.Create(new { effectiveDate = "2026-11-01" })));

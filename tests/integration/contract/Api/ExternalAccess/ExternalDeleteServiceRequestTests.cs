@@ -294,6 +294,73 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
         _fixture.Data.ServiceRequestDeletes.Should().BeEmpty();
     }
 
+    // ── 130-0 F3b: a service request follows the child rule (after the requester gate) ─────────────────────────────
+
+    [Fact(DisplayName = "130-0 F3b delete own (must fire): the requester's own request linked to another firm's invoice is the uniform denial, and nothing is probed or deleted")]
+    public async Task ARequestOfAnotherFirmsInvoice_IsTheUniformDenial_AndNothingIsDeleted()
+    {
+        var invoice = Guid.NewGuid();
+        var id = SeedRequest(Me);
+        _fixture.Data.ServiceRequestInvoices[id] = new[] { invoice };
+        _fixture.InvoiceHiding = InvoiceHidingStub.Hiding(invoice);
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Data.Requesters.ContainsKey(id).Should().BeTrue();
+        _fixture.Data.ServiceRequestDeletes.Should().BeEmpty();
+        _fixture.Data.RelationshipProbeCalls.Should().Be(0, "the invoice rule precedes the relationship check");
+    }
+
+    [Fact(DisplayName = "130-0 F3b delete own (fault, must fire): a decision on the request's invoice that could not be made is the invoice-unreadable 503, and nothing is deleted")]
+    public async Task ARequestWhoseInvoiceDecisionFaults_Is503_AndNothingIsDeleted()
+    {
+        var invoice = Guid.NewGuid();
+        var id = SeedRequest(Me);
+        _fixture.Data.ServiceRequestInvoices[id] = new[] { invoice };
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        ProblemCode(body).Should().Be(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        _fixture.Data.ServiceRequestDeletes.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0 F3b delete own (must not fire): a request linked to an invoice the caller may see is deleted as any other")]
+    public async Task ARequestOfAVisibleInvoice_IsDeleted()
+    {
+        var invoice = Guid.NewGuid();
+        var id = SeedRequest(Me);
+        _fixture.Data.ServiceRequestInvoices[id] = new[] { invoice };
+        _fixture.InvoiceHiding = InvoiceHidingStub.NoneHidden();
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent, await response.Content.ReadAsStringAsync());
+        _fixture.Data.ServiceRequestDeletes.Should().Equal(id);
+    }
+
+    [Fact(DisplayName = "130-0 F3b delete own (order, must fire): another requester's linked request is the uniform denial and its invoice is never decided")]
+    public async Task AnotherRequestersLinkedRequest_AsksNoInvoiceDecision()
+    {
+        var invoice = Guid.NewGuid();
+        var id = SeedRequest(SomeoneElse);
+        _fixture.Data.ServiceRequestInvoices[id] = new[] { invoice };
+        var hiding = InvoiceHidingStub.Hiding(invoice);
+        _fixture.InvoiceHiding = hiding;
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        await ShouldBeTheUniformDenial(response);
+        hiding.Calls.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task NotTheRequester_WhenTheRequestHasActivity_IsStill403_NotAConflict()
     {

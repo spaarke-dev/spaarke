@@ -46,6 +46,36 @@ public static class BillingRuleCatalogue
     /// </summary>
     public static bool IsSystemType(RuleType ruleType) => ruleType == RuleType.SubmissionIntegrity;
 
+    /// <summary>
+    /// How rules of one billing type from several Procedures combine (ebilling-r1 task 082b; procedure model 7.3; ontology D-172 Q7
+    /// "limits replace, checklists add"; the per-type table in <c>notes/rule-set-scope-design.md</c> 3.3). <see cref="BillingRulePrecedence.Replace"/>:
+    /// a numeric limit, the highest-ranked accepted version replaces the others of its <see cref="BillingRuleDefinition.PrecedenceKey"/>.
+    /// <see cref="BillingRulePrecedence.Additive"/>: a checklist, every in-force version applies. <see cref="BillingRulePrecedence.Split"/>:
+    /// ExpenseRule only, its per-category caps replace and its non-reimbursable codes add (ontology F3-c). Closed: an exhaustive switch,
+    /// reviewed as code (D-27); a non-billing type throws. The evaluator applies it (task 082c).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Not a billing type.</exception>
+    public static BillingRulePrecedence PrecedenceOf(RuleType ruleType) => ruleType switch
+    {
+        RuleType.ApprovedTimekeeper => BillingRulePrecedence.Additive,
+        RuleType.ApprovedRate => BillingRulePrecedence.Replace,
+        RuleType.TimeIncrement => BillingRulePrecedence.Replace,
+        RuleType.DailyHoursCap => BillingRulePrecedence.Replace,
+        RuleType.NonBillableActivity => BillingRulePrecedence.Additive,
+        RuleType.ExpenseRule => BillingRulePrecedence.Split,
+        RuleType.InvoiceAge => BillingRulePrecedence.Replace,
+        RuleType.CoreRecordWindow => BillingRulePrecedence.Replace,
+        RuleType.Duplicate => BillingRulePrecedence.Replace,
+        RuleType.RequiredData => BillingRulePrecedence.Additive,
+        RuleType.AiObservation => BillingRulePrecedence.Additive,
+        // Keyed by PrecedenceKey: the rule type plus the fee kind, and for 'other' the exact fee-code set (owner 2026-10-21, D-39).
+        RuleType.AddedFee => BillingRulePrecedence.Replace,
+        RuleType.Discount => BillingRulePrecedence.Replace,
+        // The system type (D-125): one seeded policy outside the Procedure model, never displaced and never displacing.
+        RuleType.SubmissionIntegrity => BillingRulePrecedence.Additive,
+        _ => throw new ArgumentOutOfRangeException(nameof(ruleType), ruleType, "Not a billing rule type."),
+    };
+
     /// <summary>The system policy's code (D-125): one policy, seeded by <c>scripts/ebilling/Seed-BillingSystemPolicy.ps1</c>.</summary>
     public const string SystemPolicyCode = "BILL-SYSTEM-SUBMISSION";
 
@@ -225,7 +255,9 @@ public static class BillingRuleCatalogue
         // D-125: the values the four system reasons compare, as 049 reads them (BillingSystemFindings builds exactly these).
         RuleType.SubmissionIntegrity => Fields(
             "submission.invoiceNumber", "invoice.invoiceNumber", "line.codeKind", "line.refusedCode", "line.firmCode", "line.suggestedCode",
-            "codeSet.name"),
+            "codeSet.name",
+            // ebilling-r1 082c-2: the Procedure gap and the unresolved hold (BillingSystemFindings.ProcedureGap / ProceduresUnresolved).
+            "procedure.name", "procedure.workDate", "procedure.gapKind", "procedure.cause"),
         // Task 115: AddedFee's cap form only (the other two allowances are refused before evaluation); feeTotal / feeLimit are amounts.
         // AddedFee's finding is invoice level (ontology-r1 115 review F3-6), so it has no line token; rule.feeKind is the kind's label.
         RuleType.AddedFee => Fields("feeTotal", "feeLimit", "rule.feeKind"),
@@ -289,6 +321,9 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewTemplate,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetTemplate,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableTemplate,
+        BillingReasonCodes.SubmissionFirmMissing => FirmMissingTemplate,
+        BillingReasonCodes.SubmissionProcedureGap => ProcedureGapTemplate,
+        BillingReasonCodes.SubmissionProceduresUnresolved => ProceduresUnresolvedTemplate,
         BillingEvaluationReasons.CurrencyMissing => RatesNotCheckedPrefix + "missing.",
         BillingEvaluationReasons.CurrencyUnreliable => RatesNotCheckedPrefix + "unclear.",
         BillingEvaluationReasons.CurrencyNotUsd => RatesNotCheckedPrefix + "not USD.",
@@ -367,6 +402,27 @@ public static class BillingRuleCatalogue
     public const string CodingUnavailableTemplate =
         "Code suggestion was not available when this invoice was processed, so no codes were suggested for the invoice lines.";
 
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionFirmMissing"/> (ebilling-r1 task 095c-3, D-201): the invoice has no firm,
+    /// so its billing rules were not checked and it cannot be approved until a reviewer adds the firm.</summary>
+    public const string FirmMissingTemplate =
+        "This invoice was submitted without a firm, so its billing rules were not checked. A reviewer must add the firm before it can be approved.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionProcedureGap"/> (ebilling-r1 082c-2, brief C11). Internal reviewers only
+    /// (C18: the external view never carries it); the gap kind is a closed text (<see cref="BillingSystemFindings.GapKindText"/>).</summary>
+    public const string ProcedureGapTemplate =
+        "No billing terms of the procedure {{procedure.name}} are in force on {{procedure.workDate}} ({{procedure.gapKind}}), so its billing rules were not checked on the work dated then. The invoice is on hold until the terms are set up or the dates are corrected.";
+
+    /// <summary>The message of <see cref="BillingReasonCodes.SubmissionProceduresUnresolved"/> (ebilling-r1 082c-2, brief C14, C15). The cause is
+    /// a closed text (<see cref="BillingSystemFindings.CauseText"/>); never an exception message.</summary>
+    public const string ProceduresUnresolvedTemplate =
+        "The billing terms of this invoice could not be checked ({{procedure.cause}}), so no billing rule was checked. The invoice is on hold for review.";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionProcedureGap"/>'s Signal (brief 082c C11). A gap means a Procedure IS associated but no version is in force on some work date (ontology F2, 2026-11-05: the first wording said no procedure was associated), so the title says that, as <see cref="ProcedureGapTemplate"/> and the review detail "Waiting for billing terms" do.</summary>
+    public const string ProcedureGapHeadline = "No billing terms in force for some work dates";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionProceduresUnresolved"/>'s Signal.</summary>
+    public const string ProceduresUnresolvedHeadline = "Billing terms could not be checked";
+
     /// <summary>The title of <see cref="BillingReasonCodes.SubmissionInvoiceNumberMismatch"/>'s Signal.</summary>
     public const string InvoiceNumberMismatchHeadline = "Invoice number differs from the submission";
 
@@ -396,6 +452,9 @@ public static class BillingRuleCatalogue
 
     /// <summary>The title of <see cref="BillingReasonCodes.CodingUnavailable"/>'s Signal.</summary>
     public const string CodingUnavailableHeadline = "Lines not coded";
+
+    /// <summary>The title of <see cref="BillingReasonCodes.SubmissionFirmMissing"/>'s Signal.</summary>
+    public const string FirmMissingHeadline = "Firm needed";
 
     /// <summary>The title (<c>sprk_name</c>) of D-115's "money not judged" Signal.</summary>
     public const string RatesNotCheckedHeadline = "Rates and expense caps not checked";
@@ -429,6 +488,9 @@ public static class BillingRuleCatalogue
         BillingReasonCodes.CodingCodeSetNeedsReview => CodeSetNeedsReviewHeadline,
         BillingReasonCodes.CodingNoCodeSet => NoCodeSetHeadline,
         BillingReasonCodes.CodingUnavailable => CodingUnavailableHeadline,
+        BillingReasonCodes.SubmissionFirmMissing => FirmMissingHeadline,
+        BillingReasonCodes.SubmissionProcedureGap => ProcedureGapHeadline,
+        BillingReasonCodes.SubmissionProceduresUnresolved => ProceduresUnresolvedHeadline,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd
             => RatesNotCheckedHeadline,
         BillingReasonCodes.DiscountNotCheckedNoRackRate => DiscountNotCheckedHeadline,
@@ -452,7 +514,8 @@ public static class BillingRuleCatalogue
             or BillingReasonCodes.CodingRefusedCodeNotShown or BillingReasonCodes.CodingCodeKindNotForLine
             or BillingReasonCodes.CodingFirmCodeMismatch or BillingReasonCodes.CodingCodeSetNeedsReview
             or BillingReasonCodes.SubmissionInvoiceNumberMismatchNotShown or BillingReasonCodes.CodingFirmCodeMismatchNotShown
-            or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable => true,
+            or BillingReasonCodes.CodingNoCodeSet or BillingReasonCodes.CodingUnavailable or BillingReasonCodes.SubmissionFirmMissing
+            or BillingReasonCodes.SubmissionProcedureGap or BillingReasonCodes.SubmissionProceduresUnresolved => true,
         BillingEvaluationReasons.CurrencyMissing or BillingEvaluationReasons.CurrencyUnreliable or BillingEvaluationReasons.CurrencyNotUsd => true,
         // Task 115: "not checked" is a fact about the invoice's data, not a breach (as D-115).
         BillingReasonCodes.DiscountNotCheckedNoRackRate or BillingReasonCodes.AddedFeeNotChecked => true,
@@ -698,4 +761,17 @@ public static class BillingRuleCatalogue
 
     private static string List(JsonElement root, string name) =>
         string.Join(", ", root.GetProperty(name).EnumerateArray().Select(e => e.GetString()));
+}
+
+/// <summary>How rules of one billing type from several Procedures combine (<see cref="BillingRuleCatalogue.PrecedenceOf"/>, model 7.3).</summary>
+public enum BillingRulePrecedence
+{
+    /// <summary>A limit: the highest-ranked accepted version of a precedence key replaces the others. A broken one never removes the general one.</summary>
+    Replace,
+
+    /// <summary>A checklist: every in-force version applies; nothing is displaced.</summary>
+    Additive,
+
+    /// <summary>ExpenseRule: its per-category caps replace in rank order, its non-reimbursable codes add across sources.</summary>
+    Split,
 }

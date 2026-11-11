@@ -128,6 +128,90 @@ public sealed class SupersededSubmissionNoteTests
         (await ApplyAsync(inReview, AllowAll)).Should().BeSameAs(inReview);
     }
 
+    // ── 082c-2 fix round 2 (F2): the hold warning is kept only while the invoice is In Review ──
+
+    private static readonly Guid HeldSubmission = Guid.Parse("082c0000-0000-4000-8000-0000000000b1");
+    private static readonly Guid HeldInvoice = Guid.Parse("082c0000-0000-4000-8000-0000000000b2");
+
+    /// <summary>A received invoice held for a Procedure gap, as <see cref="InvoiceSubmissionService.ToView"/> hands it to a status route.</summary>
+    private static InvoiceSubmissionView Held(Guid? invoice = null) => new()
+    {
+        SubmissionId = HeldSubmission,
+        Status = "Accepted",
+        TrackingNumber = "INV-2.1",
+        InvoiceId = invoice,
+        OutcomeReasonCode = SubmissionReasonCodes.ProcedureGap,
+        Warning = SubmissionHoldWarning.For(SubmissionReasonCodes.ProcedureGap),
+    };
+
+    private void SeedHeldInvoice(int statusCode) =>
+        _h.Invoices[HeldInvoice] = new Entity("sprk_invoice", HeldInvoice) { ["statuscode"] = new OptionSetValue(statusCode) };
+
+    [Fact(DisplayName = "082c-2 fix round 2 (F2): an invoice still In Review keeps the hold warning, and the outcome is untouched")]
+    public async Task HeldInReview_KeepsTheWarning()
+    {
+        SeedHeldInvoice(InvoiceStatusCodes.InReview);
+
+        var shown = (await ApplyAsync([Held(HeldInvoice)], AllowAll)).Single();
+
+        shown.Warning.Should().Be(SubmissionHoldWarning.For(SubmissionReasonCodes.ProcedureGap));
+        shown.OutcomeReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+        shown.Status.Should().Be("Accepted");
+    }
+
+    [Theory(DisplayName = "082c-2 fix round 2 (F2): once the hold has ended (rejected, returned to the firm, cancelled, superseded) the stored reason code stays and the warning goes")]
+    [InlineData(InvoiceStatusCodes.Rejected)]
+    [InlineData(InvoiceStatusCodes.ReturnedToFirm)]
+    [InlineData(InvoiceStatusCodes.Cancelled)]
+    [InlineData(InvoiceStatusCodes.Superseded)]
+    public async Task HoldEnded_DropsTheWarning_KeepsTheOutcome(int statusCode)
+    {
+        SeedHeldInvoice(statusCode);
+
+        var shown = (await ApplyAsync([Held(HeldInvoice)], AllowAll)).Single();
+
+        shown.Warning.Should().BeNull("the reason code outlives the hold; the invoice is no longer In Review");
+        shown.Status.Should().Be("Accepted");
+        shown.OutcomeReasonCode.Should().BeOneOf(
+            [SubmissionReasonCodes.ProcedureGap, SubmissionReasonCodes.ReplacedByCorrection],
+            "the outcome itself is unchanged (a Superseded invoice's submission also gets the read-time replacement reason)");
+        System.Text.Json.JsonSerializer.Serialize(shown, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+            .Should().NotContain("\"warning\"");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 2 (F2): a status that cannot be read, a missing invoice and an unlinked invoice all fail toward no warning; the outcome is unchanged")]
+    public async Task StatusUnreadable_OrNoInvoice_DropsTheWarning()
+    {
+        SeedHeldInvoice(InvoiceStatusCodes.InReview);
+        _h.SupersededInvoiceReadFailure = new TimeoutException("invoice read faulted");
+        var logger = new LevelLogger();
+
+        var faulted = (await ApplyAsync([Held(HeldInvoice)], AllowAll, logger)).Single();
+
+        faulted.Warning.Should().BeNull("fail toward no stale text");
+        faulted.OutcomeReasonCode.Should().Be(SubmissionReasonCodes.ProcedureGap);
+        logger.Levels.Should().Contain(LogLevel.Warning);
+
+        _h.SupersededInvoiceReadFailure = null;
+        (await ApplyAsync([Held(Guid.NewGuid())], AllowAll)).Single().Warning.Should().BeNull("no such invoice is In Review");
+        (await ApplyAsync([Held(invoice: null)], AllowAll)).Single().Warning.Should().BeNull("a hold with no linked invoice has nothing to be held");
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 2 (F2): one page read decides both the replacement note and the warnings; a view with neither comes back as the same instance")]
+    public async Task OnePageRead_DecidesTheNoteAndTheWarnings()
+    {
+        Seed();
+        SeedHeldInvoice(InvoiceStatusCodes.InReview);
+        var plain = new InvoiceSubmissionView { SubmissionId = Guid.NewGuid(), Status = "Rejected" };
+
+        var shown = await ApplyAsync([Accepted(), Held(HeldInvoice), plain], AllowAll);
+
+        shown[0].OutcomeReasonCode.Should().Be(SubmissionReasonCodes.ReplacedByCorrection);
+        shown[1].Warning.Should().NotBeNull();
+        shown[2].Should().BeSameAs(plain);
+        _h.SupersededInvoiceReads.Should().ContainSingle("the Superseded set and the In Review set come from one read of the page");
+    }
+
     private sealed class LevelLogger : ILogger
     {
         public List<LogLevel> Levels { get; } = new();

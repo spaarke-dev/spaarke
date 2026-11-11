@@ -440,6 +440,26 @@ least as strict as the matter.
   hard-deny row owned by a non-default team other than the restricted-content team is always reported, by id. A mirrored
   share on a hard-deny row (a Secure root's sharee on its `sprk_policy` or `sprk_policyversion` child) carries Read only,
   whatever the root share carries (#2560); the share reconcile narrows a wider one and logs `HardDenyRowShareWiderThanRead`.
+- **Reading billing rules across the customer (`Billing Rule Reader`; ebilling-r1 task 089d, owner 2026-11-03 and
+  2026-11-04).** A billing rule (`sprk_policy`) sits in the customer's top business unit, and Billing Administrator reads rules
+  at Deep from the admin's own unit, so an admin homed in a child unit cannot read it, and the rule-exclude route refuses that
+  admin (403; it checks the caller's own Read on the rule and infers nothing from Procedure rights). Such an admin is
+  therefore assigned one more role, `Billing Rule Reader`, which reads `sprk_policy` at Deep and nothing else. No team holds
+  it, and it is not added to Billing Administrator. Why this keeps Secure Record out of reach: Dataverse measures a role's
+  depth from the business unit of the role **copy** the user holds, not from the user's home unit. The copy assigned is the
+  customer's top unit's (with the org setting `EnableOwnershipAcrossBusinessUnits` on, a user may hold another unit's copy),
+  so Deep covers that unit and every unit below it. Secure Record is a sibling of the customer's top unit, both being direct
+  children of the root, so it is never below it and its rules stay out of reach. Global Read, or the root's copy at Deep,
+  would reach Secure Record and is not allowed; the admin's own unit's copy would not reach the top unit at all. The one
+  definition is `config/billing-rule-readers-role.json`. `scripts/Set-CustomerOwnerTeams.ps1` creates the role, sets the
+  org setting, assigns the right copy (`-AssignBillingRuleReader`), and its `-Verify` fails on the org setting off,
+  `isinherited` not 0, any other privilege or depth, any team holding any copy, a user holding the root copy, the Secure
+  Record copy (or a copy below it) or the copy of a unit below a customer top unit, a holder of the customer's top unit copy
+  who lacks the billing-admin privilege or is homed outside the customer's units, and a holder of another customer top
+  unit's copy who is homed outside that unit and the units below it. It does **not** fail on a holder of another customer top
+  unit's copy who is homed in that unit or below: that is the other customer's own admin, listed as information and checked by
+  that customer's run. The Secure census anchors a directly assigned grant at the copy's unit in the same way, so it would
+  report a copy that reaches Secure Record.
 - **A Decision Record** is also filed under the subject of every Signal it resolved (the ids its `sprk_steps` lists). A
   Secure pass reaches it through those Signals even when it lies outside the record's own family, so it moves into
   isolation, or out, with them.
@@ -457,10 +477,16 @@ the container of the document row's own business unit — set from its parent's 
 
 ### What is in the Secure family
 
-When a record becomes Secure, **28 child tables** move with it (`SecureChildLineage`; `config/secure-record-owner-role.json`
-lists them plus the three core tables and the grant table — 32 in all), including documents and file versions, invoices, budgets and budget revisions,
+When a record becomes Secure, **36 child tables** move with it (`SecureChildLineage`; `config/secure-record-owner-role.json`
+lists them plus the three core tables and the grant table — 40 in all), including documents and file versions, invoices, budgets and budget revisions,
 events, to-dos, communications, memos, analyses, signals and decision records. Service requests are deliberately not in
 the family; a service request is a core record of its own.
+
+**Stored files** (`sprk_storedfile`, ebilling 086) are a leaf child of their invoice: a Stored File on an invoice of a
+Secure record is Secure too and is owned by Secure Record Owners. A Stored File is an internal, hard-deny file row, so it is
+not in the displayed family; it is reached only through its document, invoice or billing export batch. Known limit (K1):
+Full Access on the root already lets a person delete the root's children, so it also lets them delete a Stored File under
+one of its invoices; 086 adds no new delete right.
 
 **Where in the code**: `Services/Dataverse/CoreAncestorResolver.cs` (core / child lists, stamps),
 `Services/Dataverse/RecordOwnershipResolver.cs` (ownership), `Services/Access/SecureChildLineage.cs`,

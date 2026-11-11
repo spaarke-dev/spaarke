@@ -1769,7 +1769,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // parent of its versions. sprk_policyversion is NOT listed: it is a lineage child only (SecureChildLineage), like
         // sprk_signal, because Signals and Decision Records name the version they cite, which files nothing.
         "sprk_policy",
+        // ebilling-r1 task 089a (procedure model 5.2): a Procedure assignment is its record's child, and a record-scoped rule
+        // set is its record's child and the parent of its rules. Both UserOwned (live spaarkedev1 2026-11-03).
+        "sprk_procedureassignment",
         "sprk_reportcard",
+        "sprk_ruleset",
         "sprk_spendsignal",
         "sprk_spendsnapshot",
         "sprk_todo",
@@ -1787,7 +1791,22 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <c>OwnedChildWrite.ParentsOf</c>.
     /// </summary>
     private static readonly HashSet<(string Table, string Column)> CitationLookups = new(
-        [("sprk_signal", "sprk_policy")], CitationComparer.Instance);
+        [("sprk_signal", "sprk_policy"),
+         // ebilling-r1 task 095a: a from-email submission's link to the .eml it was read from. The .eml is an ownership-parent table
+         // (sprk_document); read as a parent it would file the submission under the email (and under a Restricted email's isolation).
+         // The submission is filed under its core record only; the link is a plain reference (SubmissionSourceEmailLinkNotFilingGuardTests).
+         ("sprk_invoicesubmission", "sprk_sourceemaildocument"),
+         // ebilling-r1 task 089a (procedure model 5.2): a Procedure assignment names what it assigns, pins or excludes; it is
+         // filed under its record only. sprk_excludedpolicy targets an ownership-parent table (sprk_policy): read as a parent it
+         // would file the override under the rule (and under a record-scoped rule's isolation). The other two target tables that
+         // are no ownership parent; they are listed so the assignment's whole citation set is one declaration.
+         ("sprk_procedureassignment", "sprk_excludedpolicy"),
+         ("sprk_procedureassignment", "sprk_procedure"),
+         ("sprk_procedureassignment", "sprk_pinnedversion"),
+         // 089a review K7: a legacy uploaded rule set carries the document it was read from (RuleSetService stamps it). The document
+         // is an ownership-parent table; read as a parent it would file the set under that document (and under its record's
+         // isolation). A rule set is filed under its Procedure or core record only; the document link is provenance, not parentage.
+         ("sprk_ruleset", "sprk_sourcedocument")], CitationComparer.Instance);
 
     /// <summary>True when <paramref name="column"/> of <paramref name="table"/> cites a record rather than files the row under it.</summary>
     public static bool IsCitation(string? table, string? column) =>
@@ -2176,8 +2195,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     Remember(column);
                 }
             }
-            else if (IsOwnershipParent(value.LogicalName))
+            else if (IsOwnershipParent(value.LogicalName) && !IsCitation(request.EntityLogicalName, column))
             {
+                // 095a review K2: a citation column (it names a record, it files nothing) is never a parent, on a change as on the row read.
                 // #2091 round 4: re-binding the parent the column already holds moves nothing (a push from the parent it
                 // files its children under writes exactly that).
                 var parent = new RecordOwnershipParent(value.LogicalName, value.Id);
@@ -2487,14 +2507,20 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 
-    /// <summary>Every ownership-parent lookup <paramref name="row"/> holds, keyed by column.</summary>
-    private static Dictionary<string, RecordOwnershipParent> OwnershipParentColumnsOf(Entity row)
+    /// <summary>
+    /// Every ownership-parent lookup <paramref name="row"/> holds, keyed by column. A column that CITES rather than files
+    /// (<see cref="IsCitation"/>) is left out, as in every other parent derivation (ebilling-r1 task 095a review, known limit (a)): the
+    /// re-file reads the whole row, so a citation it holds (<c>sprk_invoicesubmission.sprk_sourceemaildocument</c>, a lookup to a
+    /// <c>sprk_document</c>) would otherwise file the row under the record it cites.
+    /// </summary>
+    internal static Dictionary<string, RecordOwnershipParent> OwnershipParentColumnsOf(Entity row)
     {
         var byColumn = new Dictionary<string, RecordOwnershipParent>(StringComparer.OrdinalIgnoreCase);
         foreach (var (column, value) in row.Attributes)
         {
             if (value is EntityReference reference && reference.Id != Guid.Empty
-                && IsOwnershipParent(reference.LogicalName))
+                && IsOwnershipParent(reference.LogicalName)
+                && !IsCitation(row.LogicalName, column))
             {
                 byColumn[column] = new RecordOwnershipParent(reference.LogicalName, reference.Id);
             }

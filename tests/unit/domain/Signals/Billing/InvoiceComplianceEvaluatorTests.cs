@@ -285,8 +285,8 @@ public class InvoiceComplianceEvaluatorTests
         scope.LineIndexes.Should().Equal(0);
     }
 
-    [Fact]
-    public void ARefusedFirmVersion_WhoseClientDefaultOfTheSameTypeJudgedTheSubjects_LeavesNoSubjectUnchecked_D39_F2()
+    [Fact(DisplayName = "082c C8: a refused FIRM limit is not covered by the lower-ranked client default that judged its subjects: they stay unchecked (was covered under D-39 alone)")]
+    public void ARefusedFirmVersion_WhoseClientDefaultOfTheSameTypeJudgedTheSubjects_StaysUnchecked_LowerRankCoversNothing_C8()
     {
         var clientDefault = Increment("CD-INCREMENT", "0.5");
         var firm = Version("FIRM-INCREMENT", RuleType.TimeIncrement, """{"type":"TimeIncrement","incrementHours":"x"}""", RuleSetScope.Firm);
@@ -298,7 +298,21 @@ public class InvoiceComplianceEvaluatorTests
         var scope = result.RefusalScopes.Should().ContainSingle("the scopes stay aligned 1:1 with the refusals").Which;
         scope.PolicyVersionId.Should().Be(firm.PolicyVersionId);
         scope.RuleType.Should().Be(RuleType.TimeIncrement);
-        scope.AppliesToInvoice.Should().BeFalse();
+        scope.AppliesToInvoice.Should().BeTrue("the firm's own limit, which would have won, was not checked anywhere");
+        scope.LineIndexes.Should().Equal(0);
+    }
+
+    [Fact(DisplayName = "082c C8: a refused client-default limit IS covered where a higher-ranked firm version of its key judged the subjects (must-not-fire control)")]
+    public void ARefusedClientDefault_WhoseFirmVersionOfTheSameKeyJudgedTheSubjects_LeavesNoSubjectUnchecked_C8()
+    {
+        var clientDefault = Version("CD-INCREMENT", RuleType.TimeIncrement, """{"type":"TimeIncrement","incrementHours":"x"}""");
+        var firm = Increment("FIRM-INCREMENT", "0.1", RuleSetScope.Firm);
+
+        var result = Evaluate(Request(Line(0, EarlyLine)), Loaded(clientDefault, firm));
+
+        var scope = result.RefusalScopes.Should().ContainSingle().Which;
+        scope.PolicyVersionId.Should().Be(clientDefault.PolicyVersionId);
+        scope.AppliesToInvoice.Should().BeFalse("the firm limit, which outranks it, judged the invoice");
         scope.LineIndexes.Should().BeEmpty();
     }
 
@@ -392,6 +406,7 @@ public class InvoiceComplianceEvaluatorTests
     }
 
     private const string ExpenseCodesOnly = """{"type":"ExpenseRule","nonReimbursableCodes":["E109"]}""";
+    private const string ExpenseCodesAndCap1000 = """{"type":"ExpenseRule","nonReimbursableCodes":["E109"],"maxAmountPerItem":1000}""";
 
     private static BillingLineFacts BadExpense(int index) =>
         Expense(index) with { ExpenseCode = "E109", BilledExpenseCode = "E109", Amount = 600m };
@@ -419,31 +434,87 @@ public class InvoiceComplianceEvaluatorTests
         result.RulesByVersion[firm.PolicyVersionId].Consequence.Should().Be((int)BillingConsequence.Flag, "the downgraded version can never reject");
     }
 
-    [Fact]
-    public void AValidFirmVersion_StillDisplacesTheClientDefault_Control_D39()
+    [Fact(DisplayName = "082c C6 Split (D-205 item 3): a valid firm ExpenseRule that states a cap displaces the client default's CAP only; the default's code check still runs")]
+    public void AValidFirmVersion_DisplacesTheClientDefaultsCap_ButItsCodeCheckAdds_Control_C6Split()
     {
-        // Control for the test above: a firm version with an allowed consequence displaces the client default, as ever.
+        // Control for the test above: a firm version with an allowed consequence and a cap displaces the client default's cap. Before 082c
+        // (D-39 all replace) it displaced the whole version; the codes now add (ontology F3-c, D-205 item 3). The firm cap is 1000: the line
+        // (600) is under it, so the cap raises nothing.
         var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
-        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm)
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesAndCap1000, RuleSetScope.Firm)
             with
         { Consequence = (int)BillingConsequence.Flag };
 
         var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
 
-        result.Findings.Should().ContainSingle().Which.PolicyVersionId.Should().Be(firm.PolicyVersionId);
+        result.Findings.Select(f => (f.PolicyCode, f.ReasonCode)).Should().BeEquivalentTo(new[]
+        {
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+            ("FIRM-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+        }, "the default's cap (500, the line is 600) is displaced by the firm's cap (1000); its code check is not");
     }
 
-    [Fact]
-    public void ANullConsequenceFirmVersion_StillDisplacesTheClientDefaultsReject_KnownLimit_073()
+    [Fact(DisplayName = "082c C6 Split: a null-consequence firm ExpenseRule that states a cap is valid, so it displaces the default's cap; the default's code check (Reject) still runs")]
+    public void ANullConsequenceFirmVersion_DisplacesTheClientDefaultsCap_TheDefaultsCodeCheckStillRuns_C6Split()
     {
-        // Pinned, not endorsed as ideal: null means "the type default" and is a valid authored row, so the firm version counts and
-        // the client default's Reject for the same type does not run. 073's known limit; see the 072 notes, section 13.
+        // Null means "the type default" and is a valid authored row, so the firm version counts and displaces the client default's cap. 073's
+        // known limit (072 notes, section 13) now covers the cap only: under Split the default's code check, with its Reject, runs beside it.
         var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
-        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm) with { Consequence = null };
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesAndCap1000, RuleSetScope.Firm) with { Consequence = null };
 
         var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
 
-        result.Findings.Should().ContainSingle().Which.PolicyVersionId.Should().Be(firm.PolicyVersionId);
+        result.Findings.Should().NotContain(f => f.ReasonCode == BillingReasonCodes.ExpenseAmountOverCap);
+        result.Findings.Where(f => f.PolicyVersionId == clientDefault.PolicyVersionId).Should().ContainSingle()
+            .Which.ReasonCode.Should().Be(BillingReasonCodes.ExpenseCodeNotReimbursable);
+        result.RulesByVersion[clientDefault.PolicyVersionId].Consequence.Should().Be((int)BillingConsequence.Reject);
+    }
+
+    [Fact(DisplayName = "082c C6 Split must-fire (D-205 ruling): a CAPLESS higher-ranked ExpenseRule displaces nothing; the lower version's cap still fires")]
+    public void ACaplessFirmVersion_DoesNotDisplaceTheClientDefaultsCap_C6Split()
+    {
+        var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule) with { Consequence = (int)BillingConsequence.Reject };
+        var firm = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm);
+
+        var result = Evaluate(Request(BadExpense(0)), Loaded(clientDefault, firm));
+
+        result.Findings.Select(f => (f.PolicyCode, f.ReasonCode)).Should().BeEquivalentTo(new[]
+        {
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseAmountOverCap),
+            ("FIRM-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+        }, "the firm version states no cap, so the default's cap (500, the line is 600) still holds the line");
+    }
+
+    [Fact(DisplayName = "082c C6 Split: a capless higher version at a TIE with a capped one displaces nothing; both apply")]
+    public void ACaplessVersionAtATie_BothApply_C6Split()
+    {
+        var capped = Version("CD-EXPENSE", RuleType.ExpenseRule);
+        var capless = Version("CD-EXPENSE-CODES", RuleType.ExpenseRule, ExpenseCodesOnly);
+
+        var result = Evaluate(Request(BadExpense(0)), Loaded(capped, capless));
+
+        result.Findings.Select(f => (f.PolicyCode, f.ReasonCode)).Should().BeEquivalentTo(new[]
+        {
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseCodeNotReimbursable),
+            ("CD-EXPENSE", BillingReasonCodes.ExpenseAmountOverCap),
+            ("CD-EXPENSE-CODES", BillingReasonCodes.ExpenseCodeNotReimbursable),
+        });
+    }
+
+    [Fact(DisplayName = "082c C6 Split, currency skip: a cap displaced by a higher cap is not listed as skipped; an in-force cap is")]
+    public void ADisplacedCap_IsNotListedAsSkipped_OnANonUsdInvoice_C6Split()
+    {
+        var clientDefault = Version("CD-EXPENSE", RuleType.ExpenseRule);
+        var firmCapped = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesAndCap1000, RuleSetScope.Firm);
+        var firmCapless = Version("FIRM-EXPENSE", RuleType.ExpenseRule, ExpenseCodesOnly, RuleSetScope.Firm);
+        var request = Request(BadExpense(0)) with { Currency = "EUR" };
+
+        var displaced = Evaluate(request, Loaded(clientDefault, firmCapped));
+        var inForce = Evaluate(request, Loaded(clientDefault, firmCapless));
+
+        displaced.Skips.Select(s => s.PolicyCode).Should().Equal("FIRM-EXPENSE");
+        inForce.Skips.Select(s => s.PolicyCode).Should().Equal("CD-EXPENSE");
     }
 
     [Fact]
@@ -891,6 +962,40 @@ public class InvoiceComplianceEvaluatorTests
 
         _output.WriteLine($"150 lines, 11 rule types: {result.Findings.Count} findings in {clock.Elapsed.TotalMilliseconds:F1} ms");
         result.Findings.Select(f => f.RuleType).Distinct().Should().BeEquivalentTo(Bodies.Keys, "every type fires on this fixture");
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact(DisplayName = "082d NFR-01: a 150-line invoice on 150 work dates over two Procedure Versions (11 rule types each, beside the 11 legacy types) is evaluated and its 7.4 snapshot built in under five seconds")]
+    public void A150LineInvoice_OnTwoProcedureVersions_IsEvaluatedAndSnapshottedInUnderFiveSeconds()
+    {
+        const string name = "Guidelines";
+        var kit = new ProcedureKit()
+            .Procedure(name, to: new DateOnly(2026, 3, 1))
+            .NextVersion(name, 2, new DateOnly(2026, 3, 1))
+            .Override(Sprk.Bff.Api.Services.Signals.Billing.ProcedureOverrideMode.FollowLatest, "follow", procedure: name, reason: "Agreed");
+        foreach (var type in Bodies.Keys)
+        {
+            kit.Rule(name, "P1-" + type, type);
+            kit.Rule(name, "P2-" + type, type, versionNumber: 2);
+        }
+
+        var (request, loaded) = EverythingWrong(150);
+        request = request with { Lines = request.Lines.Select((l, i) => l with { Date = RulesFrom.AddDays(i) }).ToList() };
+        loaded = loaded with { Procedures = kit.Build() };
+        var evaluator = Evaluator();
+        Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Build(evaluator.Evaluate(request, loaded)); // warm-up
+
+        var clock = Stopwatch.StartNew();
+        var result = evaluator.Evaluate(request, loaded with { Procedures = kit.Build() });
+        var snapshot = Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Build(result)!.ToJsonString();
+        clock.Stop();
+
+        _output.WriteLine($"082d NFR-01: 150 lines, 150 work dates, 2 Procedure Versions x 11 types + 11 legacy: {result.Findings.Count} findings, "
+            + $"snapshot {snapshot.Length} characters, in {clock.Elapsed.TotalMilliseconds:F1} ms");
+        result.ProcedureBasis!.Dates.Should().HaveCount(151, "150 work dates and the invoice date");
+        result.ProcedureBasis.Applications.Should().Contain(a => a.Source == BillingRuleSource.Procedure && a.Applied.Count > 0)
+            .And.Contain(a => a.Source == BillingRuleSource.Legacy && a.Displaced.Count > 0, "control: precedence ran over both streams");
+        System.Text.Json.Nodes.JsonNode.Parse(snapshot)!["resolutions"]!.AsArray().Should().HaveCount(2, "one entry per outcome, not per date");
         clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
     }
 }
