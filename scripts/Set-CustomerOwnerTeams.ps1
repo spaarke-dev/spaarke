@@ -292,6 +292,8 @@ function Read-DirectConfig([string]$Path) {
     if ($c.access -ne 'Read' -or $c.depth -ne 'Basic') {
         throw "Config $Path asks for access '$($c.access)' at depth '$($c.depth)'. Only Read at Basic is supported, by design."
     }
+    # The run splits the declared files by 'assignment' (089d); a 'direct' file always declares a memberless owner team.
+    $c | Add-Member -NotePropertyName assignment -NotePropertyValue 'team' -Force
     foreach ($field in 'teamName', 'roleName') {
         if ([string]::IsNullOrWhiteSpace($c.$field)) { throw "Config $Path has no '$field'." }
     }
@@ -446,7 +448,6 @@ try {
 
     # Every customer top unit: a direct child of the root that is not the Secure Record unit.
     $customerTops = @($units | Where-Object { $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId })
-    $customerTopIds = @($customerTops | ForEach-Object businessunitid)
 
     # 089d: the units no declared team may sit in: the root, Secure Record and every unit below Secure Record.
     $forbiddenUnits = @{ $rootId = 'the ROOT business unit'; $secureId = 'the Secure Record business unit' }
@@ -548,6 +549,8 @@ try {
         $customerTops = @($customer)
         Write-Host "Direct BU   : $($customer.name) ($customerId), no users"
     }
+    # After the Direct-message filtering above: the Direct unit is never another customer's top unit.
+    $customerTopIds = @($customerTops | ForEach-Object businessunitid)
 
     # ── Each table's Read privilege, from METADATA ──────────────────────────────────────────────────────────
     foreach ($d in $defs) {
