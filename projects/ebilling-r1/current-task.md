@@ -166,7 +166,18 @@ All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133
 4. A citation of a deactivated draft still resolves; say so in the notes.
 5. The role-privilege guard is unchanged; confirm the Write depth fits team-owned drafts and report what you find.
 
-**OWNER CHOSE (c) 2026-11-10 ("Deactivate old drafts") = EB-D-216** (decisions log). **Fix round 4 RUNNING:** Opus, `task/ebilling-116-c` from `cf323d251f`, in its own worktree; I merge it into 116. It covers uac-r2's five conditions plus the ledger, and removes the round-2 Delete checks. The role-depth finding goes privately to uac-r2. uac-r2 and ontology-r1 have been told; ontology may have draft listers in `Services/Signals/**`, which they change themselves, not us. Then: a scoped re-check of rounds 3–4, the 116 diff to uac-r2, and merging 116 into work.
+**Fix round 4 DONE** on `task/ebilling-116-c` at `ae0a9cffa3` (4beeef10ca, b05ac99a8d, ae0a9cffa3). ArchTests 2204/2204; filtered 9471/0.
+- **Running:** an Opus re-check of `cf323d251f..HEAD`.
+- **Condition 5:** a redraft by a second admin can be refused (detail in messages only).
+- **uac-r2 ruled (i)** (accept, fail closed) **plus three additions**, all for round 5:
+  - (1) the 403 names the reason code and the owning team's name;
+  - (2) a provisioning invariant, asked of provisioning-r1 privately, plus a neutral known-limit issue linked from the 116 notes and the PR;
+  - (3) a job queue failure after the deactivation answers 503 `ruleset.redraft_not_queued`, never 2xx, and a test proves a retry works.
+- Round 5 bundles these with any re-check findings.
+- Tell the owner (no role change; consistent with EB-D-216).
+- The DEF-060 note line is added on work (`152257b9f1`).
+
+Earlier: **OWNER CHOSE (c) 2026-11-10 ("Deactivate old drafts") = EB-D-216** (decisions log). **Fix round 4 RUNNING:** Opus, `task/ebilling-116-c` from `cf323d251f`, in its own worktree; I merge it into 116. It covers uac-r2's five conditions plus the ledger, and removes the round-2 Delete checks. The role-depth finding goes privately to uac-r2. uac-r2 and ontology-r1 have been told; ontology may have draft listers in `Services/Signals/**`, which they change themselves, not us. Then: a scoped re-check of rounds 3–4, the 116 diff to uac-r2, and merging 116 into work.
 
 **Re-check of round 2: NOT APPROVED.**
 - F4: the rule-set citation must stay until the column `-Delete`.
