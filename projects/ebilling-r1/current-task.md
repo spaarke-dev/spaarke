@@ -28,7 +28,10 @@
 
 ## Agents running
 
-- **116 round 5 scoped re-check** (Opus adversarial-reviewer, read-only): diff `ae0a9cffa3..6fa104ffef` on `origin/task/ebilling-116-r5`. Round 5 is done: EB-D-216a reject-equivalent check, F2 job lock with 409 and older-drafts-only, F1 503 on an unknown outcome, the Ks. ArchTests 2206/2206.
+- None. **116 rounds 5–6 are done:** squashed into `03745c9483` on `origin/task/ebilling-116-r5` (on top of round 4 `ae0a9cffa3`).
+  - The Opus re-check of round 5 found no defects in the code paths. Its two F4s (wording; the `/draft` 404 now answers the missing-version body) and K-4 (job-lock owner) were fixed in round 6, and the session reviewed the round-6 diff.
+  - Build 0/0, ArchTests 2206/2206, filtered 9493/0.
+  - **uac-r2 review asked** for `ebc4f178d5..03745c9483`. After approval: fast-forward `task/ebilling-116` to it, then merge into work (expect a comment conflict in `RuleSetEndpoints.cs`: keep work's neutral wording), then close out.
 - The master-sync blockers are done (modal keep-mounted shape at 5 sites; ontology's 176 and BudgetInquiry test doubles; uac-r2's boundary test helper was missing `readDocumentChains`). Peers have been told.
 
 ## Next actions, in order
@@ -38,7 +41,7 @@
    - Re-run `merge-tree` against current master. uac-r2 (2026-11-11) warns that master now has #2673 (F-198-1) and #2679 (#2669: `ExternalModuleDataEndpoints.cs` and `ExternalDataService.cs` around the document narrowing), with #2677 (198b) coming. Our batch also edits `ExternalModuleDataEndpoints.cs`, so expect a hand-resolve there and list it for uac-r2.
    - Send uac-r2 the sync SHA and the hand-resolved files. They read `--remerge-diff` for the ExternalAccess files and `FeatureRolePrivilegeGuardTests` before the PR opens. Guards and ratchets: union only.
    - Hand-resolved so far: `Set-CustomerOwnerTeams.ps1` fixes `2011574c2c` and `50c6b9ee76` (provisioning-r1 confirmed them); test signature fix `7171d01aa6`.
-2. **`/merge-to-master`** (owner-authorized). **PR #2689 is open** (head `ec11c6d0e2`; publish delta +0.46 MB, 191/191 files; ArchTests 2430/2430; build 0/0; no vulnerable packages). Auto-merge is OFF. Merge only after the reviews from uac-r2, ontology-r1 and spa-r4 (all requested 2026-11-11) and a full green rollup (`mergeStateStatus` CLEAN). Then send the merge SHA to uac-r2 (it runs the dev deploy) and to all peers. The original plan, for the record:
+2. **`/merge-to-master`** (owner-authorized). **PR #2689 is open** (head `ec11c6d0e2`; publish delta +0.46 MB, 191/191 files; ArchTests 2430/2430; build 0/0; no vulnerable packages). Auto-merge is OFF. **ontology-r1 APPROVED** at `ec11c6d0e2`, with public Ks K1, K3 and K5 on the PR. It also explicitly approved DEF-061 `340b6c53ad`. After merge we owe ontology-r1 a comment-only fix: the O3 offline guard's "the evaluator's reading role" comment claims more than the guard checks. Its private K stays in messages only. **spa-r4:** its review waits on its owner's go; R4 resolves overlaps after #2689 merges. **uac-r2:** review pending. Merge only after all three reviews and a full green rollup (`mergeStateStatus` CLEAN). Then send the merge SHA to uac-r2 (it runs the dev deploy) and to all peers. The original plan, for the record:
    - Measure the publish-size delta against fresh master (root §10).
    - The PR gets reviews from ontology-r1, uac-r2 and spa-r4.
    - Notify every peer with the SHA.
