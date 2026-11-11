@@ -286,7 +286,15 @@ public static class ProcedureEndpoints
         // The source, the version's state and a finished run are decided here, so the admin hears 404 / 409 / 422 now, not from a dead-lettered job.
         // Fix round 1: the route checks the caller's rights on the version before its other answers (an unknown version first, then those rights).
         // Fix round 2: the rights are asked for every id, an unknown one too, before the version is read, so both answers take the same path.
+        // Fix round 3: the probe answers no rights for an unknown id too, so its no-Read 404 is returned before the version is read: an
+        // unknown id and an unreadable version make the same reads. Only Read without Write (403) waits for the version read below, so a
+        // version under another Procedure still answers 404; a probe fault keeps that order too.
         var denied = await CallerVersionRefusalAsync(files, versionId, VersionNotFoundForDraft, http, logger, ct);
+        if (denied is IStatusCodeHttpResult { StatusCode: StatusCodes.Status404NotFound })
+        {
+            return denied;
+        }
+
         var found = await ruleSets.GetDraftSourceAsync(procedureId, versionId, ct);
         if (found.Kind != RuleSetOutcomeKind.Done && found.StatusCode == StatusCodes.Status404NotFound)
         {

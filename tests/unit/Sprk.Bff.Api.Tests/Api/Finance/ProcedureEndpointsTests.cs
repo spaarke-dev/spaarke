@@ -214,7 +214,7 @@ public sealed class ProcedureEndpointsTests
                 Mock.Of<Spaarke.Scheduling.IScheduledJobLease>(), Mock.Of<ILogger<RuleSetService>>());
         }
 
-        private static Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService> NewJobs() => new(
+        internal static Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService> NewJobs() => new(
             MockBehavior.Strict,
             Microsoft.Extensions.Options.Options.Create(new ServiceBusOptions
             {
@@ -1158,5 +1158,60 @@ public sealed class ProcedureEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         host.Service.Verify(s => s.ResetDraftedStateIfDraftAsync(VersionId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+    [Fact(DisplayName = "116 fix 3 (item 3) must-fire: /draft on an unknown id and on a version the caller cannot read makes the same reads, in number and order, and gives the same answer")]
+    public async Task Draft_AnUnknownAndAnUnreadableVersion_MakeTheSameReads()
+    {
+        var unknown = await DraftAgainstTheStoreDouble(versionExists: false);
+        var unreadable = await DraftAgainstTheStoreDouble(versionExists: true);
+
+        unknown.Status.Should().Be(404);
+        unreadable.Status.Should().Be(unknown.Status);
+        unreadable.Answer.Should().Be(unknown.Answer);
+        unreadable.EntityReads.Should().Equal(unknown.EntityReads, "the same Dataverse reads, in number and order");
+        unreadable.RightsAsked.Should().Equal(unknown.RightsAsked, "the same rights questions, in number and order");
+        unreadable.FileStoreCalls.Should().Equal(unknown.FileStoreCalls);
+    }
+
+    [Fact(DisplayName = "116 fix 3 (item 3) must-not-fire: /draft with Read but no Write on a version of another Procedure still reads the version first and answers 404")]
+    public async Task Draft_ReadWithoutWrite_OnAnotherProceduresVersion_Is404()
+    {
+        await using var host = await Host.StartAsync();
+        host.RuleSets.Setup(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RuleSetOutcome<DraftSource>.Refused(404, ProcedureService.CodeVersionNotFound, "The Procedure Version was not found."));
+        NoRightsOnTheVersion(host, AccessRights.Read);
+
+        var response = await host.Client.SendAsync(Req("POST", DraftUrl, content: BodyFor("POST")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.RuleSets.Verify(r => r.GetDraftSourceAsync(ProcedureId, VersionId, It.IsAny<CancellationToken>()), Times.Once);
+        host.Jobs.VerifyNoOtherCalls();
+    }
+
+    /// <summary>
+    /// Fix round 3 (item 3): the /draft handler over the REAL rule set service and file store (their Dataverse doubles record every read),
+    /// for a caller with no rights on the version: an id that names nothing, or a Draft version of a Billing Procedure with one source file.
+    /// </summary>
+    private static async Task<(int Status, string Answer, string[] EntityReads, string[] RightsAsked, string[] FileStoreCalls)> DraftAgainstTheStoreDouble(bool versionExists)
+    {
+        var h = new Sprk.Bff.Api.Tests.Services.Finance.RuleSetServiceTests.Harness();
+        var d = h.DraftVersion();
+        var versionId = versionExists ? d.Version : Guid.NewGuid();
+        var rig = new Sprk.Bff.Api.Tests.Finance.Files.StoredFileRig(); // grants nothing on either id
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.Request.Headers.Authorization = "Bearer caller-token";
+        var jobs = Host.NewJobs();
+
+        var result = await ProcedureEndpoints.DraftVersionRules(
+            d.Procedure, versionId, h.Service(), jobs.Object, rig.Service, http, NullLogger<RuleSetService>.Instance, CancellationToken.None);
+
+        jobs.VerifyNoOtherCalls();
+        var problem = result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject.ProblemDetails;
+        return (
+            problem.Status ?? 0,
+            $"{problem.Detail}|{problem.Extensions["errorCode"]}",
+            h.Entities.Invocations.Select(i => i.Method.Name + ":" + (i.Arguments.FirstOrDefault() is QueryExpression q ? q.EntityName : i.Arguments.FirstOrDefault())).ToArray(),
+            rig.Probe.Calls.Select(c => c.Set).ToArray(),
+            rig.Dataverse.Calls.ToArray());
     }
 }
