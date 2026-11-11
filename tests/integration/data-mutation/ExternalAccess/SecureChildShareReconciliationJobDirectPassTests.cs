@@ -472,8 +472,14 @@ public class SecureChildShareReconciliationJobDirectPassTests
 
         var listings = _directQueries.Where(IsListing).ToList();
         listings.Select(q => q.EntityName).Should().BeEquivalentTo(new[] { Communication }.Concat(ContentTables));
+        var lookups = Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares.ContentRows
+            .ToDictionary(r => r.Table, r => r.MessageLookup);
         foreach (var listing in listings)
         {
+            // The world ignores the column set; Dataverse refuses a null column name.
+            listing.ColumnSet.Columns.Should().Equal(listing.EntityName == Communication
+                ? new[] { "modifiedon" }
+                : new[] { lookups[listing.EntityName], "modifiedon" });
             listing.Orders.Select(o => (o.AttributeName, o.OrderType)).Should().Equal(
                 ("modifiedon", OrderType.Ascending), (listing.EntityName + "id", OrderType.Ascending));
             listing.TopCount.Should().Be(Job.MaxDirectListedPerTable);
