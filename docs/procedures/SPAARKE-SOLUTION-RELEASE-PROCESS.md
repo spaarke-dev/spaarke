@@ -1,5 +1,7 @@
 # Spaarke Solution Package — Release, IAM and Upgrade Runbook
 
+> **Last Reviewed**: 2026-11-11
+
 > **Purpose**: how Spaarke's Dataverse content is defined, released, imported into a customer environment and upgraded.
 > One document for the whole lifecycle; other docs link here instead of restating it.
 >
