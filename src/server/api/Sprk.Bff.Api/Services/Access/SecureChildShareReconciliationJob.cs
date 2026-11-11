@@ -319,7 +319,10 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                 carried.Count);
             return new DirectMessageRun(DirectMessageRun.StatusTeamUnknown)
             {
-                Since = since, CarriedIn = carried.Count, Carried = carried.Count, Incomplete = carried.Count,
+                Since = since,
+                CarriedIn = carried.Count,
+                Carried = carried.Count,
+                Incomplete = carried.Count,
                 Failure = "the Direct-message owner team cannot be resolved",
             };
         }

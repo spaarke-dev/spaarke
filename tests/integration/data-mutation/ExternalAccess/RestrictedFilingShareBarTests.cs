@@ -76,8 +76,8 @@ public class RestrictedFilingShareBarTests
     private void ShareWith(IEnumerable<(string Table, Guid Id)> rows, params Guid[] users)
     {
         foreach (var (table, id) in rows)
-        foreach (var user in users)
-            _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
+            foreach (var user in users)
+                _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
     }
 
     private Guid Matter(int? accessPermission)
@@ -101,8 +101,8 @@ public class RestrictedFilingShareBarTests
         await RefileAsync(message);
 
         foreach (var (table, id) in rows)
-        foreach (var user in new[] { External, Internal, BlankFlag })
-            Holds(table, id, user).Should().BeTrue($"{table} is filed under an ordinary record");
+            foreach (var user in new[] { External, Internal, BlankFlag })
+                Holds(table, id, user).Should().BeTrue($"{table} is filed under an ordinary record");
         _shares.WriteLog.Where(w => w.Action.StartsWith("Revoke", StringComparison.OrdinalIgnoreCase)).Should().BeEmpty();
         _users.Queries.Should().BeEmpty("a target that is not Restricted never reads the users");
     }

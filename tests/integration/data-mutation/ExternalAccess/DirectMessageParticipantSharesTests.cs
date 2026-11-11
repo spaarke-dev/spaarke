@@ -243,11 +243,11 @@ public class DirectMessageParticipantSharesTests
         var (_, rows) = DirectMessage();
         var attachment = rows.Single(r => r.Table == "sprk_communicationattachment").Id;
         foreach (var (table, id) in rows)
-        foreach (var user in new[] { Caller, Other })
-        {
-            if (id != attachment || user != Other)
-                _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
-        }
+            foreach (var user in new[] { Caller, Other })
+            {
+                if (id != attachment || user != Other)
+                    _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
+            }
 
         await Job().ExecuteAsync(RunContext(), CancellationToken.None);
 
@@ -950,8 +950,8 @@ public class DirectMessageParticipantSharesTests
         var (message, rows) = DirectMessage();
         Stamp(message, Caller, Stamped);
         foreach (var (table, id) in rows)
-        foreach (var user in new[] { Caller, Stamped })
-            _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
+            foreach (var user in new[] { Caller, Stamped })
+                _shares.Seed(table, id, DataversePrincipalRef.User(user), Read);
 
         var run = await Job().ExecuteAsync(RunContext(), CancellationToken.None);
 
@@ -1051,8 +1051,8 @@ public class DirectMessageParticipantSharesTests
 
         outcome.Complete.Should().BeTrue();
         foreach (var (table, id) in rows)
-        foreach (var user in new[] { Caller, Other })
-            Holds(table, id, user).Should().BeTrue($"{table}");
+            foreach (var user in new[] { Caller, Other })
+                Holds(table, id, user).Should().BeTrue($"{table}");
         Revokes().Should().Be(0);
     }
 
