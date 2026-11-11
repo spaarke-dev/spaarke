@@ -65,6 +65,11 @@ public class DocumentAccessPermissionWriterGuardTests
             "without its record (DocumentCommunicationFieldsStagingTests). ebilling-r1 task 095: the same method's " +
             "submissionNarrowing branch sets Restricted with the NON-provisional AccessInheritance.OwnNarrowing(Restricted) and " +
             "the submission marker, for the from-email submission's .eml only (SubmissionMarkerWriterGuardTests)."),
+        new Writer("src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs", "StageEmbeddedAttachmentNarrowing",
+            "Ontology task 177 review F1b (uac-r2 binding addition): a sent .eml embeds its attachments' bytes, so it is created " +
+            "with the most restrictive OWN value of their source documents (unreadable = Restricted), only Limited or " +
+            "Restricted, always with the NON-provisional AccessInheritance.OwnNarrowing(level) record in the same create — an " +
+            "own narrowing the reconciler's DecideDocument keeps as max(own, inherited) and never widens."),
     };
 
     private static readonly IReadOnlyList<Writer> NonDocumentWriters = new[]

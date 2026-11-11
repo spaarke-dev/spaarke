@@ -72,7 +72,8 @@ public sealed record SendCommunicationRequest
 
     /// <summary>
     /// Whether to archive the sent email as .eml in SharePoint Embedded.
-    /// Default false.
+    /// Default false. Ontology task 177 (D-217): an email whose created communication is filed to a record is archived
+    /// whatever this says (<c>CommunicationService.ShouldArchiveOutgoing</c>); this flag still opts a record-less send in.
     /// </summary>
     public bool ArchiveToSpe { get; init; } = false;
 

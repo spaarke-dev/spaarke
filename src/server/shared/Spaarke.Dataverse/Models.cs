@@ -337,6 +337,42 @@ public static class DocumentAssociationMap
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (!TryResolveAssociationField(entityTypeOrAlias, recordId, out var field))
+            return false;
+
+        request.Association = new DocumentAssociationBind(field, recordId!.Value);
+        return true;
+    }
+
+    /// <summary>
+    /// Ontology task 177 A3 (D-218, uac-r2 Option A): the raw-row form of the create's association — the same choice of column
+    /// and verified target as <see cref="TryApply(CreateDocumentRequest, string?, Guid?)"/>, staged onto a <c>sprk_document</c>
+    /// <see cref="Microsoft.Xrm.Sdk.Entity"/> as <c>[column] = EntityReference(target table, id)</c>, exactly as
+    /// <c>DataverseServiceClientImpl.StageDocumentAssociation</c> writes it. For a create that builds its row itself because
+    /// its columns are not on <see cref="CreateDocumentRequest"/> (the archived outgoing <c>.eml</c>). It sets the link and
+    /// touches nothing else; this map stays the only thing that chooses the field and its target.
+    /// </summary>
+    /// <returns>As the request overloads: <see langword="false"/> when the type has no <c>sprk_document</c> column or the id is
+    /// empty, and nothing is set.</returns>
+    /// <exception cref="ArgumentException"><paramref name="document"/> is not a <c>sprk_document</c> row.</exception>
+    public static bool TryApply(Microsoft.Xrm.Sdk.Entity document, string? entityTypeOrAlias, Guid? recordId)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (!string.Equals(document.LogicalName, "sprk_document", StringComparison.Ordinal))
+            throw new ArgumentException("A document association is staged only onto a sprk_document row.", nameof(document));
+
+        if (!TryResolveAssociationField(entityTypeOrAlias, recordId, out var field))
+            return false;
+
+        document[field.LogicalName] = new Microsoft.Xrm.Sdk.EntityReference(field.TargetEntityLogicalName, recordId!.Value);
+        return true;
+    }
+
+    /// <summary>The one choice both create forms make: the <see cref="DocumentLinkFields.All"/> entry of the association column
+    /// for <paramref name="entityTypeOrAlias"/>, or <see langword="false"/> when the type has none or the id is empty.</summary>
+    private static bool TryResolveAssociationField(string? entityTypeOrAlias, Guid? recordId, out DocumentLinkField field)
+    {
+        field = null!;
         if (!recordId.HasValue || recordId.Value == Guid.Empty)
             return false;
 
@@ -344,8 +380,7 @@ public static class DocumentAssociationMap
             || !AssociationColumnByLogicalName.TryGetValue(logicalName, out var column))
             return false;
 
-        var field = DocumentLinkFields.All.Single(f => string.Equals(f.LogicalName, column, StringComparison.Ordinal));
-        request.Association = new DocumentAssociationBind(field, recordId.Value);
+        field = DocumentLinkFields.All.Single(f => string.Equals(f.LogicalName, column, StringComparison.Ordinal));
         return true;
     }
 
