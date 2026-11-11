@@ -671,7 +671,7 @@ public sealed record RecordOwnershipContext
     /// <param name="reads">What the question reads, once per pass (<see cref="ExistingRowReads"/>): the record-type catalog,
     /// the core-ancestor derivation (absent: a Signal or Decision Record with a core is
     /// <see cref="ExistingRowOwnership.Undetermined"/> — fail closed, a stamp could be the secure parent) and the To Do
-    /// assignee links (absent: a no-core row about a To Do is undetermined).</param>
+    /// assignee rule's contact → user read (absent: a no-core row about a To Do is undetermined).</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>A data condition (a malformed pair, an unknown core type, a stamp derivation that failed) is
     /// <see cref="ExistingRowOwnership.Undetermined"/>, never a throw. A Dataverse fault reading the core record propagates; one
@@ -721,7 +721,7 @@ public sealed record RecordOwnershipContext
             var noCore = ForParents(new[] { subject }.Concat(signalSubjects).Concat(rest)) with { SecureOnlyParents = secureOnly, ChildEntityLogicalName = row.LogicalName };
             if (subject is null || !string.Equals(subject.EntityLogicalName, TodoTable, StringComparison.OrdinalIgnoreCase))
                 return Asked(new ExistingRowOwnership(noCore));
-            if (reads.Links is null || reads.CoreAncestors is null)
+            if (reads.People is null || reads.CoreAncestors is null)
             {
                 return new ExistingRowOwnership(noCore)
                 {
@@ -733,7 +733,7 @@ public sealed record RecordOwnershipContext
             try
             {
                 keptByToDoJob = await Sprk.Bff.Api.Services.Signals.TodoAssigneeOwnerReconciliationJob.SelectsAsync(
-                    row, reads.Entities, reads.Links, reads.CoreAncestors, ct).ConfigureAwait(false);
+                    row, reads.Entities, reads.People, reads.CoreAncestors, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -930,15 +930,16 @@ public sealed class ExistingRowReads
     /// <param name="entities">Reads the catalog, the To Do and the Signals a Decision Record resolved.</param>
     /// <param name="coreAncestors">The ONE core-ancestor derivation; <c>null</c> leaves a cored Signal or Decision Record
     /// undetermined.</param>
-    /// <param name="links">The To Do assignee links (the To Do job's); <c>null</c> leaves a no-core row about a To Do
-    /// undetermined.</param>
+    /// <param name="people">The To Do assignee rule's contact → user read (the To Do job's; uac-r2 task 193:
+    /// <see cref="Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation"/>); <c>null</c> leaves a no-core row about a
+    /// To Do undetermined.</param>
     public ExistingRowReads(
         IGenericEntityService entities, CoreAncestorResolver? coreAncestors,
-        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links)
+        Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? people)
     {
         Entities = entities ?? throw new ArgumentNullException(nameof(entities));
         CoreAncestors = coreAncestors;
-        Links = links;
+        People = people;
     }
 
     /// <summary>Reads the catalog, the To Do and the Signals a Decision Record resolved.</summary>
@@ -947,8 +948,8 @@ public sealed class ExistingRowReads
     /// <summary>The core-ancestor derivation, when given.</summary>
     public CoreAncestorResolver? CoreAncestors { get; }
 
-    /// <summary>The To Do assignee links, when given.</summary>
-    public Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? Links { get; }
+    /// <summary>The To Do assignee rule's contact → user read, when given.</summary>
+    public Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? People { get; }
 
     /// <summary>How many catalog reads this pass made (one per record type).</summary>
     public int CatalogReads { get; private set; }
