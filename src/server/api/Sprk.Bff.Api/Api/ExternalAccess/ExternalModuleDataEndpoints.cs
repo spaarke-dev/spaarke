@@ -372,7 +372,9 @@ public static class ExternalModuleDataEndpoints
                 .Concat(module.NarrowingAttributes)
                 .Concat(module.FileStateAttributes) // R3 ISS-011: read to derive hasFile, never returned (not readable columns)
                 .Concat(InvoiceFamilyKeyAttributes(module)) // task 098: the row id the (a′) predicate is keyed on
-                .Concat(InvoiceLinkedChildAttributes(module)) // task 130-0 fix round 1: the invoices a child row belongs to
+                .Concat(ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(module.RecordEntity) // task 130-0 fix round 1: the invoices a child row belongs to
+                    ? InvoiceLinks.LinkColumnsOf(module.RecordEntity)
+                    : Array.Empty<string>())
                 .Concat(InvoiceAncestorAttributes(module)) // F3b fix round 1 (K1): the rows it is filed under, whatever the narrowing projects
                 .Concat(ExternalInvoiceReviewDetail.RequiredAttributes(module.RecordEntity)) // 082c-2 fix round 3 (U1): the status the review detail is judged on
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -436,7 +438,7 @@ public static class ExternalModuleDataEndpoints
             // even when it is also filed under a record the caller can read (one seam call for the page; a fault hides every
             // invoice-linked row and the response says truncated). Which columns are invoice links comes from InvoiceLinks.
             var invoiceLinkedTruncated = false;
-            if (InvoiceLinkedChildAttributes(module).Any() && scoped.Count > 0)
+            if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(module.RecordEntity) && scoped.Count > 0)
             {
                 // F3b: a child document is decided by EVERY invoice link up its parent document chain too (one batched read per hop,
                 // InvoiceLinks.MaxWalkHops). A chain that cannot be decided carries the unreadable link, so the row is hidden; a chain read
@@ -542,27 +544,16 @@ public static class ExternalModuleDataEndpoints
     }
 
     /// <summary>
-    /// ebilling-r1 task 130-0 fix round 1: the invoice link columns (<see cref="InvoiceLinks.LinkColumnsOf"/>) of a CHILD module's
-    /// table, projected server-side so a row that belongs to an invoice the caller may not see can be hidden. None for a root module
-    /// (a root is never hidden by an invoice link; its link is redacted instead) and none for the invoice family (decided by the
-    /// invoice predicate itself, <see cref="HideInvoiceRowsAsync"/>).
-    /// </summary>
-    /// <summary>
     /// F3b fix round 1 (K1): the parent edge attributes of a module whose table is decided through its parent edges too
     /// (<see cref="InvoiceLinks.Descendants"/>), projected server-side on every fetch. FetchXML omits a null attribute, so the chain
     /// reader reads an absent one as "no parent": without this projection a fetch that did not name a parent column (or a module
-    /// whose narrowing projects only some of them) would decide a child of another firm's invoice work as unfiled.
+    /// whose narrowing projects only some of them) would decide a child of another firm's invoice work as unfiled. Only for a CHILD
+    /// module's table (<see cref="ExternalInvoiceVisibility.IsInvoiceLinkedChildTable"/>): a root is never hidden by an invoice link
+    /// (its link is redacted instead) and the invoice family is decided by the invoice predicate itself (<see cref="HideInvoiceRowsAsync"/>).
     /// </summary>
     internal static IReadOnlyList<string> InvoiceAncestorAttributes(ExternalModuleDescriptor module) =>
-        InvoiceLinkedChildAttributes(module).Count > 0
+        ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(module.RecordEntity)
             ? InvoiceLinks.ParentEdgesOf(module.RecordEntity).Select(edge => edge.Column).ToArray()
-            : Array.Empty<string>();
-
-    private static IReadOnlyList<string> InvoiceLinkedChildAttributes(ExternalModuleDescriptor module) =>
-        InvoiceLinks.HasInvoiceLink(module.RecordEntity)
-        && !InvoiceLinks.IsRootWithInvoiceLink(module.RecordEntity)
-        && !ExternalInvoiceVisibility.IsInvoiceFamilyTable(module.RecordEntity)
-            ? InvoiceLinks.LinkColumnsOf(module.RecordEntity)
             : Array.Empty<string>();
 
     /// <summary>

@@ -99,8 +99,6 @@ public class ExternalInvoiceVisibilityGuardTests
             "Turns the record gate's answer into rights; the gate (EvaluateRecordGateAsync) applied the predicate first.",
         [$"{typeof(ExternalModuleDataEndpoints).FullName}::InvoiceFamilyKeyAttributes"] =
             "Projects sprk_invoiceid so the predicate can key each row (ExecuteScopedFetchCoreAsync applies it).",
-        [$"{typeof(ExternalModuleDataEndpoints).FullName}::InvoiceLinkedChildAttributes"] =
-            "Projects a child module's invoice link columns so the predicate can decide each row by its invoice (ebilling-r1 task 130-0 fix round 1; ExecuteScopedFetchCoreAsync applies it). Names the invoice family only to leave it to the predicate's own family step; reads no row.",
         [$"{typeof(InvoiceLinks).FullName}::IsInvoice"] =
             "Picks the registry edges whose parent is sprk_invoice (ebilling-r1 task 130-0b), so the invoice ids a row links to can be decided BY the predicate; reads no row.",
         [$"{typeof(InvoiceLinks).FullName}::BuildDescendants"] =

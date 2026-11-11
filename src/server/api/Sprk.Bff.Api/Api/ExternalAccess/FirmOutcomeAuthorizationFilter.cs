@@ -332,6 +332,7 @@ internal sealed class FirmOutcomeAuthorizationFilter : IEndpointFilter
 
     private static readonly CoreColumns InvoiceCoreColumns = new("sprk_project", "sprk_matter", "sprk_regardingworkassignment");
 
+    // The same sprk_regarding{core} trio as InvoiceCoreRecord.SubmissionColumn (Services/Finance/Submission/InvoiceSubmissionContracts.cs).
     private static readonly CoreColumns SubmissionCoreColumns =
         new("sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingworkassignment");
 
