@@ -11,7 +11,9 @@
 // trailing whitespace (Dataverse would find "Acme " and "Acme" as different names on a later run's find-by-name, and a
 // second unit would be created); never the Secure Record unit's name, in any casing (Dataverse compares names without
 // case — H10 would otherwise adopt the Secure Record unit as the customer's and put the BFF's users in it, the exact
-// exposure the owner decision forbids).
+// exposure the owner decision forbids). This name comparison is only a FIRST FILTER for a clear 400 at intake: Dataverse
+// also ignores accents, which no code-side comparison reproduces exactly. The binding checks compare business-unit IDs
+// resolved by Dataverse — H10 (EnsureCustomerBusinessUnitAsync → IsReservedUnit) and H7b S1 (BusinessUnitIsCustomerUnit).
 //
 // §11 — existing: SecureRecordSetupIntake (H7b's intake rule) and OpenAiMonthlyLimitRule are the same pattern for other
 // keys. Extension: neither can carry another key's rule without making the run-context contract record a handler as
@@ -65,10 +67,11 @@ public static class CustomerBusinessUnitIntake
         {
             problem = "has leading or trailing whitespace";
         }
-        else if (string.Equals(value, secureRecordBusinessUnitName, StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(FoldAccents(value), FoldAccents(secureRecordBusinessUnitName), StringComparison.OrdinalIgnoreCase))
         {
-            problem = $"is the Secure Record business unit's name ('{secureRecordBusinessUnitName}') — the customer's unit " +
-                      "must be a different unit: no user may be placed in the Secure Record unit";
+            problem = $"is the Secure Record business unit's name ('{secureRecordBusinessUnitName}'), ignoring case and " +
+                      "accents as Dataverse does — the customer's unit must be a different unit: no user may be placed in " +
+                      "the Secure Record unit";
         }
 
         if (problem is not null)
@@ -81,6 +84,16 @@ public static class CustomerBusinessUnitIntake
 
         return new CustomerBusinessUnitIntakeOutcome.Valid(value);
     }
+
+    /// <summary>
+    /// Canonical decomposition with combining marks dropped ("Sécure" → "Secure") — an APPROXIMATION of Dataverse's
+    /// accent-insensitive name match (it misses ß/ss, æ/ae, ø and similar). Good enough for a first-filter 400; the binding
+    /// checks compare unit IDs Dataverse resolves.
+    /// </summary>
+    private static string FoldAccents(string value)
+        => new string(value.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .ToArray());
 }
 
 /// <summary>Result of <see cref="CustomerBusinessUnitIntake.Validate"/>.</summary>

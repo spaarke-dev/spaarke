@@ -243,7 +243,8 @@ public sealed class InvoiceCorrectionSignalsTests
         root["reasonCode"] = Sprk.Bff.Api.Services.Finance.Submission.SubmissionReasonCodes.CodingNoCodeSetHold;
         root["pipelineFindings"] = new JsonArray(new JsonObject
         {
-            ["reasonCode"] = Sprk.Bff.Api.Services.Finance.Submission.SubmissionReasonCodes.CodingNoCodeSetHold, ["values"] = new JsonObject(),
+            ["reasonCode"] = Sprk.Bff.Api.Services.Finance.Submission.SubmissionReasonCodes.CodingNoCodeSetHold,
+            ["values"] = new JsonObject(),
         });
         Store(world, root);
         world.AddSignal(SystemPolicy.PolicyCode, "sprk_invoice", W.InvoiceId, 1, "coding.no_code_set|Flag");
@@ -395,8 +396,11 @@ public sealed class InvoiceCorrectionSignalsTests
         {
             ["rule"] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = Cap.PolicyCode, ["subjectEntity"] = LineEntity, ["subjectId"] = W.FeeLineId.ToString("D"),
-                ["closeFingerprint"] = CapFingerprint, ["raiseFingerprint"] = null,
+                ["policyCode"] = Cap.PolicyCode,
+                ["subjectEntity"] = LineEntity,
+                ["subjectId"] = W.FeeLineId.ToString("D"),
+                ["closeFingerprint"] = CapFingerprint,
+                ["raiseFingerprint"] = null,
             }),
         };
         Store(world, root);
@@ -421,8 +425,11 @@ public sealed class InvoiceCorrectionSignalsTests
         {
             ["rule"] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = Cap.PolicyCode, ["subjectEntity"] = LineEntity, ["subjectId"] = W.FeeLineId.ToString("D"),
-                ["closeFingerprint"] = CapFingerprint, ["raiseFingerprint"] = null,
+                ["policyCode"] = Cap.PolicyCode,
+                ["subjectEntity"] = LineEntity,
+                ["subjectId"] = W.FeeLineId.ToString("D"),
+                ["closeFingerprint"] = CapFingerprint,
+                ["raiseFingerprint"] = null,
             }),
         };
         Store(world, root);

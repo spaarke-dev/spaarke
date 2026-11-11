@@ -521,8 +521,11 @@ public sealed class RefileWriterBindShapeTests
         AnOrdinaryCommunication();
         var first = new FieldMappingRuleDto
         {
-            SourceField = "sprk_lookupsource", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_lookupsource",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
         var second = first with { };
         var plans = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
@@ -583,7 +586,8 @@ public sealed class RefileWriterBindShapeTests
                 "sprk_communication", Communication, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?>
                 {
-                    [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadB})",
+                    [MatterBind] = $"/sprk_matters({SecureMatter})",
+                    [ThreadBind] = $"/sprk_communicationthreads({ThreadB})",
                 },
                 Lookups: null, ImpersonateSystemUserId: ConfirmingUser),
             CancellationToken.None);
@@ -601,7 +605,8 @@ public sealed class RefileWriterBindShapeTests
                 "sprk_communication", Communication, FieldMappings: null,
                 LegacyFields: new Dictionary<string, string?>
                 {
-                    [MatterBind] = $"/sprk_matters({SecureMatter})", [ThreadBind] = $"/sprk_communicationthreads({ThreadA})",
+                    [MatterBind] = $"/sprk_matters({SecureMatter})",
+                    [ThreadBind] = $"/sprk_communicationthreads({ThreadA})",
                 },
                 Lookups: null, ImpersonateSystemUserId: ConfirmingUser),
             CancellationToken.None);
@@ -635,13 +640,19 @@ public sealed class RefileWriterBindShapeTests
         ASecureCommunication(inThread: ThreadA);
         var matterRule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_mattersource", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_mattersource",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
         var threadRule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_threadsource", TargetField = "sprk_communicationthread",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 2,
+            SourceField = "sprk_threadsource",
+            TargetField = "sprk_communicationthread",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 2,
         };
         var plans = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
         {
@@ -863,8 +874,11 @@ public sealed class RefileWriterBindShapeTests
             default:
                 var rule = new FieldMappingRuleDto
                 {
-                    SourceField = "sprk_lookupsource", TargetField = "sprk_regardingmatter",
-                    SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+                    SourceField = "sprk_lookupsource",
+                    TargetField = "sprk_regardingmatter",
+                    SourceFieldType = "Lookup",
+                    TargetFieldType = "Lookup",
+                    Priority = 1,
                 };
                 var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
@@ -1042,8 +1056,11 @@ public sealed class RefileWriterBindShapeTests
     {
         var rule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_lookupsource", TargetField = targetField ?? SecureRootInheritance.NormalizeColumn(bindKey),
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_lookupsource",
+            TargetField = targetField ?? SecureRootInheritance.NormalizeColumn(bindKey),
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
         return FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             sourceGate ?? Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),

@@ -524,7 +524,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
         // Round 46 item 2: the Make Secure file backstop, after the children (each document's container derives from its
         // now-secure parents). Its writes follow the recent-changes pass.
-        var relocations =await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
+        var relocations = await SettleMakeSecureRelocationsAsync(scope.ServiceProvider, dataverse, recentWrites, cancellationToken)
             .ConfigureAwait(false);
 
 
@@ -867,6 +867,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         problems = apRun.Problems,
                         changes = apRun.Changes.Select(c => new { table = c.Table, id = c.Id, from = c.From, to = c.To }).ToArray(),
                         carriedRows = accessPermission.CarriedRows,
+                        // uac-r2 198 pass 2 (F2): undecided or failed rows not carried because the carry was full (counted;
+                        // the watermark holds, the sweep stays before them or starts again).
+                        carryOverflow = apRun.CarryOverflow,
                         tablesWithoutColumn = apRun.TablesWithoutColumn,
                         // Task 189 (D7 T7a): documents' own-narrowing records written, documents held above their parents by
                         // their own narrowing, and documents that changed between read and write (nothing written, carried).
@@ -879,6 +882,16 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                         // Owner round 122 fix round 2 (K2): save-time Restricted documents not released because the
                         // document link columns are not field-secured. Not carried, so they never hold the window.
                         releaseRefusedLinkColumnsNotSecured = apRun.ReleaseRefusedLinkColumnsNotSecured,
+                        // uac-r2 task 198 R3: the Restricted filing bar on every Restricted communication examined (capped at
+                        // the write cap; capped rows carried, or left for their next listing or the sweep).
+                        restrictedBar = new
+                        {
+                            ran = apRun.RestrictedBarRan,
+                            incomplete = apRun.RestrictedBarIncomplete,
+                            capped = apRun.RestrictedBarCapped,
+                            left = apRun.RestrictedBarLeft,
+                            capReached = apRun.RestrictedBarCapReached,
+                        },
                         failure = apRun.Failure,
                         sweep = new
                         {
@@ -1416,9 +1429,17 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 : _accessPermissionSweepCursor ?? ChildAccessPermissionReconciler.SweepFromStart;
         }
 
+        // uac-r2 task 198 Part D (R3: every Restricted communication the pass examines, not only a value change): its external-
+        // flagged shares are removed through the ONE bar (the same one every re-file runs). Its share seam and user reader are
+        // registered unconditionally.
+        var restrictedBar = new RestrictedFilingShareBar(
+            dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token),
+            services.GetService<IDataverseRecordShareService>(), services.GetService<DataverseWebApiClient>(), _logger);
         var reconciler = new ChildAccessPermissionReconciler(
             dataverse, (table, token) => coreAncestors.ProbeColumnsAsync(table, token), _logger,
-            token => DocumentLinkColumnsSecuredAsync(services, token));
+            token => DocumentLinkColumnsSecuredAsync(services, token),
+            async (communicationId, token) => (await restrictedBar.RemoveBarredSharesAsync(communicationId, token).ConfigureAwait(false)).Complete,
+            AccessPermissionCarryCap);
         ChildAccessPermissionRun run;
         try
         {
@@ -1437,24 +1458,47 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         {
             // The window moves only past a pass that listed completely, wrote, and did not stop at the write cap (F3): a
             // capped run's unwritten rows are listed again from the same watermark next run.
-            var overflow = run.Carry.Count > MaxCarriedRows;
+            // 198 pass 2 (F2): the reconciler keeps the carry within the cap and counts the undecided or failed rows past it
+            // (CarryOverflow); those hold the watermark, as before. Rows the Restricted bar leaves never hold it (§7.3).
+            var overflow = run.CarryOverflow > 0 || run.Carry.Count > AccessPermissionCarryCap;
             if (run.Failure is null && writes && !overflow && !run.WriteCapReached)
                 _accessPermissionWatermark = startedAt - RecentChangesOverlap;
 
             _accessPermissionPending.Clear();
-            _accessPermissionPending.UnionWith(run.Carry.Take(MaxCarriedRows));
+            _accessPermissionPending.UnionWith(run.Carry.Take(AccessPermissionCarryCap));
 
-            // The sweep advances only in a run that listed completely and wrote (a report-only run corrected nothing).
+            // The sweep advances only in a run that listed completely and wrote (a report-only run corrected nothing). F2: its
+            // resume position never passes a row the run neither handled nor carried (the reconciler holds it before one).
             if (sweepAfter is not null && run.Failure is null && writes && !run.WriteCapReached)
             {
-                if (run.SweepReachedEnd)
+                if (run.SweepReachedEnd && !_accessPermissionResweepPending)
                 {
                     _accessPermissionSweepComplete = true;
+                    _accessPermissionSweepCursor = null;
+                }
+                else if (run.SweepReachedEnd)
+                {
+                    _accessPermissionResweepPending = false; // F2: a row was lost behind the cursor: start again
                     _accessPermissionSweepCursor = null;
                 }
                 else if (run.SweepResumeAfter is { } resume)
                 {
                     _accessPermissionSweepCursor = resume;
+                }
+            }
+
+            // F2: a row neither handled nor carried outside the sweep window is found by the sweep: start it again now when it
+            // is complete, otherwise when the current one reaches its end (so the rows already behind the cursor are seen).
+            if (run.Failure is null && run.ResweepNeeded)
+            {
+                if (_accessPermissionSweepComplete)
+                {
+                    _accessPermissionSweepComplete = false;
+                    _accessPermissionSweepCursor = null;
+                }
+                else
+                {
+                    _accessPermissionResweepPending = true;
                 }
             }
 
@@ -1466,13 +1510,17 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             "[CHILD-ACCESS-PERMISSION] run={RunId} mode={Mode} since={Since:o} rowsChanged={RowsChanged} examined={Examined} " +
             "alreadyCorrect={AlreadyCorrect} changed={Changed} wouldChange={WouldChange} parentless={Parentless} " +
             "undetermined={Undetermined} failed={Failed} deferred={Deferred} writeCapReached={WriteCapReached} carried={Carried} " +
+            "carryOverflow={CarryOverflow} resweep={Resweep} " +
             "sweepRows={SweepRows} sweepComplete={SweepComplete} recordsWritten={RecordsWritten} ownKept={OwnKept} " +
             "changedConcurrently={ChangedConcurrently} raisedOnly={RaisedOnly} " +
-            "releaseRefusedLinkColumnsNotSecured={ReleaseRefusedLinkColumnsNotSecured} failure={Failure}",
+            "releaseRefusedLinkColumnsNotSecured={ReleaseRefusedLinkColumnsNotSecured} restrictedBarRan={RestrictedBarRan} " +
+            "restrictedBarIncomplete={RestrictedBarIncomplete} restrictedBarCapped={RestrictedBarCapped} " +
+            "restrictedBarLeft={RestrictedBarLeft} failure={Failure}",
             runId, mode, since, run.RowsChanged, run.Examined, run.AlreadyCorrect, run.Changed, run.WouldChange, run.Parentless,
-            run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.SweepRows, sweepComplete,
+            run.Undetermined, run.Failed, run.Deferred, run.WriteCapReached, carriedRows, run.CarryOverflow, run.ResweepNeeded,
+            run.SweepRows, sweepComplete,
             run.RecordsWritten, run.OwnKept, run.ChangedConcurrently, run.RaisedOnly, run.ReleaseRefusedLinkColumnsNotSecured,
-            run.Failure);
+            run.RestrictedBarRan, run.RestrictedBarIncomplete, run.RestrictedBarCapped, run.RestrictedBarLeft, run.Failure);
 
         return new AccessPermissionRunReport(mode, run, since, carriedRows, sweepAfter is not null, sweepComplete);
     }
@@ -2277,7 +2325,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     RetriedRows = retried,
                 },
                 SecureChildShareSyncStatus.NotApplicable => new RecentChanges(
-                    rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null) { RetriedRows = retried },
+                    rowsChanged, Array.Empty<(string, Guid)>(), Array.Empty<string>(), null)
+                { RetriedRows = retried },
                 // Failed (an ambiguous Secure team) or anything else: nothing is decided, and the window stays.
                 _ => FailedRecentChanges(above.Detail ?? "the records above the changed related records could not be determined"),
             };
@@ -2468,6 +2517,16 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     private readonly HashSet<(string Table, Guid Id)> _accessPermissionPending = new();
     private bool _accessPermissionSweepComplete;
     private (string Table, Guid Id)? _accessPermissionSweepCursor;
+
+    /// <summary>
+    /// uac-r2 task 198 pass 2 (F2): the most rows the inherited Access Permission pass carries between runs. Production:
+    /// <see cref="MaxCarriedRows"/>; settable only so tests can reach the cap with a few rows.
+    /// </summary>
+    internal int AccessPermissionCarryCap { get; init; } = MaxCarriedRows;
+
+    // uac-r2 task 198 pass 2 (F2): a run lost a row (neither handled nor carried) that the current sweep may already be past:
+    // the sweep starts again when it reaches its end.
+    private bool _accessPermissionResweepPending;
 
     // Owner round 122 fix round 1 (K1): both document link columns were found field-secured. Cached for the process once
     // true (this job is a singleton); a "not secured" answer or a failed read is asked again on the next run that needs it,

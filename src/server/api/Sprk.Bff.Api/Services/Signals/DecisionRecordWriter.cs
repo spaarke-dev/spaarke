@@ -2182,10 +2182,16 @@ public sealed class DecisionRecordWriter
 
         // Task 042b (D-169): a gate record owned by an unfiled communication's own user (the only record with a Principal owner, D-144) is
         // also readable by the communication's internal sharees. After the create, never before; never throws (the record has landed). A
-        // team-owned record never reaches this (D-123).
+        // team-owned record is shared only for a Direct message (D-215, below).
         if (recordOwner.Principal is { LogicalName: "systemuser", Id: var ownerUserId })
         {
             await _participantShares.ShareAtWriteAsync(recordId, SubjectOf(request).Id, ownerUserId).ConfigureAwait(false);
+        }
+        else if (plan.IsGate && secureTeamId is null && owner.OwningTeamId is { } ownerTeamId)
+        {
+            // D-215 (uac-r2 task 198 Part E): a team-owned gate record is shared only when its communication is an unfiled Direct message
+            // (Direct-message owner team); for every other communication the call writes nothing (D-123). Never throws.
+            await _participantShares.ShareTeamOwnedAtWriteAsync(recordId, SubjectOf(request).Id, ownerTeamId).ConfigureAwait(false);
         }
 
         _logger.LogInformation(

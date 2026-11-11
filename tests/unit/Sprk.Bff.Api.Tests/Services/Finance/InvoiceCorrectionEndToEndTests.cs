@@ -143,8 +143,11 @@ public sealed class InvoiceCorrectionEndToEndTests
         w.Put(new Entity("sprk_billingcodeset", CodeSetId) { ["sprk_name"] = "UTBMS Litigation", ["statecode"] = new OptionSetValue(0) });
         w.Put(new Entity("sprk_billingcode", Guid.NewGuid())
         {
-            ["sprk_code"] = "L120", ["sprk_codetype"] = new OptionSetValue((int)BillingCodeKind.Task), ["sprk_description"] = "L120",
-            ["sprk_codeset"] = new EntityReference("sprk_billingcodeset", CodeSetId), ["statecode"] = new OptionSetValue(0),
+            ["sprk_code"] = "L120",
+            ["sprk_codetype"] = new OptionSetValue((int)BillingCodeKind.Task),
+            ["sprk_description"] = "L120",
+            ["sprk_codeset"] = new EntityReference("sprk_billingcodeset", CodeSetId),
+            ["statecode"] = new OptionSetValue(0),
         });
         w.SettingsValue = new EbillingSettings { DefaultCodeSetId = CodeSetId };
         var corrections = Corrections(w);
@@ -191,15 +194,26 @@ public sealed class InvoiceCorrectionEndToEndTests
         root["decision"] = new JsonObject { ["outcome"] = "Rejected", ["deciding"] = new JsonArray(0) };
         root["findings"] = new JsonArray(new JsonObject
         {
-            ["index"] = 0, ["ruleType"] = RuleType.DailyHoursCap.ToString(), ["policyId"] = Cap.PolicyId.ToString("D"), ["policyCode"] = Cap.PolicyCode,
-            ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"), ["subject"] = "Line", ["line"] = 0,
-            ["reasonCode"] = BillingReasonCodes.DailyHoursOverCap, ["consequence"] = "Reject", ["rejects"] = true,
+            ["index"] = 0,
+            ["ruleType"] = RuleType.DailyHoursCap.ToString(),
+            ["policyId"] = Cap.PolicyId.ToString("D"),
+            ["policyCode"] = Cap.PolicyCode,
+            ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"),
+            ["subject"] = "Line",
+            ["line"] = 0,
+            ["reasonCode"] = BillingReasonCodes.DailyHoursOverCap,
+            ["consequence"] = "Reject",
+            ["rejects"] = true,
         });
         root["signalPlan"] = new JsonArray(new JsonObject
         {
-            ["policyId"] = Cap.PolicyId.ToString("D"), ["policyCode"] = Cap.PolicyCode, ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"),
-            ["subjectEntity"] = BillingFindingSignalMapper.LineEntity, ["subjectId"] = line.Id.ToString("D"),
-            ["fingerprint"] = BillingReasonCodes.DailyHoursOverCap + "|Flag", ["decision"] = nameof(BillingGroupDecision.Blocked),
+            ["policyId"] = Cap.PolicyId.ToString("D"),
+            ["policyCode"] = Cap.PolicyCode,
+            ["policyVersionId"] = Cap.PolicyVersionId.ToString("D"),
+            ["subjectEntity"] = BillingFindingSignalMapper.LineEntity,
+            ["subjectId"] = line.Id.ToString("D"),
+            ["fingerprint"] = BillingReasonCodes.DailyHoursOverCap + "|Flag",
+            ["decision"] = nameof(BillingGroupDecision.Blocked),
         });
         var submission = Submission(w, root, status, reasonCode);
         return (line, submission);
@@ -466,8 +480,11 @@ public sealed class InvoiceCorrectionEndToEndTests
         w.Put(new Entity("sprk_billingcodeset", CodeSetId) { ["sprk_name"] = "UTBMS Litigation", ["statecode"] = new OptionSetValue(0) });
         w.Put(new Entity("sprk_billingcode", Guid.NewGuid())
         {
-            ["sprk_code"] = "L120", ["sprk_codetype"] = new OptionSetValue((int)BillingCodeKind.Task), ["sprk_description"] = "L120",
-            ["sprk_codeset"] = new EntityReference("sprk_billingcodeset", CodeSetId), ["statecode"] = new OptionSetValue(0),
+            ["sprk_code"] = "L120",
+            ["sprk_codetype"] = new OptionSetValue((int)BillingCodeKind.Task),
+            ["sprk_description"] = "L120",
+            ["sprk_codeset"] = new EntityReference("sprk_billingcodeset", CodeSetId),
+            ["statecode"] = new OptionSetValue(0),
         });
         w.SettingsValue = new EbillingSettings { DefaultCodeSetId = CodeSetId };
         var closeFails = true;

@@ -2054,7 +2054,7 @@ public sealed class InvoiceSubmissionEndpointsContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    public static TheoryData<string> CorrectionRefusals =>new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission", "submission_in_progress" };
+    public static TheoryData<string> CorrectionRefusals => new() { "invoice_status", "different_firm", "different_core_record", "different_invoice_number", "no_submission", "submission_in_progress" };
 
     [Theory(DisplayName = "097b (seed-proof, the firm and core-record guards; must fire): a Correction the guard refuses is 409 correction_not_allowed with its reason; nothing written")]
     [MemberData(nameof(CorrectionRefusals))]

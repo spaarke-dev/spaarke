@@ -177,10 +177,10 @@ public sealed class RegardingPairUpdatePlannerTests
         var mappedOnly = await PlanRegardingPairAsync("sprk_workassignment", change,
             new Reads { Row = RowOf() }.KnowsTheMatterType().Readers, default, lookupsAreMapped: true);
         var kept = await PlanRegardingPairAsync("sprk_todo", PairChangeOf("sprk_todo", new Dictionary<string, object?>
-            {
-                ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({MatterType:D})",
-                ["sprk_RegardingContact@odata.bind"] = $"/contacts({Guid.NewGuid():D})",
-            }),
+        {
+            ["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({MatterType:D})",
+            ["sprk_RegardingContact@odata.bind"] = $"/contacts({Guid.NewGuid():D})",
+        }),
             new Reads { Row = RowOf(lookups: ("sprk_regardingmatter", MatterA)) }.KnowsTheMatterType().Readers, default, lookupsAreMapped: true);
 
         ShouldClearThePair(mappedOnly);

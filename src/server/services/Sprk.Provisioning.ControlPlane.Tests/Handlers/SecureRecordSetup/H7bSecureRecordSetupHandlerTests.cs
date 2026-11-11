@@ -220,6 +220,26 @@ public sealed class H7bSecureRecordSetupHandlerTests
         dv.Reads.Should().Be(0);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData("not-a-guid")]
+    public async Task CustomerUnitNotRecorded_Refuses_BeforeAnyDataverseCall_NeverSkipsS1sIdCheck(string recorded)
+    {
+        // S1's id comparison needs H10's customer unit: a run state without it (pre-T259, or lost) is refused, never run
+        // with the check silently skipped.
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var run = BuildRun(dv);
+        run.InterStepState.CustomerBusinessUnitId = recorded;
+
+        var result = await BuildHandler(new FakeRepository(run), dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>()
+            .Which.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.MissingUpstreamState);
+        dv.Reads.Should().Be(0);
+        dv.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task OwnerDecisionRefusal_QuarantinesTheRun()
     {

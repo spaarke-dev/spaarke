@@ -146,7 +146,8 @@ public sealed class JobAwareCompletionRouterSeamTests
         PlaybookId: null,
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
-        Messages: Array.Empty<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
+        Messages: Array.Empty<ChatMessage>())
+    { OwnerOid = TestSessionOwner.Oid };
 
     /// <summary>Projects the consumer-declared stored step signals through the REAL projector.</summary>
     private static JobAwareCompletionState ProjectState(params StoredStepSignal[] signals)

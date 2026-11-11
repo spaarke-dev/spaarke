@@ -66,6 +66,7 @@ using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
+using Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Xunit;
@@ -240,8 +241,11 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         oldKey.Should().NotBe(H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey(CustomerId, ThreeRoleFixture));
         run.CompletedPhases.Add(new CompletedPhase
         {
-            Phase = "H10", IdempotencyKey = oldKey, JobId = run.RunId,
-            StartedAt = DateTimeOffset.UtcNow.AddDays(-1), CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            Phase = "H10",
+            IdempotencyKey = oldKey,
+            JobId = run.RunId,
+            StartedAt = DateTimeOffset.UtcNow.AddDays(-1),
+            CompletedAt = DateTimeOffset.UtcNow.AddDays(-1),
         });
         var repo = new FakeRepository(run, etag: "etag-t266d");
         var creator = FakeCreator.Success();
@@ -621,7 +625,10 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         var run = BuildRun();
         run.CompletedPhases.Add(new CompletedPhase
         {
-            Phase = "H10", IdempotencyKey = "appuser-acme", StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow,
+            Phase = "H10",
+            IdempotencyKey = "appuser-acme",
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
         });
         var granter = FakeGranter.Success(3, removed: new[] { "Directory.ReadWrite.All" });
         var handler = BuildHandler(new FakeRepository(run, etag: "etag-t261f"), FakeCreator.Success(),
@@ -806,6 +813,31 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         failure.RejectionCode.Should().Be(H10Rejections.CustomerBusinessUnitWrongParent);
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
         creator.CallCount.Should().Be(0, "no App User is created before the customer unit is right");
+    }
+
+    [Fact]
+    public async Task CustomerUnitThatIsTheSecureRecordUnit_IsQuarantined_BeforeAnyAppUserOrGraphWrite()
+    {
+        // Must fire: Dataverse resolved the customer's name to the Secure Record unit (an accent or case variant).
+        var repo = new FakeRepository(BuildRun(), etag: "etag-reserved");
+        var secureUnit = Guid.NewGuid();
+        var creator = FakeCreator.Success(unit: new CustomerBusinessUnitOutcome.IsReservedUnit(
+            secureUnit, SecureRecordOwnerRoleSet.Embedded.BusinessUnitName));
+        var granter = FakeGranter.Success(3);
+        var handler = BuildHandler(repo, creator, FakeVerifier.Verified(UamiSystemUserId), granter,
+            FakeParityVerifier.Verified(3), FakeRegistry.WithRoles(ThreeRoleFixture));
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H10Rejections.CustomerBusinessUnitIsReserved);
+        failure.Diagnostic.Should().Contain(secureUnit.ToString()).And.Contain("without case or accents");
+        creator.CallCount.Should().Be(0, "no App User is created or adopted in the Secure Record unit");
+        granter.CallCount.Should().Be(0, "no Graph write either");
+        granter.RemovalCallCount.Should().Be(0);
+        creator.ReservedUnitNames.Should().ContainSingle()
+            .Which.Should().Equal(SecureRecordOwnerRoleSet.Embedded.BusinessUnitName);
     }
 
     [Fact]
@@ -1010,10 +1042,13 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
                 ? new DataverseAppUserCreationOutcome.InForeignBusinessUnit(Guid.NewGuid().ToString(), unit)
                 : Default(req));
 
+        public List<IReadOnlyCollection<string>> ReservedUnitNames { get; } = new();
+
         public Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
-            string environmentUrl, string tenantId, string name, CancellationToken ct)
+            string environmentUrl, string tenantId, string name, IReadOnlyCollection<string> reservedUnitNames, CancellationToken ct)
         {
             UnitNames.Add(name);
+            ReservedUnitNames.Add(reservedUnitNames);
             return Task.FromResult(_unit);
         }
 

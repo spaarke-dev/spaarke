@@ -456,23 +456,23 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
                     return new TrapVerificationOutcome.InfraFault(Kind,
                         $"T3 verdict deferred: could not check for Graph app roles outside the stamp set: {unknown.Diagnostic}");
                 case GraphAppRoleExtrasResult.Found found:
-                {
-                    var mailboxInEntra = found.RoleValues
-                        .Where(v => IGraphAppRolesRegistry.ExchangeScopedValues.Contains(v)).ToArray();
-                    var diagnostic =
-                        $"T3 FAILED on UAMI SP objectId='{uamiSpObjectId}' (appId='{request.UamiClientId}') in tenant='{request.TenantId}': " +
-                        $"Graph app role(s) outside the stamp set: {string.Join(", ", found.RoleValues)}. The stamp holds exactly " +
-                        $"{string.Join(", ", expectedRoles.Select(r => r.Value))} in Entra (task 261; " +
-                        "projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md)." +
-                        (mailboxInEntra.Length > 0
-                            ? $" Mailbox role(s) {string.Join(", ", mailboxInEntra)} are granted through Exchange, scoped to the " +
-                              "customer's group (H14a); an Entra grant reaches EVERY mailbox in the tenant and voids that scope."
-                            : string.Empty) +
-                        " Re-run H10 (it removes them; a changed catalog re-runs a completed H10), run scripts/provisioning/Remove-StampGraphExtraRoles.ps1, or remove the Entra appRoleAssignment(s) (Graph DELETE " +
-                        $"/servicePrincipals/{uamiSpObjectId}/appRoleAssignments/{{id}}) — and find whoever granted them.";
-                    _logger.LogWarning("T3 probe FAILED (roles outside the stamp set): {Diagnostic}", diagnostic);
-                    return new TrapVerificationOutcome.Failed(Kind, diagnostic);
-                }
+                    {
+                        var mailboxInEntra = found.RoleValues
+                            .Where(v => IGraphAppRolesRegistry.ExchangeScopedValues.Contains(v)).ToArray();
+                        var diagnostic =
+                            $"T3 FAILED on UAMI SP objectId='{uamiSpObjectId}' (appId='{request.UamiClientId}') in tenant='{request.TenantId}': " +
+                            $"Graph app role(s) outside the stamp set: {string.Join(", ", found.RoleValues)}. The stamp holds exactly " +
+                            $"{string.Join(", ", expectedRoles.Select(r => r.Value))} in Entra (task 261; " +
+                            "projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md)." +
+                            (mailboxInEntra.Length > 0
+                                ? $" Mailbox role(s) {string.Join(", ", mailboxInEntra)} are granted through Exchange, scoped to the " +
+                                  "customer's group (H14a); an Entra grant reaches EVERY mailbox in the tenant and voids that scope."
+                                : string.Empty) +
+                            " Re-run H10 (it removes them; a changed catalog re-runs a completed H10), run scripts/provisioning/Remove-StampGraphExtraRoles.ps1, or remove the Entra appRoleAssignment(s) (Graph DELETE " +
+                            $"/servicePrincipals/{uamiSpObjectId}/appRoleAssignments/{{id}}) — and find whoever granted them.";
+                        _logger.LogWarning("T3 probe FAILED (roles outside the stamp set): {Diagnostic}", diagnostic);
+                        return new TrapVerificationOutcome.Failed(Kind, diagnostic);
+                    }
                 case GraphAppRoleExtrasResult.None:
                     break;   // the only subtype that lets T3 pass
                 default:

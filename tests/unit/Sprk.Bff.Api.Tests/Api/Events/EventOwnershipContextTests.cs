@@ -141,9 +141,15 @@ public class EventOwnershipContextTests
     /// <summary>The entity set a logical name has in the scripted caller's Dataverse (the inverse is in <see cref="Written"/>).</summary>
     private static readonly Dictionary<string, string> Sets = new()
     {
-        ["sprk_matters"] = "sprk_matter", ["sprk_projects"] = "sprk_project", ["sprk_invoices"] = "sprk_invoice",
-        ["sprk_analysises"] = "sprk_analysis", ["sprk_workassignments"] = "sprk_workassignment", ["sprk_budgets"] = "sprk_budget",
-        ["sprk_events"] = "sprk_event", ["sprk_recordtype_refs"] = "sprk_recordtype_ref", ["contacts"] = "contact",
+        ["sprk_matters"] = "sprk_matter",
+        ["sprk_projects"] = "sprk_project",
+        ["sprk_invoices"] = "sprk_invoice",
+        ["sprk_analysises"] = "sprk_analysis",
+        ["sprk_workassignments"] = "sprk_workassignment",
+        ["sprk_budgets"] = "sprk_budget",
+        ["sprk_events"] = "sprk_event",
+        ["sprk_recordtype_refs"] = "sprk_recordtype_ref",
+        ["contacts"] = "contact",
     };
 
     /// <summary>

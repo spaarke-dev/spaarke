@@ -224,7 +224,7 @@ Closing an alert by hand does not silence the check: the next failing run reopen
 Husky pre-commit hooks run automatically on every `git commit`. They execute lint-staged, which:
 - **TypeScript/TSX files**: Formats with Prettier, then lints with ESLint (from the nearest `eslint.config.mjs` directory)
 - **JSON/YAML files**: Formats with Prettier
-- **C# files**: Formats with `dotnet format` (scoped to staged files only)
+- **C# files**: Whitespace-formats the staged files with `dotnet format whitespace --folder` (~2 s, no MSBuild workspace). Skipping the hook with `--no-verify` does not skip the check: Tier 1 `Format (changed C# files)` fails the PR
 
 Hooks complete in under 10 seconds. If a hook fails, the commit is blocked until the issue is fixed.
 
@@ -559,6 +559,7 @@ The required status check `CI / Router` (the ruleset also requires `Client lint 
 | `compose-fidelity-gate` | Corpus round-trip harness over every `.docx` under `tests/fixtures/compose-corpus/` (requires Git-LFS checkout) |
 | `datagrid-external-host-gate` | The shared DataGrid's jest folder; runs on `Spaarke.UI.Components` or workflow changes. **Advisory** (job-level `continue-on-error`) until its FLIP CONDITION; see the job |
 | `xrm-capability-guard` | The `getXrm` capability guard (`xrmCapabilityUsage.guard.test.ts`, an AST scan of all of `src/`, ~70 s); runs on `src/client/**`, `src/solutions/**` or workflow changes. **Blocking**. Added 2026-10-06 as an owner-approved §6.5 path-A exception to the header's scope list (ontology task 081, PR #1309) |
+| `format-changed-cs` | `scripts/quality/check-changed-cs-format.sh`: `dotnet format whitespace --folder --verify-no-changes` over the `*.cs` files under `src/` and `tests/` that the PR (or merge-queue group, or push) changed; every such file when there is no base. No restore, so under a minute, in parallel with `arch-tests`. **Blocking**. Added 2026-11-10 as an owner-approved §6.5 path-A exception (PR #2663) after master reached 2,569 violations behind the advisory Tier 2 `format` job |
 
 Spec budget: p95 ≤ 3 min (NFR-01). `eval-gate`, `tenant-isolation`, and `compose-fidelity-gate` run on `windows-latest` and were ported verbatim from `sdap-ci.yml` because they are fast, security/fidelity-critical gates that must never be advisory.
 
@@ -568,7 +569,7 @@ Spec budget: p95 ≤ 3 min (NFR-01). `eval-gate`, `tenant-isolation`, and `compo
 
 | Job | Purpose |
 |-----|---------|
-| `format` | `dotnet format whitespace --verify-no-changes` |
+| `format` | `dotnet format whitespace --verify-no-changes` over the whole solution: an advisory backstop; changed C# files are checked blocking by Tier 1 `format-changed-cs` |
 | `lint` | Prettier (`src/client/**/*.{ts,tsx}`) + ESLint (`src/client/pcf`) |
 | `full-unit-tests` | The repo's one full-suite run, as four parallel shards (`full-unit-tests-shard`: `api-office`, `api-insights-integration`, `api-seam`, `rest`; `rest` is the complement of the others, so every test runs exactly once). Each shard runs `dotnet test` over the whole `Spaarke.sln` with its namespace filter, so every test project in the solution (Bff.Api.Tests, ControlPlane.Tests, Core.Tests, Scheduling.Tests, Bff.Api.IntegrationTests, Spe.Integration.Tests, ...) runs in some shard. The job runs when the Router's `dotnet_tests` filter matches (see the Router section). Each shard is two-pass (all tests, then retry only pass-1 failures); the `full-unit-tests` job aggregates the shard verdicts, and a shard with no verdict counts as a failure. Debug only (`FR-B07`); 40-min timeout per shard as a runaway guard (expected ~18 min) |
 | `adr-compliance` | The full NetArchTest suite again (non-blocking copy of Tier 1's `arch-tests`) |
@@ -1112,7 +1113,7 @@ This CI/CD workflow integrates with the [Testing and Code Quality Procedures](te
 |-------|-------|----------------------------------|-----------|
 | Prettier | Pre-commit hook | Tier 2 `lint` job | — |
 | ESLint | Pre-commit hook | Tier 2 `lint` job | `client-tests.yml` (full suite, nightly) |
-| dotnet format | Pre-commit hook | Tier 2 `format` job | — |
+| dotnet format | Pre-commit hook | Tier 1 `format-changed-cs` (blocking, changed files) + Tier 2 `format` job (advisory, whole solution) | — |
 | Tests (compile + smoke) | During implementation | Tier 1 `compile` / `changed-surface-smoke` / `auth-smoke` | `nightly-health.yml` `full-integration` |
 | Full unit-test suite | — | Tier 2 `full-unit-tests` (advisory) | — |
 | ADR Tests | Step 9.5: `/adr-check` | Tier 1 `arch-tests` (blocking) + Tier 2 `adr-compliance` (advisory copy) | `adr-audit.yml` (weekly) |

@@ -39,10 +39,20 @@ public class RuleSetRolePrivilegeGuardTests
     /// </summary>
     private static readonly Dictionary<string, string> BillingAdminSet = new(StringComparer.Ordinal)
     {
-        ["prvReadsprk_ruleset"] = "Deep", ["prvReadsprk_Policy"] = "Deep", ["prvReadsprk_PolicyVersion"] = "Deep",
-        ["prvCreatesprk_ruleset"] = "Basic", ["prvWritesprk_ruleset"] = "Basic", ["prvAppendsprk_ruleset"] = "Basic", ["prvAppendTosprk_ruleset"] = "Basic",
-        ["prvCreatesprk_Policy"] = "Basic", ["prvWritesprk_Policy"] = "Basic", ["prvAppendsprk_Policy"] = "Basic", ["prvAppendTosprk_Policy"] = "Basic",
-        ["prvCreatesprk_PolicyVersion"] = "Basic", ["prvWritesprk_PolicyVersion"] = "Basic", ["prvAppendsprk_PolicyVersion"] = "Basic",
+        ["prvReadsprk_ruleset"] = "Deep",
+        ["prvReadsprk_Policy"] = "Deep",
+        ["prvReadsprk_PolicyVersion"] = "Deep",
+        ["prvCreatesprk_ruleset"] = "Basic",
+        ["prvWritesprk_ruleset"] = "Basic",
+        ["prvAppendsprk_ruleset"] = "Basic",
+        ["prvAppendTosprk_ruleset"] = "Basic",
+        ["prvCreatesprk_Policy"] = "Basic",
+        ["prvWritesprk_Policy"] = "Basic",
+        ["prvAppendsprk_Policy"] = "Basic",
+        ["prvAppendTosprk_Policy"] = "Basic",
+        ["prvCreatesprk_PolicyVersion"] = "Basic",
+        ["prvWritesprk_PolicyVersion"] = "Basic",
+        ["prvAppendsprk_PolicyVersion"] = "Basic",
         ["prvAppendTosprk_PolicyVersion"] = "Basic",
         // Task 089e (owner 2026-11-04, "Add to role file + apply on dev"): Read on the Procedure, at the rule-set Read's depth.
         ["prvReadsprk_procedure"] = "Deep",

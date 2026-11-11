@@ -286,9 +286,14 @@ public sealed class RecordRepairColumnMetadataTests
         _world.Directory.Row("sprk_matter", RepairWorld.Matter)["sprk_budget"] = 2500.50m;
         _world.Map("sprk_matter", "sprk_event", new FieldMappingRuleEntity
         {
-            Id = Guid.NewGuid(), Name = "budget", SourceField = "sprk_budget", TargetField = FeeColumn,
-            TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber, MappingType = CreateTimeFieldMapping.MappingTypeCopy,
-            ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = "budget",
+            SourceField = "sprk_budget",
+            TargetField = FeeColumn,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber,
+            MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+            ExecutionOrder = 1,
+            IsActive = true,
         });
         _world.ColumnOverrides[("sprk_event", FeeColumn)] =
             RepairWorld.Typed(FeeColumn, "Money");
@@ -338,9 +343,15 @@ public sealed class RecordRepairColumnMetadataTests
     private void MapAFeeDefault() =>
         _world.Map("sprk_matter", "sprk_event", new FieldMappingRuleEntity
         {
-            Id = Guid.NewGuid(), Name = "fee", SourceField = string.Empty, TargetField = FeeColumn,
-            TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber, MappingType = CreateTimeFieldMapping.MappingTypeDefault,
-            DefaultValue = "1500.25", ExecutionOrder = 1, IsActive = true,
+            Id = Guid.NewGuid(),
+            Name = "fee",
+            SourceField = string.Empty,
+            TargetField = FeeColumn,
+            TargetFieldType = CreateTimeFieldMapping.FieldTypeNumber,
+            MappingType = CreateTimeFieldMapping.MappingTypeDefault,
+            DefaultValue = "1500.25",
+            ExecutionOrder = 1,
+            IsActive = true,
         });
 
     private static ColumnMetadata Secured(string column) =>

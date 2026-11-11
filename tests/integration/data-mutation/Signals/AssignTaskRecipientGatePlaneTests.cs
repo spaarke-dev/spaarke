@@ -327,7 +327,8 @@ public sealed class AssignTaskRecipientGatePlaneTests
             .Add(new AssignedLinkCandidate(LicensedUser, Contact, Guid.NewGuid(), false, 0, null, false));
         var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
         var gate = new Mock<AssignTaskRecipientGate>(Identities(HomeContact()).Object, links, null!, null!, null!, sets.Object, null!,
-            NullLogger<AssignTaskRecipientGate>.Instance) { CallBase = true };
+            NullLogger<AssignTaskRecipientGate>.Instance)
+        { CallBase = true };
         gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SecureShareWallOutcome.NotSecure);
         gate.Setup(g => g.TaskRightsAsync(LicensedUser, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(AccessRights.Read);

@@ -260,7 +260,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                     tablename = "sprk_communication",
                     recordId = OntologyCommunication,
                     item = new Dictionary<string, JsonElement> { ["sprk_regardingmatter"] = Lookup("sprk_regardingmatter", "sprk_matter", matter).Value },
-                })) with { UserId = Guid.NewGuid().ToString() },
+                })) with
+                { UserId = Guid.NewGuid().ToString() },
                 BuildAnalysisTool(nameof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler)), CancellationToken.None);
         tool.Success.Should().BeTrue(tool.ErrorMessage);
         return null;

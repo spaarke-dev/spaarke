@@ -269,7 +269,8 @@ public class UpdateRecordNodeExecutorRunIdentityTests
     {
         // The default is fail closed: a context built without StartedBy is a person's run.
         var context = Context(LegacyConfig("sprk_matter", Matter, "sprk_performancesummary", "x"), PlaybookRunStartedBy.Person, null)
-            with { StartedBy = default };
+            with
+        { StartedBy = default };
 
         var result = await Executor().ExecuteAsync(context, CancellationToken.None);
 

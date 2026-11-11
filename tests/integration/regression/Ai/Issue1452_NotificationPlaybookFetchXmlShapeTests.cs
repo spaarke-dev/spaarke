@@ -355,8 +355,14 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
             PlaybookId = Guid.NewGuid(),
             Node = new PlaybookNodeDto
             {
-                Id = Guid.NewGuid(), PlaybookId = Guid.NewGuid(), ActionId = actionId, Name = name, ExecutionOrder = 1,
-                OutputVariable = "out", ConfigJson = configJson, IsActive = true,
+                Id = Guid.NewGuid(),
+                PlaybookId = Guid.NewGuid(),
+                ActionId = actionId,
+                Name = name,
+                ExecutionOrder = 1,
+                OutputVariable = "out",
+                ConfigJson = configJson,
+                IsActive = true,
             },
             Action = new AnalysisAction { Id = actionId, Name = name },
             ExecutorType = type,
@@ -366,8 +372,12 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
             PreviousOutputs = outputs,
             Parameters = new Dictionary<string, string>
             {
-                ["userId"] = UserId.ToString(), ["userName"] = HostileName, ["todayUtc"] = "2026-10-08",
-                ["dueSoonWindowUtc"] = "2026-10-11", ["timeWindowHours"] = "24", ["dueWithinDays"] = "3",
+                ["userId"] = UserId.ToString(),
+                ["userName"] = HostileName,
+                ["todayUtc"] = "2026-10-08",
+                ["dueSoonWindowUtc"] = "2026-10-11",
+                ["timeWindowHours"] = "24",
+                ["dueWithinDays"] = "3",
                 ["matterId"] = Guid.NewGuid().ToString(),
             },
         };

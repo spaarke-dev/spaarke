@@ -85,7 +85,11 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview = true, childIds = new[] { ChildB, Stranger },
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            preview = true,
+            childIds = new[] { ChildB, Stranger },
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -101,7 +105,11 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", preview = true, childIds = new[] { ChildB, Stranger },
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            preview = true,
+            childIds = new[] { ChildB, Stranger },
         });
 
         var body = await response.Content.ReadAsStringAsync();
@@ -120,7 +128,10 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", childIds = new[] { ChildA, Stranger },
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            childIds = new[] { ChildA, Stranger },
         });
 
         var body = await response.Content.ReadAsStringAsync();
@@ -202,7 +213,10 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", includeAssignedTo = true,
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            includeAssignedTo = true,
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
@@ -228,7 +242,10 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", includeAssignedTo = true,
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            includeAssignedTo = true,
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -250,7 +267,10 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", includeAssignedTo,
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            includeAssignedTo,
         });
 
         var body = await response.Content.ReadAsStringAsync();
@@ -275,7 +295,10 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_project", includeAssignedTo,
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_project",
+            includeAssignedTo,
         });
 
         var body = await response.Content.ReadAsStringAsync();
@@ -380,8 +403,13 @@ public class FieldMappingPushFamilyContractTests
         var probe = new FamilyProbe(writable: [ChildA, ChildB, ChildC]);
         var rule = new FieldMappingRuleDto
         {
-            Id = Guid.NewGuid(), SourceField = "sprk_assignedname", SourceFieldType = "Text", TargetField = "sprk_assignedname",
-            TargetFieldType = "Text", Priority = 1, MappingType = "Copy",
+            Id = Guid.NewGuid(),
+            SourceField = "sprk_assignedname",
+            SourceFieldType = "Text",
+            TargetField = "sprk_assignedname",
+            TargetFieldType = "Text",
+            Priority = 1,
+            MappingType = "Copy",
         };
         var members = new[] { ChildA, ChildB, ChildC }.Select(id => new RecordFamilyMember(
             "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
@@ -426,7 +454,10 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", childIds = new[] { ChildA },
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            childIds = new[] { ChildA },
         });
 
         var body = await response.Content.ReadAsStringAsync();
@@ -471,7 +502,10 @@ public class FieldMappingPushFamilyContractTests
 
         var response = await world.PostAsync(new
         {
-            sourceEntity = "sprk_matter", sourceRecordId = MatterId, targetEntity = "sprk_event", childIds = new[] { ChildA },
+            sourceEntity = "sprk_matter",
+            sourceRecordId = MatterId,
+            targetEntity = "sprk_event",
+            childIds = new[] { ChildA },
         });
 
         var body = await response.Content.ReadAsStringAsync();
@@ -499,7 +533,8 @@ public class FieldMappingPushFamilyContractTests
         entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
             {
-                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                ["sprk_issecure"] = true,
             });
         entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
@@ -510,8 +545,13 @@ public class FieldMappingPushFamilyContractTests
             entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
         var rule = new FieldMappingRuleDto
         {
-            Id = Guid.NewGuid(), SourceField = Column, SourceFieldType = "Text", TargetField = Column, TargetFieldType = "Text",
-            Priority = 1, MappingType = "Copy",
+            Id = Guid.NewGuid(),
+            SourceField = Column,
+            SourceFieldType = "Text",
+            TargetField = Column,
+            TargetFieldType = "Text",
+            Priority = 1,
+            MappingType = "Copy",
         };
         var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
             "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
@@ -548,7 +588,8 @@ public class FieldMappingPushFamilyContractTests
         entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
             {
-                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                ["sprk_issecure"] = true,
             });
         entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
@@ -560,8 +601,13 @@ public class FieldMappingPushFamilyContractTests
             entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
         var rule = new FieldMappingRuleDto
         {
-            Id = Guid.NewGuid(), SourceField = "sprk_lookupsource", SourceFieldType = "Lookup", TargetField = "sprk_regardingmatter",
-            TargetFieldType = "Lookup", Priority = 1, MappingType = "Copy",
+            Id = Guid.NewGuid(),
+            SourceField = "sprk_lookupsource",
+            SourceFieldType = "Lookup",
+            TargetField = "sprk_regardingmatter",
+            TargetFieldType = "Lookup",
+            Priority = 1,
+            MappingType = "Copy",
         };
         var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
             "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
@@ -602,7 +648,8 @@ public class FieldMappingPushFamilyContractTests
         entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
             {
-                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                ["sprk_issecure"] = true,
             });
         entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
@@ -619,8 +666,13 @@ public class FieldMappingPushFamilyContractTests
             entities.Object, "sprk_matter", MatterId, _ => Task.FromResult<(Guid? TeamId, string? Refusal)>((secureTeam, null)));
         var rule = new FieldMappingRuleDto
         {
-            Id = Guid.NewGuid(), SourceField = "sprk_client", SourceFieldType = "Lookup", TargetField = "sprk_regardingaccount",
-            TargetFieldType = "Lookup", Priority = 1, MappingType = "Copy",
+            Id = Guid.NewGuid(),
+            SourceField = "sprk_client",
+            SourceFieldType = "Lookup",
+            TargetField = "sprk_regardingaccount",
+            TargetFieldType = "Lookup",
+            Priority = 1,
+            MappingType = "Copy",
         };
         var members = new[] { ChildA, ChildB }.Select(id => new RecordFamilyMember(
             "sprk_event", id, $"Event {id.ToString()[..4]}", null, null, null, RecordFamilyEdges.FamilyKind.Filing, null, null, 1)).ToList();
@@ -747,7 +799,8 @@ public class FieldMappingPushFamilyContractTests
         entities.Setup(e => e.RetrieveAsync("sprk_matter", MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_matter", MatterId)
             {
-                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam), ["sprk_issecure"] = true,
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", secureTeam),
+                ["sprk_issecure"] = true,
             });
         entities.Setup(e => e.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Microsoft.Xrm.Sdk.Entity(table, id)
@@ -767,13 +820,23 @@ public class FieldMappingPushFamilyContractTests
     {
         var text = new FieldMappingRuleDto
         {
-            Id = Guid.NewGuid(), SourceField = Column, SourceFieldType = "Text", TargetField = Column, TargetFieldType = "Text",
-            Priority = 1, MappingType = "Copy",
+            Id = Guid.NewGuid(),
+            SourceField = Column,
+            SourceFieldType = "Text",
+            TargetField = Column,
+            TargetFieldType = "Text",
+            Priority = 1,
+            MappingType = "Copy",
         };
         var lookup = new FieldMappingRuleDto
         {
-            Id = Guid.NewGuid(), SourceField = "sprk_lookupsource", SourceFieldType = "Lookup", TargetField = lookupTarget,
-            TargetFieldType = "Lookup", Priority = 2, MappingType = "Copy",
+            Id = Guid.NewGuid(),
+            SourceField = "sprk_lookupsource",
+            SourceFieldType = "Lookup",
+            TargetField = lookupTarget,
+            TargetFieldType = "Lookup",
+            Priority = 2,
+            MappingType = "Copy",
         };
         var binds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>(ReferenceEqualityComparer.Instance)
         {

@@ -285,7 +285,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             case "throws": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagReadThrows = true; break;
             case "fault": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagFault = HttpStatusCode.InternalServerError; break;
             case "flag-null": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, Hidden, isSecure: null); break;
-            // "missing": the matter record does not exist; "malformed": the lookup is not a GUID.
+                // "missing": the matter record does not exist; "malformed": the lookup is not a GUID.
         }
 
         var plain = AddRow(kind, "projects", RecordA, "Single root");
@@ -1116,15 +1116,15 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
 
     private static IReadOnlyDictionary<string, object?> InvoiceRow(
         string name, Guid? project = null, Guid? matter = null, Guid? agreement = null) => new Dictionary<string, object?>
-    {
-        ["@logicalName"] = "sprk_invoice",
-        // ebilling-r1 task 098: the primary id every FetchXML row carries (the (a') predicate is keyed on it).
-        ["sprk_invoiceid"] = Guid.NewGuid(),
-        ["sprk_name"] = name,
-        ["sprk_project"] = project,
-        ["sprk_matter"] = matter,
-        ["sprk_regardingagreement"] = agreement is { } a ? new Microsoft.Xrm.Sdk.EntityReference("sprk_agreement", a) : null,
-    };
+        {
+            ["@logicalName"] = "sprk_invoice",
+            // ebilling-r1 task 098: the primary id every FetchXML row carries (the (a') predicate is keyed on it).
+            ["sprk_invoiceid"] = Guid.NewGuid(),
+            ["sprk_name"] = name,
+            ["sprk_project"] = project,
+            ["sprk_matter"] = matter,
+            ["sprk_regardingagreement"] = agreement is { } a ? new Microsoft.Xrm.Sdk.EntityReference("sprk_agreement", a) : null,
+        };
 
     /// <summary>The real invoices-module fetch pipeline, with the REAL secure-flag and live-parent reads over FakeDataverse.</summary>
     private Task<(FetchResponseDto Body, string Executed)> RunInvoicesFetchAsync(

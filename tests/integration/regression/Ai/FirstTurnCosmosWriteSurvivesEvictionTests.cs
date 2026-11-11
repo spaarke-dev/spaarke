@@ -214,7 +214,8 @@ public class FirstTurnCosmosWriteSurvivesEvictionTests
             PlaybookId: null,
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: messages) { OwnerOid = TestSessionOwner.Oid };
+            Messages: messages)
+        { OwnerOid = TestSessionOwner.Oid };
     }
 
     private static ChatMessage NewMessage(string sessionId, int sequenceNumber, string? content = null)
