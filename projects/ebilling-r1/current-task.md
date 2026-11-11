@@ -144,6 +144,10 @@
 - Confirmation of the `sprk_sourcedocument` delete (both tables are empty; the delete runs after 079).
 - Later: the dev go for the DEF-060 column and the smoke Signal.
 
+## 116 fix round 2 DONE `61d133463d` (2026-11-10)
+
+All 11 items: 8c74671493, 424b46759a, 14ecd798ae, eeaa88140e, f4c3b538cc, 61d133463d (notes). Build 0/0, ArchTests 2200/2200, filtered 9452/0. Items 8 and 11 are Ks. **Running:** a scoped Opus re-check of `ebc4f178d5..61d133463d`. **OPEN, owner plus uac-r2:** item 2 (Delete on the policy tables for `/draft`) gives 403 to every user without that right, including billing admins (whether the role holds it is a privilege fact, so it stays in chat and messages only). Options: (a) grant it; (b) require it only when superseded drafts exist; (c) deactivate superseded drafts and require Write instead (recommended). Asked uac-r2. Also: the ledger prose for `/draft` (`RouteAuthorizationGuardTests.Ledger.cs:365-366`) needs the new checks once decided. Three stray `sprk_sourcedocument` mentions are not ours (repair fixture, a guard fixture string).
+
 ## Queued: default-team exclusion in our scripts (from provisioning-r1, 2026-11-10)
 
 provisioning's task 267 (#2618, not on master) puts the ontology writer in its own unit whose default team must hold NO field-security profile (H7b v8 quarantines otherwise). Our scripts add every default team. **After 116 merges into work** (116 edits `Deploy-EbillingProcedureSchema.ps1`), one change: resolve that unit by name, skip its default team in apply, and fail `-Verify` if it holds the profile. The places: `Deploy-EbillingProcedureSchema.ps1:739,1001`; `Deploy-EbillingStoredFileSchema.ps1:529`; `Set-EbillingInvoiceMoneyFieldSecurity.ps1:510`; `Set-EbillingInvoiceFirmHoldColumn.ps1:340`; `Set-EbillingResubmissionOfFieldSecurity.ps1:284`; `Set-EbillingFirmReasonFieldSecurity.ps1:140` (FormsViews :282 is saved views, not teams). Consider one shared helper (§11). Pester must-fire and must-not-fire tests. The SHA goes in the provisioning master-merge message. Needed before our master merge.
