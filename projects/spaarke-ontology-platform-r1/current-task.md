@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-11-11 afternoon (by context-handoff, before compaction). State only: history is in git log, task
+> **Last Updated**: 2026-11-11 evening (by context-handoff, before compaction). State only: history is in git log, task
 > `<completion>` blocks and `notes/handoff-history/2026-11.md` (the previous checkpoint is archived there verbatim). Standing rules:
 > [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-218). Deferred work: one
 > self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-150**). Sub-agents never edit this file.
@@ -13,13 +13,14 @@
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
 | **Active task** | None in progress. **177 is ✅** (PR #2666 squash-merged to docs as `52d02a66f3`; completion record + TASK-INDEX committed). |
 | **Open PR** | None. docs→master [#2674](https://github.com/spaarke-dev/spaarke/pull/2674) (task 177) **merged 2026-11-11 as master `c152d7d0b1`** (merge commit). CI: 43 pass; the non-required `Server tests (office scope) (api-office)` leg hit its 20-min hang guard twice — same stall point as `work/field-mapping-server-write-path-r1` (no 177 code), existing issue **#1504**; locally the same selection on this branch ran 567 pass / 7 skip / 0 fail in 13.9 min with `--blame-hang`. |
-| **Next Action** | 1) Merge **#2695** (non-ontology fix, master) on green: outgoing email association status → Resolved when the send files it (owner "Fix it now" + "file replies" 2026-11-11). Branch `fix/outgoing-email-association-status`, worktree `C:\wtoas` (remove with Remove-WorktreeSafe after merge). Dev backfill of 76 rows DONE (owner-approved). 2) 176 smoke still owed: needs an open Revise-budget Work Item on dev (test data = owner's go); tell uac-r2 when it runs. 3) Tell word-add-in-r1 master `c152d7d0b1` when it reappears. |
+| **Next Action** | 1) 176 smoke still owed: needs an open Revise-budget Work Item on dev (test data = owner's go); tell uac-r2 when it runs. 2) After the next dev BFF deploy (contains #2695 if from master ≥ `25ac8ea931`): send a new email from Spaarke and check its "Related to" panel shows confirmed. 3) Tell word-add-in-r1 master `c152d7d0b1` when it reappears. |
 | **Uncommitted** | None. |
 
 ## Open items
 
 **Owner**
 - **Dev BFF = `dc4f28ded8`** (local merge of master `df93d2029c` + mcp-r1 spike; DLL read 2026-11-11; contains 177; NOT #2689, D-3, D-5, #2695).
+- **#2695 merged to master 2026-11-11 as `25ac8ea931`** (squash; outgoing email association status → Resolved when the send files it; replies Resolved only from a Resolved parent). Not deployed. Dev backfill of 76 existing rows done (owner-approved). Worktree `C:\wtoas` removed.
 - **177 smoke PASSED on dev 2026-11-11** (owner, Assign Work task email): Outgoing, internal-only, `sprk_regardingmatter` set, .eml document on the same matter, shows in Messages + Documents. Sent to uac-r2.
 - **176 smoke NOT RUN:** no open Revise-budget Work Item on dev to send a Budget inquiry from; verify `sprk_regardingmatter` + `sprk_regardingservicerequest`, internal-only, Private thread, .eml on the matter, Messages. Note: after #2695 deploys, inquiry replies auto-file (Resolved) instead of Suggested; `ConfirmSuggestedAssociationAsync` then no-ops (owner-approved).
 - UAT still open: 161 (Revise budget on REAL-2026-123456.02), 162 (uploads in Create Work Assignment / Project / Invoice), 111 row 4, 114, 105, #2394 (project create as Core User), check 6 (composer); then close 114, 158–163, 166. **090 held.**
@@ -42,7 +43,7 @@
 
 **Worktree cleanup (use `scripts/worktree/Remove-WorktreeSafe.ps1` only):** 176/177 agent worktrees removed 2026-11-11 (tips verified inside #2666 / master). Left: task174 `agent-a87a71b050eceafb1` under `C:/code_files/spaarke/.claude/worktrees/` (after #2580/#2579 merge).
 
-**ebilling master PR [#2689](https://github.com/spaarke-dev/spaarke/pull/2689):** ontology scope **APPROVED 2026-11-11 at `ec11c6d0e2`** (PR comment 6799396706; one adversarial review, no F-class; DEF-061 `340b6c53ad` approved explicitly; test fixes `49a49437bc` + `14e54c9e06` accepted). Public K1 (`sprk_publishedon` before BFF), K3, K5 on the PR; K2/K4 PRIVATE, sent to ebilling by message. Merges after uac-r2 + spa-r4 too; ebilling sends the SHA. If the head moves before merge, re-check only the delta in our scope.
+**ebilling master PR [#2689](https://github.com/spaarke-dev/spaarke/pull/2689):** ontology scope **APPROVED 2026-11-11 at `ec11c6d0e2`** (PR comment 6799396706; one adversarial review, no F-class; DEF-061 `340b6c53ad` approved explicitly; test fixes `49a49437bc` + `14e54c9e06` accepted). Public K1 (`sprk_publishedon` before BFF), K3, K5 on the PR; K2/K4 PRIVATE, sent to ebilling by message. **MERGED 2026-11-11 as master `2fc434c912`** (head `60628550fb`; delta since `ec11c6d0e2` has no change in `Services/Signals/**`, `Api/Signals/**`, `FinanceBaseValues.cs`). Their K4 O3 guard comment fix comes in their next work commit; 116 ships later with `sprk_policyversion` notices to us before any live write.
 
 ## Dev state
 
