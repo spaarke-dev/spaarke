@@ -1,6 +1,11 @@
 # Current Task State - spaarkeai-mcp-bff-api-r1
 
-> **Last Updated**: 2026-11-11 (mcp-r1, rebuilt from git: 002 (a)–(c) done, dev now `b3ca99cad5`)
+> **Last Updated**: 2026-11-12 (mcp-r1, checkpoint mid master-merge)
+
+## ⚠️ IN FLIGHT (2026-11-12) — read first
+- **Branch updated from master, NOT pushed:** local merge commit `d269f0abe7` (origin/master into `work/spaarkeai-mcp-bff-api-r1`, 1229 commits, no conflicts). Pre-merge HEAD `8fd598c2a0`. BFF build 0/0; ArchTests 2491/2491.
+- **5 failing tests, all `SignalRoutesContractBaselineTests` (decision.200.recorded, decision.200.replayed, decision.500.step-failed, decision.500.not-resumable, decision.500.record-write-failed).** Cause: master commit `90e8571c20` (ontology task 176 review round 2 B) added `warning` to `DecisionCommitStep`, so each step now serialises `"warning":null`. Baselines exist only on this branch (`tests/integration/contract/Api/Signals/Baselines/`, task 011 `b9d8f19b47`). **Next:** confirm every diff is only the added `"warning":null` per step, then re-record those 5 baselines (a master contract change, not ours: FR-09 "byte-for-byte" guards OUR rework), re-run the filtered tests (`Mcp|Signals|Decision|RouteAuthorization|Worklist`: 5688 pass + these 5), commit, push.
+- **Auto-merge ON (merge commits)** for #2714 (instruction paths), #2720 (broken links, review fixes f9757c3eb5), #2692 (client-tests). All reviewed (adversarial reviewers: safe). After they merge: sync main checkout ff-only (merge-to-master A.6), remove `C:\wtpaths` via `Remove-WorktreeSafe.ps1`, tell code-reuse-r1.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
