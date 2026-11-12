@@ -689,6 +689,17 @@ public sealed class RecordProcedureEndpointsContractTests
             "the Procedure is removed by a Procedure-level Exclude, so nothing about it is listed; the Exclude row (asked) decides, not its versions",
         ["excluded procedure/rules-in-force/policy version 1 of rule 'REMOVED' (in force from 2026-01-01)"] =
             "the Procedure is removed by a Procedure-level Exclude, so none of its rules is listed; the Exclude row (asked) decides",
+
+        // 084e: the outranked seed. The Procedures list shows no rule (legacy rules included: that route does not read them).
+        ["outranked/procedures/policy version 1 of rule 'LEGACY-RATE' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        ["outranked/procedures/policy version 1 of rule 'LEGACY-CD-RATE' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        ["outranked/procedures/policy version 1 of rule 'GENERAL' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        ["outranked/procedures/policy version 1 of rule 'FIRM-EXP' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        ["outranked/procedures/policy version 1 of rule 'GENERAL-EXP' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        // A legacy rule ranked BELOW the top rank of its key: precedence never consults it (O-1), and it is not a row of the list (the list is the
+        // resolver's), so nothing in the body is derived from it.
+        ["outranked/rules-in-force/policy version 1 of rule 'LEGACY-CD-RATE' (in force from 2026-01-01)"] =
+            "a legacy rule below the top rank of its key: precedence never consults it (084e O-1) and the list shows only the resolver's rules, so the body does not depend on it",
     };
 
     private const string ProceduresListShowsNoRule =
@@ -846,7 +857,7 @@ public sealed class RecordProcedureEndpointsContractTests
         get
         {
             var data = new TheoryData<string, string>();
-            foreach (var seed in new[] { "refusals seed", "changed and base retired", "conflicting parents", "parent pin", "excluded procedure" })
+            foreach (var seed in new[] { "refusals seed", "changed and base retired", "conflicting parents", "parent pin", "excluded procedure", "outranked" })
             {
                 foreach (var list in Lists)
                 {
@@ -908,6 +919,22 @@ public sealed class RecordProcedureEndpointsContractTests
                     rig.Simple("GENERAL");
                     var removed = rig.Simple("REMOVED");
                     return new GuardSeed("projects", P, "2026-02-01", [rig.Assign(Matter, M, removed.Procedure, ProcedureAssignmentEntity.ModeExcluded), M]);
+                }
+
+            case "outranked":
+                {
+                    // 084e: a legacy Firm rule outranks a Procedure rule (Replace), a Firm Procedure's capped ExpenseRule cap-outranks an
+                    // All-records one (Split), and a legacy Client default rule sits below the top rank of the first key (never consulted, O-1).
+                    rig.BillingFirm(Project, P, F);
+                    var legacy = rig.AddLegacyRule("LEGACY-RATE", Sprk.Bff.Api.Services.Finance.RuleSetScope.Firm, F);
+                    rig.AddLegacyRule("LEGACY-CD-RATE", Sprk.Bff.Api.Services.Finance.RuleSetScope.ClientDefault);
+                    rig.Simple("GENERAL");
+                    rig.Simple("FIRM-EXP", ProcedureAppliesTo.Firm, F, type: Sprk.Bff.Api.Services.Signals.RuleType.ExpenseRule,
+                        body: """{"type":"ExpenseRule","maxAmountPerItem":500}""");
+                    rig.Simple("GENERAL-EXP", type: Sprk.Bff.Api.Services.Signals.RuleType.ExpenseRule,
+                        body: """{"type":"ExpenseRule","nonReimbursableCodes":["E109"],"maxAmountPerItem":500}""");
+                    // The legacy rule's set decides its Level under "by", but its id is not in the body.
+                    return new GuardSeed("projects", P, "2026-02-01", [], [legacy.RuleSet], [F]);
                 }
 
             default: throw new ArgumentOutOfRangeException(nameof(name), name, null);

@@ -147,13 +147,25 @@ public sealed record RuleInForceView(
 /// A mark on a rule. <see cref="Kind"/>: <c>Excluded</c> (the rule was excluded for this record: reason, optional firm, distance, who and
 /// when), <c>Changed</c> (a record rule runs in its slot: <see cref="RecordRuleId"/>, the version it is <see cref="BasedOn"/>, the base
 /// rule), <c>Stale</c> (BasedOn is not the base rule's version in force on the date: <see cref="CurrentBase"/>) or <c>BaseRetired</c> (the
-/// base rule is not in force on the date, so the record rule does not run). The set is open: a reader must ignore a kind it does not know
-/// (task 084e adds <c>Outranked</c>). Members a kind does not use are null.
+/// base rule is not in force on the date, so the record rule does not run). Task 084e (EB-D-219, ontology-r1 R1-R6): <c>Outranked</c> (a
+/// Replace key: a higher-ranked rule of the same key passes at record level, so on an invoice this rule runs only if every one of
+/// <see cref="By"/> is refused) and <c>CapOutranked</c> (ExpenseRule: the same for its cap only; its code check still runs), each with
+/// <see cref="Text"/> ("Outranked by X" / "Cap outranked by X") and the fixed <see cref="Note"/>. The set is open: a reader must ignore a kind
+/// it does not know. Members a kind does not use are null.
 /// </summary>
 public sealed record RuleMarkView(
     string Kind, string? Reason = null, FirmView? Firm = null, int? Distance = null, ChainRecordView? ChainRecord = null, StampView? Stamp = null,
     Guid? OverrideRowId = null, Guid? RecordRuleId = null, PolicyVersionRefView? BasedOn = null, PolicyVersionRefView? CurrentBase = null,
-    string? BaseCode = null, string? BaseParameterSummary = null);
+    string? BaseCode = null, string? BaseParameterSummary = null, string? Text = null, string? Note = null, IReadOnlyList<OutrankingRuleView>? By = null);
+
+/// <summary>
+/// 084e: one rule that outranks another on the record (R3: every such rule at the top rank is listed). <see cref="Source"/> is
+/// <c>Procedure</c> (a rule of an applied Procedure, or a record rule in its base's slot; <see cref="ProcedureId"/> set) or <c>Legacy</c> (a
+/// rule of a published Client default or Firm rule set with no Procedure). <see cref="Level"/> and <see cref="Distance"/> are its rank.
+/// <see cref="Code"/> is the reader code (a record rule shows its base rule's code).
+/// </summary>
+public sealed record OutrankingRuleView(
+    Guid PolicyId, Guid PolicyVersionId, string Code, string? Name, int VersionNumber, string Source, Guid? ProcedureId, string Level, int Distance);
 
 /// <summary>
 /// Reads the two lists of model 6.6 for a core record (task 084 Part A). <b>Read model, EB-D-218 option A:</b> the rows are read ONCE,
@@ -199,20 +211,30 @@ public class RecordProcedureReadService
     private const string OrganizationSet = FinanceAuthorizationFilter.VendorOrganizationEntitySet;
     private const string SystemUserSet = "systemusers";
 
+    /// <summary>084e, ontology-r1 R4: the fixed note of an <c>Outranked</c> / <c>CapOutranked</c> mark; <c>{0}</c> is the outranking rules' codes.</summary>
+    internal const string OutrankedNoteFormat = "applies unless {0} {1} refused when an invoice is checked; a line can differ (dates, fallback)";
+
     private readonly IGenericEntityService _entities;
     private readonly CallerRecordAccessProbe _probe;
     private readonly RuleBodyDescriber _describer;
+    private readonly BillingFactLoader _legacyRules;
+    private readonly PolicyVersionValidator _gate;
     private readonly ILogger<RecordProcedureReadService> _logger;
 
     /// <summary>The clock for the default date ("today", UTC). A test seam; production uses the system clock.</summary>
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
+    /// <param name="legacyRules">084e (R6): the evaluator's own legacy-rule read (<see cref="BillingFactLoader.LoadLegacyRulesAsync"/>, app-only).</param>
+    /// <param name="gate">084e (R1): the billing gate, so a rule refused by it takes no part in precedence, as in the evaluator.</param>
     public RecordProcedureReadService(
-        IGenericEntityService entities, CallerRecordAccessProbe probe, RuleBodyDescriber describer, ILogger<RecordProcedureReadService> logger)
+        IGenericEntityService entities, CallerRecordAccessProbe probe, RuleBodyDescriber describer, BillingFactLoader legacyRules,
+        PolicyVersionValidator gate, ILogger<RecordProcedureReadService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _describer = describer ?? throw new ArgumentNullException(nameof(describer));
+        _legacyRules = legacyRules ?? throw new ArgumentNullException(nameof(legacyRules));
+        _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -226,7 +248,7 @@ public class RecordProcedureReadService
     {
         try
         {
-            var reading = await ReadAsync(coreTable, recordId, firmId, date, probeFutureDate: true, ct).ConfigureAwait(false);
+            var reading = await ReadAsync(coreTable, recordId, firmId, date, probeFutureDate: true, readLegacyRules: false, ct).ConfigureAwait(false);
             if (reading is null)
             {
                 return RecordProcedureReadResult<RecordProceduresView>.NotFound();
@@ -250,7 +272,7 @@ public class RecordProcedureReadService
     {
         try
         {
-            var reading = await ReadAsync(coreTable, recordId, firmId, date, probeFutureDate: false, ct).ConfigureAwait(false);
+            var reading = await ReadAsync(coreTable, recordId, firmId, date, probeFutureDate: false, readLegacyRules: true, ct).ConfigureAwait(false);
             if (reading is null)
             {
                 return RecordProcedureReadResult<RecordRulesInForceView>.NotFound();
@@ -307,6 +329,9 @@ public class RecordProcedureReadService
         public required IReadOnlyDictionary<Guid, Guid?> RowCreators { get; init; }
         public required IReadOnlyDictionary<Guid, string?> UserNames { get; init; }
 
+        /// <summary>084e: the legacy rules (every version that can be in force), as the evaluator's loader reads them. Empty on the Procedures route.</summary>
+        public IReadOnlyList<BillingRuleCandidate> LegacyRules { get; init; } = [];
+
         /// <summary>Every row the answer exposes, as (entity set, id): what the caller must be able to Read (EB-D-218).</summary>
         public HashSet<(string Set, Guid Id)> Exposed { get; } = new();
 
@@ -318,7 +343,7 @@ public class RecordProcedureReadService
     }
 
     private async Task<Reading?> ReadAsync(
-        string coreTable, Guid recordId, Guid? firmId, DateOnly? date, bool probeFutureDate, CancellationToken ct)
+        string coreTable, Guid recordId, Guid? firmId, DateOnly? date, bool probeFutureDate, bool readLegacyRules, CancellationToken ct)
     {
         var kind = KindOf(coreTable);
         var core = (await ReadByIdsAsync(coreTable, [recordId], [NameColumnOf(coreTable), BillingFirmColumn], ct).ConfigureAwait(false))
@@ -346,6 +371,15 @@ public class RecordProcedureReadService
         {
             var latestFrom = rows.Versions.Where(v => v.From is not null).Select(v => v.From!.Value).DefaultIfEmpty(workDate).Max();
             onFuture = latestFrom > workDate ? resolution.RulesOn(latestFrom) : onDate;
+        }
+
+        // 084e (R6): the rules route's "Outranked" mark groups what the evaluator groups, legacy rule sets included, so the legacy stream is read
+        // with the evaluator's own reader (app-only, for the same firm) and checked disjoint from the Procedure stream as the loader checks it.
+        IReadOnlyList<BillingRuleCandidate> legacy = [];
+        if (readLegacyRules)
+        {
+            legacy = await _legacyRules.LoadLegacyRulesAsync(firm ?? NoFirm, ct).ConfigureAwait(false);
+            BillingFactLoader.RequireDisjoint(legacy, resolution);
         }
 
         // The names and stamps the resolver's rows do not carry: one read per table, of ids the rows already hold.
@@ -390,6 +424,7 @@ public class RecordProcedureReadService
             ProcedureTypes = types.ToDictionary(kv => kv.Key, kv => kv.Value),
             RowCreators = creators,
             UserNames = userNames,
+            LegacyRules = legacy,
         };
     }
 
@@ -630,11 +665,12 @@ public class RecordProcedureReadService
     {
         var onDate = r.OnDate;
         var views = new List<RuleInForceView>();
+        var outranked = OutrankedMarks(r);
 
         // The rules that run, one for one, in the resolver's order.
         foreach (var rule in onDate.Rules)
         {
-            views.Add(await InForceRuleAsync(r, rule, ct).ConfigureAwait(false));
+            views.Add(await InForceRuleAsync(r, rule, outranked.GetValueOrDefault(rule.Version.PolicyVersionId), ct).ConfigureAwait(false));
         }
 
         // The rules a plain Exclude removed (a changed rule's base is shown by its record rule's "changed" mark).
@@ -672,7 +708,115 @@ public class RecordProcedureReadService
         }
     }
 
-    private async Task<RuleInForceView> InForceRuleAsync(Reading r, ResolvedRule rule, CancellationToken ct)
+    /// <summary>
+    /// 084e (EB-D-219; ontology-r1 R1-R6, O-6): the <c>Outranked</c> / <c>CapOutranked</c> mark of each in-force rule, by policy version id. The group
+    /// is exactly what the evaluator groups for a LINE on the date (R6): the legacy rules, one version per policy picked by the evaluator's own
+    /// <see cref="InvoiceComplianceEvaluator.SelectVersion"/>, then the resolver's <c>Rules</c> (not <c>RulesWithFallback</c>, the invoice
+    /// subject's fallback), system rules excluded, each through the billing gate, grouped by <see cref="BillingRuleDefinition.PrecedenceKey"/>.
+    /// Precedence is <see cref="RulePrecedence.Resolve{T}"/>, the evaluator's own function (R5: no rank loop here), with the record-level
+    /// predicate (R1): gate-accepted (a refused version is in no group) and not downgraded. What a record read cannot know (the handler's
+    /// answer on an invoice's facts) is said by the note (R4). A mark only on an outcome other than Applies; "by" is every displacing version at
+    /// the top rank (R3). EB-D-218: every version at or above the top rank of a marked key (the rows that decided the mark and its "by" list),
+    /// with its policy and rule set, a legacy one with every version of its policy, a Procedure one with its Procedure and that Procedure's
+    /// versions, is part of what the caller must be able to Read.
+    /// </summary>
+    private Dictionary<Guid, RuleMarkView> OutrankedMarks(Reading r)
+    {
+        var legacy = r.LegacyRules
+            .Where(c => c.CanBeInForce && !InvoiceComplianceEvaluator.IsSystemRule(c))
+            .OrderBy(c => c.PolicyCode, StringComparer.Ordinal).ThenBy(c => c.PolicyId).ThenBy(c => c.VersionNumber).ThenBy(c => c.PolicyVersionId)
+            .GroupBy(c => c.PolicyId)
+            .Select(g => InvoiceComplianceEvaluator.SelectVersion(g.ToList(), r.Date))
+            .OfType<BillingRuleCandidate>();
+        var procedureRules = new Dictionary<Guid, ResolvedRule>();
+        var candidates = new List<BillingRuleCandidate>(legacy);
+        foreach (var rule in r.OnDate.Rules)
+        {
+            var candidate = BillingFactLoader.ProcedureCandidate(rule);
+            if (!InvoiceComplianceEvaluator.IsSystemRule(candidate) && procedureRules.TryAdd(candidate.PolicyVersionId, rule))
+            {
+                candidates.Add(candidate);
+            }
+        }
+
+        // The gate, as the evaluator's step 2 asks it: a consequence the type may not carry is not shown to the gate (the version is downgraded, not refused).
+        var accepted = new Dictionary<Guid, BillingRuleDefinition>();
+        var downgraded = new HashSet<Guid>();
+        foreach (var candidate in candidates)
+        {
+            var disallowed = InvoiceComplianceEvaluator.DisallowedConsequenceType(candidate);
+            var snapshot = new PolicyVersionSnapshot(
+                candidate.PolicyVersionId, candidate.PolicyCode, candidate.RuleType, candidate.RuleBody, candidate.MessageTemplate,
+                disallowed is null ? candidate.Consequence : null);
+            if (_gate.TryPrepareBillingRule(snapshot, out var definition))
+            {
+                accepted[candidate.PolicyVersionId] = definition;
+                if (disallowed is not null)
+                {
+                    downgraded.Add(candidate.PolicyVersionId);
+                }
+            }
+        }
+
+        var marks = new Dictionary<Guid, RuleMarkView>();
+        foreach (var key in candidates.Where(c => accepted.ContainsKey(c.PolicyVersionId)).GroupBy(c => accepted[c.PolicyVersionId].PrecedenceKey))
+        {
+            var resolved = RulePrecedence.Resolve(
+                BillingRuleCatalogue.PrecedenceOf(key.Key.RuleType), key.ToList(), c => c.Rank,
+                c => accepted[c.PolicyVersionId].MaxAmountPerItem is not null, c => !downgraded.Contains(c.PolicyVersionId));
+            var marked = resolved.Outcomes.Where(o => o.Outcome != PrecedenceOutcome.Applies && procedureRules.ContainsKey(o.Version.PolicyVersionId)).ToList();
+            if (marked.Count == 0 || resolved.Top is not { } top)
+            {
+                continue;
+            }
+
+            foreach (var decided in key.Where(c => c.Rank.CompareTo(top) >= 0))
+            {
+                ExposeCandidate(r, decided);
+            }
+
+            var by = resolved.Displacing.Select(d => OutrankingView(d, procedureRules.GetValueOrDefault(d.PolicyVersionId))).ToList();
+            var codes = by.Count == 1 ? by[0].Code : string.Join(", ", by.Take(by.Count - 1).Select(b => b.Code)) + " and " + by[^1].Code;
+            var note = string.Format(System.Globalization.CultureInfo.InvariantCulture, OutrankedNoteFormat, codes, by.Count == 1 ? "is" : "are");
+            foreach (var (version, outcome) in marked)
+            {
+                marks[version.PolicyVersionId] = outcome == PrecedenceOutcome.DisplacedOutright
+                    ? new RuleMarkView("Outranked", Text: "Outranked by " + codes, Note: note, By: by)
+                    : new RuleMarkView("CapOutranked", Text: "Cap outranked by " + codes, Note: note, By: by);
+            }
+        }
+
+        return marks;
+    }
+
+    /// <summary>A rule that decided an outranked mark: its policy, version and rule set; a legacy rule's every version (they decide which one is
+    /// in force on the date, as F-B for a Procedure's); a Procedure rule's Procedure and all its versions.</summary>
+    private static void ExposeCandidate(Reading r, BillingRuleCandidate candidate)
+    {
+        r.Expose(PolicySet, candidate.PolicyId);
+        r.Expose(PolicyVersionSet, candidate.PolicyVersionId);
+        r.Expose(RuleSetSet, candidate.RuleSetId);
+        if (candidate.Source == BillingRuleSource.Legacy)
+        {
+            foreach (var version in r.LegacyRules.Where(v => v.PolicyId == candidate.PolicyId))
+            {
+                r.Expose(PolicyVersionSet, version.PolicyVersionId);
+            }
+        }
+        else if (candidate.ProcedureId is { } procedure)
+        {
+            r.Expose(ProcedureEntity.EntitySet, procedure);
+            ExposeVersionsOf(r, procedure);
+        }
+    }
+
+    private OutrankingRuleView OutrankingView(BillingRuleCandidate candidate, ResolvedRule? rule) => new(
+        candidate.PolicyId, candidate.PolicyVersionId,
+        rule is not null ? ProcedureRulesOnDate.ReaderCodeOf(rule, _logger) : ProcedureRulesOnDate.ReaderCodeOf(candidate.PolicyCode, null, _logger),
+        candidate.ShortHeadline, candidate.VersionNumber, candidate.Source.ToString(), candidate.ProcedureId, candidate.Rank.Level.ToString(),
+        candidate.Rank.Distance);
+
+    private async Task<RuleInForceView> InForceRuleAsync(Reading r, ResolvedRule rule, RuleMarkView? outranked, CancellationToken ct)
     {
         var marks = new List<RuleMarkView>();
         if (rule.RecordRule is { } slot)
@@ -695,6 +839,11 @@ public class RecordProcedureReadService
             {
                 marks.Add(new RuleMarkView("Stale", RecordRuleId: rule.Version.PolicyId, BasedOn: basedOn, CurrentBase: current));
             }
+        }
+
+        if (outranked is not null)
+        {
+            marks.Add(outranked);
         }
 
         return await RuleViewAsync(

@@ -85,7 +85,13 @@ internal sealed class RecordProcedureRig
             schema, new PredicateCompiler(schema, new FakeTimeProvider(new DateTimeOffset(2026, 2, 10, 0, 0, 0, TimeSpan.Zero))),
             NullLogger<PolicyVersionValidator>.Instance);
         var describer = new RuleBodyDescriber(validator, Entities.Object, NullLogger<RuleBodyDescriber>.Instance);
-        Service = new RecordProcedureReadService(Entities.Object, Probe, describer, Log)
+        // 084e: the evaluator's own legacy-rule read, over the same world (only LoadLegacyRulesAsync is used; it reads through Entities alone).
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var legacyRules = new BillingFactLoader(
+            Entities.Object, new Mock<IEbillingSettingsReader>(MockBehavior.Strict).Object,
+            new SecureChildShareSynchronizer(Entities.Object, null!, null!, configuration, NullLogger<SecureChildShareSynchronizer>.Instance),
+            configuration, new Sprk.Bff.Api.Telemetry.FinanceTelemetry(), NullLogger<BillingFactLoader>.Instance);
+        Service = new RecordProcedureReadService(Entities.Object, Probe, describer, legacyRules, validator, Log)
         {
             Clock = new FakeTimeProvider(new DateTimeOffset(2026, 2, 10, 12, 0, 0, TimeSpan.Zero)),
         };
@@ -168,15 +174,16 @@ internal sealed class RecordProcedureRig
     /// <summary>The Procedure's rule set (created with the Procedure).</summary>
     public Guid RuleSetOf(Guid procedure) => _setOf[procedure];
 
-    public Guid AddRuleVersion(Guid policy, Guid? procedureVersion, DateOnly from, int number = 1, Guid? basedOn = null, DateTime? created = null, string? headline = null)
+    public Guid AddRuleVersion(Guid policy, Guid? procedureVersion, DateOnly from, int number = 1, Guid? basedOn = null, DateTime? created = null, string? headline = null,
+        RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null)
     {
         var id = NextId();
         var columns = new List<(string, object)>
         {
             ("sprk_policy", Ref(Policy, policy)),
             ("sprk_versionnumber", number),
-            ("sprk_ruletype", Option((int)RuleType.ApprovedRate)),
-            ("sprk_rulebody", ValidRuleBody),
+            ("sprk_ruletype", Option((int)type)),
+            ("sprk_rulebody", body ?? ValidRuleBody),
             ("sprk_shortheadline", headline ?? "Approved rate"),
             ("sprk_inforcefrom", Utc(from)),
             (RuleSetService.PublishStateColumn, Option(RuleSetService.PublishStatePublished)),
@@ -184,9 +191,45 @@ internal sealed class RecordProcedureRig
         if (procedureVersion is { } pv) columns.Add((RuleSetService.ProcedureVersionColumn, Ref(ProcedureEntity.VersionEntity, pv)));
         if (basedOn is { } b) columns.Add((ProcedureAssignmentService.BasedOnVersionColumn, Ref(PolicyVersion, b)));
         if (created is { } c) columns.Add(("createdon", c));
+        if (consequence is { } stated) columns.Add(("sprk_consequence", Option(stated)));
         World.Add(PolicyVersion, id, columns.ToArray());
         VersionRows.Add(("sprk_policyversions", id, $"policy version {number} of rule '{_ruleCodes.GetValueOrDefault(policy, "?")}' (in force from {from:yyyy-MM-dd})"));
         return id;
+    }
+
+    /// <summary>The ids of a legacy rule (<see cref="AddLegacyRule"/>): its rule set, policy and current version.</summary>
+    public sealed record LegacyRule(Guid RuleSet, Guid Policy, Guid Version);
+
+    private readonly Dictionary<(RuleSetScope, Guid?), Guid> _legacySets = new();
+
+    /// <summary>
+    /// 084e: a LEGACY rule, as <see cref="BillingFactLoader.LoadLegacyRulesAsync"/> reads it: a Published billing rule set with no Procedure, scope
+    /// Client default (no firm) or Firm (<paramref name="firm"/>; one set per scope and firm), an enabled active policy, and its current version in
+    /// force from <paramref name="from"/>.
+    /// </summary>
+    public LegacyRule AddLegacyRule(
+        string code, RuleSetScope scope, Guid? firm = null, RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null,
+        DateOnly? from = null)
+    {
+        if (!_legacySets.TryGetValue((scope, firm), out var set))
+        {
+            set = NextId();
+            var setColumns = new List<(string, object)>
+            {
+                ("sprk_scope", Option((int)scope)), ("statuscode", Option(659490000)), ("statecode", Option(0)),
+                (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)),
+            };
+            if (firm is { } f) setColumns.Add(("sprk_firm", Ref("sprk_organization", f)));
+            World.Add(RuleSet, set, setColumns.ToArray());
+            _legacySets[(scope, firm)] = set;
+        }
+
+        var policy = AddRule(set, code);
+        var version = AddRuleVersion(policy, null, from ?? Jan1, type: type, body: body, consequence: consequence);
+        World.Add(Policy, policy,
+            ("sprk_policycode", code), ("sprk_ruleset", Ref(RuleSet, set)), ("sprk_enabled", true), ("statecode", Option(0)),
+            (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)), ("sprk_currentversion", Ref(PolicyVersion, version)));
+        return new LegacyRule(set, policy, version);
     }
 
     private Guid AddRow(string table, Guid record, DateTime? created, params (string Column, object Value)[] columns)
@@ -279,12 +322,13 @@ internal sealed class RecordProcedureRig
 
     /// <summary>A Procedure with one version [from, open) and one rule <paramref name="code"/> published under it.</summary>
     public (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) Simple(
-        string code, ProcedureAppliesTo appliesTo = ProcedureAppliesTo.AllRecords, Guid? firm = null, DateOnly? from = null)
+        string code, ProcedureAppliesTo appliesTo = ProcedureAppliesTo.AllRecords, Guid? firm = null, DateOnly? from = null,
+        RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null)
     {
         var procedure = AddProcedure("Procedure " + code, appliesTo, firm);
         var version = AddVersion(procedure, 1, from ?? Jan1, null);
         var rule = AddProcedureRule(procedure, code);
-        var ruleVersion = AddRuleVersion(rule, version, from ?? Jan1);
+        var ruleVersion = AddRuleVersion(rule, version, from ?? Jan1, type: type, body: body, consequence: consequence);
         return (procedure, version, rule, ruleVersion);
     }
 
