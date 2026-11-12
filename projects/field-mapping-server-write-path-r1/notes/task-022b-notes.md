@@ -147,6 +147,18 @@ task 175 F1-1 unchanged. The floor is the same answer the plan already decides o
 `SecureRootFilingGate.PlanCreateAsync` is unchanged (its early returns are `Ordinary`, a create filed under nothing, or
 refusals, undecided). Per-class runs of every test class on the plan pass (see the report).
 
+**Approved by unified-access-control-r2 (2026-11-12)** as read-only. The property that must stay true: **every way the floor can
+be wrong ends in a strip, never a map.** Only `IsRestricted` (decided and Restricted) lets a Restricted source map. Two cases
+show it:
+- A plan path that returns `Ordinary` early reads as `NoParent`, which is a decided Standard. That strips a Restricted source
+  and never grants.
+- An unknown or refused answer is `Undecided`, which also strips.
+
+The other half, from adversarial pass 2: the floor is never stricter than what the secure-root cascade later writes. So a
+mapped row never ends up Restricted only in the plan. Any future change to `PlanCreateAsync`'s returns, or to
+`AccessPermissionFloor`, keeps both halves. `PlanCreateAsync_…IsolatedPlan…` and the F3 test (mutation-checked) pin the
+isolated return.
+
 ## Known limits
 
 1. **K: a project's or work assignment's stored value follows after the create.** The create writes no Access Permission for

@@ -4,7 +4,7 @@
     <title>Mapping from a Restricted source; a document's access permission set in the create (UAC-r2 2026-11-08)</title>
     <phase>3 W3 Wizards (follow-up to 022 fix round 2)</phase>
     <gate>022 fix round 2 (the secure-source owner invariant) merged into the work branch first: both edit RecordCreationService and its mapping step. UAC-r2 reviews the diff before merge.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what a create maps and what it writes for access permission (.cs, bff-api); access-rule adjacent.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -56,5 +56,18 @@
     <criterion testable="true">AC4 (fail closed): an unreadable or faulting parent value strips the mapped values from a Restricted-capable source; "no Restricted ancestor" maps normally; the source-column guard fails when a seeded table disagrees with the solution.</criterion>
   </acceptance-criteria>
 
-  <notes>Added 2026-11-08 from UAC-r2's ruling in fm's session; split from 022 fix round 2.</notes>
+  <notes>Added 2026-11-08 from UAC-r2's ruling in fm's session; split from 022 fix round 2.
+Completed 2026-11-12: merged to the work branch at 88ef973e52 (`task/fm-022b` 908e22e8c1, base 3e5f2bb224).
+- AC1–AC4 met. Project and work assignment use the secure-root plan's read-only Access Permission floor (UAC-r2 Q2 option (c), the one approved `SecureRootInheritance` edit).
+- Reviews: two Opus adversarial passes, with fixes after each. UAC-r2 approved the `SecureRootInheritance` edit and the rule (2026-11-12).
+- Verification:
+  - build: 0 warnings;
+  - ArchTests: 2530/2530;
+  - the 022b classes: 348/348;
+  - filtered suite: 6879/0;
+  - jest: 50;
+  - publish delta: +9,579 B (40.07 MB, 191 = 191 files);
+  - CVE: no vulnerable packages.
+- Known limits K1–K6 are in `notes/task-022b-notes.md`. Repair and push follow in 022c (#2738, DI-027).
+rework: fix-round-2 task 022b</notes>
 </task>
