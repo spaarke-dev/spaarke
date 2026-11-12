@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-11-11 evening (by context-handoff, before compaction). State only: history is in git log, task
+> **Last Updated**: 2026-11-12 ~17:45Z (by context-handoff, before compaction). State only: history is in git log, task
 > `<completion>` blocks and `notes/handoff-history/2026-11.md` (the previous checkpoint is archived there verbatim). Standing rules:
 > [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-218). Deferred work: one
 > self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-150**). Sub-agents never edit this file.
@@ -13,8 +13,8 @@
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
 | **Active task** | None in progress. **177 is ✅** (PR #2666 squash-merged to docs as `52d02a66f3`; completion record + TASK-INDEX committed). |
 | **Open PR** | None. docs→master [#2674](https://github.com/spaarke-dev/spaarke/pull/2674) (task 177) **merged 2026-11-11 as master `c152d7d0b1`** (merge commit). CI: 43 pass; the non-required `Server tests (office scope) (api-office)` leg hit its 20-min hang guard twice — same stall point as `work/field-mapping-server-write-path-r1` (no 177 code), existing issue **#1504**; locally the same selection on this branch ran 567 pass / 7 skip / 0 fail in 13.9 min with `--blame-hang`. |
-| **Next Action** | 1) 176 smoke still owed: needs an open Revise-budget Work Item on dev (test data = owner's go); tell uac-r2 when it runs. 2) **#2695 VERIFIED on dev `6dbe69b9e2`** (owner 2026-11-12: new Assign Work email saved Resolved, panel shows the matter confirmed); the one pre-deploy row (2026-11-11 20:01) marked Resolved with the owner's go and read back. Nothing left on #2695. 3) Tell word-add-in-r1 master `c152d7d0b1` when it reappears. |
-| **Uncommitted** | None. |
+| **Next Action** | **NOW: creating tasks 178–184 (task-create skill) from `notes/create-wizard-lookup-composer-review.md` §5 T1–T7** (owner 2026-11-12: create-wizard side-pane lookups F-R4-2 + Send Email step on EmailComposer F-R4-3 go in THIS project; reuse existing patterns, never re-create; Fable review done = that note, verified by main session: DataverseLookupField has try/finally no catch; all hosts already build `createXrmNavigationService`). Mapping: 178=T1 harden DataverseLookupField (startable); 179=T2 Assign Work follow-on (after 178; reference-table fields gated owner Q1, contact filter Q6); 180=T3 Event/ToDo/Invoice/ReportCard Enter Info (after 178); 181=T4 Work Assignment wizard incl. firm-filtered attorney (after 178); 182=T5 Send Email follow-on on composer compose-only + "draft" wording + bodyFormat (gated owner Q2 sent-as, Q3 attachments/templates/AI, Q4 Cc/Bcc); 183=T6 DocumentEmailWizard (after 182; PCF React 16 host); 184=T7 retire EmailStep + dead steps + source-scan guard with ratchet (after 179–183; touches nothing in .claude). Also write pointer pattern `.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md` + ui/INDEX.md row (main session). Then TASK-INDEX rows + Parallel plan, Validate-TaskPoml, drift check, commit, ask owner Q1–Q6 (review §6). Other: #2737 auto-merge on green (then owner re-checks Outside Counsel; remove `C:\wtorg` via Remove-WorktreeSafe.ps1); after ~21:30Z nightly evaluator, query for an open fee/scope Signal on MAT-34929-0040 → tell owner to send Budget inquiry (176 + 160 checks). |
+| **Uncommitted** | `notes/create-wizard-lookup-composer-review.md` (Fable review deliverable, new). |
 
 ## Open items
 
