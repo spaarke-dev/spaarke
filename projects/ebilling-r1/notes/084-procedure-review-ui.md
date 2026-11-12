@@ -305,3 +305,18 @@ Review findings W1 to W5 and S1 to S2 fixed; the rest recorded below as known li
   - S6: `buildCountCards` may duplicate InvoiceReview's. Check before 084b.
   - S7: the dependency list was copied from InvoiceFiles for the shared barrel.
   - S8 to S10: minor, not worked.
+
+## uac-r2 scoped re-check (2026-11-12): PASS
+
+uac-r2 re-checked fix round 3 (`9e398e23e3..a7dc4c5276`) and the 084f role diff (`a52d754412..02e4d9396f`). This was the fix diff and its direct callers only, not a new full review. Both passed, and 084 and 084f may stay merged in work.
+
+- F-A, F-B, F-D and K2 are accepted as fixed. The deny-each-asked-row and remove-each-unasked-version-row guards are the mechanical form uac-r2 asked for. Each exemption key names its route segment (`/procedures/` or `/rules-in-force/`) and carries a reason.
+- uac-r2 asked us to confirm three things, all checked:
+  - **Firm name.** `FirmNames` for a Lookup firm is `sprk_organizationname`, the primary name of `sprk_organization` (its `DisplayMask` includes `PrimaryName`). That is the same value the lookup's formatted value shows, and nothing richer.
+  - **Episode filter.** The test that pins the read service's episode filter to the resolver's answer stays until 084e extracts one shared helper: `BaseRetired_ShowsTheCurrentEpisodesVersion_AsTheResolverCountsIt` asserts against `ResolverSays`.
+  - **084f.** The role diff passed; uac-r2 found NFR-05 holds.
+- At 112:
+  - The dry run resolves both privileges from metadata and stops if either is absent.
+  - Send uac-r2 a notice before and after the dev role apply.
+  - After the AFTER notice, uac-r2 re-runs its SecureChild `-Verify`.
+  - 112 step 2 and step 5 now say so, and step 5 also deploys `sprk_recordprocedures`.
