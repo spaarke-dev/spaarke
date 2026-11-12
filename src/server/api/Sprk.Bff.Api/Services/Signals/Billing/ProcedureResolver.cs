@@ -766,23 +766,32 @@ public sealed class ProcedureResolution
     /// and the episode's first version in one transaction). The base rule must not quietly run in its place. A date before the episode's
     /// first effective-from is not that: the episode has versions, and the base rule runs.</para>
     /// </summary>
-    private ResolvedPolicyVersion? RecordRuleVersionOn(PolicyRow recordRule, ProcedureOverrideRow exclude, DateOnly date)
+    private ResolvedPolicyVersion? RecordRuleVersionOn(PolicyRow recordRule, ProcedureOverrideRow exclude, DateOnly date) =>
+        Latest(CurrentEpisodeVersions(recordRule.Id, _versionsByPolicy[recordRule.Id].ToList(), exclude), date);
+
+    /// <summary>
+    /// The versions of a record rule that belong to its CURRENT episode (see <see cref="RecordRuleVersionOn"/>; ebilling-r1 084e, the one episode
+    /// filter the resolver and the record's rules-in-force read share): with no <c>createdon</c> on the change's Exclude row, every version; else
+    /// the versions created on or after it ("on or after": a version created at the row's own instant counts), a version with no <c>createdon</c>
+    /// never. A known boundary that no version of a rule WITH versions reaches is the fault state described there
+    /// (<see cref="ProcedureResolutionFaultException"/>). No versions at all is an empty list, not a fault.
+    /// </summary>
+    internal static List<ResolvedPolicyVersion> CurrentEpisodeVersions(Guid recordRuleId, IReadOnlyList<ResolvedPolicyVersion> all, ProcedureOverrideRow exclude)
     {
-        var all = _versionsByPolicy[recordRule.Id].ToList();
         if (exclude.CreatedOn is not { } episodeStart)
         {
-            return Latest(all, date);
+            return all.ToList();
         }
 
         var inEpisode = all.Where(v => v.CreatedOn is { } created && created >= episodeStart).ToList();
         if (all.Count > 0 && inEpisode.Count == 0)
         {
             throw new ProcedureResolutionFaultException(
-                $"Record rule {recordRule.Id} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}; "
+                $"Record rule {recordRuleId} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}; "
                 + "the current change has no version, so it cannot be told from an older change that was removed.");
         }
 
-        return Latest(inEpisode, date);
+        return inEpisode;
     }
 
     private List<RuleOverride> RuleOverridesOf(Guid basePolicyId)

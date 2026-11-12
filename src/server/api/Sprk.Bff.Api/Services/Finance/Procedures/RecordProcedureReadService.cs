@@ -766,7 +766,7 @@ public class RecordProcedureReadService
 
         var baseCodes = (await ReadByIdsAsync(BillingFactLoader.PolicyEntity, orphans.Select(o => o.Exclude.PolicyId!.Value), ["sprk_policycode"], ct).ConfigureAwait(false))
             .ToDictionary(x => x.Id, x => x.GetAttributeValue<string>("sprk_policycode"));
-        var latest = orphans.ToDictionary(o => o.RecordRuleId, o => CurrentEpisodeVersion(r, o.RecordRuleId, o.Exclude));
+        var latest = orphans.ToDictionary(o => o.RecordRuleId, o => CurrentEpisodeVersion(r.Rows.PolicyVersions, r.Date, o.RecordRuleId, o.Exclude));
         var basedOnIds = latest.Values.Where(v => v.BasedOnVersionId is not null).Select(v => v.BasedOnVersionId!.Value);
         var basedOnNumbers = (await ReadByIdsAsync(BillingFactLoader.VersionEntity, basedOnIds, ["sprk_versionnumber"], ct).ConfigureAwait(false))
             .ToDictionary(x => x.Id, x => x.GetAttributeValue<int?>("sprk_versionnumber") ?? 0);
@@ -802,23 +802,23 @@ public class RecordProcedureReadService
 
     /// <summary>
     /// The version of a record rule the resolver would count, as <c>ProcedureResolution.RecordRuleVersionOn</c> counts it (fix round 3, K2): only the
-    /// versions of the CURRENT episode (created on or after the change's Exclude row; with no <c>createdon</c> on the row every version counts, and
-    /// a version with none does not count beside a known boundary), then the latest in force on the date (effective-from, then number, then id).
+    /// versions of the CURRENT episode, by the resolver's own filter (<see cref="ProcedureResolution.CurrentEpisodeVersions"/>, 084e: one
+    /// implementation), then the latest in force on the date (effective-from, then number, then id).
     /// A record rule keeps its policy across a removal and a new change, so an older episode's version must never be shown. When the change is
     /// not yet in force on the date (no version of the episode is), its first version names what it was based on. A known boundary that no
     /// version reaches is the resolver's own fault state and is a fault here too (503, never a guess).
     /// </summary>
-    private static ResolvedPolicyVersion CurrentEpisodeVersion(Reading r, Guid recordRuleId, ProcedureOverrideRow exclude)
+    internal static ResolvedPolicyVersion CurrentEpisodeVersion(IReadOnlyList<ResolvedPolicyVersion> versions, DateOnly date, Guid recordRuleId, ProcedureOverrideRow exclude)
     {
-        var all = r.Rows.PolicyVersions.Where(v => v.PolicyId == recordRuleId).ToList();
-        var episode = exclude.CreatedOn is { } start ? all.Where(v => v.CreatedOn is { } created && created >= start).ToList() : all;
+        var all = versions.Where(v => v.PolicyId == recordRuleId).ToList();
+        var episode = ProcedureResolution.CurrentEpisodeVersions(recordRuleId, all, exclude);
         if (episode.Count == 0)
         {
             throw new ProcedureResolutionFaultException(
                 $"Record rule {recordRuleId} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}.");
         }
 
-        return episode.Where(v => ProcedureResolution.InForceOn(v.InForceFrom, r.Date))
+        return episode.Where(v => ProcedureResolution.InForceOn(v.InForceFrom, date))
                    .OrderByDescending(v => v.InForceFrom).ThenByDescending(v => v.VersionNumber).ThenByDescending(v => v.PolicyVersionId)
                    .FirstOrDefault()
                ?? episode.OrderBy(v => v.InForceFrom).ThenBy(v => v.VersionNumber).ThenBy(v => v.PolicyVersionId).First();
