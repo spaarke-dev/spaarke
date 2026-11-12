@@ -223,6 +223,9 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         ),
       },
 
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
       searchContacts: handleSearchContacts,
       searchOrganizations: handleSearchOrganizations,
       searchUsers: handleSearchUsers,
