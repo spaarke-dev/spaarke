@@ -45,6 +45,7 @@
     <constraint source="project">The dry run writes nothing: proposed rows are an in-memory overlay on the resolver's row source; a test asserts no Dataverse create, update or delete.</constraint>
     <constraint source="project">Now → After must equal what 084's lists return after the same change is written (asserted by a test that writes through 089's service in the fake world and compares).</constraint>
     <constraint source="project (ontology-r1 ownership)">Any diff under Services/Signals/** is sent to ontology-r1 for review before merge; prefer a row-source overlay that leaves ProcedureResolver.cs unchanged.</constraint>
+    <constraint source="ontology-r1 review conditions, 2026-11-11">(1) The overlay replaces rows only at the row-source seam; no ranking or selection code is copied into the dry-run path. (2) The parity test runs both sides through the real ProcedureResolver (dry run, then write the same change, then read), never against a hand-built expected list. (3) The dry run reads as the caller with the same row filtering as the lists; an overlaid row never reveals a row the caller cannot read (secure family, D-123). (4) The overlay is per request, never cached or shared. (5) Nothing is written, including no Decision Record and no Signal; a test proves no write call reaches the client. (6) The route is in the route-authorization census. The design goes to ontology-r1 before the build.</constraint>
     <constraint source="ADR-001, ADR-008, ADR-019, .claude/constraints/bff-extensions.md">ProblemDetails with stable codes; ledger entry; no new package; publish-size delta recorded.</constraint>
     <constraint source="ADR-021, ADR-012, ADR-050">Assign Procedure uses WizardShell, semantic tokens and shared components; no new npm package.</constraint>
   </constraints>
@@ -123,7 +124,8 @@
 
   <acceptance-criteria>
     <criterion testable="true">For each override kind (pin, follow latest, exclude, remove, rule exclude, rule change, assign), the dry run's After equals 084's lists after the same change is written in the fake world.</criterion>
-    <criterion testable="true">The dry run writes nothing (no create, update or delete in the tests).</criterion>
+    <criterion testable="true">The dry run writes nothing: no create, update or delete, no Decision Record and no Signal reach the client (asserted by a test).</criterion>
+    <criterion testable="true">An overlaid row on a record the caller cannot read (secure family, D-123) changes nothing visible in the answer (negative); two concurrent dry runs on one record do not see each other's overlay (negative).</criterion>
     <criterion testable="true">A caller without the matching write route's authorization, a flagged-external caller and a caller without Read get the same answers as on 084's routes or the write route (negative); a refused or faulted row read is 503 procedures.unavailable.</criterion>
     <criterion testable="true">Every wizard's Impact step uses the dry run and shows the D-170, section 15 and O-21 texts where they apply.</criterion>
     <criterion testable="true">Assign Procedure is offered to billing admins only and writes through 089's procedure-assignments route.</criterion>
