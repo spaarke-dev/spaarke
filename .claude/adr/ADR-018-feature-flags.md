@@ -72,7 +72,7 @@ public async Task<JobResult> HandleAsync(AnalysisJob job, CancellationToken ct)
 }
 ```
 
-**See**: [Feature Flag Pattern](../patterns/config/feature-flags.md)
+**See**: [Feature Flag Pattern](../patterns/provisioning/null-object-kill-switch-anti-pattern.md)
 
 ---
 

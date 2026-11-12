@@ -85,7 +85,7 @@ await _statusStore.CompleteAsync(jobId, new JobOutcome {
 });
 ```
 
-**See**: [Job Status Pattern](../patterns/jobs/status-persistence.md)
+**See**: [Job Status Pattern](../patterns/api/background-workers.md)
 
 ---
 

@@ -147,11 +147,11 @@ But the recommended approach is:
 ## References
 
 - **Replacement Skills**:
-  - [project-setup](.claude/skills/project-setup/SKILL.md)
+  - [project-setup](../../project-setup/SKILL.md)
   - [project-pipeline](../../project-pipeline/SKILL.md)
   - [task-execute](../../task-execute/SKILL.md)
 
-- **Skill Interaction Guide**: [SKILL-INTERACTION-GUIDE.md](../SKILL-INTERACTION-GUIDE.md)
+- **Skill Interaction Guide**: [SKILL-INTERACTION-GUIDE.md](../../SKILL-INTERACTION-GUIDE.md)
 - **Skills INDEX**: [INDEX.md](../../INDEX.md)
 
 ---

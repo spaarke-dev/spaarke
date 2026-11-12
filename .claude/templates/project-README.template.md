@@ -12,9 +12,9 @@
 
 | Document | Description |
 |----------|-------------|
-| [Project Plan](./plan.md) | Comprehensive project plan and timeline |
-| [Design Spec](./design.md) | Technical design specification |
-| [Tasks](./tasks.md) | Task breakdown and status |
+| Project Plan — `plan.md` | Comprehensive project plan and timeline |
+| Design Spec — `design.md` | Technical design specification |
+| Tasks — `tasks/TASK-INDEX.md` | Task breakdown and status |
 
 ## Current Status
 
@@ -60,7 +60,7 @@ The project is considered **complete** when:
 
 | Decision | Rationale | ADR |
 |----------|-----------|-----|
-| {Decision 1} | {Why} | [ADR-XXX](../../adr/ADR-XXX.md) |
+| {Decision 1} | {Why} | ADR-XXX (`.claude/adr/ADR-XXX-{slug}.md`) |
 | {Decision 2} | {Why} | — |
 
 ## Risks & Mitigations

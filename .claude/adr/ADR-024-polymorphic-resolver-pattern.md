@@ -153,7 +153,7 @@ ADR-024 exception: the tension dissolves once "related-to" is understood as inte
 
 | Component | Purpose | Location |
 |-----------|---------|----------|
-| RegardingLink PCF | Grid customizer for clickable regarding links | `src/client/pcf/RegardingLink/` |
+| RegardingLink PCF | Grid customizer for clickable regarding links | Source deleted (commit `ded4e037c2`); deployed bundle in `src/dataverse/solutions/SpaarkeMaster/Controls/sprk_Spaarke.Controls.RegardingLink/`; grids now render the link with `src/client/pcf/SpaarkeGridCustomizer/customizers/RegardingLinkRenderer.tsx` |
 | UpdateRelatedButton PCF | Parent form button to push field mappings | `src/client/pcf/UpdateRelatedButton/` |
 
 ---

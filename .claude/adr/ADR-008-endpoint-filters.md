@@ -67,7 +67,7 @@ public class DocumentAuthorizationFilter : IEndpointFilter
 }
 ```
 
-**See**: [Authorization Service Pattern](../patterns/auth/authorization-service.md)
+**See**: [Authorization Service Pattern](../patterns/api/endpoint-filters.md)
 
 ### Anti-Pattern: Global Middleware
 

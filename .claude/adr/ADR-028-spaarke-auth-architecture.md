@@ -5,7 +5,7 @@
 | **Status** | Accepted |
 | **Date** | 2026-05-19 |
 | **Supersedes** | Cascade portion of `.claude/patterns/auth/spaarke-sso-binding.md` (now retired). Amends ADR-003, ADR-004, ADR-008, ADR-009 client-side touch points. |
-| **Full version** | [docs/adr/ADR-028-spaarke-auth-architecture.md](../../docs/adr/ADR-028-spaarke-auth-architecture.md) |
+| **Full version** | docs/adr/ADR-028-spaarke-auth-architecture.md |
 | **Source design doc** | [AUDIT-FINDINGS-AUTH-SYSTEM.md](../AUDIT-FINDINGS-AUTH-SYSTEM.md) — the audit that motivated v2 |
 
 ## Decision
@@ -604,7 +604,7 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 ### Alternatives considered and rejected
 
 - **Keep A2 (multitenant + Teams SSO).** It signs guests into their home tenant, so the `oid` mismatches and no `systemuser` matches. The SSO token audience is wrong for per-customer servers, and every customer would need admin consent.
-- **A new `access_as_user` scope per stamp.** The BFF checks only that a delegated scope is present (`src/server/shared/Spaarke.Core/Auth/CallerIdentity.cs:113,247-249`), and every stamp app already exposes `user_impersonation` (H3). A second scope adds provisioning work for no gain.
+- **A new `access_as_user` scope per stamp.** The BFF checks only that a delegated scope is present (`src/server/shared/Spaarke.Core/Auth/CallerIdentity.cs`, lines 113 and 247-249), and every stamp app already exposes `user_impersonation` (H3). A second scope adds provisioning work for no gain.
 - **Per-user Tier-1 setup through the role map only (comply with A3).** Every workforce user would need manual setup before they see anything. The owner rejected this on 2026-10-09.
 - **Invites from each stamp BFF.** It puts a tenant-wide invite permission on every customer identity. A single shared path keeps it in one place.
 - **Combining with the §12b amendment.** §12b is not finished, and R3's Wave 2 (tasks 011, 012, 040) needs these rules first. Two dated amendments do not conflict, because they touch different clauses.
@@ -857,7 +857,7 @@ services.PostConfigure<JwtBearerOptions>(opts => {
 
 ## Source Documentation
 
-- Full ADR: [`docs/adr/ADR-028-spaarke-auth-architecture.md`](../../docs/adr/ADR-028-spaarke-auth-architecture.md)
+- Full ADR: `docs/adr/ADR-028-spaarke-auth-architecture.md`
 - Original audit doc (design rationale): [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](../AUDIT-FINDINGS-AUTH-SYSTEM.md)
 - Migration project: [`projects/spaarke-auth-v2-and-hardening/`](../../projects/spaarke-auth-v2-and-hardening/)
 - MSAL invariants: [`.claude/patterns/auth/spaarke-sso-binding.md`](../patterns/auth/spaarke-sso-binding.md)

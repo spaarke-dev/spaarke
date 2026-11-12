@@ -11,11 +11,11 @@
 ## Related AI Context
 
 **Related ADRs:**
-- [ADR-021 Fluent UI Design System](./ADR-021-fluent-ui-design-system.md) — Parent design system decision
-- [ADR-006 Prefer PCF over Web Resources](./ADR-006-prefer-pcf-over-webresources.md) — Web resource strategy context
-- [ADR-012 Shared Component Library](./ADR-012-shared-component-library.md) — Component sharing approach
+- [ADR-021 Fluent UI Design System](./ADR-021-fluent-design-system.md) — Parent design system decision
+- [ADR-006 Prefer PCF over Web Resources](./ADR-006-pcf-over-webresources.md) — Web resource strategy context
+- [ADR-012 Shared Component Library](./ADR-012-shared-components.md) — Component sharing approach
 
-**Operational Guide:** [Icon Manager GUIDE.md](../../projects/spaarke-navigation-icons/GUIDE.md) — Full walkthrough for using the Icon Manager app, MCP server, deployment scripts, and Claude Code orchestration.
+**Operational Guide:** Icon Manager GUIDE.md — Full walkthrough for using the Icon Manager app, MCP server, deployment scripts, and Claude Code orchestration.
 
 ---
 
