@@ -132,7 +132,7 @@ function Root() {
         ? {
             api: createRuleSetApi(authenticatedFetch, getBffBaseUrl()),
             // D-219 Q5: the Firm picker opens the Dataverse side pane when this frame can reach Xrm.Utility.lookupObjects.
-            firmLookup: createFirmLookup(undefined, getXrm('lookupObjects') ? createXrmNavigationService() : undefined),
+            firmLookup: createFirmLookup(undefined, getXrm('lookupObjects')?.Utility?.lookupObjects ? createXrmNavigationService() : undefined),
           }
         : null,
     [ready]

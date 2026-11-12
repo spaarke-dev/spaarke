@@ -71,7 +71,7 @@ export const OntologyAdminWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () =
   // built here at the host root, and only when this frame can reach `Xrm.Utility.lookupObjects`; without it (a non-MDA dev shell) no
   // pane is offered and the wizard keeps its inline search rather than showing a Select button that cannot open.
   const navigationService = React.useMemo(
-    () => (getXrm('lookupObjects') ? createXrmNavigationService() : undefined),
+    () => (getXrm('lookupObjects')?.Utility?.lookupObjects ? createXrmNavigationService() : undefined),
     []
   );
   const matterPicker = React.useMemo<MatterPicker>(
