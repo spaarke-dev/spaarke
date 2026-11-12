@@ -32,7 +32,7 @@
     <SelfContained>false</SelfContained>
     <!-- task 041: NU1510 (NuGet pruning hint — "package will not be pruned / likely unnecessary") is scoped
          OUT of TreatWarningsAsErrors for this project. The two flagged refs (Caching/Hosting.Abstractions
-         10.0.3) are DELIBERATE version pins for the Microsoft.Extensions.AI 10.3.0 dependency chain (see
+         10.0.x) are DELIBERATE version pins for the Microsoft.Extensions.AI dependency chain (10.11.0 since task 020; see
          inline comments below); removing them to satisfy the pruner would drop the pinned version. NU1510 is
          a NuGet restore-hygiene warning, not a Roslyn code/analyzer warning — outside the mechanical-baseline
          analyzers-as-errors scope. This is a scoped NuGet exemption, NOT a code-warning suppression. -->
@@ -77,7 +77,7 @@
                                           AsAIAgent() agent/thread/run loop is a DIFFERENT design from
                                           Spaarke's hand-written SprkChatAgent + middleware pipeline. -->
     <!-- PINNED: Do NOT upgrade without testing (Phase 1 - AIPL-002, AIPL-050) -->
-    <!-- Microsoft.Extensions.AI.OpenAI 10.3.0 requires OpenAI >= 2.8.0 (added in AIPL-050 for IChatClient bridge) -->
+    <!-- Microsoft.Extensions.AI.OpenAI (10.11.0 since spaarkeai-mcp-bff-api-r1 task 020) requires OpenAI >= 2.14.0; OpenAI was added in AIPL-050 for the IChatClient bridge -->
     <PackageReference Include="Azure.AI.Projects" Version="1.0.0-beta.8" />
     <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.0.1" />
     <!-- Microsoft.Extensions.AI + .OpenAI 10.3.0 -> 10.11.0 (spaarkeai-mcp-bff-api-r1 task 020, NFR-08): ModelContextProtocol.Core 2.3.1 requires
@@ -135,7 +135,7 @@
          redis-cache-remediation-r1 R7-S7, so its custom events/metrics were already inert. -->
 
     <!-- Caching -->
-    <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
+    <!-- Microsoft.Extensions.Caching.Abstractions: pinned for the Microsoft.Extensions.AI dependency chain (first bumped 10.0.1 -> 10.0.3 for M.E.AI 10.3.0; now 10.0.11, satisfying M.E.AI 10.11.0) -->
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.11" />
     <!-- Microsoft Entra authentication to Azure Managed Redis (task 242, owner D12/D13): CacheModule calls

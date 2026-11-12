@@ -3313,7 +3313,7 @@ public partial class RouteAuthorizationGuardTests
 
         // ---------- task 020: the MCP endpoint, interim until task 021 ----------
         Pending("POST /mcp/legal-operations", "021", Gap.NoDecision,
-            "[low] Signed-in only (.RequireAuthorization(), McpEndpoints.cs:42): the route itself takes no record id and, in task 020, serves "
+            "[low] Signed-in only (.RequireAuthorization(), McpEndpoints.cs:44): the route itself takes no record id and, in task 020, serves "
             + "NO production tool (only a test probe in the contract tests), so nothing is read. Task 021 adds the per-tool policies, the "
             + "A10 refusal of CIAM and home-directory tokens, and the ledger entries, and replaces this waiver. Do not add a tool "
             + "before it does."),

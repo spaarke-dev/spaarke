@@ -47,6 +47,26 @@ Decide with the Copilot surface's owner. `spaarkeai-mcp-bff-api-r1` replaces thi
 **Blockers**: none. If `spaarkeai-mcp-bff-api-r1` adopts the declarative-agent fallback (design §5.2), do this together with retiring the April OpenAPI action.
 **Related**: #1523, #1579, #1574 (the "remove before production" token logger, also found by this design and already filed there); ADR-010; CLAUDE.md §10
 
+### ISS-005 — Rate-limit OnRejected log writes the user's name (a claim value) on every 429
+
+| Field | Value |
+|---|---|
+| **Status** | Open (pre-existing on master; not caused by this project) |
+| **Urgency** | soon (MCP routes now reach the handler) |
+| **Filed** | 2026-11-12 |
+| **Source** | Task 020 adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2756 |
+
+**Description**
+
+`RateLimitingModule.cs` `OnRejected` (~L321-326) logs `User.Identity.Name` and the client IP at Warning on every 429. ADR-015 / NFR-05 allow ids, sizes, timings and reason codes, not claim values. Concrete failure: a Copilot client over the 60/min `mcp` limit writes the user's UPN to App Insights on each rejected call.
+
+**Suggested fix**
+
+Log the opaque caller key the limiter partitions by (`oid`, else `sub`), or no user at all; add a regression test that the rejected-request log has no UPN or email. Shared code: the BFF platform owner fixes it, not task 020.
+
+---
+
 ### ISS-004 — The decision commit does not require a prior plan read, although the spec says it must
 
 | Field | Value |

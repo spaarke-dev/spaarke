@@ -10,7 +10,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Mcp;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Xunit;
@@ -230,10 +230,16 @@ public sealed class McpHostContractTests
     [InlineData(true)]
     public async Task RealBffHost_AnonymousRequest_Returns401_WhateverTheKillSwitch(bool mcpEnabled)
     {
+        // UseSetting, not ConfigureAppConfiguration: AddMcpModule reads Mcp:Enabled while Program.cs registers services, and a
+        // ConfigureAppConfiguration source added here arrives after that read (both rows would silently run disabled).
         using var factory = new CustomWebAppFactory().WithWebHostBuilder(builder =>
-            builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Mcp:Enabled"] = mcpEnabled ? "true" : "false" })));
+            builder.UseSetting("Mcp:Enabled", mcpEnabled ? "true" : "false"));
         using var client = factory.CreateClient();
+
+        // The switch picked the right catalog, and with MCP enabled the real BFF-assembly tool scan ran without throwing (an
+        // anonymous request stops at 401 before the catalog is ever resolved, so this is the only place the real scan runs).
+        var catalog = factory.Services.GetRequiredService<McpToolCatalog>();
+        (catalog is NullMcpToolCatalog).Should().Be(!mcpEnabled);
         using var request = new HttpRequestMessage(HttpMethod.Post, McpEndpoints.LegalOperationsRoute)
         {
             Content = new StringContent("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""", Encoding.UTF8, "application/json"),

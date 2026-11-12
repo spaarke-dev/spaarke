@@ -332,3 +332,12 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - **Deviation from the brief's likely shape (C7 reflection ban):** the first catalog used `[McpServerTool]` on methods and `Type.GetMethods` to find them. `PoaShareClientSingletonGuardTests` C7 (owner round 48) bans method lookups by reflection on any type, so the catalog uses delegate-based `McpToolDefinition` classes instead and the guard is untouched. The SDK's own attribute scan was not an option (it registers one flat tool set and cannot partition by area).
 
 - **ArchTests ledger:** `PendingOwners` gains "021" (the interim `POST /mcp/legal-operations` waiver is owned by task 021; the set was closed over the 2026-10 sweep tasks). 021 deletes the waiver when it credits the route.
+
+### 2026-11-12 — Task 020 review: known limits (K-class, recorded, not fixed)
+
+- **K1 — tools stay off until 021 by task order only.** The default JwtBearer scheme accepts any workforce tenant (`organizations` authority), and the route is signed-in only until 021 adds the A10 refusals and per-tool policies. 022–024 depend on 021 in the plan, but nothing mechanical stops a `[McpArea]` class landing earlier. Candidate guard for 021: an ArchTest that fails if any `[McpArea]` type exists while the 021 Pending waiver is present.
+- **K2 — `PendingOwners` gained a bare `"021"`.** Any Pending waiver that cites "021" now passes. 021 removes the owner together with its waiver.
+- **K2 — the SDK registers `IdleTrackingBackgroundService`.** It is SDK-owned, and in Stateless mode its `ExecuteTask` is null, so it never starts (reviewer probe). Stateful mode would run it. 020 adds no background work of its own (ADR-052).
+- **K3 — SDK sensitive logging.** SDK 2.3.1 logs whole JSON-RPC messages (tool arguments included) at Trace/Debug. `appsettings.template.json` now caps `ModelContextProtocol` at Warning (ADR-015).
+- **Fixed in review:** the real-BFF kill-switch test used `ConfigureAppConfiguration`, which `AddMcpModule` never saw, so the "enabled" row ran disabled. It now uses `UseSetting` and asserts the catalog type, which also runs the real BFF tool scan. Also fixed: stale M.E.AI 10.3.0 pin comments in the csproj, a `DateTime.UtcNow` in the test token helper (tests/CLAUDE.md), and the waiver's line reference (`McpEndpoints.cs:44`).
+- **Filed, out of scope:** #2756 (ISS-005), the rate-limit `OnRejected` log writes `User.Identity.Name` on every 429.

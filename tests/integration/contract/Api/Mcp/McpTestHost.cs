@@ -114,7 +114,6 @@ internal sealed class McpTestHost : IAsyncDisposable
     {
         Issuer = Issuer,
         Audience = Audience,
-        Expires = DateTime.UtcNow.AddMinutes(10),
         SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256),
         Claims = new Dictionary<string, object>
         {
