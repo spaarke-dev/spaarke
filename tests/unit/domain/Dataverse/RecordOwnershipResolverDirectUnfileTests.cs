@@ -710,8 +710,9 @@ public class RecordOwnershipResolverDirectUnfileTests
 
     public static TheoryData<string> TypeShapes => new()
     {
-        "int", "long", "short", "double", "float", "decimal", "OptionSetValue", "JSON number", "JSON number with a zero fraction",
+        "int", "long", "short", "double", "decimal", "OptionSetValue", "JSON number", "JSON number with a zero fraction",
         "numeric string", "numeric string with spaces", "numeric string with a zero fraction", "JSON numeric string",
+        "exact numeric string", "exact numeric string with a zero fraction",
     };
 
     [Theory]
@@ -725,7 +726,6 @@ public class RecordOwnershipResolverDirectUnfileTests
             "long" => (long)message,
             "short" => (short)7,
             "double" => (double)message,
-            "float" => 7f,
             "decimal" => (decimal)message,
             "OptionSetValue" => new OptionSetValue(message),
             "JSON number" => System.Text.Json.JsonSerializer.SerializeToElement(message),
@@ -733,9 +733,11 @@ public class RecordOwnershipResolverDirectUnfileTests
             "numeric string" => message.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "numeric string with spaces" => $" {message} ",
             "numeric string with a zero fraction" => $"{message}.0",
+            "exact numeric string" => "100000004",
+            "exact numeric string with a zero fraction" => "100000004.0",
             _ => System.Text.Json.JsonSerializer.SerializeToElement(message.ToString(System.Globalization.CultureInfo.InvariantCulture)),
         };
-        var expected = shape is "short" or "float" ? 7 : message;
+        var expected = shape switch { "short" => 7, "exact numeric string" or "exact numeric string with a zero fraction" => 100000004, _ => message };
 
         var written = RecordReparent.UnfileRuleColumnsWrittenIn("sprk_communication",
             new Dictionary<string, object?> { ["sprk_communicationtype"] = value });
@@ -746,6 +748,7 @@ public class RecordOwnershipResolverDirectUnfileTests
     public static TheoryData<string> UnreadableTypeShapes => new()
     {
         "text", "fraction", "JSON fraction", "NaN", "long out of range", "decimal out of range", "JSON true", "empty string",
+        "float", "thousands separators", "thousands separators with a decimal point",
     };
 
     [Theory]
@@ -761,6 +764,9 @@ public class RecordOwnershipResolverDirectUnfileTests
             "long out of range" => long.MaxValue,
             "decimal out of range" => decimal.MaxValue,
             "JSON true" => System.Text.Json.JsonDocument.Parse("true").RootElement.Clone(),
+            "float" => 100000004f, // a float cannot hold this option value exactly
+            "thousands separators" => "1,0000,0004",
+            "thousands separators with a decimal point" => "1,000.0",
             _ => "",
         };
 

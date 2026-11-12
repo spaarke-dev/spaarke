@@ -1243,7 +1243,7 @@ public sealed record RecordReparent
         short number => number,
         byte number => number,
         double number => IntegerOf(number),
-        float number => IntegerOf(number),
+        // A float cannot hold an option value such as 100000004 exactly, so it reads as not set.
         decimal number => IntegerOf(number),
         string text => OptionValueOfText(text),
         System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } element =>
@@ -1260,7 +1260,7 @@ public sealed record RecordReparent
         var trimmed = text?.Trim();
         if (int.TryParse(trimmed, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
             return parsed;
-        return decimal.TryParse(trimmed, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var number)
+        return decimal.TryParse(trimmed, System.Globalization.NumberStyles.Integer | System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var number)
             ? IntegerOf(number)
             : null;
     }
