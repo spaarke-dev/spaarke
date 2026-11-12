@@ -700,10 +700,35 @@ public sealed class RecordProcedureEndpointsContractTests
         // resolver's), so nothing in the body is derived from it.
         ["outranked/rules-in-force/policy version 1 of rule 'LEGACY-CD-RATE' (in force from 2026-01-01)"] =
             "a legacy rule below the top rank of its key: precedence never consults it (084e O-1) and the list shows only the resolver's rules, so the body does not depend on it",
+
+        // 084e fix round 1 (D): a gate-refused legacy Firm rule ranked ABOVE the top of its key (GENERAL-TI, All records). The gate refuses it, so
+        // it is in no group (R1) and outranks nothing; it is not a row of the list. Its rows are never asked and the body does not depend on them.
+        ["outranked/procedures/policy version 1 of rule 'GENERAL-TI' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        ["outranked/procedures/policy version 1 of rule 'LEGACY-BAD-TI' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        ["outranked/rules-in-force/policy version 1 of rule 'LEGACY-BAD-TI' (in force from 2026-01-01)"] = GateRefusedLegacyAboveTop,
+
+        // 084e fix round 1 (D): the legacy policy and rule-set rows. The Procedures route reads no legacy rule set; the rules route asks every legacy
+        // row that decided a mark (LEGACY-RATE and its Firm set), and the rest are below the top (LEGACY-CD-RATE, its Client default set) or refused.
+        ["outranked/procedures/legacy Firm rule set first holding 'LEGACY-RATE'"] = ProceduresRouteReadsNoLegacyRow,
+        ["outranked/procedures/legacy rule 'LEGACY-RATE'"] = ProceduresRouteReadsNoLegacyRow,
+        ["outranked/procedures/legacy ClientDefault rule set first holding 'LEGACY-CD-RATE'"] = ProceduresRouteReadsNoLegacyRow,
+        ["outranked/procedures/legacy rule 'LEGACY-CD-RATE'"] = ProceduresRouteReadsNoLegacyRow,
+        ["outranked/procedures/legacy rule 'LEGACY-BAD-TI'"] = ProceduresRouteReadsNoLegacyRow,
+        ["outranked/rules-in-force/legacy ClientDefault rule set first holding 'LEGACY-CD-RATE'"] =
+            "the Client default set holds only LEGACY-CD-RATE, below the top rank of its key (O-1); without it nothing in the body changes",
+        ["outranked/rules-in-force/legacy rule 'LEGACY-CD-RATE'"] =
+            "a legacy rule below the top rank of its key: precedence never consults it (084e O-1), so the body does not depend on it",
+        ["outranked/rules-in-force/legacy rule 'LEGACY-BAD-TI'"] = GateRefusedLegacyAboveTop,
     };
 
     private const string ProceduresListShowsNoRule =
         "the Procedures list shows no rule, so no policy version appears in its body; the resolver's integrity checks still pass without this row";
+
+    private const string ProceduresRouteReadsNoLegacyRow =
+        "the Procedures route does not read legacy rule sets (084e: the mark is the rules route's only), so no legacy row can change its body";
+
+    private const string GateRefusedLegacyAboveTop =
+        "a gate-refused legacy rule above the top of its key: the gate refuses it, so it is in no group (084e R1) and the list does not show it; the body does not depend on it";
 
     /// <summary>
     /// Version rows that are not asked and whose removal makes the resolver fault (503, the same refusal as any other), on a route that does not show
@@ -715,7 +740,21 @@ public sealed class RecordProcedureEndpointsContractTests
             "the record rule's version names this version as the one it is based on; without it the resolver faults (RequireBasedOn) even though the Procedures list shows no rule. The rules route asks about it",
     };
 
-    [Theory(DisplayName = "084 guard (round 3): every Procedure Version and policy version row that exists in a seed is either asked of the caller, or the 200 body is byte-identical without it (listed, with the reason)")]
+    /// <summary>The rows the removal guard walks: every Procedure Version and policy version row, then (084e fix round 1) every legacy policy and
+    /// legacy rule-set row, in seeding order.</summary>
+    private static List<(string Set, Guid Id, string Label)> GuardRows(RecordProcedureRig rig) => rig.VersionRows.Concat(rig.LegacyRows).ToList();
+
+    /// <summary>The table a guard row is removed from, by its entity set.</summary>
+    private static string TableOf(string set) => set switch
+    {
+        ProcedureEntity.VersionEntitySet => ProcedureEntity.VersionEntity,
+        "sprk_policyversions" => PolicyVersion,
+        "sprk_policies" => Policy,
+        "sprk_rulesets" => RuleSet,
+        _ => throw new ArgumentOutOfRangeException(nameof(set), set, null),
+    };
+
+    [Theory(DisplayName = "084 guard (round 3; 084e fix 1 adds the legacy policy and rule-set rows): every Procedure Version, policy version and legacy row that exists in a seed is either asked of the caller, or the 200 body is byte-identical without it (listed, with the reason)")]
     [MemberData(nameof(GuardCases))]
     public async Task EveryVersionRow_IsAsked_OrExemptBecauseTheBodyDoesNotDependOnIt(string seedName, string list)
     {
@@ -727,7 +766,7 @@ public sealed class RecordProcedureEndpointsContractTests
         baselineResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var expected = await baselineResponse.Content.ReadAsStringAsync();
         var asked = baseline.Rig.Probe.Asked.Select(a => a.RecordId).ToHashSet();
-        var rows = baseline.Rig.VersionRows.ToList();
+        var rows = GuardRows(baseline.Rig);
         rows.Should().NotBeEmpty();
 
         var exempt = new List<string>();
@@ -756,9 +795,9 @@ public sealed class RecordProcedureEndpointsContractTests
             // Removal: the same seed in a fresh rig (ids are counters, so the bodies compare), that one row gone.
             await using var perturbed = await Host.StartAsync();
             var again = GuardSeedFor(seedName, perturbed.Rig);
-            var (_, sameId, _) = perturbed.Rig.VersionRows[i];
+            var (_, sameId, _) = GuardRows(perturbed.Rig)[i];
             sameId.Should().Be(id, "the seed is deterministic");
-            perturbed.Rig.World.Remove(set == ProcedureEntity.VersionEntitySet ? ProcedureEntity.VersionEntity : PolicyVersion, id);
+            perturbed.Rig.World.Remove(TableOf(set), id);
             var without = await perturbed.Client.SendAsync(Get(UrlOf(again)));
             var withoutText = await without.Content.ReadAsStringAsync();
             if (without.StatusCode == HttpStatusCode.OK && withoutText == expected)
@@ -933,6 +972,11 @@ public sealed class RecordProcedureEndpointsContractTests
                         body: """{"type":"ExpenseRule","maxAmountPerItem":500}""");
                     rig.Simple("GENERAL-EXP", type: Sprk.Bff.Api.Services.Signals.RuleType.ExpenseRule,
                         body: """{"type":"ExpenseRule","nonReimbursableCodes":["E109"],"maxAmountPerItem":500}""");
+                    // 084e fix round 1 (D): a legacy Firm rule the gate refuses (no incrementHours), ranked ABOVE the top of its key (GENERAL-TI,
+                    // All records). It outranks nothing and is never asked; without the gate it would outrank GENERAL-TI.
+                    rig.Simple("GENERAL-TI", type: Sprk.Bff.Api.Services.Signals.RuleType.TimeIncrement, body: """{"type":"TimeIncrement","incrementHours":0.1}""");
+                    rig.AddLegacyRule("LEGACY-BAD-TI", Sprk.Bff.Api.Services.Finance.RuleSetScope.Firm, F,
+                        type: Sprk.Bff.Api.Services.Signals.RuleType.TimeIncrement, body: """{"type":"TimeIncrement"}""");
                     // The legacy rule's set decides its Level under "by", but its id is not in the body.
                     return new GuardSeed("projects", P, "2026-02-01", [], [legacy.RuleSet], [F]);
                 }

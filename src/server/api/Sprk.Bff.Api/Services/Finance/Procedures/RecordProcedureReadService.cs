@@ -211,8 +211,24 @@ public class RecordProcedureReadService
     private const string OrganizationSet = FinanceAuthorizationFilter.VendorOrganizationEntitySet;
     private const string SystemUserSet = "systemusers";
 
-    /// <summary>084e, ontology-r1 R4: the fixed note of an <c>Outranked</c> / <c>CapOutranked</c> mark; <c>{0}</c> is the outranking rules' codes.</summary>
-    internal const string OutrankedNoteFormat = "applies unless {0} {1} refused when an invoice is checked; a line can differ (dates, fallback)";
+    // 084e fix round 1 (ontology-r1 R4 wording, binding): the note of an Outranked / CapOutranked mark sits on the OUTRANKED row. {0} is the
+    // outranking rules' codes as JoinCodes words them; the plural form is used when more than one version displaces at the top rank.
+
+    /// <summary>The note of an <c>Outranked</c> mark, one outranking rule (<c>{0}</c> is its code).</summary>
+    internal const string OutrankedNoteSingular =
+        "does not run while {0} is in force; it can run if {0} is refused when an invoice is checked; a line can differ (dates, fallback)";
+
+    /// <summary>The note of an <c>Outranked</c> mark, several outranking rules (<c>{0}</c> is "X and Y" / "X, Y and Z").</summary>
+    internal const string OutrankedNotePlural =
+        "does not run while {0} are in force; it can run if all of them are refused when an invoice is checked; a line can differ (dates, fallback)";
+
+    /// <summary>The note of a <c>CapOutranked</c> mark, one outranking rule (<c>{0}</c> is its code).</summary>
+    internal const string CapOutrankedNoteSingular =
+        "its code check always runs; its cap yields to {0}'s and can apply if {0} is refused when an invoice is checked; a line can differ (dates, fallback)";
+
+    /// <summary>The note of a <c>CapOutranked</c> mark, several outranking rules (<c>{0}</c> is "X and Y" / "X, Y and Z").</summary>
+    internal const string CapOutrankedNotePlural =
+        "its code check always runs; its cap yields to those of {0} and can apply if all of them are refused when an invoice is checked; a line can differ (dates, fallback)";
 
     private readonly IGenericEntityService _entities;
     private readonly CallerRecordAccessProbe _probe;
@@ -748,7 +764,8 @@ public class RecordProcedureReadService
             var snapshot = new PolicyVersionSnapshot(
                 candidate.PolicyVersionId, candidate.PolicyCode, candidate.RuleType, candidate.RuleBody, candidate.MessageTemplate,
                 disallowed is null ? candidate.Consequence : null);
-            if (_gate.TryPrepareBillingRule(snapshot, out var definition))
+            // The read-side entry (084e fix round 1, ontology-r1): the same decision as the evaluator's gate, without its error log and meter.
+            if (_gate.TryPrepareBillingRuleForRead(snapshot, out var definition))
             {
                 accepted[candidate.PolicyVersionId] = definition;
                 if (disallowed is not null)
@@ -776,18 +793,34 @@ public class RecordProcedureReadService
             }
 
             var by = resolved.Displacing.Select(d => OutrankingView(d, procedureRules.GetValueOrDefault(d.PolicyVersionId))).ToList();
-            var codes = by.Count == 1 ? by[0].Code : string.Join(", ", by.Take(by.Count - 1).Select(b => b.Code)) + " and " + by[^1].Code;
-            var note = string.Format(System.Globalization.CultureInfo.InvariantCulture, OutrankedNoteFormat, codes, by.Count == 1 ? "is" : "are");
             foreach (var (version, outcome) in marked)
             {
-                marks[version.PolicyVersionId] = outcome == PrecedenceOutcome.DisplacedOutright
-                    ? new RuleMarkView("Outranked", Text: "Outranked by " + codes, Note: note, By: by)
-                    : new RuleMarkView("CapOutranked", Text: "Cap outranked by " + codes, Note: note, By: by);
+                marks[version.PolicyVersionId] = OutrankedMark(outcome, by);
             }
         }
 
         return marks;
     }
+
+    /// <summary>
+    /// 084e fix round 1: the mark of one outranked version. <see cref="RuleMarkView.Text"/> is "Outranked by X" / "Cap outranked by X"; the note is
+    /// ontology-r1's wording for the kind, singular for one displacing version at the top rank, plural for more (<paramref name="by"/> in order).
+    /// </summary>
+    internal static RuleMarkView OutrankedMark(PrecedenceOutcome outcome, IReadOnlyList<OutrankingRuleView> by)
+    {
+        var codes = JoinCodes(by.Select(b => b.Code).ToList());
+        var plural = by.Count > 1;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return outcome == PrecedenceOutcome.DisplacedOutright
+            ? new RuleMarkView("Outranked", Text: "Outranked by " + codes,
+                Note: string.Format(inv, plural ? OutrankedNotePlural : OutrankedNoteSingular, codes), By: by)
+            : new RuleMarkView("CapOutranked", Text: "Cap outranked by " + codes,
+                Note: string.Format(inv, plural ? CapOutrankedNotePlural : CapOutrankedNoteSingular, codes), By: by);
+    }
+
+    /// <summary>The join rule of the outranking codes: "X"; "X and Y"; "X, Y and Z" for three or more (no serial comma).</summary>
+    internal static string JoinCodes(IReadOnlyList<string> codes) =>
+        codes.Count <= 1 ? string.Concat(codes) : string.Join(", ", codes.Take(codes.Count - 1)) + " and " + codes[^1];
 
     /// <summary>A rule that decided an outranked mark: its policy, version and rule set; a legacy rule's every version (they decide which one is
     /// in force on the date, as F-B for a Procedure's); a Procedure rule's Procedure and all its versions.</summary>

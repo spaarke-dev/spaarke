@@ -59,6 +59,9 @@ internal sealed class RecordProcedureRig
     /// <summary>What the service logged at Warning or above: (level, exception type).</summary>
     public CapturingLogger Log { get; } = new();
 
+    /// <summary>084e fix round 1: everything the billing gate (the validator the service holds) logged, at every level.</summary>
+    public Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<PolicyVersionValidator> GateLog { get; } = new();
+
     private readonly Dictionary<Guid, Guid> _setOf = new();
     private DateTime _created = new(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
     private int _nextId;
@@ -83,7 +86,7 @@ internal sealed class RecordProcedureRig
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(
             schema, new PredicateCompiler(schema, new FakeTimeProvider(new DateTimeOffset(2026, 2, 10, 0, 0, 0, TimeSpan.Zero))),
-            NullLogger<PolicyVersionValidator>.Instance);
+            GateLog);
         var describer = new RuleBodyDescriber(validator, Entities.Object, NullLogger<RuleBodyDescriber>.Instance);
         // 084e: the evaluator's own legacy-rule read, over the same world (only LoadLegacyRulesAsync is used; it reads through Entities alone).
         var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
@@ -175,7 +178,7 @@ internal sealed class RecordProcedureRig
     public Guid RuleSetOf(Guid procedure) => _setOf[procedure];
 
     public Guid AddRuleVersion(Guid policy, Guid? procedureVersion, DateOnly from, int number = 1, Guid? basedOn = null, DateTime? created = null, string? headline = null,
-        RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null)
+        RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null, DateOnly? to = null)
     {
         var id = NextId();
         var columns = new List<(string, object)>
@@ -192,6 +195,7 @@ internal sealed class RecordProcedureRig
         if (basedOn is { } b) columns.Add((ProcedureAssignmentService.BasedOnVersionColumn, Ref(PolicyVersion, b)));
         if (created is { } c) columns.Add(("createdon", c));
         if (consequence is { } stated) columns.Add(("sprk_consequence", Option(stated)));
+        if (to is { } end) columns.Add(("sprk_inforceto", Utc(end)));
         World.Add(PolicyVersion, id, columns.ToArray());
         VersionRows.Add(("sprk_policyversions", id, $"policy version {number} of rule '{_ruleCodes.GetValueOrDefault(policy, "?")}' (in force from {from:yyyy-MM-dd})"));
         return id;
@@ -209,7 +213,7 @@ internal sealed class RecordProcedureRig
     /// </summary>
     public LegacyRule AddLegacyRule(
         string code, RuleSetScope scope, Guid? firm = null, RuleType type = RuleType.ApprovedRate, string? body = null, int? consequence = null,
-        DateOnly? from = null)
+        DateOnly? from = null, DateOnly? to = null)
     {
         if (!_legacySets.TryGetValue((scope, firm), out var set))
         {
@@ -222,15 +226,41 @@ internal sealed class RecordProcedureRig
             if (firm is { } f) setColumns.Add(("sprk_firm", Ref("sprk_organization", f)));
             World.Add(RuleSet, set, setColumns.ToArray());
             _legacySets[(scope, firm)] = set;
+            LegacyRows.Add(("sprk_rulesets", set, $"legacy {scope} rule set first holding '{code}'"));
         }
 
         var policy = AddRule(set, code);
-        var version = AddRuleVersion(policy, null, from ?? Jan1, type: type, body: body, consequence: consequence);
+        var version = AddRuleVersion(policy, null, from ?? Jan1, type: type, body: body, consequence: consequence, to: to);
+        SetCurrentVersion(policy, code, set, version);
+        LegacyRows.Add(("sprk_policies", policy, $"legacy rule '{code}'"));
+        return new LegacyRule(set, policy, version);
+    }
+
+    /// <summary>
+    /// 084e fix round 1: another version of a legacy rule, in force from <paramref name="from"/>. With <paramref name="current"/> it becomes the
+    /// policy's current version (<c>sprk_currentversion</c>); the earlier one then needs an end date to stay in force on a date before it.
+    /// </summary>
+    public Guid AddLegacyVersion(LegacyRule rule, string code, int number, DateOnly from, bool current)
+    {
+        var version = AddRuleVersion(rule.Policy, null, from, number: number);
+        if (current)
+        {
+            SetCurrentVersion(rule.Policy, code, rule.RuleSet, version);
+        }
+
+        return version;
+    }
+
+    private void SetCurrentVersion(Guid policy, string code, Guid set, Guid version) =>
         World.Add(Policy, policy,
             ("sprk_policycode", code), ("sprk_ruleset", Ref(RuleSet, set)), ("sprk_enabled", true), ("statecode", Option(0)),
             (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)), ("sprk_currentversion", Ref(PolicyVersion, version)));
-        return new LegacyRule(set, policy, version);
-    }
+
+    /// <summary>
+    /// 084e fix round 1: every LEGACY rule set and legacy policy row seeded (entity set, id, label), in seeding order. The removal guard walks these
+    /// after <see cref="VersionRows"/>, so a legacy row the body depends on cannot go unasked either.
+    /// </summary>
+    public List<(string Set, Guid Id, string Label)> LegacyRows { get; } = new();
 
     private Guid AddRow(string table, Guid record, DateTime? created, params (string Column, object Value)[] columns)
     {

@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Signals.Billing;
+using Sprk.Bff.Api.Tests.Api.Finance;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Domain.Signals.Billing;
@@ -67,5 +69,32 @@ public class RecordRuleEpisodeTests
         helper.Should().Throw<ProcedureResolutionFaultException>();
         read.Should().Throw<ProcedureResolutionFaultException>();
         ProcedureResolution.CurrentEpisodeVersions(RecordRule, [], Exclude(Boundary)).Should().BeEmpty("no versions at all is not a fault");
+    }
+
+    [Fact(DisplayName = "084e fix 1 (D, O-7 wiring): through the resolver, RecordRuleVersionOn picks the version created AT the Exclude row's createdon, and agrees with the read's CurrentEpisodeVersion")]
+    public async Task Resolver_RecordRuleVersionOn_AtTheBoundary_AgreesWithTheRead()
+    {
+        var rig = new RecordProcedureRig();
+        var general = rig.Simple("GENERAL");
+        // ChangeRuleRows stamps the Exclude row and the record rule's version with the SAME createdon (the boundary).
+        var changed = rig.ChangeRuleRows(RecordProcedureRig.Matter, RecordProcedureRig.M, general.Rule, general.RuleVersion, RecordProcedureRig.Jan15, code: "BRR-1");
+        var exclude = rig.World.Retrieve(ProcedureAssignmentEntity.Entity, changed.Exclude, ["createdon"]).GetAttributeValue<DateTime>("createdon");
+        // An earlier episode's version: created before the boundary, with a later in-force date and a higher number, so it wins if the filter is gone.
+        var earlier = rig.AddRuleVersion(changed.RecordRule, null, new DateOnly(2026, 1, 20), number: 2, basedOn: general.RuleVersion,
+            created: exclude.AddMinutes(-30), headline: "Earlier episode");
+
+        var rows = await ProcedureResolver.ReadRowsAsync(
+            rig.Entities.Object, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+            new CoreRecordReference(CoreRecordKind.Matter, RecordProcedureRig.M), RecordProcedureRig.F, CancellationToken.None);
+        var onDate = new ProcedureResolution(rows).RulesOn(RecordProcedureRig.Feb1);
+        var excludeRow = rows.Overrides.Single(o => o.RowId == changed.Exclude);
+
+        var resolved = onDate.Rules.Single(r => r.RecordRule is not null).Version.PolicyVersionId;
+        var shown = RecordProcedureReadService.CurrentEpisodeVersion(rows.PolicyVersions, RecordProcedureRig.Feb1, changed.RecordRule, excludeRow).PolicyVersionId;
+
+        excludeRow.CreatedOn.Should().Be(exclude, "the boundary case: the version and the Exclude row share one createdon");
+        resolved.Should().Be(changed.RuleVersion, "'on or after' the Exclude row's createdon: the version created at the boundary is in the episode");
+        resolved.Should().NotBe(earlier);
+        shown.Should().Be(resolved, "the read names the version the resolver runs");
     }
 }
