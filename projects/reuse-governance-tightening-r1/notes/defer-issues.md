@@ -43,7 +43,7 @@ Rename `ActionType` → `ExecutorType` and `SupportedActionTypes` → `Supported
 
 | Field | Value |
 |---|---|
-| **Status** | In Progress: fix in PR #2714 (`fix/instruction-paths-2026-11-11`, by the mcp-r1 session at the owner's request); closes #2684 on merge. Flip to Done then. |
+| **Status** | Done: PR #2714 merged 2026-11-12 (`a654da59c4`); #2684 closed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-11 |
 | **Source** | Task 001 checker runs (`notes/001-index-proof.md`); both findings present on `origin/master` |
