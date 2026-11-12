@@ -43,11 +43,13 @@ Rename `ActionType` → `ExecutorType` and `SupportedActionTypes` → `Supported
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | In Progress: fix in PR #2714 (`fix/instruction-paths-2026-11-11`, by the mcp-r1 session at the owner's request); closes #2684 on merge. Flip to Done then. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-11 |
 | **Source** | Task 001 checker runs (`notes/001-index-proof.md`); both findings present on `origin/master` |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2684 |
+
+> 2026-11-11: #2714 was reviewed here and adopted. It uses the same child-path probe and comma-list strip, plus a start-up self-test, and makes the 11 text fixes. Seeded controls on Windows passed (3 must-fire, 6 must-not-fire). A duplicate local fix was dropped; it is saved outside the repo. Three stale non-path lines were sent to mcp-r1 for #2714: ADR-024 ~220 and ~241, and the full `docs/adr/ADR-011` line 240. Correction to item 2 below: `.claude/worktrees/` *is* gitignored (since 2026-07-16). The false positive came from a folder-only pattern not matching a path written without its slash, which the probe now fixes.
 
 **Description**
 
@@ -106,6 +108,38 @@ On the Linux CI runner the check reports **13** new missing paths, not 2 (Tier 2
 ##### Revised effort
 
 2–3 hours: the checker fix with must-fire and must-not-fire controls, 7 text fixes, 4 rewordings or baseline lines, then the 2 original false positives. All edits are in `.claude/` and `scripts/quality/`.
+
+---
+
+### ISS-003 — power-page-deploy skill describes a retired Power Pages deploy for the external SPA
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-11 |
+| **Source** | Found in passing while fixing ISS-002 (its `.site-download` path has never been in the repo) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2713 |
+
+**Description**
+
+`.claude/skills/power-page-deploy/SKILL.md` still tells agents to deploy `src/client/external-spa/` to a Power Pages Code Site with `pac pages upload-code-site`. Per `src/client/external-spa/README.md` § Deployment, the SPA now deploys to Azure Static Web Apps through `.github/workflows/deploy-external-spa.yml`. The skill's `--rootPath` folder has never been committed. Two other files it names (`scripts/Deploy-ExternalWorkspaceSpa.ps1`, `src/client/external-spa/powerpages.config.json`) do not exist and are already in the instruction-path baseline.
+
+Failure: an agent working on `**/external-spa/**` (the skill's `appliesTo`) loads this skill and follows a deploy procedure that cannot run. The skill never mentions the real Static Web Apps deploy.
+
+**Entry-points**
+
+- `.claude/skills/power-page-deploy/SKILL.md` (frontmatter `appliesTo`, Quick Reference table)
+- `src/client/external-spa/README.md` § Deployment; `.github/workflows/deploy-external-spa.yml`
+- `git grep -n power-page-deploy -- .claude` (`INDEX.md:49`, `azure-deploy` 29/398, `deploy-new-release` 444, `office-addins-deploy` 189)
+
+**Suggested fix**
+
+The owner confirms that Power Pages is retired for the external SPA. Then archive the skill under `.claude/skills/_archived/` (move it, never delete). Repoint the four skills above at the Static Web Apps workflow, and remove the skill's baseline lines.
+
+**Estimated effort**: 1–2 hours
+**Blockers**: owner confirmation that Power Pages deploys are retired
+**Related**: ISS-002 / #2684, PR #2714 (fixes only the false "committed to the repo" claim); `FAILURE-MODES.md` AP-1
 
 ---
 
