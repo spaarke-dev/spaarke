@@ -33,7 +33,9 @@ export function todayIso(now: Date = new Date()): string {
 
 const TABLE_NOUN: Readonly<Record<string, string>> = { sprk_matter: 'matter', sprk_project: 'project', sprk_workassignment: 'work assignment' };
 
-function recordWords(table: string, name: string | null): string {
+export const recordNoun = (table: string): string => TABLE_NOUN[table] ?? 'record';
+
+export function recordWords(table: string, name: string | null): string {
   return `${TABLE_NOUN[table] ?? 'record'}${name ? ` ${name}` : ''}`;
 }
 

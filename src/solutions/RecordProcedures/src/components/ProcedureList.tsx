@@ -1,7 +1,6 @@
 /**
  * The Procedures tab's table (ebilling-r1 task 084a): one row per Procedure the record is subject to, with its source, its version and one
- * state badge. Read-only: a row has no button, no link and no click handler (the prototype's row-click opens a wizard; that is 084b's, and
- * nothing in this task opens anything).
+ * state badge. Task 084b: a row opens the Procedure wizard on a click, or on Enter or Space while it has focus; the list calls nothing itself.
  *
  * Columns follow the prototype's panel except "Rules": task 084 deliberately returns no per-Procedure rule count (a count would expose rows
  * to the all-or-nothing rights check that the panel does not show), so the rules are on the Rules in force tab.
@@ -23,11 +22,13 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { StatusBadge } from '@spaarke/ui-components';
+import { openProps } from './rowOpen';
 import type { GapView, ProcedureItem } from '../services/recordProceduresApi';
 import { isProcedureDimmed, overrideNote, procedureState, sourceLabel, versionLines } from '../services/model';
 
 const useStyles = makeStyles({
   dim: { color: tokens.colorNeutralForeground3 },
+  open: { cursor: 'pointer' },
   stack: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS, minWidth: 0 },
   sub: { color: tokens.colorNeutralForeground3 },
   clip: { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
@@ -39,9 +40,11 @@ export interface ProcedureListProps {
   gaps: readonly GapView[];
   /** Said when the list (after the filter) has no row. */
   emptyText: string;
+  /** A row was clicked, or Enter (or Space) was pressed on it (task 084b). */
+  onOpen?: (procedure: ProcedureItem) => void;
 }
 
-export const ProcedureList: React.FC<ProcedureListProps> = ({ procedures, gaps, emptyText }) => {
+export const ProcedureList: React.FC<ProcedureListProps> = ({ procedures, gaps, emptyText, onOpen }) => {
   const s = useStyles();
   return (
     <>
@@ -63,7 +66,13 @@ export const ProcedureList: React.FC<ProcedureListProps> = ({ procedures, gaps, 
             const version = versionLines(p);
             const note = overrideNote(p, gaps);
             return (
-              <TableRow key={p.id} className={mergeClasses(dim && s.dim)} data-testid={`procedure-row-${p.id}`} data-dimmed={dim ? 'true' : 'false'}>
+              <TableRow
+                key={p.id}
+                className={mergeClasses(dim && s.dim, onOpen && s.open)}
+                data-testid={`procedure-row-${p.id}`}
+                data-dimmed={dim ? 'true' : 'false'}
+                {...openProps(onOpen, () => onOpen?.(p))}
+              >
                 <TableCell>
                   <span className={s.stack}>
                     <Text className={s.clip} weight={dim ? 'regular' : 'semibold'}>
