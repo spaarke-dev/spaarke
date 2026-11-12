@@ -7,7 +7,7 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
-> **2026-11-12 ~20:45Z — TWO tasks open.** (1) **020** (MCP module + `/mcp/{area}` host) started early with the owner's go (Copilot outage blocks 003; `notes/decisions.md`). FULL rigor, delegated to an implementer agent (sonnet), which commits locally and does NOT push. Main session then: review the diff (Step 9.5 code-review + adr-check), publish-size and CVE check, POML/TASK-INDEX/board closure, push. Branch merged with master at `1ca4773907`. Gotcha: 020's module and the spike both map `/mcp/legal-operations`, so they must never share a build. (2) **003** stays open for live tests; state below.
+> **2026-11-12 ~23:00Z — 020 ✅ done** (commits `a940d5b2b7`, `f75b54390b`, `73f1e99c7d`, `5282931e2e` + closure; board 10/29; review fixed; #2756 filed). **Next code task: 021** (A10 auth on /mcp, tool policies, route guard; opus/high, FULL): it replaces 020's interim Pending waiver, removes `"021"` from `PendingOwners`, and should add the K1 guard (no `[McpArea]` type while the waiver exists), per `notes/decisions.md` "Task 020 review: known limits". Tool shape for 022–024: `McpToolDefinition` subclasses tagged `[McpArea]`, `Create(IServiceProvider)` with `Services = services`. Gotchas: 020's module and the spike both map `/mcp/legal-operations` and must never share a build; worktree copies written by tools can be LF, so re-check them out (`rm` + `git checkout --`) before running `check-changed-cs-format.sh`. **003** stays open for live tests; state below.
 
 | Field | Value |
 |-------|-------|

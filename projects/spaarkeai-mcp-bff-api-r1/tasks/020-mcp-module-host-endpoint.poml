@@ -4,7 +4,7 @@
     <title>MCP module, packages and /mcp/{area} host</title>
     <phase>B MCP host and tools</phase>
     <gate>after 003 (T0 passed; T13 route mechanism recorded)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; new module, endpoints and package changes (.cs, .csproj)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -162,7 +162,20 @@
     <criterion testable="true">On a real stateless MCP host, a test shows that the `HttpContext` a tool hands to `IDecisionCapability` is the same instance (ReferenceEquals) as `IHttpContextAccessor.HttpContext` during the call, and as the context the request middleware saw.</criterion>
   </acceptance-criteria>
 
-  <notes>The 256 KiB body limit is this task's concrete value for 'a request-size limit' (DecisionReview payloads are a few KB); record it in notes/decisions.md. Do not use the Workforce ExternalCollaboration policy anywhere. If T13 failed, implement the area filter on a single route and keep the /mcp/{area} URL shape.</notes>
+  <notes>The 256 KiB body limit is this task's concrete value for 'a request-size limit' (DecisionReview payloads are a few KB); record it in notes/decisions.md. Do not use the Workforce ExternalCollaboration policy anywhere. If T13 failed, implement the area filter on a single route and keep the /mcp/{area} URL shape.
+
+
+Completed 2026-11-12 (early start with the owner's go while 003's live tests wait on a Copilot outage; notes/decisions.md).
+Commits: a940d5b2b7 (packages), f75b54390b (host), 73f1e99c7d (decisions), 5282931e2e (review fixes).
+- Host: stateless /mcp/legal-operations, one MapMcp per area, tool set per request from McpAreaMetadata (T13 mechanism). Mcp:Enabled default false gives NullMcpToolCatalog and 503 mcp.disabled after authorization. Rate policy "mcp" 60/min per caller (oid, else sub), sliding window 6 segments, no queue. Body limit 256 KiB. Buffering off.
+- Tests: MCP filter 29/29 (15 host contract incl. real-Kestrel 413/429/buffering/ReferenceEquals, 2 McpToolResults unit, real-BFF kill-switch theory); ArchTests 2531/2531; AI suites 7138 passed / 1 skipped before and after the M.E.AI bump (reviewer re-run of ~.Ai.: 7240 passed / 1 skipped).
+- Packages: ModelContextProtocol.AspNetCore 2.3.1; Microsoft.Extensions.AI and .OpenAI 10.3.0 to 10.11.0; OpenAI 2.8.0 to 2.14.0; Azure.AI.OpenAI unchanged. No CS0618. No vulnerable packages.
+- Publish size (fresh worktrees, Compress-Archive): master 76b2930961 40.087 MB (191 files), 020 40.951 MB (194 files): +0.86 MB (3 MCP DLLs).
+- Deviations: tools are McpToolDefinition subclasses tagged [McpArea] (the C7 reflection guard bans method scanning); PendingOwners gained "021"; literal "mcp" in RequireRateLimiting (the health-probe guard reads literals); separate commits for packages and host.
+- Review (one adversarial pass, Opus): no runtime defect. Fixed: the kill-switch theory never ran enabled (ConfigureAppConfiguration arrived too late; now UseSetting plus a catalog assertion), stale pin comments, DateTime.UtcNow in the test token, the waiver line ref; added ModelContextProtocol log level Warning. Known limits K1-K3 in notes/decisions.md. Out-of-scope defect filed: #2756 (ISS-005), the rate-limit OnRejected handler logs User.Identity.Name on every 429 (a Copilot client over the limit writes the user's UPN to App Insights per call).
+- Format: the "2686 findings" the implementer saw were LF working copies in this worktree only (the index is LF-normalized with eol=crlf); a re-checkout fixed them; check-changed-cs-format passes on all 54 files.
+
+rework: fix-round-1 task 020</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
