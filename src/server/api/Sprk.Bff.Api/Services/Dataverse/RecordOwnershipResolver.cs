@@ -2589,8 +2589,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // fm task 054 piece 3b: a communication the change leaves filed under nothing, for a writer that chose the unfiled-communication
-        // rule. Decided AFTER the F3 check (a caller without F3 is told that first) and BEFORE the write, on the row as the change
-        // leaves it, so a Direct message whose Direct team cannot be confirmed is refused with nothing written.
+        // rule. Decided AFTER the F3 check above and BEFORE the write, on the row as the change leaves it, so a Direct message
+        // whose Direct team cannot be confirmed is refused with nothing written. The check above refuses a caller without F3
+        // first only when it can name a secure root the change leaves. Whether a Direct message leaves the Secure owner is known
+        // only after this lookup (LeavesSecureOwner comes from it), so when no secure root can be named the lookup runs first and
+        // its 409 or 503 is returned before the 403 a caller without F3 would get. Nothing is written either way, and that 409
+        // or 503 does not depend on whether the message is Secure-owned.
         if (request.WhenUnfiled == UnfiledOwnership.UnfiledCommunication
             && parents.Length == 0 && secureOnlyAfter.Length == 0
             && resolution.Outcome == RecordOwnerOutcome.Unchanged
