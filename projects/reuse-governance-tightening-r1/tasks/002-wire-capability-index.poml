@@ -4,7 +4,7 @@
     <title>Wire the capability index into the reuse gate</title>
     <phase>1 Capability index</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies skill directives and root CLAUDE.md under explicit project constraints (FR-02)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -91,7 +91,8 @@
     <criterion testable="true">Test-InstructionPaths.ps1 reports no new missing path.</criterion>
   </acceptance-criteria>
 
-  <notes>Skill-directive hot path: many projects edit these files. Keep each edit to the cited lines so merges stay trivial.</notes>
+  <completion-notes>Completed 2026-11-11. All five outputs cite .claude/patterns/CAPABILITY-INDEX.md: task-create Step 3.5.6 (the &lt;existing&gt; line, plus one line that a task adding or changing a canonical component updates its row in the same PR), code-review Step 6.6 (one line in check 3a), .claude/patterns/INDEX.md (one line), root CLAUDE.md section 11 item 1, doc-drift-audit (Step 2 classification and a Step 3 stale-row check). Deviations: (1) Root CLAUDE.md: the pointer was folded into the existing item-1 line instead of an added line, because the file is at 218 lines, over its 200-line budget, and the maintainer notes require an equal trim or the owner's OK. The owner chose the fold (2026-11-11): line count unchanged, +57 bytes, .claude/CHANGELOG.md entry added. (2) doc-drift-audit line 73 is unchanged: its git-diff scope already includes .claude/patterns/, so the index is scanned; the row-staleness check went into Step 3 instead. (3) references/component-justification.md is unchanged: it does not restate the &lt;existing&gt; rule. Verification: no step heading changed; every task-create Step 3.x number cited in the repo still has its heading; scripts/Validate-TaskPoml.ps1 unchanged; Test-InstructionPaths.ps1 reports no new path from these edits (only the 2 pre-existing false positives fixed by PR #2714; the #2714 checker also shows none from this task); task-create is 576 lines and carries a length-justification. Quality gates skipped: documentation-only, no tests touched (STANDARD).
+rework: none task 002</completion-notes>  <notes>Skill-directive hot path: many projects edit these files. Keep each edit to the cited lines so merges stay trivial.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

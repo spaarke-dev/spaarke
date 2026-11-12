@@ -5,9 +5,8 @@
 
 ---
 
-**Phase**: execution. Wave 1 (001, 041, 042) **complete 2026-11-11**, all pushed to `origin/work/reuse-governance-tightening-r1`. No PR open.
-**Active task**: none. Next per `tasks/TASK-INDEX.md`:
-- **002** wire the capability index into task-create 3.5.6 / code-review 6.6 / root §11 (main session, `.claude`; depends on 001 ✅).
+**Phase**: execution. Wave 1 (001, 041, 042) **complete 2026-11-11**; 002 complete 2026-11-11, all pushed to `origin/work/reuse-governance-tightening-r1`. No PR open.
+**Active task**: none. 002 done 2026-11-11 (index wired into task-create 3.5.6, code-review 6.6, patterns INDEX, root CLAUDE.md §11 item 1 (folded, owner decision), doc-drift-audit). Next per `tasks/TASK-INDEX.md`:
 - **010** reuse-scan dry-run → owner go/no-go (owner gate).
 - **021** reviewer F2/F4 checks (main session, `.claude`).
 - **040** Learn MCP for the researcher (main session, `.claude`; `.mcp.json` needs per-machine approval by the user).
@@ -19,7 +18,7 @@
 - 041 — `nightly-health.yml` row `monthly/knowledge-refresh` (35-day limit). `workflow_dispatch` run 43058895412 succeeded; alert dry-run only. It is red today on purpose (newest REFRESH-LOG entry 2026-08-26).
 - 042 — CS0618 re-armed. The only remaining suppression is `SPRK001` × 2 in `GenericAnalysisHandler.cs`. Publish-size delta +0.001 MB. Full BFF unit suite: 468 load timeouts (known #1724), all 165 affected classes pass in chunks. Details: `notes/042-cs0618.md`.
 
-**PR plan (owner approves each)**: 041 and 042 each get their own PR (NFR-05, item 5). 001 ships with items 1–3 in one PR after 002/011/012/020/021.
+**PR plan (owner approves each)**: 041 and 042 each get their own PR (NFR-05, item 5). 001 and 002 ship with items 1–3 in one PR after 011/012/020/021.
 
 **Open, reported to owner, not this project's to fix**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).

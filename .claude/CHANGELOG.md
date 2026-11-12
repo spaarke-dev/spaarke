@@ -7,6 +7,16 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-11 — The reuse gate starts at the capability index
+
+`reuse-governance-tightening-r1` task 002 (FR-02). The `<existing>` answer in the component-justification gate now starts at `.claude/patterns/CAPABILITY-INDEX.md` (concept → canonical component, task 001), then Grep.
+
+- **Root `CLAUDE.md` §11** item 1: the pointer is folded into the existing line (+57 bytes, line count unchanged at 218), so it adds no line to a file already over its 200-line budget (owner decision).
+- **`task-create`** Step 3.5.6: `<existing>` cites "CAPABILITY-INDEX row N" + file:line or "CAPABILITY-INDEX: no row" + the Grep run; a task that adds or changes a canonical component updates its row in the same PR.
+- **`code-review`** Step 6.6: the `<existing>` check uses the same index.
+- **`.claude/patterns/INDEX.md`**: describes the index and how it differs from pointer files.
+- **`doc-drift-audit`**: the index is a pointer file to keep accurate, and a deleted or moved canonical component means checking its row.
+
 ###### 2026-11-10 — C# formatting is blocking for changed files; the commit hook formats in seconds
 
 Master had 2,569 whitespace violations in 230 files because commits skipped the pre-commit hook (`--no-verify`, approved in several projects because the hook's full `dotnet format` took 16–45 s and was SIGKILLed under load), and the only CI check was the advisory Tier 2 `format` job, red for weeks. PR #2663.
