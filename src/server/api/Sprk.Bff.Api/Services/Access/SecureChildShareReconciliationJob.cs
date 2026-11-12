@@ -340,7 +340,11 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         Dictionary<Guid, (int Failures, DateTimeOffset? RetryAt)> attempts;
         lock (_directGate)
         {
-            since = _directWatermark ?? startedAt - DirectInitialLookback;
+            // #2709: the first run's window start is stored before anything can fail. A run that holds the watermark (a
+            // listing or sweep fault, a carry past its cap, an unresolved Direct team) then leaves the next run listing from
+            // here; recomputing the look-back from each later run's own start would slide the window past what was never listed.
+            _directWatermark ??= startedAt - DirectInitialLookback;
+            since = _directWatermark.Value;
             carried = _directPending.OrderBy(id => id).ToList();
             sweepAfter = _directSweepCursor;
             attempts = new Dictionary<Guid, (int, DateTimeOffset?)>(_directAttempts);
