@@ -18,7 +18,7 @@
 >   - (Done 2026-11-12) The ontology K4 comment fix, `584f6cc34d`; ontology-r1 closed K4.
 >   - (Done 2026-11-12) Deferred issue filed as ISS-014, #2730.
 >   - ontology-r1 note (not blocking): the O3 pin names the Ontology Service role file; check which role supplies the spend reader's Decision Record read since DEF-059 and repoint or explain (answer ontology-r1 by message, no membership detail in the repo).
->   - 084 via task-execute (split per EB-D-217: 084 → 084a → 084b → 084c; 084d after 084 and 084b, opus, its design to ontology-r1 first).
+>   - **084 IN PROGRESS (2026-11-12):** FULL, sonnet/high, directional. An implementer agent works on `task/ebilling-084` from work `0b466586e7` in an agent worktree. conflict-check: soft warning only (#2615, mcp-r1's do-not-merge spike, touches the append points `EndpointMappingExtensions.cs` and `RouteAuthorizationGuardTests.Ledger.cs`). Then 084a → 084b → 084c; 084d after 084 and 084b (opus, design to ontology-r1 first).
 > - **word-add-in-r1** is owed the dev sha `6dbe69b9e2` (a superset of `b3ca99cad5`); it was not reachable on 2026-11-12, so send it when it is.
 
 ## Quick recovery
