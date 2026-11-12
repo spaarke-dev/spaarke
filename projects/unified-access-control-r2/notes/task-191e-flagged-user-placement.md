@@ -123,4 +123,21 @@ rework: fix-round-1 task 191e (findings 1, 2 fixed; 3, 9, 10-part fixed as cheap
 
 ## 6. Results
 
-(filled in below as the gates run)
+At head `abe533e365` (fix-round 1) unless stated.
+
+| Gate | Result |
+|---|---|
+| Targeted (`FlaggedUserPlacementJobTests` + `SecureRecordIsolationCensusJobTests`) | 87/87 passed (82/82 before fix-round 1) |
+| ArchTests (full) | 2488/2488 passed. First run failed 1 (`3d: every lookup-column read ... is a reviewed site`: `FlaggedUser.From`'s three SDK reads); reviewed as `FailsClosed` in `ExternalLookupAbsentReadGuardTests.ReviewedSites` |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | 212 passed, 8 skipped, 0 failed |
+| `tests/integration/Spe.Integration.Tests` | 353 passed, 23 skipped, 0 failed |
+| Full BFF unit suite | Did NOT finish on the shared machine (stopped after ~95 min, hung with no output for 15 min). It had logged 319 failures, scattered one or two per class across 124 classes (HTTP-host, Compose seam, timeout tests), none in the touched namespaces. A re-run of just those 124 classes failed a DIFFERENT set; six sampled classes run alone passed 114/114. Read as load-induced flakiness on the shared machine, not this change; CI runs the full suite |
+| Mutation checks (each reverted) | Both definite-true checks removed (read filter + `Classify`): 5 fail, incl. the `#EXT#` must-not-fire. `Classify` check alone removed: 2 fail (the read filter still protects: defence in depth). Other-roles counted as placed: 3 fail. In-unit users given Move: 11 fail (incl. never-moved-out). Ownership on every table: the ungraded-table test fails |
+| Format | `dotnet format whitespace --folder` on every changed C# file (CI Tier 1 check) |
+| Publish size | master `654e39c685` 41,848,380 B zipped / 191 files; branch `abe533e365` 41,880,679 B / 191 files; delta +32,299 B (+0.03 MB); 4 PDBs each |
+| CVE | `dotnet list ... --vulnerable --include-transitive`: no vulnerable packages; no package change |
+| adr-check | ADR-036 (AddScheduledJob, heartbeat per attempt, throw on read failure, idempotent fresh reads), ADR-052 (BFF, schedule; B2/B3), ADR-028 (no new right), ADR-032 (unconditional registration), ADR-002 (no plugin), ADR-010 (no new interface or DI service): comply. PII log guard (`UacPiiLogTemplateGuardTests`) passes |
+| Overlap with 191f (`C:\wt191f`) | None: 191f changes scripts only |
+
+Class grep (fix-round 1, finding 2's class: "placed" decided differently in two places): the read-back and `Classify` now share
+one rule (in unit + THE role + no other direct role); no other place decides "placed".
