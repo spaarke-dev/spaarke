@@ -36,8 +36,9 @@ source, and the stored `sprk_accesspermission` as a row's answer.
      `ApplyMappingsToChildRecordsAsync`), so they give the same code.
 5. **Fail closed.** A source that does not come back, a fault, a child that does not come back or whose read faults is
    `UndeterminedReasonCode` (push) or the existing unreadable-source skip (Repair). Cancellation is rethrown.
-6. **Unchanged.** The secure copy gate's verdicts, codes and texts; the create (022b); `SecureRootInheritance.cs` and UAC-r2's
-   files. The only text change on the secure path is the refile LOG line, which now also names the source's Access Permission.
+6. **Unchanged.** The secure copy gate's verdicts and codes; the create (022b); `SecureRootInheritance.cs` and UAC-r2's files.
+   The undetermined and refile TEXTS were reworded on the main session's instruction so they are true for a secure and a
+   Restricted source (below); the refile LOG line now also names the source's Access Permission.
 
 ## Section 11 answers (new members and constants)
 
@@ -124,17 +125,42 @@ between the read and the write is not seen (the same stated limit as the secure 
 (`CarriesColumn`), which leaves out `InheritedAccessPermission.SourceOnlyTables`: an agreement takes no enforcement from its
 value (022b, UAC-r2 Q1), so a Restricted source maps nothing into one (fail closed).
 
-**K: the push texts for an unreadable source and for a re-file name "secure".** The POML reuses `UndeterminedReasonCode` and
-`RefileNotAllowedReasonCode` with their existing texts, which say "whether the source record is secure" and "a push from a
-secure record". A Restricted or unreadable source that is not secure gets those same texts.
+## Follow-up in 022c (main session, 2026-11-12): the client code and the wording
 
-**K: the client does not know the new push code yet.** `recordFamilyPushService.ts` maps only the three secure-source codes.
-On the apply, the panel shows the server's fixed text for the new code (`pushErrorText` falls back to `error`). On the
-preview, a child with the new code is not listed with values (correct) but is not counted in the skip lines either
-(`isSourceRuleSkip` does not know it), so the person is not told it will not be updated. Client change is outside this task's
-scope (BFF only); reported to the operator for a follow-up.
+Two items first recorded as known limits change what a person sees, so they were fixed here.
 
-## Found in passing
+1. **Client knows the new code.** `recordFamilyPushService.ts` exports `RESTRICTED_SOURCE_NOT_RESTRICTED_REASON_CODE`
+   (`field_mapping.push.restricted_source_not_restricted`) beside the three secure-source codes, with its `SOURCE_RULE_TEXT`
+   entry (the server's text, exactly). The preview's skip lines count it ("N record(s) will not be updated because the source
+   record's access is Restricted and its/their access is not."), and the apply shows its text, as for the other three codes.
+2. **Wording true for both kinds of source.** The codes are unchanged; only the texts change, on server and client in step:
+   - `UndeterminedMessage`: "No fields were copied to this record because it could not be checked whether the source
+     record's access allows copying. Try again later." (preview line: "... will not be updated because it could not be
+     checked whether the source record's access allows copying. Try again later.")
+   - `RefileNotAllowedMessage`: "No fields were copied to this record because its filing can't be changed by a push from a
+     secure or Restricted record." (preview line: "... filing can't be changed by a push from a secure or Restricted record.")
+   - `NotIsolatedMessage` and the Restricted text are unchanged. None names a record.
+3. **Parity.** The server pins each code's exact text (`FieldMappingPushSourceGateTests.EachCodesText_IsTheFixedTextTheClientShows`,
+   4 cases) and the codes (`TheCodes_AreUnchanged`); the jest suite pins the same strings
+   (`RecordFamilyActionPanel.test.tsx`, "reads the reason code of an entry and maps each source-rule code to its wording").
+   The .NET tests that compare against the constants (`FieldMappingPushFamilyContractTests`, `FieldMappingPushSourceGateTests`,
+   `RefileWriterBindShapeTests`) follow the constants and needed no change.
 
-- The client gap above (`src/client/shared/Spaarke.UI.Components/src/components/RecordFamilyModal/recordFamilyPushService.ts`,
-  `SOURCE_RULE_TEXT` and `sourceRuleSkipText`): the new code needs its line there.
+Jest (`RecordFamilyActionPanel.test.tsx`): 3 new tests (the preview says the record will not be updated, the apply shows the
+Restricted text, the skip-line count singular and plural) and 5 updated (the undetermined and refile texts on the preview and
+the apply, the parse test and the count test).
+
+Evidence for the follow-up:
+- Jest, `src/components/RecordFamilyModal` (2 suites): with `recordFamilyPushService.ts` at the base commit plus only the new
+  exported constant (so the tests compile), **8 failed, 79 passed**; restored, **87 passed**.
+- Server texts: with the earlier 022c gate (old wording), `FieldMappingPushSourceGateTests` + `FieldMappingPushFamilyContractTests`
+  + `RefileWriterBindShapeTests` **2 failed, 145 passed** (the undetermined and refile text pins); restored, **147 passed**.
+- Filtered BFF suite `FieldMapping|RecordRepair|RecordCreation|MappingSource|RestrictedSource|Refile|RecordFamily`
+  (`&FullyQualifiedName!~Api.Office.`): **2144 passed**, 0 failed.
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `dotnet format whitespace --verify-no-changes` on the two touched .cs
+  files: clean.
+- Shared library: ESLint and Prettier clean on the two touched files. `tsc --noEmit -p tsconfig.json` (no `typecheck` script)
+  reports 9 errors, none in `RecordFamilyModal`: all in `AccessGrantModal/types.ts`, `services/document-upload/*`,
+  `EntityCreationService.ts` and `useWizardPageBootstrap.ts`, which cannot resolve the sibling packages `@spaarke/auth` and
+  `@spaarke/sdap-client` (not built in this worktree), plus three `unknown` errors that follow from them. The tsconfig
+  excludes tests; ts-jest type-checks the test file in the jest run above.
