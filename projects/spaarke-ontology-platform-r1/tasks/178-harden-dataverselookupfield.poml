@@ -4,7 +4,7 @@
     <title>Harden DataverseLookupField before it carries ~30 more wizard fields (filters, hint, failure = cancel, single flight, tests)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
     <model-tier>sonnet</model-tier>
