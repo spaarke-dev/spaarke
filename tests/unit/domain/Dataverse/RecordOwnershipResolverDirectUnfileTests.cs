@@ -437,6 +437,47 @@ public class RecordOwnershipResolverDirectUnfileTests
         directory.ConditionalWrites.Should().BeEmpty();
     }
 
+    // ── Pass 3 (F1): only a clear of a link the row holds is an unfile ───────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("partially configured")]
+    [InlineData("lookup faults")]
+    [InlineData("resolved")]
+    public async Task ClearingALinkTheRowDoesNotHold_OfAnUnfiledDirectMessage_IsNoUnfile_RefusesNothing_AndReadsNothingMore(string lookupState)
+    {
+        var directory = World().WithUnfiledDirectMessage(FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var double_ = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        var lookup = lookupState switch
+        {
+            "partially configured" => DirectMessageOwnerStepTests.PartiallyConfigured(DirectMessageOwnerTeam.BusinessUnitNameConfigKey),
+            "lookup faults" => FaultingLookup(double_),
+            _ => double_.Lookup(),
+        };
+        var request = Unfile() with
+        {
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_regardingaccount"] = null },
+        };
+        var applied = false;
+
+        var resolution = await Resolver(directory, lookup).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.IsRefused.Should().BeFalse("a clear of a link the row does not hold changes nothing it is linked to");
+        resolution.DirectUnfile.Should().BeNull("no move is due");
+        resolution.ParentsUnchanged.Should().BeTrue();
+        double_.Reads.Should().Be(0, "no lookup read");
+        directory.QueriedEntities.Count(e => e == "sprk_communicationthread").Should().Be(1, "only the reparent's own thread read");
+        directory.Assignments.Should().BeEmpty();
+        directory.ConditionalWrites.Should().BeEmpty();
+    }
+
+    private static DirectMessageOwnerTeam FaultingLookup(DirectMessageOwnerTeamDouble lookup)
+    {
+        lookup.Faults = true;
+        return lookup.Lookup();
+    }
+
     // ── Pass 2 (K2): every column the rule reads, as the write leaves it ─────────────────────────────────────────────────
 
     [Theory]

@@ -1204,15 +1204,23 @@ public sealed record RecordReparent
     }
 
     /// <summary>
-    /// fm task 054 piece 3b: whether the change sets or clears a typed regarding lookup of a communication
-    /// (<see cref="Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap"/>): one it sets onto a table that is no ownership
-    /// parent (<see cref="RegardingLinksSet"/>), or any it clears (a <c>null</c> in <see cref="ParentChanges"/>). Clearing the last
-    /// link a message holds unfiles it even when the link files it under no ownership parent.
+    /// fm task 054 piece 3b: whether the change clears a typed regarding lookup of a communication
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap"/>) that <paramref name="current"/> (the row as read
+    /// before the change) holds: a <c>null</c> or empty reference in <see cref="ParentChanges"/> for a column that names a row
+    /// before the change. Clearing the last link a message holds unfiles it even when the link files it under no ownership parent.
+    /// Setting a link never unfiles, and a clear of a column the row does not hold changes nothing.
     /// </summary>
-    internal bool ChangesARegardingLink() =>
-        RecordThreadFiling.AppliesTo(EntityLogicalName?.Trim().ToLowerInvariant())
-        && (RegardingLinksSet.Count > 0
-            || ParentChanges.Any(change => change.Value is null && IsRegardingColumn(change.Key)));
+    internal bool ChangesARegardingLink(Entity current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        return RecordThreadFiling.AppliesTo(EntityLogicalName?.Trim().ToLowerInvariant())
+            && ParentChanges.Any(change =>
+                (change.Value is null || change.Value.Id == Guid.Empty)
+                && IsRegardingColumn(change.Key)
+                && current.GetAttributeValue<EntityReference>(
+                        Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(change.Key)) is { } held
+                && held.Id != Guid.Empty);
+    }
 
     /// <summary>fm task 054 piece 3b: whether <paramref name="column"/> (any spelling) is a typed regarding lookup of a
     /// communication.</summary>
@@ -2450,12 +2458,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             var unchanged = RecordOwnerResolution.Unchanged(
                 $"the change to {request.EntityLogicalName} {request.RecordId:D} sets no parent and clears none it holds");
 
-            // fm task 054 piece 3b: but a change to a communication's typed regarding lookups that files it under no ownership
+            // fm task 054 piece 3b: but clearing a typed regarding lookup the communication holds that files it under no ownership
             // parent (a contact, an account, an organization) can still leave it linked to nothing: an unfile, decided by the same
             // rule BEFORE the write, refused the same way when the Direct team cannot be confirmed. No secure root is left here
             // (its filing does not change), so there is no F3 question.
             if (request.WhenUnfiled == UnfiledOwnership.UnfiledCommunication
-                && request.ChangesARegardingLink()
+                && request.ChangesARegardingLink(current)
                 && byColumn.Count == 0 && threadAfter.Count == 0)
             {
                 var rowAfter = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange(

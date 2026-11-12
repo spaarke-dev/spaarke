@@ -266,6 +266,26 @@ public class DirectUnfileGenericPathTests
         _calls.Should().BeEmpty();
     }
 
+    // ── Pass 3 (F1): only a clear of a link the row holds is an unfile ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateHandler_ClearingALinkTheRowDoesNotHold_OfAnUnfiledDirectMessage_MovesNothing_GrantsNothing_WritesNoOwner()
+    {
+        var world = World().WithUnfiledDirectMessage(FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        var (handler, writes) = UpdateHandler(world, lookup.Lookup());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, new Dictionary<string, object?> { ["sprk_regardingaccount"] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
+        world.Assignments.Should().BeEmpty();
+        world.ConditionalWrites.Should().BeEmpty();
+        lookup.Reads.Should().Be(0);
+        _calls.Should().BeEmpty("no participant is granted and no owner is written");
+    }
+
     // ── Pass 2 (K2): the writer passes every column the rule reads ───────────────────────────────────────────────────────
 
     [Fact]
