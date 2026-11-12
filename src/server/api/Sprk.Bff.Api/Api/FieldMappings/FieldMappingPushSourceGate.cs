@@ -50,24 +50,28 @@ internal sealed class FieldMappingPushSourceGate
     /// <summary>The child is not owned by the secure source's isolation owner: nothing was written to it.</summary>
     internal const string NotIsolatedReasonCode = "field_mapping.push.secure_source_not_isolated";
 
-    /// <summary>Whether the source is secure, or the child's owner, could not be told: nothing was written to it.</summary>
+    /// <summary>Whether the source is secure, or (task 022c) whether its Access Permission allows copying, or the child's owner,
+    /// could not be told: nothing was written to it.</summary>
     internal const string UndeterminedReasonCode = "field_mapping.push.secure_source_undetermined";
 
-    /// <summary>A secure source's push would change what the child is filed under: nothing was written to it (UAC-r2 (a)).</summary>
+    /// <summary>A secure (or, task 022c, Restricted or unreadable) source's push would change what the child is filed under:
+    /// nothing was written to it (UAC-r2 (a)).</summary>
     internal const string RefileNotAllowedReasonCode = "field_mapping.push.secure_source_refile_not_allowed";
 
-    /// <summary>The per-child text of <see cref="RefileNotAllowedReasonCode"/>. Names no record.</summary>
+    /// <summary>The per-child text of <see cref="RefileNotAllowedReasonCode"/>, true for a secure and a Restricted source. Names
+    /// no record.</summary>
     internal const string RefileNotAllowedMessage =
-        "No fields were copied to this record because its filing can't be changed by a push from a secure record.";
+        "No fields were copied to this record because its filing can't be changed by a push from a secure or Restricted record.";
 
     /// <summary>The per-child text of <see cref="NotIsolatedReasonCode"/>. Names no record.</summary>
     internal const string NotIsolatedMessage =
         "No fields were copied to this record because the source record is secure.";
 
-    /// <summary>The per-child text of <see cref="UndeterminedReasonCode"/>. Names no record.</summary>
+    /// <summary>The per-child text of <see cref="UndeterminedReasonCode"/>, true for a secure and a Restricted source. Names no
+    /// record.</summary>
     internal const string UndeterminedMessage =
-        "No fields were copied to this record because it could not be checked whether the source record is secure. "
-        + "Try again later.";
+        "No fields were copied to this record because it could not be checked whether the source record's access allows "
+        + "copying. Try again later.";
 
     /// <summary>Task 022c: the source's Access Permission is Restricted and the child's is not: nothing was written to it.</summary>
     internal const string RestrictedSourceNotRestrictedReasonCode = "field_mapping.push.restricted_source_not_restricted";

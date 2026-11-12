@@ -73,6 +73,36 @@ public partial class FieldMappingPushSourceGateTests
             .Should().Be("field_mapping.push.restricted_source_not_restricted");
     }
 
+    /// <summary>
+    /// Task 022c: the per-child texts, exactly as the client's <c>SOURCE_RULE_TEXT</c> holds them
+    /// (<c>recordFamilyPushService.ts</c>; the jest suite pins the same strings). The undetermined and re-file texts answer for a
+    /// secure and a Restricted source alike; the codes are unchanged.
+    /// </summary>
+    public static TheoryData<string, string> TheTexts => new()
+    {
+        { FieldMappingPushSourceGate.NotIsolatedReasonCode,
+            "No fields were copied to this record because the source record is secure." },
+        { FieldMappingPushSourceGate.UndeterminedReasonCode,
+            "No fields were copied to this record because it could not be checked whether the source record's access allows copying. Try again later." },
+        { FieldMappingPushSourceGate.RefileNotAllowedReasonCode,
+            "No fields were copied to this record because its filing can't be changed by a push from a secure or Restricted record." },
+        { FieldMappingPushSourceGate.RestrictedSourceNotRestrictedReasonCode,
+            "No fields were copied to this record because the source record's access is Restricted and this record's is not." },
+    };
+
+    [Theory]
+    [MemberData(nameof(TheTexts))]
+    public void EachCodesText_IsTheFixedTextTheClientShows(string code, string text) =>
+        FieldMappingPushSourceGate.MessageFor(code).Should().Be(text);
+
+    [Fact]
+    public void TheCodes_AreUnchanged()
+    {
+        FieldMappingPushSourceGate.UndeterminedReasonCode.Should().Be("field_mapping.push.secure_source_undetermined");
+        FieldMappingPushSourceGate.RefileNotAllowedReasonCode.Should().Be("field_mapping.push.secure_source_refile_not_allowed");
+        FieldMappingPushSourceGate.NotIsolatedReasonCode.Should().Be("field_mapping.push.secure_source_not_isolated");
+    }
+
     [Fact]
     public async Task ARestrictedSource_AndAChildWhoseTableHasNoColumn_IsRefused_WithoutReadingTheChild()
     {
