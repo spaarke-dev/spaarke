@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Identity;
@@ -80,13 +81,9 @@ internal static class ExternalCallerCommunicationGuard
     /// <c>CommunicationEnrichmentService</c>) and <c>sprk_affinity</c> (sender addresses, subject keywords and participant
     /// sets learned from filed email — <c>AffinityStore</c>).
     /// </summary>
-    internal static readonly IReadOnlySet<string> RefusedContentTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "sprk_emailartifact",
-        "sprk_attachmentartifact",
-        "sprk_emailreviewlog",
-        "sprk_affinity",
-    };
+    /// <remarks>Task 191b: derived from the lineage registry's <see cref="ExternalMarkerKind.Never"/> markers
+    /// (<see cref="SecureChildLineage.NeverExternalTables"/>), never listed here again; the set is unchanged (pinned by a test).</remarks>
+    internal static readonly IReadOnlySet<string> RefusedContentTables = SecureChildLineage.NeverExternalTables;
 
     /// <summary>Log event name for every guard decision (entity + reason code only, ADR-015).</summary>
     internal const string LogEvent = "sdap.ai.tool.external_communication_guard";
@@ -138,14 +135,39 @@ internal static class ExternalCallerCommunicationGuard
     /// document (<c>sprk_regardingdocument</c>, task 188 round 4b: an analysis ABOUT a document); an output follows its
     /// analysis. Entity sets and lookups as read live (<c>SecureChildLineage</c>: note <c>sprk_analysises</c>).
     /// </summary>
+    /// <remarks>Task 191b: derived from the lineage registry (<see cref="SecureChildLineage.DocumentTextTables"/>, the
+    /// <see cref="ExternalMarker.CarriesDocumentText"/> markers), never listed here again. A table's links are its lookups that
+    /// target <c>sprk_document</c>, in the registry's declaration order; a table with none is read through its one lookup to
+    /// another such table (<see cref="DerivedTable.Via"/>). The result is unchanged (pinned by a test).</remarks>
     private static readonly IReadOnlyDictionary<string, DerivedTable> DocumentDerivedTables =
-        new Dictionary<string, DerivedTable>(StringComparer.OrdinalIgnoreCase)
-        {
-            [AnalysisTable] = new("sprk_analysises", "sprk_analysisid",
-                new[] { "_sprk_documentid_value", "_sprk_outputfileid_value", "_sprk_regardingdocument_value" }, Via: null),
-            [AnalysisOutputTable] = new("sprk_analysisoutputs", "sprk_analysisoutputid",
-                new[] { "_sprk_analysisid_value" }, Via: AnalysisTable),
-        };
+        SecureChildLineage.DocumentTextTables.Values.ToDictionary(t => t.LogicalName, DerivedTableOf, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Task 191b: one registry table's <see cref="DerivedTable"/> (see <see cref="DocumentDerivedTables"/>).</summary>
+    private static DerivedTable DerivedTableOf(SecureChildLineage.Table table)
+    {
+        var documentLinks = table.LookupOrder
+            .Where(column => string.Equals(table.Lookups[column], DocumentTable, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (documentLinks.Length > 0)
+            return new(table.EntitySet, table.IdColumn, documentLinks.Select(ValueColumn).ToArray(), Via: null);
+
+        var via = table.LookupOrder
+            .Where(column => SecureChildLineage.DocumentTextTables.ContainsKey(table.Lookups[column]))
+            .ToArray();
+        return via.Length == 1
+            ? new(table.EntitySet, table.IdColumn, [ValueColumn(via[0])], Via: table.Lookups[via[0]])
+            : throw new InvalidOperationException(
+                $"Document-text table {table.LogicalName} names no document and not exactly one document-text table to read through.");
+    }
+
+    /// <summary>A lookup column's OData value property (<c>_{column}_value</c>).</summary>
+    private static string ValueColumn(string column) => $"_{column}_value";
+
+    /// <summary>Task 191b: the derived tables as (entity set, id column, link values, via), for the test that pins the
+    /// derivation to the list it replaced.</summary>
+    internal static IReadOnlyDictionary<string, (string EntitySet, string IdColumn, IReadOnlyList<string> LinkValues, string? Via)>
+        DocumentDerivedTablesForTest => DocumentDerivedTables.ToDictionary(
+            kv => kv.Key, kv => (kv.Value.EntitySet, kv.Value.IdColumn, kv.Value.LinkValues, kv.Value.Via), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// True for a table whose rows derive from a document (<see cref="AnalysisTable"/>, <see cref="AnalysisOutputTable"/>):
@@ -237,14 +259,16 @@ internal static class ExternalCallerCommunicationGuard
 
     private static bool IsUsableId(Guid id) => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink;
 
-    /// <summary>A lookup value of one OData row: <c>null</c> when absent or null (not set); the sentinel when present but not a
-    /// usable GUID.</summary>
+    /// <summary>A lookup value of one OData row: <c>null</c> for an explicit JSON null (not set); the sentinel when the column is
+    /// ABSENT (it was not read; fix round 3d) or present but not a usable GUID.</summary>
     private static Guid? LinkOf(Dictionary<string, JsonElement> row, string column) =>
-        !row.TryGetValue(column, out var v) || v.ValueKind == JsonValueKind.Null
-            ? null
-            : v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
-                ? id
-                : ExternalDocumentNarrowing.UnreadableLink;
+        !row.TryGetValue(column, out var v)
+            ? ExternalDocumentNarrowing.UnreadableLink
+            : v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+                ? null
+                : v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
+                    ? id
+                    : ExternalDocumentNarrowing.UnreadableLink;
 
     /// <summary>
     /// The log reason of the derived rows a handler hid (ADR-015: codes and counts only): <c>source_document_hidden</c> for a

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118b" project="ebilling-r1">
+  <metadata>
+    <title>Submit Invoice from document: carry supporting documents (supportingDocumentIds) into Stored File copies</title>
+    <phase>3 Rules (prerequisite of 118; found by 118's escalation 2026-11-03)</phase>
+    <gate>startable (094 merged)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the request contract of an internal BFF write route and the persister's file path; tags include bff-api and auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A new body field on an idempotent intake route: it reaches the idempotency key, the commit gate and Stored File copies. Follows the from-email path (094).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceSubmissionEndpoints.cs, InvoiceSubmissionService.cs and the persister, which 095c-2..4 and 092 also edit; merge in order.</parallel-reason>
+    <deps>094, 118a</deps>
+    <tags>bff-api, auth, ebilling</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Task 118 puts Submit Invoice in the email UI. Its marking lets the user flag attachments as Invoice or Supporting (118a). POST /api/finance/invoice-submissions/from-document (SubmitInvoiceFromDocumentRequest, InvoiceSubmissionEndpoints.cs:984) takes one invoice document and no supporting ones, so Supporting cannot be sent today. Add an optional `supportingDocumentIds` and copy each document into the file store as a Supporting Stored File of the invoice, the way the from-email route copies marked .eml parts (task 094).</prompt>
+
+  <role>SPAARKE platform developer. Expert in the ebilling intake (094), the file store (090) and the Finance route gate.</role>
+
+  <goal>A caller who may Read the communication and every named document can submit one invoice document plus up to the commit gate's limit of supporting documents. On Accepted, the invoice has its Invoice PDF and one Supporting Stored File per supporting document, each with sprk_sourcedocument set. Any other case gives today's refusals.</goal>
+
+  <context>
+    <background>
+      Read first: notes/094-submit-invoice.md (the from-document route, its idempotency key and its persister path) and notes/095-from-email-contract.md (how marked supporting parts become Stored Files).
+      The supporting documents belong to the same communication, like the invoice document: they are its attachments, already filed as sprk_document rows.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/InvoiceSubmissionEndpoints.cs (SubmitInvoiceFromDocumentRequest :984)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/ (the from-document operation and its key; the persister's file copies)</file>
+      <file role="modify">projects/ebilling-r1/notes/094-submit-invoice.md (the contract section)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="contract">`supportingDocumentIds` is optional; absent or empty behaves exactly as today. The list is de-duplicated, and must not contain the invoice document (400). Each id must be a sprk_document attached to the same communication; otherwise the uniform 404 the route already uses.</constraint>
+    <constraint source="access">The caller's Read on every supporting document is checked as the caller, before anything is staged, through the same check the invoice document uses. A document the caller cannot read gives the same 404 as an unknown one, and nothing is staged.</constraint>
+    <constraint source="idempotency">The sorted supporting ids join the route's idempotency key, so the same request replays and a different set is a different request. State the effect on existing keys (the absent list reproduces today's key exactly) and test it.</constraint>
+    <constraint source="limits">The total file count respects SubmissionCommitGate.MaxFiles (50). Above it, a 400 with a stable reason, before staging.</constraint>
+    <constraint source="file store">Each supporting document becomes a Stored File, purpose Supporting, with sprk_invoice the new invoice and sprk_sourcedocument the document, through the same staging and commit path as 094's from-email parts. No new storage path. The scan state follows the existing rule.</constraint>
+    <constraint source="escalation resolved 2026-11-03 (main session): option A">
+      The first run's escalation fired: the from-email path needs the bytes and the parts list at intake, and from-document stages nothing until the job runs.
+      Resolution, option A: stage the supporting copies at intake.
+      - Move the job's document byte read (InvoiceSubmissionProcessingJobHandler.LoadSourceDocumentAsync, the storage-container check) into ONE shared method that the job and the intake both call. This is a move, not a copy.
+      - Stage each copy under StoredFileIds.ForAttachment(submissionId, "document-part-{i}"), with that document's own source facts. The first part's stage lists the parts.
+      - The earlier attempt's set is read back from those stages. It joins the "same details?" comparison (InvoiceSubmissionService.AnswerWithEarlierAsync), never the submission id (D-134):
+        - a different set is 409 document_already_submitted;
+        - after a Failed attempt, it is a new attempt.
+      - The parts list joins StoredFileBlobs.SameSource, so a leftover stage from a different set is a 409, never extra files. From-email is unchanged.
+      - The persister gets a document-parts branch.
+      Allowed beyond the relevant files: InvoiceSubmissionProcessingJobHandler.cs and StoredFileBlobs.cs.
+      Rejected:
+      - B, a submission column: schema, and a natively writable column could point the app at a document the caller can't read (DEF-048).
+      - C, a second copy of the byte read.
+      Split:
+      - 118b-1: the shared byte read, the contract and validation, the caller-Read check (seed-proofed) and the sameness check.
+      - 118b-2: staging, the parts list and its reuse check, the persister branch, the remaining tests and the notes.
+      Known limit K2: a leftover stage can give a stuck 409, as from-email can (094 §11.3).
+    </constraint>
+    <constraint source="CLAUDE.md §10/§11">No new service. Justify the new field in the notes. BFF hygiene: placement statement, publish-size delta, no new HIGH CVE.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Contract and validation; the access check; the key.</step>
+    <step>Staging and commit of the Supporting copies through the from-email path's code.</step>
+    <step>Tests; notes; send nothing to peers (the main session does).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Without supportingDocumentIds: identical behaviour and idempotency key to today (existing tests pass untouched).</criterion>
+    <criterion>With two readable supporting documents: Accepted; the invoice has 1 Invoice PDF and 2 Supporting Stored Files, each with sprk_sourcedocument set.</criterion>
+    <criterion>The same request replayed returns the same submission. The same request with a different supporting set is a different request (409 or a new attempt, as the route's existing rule says).</criterion>
+    <criterion>A supporting document the caller can't read, or one on another communication, or an unknown id: the uniform 404, with nothing staged. Seed-proof the read check only.</criterion>
+    <criterion>The invoice document listed as supporting: 400. More than the file limit: 400.</criterion>
+    <criterion>Test scope: the cases above. Anything beyond needs a one-line justification in the notes.</criterion>
+    <criterion>Gate: the 5 test projects build; ArchTests and the broad Finance filter pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the from-email copy path cannot be reused for documents without a second copy of the staging rule, STOP and report the options.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/ebilling-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Completed 2026-11-03 in two parts (escalation option A). 118b-1: the shared document read (moved out of the job), the supportingDocumentIds contract and 400s, the caller Read check (seed-proofed) and the set in the "same details?" comparison. 118b-2 (ab0ae5a0cc): each supporting document read before step A through the shared read (bound by the route; the intake constructor stays SPE-free), staged after step A under document-part-{i} with its own source, part 1 listing the parts; the earlier set read from those stages by the one reader the persister commits with; the parts list in StoredFileBlobs.SameSource (seed-proofed), so a leftover of another set is 409, never extra files; the persister commits one Supporting Stored File per part with sprk_sourcedocument. Gate: 5 test projects build, ArchTests 1950/0, broad unit filter 0 failed. Known limits K2, K2-b, K3, K4 in notes/118b-from-document-supporting-files.md section 7; K4 (bytes held in memory, no per-file cap) reported to the main session.
+rework: none task 118b</notes>
+</task>

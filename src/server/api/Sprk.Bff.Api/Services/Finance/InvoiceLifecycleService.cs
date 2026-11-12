@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
@@ -285,9 +286,14 @@ public interface IInvoiceLifecycleService
     /// <param name="invoiceId">The invoice to reopen.</param>
     /// <param name="current">Its status, as the caller read it together with <paramref name="rowVersion"/>.</param>
     /// <param name="rowVersion">Its <c>versionnumber</c> from that same read.</param>
+    /// <param name="reviewDetail">
+    /// 082c-2 fix round 1 (ontology D-205 writer 7, the undo): the review detail the reopened invoice's REMAINING hold reasons derive
+    /// (<c>InvoiceReviewDetail.ReviewDetailOf</c>), written in the same request as the status. The close blanked it, and a reopened invoice that is
+    /// still held for billing terms or a firm must say so. Null: none of the three reasons is open (the detail stays blank).
+    /// </param>
     /// <remarks>Pure: no I/O. The caller owns the transaction and, after it commits, the invoice's re-index (task 152).</remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="rowVersion"/> is not positive (no version was read).</exception>
-    InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion);
+    InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion, int? reviewDetail = null);
 }
 
 /// <summary>
@@ -309,20 +315,37 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     private readonly IFieldMappingDataverseService _records;
     private readonly ILogger<InvoiceLifecycleService> _logger;
     private readonly JobSubmissionService? _jobs;
+    private readonly IGenericEntityService? _entities;
 
     /// <param name="records">The Dataverse boundary.</param>
     /// <param name="logger">The logger.</param>
     /// <param name="jobs">Task 152 (FR-43): enqueues the invoice's re-index after each status move. Registered in DI always; the unit-test
     /// seam leaves it null, which enqueues nothing.</param>
+    /// <param name="entities">082c-2: the app-only read of whether <see cref="InvoiceReviewDetail.Column"/> exists
+    /// (<see cref="ReviewDetailColumnProbe"/>). Registered in DI always; the unit-test seam leaves it null, which uses the probe's cached answer
+    /// (the column is written unless it was found missing).</param>
     public InvoiceLifecycleService(
         IFieldMappingDataverseService records,
         ILogger<InvoiceLifecycleService> logger,
-        JobSubmissionService? jobs = null)
+        JobSubmissionService? jobs = null,
+        IGenericEntityService? entities = null)
     {
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _jobs = jobs;
+        _entities = entities;
     }
+
+    /// <summary>082c-2: whether <see cref="InvoiceReviewDetail.Column"/> exists (the process-wide probe; a test sets its own).</summary>
+    internal ReviewDetailColumnProbe ReviewDetailProbe { get; init; } = ReviewDetailColumnProbe.Shared;
+
+    /// <summary>
+    /// 082c-2 (ontology D-205 writers 6 and 7; uac-r2 condition (b)): whether a move to <paramref name="target"/> also writes the review
+    /// detail. Every move out of In Review writes it blank in the same write as the status, so a closed invoice never carries a hold label;
+    /// the column is left out only where it does not exist yet. A move back to In Review (the supersede undo) does not blank it: the caller
+    /// passes the detail the reopened invoice's remaining holds derive (fix round 1, F2; see <see cref="BuildSupersedeUndoRequest"/>).
+    /// </summary>
+    private static bool BlanksReviewDetail(InvoiceLifecycleStatus target) => target != InvoiceLifecycleStatus.InReview;
 
     /// <summary>
     /// True when FR-06 allows <see cref="TransitionAsync"/> to move from <paramref name="from"/> to <paramref name="to"/> (never for from == to).
@@ -399,8 +422,8 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
         BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.Superseded, rowVersion);
 
     /// <inheritdoc />
-    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion) =>
-        BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.InReview, rowVersion);
+    public InvoiceTransitionRequestResult BuildSupersedeUndoRequest(Guid invoiceId, InvoiceLifecycleStatus current, long rowVersion, int? reviewDetail = null) =>
+        BuildConditionalTransition(invoiceId, current, InvoiceLifecycleStatus.InReview, rowVersion, reviewDetail);
 
     /// <summary>
     /// The status pair as an update conditional on <paramref name="rowVersion"/>, for one of the <see cref="IsAllowedInTransaction"/> moves.
@@ -408,7 +431,7 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     /// when the invoice no longer has that version, so a status read earlier is never written over.
     /// </summary>
     private InvoiceTransitionRequestResult BuildConditionalTransition(
-        Guid invoiceId, InvoiceLifecycleStatus current, InvoiceLifecycleStatus target, long rowVersion)
+        Guid invoiceId, InvoiceLifecycleStatus current, InvoiceLifecycleStatus target, long rowVersion, int? reviewDetail = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(rowVersion);
 
@@ -427,6 +450,18 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
             [StateCode] = new OptionSetValue(InvoiceStatusCodes.StateCodeOf(target)),
             [StatusCode] = new OptionSetValue(InvoiceStatusCodes.StatusCodeOf(target)),
         };
+
+        // 082c-2: Superseded closes the invoice, so its review detail goes blank in the same request (the cached answer: this builder does not
+        // read; the persister probes before it builds the correction's transaction).
+        if (BlanksReviewDetail(target) && ReviewDetailProbe.WriteColumn)
+        {
+            row[InvoiceReviewDetail.Column] = null;
+        }
+        else if (!BlanksReviewDetail(target) && reviewDetail is { } detail && ReviewDetailProbe.WriteColumn)
+        {
+            // Fix round 1 (F2, D-205 writer 7's undo): the reopened invoice shows the detail its remaining holds derive, in the status write.
+            row[InvoiceReviewDetail.Column] = InvoiceReviewDetail.ValueOf(detail);
+        }
 
         return InvoiceTransitionRequestResult.Built(
             current, target, new UpdateRequest { Target = row, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches });
@@ -488,6 +523,12 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
                 [StateCode] = targetStateCode,
             };
 
+            // 082c-2: every TransitionAsync move leaves In Review or a later status, so the review detail goes blank in this same write.
+            if (BlanksReviewDetail(target) && await WritesReviewDetailAsync(ct).ConfigureAwait(false))
+            {
+                fields[InvoiceReviewDetail.Column] = null;
+            }
+
             try
             {
                 await _records.UpdateRecordFieldsIfUnchangedAsync(InvoiceReviewService.InvoiceEntity, invoiceId, fields, version, ct);
@@ -525,6 +566,9 @@ public sealed class InvoiceLifecycleService : IInvoiceLifecycleService
     /// </summary>
     private Task EnqueueIndexAsync(Guid invoiceId, long replacedVersion) =>
         InvoiceIndexingJobHandler.TryEnqueueAsync(_jobs, _logger, invoiceId, $"v{replacedVersion.ToString(CultureInfo.InvariantCulture)}");
+
+    private async Task<bool> WritesReviewDetailAsync(CancellationToken ct) =>
+        _entities is null ? ReviewDetailProbe.WriteColumn : await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false);
 
     private static bool TryReadLong(Dictionary<string, object?> row, string column, out long value)
     {

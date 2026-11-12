@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -21,15 +20,20 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// </summary>
 /// <remarks>
 /// Concrete (ADR-010) with the two entry points <c>virtual</c> as its substitution seam — the
-/// <c>CallerRecordAccessProbe</c> precedent. The reads unwrap a concrete <c>ServiceClient</c>, which no in-process
-/// double can stand in for, so without the seam neither the recalculate routes' post-check 404 nor
-/// SpendSnapshotGenerationJobHandler's deleted-matter skip could be tested (task 130).
+/// <c>CallerRecordAccessProbe</c> precedent (task 130: the recalculate routes' post-check 404 and
+/// SpendSnapshotGenerationJobHandler's deleted-matter skip are tested through it).
+/// <para>Task 165b-4: counted and pending spend come from the shared readers in <see cref="FinanceBaseValues"/>
+/// (<see cref="FinanceBaseValues.ReadCountedInvoicesAsync"/>, <see cref="FinanceBaseValues.ReadPendingSpendAsync"/>), the same ones the
+/// Signal evaluator and the finance tool use, so they decide only from server-written sources and cannot disagree. Every read goes through
+/// the application identity's <see cref="IGenericEntityService"/> (the same connection the earlier <c>ServiceClient</c> unwrap reached).</para>
 /// </remarks>
 public class FinanceRollupService
 {
-    // INTENTIONAL: Keeps IDataverseService — casts to ServiceClient for FetchXML queries.
-    // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
+    // The application identity's IDataverseService, read through its IGenericEntityService members (task 165b-4).
     private readonly IDataverseService _dataverseService;
+
+    // Task 165b-4: the source of the writer identity only (BillingDecisionRecorder.WriterUserIdAsync), as ApExportService takes it.
+    private readonly BillingDecisionRecorder _recorder;
 
     // Writes go through the NARROW interface (→ DataverseWebApiService), NOT the composite.
     // The composite resolves to DataverseServiceClientImpl, whose field-mapping methods are stubs.
@@ -40,7 +44,6 @@ public class FinanceRollupService
     // Entity constants (same as FinancialCalculationToolHandler)
     // The spend/budget/utilization rules themselves (status set, sums, formula) live in FinanceBaseValues, which the Signal
     // evaluator also uses (task 025b, D-122): there is one formula, here and there.
-    private const string InvoiceEntity = FinanceBaseValues.InvoiceEntity;
     private const string Invoice_Matter = FinanceBaseValues.MatterEntity;
     private const string Invoice_Project = FinanceBaseValues.ProjectEntity;
     private const string Invoice_StatusCode = FinanceBaseValues.InvoiceStatusCodeColumn;
@@ -66,9 +69,11 @@ public class FinanceRollupService
     public FinanceRollupService(
         IDataverseService dataverseService,
         IFieldMappingDataverseService fieldMappingService,
+        BillingDecisionRecorder recorder,
         ILogger<FinanceRollupService> logger)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -176,12 +181,14 @@ public class FinanceRollupService
             "Recalculating finance for {Entity} {EntityId}",
             parentEntityName, parentId);
 
-        // Get ServiceClient for QueryExpression support
-        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinanceRollupService));
-
-        // Step 1: Parallel queries — invoices and budgets
-        var invoiceTask = QueryInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
-        var budgetTask = QueryBudgetTotalAsync(serviceClient, parentId, budgetLookupField, ct);
+        // Step 1: the counted invoices (task 165b-4: the shared reader; an invoice counts only with its approve record) and the budgets.
+        // The writer id is asked for only when the parent has counted invoice rows (round 2): with none, counted spend is 0 and the rollup
+        // writes without it. With some and no usable writer id, counted spend is unknown: the read throws (and logs a Warning naming the
+        // writer setting) before anything is written, so the WHOLE write is skipped (total budget too, it shares the counted PATCH) and
+        // pending is unchanged. Any other read fault does the same.
+        var invoiceTask = FinanceBaseValues.ReadCountedInvoicesAsync(
+            _dataverseService, parentEntityName, [parentId], _recorder.WriterUserIdAsync, ct, [Invoice_InvoiceDate, Invoice_StatusCode], _logger);
+        var budgetTask = QueryBudgetTotalAsync(_dataverseService, parentId, budgetLookupField, ct);
 
         await Task.WhenAll(invoiceTask, budgetTask);
 
@@ -217,11 +224,12 @@ public class FinanceRollupService
             averageInvoice: averageInvoice,
             timelineJson: timelineJson);
 
-        // Pending Spend (D-104): In Review and not held, kept apart from actual spend; it feeds nothing else here.
+        // Pending Spend (D-104): In Review and not held, kept apart from actual spend; it feeds nothing else here. Task 165b-4: the one
+        // pending reader (InvoiceBlockedHold's hold, read in a batch), which logs the In Review invoices it leaves out as unlinked.
         await WriteRollupAsync(
             _fieldMappingService, _logger, parentEntityName, parentId, fields,
-            async token => FinanceBaseValues.SumSpend(
-                await QueryPendingInvoicesAsync(serviceClient, parentId, invoiceLookupField, token)),
+            async token => (await FinanceBaseValues.ReadPendingSpendAsync(_dataverseService, parentEntityName, [parentId], token, _logger))
+                .GetValueOrDefault(parentId),
             ct);
 
         _logger.LogInformation(
@@ -292,92 +300,11 @@ public class FinanceRollupService
     }
 
     /// <summary>
-    /// Query all invoices for a parent entity (matter or project) with valid statuses.
-    /// </summary>
-    private static async Task<List<Entity>> QueryInvoicesAsync(
-        ServiceClient serviceClient,
-        Guid parentId,
-        string lookupField,
-        CancellationToken ct)
-    {
-        var query = BuildInvoiceQuery(parentId, lookupField);
-
-        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
-        return results.Entities.ToList();
-    }
-
-    /// <summary>Query the parent's PENDING invoices (D-104): In Review and not held.</summary>
-    private static async Task<List<Entity>> QueryPendingInvoicesAsync(
-        ServiceClient serviceClient,
-        Guid parentId,
-        string lookupField,
-        CancellationToken ct)
-    {
-        var query = BuildPendingInvoiceQuery(parentId, lookupField);
-
-        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
-        return results.Entities.ToList();
-    }
-
-    /// <summary>The pending-spend invoice query (D-104): the parent's invoices whose status is one of
-    /// <see cref="FinanceBaseValues.PendingInvoiceStatuses"/> and that are not held. The held exclusion is
-    /// <see cref="FinanceBaseValues.HeldSubmissionConditions"/>, written as a LEFT OUTER link with the conditions inside the link
-    /// and a null check on the linked key, so an invoice with several linked submissions is returned at most once. Internal so a
-    /// test can pin it against the grouped query the Signal evaluator sends.</summary>
-    internal static QueryExpression BuildPendingInvoiceQuery(Guid parentId, string lookupField)
-    {
-        var query = new QueryExpression(InvoiceEntity)
-        {
-            ColumnSet = InvoiceColumns(),
-            Criteria = new FilterExpression(LogicalOperator.And)
-        };
-        query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);
-        query.Criteria.AddCondition(
-            Invoice_StatusCode,
-            ConditionOperator.In,
-            FinanceBaseValues.PendingInvoiceStatuses.Cast<object>().ToArray());
-
-        var held = query.AddLink(
-            FinanceBaseValues.SubmissionEntity, FinanceBaseValues.InvoiceKeyColumn, FinanceBaseValues.SubmissionInvoiceLookup, JoinOperator.LeftOuter);
-        held.EntityAlias = FinanceBaseValues.HeldAlias;
-        held.Columns = new ColumnSet(false);
-        foreach (var (column, values) in FinanceBaseValues.HeldSubmissionConditions)
-        {
-            held.LinkCriteria.AddCondition(column, ConditionOperator.In, values.ToArray());
-        }
-
-        query.Criteria.AddCondition(
-            FinanceBaseValues.HeldAlias, FinanceBaseValues.SubmissionKeyColumn, ConditionOperator.Null);
-        return query;
-    }
-
-    /// <summary>The invoice columns both spend queries read: the two amount columns of <see cref="FinanceBaseValues.SpendAmount"/>
-    /// (a column left out would read as empty and fall back to the billed total without a sound), the date and the status.</summary>
-    private static ColumnSet InvoiceColumns() =>
-        new(FinanceBaseValues.SpendAmountColumns.Append(Invoice_InvoiceDate).Append(Invoice_StatusCode).ToArray());
-
-    /// <summary>The invoice query: the parent's invoices whose status is one of <see cref="FinanceBaseValues.CountedInvoiceStatuses"/>.
-    /// Internal so a test can pin it against the grouped query the Signal evaluator sends (same lookups, same status set).</summary>
-    internal static QueryExpression BuildInvoiceQuery(Guid parentId, string lookupField)
-    {
-        var query = new QueryExpression(InvoiceEntity)
-        {
-            ColumnSet = InvoiceColumns(),
-            Criteria = new FilterExpression(LogicalOperator.And)
-        };
-        query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);
-        query.Criteria.AddCondition(
-            Invoice_StatusCode,
-            ConditionOperator.In,
-            FinanceBaseValues.CountedInvoiceStatuses.Cast<object>().ToArray());
-        return query;
-    }
-
-    /// <summary>
-    /// Query all Budget records for a parent entity and return the sum of sprk_totalbudget.
+    /// Query all Budget records for a parent entity and return the sum of sprk_totalbudget (app-only, through
+    /// <see cref="IGenericEntityService"/>; task 165b-4: no <c>ServiceClient</c> unwrap).
     /// </summary>
     private static async Task<decimal> QueryBudgetTotalAsync(
-        ServiceClient serviceClient,
+        IGenericEntityService entities,
         Guid parentId,
         string lookupField,
         CancellationToken ct)
@@ -389,7 +316,7 @@ public class FinanceRollupService
         };
         query.Criteria.AddCondition(lookupField, ConditionOperator.Equal, parentId);
 
-        var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
+        var results = await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return FinanceBaseValues.SumMoney(results.Entities, Budget_TotalBudget);
     }
 }

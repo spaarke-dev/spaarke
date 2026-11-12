@@ -298,8 +298,8 @@ public sealed class StoredFileServiceTests
         var result = await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
 
         var expected = $"{StoredFileRig.Tenant:D}/{table}/{InvoiceId:D}/{spec.FileId:D}";
-        result.Blob.Should().BeEquivalentTo(new StagedBlob(container, expected, Sha(Pdf), Pdf.Length, false));
         var blob = rig.Gateway.Get(container, expected)!;
+        result.Blob.Should().BeEquivalentTo(new StagedBlob(container, expected, Sha(Pdf), Pdf.Length, false, blob.ETag), "the create's ETag rides on the StagedBlob (DEF-044)");
         blob.Content.Should().Equal(Pdf);
         blob.Metadata.Should().Contain("sha256", Sha(Pdf)).And.Contain("purpose", ((int)purpose).ToString(CultureInfo.InvariantCulture))
             .And.Contain("submissionid", Submission.ToString("D")).And.Contain("environment", StoredFileBlobs.TestEnvironment);
@@ -443,7 +443,265 @@ public sealed class StoredFileServiceTests
         rig.Gateway.StorageCalls.Should().Be(0);
     }
 
-    [Fact(DisplayName = "Stage: re-staging the same bytes reuses the blob; different bytes under the id are refused and the blob is unchanged")]
+    // =============================================================================================================================
+    // DEF-044 (owner option B, 2026-11-05): a reuse REWRITES the same verified bytes under If-Match
+    // =============================================================================================================================
+
+    private const string InvoiceFilesContainer = "invoice-files";
+
+    private static string PathOf(StoredFileRowSpec spec) => StoredFileBlobName.Build(StoredFileRig.Tenant, spec.Parent, spec.FileId);
+
+    private static StoredFileRowSpec SourcedSpec() => Spec(StoredFileIds.ForSourceVersion(Submission, 7)) with
+    {
+        SourceDocumentId = Guid.Parse("d0c00000-0000-4000-8000-000000000001"),
+        SourceCommunicationId = Guid.Parse("c0aa0000-0000-4000-8000-000000000001"),
+        SourceAttachmentIdentity = "eml-part-0",
+        SourceVersion = 7,
+        SubmissionId = Submission,
+    };
+
+    [Fact(DisplayName = "DEF-044 must-fire: reusing a staged blob rewrites the same bytes: the ETag and Last-Modified move, the StagedBlob carries the new ETag, and no metadata or content type is dropped")]
+    public async Task Stage_Reuse_RewritesTheSameBytes_ETagMoves_MetadataKept()
+    {
+        var rig = new StoredFileRig();
+        var spec = SourcedSpec();
+        var first = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        var path = PathOf(spec);
+        var stored = rig.Gateway.Get(InvoiceFilesContainer, path)!;
+        first.Reused.Should().BeFalse();
+        first.ETag.Should().Be(stored.ETag, "the create's ETag rides on the StagedBlob");
+        var etagBefore = stored.ETag;
+        var metadataBefore = new Dictionary<string, string>(stored.Metadata);
+        metadataBefore.Keys.Should().Contain([StoredFileBlobs.MetadataSha256, StoredFileBlobs.MetadataPurpose, StoredFileBlobs.MetadataSubmission,
+            StoredFileBlobs.MetadataEnvironment, StoredFileBlobs.MetadataSourceDocument, StoredFileBlobs.MetadataSourceCommunication,
+            StoredFileBlobs.MetadataSourceAttachment, StoredFileBlobs.MetadataSourceVersion], "the stage wrote them");
+        var modifiedBefore = stored.LastModified;
+        rig.Gateway.Now = rig.Gateway.Now.AddHours(30);
+
+        var again = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+
+        again.Reused.Should().BeTrue();
+        var after = rig.Gateway.Get(InvoiceFilesContainer, path)!;
+        after.ETag.Should().NotBe(etagBefore, "the rewrite moves the ETag, so a delete judged on the old one is refused");
+        again.ETag.Should().Be(after.ETag, "the rewrite's ETag rides on the StagedBlob");
+        after.LastModified.Should().BeAfter(modifiedBefore).And.Be(rig.Gateway.Now);
+        after.Content.Should().Equal(Pdf);
+        after.ContentType.Should().Be("application/pdf");
+        after.Metadata.Should().BeEquivalentTo(metadataBefore, "the SHA-256, purpose, submission, environment marker and source facts survive the rewrite");
+        rig.Gateway.Calls.Count(c => c.StartsWith("overwrite ", StringComparison.Ordinal)).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "DEF-044 must-not-fire: a first stage writes once (create only, no rewrite) and answers the create's ETag")]
+    public async Task Stage_FirstStage_NoRewrite()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec();
+
+        var staged = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+
+        staged.Reused.Should().BeFalse();
+        staged.ETag.Should().Be(rig.Gateway.Get(InvoiceFilesContainer, PathOf(spec))!.ETag);
+        rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("overwrite ", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "DEF-044 A3: after a reuse the scan rule reads Pending (the old verdict predates the new Last-Modified) until a scan newer than it lands, then Clean")]
+    public async Task Stage_Reuse_ScanRule_PendingUntilTheRescan_ThenClean()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec();
+        var first = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        var path = PathOf(spec);
+        rig.Gateway.Get(InvoiceFilesContainer, path)!.Tags = StoredFileRig.CleanTags(rig.Gateway.Now.AddMinutes(1));
+        (await rig.Blobs.GetScanStateAsync(InvoiceFilesContainer, path, CancellationToken.None))!.Value.State
+            .Should().Be(StoredFileScanState.Clean, "scanned after it was written");
+
+        rig.Gateway.Now = rig.Gateway.Now.AddHours(3);
+        (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!.Reused.Should().BeTrue();
+
+        (await rig.Blobs.GetScanStateAsync(InvoiceFilesContainer, path, CancellationToken.None))!.Value.State
+            .Should().Be(StoredFileScanState.Pending, "the verdict read is older than the rewrite's Last-Modified: no clean scan of THIS content yet");
+        rig.Gateway.Get(InvoiceFilesContainer, path)!.Tags = StoredFileRig.CleanTags(rig.Gateway.Now.AddMinutes(1));
+        (await rig.Blobs.GetScanStateAsync(InvoiceFilesContainer, path, CancellationToken.None))!.Value.State
+            .Should().Be(StoredFileScanState.Clean, "the rescan landed after the rewrite");
+        first.ETag.Should().NotBe(rig.Gateway.Get(InvoiceFilesContainer, path)!.ETag);
+    }
+
+    [Fact(DisplayName = "DEF-044 A3: with scanning disabled (MalwareScanningEnabled=false) a reused file is servable exactly like a fresh one, with no tag at all")]
+    public async Task Stage_Reuse_ScanningDisabled_ServableLikeAFreshOne()
+    {
+        var rig = new StoredFileRig(malwareScanningEnabled: false);
+        var spec = UploadSpec();
+        await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+        var path = PathOf(spec);
+        (await rig.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, spec.FileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Ok, "a fresh stage with scanning off is servable with no tag");
+
+        rig.Gateway.Now = rig.Gateway.Now.AddHours(3);
+        (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!.Reused.Should().BeTrue();
+
+        rig.Gateway.Get(InvoiceFilesContainer, path)!.Tags.Should().BeEmpty("nothing scans a blob when scanning is off");
+        (await rig.Blobs.GetScanStateAsync(InvoiceFilesContainer, path, CancellationToken.None))!.Value.State.Should().Be(StoredFileScanState.NotScanned);
+        var read = await rig.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, spec.FileId, CancellationToken.None);
+        read.Outcome.Should().Be(StoredFileProcessingOutcome.Ok, "the same answer as the fresh stage");
+        read.Content!.ToArray().Should().Equal(Pdf);
+    }
+
+    [Theory(DisplayName = "DEF-044 A4: a reuse whose existing blob differs in SHA-256, in length or in source is refused as today and NO rewrite is made")]
+    [InlineData("sha")]
+    [InlineData("length")]
+    [InlineData("source")]
+    public async Task Stage_Reuse_DifferentBytesOrSource_Conflict_NoRewrite(string differs)
+    {
+        var rig = new StoredFileRig();
+        var spec = SourcedSpec();
+        var path = PathOf(spec);
+        var metadata = new Dictionary<string, string>
+        {
+            [StoredFileBlobs.MetadataSha256] = Sha(Pdf),
+            [StoredFileBlobs.MetadataSourceDocument] = spec.SourceDocumentId!.Value.ToString("D"),
+            [StoredFileBlobs.MetadataSourceCommunication] = spec.SourceCommunicationId!.Value.ToString("D"),
+            [StoredFileBlobs.MetadataSourceAttachment] = "eml-part-0",
+        };
+        byte[] content = Pdf;
+        switch (differs)
+        {
+            case "sha":
+                content = Encoding.UTF8.GetBytes("%PDF-1.7 another file");
+                metadata[StoredFileBlobs.MetadataSha256] = Sha(content);
+                break;
+            case "length":
+                content = Pdf[..^1]; // recorded SHA-256 of the full file, but the stored bytes are one short
+                break;
+            default:
+                metadata[StoredFileBlobs.MetadataSourceDocument] = Guid.NewGuid().ToString("D");
+                break;
+        }
+
+        var seeded = rig.Gateway.Seed(InvoiceFilesContainer, path, content, metadata);
+        var etag = seeded.ETag;
+        var modified = seeded.LastModified;
+
+        var result = await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+
+        result.RefusalCode.Should().Be(StoredFileRefusal.ContentConflict);
+        rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("overwrite ", StringComparison.Ordinal), "different bytes or another source are never rewritten");
+        var kept = rig.Gateway.Get(InvoiceFilesContainer, path)!;
+        kept.ETag.Should().Be(etag);
+        kept.LastModified.Should().Be(modified);
+        kept.Content.Should().Equal(content);
+    }
+
+    [Fact(DisplayName = "DEF-044 A5: a 412 on the rewrite reads the blob again and rewrites once more; the result is the second rewrite's ETag")]
+    public async Task Stage_Reuse_412OnTheRewrite_RetriesOnce()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec();
+        await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+        var path = PathOf(spec);
+        var fired = 0;
+        rig.Gateway.BeforeOp = (op, name) =>
+        {
+            if (op == "overwrite" && fired++ == 0)
+            {
+                rig.Gateway.Overwrite(InvoiceFilesContainer, path, Pdf, rig.Gateway.Now); // another retry reused it first: same bytes, new ETag
+            }
+        };
+
+        var staged = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+
+        staged.Reused.Should().BeTrue();
+        staged.ETag.Should().Be(rig.Gateway.Get(InvoiceFilesContainer, path)!.ETag);
+        rig.Gateway.Calls.Count(c => c.StartsWith("overwrite ", StringComparison.Ordinal)).Should().Be(2, "one 412, one retry");
+        rig.Gateway.Get(InvoiceFilesContainer, path)!.Content.Should().Equal(Pdf);
+    }
+
+    [Fact(DisplayName = "DEF-044 A5: a second 412 is the stage's retryable failure (an exception, not a refusal or a Reused answer); the blob is intact")]
+    public async Task Stage_Reuse_412Twice_IsTheRetryableFailure()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec();
+        await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+        var path = PathOf(spec);
+        rig.Gateway.BeforeOp = (op, _) =>
+        {
+            if (op == "overwrite")
+            {
+                rig.Gateway.Overwrite(InvoiceFilesContainer, path, Pdf, rig.Gateway.Now); // a writer that always gets there first
+            }
+        };
+
+        var act = () => rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*retry*");
+        rig.Gateway.Calls.Count(c => c.StartsWith("overwrite ", StringComparison.Ordinal)).Should().Be(2, "one retry, no more");
+        rig.Gateway.Get(InvoiceFilesContainer, path)!.Content.Should().Equal(Pdf);
+    }
+
+    [Fact(DisplayName = "DEF-044 A4/A5: a 412 because the blob now holds OTHER bytes is judged again and refused as a conflict, with no further rewrite")]
+    public async Task Stage_Reuse_412ThenOtherBytes_IsAConflict()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec();
+        await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+        var path = PathOf(spec);
+        var other = Encoding.UTF8.GetBytes("different bytes written meanwhile");
+        rig.Gateway.BeforeOp = (op, _) =>
+        {
+            if (op == "overwrite")
+            {
+                rig.Gateway.Overwrite(InvoiceFilesContainer, path, other, rig.Gateway.Now);
+            }
+        };
+
+        var result = await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+
+        result.RefusalCode.Should().Be(StoredFileRefusal.ContentConflict);
+        rig.Gateway.Calls.Count(c => c.StartsWith("overwrite ", StringComparison.Ordinal)).Should().Be(1);
+        rig.Gateway.Get(InvoiceFilesContainer, path)!.Content.Should().Equal(other, "the blob that was found is left as it was");
+    }
+
+    [Theory(DisplayName = "DEF-044 A5: a blob deleted between the read and the rewrite is created afresh (as the first write: Reused false, with the create's ETag)")]
+    [InlineData("overwrite-answers-404")]
+    [InlineData("overwrite-answers-412-then-gone")]
+    public async Task Stage_Reuse_BlobVanishedBeforeTheRewrite_CreatesAfresh(string how)
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec();
+        await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None);
+        var path = PathOf(spec);
+        var removed = false;
+        rig.Gateway.BeforeOp = (op, _) =>
+        {
+            if (how == "overwrite-answers-404" && op == "overwrite" && !removed)
+            {
+                removed = rig.Gateway.Remove(InvoiceFilesContainer, path);
+            }
+
+            if (how == "overwrite-answers-412-then-gone")
+            {
+                if (op == "overwrite" && !removed)
+                {
+                    rig.Gateway.Overwrite(InvoiceFilesContainer, path, Pdf, rig.Gateway.Now); // 412 ...
+                }
+                else if (op == "props" && !removed && rig.Gateway.Calls.Count(c => c.StartsWith("overwrite ", StringComparison.Ordinal)) == 1)
+                {
+                    removed = rig.Gateway.Remove(InvoiceFilesContainer, path); // ... and the blob is gone at the read that follows
+                }
+            }
+        };
+
+        var staged = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+
+        removed.Should().BeTrue("the blob really vanished mid-stage");
+        staged.Reused.Should().BeFalse("nothing was reused: this stage wrote the blob");
+        var blob = rig.Gateway.Get(InvoiceFilesContainer, path)!;
+        staged.ETag.Should().Be(blob.ETag);
+        blob.Content.Should().Equal(Pdf);
+        blob.Metadata.Should().ContainKey(StoredFileBlobs.MetadataSha256).WhoseValue.Should().Be(Sha(Pdf));
+        blob.Metadata.Should().ContainKey(StoredFileBlobs.MetadataEnvironment, "a fresh create carries the stage's own metadata");
+    }
+
+    [Fact(DisplayName = "Stage: re-staging the same bytes reuses the blob; different bytes under the id are refused and the blob is unchanged (write-once per content)")]
     public async Task Stage_WriteOnce()
     {
         var rig = new StoredFileRig();
@@ -929,6 +1187,36 @@ public sealed class StoredFileServiceTests
             .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
     }
 
+    [Fact(DisplayName = "092 review K6 must-fire: a row under the id whose parent or purpose is not the one asked for is Missing, even Servable and clean")]
+    public async Task OpenStaged_RowWithAnotherParentOrPurpose_IsMissing()
+    {
+        var fileId = UploadSpec().FileId;
+
+        var otherParent = new StoredFileRig();
+        otherParent.SeedFile(fileId, new StoredFileParent(StoredFileParentKind.Invoice, Guid.NewGuid()), Pdf);
+        (await otherParent.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+
+        var otherPurpose = new StoredFileRig();
+        otherPurpose.SeedFile(fileId, Invoice, Pdf, purpose: StoredFilePurpose.InvoiceSupportingFile);
+        (await otherPurpose.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None))
+            .Outcome.Should().Be(StoredFileProcessingOutcome.Missing);
+        otherPurpose.Gateway.Calls.Should().NotContain(c => c.StartsWith("open ", StringComparison.Ordinal), "no bytes are read for a mismatched row");
+    }
+
+    [Fact(DisplayName = "092 review K6 must-not-fire: a row with the asked parent and purpose, Servable and clean, returns its bytes")]
+    public async Task OpenStaged_MatchingRow_ReturnsBytes()
+    {
+        var rig = new StoredFileRig();
+        var fileId = UploadSpec().FileId;
+        rig.SeedFile(fileId, Invoice, Pdf);
+
+        var read = await rig.Service.OpenStagedForProcessingAsync(StoredFilePurpose.InvoicePdf, Invoice, fileId, CancellationToken.None);
+
+        read.Outcome.Should().Be(StoredFileProcessingOutcome.Ok);
+        read.Content!.ToArray().Should().Equal(Pdf);
+    }
+
     [Fact(DisplayName = "092 staged read: a purpose under the wrong parent is Missing with no storage call; an unconfigured store throws (the job retries)")]
     public async Task OpenStaged_WrongParent_AndNotConfigured()
     {
@@ -1002,6 +1290,138 @@ public sealed class StoredFileServiceTests
         var off = new StoredFileRig(configured: false);
         (await off.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeFalse();
         off.Gateway.StorageCalls.Should().Be(0);
+    }
+
+    // =============================================================================================================================
+    // DEF-044: the cleanup deletes are pinned to the version they judged
+    // =============================================================================================================================
+
+    /// <summary>Runs <paramref name="reuse"/> the moment the gateway is asked to delete <paramref name="path"/>: a retry that lands after the delete was decided.</summary>
+    private static void ReuseJustBeforeTheDelete(StoredFileRig rig, string path, Action reuse) =>
+        rig.Gateway.BeforeOp = (op, name) =>
+        {
+            if (op == "delete" && name == InvoiceFilesContainer + "/" + path)
+            {
+                rig.Gateway.Now = rig.Gateway.Now.AddMinutes(5);
+                reuse();
+            }
+        };
+
+    [Fact(DisplayName = "DEF-044 must-fire (A1b): a failed row write whose own staged blob a concurrent retry REUSED since is kept: the delete is pinned to the staged ETag (412), the retry's bytes intact")]
+    public async Task CreateFails_BlobReusedByAConcurrentRetry_Kept()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
+        var path = PathOf(spec);
+        rig.Dataverse.CreateFault = new InvalidOperationException("Dataverse refused the create");
+        StagedBlob? retry = null;
+        ReuseJustBeforeTheDelete(rig, path,
+            () => retry = rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None).GetAwaiter().GetResult().Blob);
+
+        var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("Dataverse refused the create");
+        retry.Should().NotBeNull();
+        retry!.Reused.Should().BeTrue("the concurrent retry reused (rewrote) the blob this attempt had staged");
+        var blob = rig.Gateway.Get(InvoiceFilesContainer, path);
+        blob.Should().NotBeNull("a delete judged on the version this attempt wrote must not take the retry's blob");
+        blob!.ETag.Should().Be(retry.ETag);
+        blob.Content.Should().Equal(Pdf);
+        rig.Gateway.Calls.Should().Contain("delete " + InvoiceFilesContainer + "/" + path, "the delete was attempted, and refused");
+    }
+
+    [Fact(DisplayName = "DEF-044 must-not-fire (A2b): a failed row write over a blob THIS attempt wrote, and nobody reused, still deletes it (the pinned delete matches) and rethrows")]
+    public async Task CreateFails_OwnBlobNotReused_StillDeleted()
+    {
+        var rig = new StoredFileRig();
+        var spec = Spec(StoredFileIds.ForUpload(Submission), StoredFilePurpose.InvoiceSupportingFile) with { SubmissionId = Submission };
+        rig.Dataverse.CreateFault = new InvalidOperationException("Dataverse refused the create");
+
+        var act = () => rig.Service.CreateForAppAsync(spec, new MemoryStream(Pdf), requestedBy: null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("Dataverse refused the create");
+        rig.Gateway.Get(InvoiceFilesContainer, PathOf(spec)).Should().BeNull("this attempt's own blob is removed");
+        rig.Gateway.Calls.Count(c => c.StartsWith("delete ", StringComparison.Ordinal)).Should().Be(1);
+        rig.Gateway.Calls.Should().NotContain(c => c.StartsWith("overwrite ", StringComparison.Ordinal), "a first stage is a create, never a rewrite");
+    }
+
+    [Fact(DisplayName = "DEF-044 must-fire (A1c): DeleteStagedAsync that races a reuse (a retry rewrote the blob after its properties were read) is refused (412): false, the blob kept")]
+    public async Task DeleteStaged_RacesAReuse_Kept()
+    {
+        var rig = new StoredFileRig();
+        var staged = await StageCleanAsync(rig);
+        var spec = UploadSpec();
+        StagedBlob? retry = null;
+        ReuseJustBeforeTheDelete(rig, staged.BlobPath,
+            () => retry = rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None).GetAwaiter().GetResult().Blob);
+
+        var deleted = await rig.Service.DeleteStagedAsync(spec, CancellationToken.None);
+
+        deleted.Should().BeFalse("a blob changed since it was judged is kept");
+        retry.Should().NotBeNull();
+        retry!.Reused.Should().BeTrue();
+        var blob = rig.Gateway.Get(staged.Container, staged.BlobPath);
+        blob.Should().NotBeNull("the retry's blob survives");
+        blob!.ETag.Should().Be(retry.ETag);
+        blob.Content.Should().Equal(Pdf);
+        var calls = rig.Gateway.Calls.ToList();
+        calls.IndexOf("props " + staged.Container + "/" + staged.BlobPath).Should().BeGreaterThanOrEqualTo(0)
+            .And.BeLessThan(calls.IndexOf("delete " + staged.Container + "/" + staged.BlobPath), "the version is read BEFORE the delete is decided");
+    }
+
+    [Fact(DisplayName = "DEF-044 must-not-fire (A2): DeleteStagedAsync deletes a blob nobody reused with the ETag it read; a blob already gone is not an error and nothing is deleted")]
+    public async Task DeleteStaged_NoReuse_Deletes_AndGoneIsFalse()
+    {
+        var rig = new StoredFileRig();
+        var staged = await StageCleanAsync(rig);
+
+        (await rig.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeTrue();
+        rig.Gateway.Get(staged.Container, staged.BlobPath).Should().BeNull();
+
+        var callsBefore = rig.Gateway.Calls.Count(c => c.StartsWith("delete ", StringComparison.Ordinal));
+        (await rig.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None)).Should().BeFalse("nothing was there");
+        rig.Gateway.Calls.Count(c => c.StartsWith("delete ", StringComparison.Ordinal)).Should().Be(callsBefore, "no delete is attempted for a blob that was not there at the read");
+    }
+
+    [Fact(DisplayName = "DEF-044 F1 must-fire: DeleteStagedAsync(stagedETag: E1) after a newer run REUSED the blob (E2) and with no row yet keeps it (412): the lock-expiry case; the read-time pin alone would have deleted it")]
+    public async Task DeleteStaged_PinnedToTheStagedETag_NewerReuse_Kept()
+    {
+        var rig = new StoredFileRig();
+        var spec = UploadSpec();
+        var first = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        first.ETag.Should().NotBeNull();
+        var newer = (await rig.Service.StageAsync(spec, new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        newer.Reused.Should().BeTrue("the newer run reuses (rewrites) the blob");
+        newer.ETag.Should().NotBe(first.ETag);
+
+        var deleted = await rig.Service.DeleteStagedAsync(spec, CancellationToken.None, first.ETag);
+
+        deleted.Should().BeFalse("the blob is no longer the version this run staged");
+        var blob = rig.Gateway.Get(first.Container, first.BlobPath);
+        blob.Should().NotBeNull("the newer run's blob survives");
+        blob!.ETag.Should().Be(newer.ETag);
+        blob.Content.Should().Equal(Pdf);
+        rig.Gateway.Calls.Should().Contain("delete " + first.Container + "/" + first.BlobPath, "the delete was attempted, and refused");
+
+        // The read-time pin alone (no stagedETag) reads the newer ETag and would delete it: the gap this closes.
+        (await rig.Service.DeleteStagedAsync(spec, CancellationToken.None)).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "DEF-044 F1 must-not-fire: DeleteStagedAsync(stagedETag: E1) over a blob nobody reused deletes it; without a stagedETag the read-time pin is unchanged")]
+    public async Task DeleteStaged_PinnedToTheStagedETag_NoReuse_Deleted()
+    {
+        var rig = new StoredFileRig();
+        var staged = (await rig.Service.StageAsync(UploadSpec(), new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+
+        (await rig.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None, staged.ETag)).Should().BeTrue();
+        rig.Gateway.Get(staged.Container, staged.BlobPath).Should().BeNull();
+
+        // A row still keeps the blob whatever ETag is given.
+        var withRow = new StoredFileRig();
+        var rowStaged = (await withRow.Service.StageAsync(UploadSpec(), new MemoryStream(Pdf), CancellationToken.None)).Blob!;
+        withRow.SeedFile(UploadSpec().FileId, Invoice, Pdf, StoredFileStatus.NotYetServable);
+        (await withRow.Service.DeleteStagedAsync(UploadSpec(), CancellationToken.None, rowStaged.ETag)).Should().BeFalse();
+        withRow.Gateway.Get(rowStaged.Container, rowStaged.BlobPath).Should().NotBeNull();
     }
 
     // =============================================================================================================================

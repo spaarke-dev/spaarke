@@ -657,6 +657,211 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     // =====================================================================
+    // ebilling-r1 task 130-0 F3b: a service request follows the child rule on the workforce routes. The invoice rule is applied AFTER
+    // the requester gate (so it is no existence oracle): a request linked to an invoice the caller may not see is refused like an absent
+    // one, and a decision that could not be made is the invoice-unreadable 503.
+    // =====================================================================
+
+    private static readonly Guid RequestInvoice = Guid.Parse("a0310000-0000-4000-8000-0000000000c1");
+
+    private static async Task<HttpResponseMessage> ServiceRequestRouteAsync(HttpClient client, string route, Guid request, Guid document) => route switch
+    {
+        "list" => await client.GetAsync($"/api/v1/external/servicerequests/{request}/documents"),
+        "content" => await client.GetAsync($"/api/v1/external/servicerequests/{request}/documents/{document}/content"),
+        "versions" => await client.GetAsync($"/api/v1/external/servicerequests/{request}/documents/{document}/versions"),
+        _ => await client.PostAsync($"/api/v1/external/servicerequests/{request}/documents", FileForm()),
+    };
+
+    private Guid SeedLinkedServiceRequest()
+    {
+        _fixture.Principal = WorkforceContact();
+        _fixture.Data.Requesters[RecordA] = CallerContact;
+        _fixture.Data.ServiceRequestInvoices[RecordA] = new[] { RequestInvoice };
+        var document = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.ServiceRequest, RecordA, "sr.pdf", "b!c", "item-sr");
+        _fixture.Data.DocumentReads.Clear();
+        return document;
+    }
+
+    [Theory(DisplayName = "130-0 F3b service request (must fire): a request linked to another firm's invoice is refused exactly like one that does not exist, on every route, before any document is read")]
+    [InlineData("list")]
+    [InlineData("content")]
+    [InlineData("versions")]
+    [InlineData("upload")]
+    public async Task ServiceRequest_LinkedToAnotherFirmsInvoice_IsTheUniformRefusal(string route)
+    {
+        var document = SeedLinkedServiceRequest();
+        _fixture.InvoiceHiding = InvoiceHidingStub.Hiding(RequestInvoice);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var hidden = await ServiceRequestRouteAsync(client, route, RecordA, document);
+        using var missing = await ServiceRequestRouteAsync(client, route, OutsideRecord, document);
+
+        hidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await hidden.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(),
+            "a request of another firm's invoice and one that does not exist are indistinguishable");
+        _fixture.Data.DocumentReads.Should().BeEmpty();
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.InvoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(RequestInvoice);
+    }
+
+    [Theory(DisplayName = "130-0 F3b service request (must not fire): a request linked to an invoice the caller may see is served on every route")]
+    [InlineData("list")]
+    [InlineData("content")]
+    [InlineData("versions")]
+    [InlineData("upload")]
+    public async Task ServiceRequest_LinkedToAVisibleInvoice_IsServed(string route)
+    {
+        var document = SeedLinkedServiceRequest();
+        _fixture.InvoiceHiding = InvoiceHidingStub.NoneHidden();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await ServiceRequestRouteAsync(client, route, RecordA, document);
+
+        // The in-memory store has no file versions (a 404 on that route); what matters is that the invoice rule let the caller through.
+        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden).And.NotBe(HttpStatusCode.ServiceUnavailable);
+        if (route != "versions")
+            response.StatusCode.Should().BeOneOf(HttpStatusCode.OK, HttpStatusCode.Created);
+        _fixture.InvoiceHiding.Calls.Should().ContainSingle().Which.Should().Equal(RequestInvoice);
+    }
+
+    [Theory(DisplayName = "130-0 F3b service request (fault, must fire): a decision that could not be made is the invoice-unreadable 503 on every route, never the refusal")]
+    [InlineData("list")]
+    [InlineData("content")]
+    [InlineData("versions")]
+    [InlineData("upload")]
+    public async Task ServiceRequest_WhenTheInvoiceDecisionFaults_IsThe503(string route)
+    {
+        var document = SeedLinkedServiceRequest();
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await ServiceRequestRouteAsync(client, route, RecordA, document);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        body.Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        _fixture.Data.DocumentReads.Should().BeEmpty();
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "F3b fix round 1 service request parity, REST plane: a request linked to another firm's invoice is the uniform refusal (as one that does not exist); one linked to the caller's own firm's invoice, or to none, is served (the assistant plane: DataverseReadQueryHandlerTests / DataverseSearchDataHandlerTests ...ServiceRequestParity)")]
+    [MemberData(nameof(ServiceRequestParityCase.Kinds), MemberType = typeof(ServiceRequestParityCase))]
+    public async Task ServiceRequestParity_RestPlane(string kind)
+    {
+        var document = SeedLinkedServiceRequest();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        if (ServiceRequestParityCase.InvoiceFor(world, kind) is { } invoice)
+            _fixture.Data.ServiceRequestInvoices[RecordA] = new[] { invoice };
+        else
+            _fixture.Data.ServiceRequestInvoices.TryRemove(RecordA, out _);
+        _fixture.InvoiceHiding = InvoiceHidingStub.Real(world);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        foreach (var route in new[] { "list", "content" })
+        {
+            using var response = await ServiceRequestRouteAsync(client, route, RecordA, document);
+            if (ServiceRequestParityCase.Hidden(kind))
+            {
+                using var missing = await ServiceRequestRouteAsync(client, route, OutsideRecord, document);
+                response.StatusCode.Should().Be(HttpStatusCode.Forbidden, route);
+                (await response.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(), route);
+            }
+            else
+            {
+                response.StatusCode.Should().Be(HttpStatusCode.OK, $"{route}: {await response.Content.ReadAsStringAsync()}");
+            }
+        }
+
+        if (ServiceRequestParityCase.Hidden(kind))
+            _fixture.Downloads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0 F3b service request (must not fire): a request with no invoice link asks no invoice decision and is served")]
+    public async Task ServiceRequest_WithNoInvoiceLink_AsksNothing()
+    {
+        _fixture.Principal = WorkforceContact();
+        _fixture.Data.Requesters[RecordA] = CallerContact;
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/servicerequests/{RecordA}/documents");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.InvoiceHiding.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0 F3b service request (order, must fire): another requester's linked request is the uniform refusal and its invoice links are never read")]
+    public async Task ServiceRequest_OfAnotherRequester_ReadsNoInvoiceLinks()
+    {
+        SeedLinkedServiceRequest();
+        _fixture.Data.Requesters[RecordA] = OtherContact;
+        _fixture.InvoiceHiding = InvoiceHidingStub.Hiding(RequestInvoice);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/servicerequests/{RecordA}/documents");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.ServiceRequestInvoiceReads.Should().Be(0, "the requester gate decides first, so the rule is no existence oracle");
+        _fixture.InvoiceHiding.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0 F3b service request (fault, must fire): an invoice link read that fails is the 503, never a refusal; it reads normally once Dataverse answers again")]
+    public async Task ServiceRequest_WhenTheInvoiceLinkReadFails_IsThe503()
+    {
+        SeedLinkedServiceRequest();
+        _fixture.InvoiceHiding = InvoiceHidingStub.NoneHidden();
+        _fixture.Data.ServiceRequestInvoiceFault = new ExternalDataService.DataverseUnavailableException("Dataverse answered 429.");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/servicerequests/{RecordA}/documents";
+        using (var response = await client.GetAsync(basePath))
+            response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+
+        _fixture.Data.ServiceRequestInvoiceFault = null;
+        using (var response = await client.GetAsync(basePath))
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory(DisplayName = "130-0 F3b service request firms (must fire): unknown firms are the 503, a caller in no firm is the uniform refusal")]
+    [InlineData("unknown", 503)]
+    [InlineData("nofirm", 403)]
+    public async Task ServiceRequest_TheFirmRulings(string state, int expected)
+    {
+        SeedLinkedServiceRequest();
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        if (state == "unknown")
+            world.CallerFirmsFault = new TimeoutException("The caller-firm read failed (test).");
+        else
+            world.CallerFirmsAnswer = Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerFirms.From(Array.Empty<Guid>(), unreadable: false);
+        _fixture.InvoiceHiding = InvoiceHidingStub.Real(world);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/servicerequests/{RecordA}/documents");
+
+        ((int)response.StatusCode).Should().Be(expected, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact(DisplayName = "130-0 F3b pin: the service request invoice link read selects the registry link column; a missing column or row reads as unreadable (never 'no link')")]
+    public async Task ServiceRequestInvoiceLinkRead_IsPinned_AndAbsentIsUnreadable()
+    {
+        var link = Guid.NewGuid();
+        var linked = new DataverseRowHandler(new Dictionary<string, object?> { ["_sprk_regardinginvoice_value"] = link.ToString() });
+        var explicitNull = new DataverseRowHandler(new Dictionary<string, object?> { ["_sprk_regardinginvoice_value"] = null });
+        var absent = new DataverseRowHandler(new Dictionary<string, object?> { ["sprk_other"] = "x" });
+        var missing = new DataverseRowHandler(row: null);
+
+        (await NewService(linked).GetServiceRequestInvoiceLinksAsync(RecordA)).Should().Equal(link);
+        linked.Urls.Should().ContainSingle().Which.Should().EndWith($"/sprk_servicerequests({RecordA})?$select=_sprk_regardinginvoice_value");
+        (await NewService(explicitNull).GetServiceRequestInvoiceLinksAsync(RecordA)).Should().BeEmpty("an explicit null is not filed");
+        (await NewService(absent).GetServiceRequestInvoiceLinksAsync(RecordA)).Should().Equal(ExternalDocumentNarrowing.UnreadableLink);
+        (await NewService(missing).GetServiceRequestInvoiceLinksAsync(RecordA)).Should().Equal(ExternalDocumentNarrowing.UnreadableLink);
+        await ((Func<Task>)(() => NewService(new StatusHandler(HttpStatusCode.ServiceUnavailable)).GetServiceRequestInvoiceLinksAsync(RecordA)))
+            .Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
+    }
+
+    // =====================================================================
     // Owner decision 2026-10-11 (1): invoice documents INHERIT the access held on the invoice's parents (option A)
     // =====================================================================
 
@@ -799,9 +1004,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     // is isolated. Every invoice-document route (list, download, versions, upload) answers exactly as for an invoice that does
     // not exist, before any document, SPE or write is touched; a predicate that cannot decide answers the same (fail closed).
 
+    // Task 130-0 fix round 1 (K1): the "fault" case moved to Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_OnEveryDocumentRoute.
     [Theory]
     [InlineData("hidden")]
-    [InlineData("fault")]
     public async Task Task098_AnInvoiceThePredicateHides_DeniesEveryDocumentRoute_AsAMissingInvoice_AndTouchesNothing(string kind)
     {
         _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
@@ -840,6 +1045,195 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         _fixture.InvoiceHiding.Calls.Should().OnlyContain(call => call.SequenceEqual(new[] { RecordA }));
     }
 
+    // Task 130-0 fix round 1 (K1): a failed invoice decision is "could not check" (the invoice-unreadable 503) on every invoice
+    // document route, but only for a caller who reaches the invoice through one of its parents; a missing invoice and an invoice
+    // under a record the caller cannot read stay the uniform 403. Nothing is read, downloaded or written.
+    [Fact]
+    public async Task Task130_0_APredicateReadFault_IsTheInvoiceUnreadable503_OnEveryDocumentRoute()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        var elsewhere = Guid.NewGuid();
+        _fixture.Data.InvoiceParents[elsewhere] = (Guid.NewGuid(), null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
+        };
+        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
+        var faulted = new[]
+        {
+            await client.GetAsync(basePath),
+            await client.GetAsync($"{basePath}/{documentOnA}/content"),
+            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
+            await client.PostAsync(basePath, FileForm()),
+        };
+        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
+        var unreachable = await client.GetAsync($"/api/v1/external/invoices/{elsewhere}/documents");
+
+        faulted.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
+        foreach (var response in faulted)
+            (await response.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        missing.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        unreachable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await unreachable.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync());
+        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().ContainSingle("nothing was written");
+        _fixture.InvoiceHiding.Calls.Should().Contain(call => call.SequenceEqual(new[] { RecordA }));
+    }
+
+    // Task 130-0 fix round 2 (K1): a caller who reaches the invoice through NO parent is refused before the invoice decision, so the
+    // seam is never asked (no timing difference between "not yours" and "not visible").
+    [Fact(DisplayName = "130-0 fix2 K1: no Read through any of the invoice's parents is the uniform 403, and the invoice decision is not asked")]
+    public async Task Task130_0_NoReadThroughAnyParent_IsRefused_BeforeTheInvoiceDecision()
+    {
+        var elsewhere = Guid.NewGuid();
+        _fixture.Data.InvoiceParents[elsewhere] = (Guid.NewGuid(), null);
+        _fixture.Principal = CiamOn(matter: MatterM);
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var unreachable = await client.GetAsync($"/api/v1/external/invoices/{elsewhere}/documents");
+        using var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
+
+        unreachable.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await unreachable.Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync());
+        _fixture.InvoiceHiding.Calls.Should().BeEmpty("the decision is asked only for a caller who reaches the invoice");
+    }
+
+    // Task 130-0 fix round 2 (K3, D-28): an invoice's core record is exactly one of matter, project or work assignment, so the invoice
+    // routes decide rights through all three. A caller who reaches the invoice only through its work assignment is served; a grant on
+    // another work assignment gives the uniform 403; a faulted decision after Read through the work assignment is the 503.
+    private static readonly Guid AssignmentW = Guid.Parse("c0310000-0000-4000-8000-00000000000f");
+
+    [Fact(DisplayName = "130-0 fix2 K3 documents (must not fire): Read and Create only through the invoice's work assignment list and upload")]
+    public async Task Task130_0_K3_AnInvoiceUnderAWorkAssignment_ListsAndUploads_ThroughIt()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (null, null);
+        _fixture.Data.InvoiceWorkAssignments[RecordA] = AssignmentW;
+        NonSecure("sprk_workassignment", AssignmentW);
+        _fixture.Principal = CiamOn(workAssignment: AssignmentW);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents");
+        using var upload = await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm());
+
+        list.StatusCode.Should().Be(HttpStatusCode.OK, await list.Content.ReadAsStringAsync());
+        upload.StatusCode.Should().Be(HttpStatusCode.Created, await upload.Content.ReadAsStringAsync());
+    }
+
+    [Fact(DisplayName = "130-0 fix2 K3 documents (must fire): a grant on ANOTHER work assignment, or none, is the uniform 403 and touches nothing")]
+    public async Task Task130_0_K3_AGrantOnAnotherWorkAssignment_IsTheUniform403()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (null, null);
+        _fixture.Data.InvoiceWorkAssignments[RecordA] = AssignmentW;
+        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.Principal = CiamOn(workAssignment: Guid.NewGuid());
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
+        var refused = new[]
+        {
+            await client.GetAsync(basePath),
+            await client.GetAsync($"{basePath}/{documentOnA}/content"),
+            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
+            await client.PostAsync(basePath, FileForm()),
+        };
+        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
+
+        refused.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
+        (await refused[0].Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync());
+        _fixture.Data.DocumentReads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.InvoiceHiding.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0 fix2 K3 documents (fault): a faulted invoice decision after Read through the work assignment is the 503")]
+    public async Task Task130_0_K3_AFaultAfterReadThroughTheWorkAssignment_Is503()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (null, null);
+        _fixture.Data.InvoiceWorkAssignments[RecordA] = AssignmentW;
+        _fixture.Principal = CiamOn(workAssignment: AssignmentW);
+        _fixture.InvoiceHiding = InvoiceHidingStub.Faulting();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents");
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(
+            Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+    }
+
+    // Task 130-0 fix round 3 (Q2): the invoice's own failed decision (the result not faulted as a whole) is the 503 on every invoice
+    // document route for a caller who reaches the invoice; a decided hidden invoice keeps the uniform 403 (covered above).
+    [Fact(DisplayName = "130-0 fix3 Q2 documents (must fire): a fault deciding this invoice, with the firms known, is the 503 on every invoice document route")]
+    public async Task Task130_0_Q2_APerInvoiceFault_IsThe503_OnEveryInvoiceDocumentRoute()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = CiamOn(matter: MatterM);
+        var documentOnA = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, RecordA, "a.pdf", "b!c", "item-a");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.InvoiceHiding = InvoiceHidingStub.PerInvoiceFault(RecordA);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/invoices/{RecordA}/documents";
+        var faulted = new[]
+        {
+            await client.GetAsync(basePath),
+            await client.GetAsync($"{basePath}/{documentOnA}/content"),
+            await client.GetAsync($"{basePath}/{documentOnA}/versions"),
+            await client.PostAsync(basePath, FileForm()),
+        };
+
+        faulted.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
+        foreach (var response in faulted)
+            (await response.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints.InvoiceUnreadableReasonCode);
+        _fixture.Data.DocumentReads.Should().BeEmpty();
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "130-0 fix2 K1 (fail closed by type): a list row whose invoice links were never set is hidden, and the list says truncated")]
+    public async Task Task130_0_ARowWhoseLinksWereNeverSet_IsHidden()
+    {
+        _fixture.Data.InvoiceParents[RecordA] = (MatterM, null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = CiamOn(matter: MatterM);
+        _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Matter, MatterM, "a.pdf", "b!c", "item-a");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var listed = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/matters/{MatterM}/documents");
+        _fixture.Data.ListWithUnsetLinks = true;
+        var unset = await client.GetFromJsonAsync<ExternalDocumentListResponse>($"/api/v1/external/matters/{MatterM}/documents");
+
+        listed!.Value.Should().ContainSingle("must not fire: links set (none) list the row");
+        unset!.Value.Should().BeEmpty("links that were never set read as an invoice that cannot be decided");
+    }
+
+    private static CallerPrincipal CiamOn(Guid? matter = null, Guid? workAssignment = null) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = CallerContact,
+        Email = "external.user@example.test",
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        MatterAccess = matter is { } m ? new Dictionary<Guid, AccessRights> { [m] = Collaborate } : new Dictionary<Guid, AccessRights>(),
+        WorkAssignmentAccess = workAssignment is { } w
+            ? new Dictionary<Guid, AccessRights> { [w] = Collaborate }
+            : new Dictionary<Guid, AccessRights>(),
+    };
+
     [Fact]
     public async Task Task098_AnInvoiceThePredicateLeavesVisible_ListsAndUploads_AsBefore()
     {
@@ -859,6 +1253,56 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         (await client.GetAsync($"/api/v1/external/invoices/{RecordA}/documents")).StatusCode.Should().Be(HttpStatusCode.OK);
         (await client.PostAsync($"/api/v1/external/invoices/{RecordA}/documents", FileForm())).StatusCode
             .Should().Be(HttpStatusCode.Created);
+    }
+
+    // ebilling-r1 task 130-0 (design.md:414): a partner sees only invoices of its own firms. Through the REAL caller-aware seam, another
+    // firm's invoice on the caller's matter has no documents for the caller (answered as a missing invoice); the caller's own firm's
+    // invoice on the same matter lists them.
+
+    private static readonly Guid OtherFirm = Guid.Parse("13000000-0000-4000-8000-0000000000b2");
+
+    [Fact(DisplayName = "130-0 project-data child reads (must fire / must not fire): another firm's invoice on a shared matter denies its document list, download and versions; the caller's own firm's invoice lists")]
+    public async Task Task130_OwnFirms_AnotherFirmsInvoiceOnASharedMatter_HasNoDocuments_TheCallersOwnInvoiceLists()
+    {
+        var world = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.InvoiceWorld();
+        var own = world.OwnedInvoice();
+        var other = world.OwnedInvoice();
+        world.InvoiceFirm(other, OtherFirm);
+        _fixture.Data.InvoiceParents[own] = (MatterM, null);
+        _fixture.Data.InvoiceParents[other] = (MatterM, null);
+        NonSecure("sprk_matter", MatterM);
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = CallerContact,
+            Email = "external.user@example.test",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+            MatterAccess = new Dictionary<Guid, AccessRights> { [MatterM] = Collaborate },
+        };
+        var documentOnOther = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, other, "other.pdf", "b!o", "item-o");
+        _fixture.Data.Seed(ExternalDataService.DocumentParentKind.Invoice, own, "own.pdf", "b!w", "item-w");
+        _fixture.Data.DocumentReads.Clear();
+        _fixture.InvoiceHiding = InvoiceHidingStub.Real(world);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var otherPath = $"/api/v1/external/invoices/{other}/documents";
+        var hidden = new[]
+        {
+            await client.GetAsync(otherPath),
+            await client.GetAsync($"{otherPath}/{documentOnOther}/content"),
+            await client.GetAsync($"{otherPath}/{documentOnOther}/versions"),
+        };
+        var missing = await client.GetAsync($"/api/v1/external/invoices/{OutsideRecord}/documents");
+
+        hidden.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.Forbidden);
+        (await hidden[0].Content.ReadAsStringAsync()).Should().Be(await missing.Content.ReadAsStringAsync(),
+            "another firm's invoice and one that does not exist are indistinguishable");
+        _fixture.Data.DocumentReads.Should().BeEmpty("the invoice gate runs before any document read");
+        _fixture.Downloads.Should().BeEmpty();
+
+        var ownList = await client.GetAsync($"/api/v1/external/invoices/{own}/documents");
+        ownList.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await ownList.Content.ReadAsStringAsync()).Should().Contain("own.pdf");
     }
 
     private static readonly Guid ProjectX = Guid.Parse("c0310000-0000-4000-8000-0000000000a7");
@@ -1527,6 +1971,9 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                          // Task 188: the document's own Access Permission, which the document narrowing reads (its two
                          // lookups, the related communication and the parent document, are already selected above).
                          + ",sprk_accesspermission"
+                         // ebilling-r1 task 130-0b F3b fix round 1: the one filing edge the invoice ancestor walk follows that is
+                         // not selected above (InvoiceLinks.ParentValueColumnsOf).
+                         + ",_sprk_relatedservicerequest_value"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
 
@@ -2015,11 +2462,27 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>How many times a service request's requester was read.</summary>
         public int RequesterReads;
 
+        /// <summary>ebilling-r1 task 130-0 F3b: service request id → the invoices it links to. Absent = none.</summary>
+        public ConcurrentDictionary<Guid, Guid[]> ServiceRequestInvoices { get; } = new();
+
+        /// <summary>F3b: set to make the service request's invoice link read fail the way a throttled or unreachable Dataverse does.</summary>
+        public Exception? ServiceRequestInvoiceFault { get; set; }
+
+        /// <summary>F3b: how many times a service request's invoice links were read.</summary>
+        public int ServiceRequestInvoiceReads;
+
         /// <summary>Every document read (list or scoping), so deny tests can assert none happened.</summary>
         public ConcurrentQueue<string> DocumentReads { get; } = new();
 
         /// <summary>Invoice id → its parent matter and project. Absent = the invoice does not exist.</summary>
         public ConcurrentDictionary<Guid, (Guid? MatterId, Guid? ProjectId)> InvoiceParents { get; } = new();
+
+        /// <summary>Task 130-0 fix round 2 (K3, D-28): invoice id → its work-assignment core record. Absent = none.</summary>
+        public ConcurrentDictionary<Guid, Guid> InvoiceWorkAssignments { get; } = new();
+
+        /// <summary>Task 130-0 fix round 2 (K1): when set, the list builds its rows without setting their invoice links (a future
+        /// construction site that forgets them).</summary>
+        public bool ListWithUnsetLinks { get; set; }
 
         /// <summary>Set to make the invoice parent read fail the way a throttled or unreachable Dataverse does.</summary>
         public Exception? InvoiceFault { get; set; }
@@ -2058,7 +2521,12 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             DocumentReads.Clear();
             RequesterFault = null;
             Interlocked.Exchange(ref RequesterReads, 0);
+            ServiceRequestInvoices.Clear();
+            ServiceRequestInvoiceFault = null;
+            Interlocked.Exchange(ref ServiceRequestInvoiceReads, 0);
             InvoiceParents.Clear();
+            InvoiceWorkAssignments.Clear();
+            ListWithUnsetLinks = false;
             InvoiceFault = null;
             Interlocked.Exchange(ref InvoiceReads, 0);
             InvoiceAgreements.Clear();
@@ -2084,6 +2552,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             if (parents.ProjectId is { } project && lookups.Contains("sprk_project")) row["sprk_project"] = project;
             if (InvoiceAgreements.TryGetValue(invoiceId, out var agreement) && lookups.Contains("sprk_regardingagreement"))
                 row["sprk_regardingagreement"] = agreement;
+            if (InvoiceWorkAssignments.TryGetValue(invoiceId, out var workAssignment) && lookups.Contains("sprk_regardingworkassignment"))
+                row["sprk_regardingworkassignment"] = workAssignment;
             return Task.FromResult<IReadOnlyDictionary<string, object?>>(row);
         }
 
@@ -2112,14 +2582,16 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             return Task.FromResult(new LiveParentRootsRead(resolved, LiveParentFault));
         }
 
-        public override Task<(Guid? MatterId, Guid? ProjectId)?> GetInvoiceParentsAsync(Guid invoiceId, CancellationToken ct = default)
+        public override Task<(Guid? MatterId, Guid? ProjectId, Guid? WorkAssignmentId)?> GetInvoiceParentsAsync(
+            Guid invoiceId, CancellationToken ct = default)
         {
             Interlocked.Increment(ref InvoiceReads);
             if (InvoiceFault is { } fault)
                 throw fault;
             return Task.FromResult(InvoiceParents.TryGetValue(invoiceId, out var parents)
-                ? parents
-                : ((Guid? MatterId, Guid? ProjectId)?)null);
+                ? (parents.MatterId, parents.ProjectId,
+                    InvoiceWorkAssignments.TryGetValue(invoiceId, out var workAssignment) ? workAssignment : (Guid?)null)
+                : ((Guid? MatterId, Guid? ProjectId, Guid? WorkAssignmentId)?)null);
         }
 
         /// <summary>
@@ -2181,7 +2653,10 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             return Task.FromResult(new ExternalCollectionResponse<ExternalDocumentDto>
             {
                 Value = Documents.Where(d => ParentOf(d, parentKind) == parentId)
-                    .Select(d => new ExternalDocumentDto { SprkDocumentid = d.Id.ToString(), SprkName = d.Name })
+                    // Task 130-0 fix round 2 (K1): a row's links are set explicitly (none here); unset links hide the row.
+                    .Select(d => ListWithUnsetLinks
+                        ? new ExternalDocumentDto { SprkDocumentid = d.Id.ToString(), SprkName = d.Name }
+                        : new ExternalDocumentDto { SprkDocumentid = d.Id.ToString(), SprkName = d.Name, InvoiceLinks = Array.Empty<Guid>() })
                     .ToList(),
             });
         }
@@ -2196,8 +2671,26 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             var row = Documents.SingleOrDefault(d => d.Id == documentId);
             return Task.FromResult(row is null
                 ? DocumentScopeRead.Absent
-                : new DocumentScopeRead(ParentOf(row, parentKind), row.Name, default));
+                : new DocumentScopeRead(ParentOf(row, parentKind), row.Name, NoLinks));
         }
+
+        /// <summary>
+        /// Task 130-0 fix round 3: the roots of a document read that selected every invoice link column and found none set (an explicit
+        /// null each, as the Web API answers a selected lookup that is not set). A <c>default</c> would carry no row, which reads as an
+        /// unread link (never visible).
+        /// </summary>
+        public static DocumentRootLinks NoLinks { get; } = new DocumentRootLinks(null, null, null, null, null, null)
+        {
+            // Fix round 3c: and every live-parent lookup column as an explicit null (an absent one reads as unreadable).
+            Row = InvoiceLinks.LinkColumnsOf("sprk_document").Select(c => $"_{c}_value")
+                .Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+                // Fix round 3f: and the document narrowing's columns (the own Access Permission too), each an explicit null.
+                .Concat(ExternalDocumentNarrowing.SelectColumns)
+                // F3b fix round 1: and every filing edge column the invoice ancestor walk follows, each an explicit null (not filed).
+                .Concat(InvoiceLinks.ParentValueColumnsOf("sprk_document"))
+                .Distinct()
+                .ToDictionary(c => c, _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
+        };
 
         // The real seam's body without the transport: build the payload, stamp it (task 030), store it.
         public override Task<ExternalDocumentDto> CreateDocumentAsync(
@@ -2220,6 +2713,14 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             if (RequesterFault is { } fault)
                 throw fault;
             return Task.FromResult(Requesters.TryGetValue(serviceRequestId, out var requester) ? requester : (Guid?)null);
+        }
+
+        public override Task<Guid[]> GetServiceRequestInvoiceLinksAsync(Guid serviceRequestId, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref ServiceRequestInvoiceReads);
+            if (ServiceRequestInvoiceFault is { } fault)
+                throw fault;
+            return Task.FromResult(ServiceRequestInvoices.TryGetValue(serviceRequestId, out var links) ? links : Array.Empty<Guid>());
         }
 
         internal sealed class TestCredential : TokenCredential

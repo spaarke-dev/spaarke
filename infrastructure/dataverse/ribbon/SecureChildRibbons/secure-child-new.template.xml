@@ -19,6 +19,10 @@
      enable rule is the exact complement: shown when the host is secure, or cannot be told. It opens the product's
      BFF-backed create surface (sprk_secure_child_ribbon.js - Spaarke.SecureChild.Ribbon.newChild).
 
+  Both custom rules also receive the child's table ({{entity}}, a StringParameter - not a CrmParameter): a table the script lists
+  in Spaarke.SecureChild.Ribbon.NATIVE_NEW_CLOSED (sprk_invoice; ebilling-r1 task 096b, EB-D-201) never offers the platform
+  "+ New" and shows the "New {{label}}" command on every saved host. For every other table the parameter changes nothing.
+
   Libraries: every action and enable rule lists bff_auth.js -> assignedaccess_postsave.js -> secure_child_ribbon.js (the
   leading two as FunctionName="isNaN": loads the library, no side effect; isNaN() is true so an AND-ed rule is unaffected).
 -->
@@ -91,6 +95,7 @@
       <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js"
                   FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
         <CrmParameter Value="PrimaryControl" />
+        <StringParameter Value="{{entity}}" />
       </CustomRule>
     </EnableRule>
     <EnableRule Id="sprk.SecureChild.{{entity}}.NewAvailable.EnableRule">
@@ -99,6 +104,7 @@
       <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js"
                   FunctionName="Spaarke.SecureChild.Ribbon.newChildAvailable" Default="false">
         <CrmParameter Value="PrimaryControl" />
+        <StringParameter Value="{{entity}}" />
       </CustomRule>
     </EnableRule>
   </EnableRules>

@@ -1298,6 +1298,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         communication[field] = regarding;
         await StampCoreAncestorOrThrowAsync(communication, regarding.LogicalName, regarding.Id, correlationId, ct);
+        MarkFiledBySender(communication);
 
         // The denormalized pointer, as MapAssociationFieldsAsync writes it for an associated record. A pointer a reply copied
         // from its source describes the source's record: it goes unless the thread names that same record.
@@ -1350,6 +1351,85 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         if (parentThreadId is { } threadId)
             await ApplyTargetThreadAsync(communication, request, threadId, correlationId, ct, inheritRegarding: false);
+    }
+
+    /// <summary>
+    /// Issue #2033 (owner decision, NFR-01 fail closed): the problem code (403) of a send-as-user email refused because the
+    /// caller has no ENABLED Dataverse systemuser: disabled in Dataverse while still active in Entra, or no systemuser at all.
+    /// Nothing is sent or written.
+    /// </summary>
+    public const string SenderDisabledCode = "sdap.communication.sender_disabled";
+
+    /// <summary>
+    /// Issue #2033: the problem code (503) of a send-as-user email refused because the caller's Dataverse user could not be
+    /// read, so it could not be confirmed enabled. Nothing is sent or written.
+    /// </summary>
+    public const string SenderStatusUnavailableCode = "sdap.communication.sender_status_unavailable";
+
+    /// <summary>
+    /// Issue #2033: the problem code (401) of a send-as-user email refused because the caller's claims carry no Entra object
+    /// id, so their Dataverse user cannot be read (<see cref="CallerResolution.ResolveObjectId"/>: null is 401). Nothing is
+    /// sent or written.
+    /// </summary>
+    public const string SenderUnidentifiedCode = "sdap.communication.sender_unidentified";
+
+    /// <summary>
+    /// Issue #2033: the gate a send-as-user email passes BEFORE anything is sent or written. The caller sends as themselves,
+    /// so their Dataverse systemuser must be enabled. Uses the existing oid → systemuserid resolution, which answers only an
+    /// enabled user (#1576), and returns that user for <c>sprk_sentby</c>. Shared-mailbox and system sends do not take it.
+    /// </summary>
+    /// <exception cref="SdapProblemException">
+    /// 401 <see cref="SenderUnidentifiedCode"/> (no oid); 403 <see cref="SenderDisabledCode"/> (no enabled systemuser);
+    /// 503 <see cref="SenderStatusUnavailableCode"/> (the read failed).
+    /// </exception>
+    private async Task<Guid> RequireEnabledSenderAsync(string? userObjectId, string correlationId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(userObjectId))
+        {
+            _logger.LogWarning(
+                "Send as user REFUSED: the caller's claims carry no object id, so the sender cannot be checked | CorrelationId: {CorrelationId}",
+                correlationId);
+            throw new SdapProblemException(
+                code: SenderUnidentifiedCode,
+                title: "Sender Not Identified",
+                detail: "The message was not sent: the sender could not be identified from the authentication claims.",
+                statusCode: 401,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        Guid? systemUserId;
+        try
+        {
+            systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "Send as user REFUSED: the sender's Dataverse user could not be read (Azure AD OID: {UserObjectId}) | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: SenderStatusUnavailableCode,
+                title: "Sender Status Unavailable",
+                detail: "The message was not sent: the sender's user status could not be checked. Please try again.",
+                statusCode: 503,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        if (systemUserId is not { } enabledSystemUserId)
+        {
+            _logger.LogWarning(
+                "Send as user REFUSED: no enabled Dataverse systemuser for Azure AD OID {UserObjectId} | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: SenderDisabledCode,
+                title: "Sender Disabled",
+                detail: "The message was not sent: the sender's user account is disabled or not set up in Spaarke.",
+                statusCode: 403,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        return enabledSystemUserId;
     }
 
     /// <summary>
@@ -2645,6 +2725,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Resolve user object ID for sprk_sentby (Azure AD oid claim)
         var userObjectId = CallerResolution.ResolveObjectId(httpContext.User);
 
+        // Step 2b (issue #2033, NFR-01): the caller sends as themselves, so their Dataverse user must be ENABLED. Checked
+        // before anything is sent or written; a disabled user (still active in Entra) is refused, and a failed read refuses.
+        var senderSystemUserId = await RequireEnabledSenderAsync(userObjectId, correlationId, ct);
+
         _logger.LogInformation(
             "Sending as user (OBO) | CorrelationId: {CorrelationId}, UserEmail: {UserEmail}",
             correlationId,
@@ -2653,7 +2737,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Step 2c (task 146 r1, verifier item 10): the record — its filing and OWNER — is prepared BEFORE the send: a
         // refusal is a 409 and nothing is sent or created; a fault is the request's 5xx.
         var preparedRecord = await BuildDataverseRecordForUserAsync(
-            request, userEmail, userObjectId, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
+            request, userEmail, senderSystemUserId, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
 
         // Step 3+4: Send via the email channel seam in user (OBO) mode — dispatch by CommunicationType.
         // The sender resolves the OBO Graph client and sends as /me; provider failures surface as
@@ -2917,13 +3001,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// Builds — BEFORE the send — the Dataverse sprk_communication record for a user-mode send, with its filing and
-    /// owner decided (task 146 r1). Sets sprk_from to user's email and sprk_sentby to user's Azure AD object ID.
+    /// owner decided (task 146 r1). Sets sprk_from to user's email and sprk_sentby to the caller's enabled systemuser
+    /// (<see cref="RequireEnabledSenderAsync"/>, issue #2033).
     /// </summary>
     /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
     private async Task<DataverseEntity> BuildDataverseRecordForUserAsync(
         SendCommunicationRequest request,
         string userEmail,
-        string? userObjectId,
+        Guid senderSystemUserId,
         string correlationId,
         CancellationToken ct,
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
@@ -2945,11 +3030,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_isinternalonly"] = RequestedInternalOnly(request),
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
-            ["sprk_correlationid"] = correlationId
+            ["sprk_correlationid"] = correlationId,
+            // The sender read before the send (issue #2033) resolved the caller's enabled systemuser; it is not read twice.
+            ["sprk_sentby"] = new EntityReference("systemuser", senderSystemUserId)
         };
-
-        // Resolve Azure AD oid → Dataverse systemuserid for sprk_sentby lookup
-        await StampSentByFromObjectIdAsync(communication, userObjectId, ct);
 
         // Only set CC/BCC if provided
         if (request.Cc is { Length: > 0 })
@@ -3266,6 +3350,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // otherwise carry no matter stamp and stay invisible to everyone whose access comes from
             // that matter.
             await StampCoreAncestorOrThrowAsync(communication, primary.EntityType, primary.EntityId, correlationId, ct);
+
+            MarkFiledBySender(communication);
         }
         else
         {
@@ -3289,6 +3375,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (primary.EntityUrl is not null)
             communication["sprk_regardingrecordurl"] = TruncateTo(primary.EntityUrl, 200);
     }
+
+    /// <summary>
+    /// Marks an outgoing communication's regarding as settled (<see cref="Engine.AssociationStatusCodes.Resolved"/>) when the
+    /// send itself filed it: an explicit association the sender chose, or the record whose thread the message was posted
+    /// into. The association engine never evaluates an outgoing row, so without this the status stays empty and the email
+    /// page's "Related to" panel offers the row for review ("No confident match") although its regarding lookup is set.
+    /// A reply's inherited regarding is marked only when the parent's was settled (<see cref="CopyRegardingFromSourceAsync"/>).
+    /// An association whose type maps to no regarding lookup files nothing, so it is not marked. A post into a record's
+    /// thread is marked whoever sends it (an external contact's post included): the thread's record is the filing.
+    /// </summary>
+    private static void MarkFiledBySender(DataverseEntity communication) =>
+        communication["sprk_associationstatus"] = new OptionSetValue(Engine.AssociationStatusCodes.Resolved);
 
     /// <summary>
     /// The FR-26 core-ancestor stamp for a communication whose typed regarding lookup is already bound (task 052), shared
@@ -3347,6 +3445,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
                 "sprk_regardingrecordurl", "sprk_regardingrecordnumber", "sprk_associationcount", "sprk_isinternalonly",
+                "sprk_associationstatus",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -3392,6 +3491,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var count = source.GetAttributeValue<int?>("sprk_associationcount");
             if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
                 communication["sprk_associationcount"] = count.Value;
+
+            // An inherited regarding is settled only when the parent's was: a reply to an email still awaiting review is not
+            // settled by replying, and it is not added to the review queue either (CommunicationQueueFeedService lists every
+            // non-empty, non-Resolved status), so any other parent status leaves the reply's empty, as before. An explicit
+            // association mapped afterwards marks the row settled regardless (MarkFiledBySender).
+            if (copied > 0
+                && source.GetAttributeValue<OptionSetValue>("sprk_associationstatus")?.Value == Engine.AssociationStatusCodes.Resolved)
+            {
+                MarkFiledBySender(communication);
+            }
 
             _logger.LogInformation(
                 "Inherited {Count} regarding lookup(s) from source communication {SourceId} onto new draft | CorrelationId: {CorrelationId}",

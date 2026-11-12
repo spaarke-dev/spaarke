@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Xunit;
 
@@ -349,6 +350,9 @@ public class ExternalDocumentNarrowingGuardTests
             "External plane (round 1): the documents module fetch drops the rows ExternalDataService.NarrowDocumentsAsync hides.",
         ["Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints"] =
             "External plane (round 1): download and versions refuse a document ExternalDataService.IsDocumentVisibleAsync hides.",
+        ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility"] =
+            "uac-r2 191b: THE external visibility predicate asks the seam for a document's hide decision only (its verdict, " +
+            "never a row) and returns Visible / Hidden / Undecided; every reader it takes is app-only.",
     };
 
     [Fact(DisplayName = "Task 188 r3 C (K7): the app-only narrowing seams have only listed consumers")]
@@ -1097,6 +1101,9 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.InvoiceReviewService::RejectInvoiceAsync"] =
             "Writes BuildReviewStatusFields on sprk_document: the invoice review status, reviewed-on and notes (literal keys).",
         ["Sprk.Bff.Api.Services.Finance.SignalEvaluationService::UpsertSignalAsync"] = "Writes sprk_spendsignal only (SignalEntity).",
+        // ebilling-r1 task 095d-2b-2: the re-run's after-commit Signal steps record their state on the submission.
+        ["Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionRerun::WriteSignalStateAsync"] =
+            "Writes sprk_invoicesubmission only (FinanceBaseValues.SubmissionEntity): sprk_findingsjson and sprk_adminattention, a payload it builds itself.",
         // ebilling-r1 (D-104): the rollup's write moved into WriteRollupAsync, whose one caller passes BuildRollupFields.
         ["Sprk.Bff.Api.Services.Finance.FinanceRollupService::WriteRollupAsync"] =
             "Writes its own rollup fields (BuildRollupFields, then BuildPendingSpendFields) to sprk_matter or sprk_project only " +
@@ -1465,6 +1472,117 @@ public class ExternalDocumentNarrowingGuardTests
 
         return problems;
     }
+
+    // ── uac-r2 191b: the lineage registry is the ONE table → external-marker map ─────────────────────────────────────
+
+    /// <summary>
+    /// Types whose STATIC initializer names a communication-content table (<see cref="SecureChildLineage.NeverExternalTables"/>)
+    /// for a purpose other than external visibility, each with its reason (the 191b ratchet: a new type fails until it is
+    /// reviewed and listed here, or derives its list from the registry; an entry that stops naming one is stale).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> OtherTableListsNamingNeverTables = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
+            "Task 198: the content rows of a Direct-team-owned message that are granted to its participants (table → its " +
+            "message lookup); a share list, not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission"] =
+            "#2253: the access-deciding columns per table that an app-only generic write refuses; a write guard, not an " +
+            "external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordFamilyEdges"] =
+            "The record-family edge registry (child → parent per lookup) and its display-only DetailTables; edges, not an " +
+            "external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader"] =
+            "The display-name column of each family table (display data only); not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar"] =
+            "A message's content rows (table → its message lookup), the same set task 198 Part B grants, barred on a " +
+            "Restricted filing; a share bar, not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson"] =
+            "Task 146: the child tables the BFF creates as the application that carry the creator column; a stamp list, not " +
+            "an external-visibility map.",
+    };
+
+    [Fact(DisplayName = "uac-r2 191b: no type but the lineage registry lists the communication-content (Never) tables, except the listed other-purpose lists")]
+    public void NoSecondTableToInternalOnlyMap_OutsideTheRegistry()
+    {
+        var found = NeverTableListers(BffTypes.Value);
+
+        var problems = found.Keys.Where(k => !OtherTableListsNamingNeverTables.ContainsKey(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"NEW list of Never tables in {k} ({string.Join(", ", found[k].Order())}): derive it from " +
+                         "SecureChildLineage (ExternalMarker / NeverExternalTables), or list it with its reason if it is not about " +
+                         "external visibility.")
+            .Concat(OtherTableListsNamingNeverTables.Keys.Where(k => !found.ContainsKey(k)).Order(StringComparer.Ordinal)
+                .Select(k => $"STALE entry {k}: it no longer names a Never table — remove it (the ratchet)."))
+            .ToList();
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "uac-r2 191b: negative control — a static list naming a Never table is found; a registry-derived list and an instance method's mention are not")]
+    public void NeverTableListDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(NeverTableControlStaticList), typeof(NeverTableControlDerivedFromTheRegistry),
+            typeof(NeverTableControlInstanceMention),
+        };
+
+        var found = NeverTableListers(fixtures.SelectMany(IlCallScan.WithNested));
+
+        Assert.Equal(new[] { typeof(NeverTableControlStaticList).FullName }, found.Keys.ToArray());
+        Assert.Contains("sprk_emailartifact", found[typeof(NeverTableControlStaticList).FullName!]);
+    }
+
+    [Fact(DisplayName = "uac-r2 191b: the AI guard's two lists ARE the registry's (Never markers; document-text markers)")]
+    public void TheGuardsLists_AreDerivedFromTheRegistry()
+    {
+        Assert.Same(SecureChildLineage.NeverExternalTables, ExternalCallerCommunicationGuard.RefusedContentTables);
+        Assert.Equal(
+            SecureChildLineage.DocumentTextTables.Keys.Order(StringComparer.Ordinal),
+            ExternalCallerCommunicationGuard.DocumentDerivedTablesForTest.Keys.Order(StringComparer.Ordinal));
+        Assert.All(SecureChildLineage.Children.Values, table => Assert.NotNull(table.External));
+    }
+
+    /// <summary>
+    /// Every outermost BFF type (other than the registry) whose STATIC constructor loads the name of a
+    /// <see cref="SecureChildLineage.NeverExternalTables"/> table: a static table list that includes communication content,
+    /// the shape a second "internal-only" map takes. Case-insensitive.
+    /// </summary>
+    private static IReadOnlyDictionary<string, HashSet<string>> NeverTableListers(IEnumerable<Type> types)
+    {
+        var found = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var (caller, method, value) in IlCallScan.StringLoads(types))
+        {
+            if (method is not ConstructorInfo { IsStatic: true } || !SecureChildLineage.NeverExternalTables.Contains(value))
+                continue;
+            var key = IlCallScan.Outermost(caller).FullName!;
+            if (key == typeof(SecureChildLineage).FullName)
+                continue;
+            if (!found.TryGetValue(key, out var names))
+                found[key] = names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            names.Add(value.ToLowerInvariant());
+        }
+
+        return found;
+    }
+}
+
+// ── uac-r2 191b: compiled control fixtures for NeverTableListDetector_MustFireAndMustNotFire (never run; IL only) ──
+
+/// <summary>MUST FIRE (191b): a static set naming a communication-content table: a second internal-only map.</summary>
+internal static class NeverTableControlStaticList
+{
+    internal static readonly IReadOnlySet<string> Hidden = new HashSet<string> { "sprk_emailartifact", "sprk_todo" };
+}
+
+/// <summary>MUST NOT FIRE (191b): the same list derived from the registry.</summary>
+internal static class NeverTableControlDerivedFromTheRegistry
+{
+    internal static readonly IReadOnlySet<string> Hidden = SecureChildLineage.NeverExternalTables;
+}
+
+/// <summary>MUST NOT FIRE (191b): an instance method that names a table (a query, not a static list).</summary>
+internal sealed class NeverTableControlInstanceMention
+{
+    internal string Set() => "sprk_emailartifact";
 }
 
 // Compiled control fixtures for ExternalDocumentNarrowingGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the

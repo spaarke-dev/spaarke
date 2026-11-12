@@ -93,6 +93,36 @@ internal static class ExternalMultiRootRule
         };
 
     /// <summary>
+    /// The rule input standing for a lookup column that was not read (absent from a Web API row, or a stamp the typed row never
+    /// received). Not a GUID, so <see cref="SecureRootsReadable(CallerPrincipal, SecureRootFlags, ValueTuple{ExternalGrantRootType, string}[])"/>
+    /// withholds the row exactly as it withholds a malformed lookup: an unread column is never "not filed there".
+    /// </summary>
+    internal const string UnreadableLookup = "unreadable-lookup";
+
+    /// <summary>
+    /// One lookup column of a Web API row as rule input (fix round 3d): an explicit JSON null is "not filed there"; a string is the
+    /// lookup; a column that is ABSENT from the row (or a <c>null</c> row), and any other JSON value, is <see cref="UnreadableLookup"/>.
+    /// The read's <c>$select</c> is therefore never the boundary: a column it left out is unreadable, not empty.
+    /// </summary>
+    internal static string? LookupOf(IReadOnlyDictionary<string, JsonElement>? row, string column)
+    {
+        if (row is null || !row.TryGetValue(column, out var value))
+            return UnreadableLookup;
+        return value.ValueKind switch
+        {
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            JsonValueKind.String => value.GetString(),
+            _ => UnreadableLookup,
+        };
+    }
+
+    /// <summary>
+    /// A typed row's stamp (fix round 3d): <paramref name="value"/> when its column was present in the row (an explicit null
+    /// included), else <see cref="UnreadableLookup"/>. The typed rows record presence in their setters.
+    /// </summary>
+    internal static string? StampOf(bool columnRead, string? value) => columnRead ? value : UnreadableLookup;
+
+    /// <summary>
     /// The linked roots of one row whose secure flag the rule needs: populated, a GUID, and NOT readable by the caller. A
     /// readable root never needs a lookup; a malformed one is withheld without one.
     /// </summary>
@@ -222,17 +252,22 @@ internal static class ExternalMultiRootRule
         LiveParentLookupsOf(childTable).Select(l => $"_{l.Column}_value").ToArray();
 
     /// <summary>
-    /// A Web API row's parent lookups (<see cref="LiveParentLookupsOf"/>), as raw values: absent or JSON null is "not filed
+    /// A Web API row's parent lookups (<see cref="LiveParentLookupsOf"/>), as raw values: an explicit JSON null is "not filed
     /// there", a string is the lookup, and any other JSON value is malformed (withheld by the rule, fail closed).
     /// </summary>
+    /// <remarks>
+    /// Task 130-0 fix round 3c: a lookup column that is ABSENT from the row (or a <c>null</c> row) was not read, so it is treated
+    /// as unreadable (<see cref="UnresolvedParent"/>, the same fail-closed path as a malformed value); it is never "not filed".
+    /// Every Web API read that feeds this method selects every column of <see cref="LiveParentSelect"/> (pinned by test).
+    /// </remarks>
     internal static LiveParentLookup[] LiveParentsOf(string childTable, IReadOnlyDictionary<string, JsonElement>? row) =>
         LiveParentsOf(childTable, column =>
         {
-            if (row is null || !row.TryGetValue($"_{column}_value", out var value)
-                || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-            {
-                return null;
-            }
+            if (row is null || !row.TryGetValue($"_{column}_value", out var value))
+                return UnresolvedParent; // not read: never "not filed there"
+
+            if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                return null; // an explicit null: not filed there
 
             return value.ValueKind == JsonValueKind.String ? value.GetString() : UnresolvedParent;
         });
@@ -452,8 +487,8 @@ public readonly struct ChildRowRoots : IEnumerable<(ExternalGrantRootType Root, 
     /// <summary>
     /// For a Web API row (raw <c>_..._value</c> columns): {<paramref name="stamped"/>} ∪ {live roots of every parent lookup of
     /// <paramref name="childTable"/> that <paramref name="row"/> carries}. A parent whose value is not a GUID, or that
-    /// <paramref name="live"/> did not resolve, enters as <see cref="ExternalMultiRootRule.UnresolvedParent"/>. A
-    /// <c>null</c> row is one that came back with no column outside the typed ones: it names no parent.
+    /// <paramref name="live"/> did not resolve, enters as <see cref="ExternalMultiRootRule.UnresolvedParent"/>. A parent
+    /// lookup column that is absent from the row (a <c>null</c> row has none) was not read and enters the same way (fix round 3c).
     /// </summary>
     /// <param name="childTable">The row's table; must have an entry in the lineage map.</param>
     /// <param name="row">The row as read (its <c>$select</c> must carry <see cref="ExternalMultiRootRule.LiveParentSelect"/>).</param>

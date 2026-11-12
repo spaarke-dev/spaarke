@@ -61,17 +61,22 @@ namespace Sprk.Bff.Api.Api;
 public static class ChildRecordEndpoints
 {
     /// <summary>
-    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c>,
-    /// <c>sprk_kpiassessment</c> and <c>sprk_billingevent</c> are the secure-record ribbon's "New Budget" / "New KPI
-    /// Assessment" / "New Billing Event" (owner round 28 item 2, E2; the r1c live inventory of every main form found the
-    /// last two on the matter, project, report card and invoice forms): the native subgrid "+ New" under a secure record is
-    /// replaced by a command that creates the row here and then opens it — these tables have no product create surface of
-    /// their own.
+    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c> and
+    /// <c>sprk_kpiassessment</c> are the secure-record ribbon's "New Budget" / "New KPI Assessment" (owner round 28 item 2,
+    /// E2; the r1c live inventory of every main form found the KPI assessment on the matter, project and report card forms):
+    /// the native subgrid "+ New" under a secure record is replaced by a command that creates the row here and then opens
+    /// it — these tables have no product create surface of their own. ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line
+    /// (<c>sprk_billingevent</c>) is no longer created here; its new rows have one server-side owner (extraction, a line
+    /// decision, Add line), and the general create refuses it (<see cref="RecordTableRule.GenericCreateRefused"/>).
+    /// ebilling-r1 task 096b (EB-D-201): an invoice (<c>sprk_invoice</c>) is no longer created here either; invoices are created
+    /// only by submission (the Create Invoice wizard and the Outlook Submit Invoice, both on the submission operation). A POST for
+    /// either table is the route's unsupported-table answer, before any Dataverse call. The invoice stays in
+    /// <see cref="RefileTables"/> (re-filing is unchanged).
     /// </summary>
     internal static readonly IReadOnlySet<string> CreateTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "sprk_todo", "sprk_event", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis", "sprk_document",
-        "sprk_budget", "sprk_kpiassessment", "sprk_billingevent",
+        "sprk_todo", "sprk_event", "sprk_memo", "sprk_reportcard", "sprk_analysis", "sprk_document",
+        "sprk_budget", "sprk_kpiassessment",
         // spaarke-ontology-platform-r1 task 046 (D-21; uac-r2's answer D-113 on #1355): the Create Work Assignment wizard's
         // create and a decision's Assign Work follow-on — ONE server create path for the table, this one. A work assignment is
         // a ROOT, not a child: the secure-create plan decides how it is made (filed under a secure matter or project → INTO
@@ -207,7 +212,7 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event), a work assignment, a matter or a project")
+            .WithSummary("Create a child record (to-do, event, memo, report card, analysis, document, budget, KPI assessment), a work assignment, a matter or a project")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +
@@ -732,6 +737,16 @@ public static class ChildRecordEndpoints
         // in-process update), whatever that caller checks first. Nothing is written.
         if (RecordTableRules.RefuseWriterOnlyTableUpdate(entity) is { } writerOnly)
             return Problem(StatusCodes.Status403Forbidden, DeniedCode, writerOnly.Reason!);
+
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): and a column only the table's typed writer sets (the invoice's AP
+        // export claim), on the body's shape alone, before any read or write. This route writes AS the caller, so only the column check is
+        // asked here, never RefuseAppOnlyWrite. Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyColumns(
+                entity, body.ValueKind == JsonValueKind.Object ? body.EnumerateObject().Select(p => p.Name) : []) is { } writerOnlyColumn)
+        {
+            return Problem(StatusCodes.Status403Forbidden, RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode,
+                $"The {Noun(entity)} was not saved: {writerOnlyColumn.Reason}.");
+        }
 
         var meta = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{entity}')?$select=EntitySetName,PrimaryIdAttribute", ct).ConfigureAwait(false);

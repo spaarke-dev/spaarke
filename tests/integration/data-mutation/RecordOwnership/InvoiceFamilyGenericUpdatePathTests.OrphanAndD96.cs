@@ -407,6 +407,25 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         WrittenOnce("sprk_billingevent", Line);
     }
 
+    [Theory(DisplayName = "164a-1 (must not fire): D-96's re-attach of a line to its invoice is still written; only the line's generic CREATE is refused")]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task D96_ALineReattachedToItsInvoice_OnTheSameMatter_IsWritten_TheCreateOnlyRefusalDoesNotFire(GenericPath path)
+    {
+        // ebilling-r1 task 164a-1 (uac-r2 Q6): the line's generic create is refused (GenericCreateRefused), its update is not.
+        var rule = Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.Get("sprk_billingevent");
+        rule.GenericCreateRefused.Should().BeTrue();
+        Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate("sprk_billingevent").Should().BeNull();
+
+        // The hint's last step: the line, on its invoice's matter, names its invoice again.
+        var outcome = await RunAsync(path, "sprk_billingevent", Line,
+            Lookups(("sprk_invoice", new EntityReference("sprk_invoice", Invoice)), ("sprk_matter", MatterRef(Matter))), NoPlain,
+            WorldWithLines().Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        WrittenOnce("sprk_billingevent", Line);
+    }
+
     [Fact]
     public async Task TheMismatchRefusalOnTheThrowingPaths_PinsTheExactMessage()
     {

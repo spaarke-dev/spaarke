@@ -52,6 +52,14 @@ public enum CorrectionStatus
     /// <summary>The correction row and the value are written but the follow-through after them (the <c>OnValueWrittenAsync</c> seam) did not
     /// finish. Repeating the same request writes no second row and runs the follow-through again.</summary>
     Incomplete,
+
+    /// <summary>Task 095c-4: the invoice has no firm, or is held "firm needed" (<see cref="InvoiceFirmHold"/>). A correction re-runs the firm's billing
+    /// rules, so it waits for the firm (095d). 409; nothing was written (or, when the re-evaluation met it, the follow-through did not run).</summary>
+    FirmMissing,
+
+    /// <summary>082c C12 (F1-low): the correction moves work onto a date with no billing terms in force on the record (a Procedure gap). 409; the value is
+    /// saved but not followed through, and repeating the same request never clears it.</summary>
+    ProcedureGap,
 }
 
 /// <summary>Stable ProblemDetails codes of the correction routes (ADR-019). Callers branch on these, never on a message.</summary>
@@ -90,6 +98,13 @@ public static class CorrectionCodes
     /// <summary>The correction would push the line's extraction JSON over its column limit; 409, nothing was written.</summary>
     public const string TooLarge = "ebilling.correction.too_large";
 
+    /// <summary>082d fix round 2: the patched findings would exceed <c>sprk_findingsjson</c>'s column even without the Procedure snapshot; 409, the value is saved and
+    /// the findings are not patched (the correction stays unapplied).</summary>
+    public const string FindingsTooLarge = "ebilling.correction.findings_too_large";
+
+    /// <summary>The sentence with <see cref="FindingsTooLarge"/>.</summary>
+    public const string FindingsTooLargeDetail = "The correction was saved, but the invoice's stored findings are too large to update, so its rules were not re-checked. Contact support.";
+
     /// <summary>The line's extraction JSON is missing (it was over the column limit when the invoice was stored); 409, nothing was written.</summary>
     public const string ExtractionUnavailable = "ebilling.correction.extraction_unavailable";
 
@@ -110,6 +125,37 @@ public static class CorrectionCodes
     public const string NoProvenance = "ebilling.correction.no_provenance";
     public const string CodeSetUnavailable = "ebilling.correction.code_set_unavailable";
     public const string InvoiceChanged = "ebilling.invoice.changed";
+
+    /// <summary>409 (task 095c-4): see <see cref="CorrectionStatus.FirmMissing"/>.</summary>
+    public const string FirmMissing = "ebilling.correction.firm_missing";
+
+    /// <summary>The sentence a reviewer reads with <see cref="FirmMissing"/> when the invoice names no firm (<see cref="InvoiceFirmNeed.NoFirm"/>).</summary>
+    public const string FirmMissingDetail = "This invoice has no firm. Add the firm before correcting its values; nothing was changed.";
+
+    /// <summary>095c-4 review K1: the sentence with <see cref="FirmMissing"/> when the invoice shows a firm but is held for one
+    /// (<see cref="InvoiceFirmNeed.Held"/>).</summary>
+    public const string FirmHeldDetail = "This invoice is waiting for its firm to be assigned. Its values can be corrected once the firm is assigned; nothing was changed.";
+
+    /// <summary>409 (082c C12): see <see cref="CorrectionStatus.ProcedureGap"/>.</summary>
+    public const string ProcedureGap = "ebilling.correction.procedure_gap";
+
+    /// <summary>The fixed sentence with <see cref="ProcedureGap"/>: no id, no date, no Procedure name. It says what happened: the value IS saved
+    /// (the client shows this verbatim); only the billing rules were not re-run, so the correction stays unapplied and holds approval.</summary>
+    public const string ProcedureGapDetail = "Saved, but its billing terms were not re-checked because the new dates have no terms in force; the invoice stays on hold until terms are set up or the dates are corrected.";
+
+    /// <summary>The <see cref="FirmMissing"/> sentence for <paramref name="need"/>.</summary>
+    public static string FirmDetailFor(InvoiceFirmNeed need) => need == InvoiceFirmNeed.Held ? FirmHeldDetail : FirmMissingDetail;
+
+    /// <summary>EB-D-197: the sentence with <see cref="FirmMissing"/> while the Set-firm re-run is pending (the same sentence the line decisions give).</summary>
+    public const string FirmRerunPendingDetail = "This invoice's firm was just assigned and its billing rules are being checked again. Try again when the check finishes; nothing was changed.";
+
+    /// <summary>EB-D-197: the <see cref="FirmMissing"/> sentence for <paramref name="gate"/> (<see cref="InvoiceFirmGateResult.Open"/> has none and gets the no-firm sentence).</summary>
+    public static string FirmDetailFor(InvoiceFirmGateResult gate) => gate switch
+    {
+        InvoiceFirmGateResult.HeldForFirm => FirmHeldDetail,
+        InvoiceFirmGateResult.RerunPending => FirmRerunPendingDetail,
+        _ => FirmMissingDetail,
+    };
 }
 
 /// <summary>
@@ -384,6 +430,13 @@ public sealed class InvoiceCorrectionService
             if (invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value != InvoiceStatusCodes.InReview)
             {
                 return new CorrectionResult(CorrectionStatus.NotInReview, CorrectionCodes.NotInReview, "Values can be corrected only while the invoice is In Review.");
+            }
+
+            // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
+            // Task 095d-0 (EB-D-197): and while the Set-firm re-run is pending (which also removes a race between a correction and the re-run).
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
+            {
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(gate));
             }
 
             line = await ReadLineAsync(command.InvoiceId, command.LineId!.Value, ct).ConfigureAwait(false);
@@ -673,6 +726,13 @@ public sealed class InvoiceCorrectionService
                 return new CorrectionResult(CorrectionStatus.NotInReview, CorrectionCodes.NotInReview, "Values can be corrected only while the invoice is In Review.");
             }
 
+            // Task 095c-4: a correction re-runs the firm's rules (InvoiceCorrectionReevaluation); with no firm, or a stored "firm needed" hold, it waits.
+            // Task 095d-0 (EB-D-197): and while the Set-firm re-run is pending.
+            if (await InvoiceFirmGate.CheckAsync(_entities, invoice, ct).ConfigureAwait(false) is not InvoiceFirmGateResult.Open and var gate)
+            {
+                return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing, CorrectionCodes.FirmDetailFor(gate));
+            }
+
             prior = await ReadPriorAsync(command.InvoiceId, null, spec.Name, ct).ConfigureAwait(false);
             findingsJson = await ReadFindingsJsonAsync(command.InvoiceId, ct).ConfigureAwait(false);
         }
@@ -904,6 +964,27 @@ public sealed class InvoiceCorrectionService
         try
         {
             await OnValueWrittenAsync(new CorrectionApplied(command.InvoiceId, lineId, spec.Name, dto.Outcome, valueChanged), ct).ConfigureAwait(false);
+        }
+        catch (CorrectionFirmMissingException)
+        {
+            // Task 095c-4: the firm was cleared (a direct write) between the check above and the re-evaluation. The value is saved, its follow-through
+            // is not; the correction stays unapplied, which holds approval (CorrectionsPending), and the repeat completes it once the firm is set.
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but the invoice has no firm, so its rules were not re-run.", spec.Name, command.InvoiceId);
+            return new CorrectionResult(CorrectionStatus.FirmMissing, CorrectionCodes.FirmMissing,
+                "This invoice has no firm, so the correction was saved but its rules were not re-run. Add the firm, then repeat the correction.");
+        }
+        catch (CorrectionProcedureGapException)
+        {
+            // 082c C12: the corrected value saves, but moves work onto a date no Procedure Version covers. 409 with a fixed sentence (no id): the generic
+            // Incomplete would tell the reviewer to repeat the request, which never clears a gap. The correction stays unapplied, which holds approval.
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but it brings in a Procedure gap, so its rules were not re-run; the correction stays unapplied and holds approval.", spec.Name, command.InvoiceId);
+            return new CorrectionResult(CorrectionStatus.ProcedureGap, CorrectionCodes.ProcedureGap, CorrectionCodes.ProcedureGapDetail);
+        }
+        catch (CorrectionFindingsTooLargeException)
+        {
+            // 082d fix round 2: the value saves, the findings cannot be patched within their column. 409 with a fixed sentence; repeating never clears it.
+            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: saved, but the patched findings are over the findings column, so its rules were not re-run; the correction stays unapplied and holds approval.", spec.Name, command.InvoiceId);
+            return new CorrectionResult(CorrectionStatus.TooLarge, CorrectionCodes.FindingsTooLarge, CorrectionCodes.FindingsTooLargeDetail);
         }
         catch (CorrectionTotalsRefusedException refused)
         {
@@ -1305,22 +1386,26 @@ public sealed class InvoiceCorrectionService
         var rows = await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
         return rows
             .Where(r => r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is (int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
-            .Select(r => new InvoiceLineToCode
-            {
-                LineKey = ((r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0) - 1).ToString(CultureInfo.InvariantCulture),
-                Date = r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } date ? DateOnly.FromDateTime(date) : null,
-                LineType = r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value == (int)InvoiceLineCostType.Fee
-                    ? InvoiceLineType.Fee
-                    : InvoiceLineType.Expense,
-                Narrative = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription),
-                Hours = r.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity),
-                Amount = r.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value,
-                BilledTaskCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled),
-                BilledActivityCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled),
-                BilledExpenseCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled),
-            })
+            .Select(CodingLineOf)
             .ToList();
     }
+
+    /// <summary>One stored fee or expense line as the coding step reads it (task 164a-4a: shared with Add line, which resolves the invoice's code set
+    /// over the same input).</summary>
+    internal static InvoiceLineToCode CodingLineOf(Entity r) => new()
+    {
+        LineKey = ((r.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) ?? 0) - 1).ToString(CultureInfo.InvariantCulture),
+        Date = r.GetAttributeValue<DateTime?>(InvoiceSubmissionPersister.LineEventDate) is { } date ? DateOnly.FromDateTime(date) : null,
+        LineType = r.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value == (int)InvoiceLineCostType.Fee
+            ? InvoiceLineType.Fee
+            : InvoiceLineType.Expense,
+        Narrative = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription),
+        Hours = r.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity),
+        Amount = r.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value,
+        BilledTaskCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled),
+        BilledActivityCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled),
+        BilledExpenseCode = r.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled),
+    };
 
     private static string? CodeOf(JsonNode? extraction, string member) =>
         extraction?["coding"]?[member]?["code"] is JsonValue v && v.TryGetValue<string>(out var code) && !string.IsNullOrWhiteSpace(code) ? code.Trim() : null;
@@ -1564,20 +1649,11 @@ public sealed class InvoiceCorrectionService
         return await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
     }
 
-    /// <summary>The latest submission's stored findings JSON (it carries the header provenance), or null.</summary>
-    private async Task<string?> ReadFindingsJsonAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceSubmissionPersister.SubmissionFindingsJson, "createdon"),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        query.AddOrder("createdon", OrderType.Descending);
-        return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault()
+    /// <summary>The invoice's own submission's stored findings JSON (it carries the header provenance), or null when that submission is not
+    /// linked (task 165a: never another submission linked to the invoice).</summary>
+    private async Task<string?> ReadFindingsJsonAsync(Guid invoiceId, CancellationToken ct) =>
+        (await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, [InvoiceSubmissionPersister.SubmissionFindingsJson], ct).ConfigureAwait(false))
             ?.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
-    }
 
     private CorrectionResult ReadFailed(Guid invoiceId, Exception ex)
     {

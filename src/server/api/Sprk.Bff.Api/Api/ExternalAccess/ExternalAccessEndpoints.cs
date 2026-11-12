@@ -72,8 +72,8 @@ public static class ExternalAccessEndpoints
         // scheme (task 025), so a CIAM external contact AND a workforce (Teams-host) user authenticate
         // here. The group-level CallerPrincipalAuthorizationFilter then resolves either token to a
         // plane-agnostic CallerPrincipal (with its Tier-2 record scope) on HttpContext.Items — the CIAM
-        // strategy reproduces the old ExternalCallerAuthorizationFilter byte-for-byte (FR-15). Every
-        // handler in this group is principal-agnostic (no if(ciam)…else…).
+        // strategy runs the same contact-plane composition and veto pipeline as the workforce contact
+        // plane (uac-r2 task 135, C1). Every handler in this group is principal-agnostic (no if(ciam)…else…).
         var externalGroup = app.MapGroup("/api/v1/external")
             .WithTags("External Access")
             .RequireAuthorization(AuthPolicies.ExternalCollaboration)
@@ -142,6 +142,7 @@ public static class ExternalAccessEndpoints
         // caller's contact as sprk_requestedby.
         externalGroup.MapExternalIntakeEndpoints();
         externalGroup.MapExternalInvoiceSubmissionEndpoints(); // ebilling-r1 task 044 (FR-17 SPA channel; firm + core-record filter)
+        externalGroup.MapFirmOutcomeEndpoints(); // ebilling-r1 task 130b (FR-38: the firm-visible outcome of an invoice or submission; firm + core-record filter)
 
         // GET /api/v1/external/notifications · POST /api/v1/external/notifications/seen — the derived in-portal feed (r3 task
         // 037, FR-08). Inherits this group's policy + CallerPrincipalAuthorizationFilter; grants are re-checked against the

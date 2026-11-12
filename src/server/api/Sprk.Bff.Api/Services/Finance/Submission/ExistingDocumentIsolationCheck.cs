@@ -70,12 +70,18 @@ public enum SourceFilingVerdict
 /// never stored; carried for the log and the tests only. Null is "no such row".</summary>
 public sealed record SourceIsolationFlags(bool Restricted, bool? InternalOnly, int? Privacy);
 
-/// <summary>Task 094: the verdict of the source re-check, why (ids and reasons only), and on Allowed the source's secure roots and flags.</summary>
+/// <summary>
+/// Task 094: the verdict of the source re-check, why (ids and reasons only), and on Allowed the source's secure roots and flags.
+/// <paramref name="RecordedFileBytes"/> (task 118b review 2, F1): on Allowed, the <c>sprk_filesize</c> the row records (null when empty), read
+/// by the check's own retrieve so the from-document intake can sum its supporting documents' sizes before downloading any of them. Not part of
+/// the verdict; the commit gate and the persister ignore it.
+/// </summary>
 public sealed record SourceFilingCheck(
     SourceFilingVerdict Verdict,
     string? Detail,
     IReadOnlyList<(string Table, Guid Id)>? Roots = null,
-    SourceIsolationFlags? Flags = null);
+    SourceIsolationFlags? Flags = null,
+    long? RecordedFileBytes = null);
 
 /// <summary>
 /// 050a review round 3 (uac-r2 F1-a / F1-b): the isolation rule of a confirmed existing document. The document's secure roots are found by

@@ -77,9 +77,9 @@ public static class FinanceModule
         services.AddScoped<IInvoiceResolutionService, InvoiceResolutionService>();
 
         // Billing compliance evaluation (ebilling-r1 task 072, FR-25, D-23 in-memory strategy): BillingFactLoader reads the published
-        // billing rules for the client default and the firm, the core record, the firm's priors and their secure roots (D-112) once
-        // per submission; InvoiceComplianceEvaluator selects the versions in force per line (firm over client default, D-39), gates
-        // them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
+        // billing rules (the legacy client-default and firm sets, and the Procedure stream through the static ProcedureResolver, 082c: no
+        // registration), the core record, the firm's priors and their secure roots (D-112) once per submission; InvoiceComplianceEvaluator
+        // selects the versions in force per line (rank and PrecedenceOf, 082c), gates them (FR-24) and runs the 071 handlers. Writes nothing. Concrete (ADR-010: no interface, one implementation each). Scoped:
         // the loader holds the scoped SecureChildShareSynchronizer (ExternalAccessModule, unconditional); the gate PolicyVersionValidator
         // is a singleton (SignalsModule). Unconditional (flag rule above). Caller: task 049 (pipeline orchestration).
         services.AddScoped<Sprk.Bff.Api.Services.Signals.Billing.BillingFactLoader>();
@@ -101,6 +101,12 @@ public static class FinanceModule
         // Scoped like its callers (the pipeline's scoped processor). Unconditional (flag rule above): the processor always calls it.
         services.AddScoped<IEbillingNotificationSink, NoOpEbillingNotificationSink>();
 
+        // Submission outcome bell (ebilling-r1 task 095b): the job handler tells the submitter, in the model-driven app's bell, when a submission
+        // reaches a final status (after it is committed; never fails or delays the outcome). Concrete (ADR-010: one implementation; no second
+        // is planned, task 132's channels are the sink's). Scoped like the handler that calls it. Unconditional (flag rule above): NotificationService
+        // is a singleton registered by AnalysisServicesModule's unconditional notification services.
+        services.AddScoped<SubmissionOutcomeNotifier>();
+
         // Rate card and timekeeper import / publish (ebilling-r1 task 078, FR-29 / FR-08): template, all-or-nothing import into a Draft card,
         // overlap re-check and publish. Concrete (ADR-010: no interface, no second implementation). Scoped: holds the scoped Dataverse
         // clients and the SPE facade. Unconditional (flag rule above); the routes carry the kill switch.
@@ -117,6 +123,10 @@ public static class FinanceModule
         // per-request CallerRecordAccessProbe (ExternalAccessModule). Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<AffectedInvoiceCounter>();
         services.AddScoped<ProcedureService>();
+        // Procedure assignments and record overrides (ebilling-r1 task 089b, EB-D-148, model 6.2 / 6.3): assign, pin or exclude a Procedure
+        // and exclude a rule for one core record; 089c adds change rule and remove. Concrete (ADR-010). Scoped: it holds the scoped ownership
+        // resolver. Unconditional (flag rule above); the routes carry the kill switch.
+        services.AddScoped<ProcedureAssignmentService>();
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a
@@ -139,6 +149,22 @@ public static class FinanceModule
         services.AddScoped<InvoiceLineDecisionService>();
         // Invoice-level adjustments (ebilling-r1 task 102, FR-32, D-74): add / remove an Adjustment line and the rule list; 016 owns the amounts and totals.
         services.AddScoped<InvoiceAdjustmentService>();
+        // Firm-visible outcome projection (ebilling-r1 task 130a, FR-38, D-66, EB-D-202): read-only, no caller check (its callers establish that the
+        // invoice may be shown). Concrete (ADR-010: no interface, one implementation). Scoped: it holds the singleton generic Dataverse client. It takes
+        // the clause reader as a delegate resolved lazily, as ExternalInvoiceHiding is, so it does not hold RuleSetService's nine dependencies.
+        // Unconditional (flag rule above); the routes (130b) carry the kill switch.
+        services.AddScoped<FirmClauseReader>(sp => (policyVersionId, invoiceId, ct) =>
+            sp.GetRequiredService<RuleSetService>().GetFirmClauseAsync(policyVersionId, invoiceId, ct));
+        // 130b: the writer identity (BillingDecisionRecorder.WriterUserIdAsync, the source 165b's readers use) is passed as a delegate, resolved lazily, so
+        // a reason comes only from a Decision Record the writer created and the singleton recorder is not built for an invoice with no decided lines.
+        services.AddScoped<FirmFindingsProjection>(sp => new FirmFindingsProjection(
+            sp.GetRequiredService<Spaarke.Dataverse.IGenericEntityService>(),
+            sp.GetRequiredService<FirmClauseReader>(),
+            ct => sp.GetRequiredService<BillingDecisionRecorder>().WriterUserIdAsync(ct),
+            sp.GetRequiredService<ILogger<FirmFindingsProjection>>()));
+        // Add line (ebilling-r1 task 164, EB-D-188): a reviewer-typed Fee or Expense line. Concrete (ADR-010), scoped: it holds the scoped CodeSetResolver,
+        // IInvoiceResolutionService, BillingFactLoader and InvoiceComplianceEvaluator. Unconditional (flag rule above); the route carries the kill switch.
+        services.AddScoped<InvoiceLineAddService>();
         // Value and code corrections (ebilling-r1 task 101 part B1, FR-31, FR-22, D-64): the D-64 correction rows and the corrected value. Concrete (ADR-010).
         // Scoped: it holds the scoped CodeSetResolver and the scoped EligibleApproverResolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<InvoiceCorrectionService>();
@@ -201,6 +227,11 @@ public static class FinanceModule
         services.AddScoped<EligibleApproverResolver>();
         services.AddScoped<InvoiceApprovalService>();
 
+        // Set firm on a held no-firm invoice (ebilling-r1 task 095d-1b, notes 095c 16.4-16.7): concrete (ADR-010), scoped like its scoped
+        // dependencies (IGenericEntityService, InvoiceSubmissionService, CoreAncestorResolver). It hands its one-transaction apply to the
+        // allocator (095d-1a), the number columns' only writer. Unconditional (flag rule above); the route reads the kill switch.
+        services.AddScoped<InvoiceAssignFirmService>();
+
         // Reject and Return to Firm of an invoice (ebilling-r1 task 104, FR-36): concrete (ADR-010), scoped like the approval service it follows.
         services.AddScoped<InvoiceRejectReturnService>();
 
@@ -236,6 +267,21 @@ public static class FinanceModule
         //     synchronizer it composes. It replaces 050a's InvoiceDocumentRefile (retired: a Submit Invoice source is copied, never re-filed).
         services.AddScoped<SubmissionCommitGate>();
         services.AddScoped<IJobHandler, InvoiceSubmissionProcessingJobHandler>();
+
+        // The rules re-run after Set firm (ebilling-r1 task 095d-2b-1; EB-D-185..187; notes/095d-2b-1.md). Unconditional (flag rule above;
+        // the handler reads the kill switch, so a queued message never dead-letters NoHandler). Scoped like their scoped dependencies.
+        //   * InvoiceSubmissionProcessor (concrete) - the re-run calls EvaluateFromReadAsync, which is not on IInvoiceSubmissionProcessor (the
+        //     049 seam the handler tests fake). Existing: the interface registration above. Extension: widening the 049 seam would put a
+        //     re-run-only entry point on every fake of it. Cost of nothing: InvoiceSubmissionRerun cannot be resolved, so no re-run runs.
+        //   * InvoiceSubmissionRerun (concrete, ADR-010: one implementation) - the re-run's evaluation and its one commit (095d-2a-2). Existing:
+        //     the persister (writes an intake once) and InvoiceCorrectionReevaluation (one field's diff). Extension: neither may re-evaluate a
+        //     committed outcome. Cost of nothing: the job handler cannot be built, and the rerun-pending hold never lifts.
+        //   * InvoiceSubmissionRerunJobHandler (Services/Ai/Jobs: the re-run can call AI coding, uac-r2 Q7) - the queued, retried run Set firm
+        //     enqueues. Existing: the 049 handler. Extension: its "never re-evaluate a linked submission" invariant. Cost of nothing: Set
+        //     firm's enqueued message dead-letters NoHandler and the invoice stays held for ever.
+        services.AddScoped<InvoiceSubmissionProcessor>();
+        services.AddScoped<InvoiceSubmissionRerun>();
+        services.AddScoped<IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.InvoiceSubmissionRerunJobHandler>();
 
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)

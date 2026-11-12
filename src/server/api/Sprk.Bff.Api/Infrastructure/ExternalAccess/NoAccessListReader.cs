@@ -785,9 +785,8 @@ public class NoAccessListReader : INoAccessListReader
                 return null;
             }
 
-            var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<NoAccessEntryRow>>(JsonOptions, ct)
-                .ConfigureAwait(false);
-            return result?.Value ?? new List<NoAccessEntryRow>();
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return ParseRows(body, _logger);
         }
         catch (OperationCanceledException)
         {
@@ -800,6 +799,33 @@ public class NoAccessListReader : INoAccessListReader
                 "be denied (NFR-01).");
             return null;
         }
+    }
+
+    /// <summary>
+    /// The entry rows of one chunk's response body. Fix round 3d: every row must carry every column of <see cref="RowSelect"/>
+    /// (an empty lookup is an explicit JSON null); a row that lacks one was not read in full, so which subject or object the entry
+    /// names cannot be told from an entry that names none. That returns <c>null</c>, the same fail-closed signal as a failed query
+    /// (the caller denies every queried candidate), instead of letting the entry read as a malformed one that "denies nothing".
+    /// </summary>
+    internal static List<NoAccessEntryRow>? ParseRows(string body, ILogger logger)
+    {
+        using var document = JsonDocument.Parse(body);
+        if (!document.RootElement.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Array)
+            return new List<NoAccessEntryRow>();
+
+        var columns = RowSelect.Split(',');
+        foreach (var row in value.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object || columns.Any(column => !row.TryGetProperty(column, out _)))
+            {
+                logger.LogError(
+                    "[NO-ACCESS] Deny-list row did not carry every selected column. Failing CLOSED - this chunk's candidates " +
+                    "will be denied (NFR-01).");
+                return null;
+            }
+        }
+
+        return value.Deserialize<List<NoAccessEntryRow>>(JsonOptions) ?? new List<NoAccessEntryRow>();
     }
 
     private async Task<string> GetAppOnlyTokenAsync(CancellationToken ct)

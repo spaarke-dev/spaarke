@@ -1368,7 +1368,11 @@ public static class FieldMappingEndpoints
                             SourceField = rule.SourceField,
                             TargetField = rule.TargetField,
                             Status = FieldMappingStatus.Skipped,
-                            ErrorMessage = setBySpaarke.Reason,
+                            // The writer-only column refusal's Reason carries no code (the throwing writers add it); this skip is the code's
+                            // only carrier on the push, so it is appended here.
+                            ErrorMessage = setBySpaarke.RefusalCode == Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode
+                                ? $"{setBySpaarke.Reason} ({setBySpaarke.RefusalCode}); the rule was skipped and nothing was written for it."
+                                : setBySpaarke.Reason,
                         });
                         continue;
                     }
