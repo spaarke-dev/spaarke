@@ -27,7 +27,17 @@ Status: **dev SPA deployed 2026-11-12 (run 43324493710); E2E not started (needs 
   SPA features need their BFF routes live; confirm with ebilling-r1 and uac-r2 that the dev BFF SHA covers them.
 - BFF host: confirm the dev BFF host is unchanged since `b083d62183`'s build (Vite bakes it in; project gotcha).
 
+## Post-SPA-deploy gate (uac-r2, 23:00–23:30Z 2026-11-12)
+
+PASS, no faults: 45 BFF requests, 0 5xx, 1 4xx, **0 on external routes** (new matter/WA event routes and `canCreate` not
+yet exercised). Tell uac-r2 when the E2E is done; it re-reads the external routes.
+
 ## E2E (steps 6–9) — accounts and records needed (owner to supply/confirm)
+
+- ⚠️ **Watch-item #2761 (uac-r2's code, not R4):** on dev the identity store's contact-binding readability proof faults
+  on WhoAmI (403) every 5 min since 2026-11-02 and fails closed, so an **unbound** contact's first sign-in, invite
+  redemption or registration may be refused or stall. Prefer already-bound test contacts; if a first-time contact
+  fails, attribute it to #2761 and tell uac-r2 (they will prioritize it).
 
 - A partner with **Collaborate/Create** on a matter, a project and a work assignment; a **View-only** partner on the same.
 - A **firm-linked** partner (Submit invoice) and a **no-firm** caller.
