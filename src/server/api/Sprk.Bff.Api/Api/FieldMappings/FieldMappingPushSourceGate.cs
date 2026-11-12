@@ -28,6 +28,14 @@ namespace Sprk.Bff.Api.Api.FieldMappings;
 /// (<see cref="RefileNotAllowedReasonCode"/>). A pushed clear of a filing column is always a filing change. A pushed value equal
 /// to the child's current filing is no change; that child goes on to the owner question. A source that is not secure is
 /// unchanged, its re-files and clears included.</para>
+/// <para><b>Restricted source (task 022c).</b> Values mapped from a source whose <c>sprk_accesspermission</c> is Restricted, or
+/// cannot be read (<see cref="RecordCreationService.MappingSourceAccessOf"/>, the create's own answer), are written only into a
+/// child that is Restricted (<see cref="RecordCreationService.StoredRowIsRestricted"/>: its stored value). The column is read
+/// in the same one source read, and on the child only when the source is Restricted or unreadable, in the same per-child read.
+/// A child that is not Restricted gets <see cref="RestrictedSourceNotRestrictedReasonCode"/> (a Restricted source) or
+/// <see cref="UndeterminedReasonCode"/> (an unreadable one). Such a source never changes a child's filing either
+/// (<see cref="RefileNotAllowedReasonCode"/>, the secure source's rule). A source that is not secure and is NotRestricted or
+/// carries no column reads no child, as before.</para>
 /// <para><b>Fail closed.</b> A source that does not come back, a fault reading it or the child's owner, a child with no owner, a
 /// Secure Record owner team that is set up but cannot be told, or any other answer the gate cannot tell is
 /// <see cref="UndeterminedReasonCode"/>: the child is not written. Cancellation is rethrown.</para>
@@ -60,6 +68,13 @@ internal sealed class FieldMappingPushSourceGate
     internal const string UndeterminedMessage =
         "No fields were copied to this record because it could not be checked whether the source record is secure. "
         + "Try again later.";
+
+    /// <summary>Task 022c: the source's Access Permission is Restricted and the child's is not: nothing was written to it.</summary>
+    internal const string RestrictedSourceNotRestrictedReasonCode = "field_mapping.push.restricted_source_not_restricted";
+
+    /// <summary>The per-child text of <see cref="RestrictedSourceNotRestrictedReasonCode"/>. Names no record.</summary>
+    internal const string RestrictedSourceNotRestrictedMessage =
+        "No fields were copied to this record because the source record's access is Restricted and this record's is not.";
 
     private const string OwnerColumn = "ownerid";
 
@@ -101,6 +116,7 @@ internal sealed class FieldMappingPushSourceGate
     {
         NotIsolatedReasonCode => NotIsolatedMessage,
         RefileNotAllowedReasonCode => RefileNotAllowedMessage,
+        RestrictedSourceNotRestrictedReasonCode => RestrictedSourceNotRestrictedMessage,
         _ => UndeterminedMessage,
     };
 
@@ -165,8 +181,9 @@ internal sealed class FieldMappingPushSourceGate
 
     /// <summary>
     /// <c>null</c> when values copied from the source may be written into the child; otherwise the reason code
-    /// (<see cref="NotIsolatedReasonCode"/>, <see cref="RefileNotAllowedReasonCode"/> or <see cref="UndeterminedReasonCode"/>)
-    /// and nothing may be written to it.
+    /// (<see cref="NotIsolatedReasonCode"/>, <see cref="RefileNotAllowedReasonCode"/>,
+    /// <see cref="RestrictedSourceNotRestrictedReasonCode"/> or <see cref="UndeterminedReasonCode"/>) and nothing may be
+    /// written to it.
     /// </summary>
     /// <param name="targetEntity">The child's table.</param>
     /// <param name="childId">The child.</param>
@@ -181,48 +198,81 @@ internal sealed class FieldMappingPushSourceGate
             if (source is null)
                 return Undetermined(targetEntity, childId, "the source's owner and secure flag did not come back", null);
 
-            // The source decided for a row in no isolation: a source that is not secure is allowed for any owner.
+            // The source decided for a row in no isolation: a source that is not secure is allowed for any owner. Task 022c: the
+            // Restricted-source rule is decided on the same one read; a source that is NoColumn or NotRestricted adds nothing.
             var unowned = await MappingSourceCopyGate.DecideAsync(_sourceTable, source, null, SecureTeamOnce, ct).ConfigureAwait(false);
-            if (unowned.Verdict == MappingSourceCopyVerdict.Allowed)
+            var access = RecordCreationService.MappingSourceAccessOf(_sourceTable, source);
+            var restricted = access is RecordCreationService.MappingSourceAccess.Restricted
+                or RecordCreationService.MappingSourceAccess.Unreadable;
+            if (unowned.Verdict == MappingSourceCopyVerdict.Allowed && !restricted)
                 return null;
             if (unowned.Verdict == MappingSourceCopyVerdict.Unknown)
                 return Undetermined(targetEntity, childId, unowned.Reason, unowned.Fault);
 
-            // A secure source: the child's filing and its own owner decide, read together.
+            // A secure, Restricted or unreadable source: the child's filing, its own owner (a secure source) and its stored Access
+            // Permission (a Restricted or unreadable source, where its table carries the column) decide, read together.
+            var secure = unowned.Verdict != MappingSourceCopyVerdict.Allowed;
             var filing = FilingWrites(targetEntity, payload);
-            var child = await _entities.RetrieveAsync(targetEntity, childId, [OwnerColumn, .. filing.Keys], ct).ConfigureAwait(false);
+            string[] columns =
+            [
+                .. secure ? [OwnerColumn] : Array.Empty<string>(),
+                .. filing.Keys,
+                .. restricted ? RecordCreationService.StoredRowAccessColumns(targetEntity) : [],
+            ];
+            var child = columns.Length == 0
+                ? new Entity(targetEntity, childId) // nothing the answer needs is on the child: it is not read
+                : await _entities.RetrieveAsync(targetEntity, childId, columns, ct).ConfigureAwait(false);
             if (child is null)
                 return Undetermined(targetEntity, childId, "the child did not come back", null);
 
-            // UAC-r2 (a): a push from a secure source never changes a child's filing. A clear is always a change; a value equal
-            // to what the child is filed under is no change.
+            // UAC-r2 (a): a push from a secure source never changes a child's filing; task 022c: nor does a push from a Restricted
+            // or unreadable source. A clear is always a change; a value equal to what the child is filed under is no change.
             if (filing.FirstOrDefault(f => ChangesFiling(f.Value, HeldId(child, f.Key))) is { Key: { } moved })
             {
                 _logger.LogInformation(
-                    "[FIELD-MAPPING-PUSH] {Target} {ChildId}: the push from the secure source {Source} {SourceId} would change the "
-                    + "filing column {Column}; nothing was written to it ({Code}).",
-                    targetEntity, childId, _sourceTable, _sourceId, moved, RefileNotAllowedReasonCode);
+                    "[FIELD-MAPPING-PUSH] {Target} {ChildId}: the push from the source {Source} {SourceId} (secure: {Secure}, "
+                    + "Access Permission: {Access}) would change the filing column {Column}; nothing was written to it ({Code}).",
+                    targetEntity, childId, _sourceTable, _sourceId, secure, access, moved, RefileNotAllowedReasonCode);
                 return RefileNotAllowedReasonCode;
             }
 
-            var owner = child.GetAttributeValue<EntityReference>(OwnerColumn);
-            if (owner is null || owner.Id == Guid.Empty)
-                return Undetermined(targetEntity, childId, "the child's owner did not come back", null);
-
-            var decision = await MappingSourceCopyGate.DecideAsync(_sourceTable, source, owner, SecureTeamOnce, ct).ConfigureAwait(false);
-            switch (decision.Verdict)
+            if (secure)
             {
-                case MappingSourceCopyVerdict.Allowed:
-                    return null;
-                case MappingSourceCopyVerdict.Secure:
-                    _logger.LogInformation(
-                        "[FIELD-MAPPING-PUSH] {Target} {ChildId}: the source {Source} {SourceId} is secure and the record is not "
-                        + "owned by its isolation owner; nothing was written to it ({Code}).",
-                        targetEntity, childId, _sourceTable, _sourceId, NotIsolatedReasonCode);
-                    return NotIsolatedReasonCode;
-                default:
-                    return Undetermined(targetEntity, childId, decision.Reason, decision.Fault);
+                var owner = child.GetAttributeValue<EntityReference>(OwnerColumn);
+                if (owner is null || owner.Id == Guid.Empty)
+                    return Undetermined(targetEntity, childId, "the child's owner did not come back", null);
+
+                var decision = await MappingSourceCopyGate.DecideAsync(_sourceTable, source, owner, SecureTeamOnce, ct).ConfigureAwait(false);
+                switch (decision.Verdict)
+                {
+                    case MappingSourceCopyVerdict.Allowed:
+                        break;
+                    case MappingSourceCopyVerdict.Secure:
+                        _logger.LogInformation(
+                            "[FIELD-MAPPING-PUSH] {Target} {ChildId}: the source {Source} {SourceId} is secure and the record is not "
+                            + "owned by its isolation owner; nothing was written to it ({Code}).",
+                            targetEntity, childId, _sourceTable, _sourceId, NotIsolatedReasonCode);
+                        return NotIsolatedReasonCode;
+                    default:
+                        return Undetermined(targetEntity, childId, decision.Reason, decision.Fault);
+                }
             }
+
+            // Task 022c (the Restricted-source rule, as the create applies it): values mapped from a Restricted source, or from a
+            // source whose Access Permission cannot be read, are written only into a child that is Restricted.
+            if (!restricted || RecordCreationService.StoredRowIsRestricted(targetEntity, child))
+                return null;
+            if (access == RecordCreationService.MappingSourceAccess.Unreadable)
+            {
+                return Undetermined(targetEntity, childId,
+                    "the source's Access Permission could not be read and the record is not Restricted", null);
+            }
+
+            _logger.LogInformation(
+                "[FIELD-MAPPING-PUSH] {Target} {ChildId}: the source {Source} {SourceId} is Restricted and the record is not; "
+                + "nothing was written to it ({Code}).",
+                targetEntity, childId, _sourceTable, _sourceId, RestrictedSourceNotRestrictedReasonCode);
+            return RestrictedSourceNotRestrictedReasonCode;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -237,7 +287,11 @@ internal sealed class FieldMappingPushSourceGate
     private Task<(Guid? TeamId, string? Refusal)> SecureTeamOnce(CancellationToken ct) => _secureTeam ??= _secureOwnerTeam(ct);
 
     private async Task<Entity?> ReadSourceAsync(CancellationToken ct) =>
-        await _entities.RetrieveAsync(_sourceTable, _sourceId, MappingSourceCopyGate.SourceGateColumns(_sourceTable).ToArray(), ct)
+        await _entities.RetrieveAsync(_sourceTable, _sourceId,
+                MappingSourceCopyGate.SourceGateColumns(_sourceTable)
+                    .Concat(RecordCreationService.MappingSourceAccessColumns(_sourceTable))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(), ct)
             .ConfigureAwait(false);
 
     private string Undetermined(string targetEntity, Guid childId, string? reason, Exception? fault)

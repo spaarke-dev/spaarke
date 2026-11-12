@@ -141,8 +141,9 @@ public record PushFieldMappingsError
     /// Task 022 fix round 4: the stable code of a child the push does not write because of the mapping-source rule
     /// (<c>FieldMappingPushSourceGate</c>), one of <c>field_mapping.push.secure_source_not_isolated</c>,
     /// <c>field_mapping.push.secure_source_undetermined</c> and <c>field_mapping.push.secure_source_refile_not_allowed</c>
-    /// (a secure source's push would change what the child is filed under, UAC-r2 (a)); null for every other entry. Carried
-    /// on the apply and on the preview.
+    /// (a secure source's push would change what the child is filed under, UAC-r2 (a)), and, task 022c,
+    /// <c>field_mapping.push.restricted_source_not_restricted</c> (the source is Restricted and the child is not); null for every
+    /// other entry. Carried on the apply and on the preview.
     /// </summary>
     public string? ReasonCode { get; init; }
 }

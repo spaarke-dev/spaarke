@@ -32,7 +32,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// restamper and the service are the real code. Every update the service sends is recorded in <see cref="RepairWorld.Writes"/>.
 /// </remarks>
 [Trait("status", "new")]
-public sealed class RecordRepairModeTests
+public sealed partial class RecordRepairModeTests
 {
     private readonly RepairWorld _world = new();
 
@@ -1272,7 +1272,7 @@ public sealed class RecordRepairModeTests
 /// matter → event mapping profile; a person in the child unit who owns rows natively; an application user; a communication
 /// filed under the matter (its stamp source); each unit's search-index defaults.
 /// </summary>
-internal sealed class RepairWorld
+internal sealed partial class RepairWorld
 {
     public static readonly Guid Matter = Guid.Parse("a0160000-0000-4000-8000-000000000001");
     public static readonly Guid OtherMatter = Guid.Parse("a0160000-0000-4000-8000-000000000002");
@@ -1997,7 +1997,7 @@ internal sealed class RepairWorld
         Rules = [.. rules],
     };
 
-    private static FieldMappingRuleEntity Copy(string source, string target, int order) => new()
+    public static FieldMappingRuleEntity Copy(string source, string target, int order) => new()
     {
         Id = Guid.NewGuid(),
         Name = $"{source} -> {target}",

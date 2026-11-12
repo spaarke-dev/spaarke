@@ -351,9 +351,11 @@ internal sealed partial class RecordCreationService
                 return;
             }
 
-            // The source's own secure status (review F1-e (ii)) is read in the same one read as its mapped columns.
+            // The source's own secure status (review F1-e (ii)) and, task 022c, its Access Permission (where its table carries
+            // the column) are read in the same one read as its mapped columns.
             var sourceColumns = copyable
                 .Concat(SourceGateColumns(source.EntityLogicalName))
+                .Concat(MappingSourceAccessColumns(source.EntityLogicalName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             var read = await MappingSourceReadProbe.ReadAsync(
@@ -371,6 +373,20 @@ internal sealed partial class RecordCreationService
             if (!await SourceMayBeCopiedAsync(table, row, source, read.Record, ct).ConfigureAwait(false))
             {
                 report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceSecure));
+                return;
+            }
+
+            // Task 022c (the Restricted-source rule, as the create applies it): values mapped from a Restricted source, or from a
+            // source whose Access Permission cannot be read, are written only into a row that is Restricted. The row's answer is
+            // its stored value (Repair never maps sprk_accesspermission), held by the whole-row read: nothing more is read.
+            var sourceAccess = MappingSourceAccessOf(source.EntityLogicalName, read.Record);
+            if (sourceAccess is MappingSourceAccess.Restricted or MappingSourceAccess.Unreadable
+                && !StoredRowIsRestricted(table, row))
+            {
+                _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the mapping source {Source} {SourceId} is {Access} and the row " +
+                                       "is not Restricted; nothing was mapped", table, row.Id, source.EntityLogicalName,
+                    source.RecordId, sourceAccess);
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceRestricted));
                 return;
             }
 
@@ -1021,6 +1037,10 @@ internal static class RecordRepairReason
 
     /// <summary>Review F1-b: the row's filing resolves to the Secure team, which does not own the row yet — nothing is mapped.</summary>
     internal const string MappingSourceSecure = "record_repair.mapping_source_secure";
+
+    /// <summary>Task 022c: the mapping source's Access Permission is Restricted, or cannot be read, and the row is not Restricted
+    /// (<c>RecordCreationService.StoredRowIsRestricted</c>) — nothing is mapped.</summary>
+    internal const string MappingSourceRestricted = "record_repair.mapping_source_restricted";
 
     /// <summary>Review F1-b: the owner of what the row is filed under could not be decided — nothing is mapped (fail closed).</summary>
     internal const string MappingFilingUndecided = "record_repair.mapping_filing_undecided";
