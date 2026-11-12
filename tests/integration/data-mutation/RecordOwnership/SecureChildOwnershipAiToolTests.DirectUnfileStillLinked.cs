@@ -1,5 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -67,18 +69,60 @@ public sealed partial class SecureChildOwnershipAiToolTests
             .Should().Be(DirectUnfileContact);
     }
 
+    [Fact(DisplayName = "fm 054 piece 3b pass 2: the re-file route unfiling a Direct message grants, assigns, grants again, and only then runs the step after a re-file")]
+    public async Task RefileRoute_UnfilingADirectMessage_GrantsAssignsGrants_ThenRunsTheStepAfterTheRefile()
+    {
+        _world.WithMessageFiledUnder(OrdinaryMatter, Directory.ChildBu, Directory.ChildTeam);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectUnfileTeam).Lookup();
+        var calls = new List<string>();
+        var step = DirectUnfileStep(lookup, new List<Guid>(), calls);
+        var threads = new Mock<IThreadResolver>();
+        threads
+            .Setup(t => t.ReconcileThreadForFilingAsync(
+                It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(),
+                It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("step after the re-file"))
+            .Returns(Task.CompletedTask);
+        var http = HttpContextOfCaller();
+        http.RequestServices = new Microsoft.Extensions.DependencyInjection.ServiceCollection()
+            .AddSingleton(step).BuildServiceProvider();
+
+        var result = await Sprk.Bff.Api.Api.ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", DirectUnfileMessage, Payload(new() { ["sprk_RegardingMatter@odata.bind"] = null }), _user,
+            _world.Resolver(directMessageOwnerTeam: lookup), Restamper(), Children(threads.Object), http,
+            NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent);
+        _world.Row("sprk_communication", DirectUnfileMessage).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(DirectUnfileTeam);
+        calls.Should().Equal("grant", "assign sprk_communication", "grant", "step after the re-file");
+    }
+
     /// <summary>The real step over the directory: rows read by id, grants recorded.</summary>
-    private DirectMessageOwnerStep DirectUnfileStep(DirectMessageOwnerTeam lookup, List<Guid> grants)
+    private DirectMessageOwnerStep DirectUnfileStep(DirectMessageOwnerTeam lookup, List<Guid> grants, List<string>? calls = null)
     {
         var dataverse = new Mock<IGenericEntityService>();
         dataverse
             .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
                 q.Criteria.Conditions.Any(c => c.AttributeName == q.EntityName + "id") ? _world.Answer(q) : new EntityCollection());
+        dataverse
+            .Setup(d => d.UpdateIfRowVersionMatchesAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string, Dictionary<string, object>, CancellationToken>((table, id, version, fields, _) =>
+            {
+                calls?.Add("assign " + table);
+                _world.UpdateIfVersion(table, id, version, fields);
+            })
+            .Returns(Task.CompletedTask);
         var access = new Mock<IDirectThreadAccessService>();
         access
             .Setup(a => a.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, ThreadAssignment, CancellationToken>((id, _, _) => grants.Add(id))
+            .Callback<Guid, ThreadAssignment, CancellationToken>((id, _, _) =>
+            {
+                grants.Add(id);
+                calls?.Add("grant");
+            })
             .Returns(Task.CompletedTask);
         return new DirectMessageOwnerStep(access.Object, dataverse.Object, lookup, NullLogger<DirectMessageOwnerStep>.Instance);
     }
