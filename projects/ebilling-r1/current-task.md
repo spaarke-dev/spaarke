@@ -18,7 +18,7 @@
 >   - The ontology K4 comment fix.
 >   - Deferred issue: Invoice Review doesn't poll while `firmNeeded`.
 >   - 084 via task-execute (split per EB-D-217: 084 → 084a → 084b → 084c; 084d after 084 and 084b, opus, its design to ontology-r1 first).
-> - **word-add-in-r1** was sent the dev sha `6dbe69b9e2` (2026-11-12; a superset of `b3ca99cad5`).
+> - **word-add-in-r1** is owed the dev sha `6dbe69b9e2` (a superset of `b3ca99cad5`); it was not reachable on 2026-11-12, so send it when it is.
 
 ## Quick recovery
 
