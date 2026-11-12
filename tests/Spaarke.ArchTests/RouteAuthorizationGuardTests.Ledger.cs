@@ -287,6 +287,11 @@ public partial class RouteAuthorizationGuardTests
             + "reassign step landed. Then every action's preflight checks the caller's own rights before any "
             + "write (a missing right is 403). Core record and item subject are derived server-side from the Signal, never the body; "
             + "the Decision Record's owning team is the ownership resolver's answer for the core and every resolved Signal's subject (D-129)."),
+        new GovernedFile("Api/Mcp/McpEndpoints.cs", Scope.RouteLevelGate,
+            "POST /mcp/legal-operations (spaarkeai-mcp-bff-api-r1 task 020, FR-01): the stateless MCP Streamable HTTP endpoint, registered with the "
+            + "SDK's MapMcp on the application root. The route's own gate is .RequireAuthorization() on the default workforce scheme (signed-in only: "
+            + "no record id in the URL or the transport envelope); the tool a call names decides what is read, and every tool runs as the caller. "
+            + "Per-tool policies, the A10 refusals and the tools/list annotation checks are task 021's (see the interim Pending waiver)."),
         new GovernedFile("Api/Signals/SignalReadEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/v1/signals/worklist (ontology platform R1 task 038, D-15, FR-54) -- the worklist's only Signal reader. The "
             + "record-level decision is SignalReadService.ReadAsync, every row-visibility read AS THE CALLER through IDataverseUserClient: "
@@ -1197,7 +1202,11 @@ public partial class RouteAuthorizationGuardTests
     // /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome on the
     // external collaboration group. Classified by GovernedFiles (GroupGated: AddFirmOutcomeAuthorizationFilter, credited above);
     // .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 152;
+    //
+    // 152 -> 153 (2026-11-12, spaarkeai-mcp-bff-api-r1 task 020, FR-01). Net +1: Api/Mcp/McpEndpoints.cs ADDED -- POST /mcp/legal-operations,
+    // the stateless MCP endpoint, counted once the census vocabulary learned MapMcp (the SDK's MCP registration form). Classified by
+    // GovernedFiles (RouteLevelGate) and one interim Pending waiver owned by task 021, which replaces it with the per-tool policy ledger.
+    private const int ExpectedEndpointFileCount = 153;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1543,6 +1552,15 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("AddEndpointFilter<DocumentEmailIdentityFilter>", "Word add-in task 120: resolves an email's message id to its saved .eml document id; the route's decision is its AddDocumentAuthorizationFilter."),
         new NotAuthorizationForm("AddEndpointFilter(lambda)", "The one inline filter (OfficeEndpoints.cs:1521) validates Guid.Empty. An inline lambda is NEVER credited."),
         new NotAuthorizationForm("WithMetadata(new RequestSizeLimitAttribute)", "A request body size limit on the Compose save/mount routes."),
+        new NotAuthorizationForm("AddEndpointFilter(DisableResponseBufferingAsync)",
+            "spaarkeai-mcp-bff-api-r1 task 020: turns off response buffering so the MCP transport can stream an SSE answer "
+            + "(McpEndpoints.cs, IHttpResponseBodyFeature.DisableBuffering, then next). No I/O; decides nothing."),
+        new NotAuthorizationForm("RequireMcpEnabled",
+            "spaarkeai-mcp-bff-api-r1 task 020: the MCP kill switch (McpEnabledFilter, ADR-032 P3) answers 503 mcp.disabled when Mcp:Enabled is "
+            + "false. Chained AFTER .RequireAuthorization(), so an anonymous caller still gets 401; decides nothing about who may act on what."),
+        new NotAuthorizationForm("WithMetadata(new McpAreaMetadata)",
+            "spaarkeai-mcp-bff-api-r1 task 020: endpoint METADATA naming the product area the route serves (/mcp/{area}); McpModule reads it to "
+            + "choose the route's tool set. Not a filter; decides nothing."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateCreateEventRequestAsync)",
             "Task 159: POST /api/v1/events request SHAPE only (EventEndpoints.cs:201-214, no I/O), run BEFORE the route's "
             + "RecordRouteAccessAuthorizationFilter so a 400 never becomes a 403; it decides nothing about any record."),
@@ -3292,6 +3310,13 @@ public partial class RouteAuthorizationGuardTests
         // prvCreatesprk_Todo, so their waivers are deleted (close-project is sweep S-39, resolved in the ledger); the DELETE
         // pin's 404-vs-403 split is gone, so its Pending waiver became the Permanent OwnerComparison below in the diff that
         // landed the fix (maintenance rule 4's one sanctioned exception, named by owner round 12 item 4).
+
+        // ---------- task 020: the MCP endpoint, interim until task 021 ----------
+        Pending("POST /mcp/legal-operations", "021", Gap.NoDecision,
+            "[low] Signed-in only (.RequireAuthorization(), McpEndpoints.cs:42): the route itself takes no record id and, in task 020, serves "
+            + "NO production tool (only a test probe in the contract tests), so nothing is read. Task 021 adds the per-tool policies, the "
+            + "A10 refusal of CIAM and home-directory tokens, and the ledger entries, and replaces this waiver. Do not add a tool "
+            + "before it does."),
 
         // ---------- P:ReferenceData ----------
         Permanent("GET /api/ai/capabilities", PermanentBasis.ReferenceData, "167",

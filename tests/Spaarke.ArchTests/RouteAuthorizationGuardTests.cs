@@ -87,7 +87,7 @@ public partial class RouteAuthorizationGuardTests
     // THE SCOPE BOUNDARY
     // ---------------------------------------------------------------------------------------------
     // EVERY file the census finds (EndpointFiles(): every non-obj/bin .cs file under Sprk.Bff.Api that
-    // registers a route with Map{Verb}, MapMethods or MapHealthChecks) is in GovernedFiles, and the two sets
+    // registers a route with Map{Verb}, MapMethods, MapHealthChecks or MapMcp) is in GovernedFiles, and the two sets
     // are equal — TheEndpointFileCensusIsPinned asserts it. Rule A applies to every live route of every one
     // of them. There is no "NotGoverned" and no file-level exemption any more: task 074's HandlerAuthorized
     // scope is RETIRED, because it is how eight Compose files and the external data plane sat outside Rule A
@@ -117,6 +117,9 @@ public partial class RouteAuthorizationGuardTests
     private static readonly IReadOnlySet<string> PendingOwners = new HashSet<string>(StringComparer.Ordinal)
     {
         "159", "160", "161", "162", "163", "164", "165", "166", "UNOWNED-NEW",
+        // spaarkeai-mcp-bff-api-r1 task 021 (2026-11-12): the interim waiver on POST /mcp/legal-operations until 021 credits it
+        // through the Decision capability's own authorization (a mapped MCP route carries no per-resource filter of its own).
+        "021",
     };
 
     // =============================================================================================
@@ -2528,7 +2531,7 @@ public partial class RouteAuthorizationGuardTests
         foreach (var file in GovernedFiles)
         {
             var code = Real.Set.Get(file.RelativePath)!.Code;
-            var expected = Regex.Matches(code, @"\.\s*Map(?:Get|Post|Put|Patch|Delete|Methods|HealthChecks)\s*\(").Count;
+            var expected = Regex.Matches(code, @"\.\s*Map(?:Get|Post|Put|Patch|Delete|Methods|HealthChecks|Mcp)\s*\(").Count;
             var actual = ScanFile(file.RelativePath).Select(r => (r.Line, r.RouteLiteral)).Distinct().Count();
             if (expected != actual)
             {
@@ -2581,7 +2584,7 @@ public partial class RouteAuthorizationGuardTests
     // =============================================================================================
     // THE THREE SHAPES THAT WOULD FAIL OPEN — refused outright (task 167 r1 findings 3 and 4; r2 finding 2)
     // ---------------------------------------------------------------------------------------------
-    // The scanner reads fluent chains of Map{Verb} / MapMethods / MapHealthChecks / MapGroup. Three things could
+    // The scanner reads fluent chains of Map{Verb} / MapMethods / MapHealthChecks / MapMcp / MapGroup. Three things could
     // put an anonymous or unread route surface beside it without it noticing, and all three fail OPEN, so all
     // three are refused rather than stated as residuals:
     //   - Anonymity carried by an ATTRIBUTE ([AllowAnonymous] on a lambda or a handler method,
@@ -2660,7 +2663,7 @@ public partial class RouteAuthorizationGuardTests
     /// <summary>The registration vocabulary the scanner reads (plus MapGroup, which it follows).</summary>
     private static readonly IReadOnlySet<string> ReadRegistrationVocabulary = new HashSet<string>(StringComparer.Ordinal)
     {
-        "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete", "MapMethods", "MapHealthChecks", "MapGroup",
+        "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete", "MapMethods", "MapHealthChecks", "MapMcp", "MapGroup",
     };
 
     /// <summary>ASP.NET Core registration APIs the scanner does not read — refused even if something in src/server
@@ -2773,7 +2776,7 @@ public partial class RouteAuthorizationGuardTests
         Assert.True(
             violations.Count == 0,
             "These calls register routes (or may) in a form outside the scanner's vocabulary (Map{Verb}, MapMethods, "
-            + "MapHealthChecks, MapGroup). Their routes would be invisible to the census and to Rule A. Teach the scanner "
+            + "MapHealthChecks, MapMcp, MapGroup). Their routes would be invisible to the census and to Rule A. Teach the scanner "
             + "the form (RouteAuthorizationGuardTests.Scanner.cs) and the census vocabulary first, with a control.\n\n  "
             + string.Join("\n  ", violations));
     }
@@ -5506,6 +5509,61 @@ public partial class RouteAuthorizationGuardTests
             Assert.False(routes[0].Unparseable, routes[0].Problem);
             Assert.Empty(AnonymousByOmissionViolations(routes));
         }
+    }
+
+    [Fact(DisplayName = "spaarkeai-mcp-bff-api-r1 controls: MapMcp is read like any route — without RequireAuthorization it fails; with it, it passes")]
+    public void MapMcp_Controls_ReadAsARouteAndJudgedByRuleA()
+    {
+        // The shape the SDK registration takes in the BFF: an extension on the application root, a same-file const path,
+        // the sign-in requirement and a non-authorization filter chained on the MapMcp call itself.
+        static List<RouteRegistration> Scan(string chain) => ScanFixtures(new[]
+        {
+            ("Api/Mcp/FakeMcpEndpoints.cs",
+                "public static class FakeMcpEndpoints\n{\n    public const string Route = \"/mcp/zz-fixture\";\n\n"
+                + "    public static void MapFakeMcp(this WebApplication app)\n    {\n"
+                + "        app.MapMcp(Route)" + chain + ";\n    }\n}"),
+            ("Program.cs", "var app = builder.Build();\napp.MapFakeMcp();"),
+        }, "Api/Mcp/FakeMcpEndpoints.cs");
+
+        var waiver = Permanent("POST /mcp/zz-fixture", PermanentBasis.CallerSuppliedContentOnly, "001",
+            "Seeded by MapMcp_Controls_ReadAsARouteAndJudgedByRuleA: an echo-only fixture route; FakeMcpEndpoints.cs:7.");
+
+        // MUST FIRE: MapMcp with no RequireAuthorization. It is a real, resolved route (not a parse failure), Rule A names
+        // it, and the omission rule names it even under a waiver that satisfies Rule A.
+        foreach (var chain in new[] { string.Empty, ".AddEndpointFilter(DisableResponseBufferingAsync)" })
+        {
+            var bare = Assert.Single(Scan(chain));
+            Assert.False(bare.Unparseable, bare.Problem);
+            Assert.Equal("POST /mcp/zz-fixture", bare.Key);
+            Assert.False(bare.Anonymous);
+            var assessed = Assess(bare, Array.Empty<HandlerDecision>());
+            Assert.Equal(Credit.None, assessed.Credit);
+            Assert.Contains(RuleAViolations(new[] { assessed }, Array.Empty<Waiver>()),
+                v => v.StartsWith("POST /mcp/zz-fixture\n      at Api/Mcp/FakeMcpEndpoints.cs:7 ", StringComparison.Ordinal));
+            Assert.Empty(RuleAViolations(new[] { assessed }, new[] { waiver }));
+            Assert.Contains(AnonymousByOmissionViolations(new[] { bare }),
+                v => v.StartsWith("POST /mcp/zz-fixture\n      at Api/Mcp/FakeMcpEndpoints.cs:7 ", StringComparison.Ordinal));
+        }
+
+        // MUST NOT FIRE: the real chain shape, MapMcp(...).RequireAuthorization().AddEndpointFilter(...). Sign-in is read
+        // from the chain, so the omission rule passes; Rule A still applies like any signed-in-only route — it passes with
+        // the route's waiver and names the route without one.
+        var gated = Assert.Single(Scan(".RequireAuthorization().AddEndpointFilter(DisableResponseBufferingAsync)"));
+        Assert.False(gated.Unparseable, gated.Problem);
+        Assert.Equal("POST /mcp/zz-fixture", gated.Key);
+        Assert.Contains("RequireAuthorization()", gated.Forms);
+        Assert.Empty(AnonymousByOmissionViolations(new[] { gated }));
+        var gatedAssessment = Assess(gated, Array.Empty<HandlerDecision>());
+        Assert.Empty(RuleAViolations(new[] { gatedAssessment }, new[] { waiver }));
+        Assert.Single(RuleAViolations(new[] { gatedAssessment }, Array.Empty<Waiver>()));
+
+        // MapMcp is in the read vocabulary and the census pattern; a MapMcp() with no path is a problem, never a guessed route.
+        Assert.Empty(UnreadRegistrationViolations(
+            new[] { new SourceUnit("Api/Mcp/FakeMcpEndpoints.cs", "app.MapMcp(\"/mcp/zz\").RequireAuthorization();") },
+            new HashSet<string>(StringComparer.Ordinal)));
+        Assert.Matches(RegistrationCall, CodeOf("app.MapMcp(\"/mcp/zz\").RequireAuthorization();"));
+        var noPath = Assert.Single(ScanText("Api/Mcp/NoPath.cs", new[] { "        app.MapMcp().RequireAuthorization();" }));
+        Assert.True(noPath.Unparseable);
     }
 
     // =============================================================================================
