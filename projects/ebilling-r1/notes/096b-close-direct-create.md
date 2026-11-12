@@ -74,3 +74,18 @@ Fix round (EB-D-201, lead decisions of 2026-11-07):
 - `secureChildRibbonScript.test.ts`: an invoice offers no platform "+ New" and shows the wizard command on a root read as not secure, on a child host and on a party host, with no flag read (must fire); a to-do keeps the platform one (must not fire); an unsaved host and the AP export batch offer no "New".
 - `FeatureRolePrivilegeGuardTests`: the invoice Create row is kept and re-cited to R1 and R4; the Append row is kept until D3.
 - `scripts/Deploy-SecureChildNewCommands.ps1 -Verify`: reads the live ribbon hides (`ribbondiffs`, unmanaged) of the five platform "New" locations of `sprk_billingevent` and `sprk_invoice`; a subgrid is "ok" only when the live hides are present, a missing hide fails, and a read that fails is reported UNVERIFIED (exit 2), never ok. Not run here (no live call).
+
+## Dev apply, 2026-11-11 (owner go typed in the ebilling session; uac-r2 notified before and after)
+
+Triggered by uac-r2's SecureChild `-Verify` after the dev BFF deploy `b3ca99cad5`: 10 FAILs, all from 096b's invoice side. Native invoice New was still open on dev.
+
+1. `scripts/Deploy-SecureChildNewCommands.ps1 -Apply` with a fresh, unmodified export of `SpaarkeSecureChildRibbons`. `secure_child_ribbon.js` was updated, then a scoped publish (9 entities, 1 web resource).
+2. A scoped import (`Invoke-ScopedSolutionImport`) of the same package, with `Entities/sprk_Invoice/RibbonDiff.xml` replaced by master's SpaarkeMaster copy. It was checked first to keep every live line; it adds only the two `sprk_invoice` StringParameters and 12 hides.
+   - The script's own stale-export guard refuses the combined run, because the rule change looks like drift to it; that is why this ran as a separate import.
+   - The first pass ran without `--force-overwrite` and did not update the two existing EnableRules. The second pass used the helper's default `--force-overwrite` and did.
+3. The owner also approved restoring task 029's seven invoice Activate / Deactivate / Re-activate hides (`ac920d4184`). They were missing on dev; most likely an earlier whole-ribbon import of `sprk_invoice` dropped them.
+
+Read-backs:
+- `Deploy-SecureChildNewCommands.ps1 -Verify` exits 0.
+- `sprk_invoice` has 12 stored `sprk.Mscrm.*` hide rows.
+- `Deploy-EbillingBillingEventRibbon.ps1 -Verify` still passes.
