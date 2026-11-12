@@ -190,6 +190,7 @@ public class RecordProcedureReadService
 
     private const int MaxInValues = 500;
     private const int PageSize = 5000;
+    private const string QueryFirmSource = "Query";
     private const string BillingFirmColumn = "sprk_billingfirm";
     private const string CreatedByPersonColumn = "sprk_createdbyperson";
     private const string RuleSetSet = "sprk_rulesets";
@@ -328,7 +329,7 @@ public class RecordProcedureReadService
         }
 
         var billingFirm = core.GetAttributeValue<EntityReference>(BillingFirmColumn)?.Id;
-        var (firm, source) = firmId is { } chosen && chosen != Guid.Empty ? (chosen, "Query")
+        var (firm, source) = firmId is { } chosen && chosen != Guid.Empty ? (chosen, QueryFirmSource)
             : billingFirm is { } own && own != Guid.Empty ? (own, "Record")
             : ((Guid?)null, "None");
 
@@ -470,7 +471,7 @@ public class RecordProcedureReadService
             .ToList();
         var gapViews = onDate.Gaps.Select(g => BuildGap(r, g)).ToList();
         return new RecordProceduresView(
-            RecordView(r, r.RecordId), r.Date, FirmOf(r, r.FirmId), r.FirmSource, ordered, gapViews);
+            RecordView(r, r.RecordId), r.Date, ResolvedFirmOf(r), r.FirmSource, ordered, gapViews);
     }
 
     private static int StatusOrder(string status) => status switch { "InForce" => 0, "Gap" => 1, "NotYetInForce" => 2, _ => 3 };
@@ -486,6 +487,7 @@ public class RecordProcedureReadService
         Reading r, ProcedureRow procedure, string status, AppliedProcedure? applied, IReadOnlyList<ProcedureOverrideRow> decisive)
     {
         r.Expose(ProcedureEntity.EntitySet, procedure.Id);
+        ExposeVersionsOf(r, procedure.Id);
         var sources = SourcesOf(r, procedure);
         var level = sources.Count == 0 ? ProcedureLevel.AllRecords : LevelOf(sources[0]);
 
@@ -504,7 +506,7 @@ public class RecordProcedureReadService
             .Select(o => OverrideView(r, o, decisiveIds.Contains(o.RowId)))
             .ToList();
         return new ProcedureListItem(
-            procedure.Id, procedure.Name, "Billing", TypeName(r, procedure.Id), procedure.AppliesTo.ToString(), FirmOf(r, procedure.FirmId),
+            procedure.Id, procedure.Name, "Billing", TypeName(r, procedure.Id), procedure.AppliesTo.ToString(), FirmOf(r, procedure.FirmId, FirmOrigin.Lookup),
             status, level.ToString(), sources, versionInForce, applied?.Pinned ?? false, newer, overrides);
     }
 
@@ -561,6 +563,19 @@ public class RecordProcedureReadService
             row.RowId, row.Mode.ToString(), decisive, row.Distance, ChainRecordOf(r, row.ChainRecord), row.Reason, pinned, newer, StampOf(r, row));
     }
 
+    /// <summary>
+    /// Exposes EVERY version of a Procedure the answer shows (fix round 3, F-B). What the answer says about a Procedure derives from its whole
+    /// version set, not from the version it picked: <c>NotYetInForce</c>, the gap kinds <c>HoleBetweenVersions</c> and <c>AfterLastVersion</c>,
+    /// an absent <c>NewerVersion</c> and the version chosen for a date are each decided by versions that are not shown.
+    /// </summary>
+    private static void ExposeVersionsOf(Reading r, Guid procedureId)
+    {
+        foreach (var version in r.Rows.Versions.Where(v => v.ProcedureId == procedureId))
+        {
+            r.Expose(ProcedureEntity.VersionEntitySet, version.Id);
+        }
+    }
+
     /// <summary>The newest version in force (Active or Superseded, with a window) that is newer than version <paramref name="number"/>, or null: what a pin skips.</summary>
     private ProcedureVersionView2? NewerThan(Reading r, Guid procedureId, int number) =>
         VersionView(r, r.Rows.Versions
@@ -590,6 +605,7 @@ public class RecordProcedureReadService
     private ProcedureGapView BuildGap(Reading r, ProcedureGap gap)
     {
         r.Expose(ProcedureEntity.EntitySet, gap.ProcedureId);
+        ExposeVersionsOf(r, gap.ProcedureId);
         var decisiveIds = gap.Overrides.Select(o => o.RowId).ToHashSet();
         return new ProcedureGapView(
             gap.ProcedureId, gap.ProcedureName, gap.Kind.ToString(), gap.WorkDate, GapText(gap),
@@ -643,7 +659,7 @@ public class RecordProcedureReadService
         }
 
         return new RecordRulesInForceView(
-            RecordView(r, r.RecordId), r.Date, FirmOf(r, r.FirmId), r.FirmSource, views, onDate.Gaps.Select(g => BuildGap(r, g)).ToList());
+            RecordView(r, r.RecordId), r.Date, ResolvedFirmOf(r), r.FirmSource, views, onDate.Gaps.Select(g => BuildGap(r, g)).ToList());
     }
 
     /// <summary>Exposes override rows that decided something the answer shows (or omits), and the chain record each sits on.</summary>
@@ -667,7 +683,7 @@ public class RecordProcedureReadService
             var exclude = slot.Exclude;
             r.Expose(PolicySet, slot.BasePolicyId);
             marks.Add(new RuleMarkView(
-                "Changed", exclude?.Reason, FirmOf(r, exclude?.FirmId), exclude?.Distance ?? slot.ChainRecord.Distance, ChainRecordOf(r, slot.ChainRecord),
+                "Changed", exclude?.Reason, FirmOf(r, exclude?.FirmId, FirmOrigin.Lookup), exclude?.Distance ?? slot.ChainRecord.Distance, ChainRecordOf(r, slot.ChainRecord),
                 exclude is null ? null : StampOf(r, exclude), exclude?.RowId, rule.Version.PolicyId, basedOn, current, slot.BasePolicyCode,
                 baseVersion is null ? null : await SummaryAsync(r, baseVersion, ct).ConfigureAwait(false)));
             if (exclude is not null)
@@ -691,7 +707,7 @@ public class RecordProcedureReadService
         {
             r.Expose(ProcedureAssignmentEntity.EntitySet, o.RowId);
             return new RuleMarkView(
-                "Excluded", o.Reason, FirmOf(r, o.FirmId), o.Distance, ChainRecordOf(r, o.ChainRecord), StampOf(r, o), o.RowId);
+                "Excluded", o.Reason, FirmOf(r, o.FirmId, FirmOrigin.Lookup), o.Distance, ChainRecordOf(r, o.ChainRecord), StampOf(r, o), o.RowId);
         }).ToList();
         return await RuleViewAsync(
             r, excluded.Version, excluded.Procedure, excluded.Version.PolicyCode, inForce: false, recordRule: false, marks, ct).ConfigureAwait(false);
@@ -708,6 +724,7 @@ public class RecordProcedureReadService
         r.Expose(PolicyVersionSet, version.PolicyVersionId);
         r.Expose(RuleSetSet, version.RuleSetId);
         r.Expose(ProcedureEntity.EntitySet, applied.ProcedureId);
+        ExposeVersionsOf(r, applied.ProcedureId);
         // Pinned, Level and Distance below derive from the rows that decided the Procedure (EB-D-218: the caller must be able to Read them).
         ExposeOverrides(r, applied.Overrides);
         var procedureVersion = r.Rows.Versions.FirstOrDefault(v => v.Id == applied.ProcedureVersionId);
@@ -716,7 +733,7 @@ public class RecordProcedureReadService
             code, version.ShortHeadline, RuleTypeName(version.RuleType), await SummaryAsync(r, version, ct).ConfigureAwait(false), version.VersionNumber,
             version.InForceFrom, inForce, recordRule, version.RuleSetId,
             new RuleProcedureView(applied.ProcedureId, applied.ProcedureName, VersionView(r, procedureVersion), applied.Pinned),
-            applied.Rank.Level.ToString(), applied.Rank.Distance, FirmOf(r, firm), marks);
+            applied.Rank.Level.ToString(), applied.Rank.Distance, FirmOf(r, firm, FirmOrigin.Lookup), marks);
     }
 
     /// <summary>
@@ -749,10 +766,7 @@ public class RecordProcedureReadService
 
         var baseCodes = (await ReadByIdsAsync(BillingFactLoader.PolicyEntity, orphans.Select(o => o.Exclude.PolicyId!.Value), ["sprk_policycode"], ct).ConfigureAwait(false))
             .ToDictionary(x => x.Id, x => x.GetAttributeValue<string>("sprk_policycode"));
-        var latest = orphans.ToDictionary(
-            o => o.RecordRuleId,
-            o => r.Rows.PolicyVersions.Where(v => v.PolicyId == o.RecordRuleId)
-                .OrderByDescending(v => v.InForceFrom).ThenByDescending(v => v.VersionNumber).ThenByDescending(v => v.PolicyVersionId).First());
+        var latest = orphans.ToDictionary(o => o.RecordRuleId, o => CurrentEpisodeVersion(r, o.RecordRuleId, o.Exclude));
         var basedOnIds = latest.Values.Where(v => v.BasedOnVersionId is not null).Select(v => v.BasedOnVersionId!.Value);
         var basedOnNumbers = (await ReadByIdsAsync(BillingFactLoader.VersionEntity, basedOnIds, ["sprk_versionnumber"], ct).ConfigureAwait(false))
             .ToDictionary(x => x.Id, x => x.GetAttributeValue<int?>("sprk_versionnumber") ?? 0);
@@ -762,6 +776,8 @@ public class RecordProcedureReadService
         {
             var basePolicy = exclude.PolicyId!.Value;
             var version = latest[recordRuleId];
+            // basedOn (shown in both marks) is read from this version row, so the row itself is part of what the caller must be able to Read (fix round 3, F-A).
+            r.Expose(PolicyVersionSet, version.PolicyVersionId);
             PolicyVersionRefView? basedOn = version.BasedOnVersionId is { } b && basedOnNumbers.TryGetValue(b, out var number)
                 ? new PolicyVersionRefView(r.Expose(PolicyVersionSet, b), number) : null;
             // The base rule's own catalogue code (fail closed to blank if it is missing or itself a record-rule code), as a reader sees a record rule.
@@ -772,15 +788,40 @@ public class RecordProcedureReadService
             r.Expose(ProcedureAssignmentEntity.EntitySet, exclude.RowId);
             var stamp = StampOf(r, exclude);
             var chainRecord = ChainRecordOf(r, exclude.ChainRecord);
+            var firmView = FirmOf(r, exclude.FirmId, FirmOrigin.Lookup);
             views.Add(new RuleInForceView(
-                recordRuleId, null, code, null, null, null, null, null, InForce: false, RecordRule: true, setId, null, null, null, FirmOf(r, exclude.FirmId),
+                recordRuleId, null, code, null, null, null, null, null, InForce: false, RecordRule: true, setId, null, null, null, firmView,
                 [
-                    new RuleMarkView("Changed", exclude.Reason, FirmOf(r, exclude.FirmId), exclude.Distance, chainRecord, stamp, exclude.RowId, recordRuleId, basedOn, null, code),
+                    new RuleMarkView("Changed", exclude.Reason, firmView, exclude.Distance, chainRecord, stamp, exclude.RowId, recordRuleId, basedOn, null, code),
                     new RuleMarkView("BaseRetired", RecordRuleId: recordRuleId, BasedOn: basedOn, BaseCode: code),
                 ]));
         }
 
         return views;
+    }
+
+    /// <summary>
+    /// The version of a record rule the resolver would count, as <c>ProcedureResolution.RecordRuleVersionOn</c> counts it (fix round 3, K2): only the
+    /// versions of the CURRENT episode (created on or after the change's Exclude row; with no <c>createdon</c> on the row every version counts, and
+    /// a version with none does not count beside a known boundary), then the latest in force on the date (effective-from, then number, then id).
+    /// A record rule keeps its policy across a removal and a new change, so an older episode's version must never be shown. When the change is
+    /// not yet in force on the date (no version of the episode is), its first version names what it was based on. A known boundary that no
+    /// version reaches is the resolver's own fault state and is a fault here too (503, never a guess).
+    /// </summary>
+    private static ResolvedPolicyVersion CurrentEpisodeVersion(Reading r, Guid recordRuleId, ProcedureOverrideRow exclude)
+    {
+        var all = r.Rows.PolicyVersions.Where(v => v.PolicyId == recordRuleId).ToList();
+        var episode = exclude.CreatedOn is { } start ? all.Where(v => v.CreatedOn is { } created && created >= start).ToList() : all;
+        if (episode.Count == 0)
+        {
+            throw new ProcedureResolutionFaultException(
+                $"Record rule {recordRuleId} has {all.Count} Published version(s) but none was created on or after its change's Exclude row {exclude.RowId}.");
+        }
+
+        return episode.Where(v => ProcedureResolution.InForceOn(v.InForceFrom, r.Date))
+                   .OrderByDescending(v => v.InForceFrom).ThenByDescending(v => v.VersionNumber).ThenByDescending(v => v.PolicyVersionId)
+                   .FirstOrDefault()
+               ?? episode.OrderBy(v => v.InForceFrom).ThenBy(v => v.VersionNumber).ThenBy(v => v.PolicyVersionId).First();
     }
 
     private PolicyVersionRefView? PolicyVersionRef(Reading r, Guid? versionId)
@@ -818,14 +859,32 @@ public class RecordProcedureReadService
         return new ChainRecordView(link.Table, link.Id, r.RecordNames.GetValueOrDefault(link.Id), link.Distance);
     }
 
-    private FirmView? FirmOf(Reading r, Guid? id)
+    /// <summary>Where a firm id in the answer came from (EB-D-218, fix round 3 F-D): this decides whether the caller's Read on the firm is asked.</summary>
+    private enum FirmOrigin
+    {
+        /// <summary>A lookup value on a row that is already in the checked set (the record's billing firm, <c>sprk_firm</c> on a Procedure, an override row or a rule set): its id and name come with that row's own read, so the organization is not asked.</summary>
+        Lookup,
+
+        /// <summary>The caller's <c>?firmId=</c>: nothing else vouches for it, so asking about the organization is the only thing that stops the parameter being a firm-existence and firm-name oracle.</summary>
+        Query,
+    }
+
+    /// <summary>The route's own firm: asked when the caller named it (<see cref="FirmOrigin.Query"/>), not when it is the record's billing firm.</summary>
+    private FirmView? ResolvedFirmOf(Reading r) =>
+        FirmOf(r, r.FirmId, r.FirmSource == QueryFirmSource ? FirmOrigin.Query : FirmOrigin.Lookup);
+
+    private FirmView? FirmOf(Reading r, Guid? id, FirmOrigin origin)
     {
         if (id is not { } firm || firm == Guid.Empty)
         {
             return null;
         }
 
-        r.Expose(OrganizationSet, firm);
+        if (origin == FirmOrigin.Query)
+        {
+            r.Expose(OrganizationSet, firm);
+        }
+
         return new FirmView(firm, r.FirmNames.GetValueOrDefault(firm));
     }
 
