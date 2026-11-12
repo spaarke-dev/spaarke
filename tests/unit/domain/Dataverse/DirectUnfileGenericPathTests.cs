@@ -17,6 +17,8 @@ using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Services.Communication;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Xunit;
 using FakeDirectory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
@@ -261,19 +263,28 @@ public class DirectUnfileGenericPathTests
     }
 
     [Fact]
-    public async Task UpdateHandler_MovedFromASecureRecordToAContact_ThenTheContactCleared_MovesTheMessage_AndRunsTheSecureChildReconcile()
+    public async Task UpdateHandler_MovedFromASecureRecordToAContact_ThenTheContactCleared_MovesTheMessage_AndTheSecureChildReconcileTakesItsMirrorOff()
     {
         var world = World().WithSecureRoot("sprk_matter", SecureMatterId)
             .WithMessageFiledUnder(SecureMatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
             .CreatedBy(Creator)
             .WithRecord(AttachmentTable, AttachmentId, FakeDirectory.SecureBu, owningTeam: FakeDirectory.SecureNamedTeam, extra: AttachmentOf());
         var threads = ThreadReconciles();
-        var (handler, _) = UpdateHandler(world, Resolved(), threads: threads.Object, shares: FullRightsFor(Person));
+        // The reconcile reads the message from its own store, which the Direct step's owner write reaches too.
+        var shareWorld = SecureChildShareWorld.Standard();
+        var shareTable = new FakeRecordShareTable();
+        var children = SecureChildShareWorld.ReconcilerOver(() => shareWorld, shareTable, null!, threads: threads.Object);
+        var (handler, _) = UpdateHandler(world, Resolved(), shares: FullRightsFor(Person), children: children,
+            afterOwnerWrite: (table, id, team) => shareWorld.Set(table, id, "owningteam", new EntityReference("team", team)));
 
         await handler.UpdateAsync("sprk_communication", MessageId, ToAContact(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
             impersonateSystemUserId: Person);
         OwningTeam(world).Should().Be(FakeDirectory.SecureNamedTeam);
         _calls.Clear();
+
+        // As the first write left it: owned by the Secure team, linked to the contact, carrying its secure record's sharee.
+        shareWorld.SecureChild("sprk_communication", MessageId, ("sprk_regardingperson", "contact", ContactId));
+        shareTable.Seed("sprk_communication", MessageId, DataversePrincipalRef.User(Sharee), CollaborateMask);
 
         // The contact is cleared by the message's creator, whom F3 admits.
         await handler.UpdateAsync("sprk_communication", MessageId, ClearTheContact(), ConcurrencyMode.None, maxRetries: 1,
@@ -284,7 +295,12 @@ public class DirectUnfileGenericPathTests
             .Should().Be(FakeDirectory.SecureNamedTeam, "from the Secure team the content rows are the secure-child reconcile's");
         _calls.Should().Equal(
             "grant DirectParticipants", "owner sprk_communication", "grant DirectParticipants", "reconcile after the re-file");
+        shareTable.MaskOf("sprk_communication", MessageId, DataversePrincipalRef.User(Sharee))
+            .Should().BeNull("the message left isolation, so the reconcile takes its mirror off");
     }
+
+    private static readonly Guid Sharee = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003cc");
+    private const int CollaborateMask = 1 | 2 | 4 | 16;
 
     [Theory]
     [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
@@ -606,7 +622,8 @@ public class DirectUnfileGenericPathTests
 
     private (DataverseUpdateHandler Handler, List<Dictionary<string, object?>> Writes) UpdateHandler(
         FakeDirectory world, DirectMessageOwnerTeam lookup, bool withStep = true, IThreadResolver? threads = null,
-        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null)
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null,
+        Sprk.Bff.Api.Services.Access.SecureChildReconciler? children = null, Action<string, Guid, Guid>? afterOwnerWrite = null)
     {
         var writes = new List<Dictionary<string, object?>>();
         var handler = new DataverseUpdateHandler(
@@ -614,9 +631,9 @@ public class DirectUnfileGenericPathTests
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             world.Resolver(directMessageOwnerTeam: lookup),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            SecureChildReconcilerFixtures.OverEmptyWorld(threads),
+            children ?? SecureChildReconcilerFixtures.OverEmptyWorld(threads),
             shares: shares,
-            directOwner: withStep ? Step(world, lookup) : null);
+            directOwner: withStep ? Step(world, lookup, afterOwnerWrite) : null);
         return (handler, writes);
     }
 
@@ -649,8 +666,8 @@ public class DirectUnfileGenericPathTests
     }
 
     /// <summary>The real step over the directory: rows read by id, the message's attachment (when seeded) its one content row,
-    /// owner writes conditional.</summary>
-    private DirectMessageOwnerStep Step(FakeDirectory world, DirectMessageOwnerTeam lookup)
+    /// owner writes conditional (each also handed to <paramref name="afterOwnerWrite"/> with the team it names).</summary>
+    private DirectMessageOwnerStep Step(FakeDirectory world, DirectMessageOwnerTeam lookup, Action<string, Guid, Guid>? afterOwnerWrite = null)
     {
         var dataverse = new Mock<IGenericEntityService>();
         dataverse
@@ -669,6 +686,8 @@ public class DirectUnfileGenericPathTests
             {
                 _calls.Add("owner " + table);
                 world.UpdateIfVersion(table, id, version, fields);
+                if (afterOwnerWrite is not null && fields.TryGetValue("ownerid", out var owner) && owner is EntityReference team)
+                    afterOwnerWrite(table, id, team.Id);
             })
             .Returns(Task.CompletedTask);
         var access = new Mock<IDirectThreadAccessService>();
