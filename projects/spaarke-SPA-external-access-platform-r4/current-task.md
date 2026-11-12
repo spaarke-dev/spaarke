@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 018 — P1 deploy + E2E (`tasks/018-p1-deploy-dev-e2e.poml`) — PREP ONLY, nothing live |
+| **Task** | 018 — P1 deploy + E2E (`tasks/018-p1-deploy-dev-e2e.poml`) — SPA deployed to dev; E2E pending |
 | **Step** | — |
 | **Status** | 001–007 ✅; Phase 1 code complete. Next is 018 (live: BFF deploy via uac-r2 + SPA dev deploy + E2E) |
-| **Next Action** | Gates in `notes/task-018-notes.md`: PR #2681 merged as `c53452bb0c` (2026-11-12); uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1. BFF prerequisite met: live dev BFF `4e64670ea0` contains it (uac-r2 read-back passed). Next: owner approves the dev SPA deploy (`deploy-external-spa.yml`, environment dev, `--ref master`; rollback `b083d62183` via a temp tag) → tell uac-r2 when live → E2E |
+| **Next Action** | Gates in `notes/task-018-notes.md`: PR #2681 merged as `c53452bb0c` (2026-11-12); uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1. BFF prerequisite met: live dev BFF `4e64670ea0` contains it (uac-r2 read-back passed). Dev SPA deployed (run 43324493710, master `2ef4a17915`, verified; rollback `b083d62183` via a temp tag); uac-r2 told. Next: E2E with owner-supplied accounts (`notes/task-018-notes.md` "E2E") |
 
 ### Critical Context
 - Record view: `components/record/RecordTemplateModal.tsx`; sections in `record/sections/`, action hosts in `record/actions/`.

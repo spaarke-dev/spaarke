@@ -1,6 +1,6 @@
 # Task 018 — P1 deploy + E2E: prep (2026-11-12)
 
-Status: **prep only, nothing live has run.** Rigor STANDARD; prescriptive steps; Sonnet @ high per POML.
+Status: **dev SPA deployed 2026-11-12 (run 43324493710); E2E not started (needs owner accounts).** Rigor STANDARD; prescriptive steps; Sonnet @ high per POML.
 
 ## Gates, in order (POML + `docs/procedures/dev-bff-deploy-coordination.md`)
 
@@ -12,7 +12,8 @@ Status: **prep only, nothing live has run.** Rigor STANDARD; prescriptive steps;
 | 4 | Owner **"go BFF deploy &lt;master sha&gt;"** given directly in uac-r2's session | ✅ Not needed: live dev BFF **`4e64670ea0`** (uac-r2 deploy ~19:40Z 2026-11-12) already contains `c53452bb0c` (ancestry verified locally, `merge-base --is-ancestor` exit 0). ebilling-r1 confirmed it covers #2689/#2708/#2724/#2727 |
 | 5 | Peer OKs, Router green, content checks, ebilling schema verify, app settings | uac-r2 runs these (orchestrator); R4 gives its peer OK |
 | 6 | uac-r2 read-back + 30-minute gate PASS, 0 new 5xx on external routes | ✅ read-back passed per uac-r2 (/healthz 200, /ping 200, anon MCP 401); uac-r2 watches external routes again after the SPA deploy |
-| 7 | Owner approval of the SPA deploy with rollback stated | ❌ after gate 6 |
+| 7 | Owner approval of the SPA deploy with rollback stated | ✅ owner "Yes deploy spa" 2026-11-12 → run **43324493710** (dev, `--ref master` = `2ef4a17915`, success ~23:00Z). Verified: index + deep path 200; live `/assets/app.js` contains `invoiceRecord` (R4 code); baked BFF host `spaarke-bff-dev` `/healthz` 200. uac-r2 + ebilling-r1 told; uac-r2 watches external routes next gate |
+| 8 | E2E (POML steps 6–9) | ❌ needs owner-supplied accounts (below) |
 
 ## SPA deploy plan (for the owner's approval at step 4)
 
