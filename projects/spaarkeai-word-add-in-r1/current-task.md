@@ -28,6 +28,10 @@
 - 2026-11-07 cc11294300: 030a To Do through RecordCreationService; #2292 shared alternate-key classifier (exact 0x80060891). No add-in concern.
 - 2026-11-06 20669df6a9: POST /api/v1/documents caller check does not touch the pane (it uses GET/PUT there).
 
+## Word Email tab: templates + AI draft (ontology D-220, owner ruling 2026-11-12)
+- The owner ruled that the Word Email tab (`EmailView.tsx` → `SendEmailPane`) gets the template picker and AI drafting, like the Console's Send Email (#2744), coordinated with this project and uac-r2. ontology's task 189 tracks it; nothing is built yet.
+- Answered ontology on 2026-11-12. This project owns `EmailView.tsx` and `shared/types/spaarke-send-email-pane.d.ts`; nothing in flight. Draft and render have no add-in limit (same NAA audience and CORS as `/send`). Recommended a BFF `GET /api/communications/templates` used by both hosts (Console drops its Xrm listing; ADR-012 host-agnostic decision 2026-10-05; compose-r8 can swap the source server-side), owned by the communications owner and checked by uac-r2. `NO_ADDITIONAL_ATTACHMENT_SOURCES` stays. Offered to do the pane side (three props, the `.d.ts`, tests) once the route exists. Waiting on ontology's answer.
+
 ## Submit Invoice (task 133): state
 - Already-submitted banner (#2533): **active since 6dbe69b9e2** (095a on dev); owner check (6) above. Backfill for older submissions is ebilling's, with the owner's OK; an older submission still shows today's form until then.
 - Invoice form Files section and "Source email" link: ebilling 151e, on dev in 6dbe69b9e2 (the invoice form, not the pane). No approve UI until ebilling 110/111/112 (no interim path).
