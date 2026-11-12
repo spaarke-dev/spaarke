@@ -4,7 +4,7 @@
     <title>Procedures on the record (B1): the read-only Billing-tab panel, with firm and date pickers, both lists, filters, marks and the gap bar</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
     <gate>084 merged into work (its routes and DTO notes are the contract this panel renders).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New React code page (.tsx) with fluent-ui tags.</rigor-reason>
     <model-tier>sonnet</model-tier>

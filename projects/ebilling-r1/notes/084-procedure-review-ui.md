@@ -216,3 +216,92 @@ Task 084f (EB-D-220, owner option a; uac-r2 finding F-C on 084): billing admins 
 2. Billing Rule Reader role: delivered by `scripts/Set-CustomerOwnerTeams.ps1 -EnvironmentUrl <url> -CustomerBusinessUnitId <id>` (dry run, which plans "add Read at Deep" for the two missing privileges), then `-Apply` (owner go), then `-Verify`, once for each customer top business unit. The role's existing holders are not re-assigned; the change is to the role's privileges only.
 3. Check after the apply: a billing admin homed in the top unit and one homed in a child unit each get 200 from both of 084's routes on a record with an in-force Procedure; any other internal user still gets 503 `procedures.unavailable` (by design until uac-r2 task 191).
 4. Not part of this task: `config/feature-role-privileges.json` (the feature-role matrix and `Set-FeatureRolePrivileges.ps1`) lists the Billing Administrator's `prvReadsprk_procedure` (gap G5) but 089e did not add it, and nothing here does; if uac-r2 wants the two new Reads in that matrix, that is a separate change.
+## 084a: the read-only "Procedures on the record" code page
+
+Branch `task/ebilling-084a`, from `work/ebilling-r1` at `cfe9a7b460`. Folder `src/solutions/RecordProcedures/`. Rigor FULL. The contract is 084's two routes above; every list on the page is the server's answer. No BFF file changed. No `src/dataverse/solutions/SpaarkeMaster/**` file changed (form placement is 112's).
+
+### What was built
+
+| File | Purpose |
+|---|---|
+| `src/main.tsx` | Entry. Copy of InvoiceFiles' shape: `@spaarke/auth` bootstrap, host `FluentProvider` theme (light and dark), `AppErrorBoundary`. Launch = `id` + `typename` from the form. |
+| `src/services/launch.ts` | `typename` decides the route (`sprk_matter` -> `matters`, `sprk_project` -> `projects`, `sprk_workassignment` -> `workassignments`). Any other table or a non-GUID id is a launch message, no BFF call. |
+| `src/services/recordProceduresApi.ts` | 084's DTO types and the two GET calls. A body that is not the view is a failure, never an empty list. Failure kinds and the sentences. |
+| `src/services/model.ts` | Pure: badges, labels, dimming, filters, count-card configs. `RULE_MARKS` and `DIMMED_MARK_KINDS` are the two tables 084e extends. |
+| `src/services/firmChoices.ts` | The picker's data (below). |
+| `src/components/ProceduresPanel.tsx`, `ProcedureList.tsx`, `RuleList.tsx` | The card, and the two tables. |
+| `src/__tests__/` | 5 suites, 82 tests. Fixtures mirror the prototype's Matter 2026-LIT-4471, Project PRJ-20418 and WA-30552 as 084 DTOs. |
+
+Shared pieces: count cards are `MetricCardRow` (layout `wide`) fed `MetricCardConfig[]` (D-24, as `Worklist/laneCountFilters` and InvoiceReview do; ConsoleKit has no count-card component since 109's rework), and `StatusBadge`. Both come from `@spaarke/ui-components`; jest maps that to a test seam that re-exports the real sources. No colour literal; Fluent tokens only. No new package: `package.json` is InvoiceFiles' dependency list (the shared barrel needs it to bundle).
+
+### Decisions
+
+1. **Firm picker source (decision 1).** The picker is: the record's billing firm first, then the other firms that have invoiced the record, each once.
+   - The billing firm is learned from the first read, which sends no `firmId` (the server then uses `sprk_billingfirm`): `firmSource: "Record"` returns it; `"None"` means no billing firm and the picker says "No billing firm".
+   - Other firms: `Xrm.WebApi` reads `sprk_invoice` as the caller (`_sprk_vendororg_value` of the invoices whose `_sprk_matter_value`, `_sprk_project_value` or `_sprk_regardingworkassignment_value` is the record), then reads those ids from `sprk_organization` as the caller and offers only the rows that come back.
+   - Why no BFF route: `GET /api/finance/core-records/{type}/{id}/firms` lists the ACTIVE firms LINKED to the record (external participation), not the firms that invoiced it, so it is a different set; `/invoices/search` is a semantic search that needs a query. Neither lists a core record's invoices with their firm.
+   - Why `Xrm.WebApi` is allowed: DATA-ACCESS-DECISION-CRITERIA, a simple read-only lookup in host context; the same pattern as `RuleReview/firmLookup.ts` and `ApExport/invoices.ts`. The POML forbids it only for the Procedure, override and rule tables; a test pins that `firmChoices.ts` reads only `sprk_invoice` and `sprk_organization`. `sprk_vendororg` is field-secured "readable by everyone" (EB-D-200), so the invoice read returns it.
+   - K2 (a `firmId` the caller cannot Read makes the routes 503): the organization read as the caller is the filter, so an unreadable firm is never offered. A firm that is not returned is dropped silently; a failed read leaves the list short and the page says "Some firms that have invoiced this record could not be listed."
+   - Limit K1: one platform page (5,000 invoices, newest first) is read. A record with more invoices than that could miss an older firm; the billing firm is always offered.
+   - If the default read fails (for example the billing firm is unreadable and the route answers 503), the picker still shows, with "Record's billing firm" and the invoiced firms, so the user can pick another firm.
+2. **Marks.** Rendered generically. `Excluded` is dimmed; `Excluded`, `Changed` ("Changed here"), `Stale` ("Base rule updated") and `BaseRetired` ("Base rule retired") each get a badge. An unknown kind is a neutral badge with the kind text and is not dimmed. 084e adds one entry to `RULE_MARKS` (label, tone) and one to `DIMMED_MARK_KINDS`; a test adds `Outranked` to the set and sees the row dim. "displaced" appears nowhere (a test scans every rendered fixture).
+3. **States.** 404 from either route: "Procedures are not available for this record" (one message, same text whichever route sent it, no hint whether the record exists). 503 `procedures.unavailable`: "Procedures cannot be shown right now". 503 `ebilling.disabled`: "eBilling is not enabled". Both routes are read for every firm and date; if either fails the page shows no row on either tab (a mutation that shows rows when only the Procedures route succeeds fails 3 tests). When both fail, the most definite failure is reported (sign-in, then 404, then eBilling off, then 503). The 404, eBilling-off and sign-in states show no pickers; a 503, 400 or network failure keeps the pickers and a Retry.
+4. **Read-only.** No row has a button, link or tab stop; a click or Enter on a row opens nothing and makes no call. Every request is a `GET` of `.../procedures` or `.../rules-in-force`; no 089 route exists in the sources. Tests: rows (no button, no link, no tabindex, click and Enter change nothing, call count unchanged), the full request log of a session using every control (all `GET`, only the two paths), and a source scan with must-fire controls for 089 paths, write verbs and Dataverse write calls.
+5. **Today.** The date picker defaults to the user's own calendar day (`yyyy-MM-dd`), sent explicitly. The server default is UTC today; they differ only near midnight UTC. An empty or half-typed date reads as today.
+
+### Prototype elements left out
+
+| Element | Reason |
+|---|---|
+| "Rules" column (rule count per Procedure) | 084 returns no per-Procedure rule count (corrections list above). |
+| "Displaced" card and mark | EB-D-219: the mark is "Outranked", task 084e. |
+| Row click to the wizard, previous/next through the list, "Assign Procedure" button, the saved-banner | 084b to 084d; the page is read-only. |
+| The "Billing setup" card | Not part of this panel (the Billing tab already carries the firm lookups). |
+| `versions[]` and version labels like "2025 rates" | 084 returns the version number and window only; the page shows `v2`, "pinned to v1, v2 available". |
+
+No field the prototype's panel shows is missing from 084's DTOs apart from those documented corrections, so no escalation.
+
+### For task 112 (deploy and form placement)
+
+- **Web resource name:** `sprk_recordprocedures` (InvoiceFiles' convention: `sprk_` + the folder name lower-cased). `npm run build` writes `dist/sprk_recordprocedures.html` (a single file, 1,181,939 bytes). Deploy it BEFORE importing the forms: `scripts/Deploy-WebResourceInline.ps1 -WebResourceName sprk_recordprocedures -FilePath <path>/dist/sprk_recordprocedures.html -DisplayName "Procedures on the record"`. As with `sprk_invoicefiles` (151e, F3b), the form references a web resource the solution does not carry until it is exported once after the first deploy.
+- **Control:** web resource control with "Pass record object-type code and unique identifier as parameters" (`id` and `typename`), as the invoice form's Files section does. A new section with a full-width cell, height about 600 px, scrolling on.
+- **Forms** (SpaarkeMaster source, read-only here):
+
+| Entity | Main form | Billing tab |
+|---|---|---|
+| `sprk_matter` | `Entities/sprk_Matter/FormXml/main/{4fa382f2-c273-f011-b4cb-6045bdd6a665}.xml` ("Matter main form") | Has `tab_billing` with sections `tab_billing_section_financials`, `_invoices`, `_budgets`. Add a section `tab_billing_section_procedures` after the budgets. |
+| `sprk_project` | `Entities/sprk_Project/FormXml/main/{5aa00242-5212-f111-8342-7ced8d1dc988}.xml` ("Project main form") | Has `tab_billing` with sections `tab_billing_section_financials`, `_invoices`, `tab_6_section_3`. Add a section `tab_billing_section_procedures` at the end. |
+| `sprk_workassignment` | `Entities/sprk_WorkAssignment/FormXml/main/{7e578eef-761d-f111-88b3-7c1e520aa4df}.xml` ("Work Assignment main form") | **No Billing tab exists** (tabs: `tab_overview`, and two hidden `tab_2` / `tab_3`). 112 must add a `tab_billing` tab, then the section. |
+
+  Each form also has a `_managed.xml` copy (151e F3a: mirror the edit by hand). The other main forms named "Information" on the three entities are the OOB default and need no change.
+- **Navigator side pane: does not apply.** `ensureNavigatorSidePane()` is the standard step for a code page the user navigates TO (its own app page). This page is a form-embedded web resource inside the host form's iframe: the pane is app-level, and the host forms already carry the trigger (the Matter and Project entity ribbons are wired per SPAARKE-SIDE-PANE-NAVIGATION; the global application-ribbon insertion covers every entity). Calling it from an embedded section would only duplicate the host's registration. InvoiceFiles (151e, decision 6) took the same decision. Note for 112: the architecture doc lists Matter and Project among the wired entity ribbons but not Work Assignment; the global application-ribbon insertion covers it, and that is outside this task.
+- **ui-tests:** the POML's five browser checks run after 112 deploys (not run here: no Dataverse environment in this task). Verify first: a record with a billing firm and an override, since 084's rights check is all-or-nothing (084 judgement call 6: `RetrievePrincipalAccess` must answer for `sprk_organization` and `systemuser` rows) and the page shows nothing otherwise.
+
+### Verification
+
+- `npm run build` in `src/solutions/RecordProcedures`: succeeds (`check-html-css-reset` ok; `tsc-surface-gate`: 0 errors in the page's own files, 98 pre-existing in shared libs, deferred to Phase B as for every code page); `dist/sprk_recordprocedures.html` 1,181,939 bytes (357.9 kB gzip).
+- `npx jest`: 5 suites, 82 tests, all pass. Tests for the criteria: both lists with counts and each count card filtering to exactly its rows; firm and date changes re-reading both routes with the new `firmId` and `date`; picker order (billing firm first, then invoiced firms, each once); 404 (from either route), 503 `procedures.unavailable`, 503 `ebilling.disabled`, 400, network and a malformed body, each with no rows on either tab; the gap bar and Show; read-only negatives; unknown mark; dark theme render; no colour literal.
+- Mutation proof: with the panel changed to accept the Procedures route alone (a partial list when the rules route fails), 3 tests fail; restored, 82 pass.
+- `npm run lint`: the script exists (copied from InvoiceFiles) but `eslint` is not a dependency of this package, as in InvoiceFiles, so it cannot run; the shared type-aware lint (`scripts/quality/client-lint`) does not cover this folder. Not run.
+- Tests beyond the POML criteria, one line each: launch parsing (the page must never guess a route); the firm read (K2 filter, OData injection guard on the record id); wording (the 404 text is identical whichever route sent it); the dimmed-set extension (the 084e hook); the source scan (the read-only criterion's negative).
+- TASK-INDEX.md not updated (the brief limits the diff to the folder and this notes file; the orchestrator owns the cell).
+
+### 084a fix round 1 (branch `task/ebilling-084a-r2`, from `7f9dd2a080`)
+
+Review findings W1 to W5 and S1 to S2 fixed; the rest recorded below as known limits. `npm run build` succeeds; `npx jest`: 5 suites, 107 tests, all pass (was 82).
+
+- **W1 (F4), out-of-order responses.** `ProceduresPanel.tsx` already had a `cancelled` guard on its read effect, but nothing proved it. New tests with deferred promises for BOTH routes: (a) two date changes, (b) a firm change then a change back to the billing firm, (c) the older response arriving with its two routes in the opposite order to the newer one's, (d) an older FAILURE arriving after a newer success. In each the newer request is answered first and the older one second, and the newer rows (and the date or firm shown) must remain. Seeding: with the `if (cancelled) return;` in the `.then` removed, all 4 fail; restored, they pass.
+- **W5 (F4), ready, then a failing change.** 12 tests: a firm change and a date change, each with (both routes fail / only the Procedures route fails / only the rules route fails), each started from the Procedures tab and from the Rules in force tab. Each asserts the `unavailable` state, that both routes were re-read, no row of either kind, no tab, and a Retry button. Seeding: with the panel changed to accept either route (`procedures.ok || rules.ok`), the 8 single-route cases fail (the 4 both-fail cases still pass, as they should); restored, all pass.
+- **W4 (F4), test title.** The sign-in failure case was added at panel level to the "400, a network failure and a sign-in failure" loop (now three cases, so the title is true), plus a test that the sign-in state is standalone (no pickers), says "Sign-in could not be verified", and that Retry reads both routes again and recovers.
+- **W3, the 5,000-row cap is silent (`firmChoices.ts`).** `WebApiLike` now types the `nextLink` that `Xrm.WebApi` returns. A `nextLink` on the invoice read (more rows than one page) makes the result `complete: false` (also when the page names no firm yet), and so does one on a name read; the existing "could not be listed" caption then shows. The page is still not followed (K1 stays a known limit; the billing firm is always offered). Tests: nextLink with a firm, nextLink with none, none or empty is complete; 45 firm ids are read in chunks of 20, 20 and 5 (each id once, all firms back); exactly 20 is one chunk and 21 is two; the panel offers readable firms with the caption, and shows no caption when complete. Seeding: with the two `nextLink` checks removed, 2 fail; with `complete = false` removed from the chunk `catch`, 2 fail (the new chunk test and the existing names-fail test); restored, all pass.
+- **Decision, a chunk fails while another succeeds:** `invoicedBy` returns the firms from the chunks that were read, with `complete: false`, and the panel OFFERS those firms and shows the caption. A firm is only ever offered after the caller's own `sprk_organization` read returned it (K2), so a partial list never offers a firm the routes would refuse; hiding readable firms because a sibling chunk failed would only remove choices. A later chunk still runs after an earlier one fails. Tested at `firmChoices` level (chunks 1 and 3 offered, chunk 2 not, `complete: false`) and at panel level.
+- **S1.** The dead `status === 503 && errorCode === procedures.unavailable` line in `failureKind` is removed. Checked first: it returned `'unavailable'`, as the next line (any 503) does, and nothing sits between them, so no input changes its answer (the existing `failureKind` tests for 503 with and without the code still pass). `CODE_PROCEDURES_UNAVAILABLE` stays exported as documentation of the server's code.
+- **S2.** The header comment of `authInit.ts` no longer says "Files page call (list, open, download)" (copied from InvoiceFiles); it says what this page calls: the GET reads of `.../procedures` and `.../rules-in-force`.
+- **W2, resolved without code.** The POML's "one state badge" applies to Procedure rows (one badge each, tested). Rule rows show one badge per mark, as the prototype's `RuleBadges` does (`spaarke-prototype/projects/ebilling.r1/src/procedures/parts.tsx:58-64`); the Rules tab test ("one badge per mark") already asserts it.
+- **Known limits, no code in this round:**
+  - S3: a 401 and a 403 read as "retry" (generic message plus Retry). Revisit after 084f.
+  - S4: the "and n more" tooltip cannot be reached by keyboard. Belongs to 084b's row work.
+  - S5: the hidden scrollbar was copied from InvoiceFiles.
+  - S6: `buildCountCards` may duplicate InvoiceReview's. Check before 084b.
+  - S7: the dependency list was copied from InvoiceFiles for the shared barrel.
+  - S8 to S10: minor, not worked.
