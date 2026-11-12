@@ -16,7 +16,8 @@
 // only member of the two ontology-writer field-security profiles; since task 267 (#2618) it sits ALONE in its own business
 // unit "Spaarke Ontology Writer" (H10), whose default team holds no role and is in no field-security profile, and holds that
 // unit's copy of the role — plus S25 (task 267, #2618): the customer unit's default team holds the customer-unit copy of
-// "Spaarke Basic User", so it can own ordinary records (contacts included — Dataverse requires the owner to hold Read).
+// "Spaarke Basic User", so it can own ordinary records (contacts included — Dataverse requires the owner to hold Read) —
+// plus S26 (task 268; ebilling-r1 task 166, EB-D-200): the shipped lock on the invoice amounts and firm, VERIFIED ONLY.
 // Every step READS first and writes only what is missing, so a second run against a configured environment performs no
 // write at all.
 //
@@ -167,6 +168,32 @@ public sealed class SecureRecordSetupProcedure
         ("contact", "sprk_identitycollisionreason"),
         ("contact", "sprk_identitycollisionparties"),
     ];
+
+    /// <summary>S26 (ebilling-r1 task 166, owner decision EB-D-200): the table whose amounts and firm only the BFF sets.</summary>
+    public const string InvoiceMoneyTable = "sprk_invoice";
+
+    /// <summary>
+    /// S26 (ebilling-r1 task 166, EB-D-200): the invoice columns that are field-secured, readable by everyone through
+    /// <see cref="ReaderProfileName"/> and settable only by the BFF through <see cref="WriterProfileName"/> — the billed total,
+    /// the five derived totals and the firm lookup (docs/data-model/sprk_invoice.md). Exactly the <c>$Columns</c> of
+    /// scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 and the package's grants (InvoiceMoneyColumnLockPackagedTests).
+    /// </summary>
+    public static readonly IReadOnlyList<string> InvoiceMoneyColumns =
+    [
+        "sprk_totalamount",
+        "sprk_approvedtotal",
+        "sprk_feestotal",
+        "sprk_expensestotal",
+        "sprk_lineadjustmentstotal",
+        "sprk_invoiceadjustmentstotal",
+        "sprk_vendororg",
+    ];
+
+    /// <summary>S26: the remedy an incomplete invoice money lock names.</summary>
+    internal const string InvoiceMoneyLockRemedy =
+        "A new run imports the SpaarkeMaster release that carries ebilling task 166 at H6; an existing environment runs " +
+        "scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, then -Verify) with the owner's OK. Then resume. " +
+        "Nothing was written.";
 
     /// <summary>
     /// S19/S20 (ISS-020 / #1565): the profile whose membership lets an identity READ the field-secured
@@ -871,6 +898,44 @@ public sealed class SecureRecordSetupProcedure
                 $"Profiles other than '{WriterProfileName}' may create or update {SecureFlagColumn}: " +
                 $"{string.Join(", ", otherWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} on {p.EntityName}"))}. " +
                 "The lock is only as strong as its writer list (owner decision F4). Nothing was written.");
+        }
+
+        // S26 (ebilling-r1 task 166, EB-D-200) — the lock on the invoice amounts and firm ships in SpaarkeMaster: verify it is
+        // whole (secured, Readers read 4, Writers 4/4/4) and that nobody else may write. A BFF built from master assumes only it
+        // sets these columns. Verify only: nothing here is written or removed.
+        foreach (var column in InvoiceMoneyColumns)
+        {
+            var columnPermissions = (await dv.ListFieldPermissionsAsync(t, column, ct).ConfigureAwait(false))
+                .Where(p => Same(p.EntityName, InvoiceMoneyTable))
+                .ToArray();
+            var secured = await dv.IsAttributeSecuredAsync(t, InvoiceMoneyTable, column, ct).ConfigureAwait(false);
+            var reader = columnPermissions.FirstOrDefault(p => p.ProfileId == readerProfileId);
+            var writer = columnPermissions.FirstOrDefault(p => p.ProfileId == writerProfileId);
+            if (secured != true
+                || reader is null || reader.CanRead != FieldPermissionAllowed
+                || writer is null || writer.CanRead != FieldPermissionAllowed || writer.CanCreate != FieldPermissionAllowed
+                || writer.CanUpdate != FieldPermissionAllowed)
+            {
+                return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete,
+                    $"{InvoiceMoneyTable}.{column}: IsSecured={secured?.ToString() ?? "(no such column)"}, " +
+                    $"'{ReaderProfileName}' read={reader?.CanRead.ToString() ?? "(none)"}, " +
+                    $"'{WriterProfileName}' read/create/update={Rights(writer)} (expected secured, 4, 4/4/4). The package's " +
+                    "lock on the invoice amounts and firm (ebilling task 166) is incomplete: a user could set them. " +
+                    InvoiceMoneyLockRemedy);
+            }
+            var otherMoneyWriters = columnPermissions
+                .Where(p => p.ProfileId != writerProfileId
+                            && !systemAdministratorProfiles.Contains(p.ProfileId)
+                            && (p.CanCreate == FieldPermissionAllowed || p.CanUpdate == FieldPermissionAllowed))
+                .ToArray();
+            if (otherMoneyWriters.Length > 0)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
+                    $"Profiles other than '{WriterProfileName}' may create or update {InvoiceMoneyTable}.{column}: " +
+                    $"{Ids(otherMoneyWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is " +
+                    "its member). Only the BFF sets an invoice's amounts and firm (EB-D-200); who else may is an owner " +
+                    "decision. Nothing is removed here. Nothing was written.");
+            }
         }
 
         // S15 — the two identity-link profiles (INCOMING-141) ship in SpaarkeMaster: exactly one of each.

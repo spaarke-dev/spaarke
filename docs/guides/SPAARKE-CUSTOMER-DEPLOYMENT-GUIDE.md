@@ -2054,6 +2054,16 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   `secure_setup.basic_user_role_reaches_secure_unit` (QuarantineRequired) when that copy holds Read at **Global** on any
   table of `config/secure-record-owner-role.json` — on the default team every customer user would read every secure
   record (as shipped it holds Deep or Basic only, which stops at the customer's unit);
+- a read-only check (S26, task 268; ebilling task 166, owner decision EB-D-200; procedure version 9) that the seven
+  `sprk_invoice` columns only the BFF sets — `sprk_totalamount`, `sprk_approvedtotal`, `sprk_feestotal`,
+  `sprk_expensestotal`, `sprk_lineadjustmentstotal`, `sprk_invoiceadjustmentstotal` and the firm `sprk_vendororg` — are
+  field-secured, that `Spaarke BFF-Managed Field Readers` grants Read and `Writers` 4/4/4, and that no other profile
+  (System Administrator excepted; the Readers profile included) can create or update one. A missing column or a wrong
+  lock refuses `secure_setup.invoice_money_lock_incomplete` (Resumable: a new run imports the SpaarkeMaster release that
+  carries task 166 at H6; an existing environment runs `scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1`,
+  then `-Verify`, with the owner's OK); another writer refuses `secure_setup.invoice_money_lock_other_writer`
+  (QuarantineRequired). A stamp whose package predates task 166 (ACME's 1.3.0.0) refuses here until that release is
+  imported — a BFF from master assumes only it sets these values;
 - a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
   Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
   refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`);

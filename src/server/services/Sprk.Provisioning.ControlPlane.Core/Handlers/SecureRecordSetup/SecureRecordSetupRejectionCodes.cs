@@ -142,6 +142,22 @@ public static class SecureRecordSetupRejectionCodes
     /// </summary>
     public const string IdentityLinkLockOtherWriter = "secure_setup.identity_link_lock_other_writer";
 
+    // ---- Invoice amounts and firm (ebilling-r1 task 166, owner decision EB-D-200) ----
+
+    /// <summary>
+    /// S26: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.InvoiceMoneyColumns"/> is incomplete — the
+    /// column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import the
+    /// SpaarkeMaster release carrying ebilling task 166, H6, or run scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1
+    /// in an existing environment).
+    /// </summary>
+    public const string InvoiceMoneyLockIncomplete = "secure_setup.invoice_money_lock_incomplete";
+
+    /// <summary>
+    /// S26: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update an
+    /// invoice amount or the firm — the Readers profile included: every default team is its member (QuarantineRequired).
+    /// </summary>
+    public const string InvoiceMoneyLockOtherWriter = "secure_setup.invoice_money_lock_other_writer";
+
     /// <summary>
     /// S19 (ISS-020 / #1565): <c>contact.sprk_standinggrant</c> is not secured, or the "Standing Grant Administrators" profile
     /// does not grant read/create/update (4/4/4) on it (Resumable: import SpaarkeMaster, H6).

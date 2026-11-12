@@ -175,6 +175,17 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             dv.SecuredColumns[ColumnKey(table, column)] = true;
         }
 
+        // Task 268 (ebilling task 166, EB-D-200): the invoice amounts and firm as SpaarkeMaster ships them (secured; Readers
+        // 4/0/0, Writers 4/4/4, plus the platform's System Administrator profile).
+        foreach (var column in SecureRecordSetupProcedure.InvoiceMoneyColumns)
+        {
+            var permissions = dv.ColumnPermissions(column);
+            permissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 0, 0));
+            permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 4, 4));
+            dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InvoiceMoneyTable, column)] = true;
+        }
+
         // ISS-020: the standing-grant profile as SpaarkeMaster ships it (Read/Create/Update on contact.sprk_standinggrant,
         // the column secured, no members) ...
         dv.StandingGrantProfileId = dv.AddProfile(SecureRecordSetupProcedure.StandingGrantProfileName);
