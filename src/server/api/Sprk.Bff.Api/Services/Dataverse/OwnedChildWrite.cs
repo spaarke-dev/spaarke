@@ -1586,6 +1586,12 @@ internal static class OwnedChildWrite
                     // to the Direct team; any other communication is Unchanged pending #2722).
                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                         table, actsForAPerson: true, directOwner),
+                    // Piece 3b: the typed regarding lookups the update sets that file nothing (a contact, an account): a message
+                    // still linked to one after the update is not unfiled.
+                    RegardingLinksSet = RecordReparent.RegardingLinksSetIn(
+                        table,
+                        item.Lookups.Select(l => KeyValuePair.Create(
+                            l.Column, (object?)new Microsoft.Xrm.Sdk.EntityReference(l.RelatedTable, l.RecordId)))),
                     SecureExitCaller = secureExitCaller,
                 },
                 async token =>

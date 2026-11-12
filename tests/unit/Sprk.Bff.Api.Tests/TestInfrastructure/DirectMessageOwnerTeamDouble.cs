@@ -33,6 +33,9 @@ internal sealed class DirectMessageOwnerTeamDouble
     /// <summary>When set, every read throws (a Dataverse fault).</summary>
     public bool Faults { get; set; }
 
+    /// <summary>fm task 054 piece 3b: how many reads the lookup has sent (a fault included).</summary>
+    public int Reads { get; private set; }
+
     /// <summary>The Direct team: the named, non-default, memberless Owner team in the Direct unit.</summary>
     public DirectMessageOwnerTeamDouble WithDirectTeam(Guid teamId) => Team(teamId, OwnerTeamName, DirectUnitId);
 
@@ -77,6 +80,12 @@ internal sealed class DirectMessageOwnerTeamDouble
         NullLogger<DirectMessageOwnerTeam>.Instance);
 
     private List<object> Answer(string entitySet, string? filter)
+    {
+        Reads++;
+        return AnswerRead(entitySet, filter);
+    }
+
+    private List<object> AnswerRead(string entitySet, string? filter)
     {
         if (Faults)
             throw new HttpRequestException("Simulated Dataverse fault.");

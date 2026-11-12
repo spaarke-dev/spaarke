@@ -274,8 +274,12 @@ internal sealed class OwnershipDirectory
 
         var payload = fields.ToList();
         var changes = RecordReparent.WithLineageLookupsIn(
-            entity, RecordReparent.ParentChangesWithClearsIn(entity, payload), payload);
-        Write(entity, id, changes.ToDictionary(change => change.Key, change => (object?)change.Value));
+            entity, RecordReparent.ParentChangesWithClearsIn(entity, payload), payload)
+            .ToDictionary(change => change.Key, change => (object?)change.Value);
+        // fm task 054 piece 3b: a communication's typed regarding lookups that file nothing (a contact, an account) land too.
+        foreach (var (column, link) in RecordReparent.RegardingLinksSetIn(entity, payload))
+            changes[column] = link;
+        Write(entity, id, changes);
     }
 
     /// <summary>#2143: <see cref="ApplyPatch{TValue}"/> for a Web API PATCH addressed as <c>&lt;entity set&gt;(&lt;id&gt;)</c> with a
@@ -502,9 +506,14 @@ internal sealed class OwnershipDirectory
                         && _businessUnits.Any(b => b.BusinessUnitId == t.BusinessUnit
                                                    && string.Equals(b.Name, SecureBuName, StringComparison.OrdinalIgnoreCase)));
 
+    /// <summary>fm task 054 piece 3b: called with every query before it is answered, so a test can change the directory between
+    /// two reads.</summary>
+    public Action<QueryExpression>? BeforeAnswer { get; set; }
+
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedEntities.Add(query.EntityName);
+        BeforeAnswer?.Invoke(query);
         if (!query.ColumnSet.AllColumns
             && query.ColumnSet.Columns.FirstOrDefault(c => _absentColumns.Contains((query.EntityName, c))) is { } absent)
         {

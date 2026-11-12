@@ -1591,6 +1591,8 @@ public static class FieldMappingEndpoints
                                     // message returns to the Direct team; any other communication is Unchanged pending #2722).
                                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                                         targetEntity, actsForAPerson: true, directOwner),
+                                    RegardingLinksSet = Sprk.Bff.Api.Services.Dataverse.RecordReparent.RegardingLinksSetIn(
+                                        targetEntity, updatePayload),
                                     // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
                                     SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                                         callerSystemUserId,

@@ -241,7 +241,127 @@ public class RecordOwnershipResolverDirectUnfileTests
         resolution.DirectUnfile.Should().BeNull();
     }
 
+    // ── Piece 3b fix round: judged on the row as the change leaves it, after F3 ──────────────────────────────────────────
+
+    [Theory]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task Refile_FromAMatterToAContact_WithAPartialConfig_IsNotRefused_AndTheOwnerIsUnchanged(string onlySet)
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var request = ToAContact();
+        var applied = false;
+
+        var resolution = await Resolver(directory, DirectMessageOwnerStepTests.PartiallyConfigured(onlySet))
+            .ReparentAsync(request, Applies(directory, request, () => applied = true), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse("a message re-filed to a contact is still linked to a record: no unfile");
+        applied.Should().BeTrue();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.DirectUnfile.Should().BeNull();
+        directory.Assignments.Should().BeEmpty();
+        _log.Entries.Should().NotContain(e => e.Event.Id == DirectMessageOwnerStep.UnfileRefusedEvent.Id);
+    }
+
+    [Fact]
+    public async Task Refile_FromAMatterToAContact_WithAResolvedLookup_CarriesNoMove()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var request = ToAContact();
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request),
+            CancellationToken.None);
+
+        resolution.DirectUnfile.Should().BeNull("no move is due, so the writer grants nothing and moves nothing");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ClearingTheMatter_OfAMessageAlsoLinkedToAContact_IsNotAnUnfile(bool resolved)
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["sprk_regardingperson"] = new EntityReference("contact", ContactId),
+        });
+        var applied = false;
+
+        var resolution = await Resolver(directory, resolved
+                ? Resolved()
+                : DirectMessageOwnerStepTests.PartiallyConfigured(DirectMessageOwnerTeam.BusinessUnitNameConfigKey))
+            .ReparentAsync(Unfile(), Applies(directory, () => applied = true), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse();
+        applied.Should().BeTrue();
+        resolution.DirectUnfile.Should().BeNull();
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Unfile_OutOfASecureRecord_ByACallerWithoutF3_IsForbidden_BeforeTheDirectTeamIsAsked()
+    {
+        var directory = World().WithMessageFiledUnder(SecureMatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        lookup.Faults = true;
+        var applied = false;
+
+        var resolution = await Resolver(directory, lookup.Lookup()).ReparentAsync(
+            Unfile() with { SecureExitCaller = CallerHoldingNoAccess() }, Applies(directory, () => applied = true),
+            CancellationToken.None);
+
+        resolution.IsForbidden.Should().BeTrue("a caller without F3 is told that first, never a 503 then a 403");
+        resolution.RefusalCode.Should().NotBe(RecordOwnerRefusal.DirectTeamUnavailable);
+        lookup.Reads.Should().Be(0, "the Direct team is not asked for a change the caller may not make");
+        applied.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Unfile_OfADirectMessage_WhenTheSecureRecordUnitCannotBeDecided_IsRefused409_BeforeAnythingIsWritten()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var secureUnitReads = 0;
+        directory.BeforeAnswer = query =>
+        {
+            if (query.EntityName == "businessunit"
+                && query.Criteria.Conditions.Any(c => c.AttributeName == "name" && Equals(c.Values.FirstOrDefault(), FakeDirectory.SecureBuName))
+                && ++secureUnitReads == 2)
+            {
+                // A second unit takes the Secure Record name between the F3 check and the Direct decision.
+                directory.WithBusinessUnit(Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003ba"), FakeDirectory.SecureBuName);
+            }
+        };
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(Unfile(), Applies(directory, () => applied = true),
+            CancellationToken.None);
+
+        secureUnitReads.Should().Be(2, "the F3 check, then the Direct decision");
+        resolution.IsRefused.Should().BeTrue("an undecidable Secure Record unit is never guessed");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnusable);
+        resolution.DirectUnfile.Should().BeNull();
+        applied.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty();
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid ContactId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003bb");
+
+    /// <summary>The re-file from the matter to a contact: the matter cleared and the contact set in one change.</summary>
+    private static RecordReparent ToAContact() => Unfile() with
+    {
+        RegardingLinksSet = new Dictionary<string, EntityReference>
+        {
+            ["sprk_regardingperson"] = new EntityReference("contact", ContactId),
+        },
+    };
+
+    private static Sprk.Bff.Api.Services.Access.SecureRemovalCaller CallerHoldingNoAccess() =>
+        new(_ => Task.FromResult<Guid?>(FakeDirectory.CallerUserId),
+            (_, _) => Task.FromResult(Spaarke.Dataverse.AccessRights.Read));
 
     /// <summary>The standard directory plus the Direct business unit and its teams, an ordinary and a secure matter, and the
     /// message's thread.</summary>
@@ -268,8 +388,10 @@ public class RecordOwnershipResolverDirectUnfileTests
     private static Func<CancellationToken, Task> Applies(FakeDirectory directory, RecordReparent request, Action? alsoDone = null) =>
         _ =>
         {
-            directory.Write(request.EntityLogicalName, request.RecordId,
-                request.ParentChanges.ToDictionary(change => change.Key, change => (object?)change.Value));
+            var written = request.ParentChanges.ToDictionary(change => change.Key, change => (object?)change.Value);
+            foreach (var (column, link) in request.RegardingLinksSet)
+                written[column] = link;
+            directory.Write(request.EntityLogicalName, request.RecordId, written);
             alsoDone?.Invoke();
             return Task.CompletedTask;
         };

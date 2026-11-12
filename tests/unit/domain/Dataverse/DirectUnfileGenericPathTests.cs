@@ -138,6 +138,82 @@ public class DirectUnfileGenericPathTests
         OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateHandler_MovingADirectMessageFromAMatterToAContact_WritesIt_RefusesNothing_GrantsNothing_MovesNoOwner(
+        bool lookupResolves)
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var (handler, writes) = UpdateHandler(world, lookupResolves
+            ? Resolved()
+            : DirectMessageOwnerStepTests.PartiallyConfigured(DirectMessageOwnerTeam.BusinessUnitNameConfigKey));
+
+        await handler.UpdateAsync("sprk_communication", MessageId, ToAContact(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle("a message re-filed to a contact is still linked to a record: no unfile");
+        world.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson")?.Id.Should().Be(ContactId);
+        world.Assignments.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
+        _calls.Should().BeEmpty("no participant is granted for a message that does not move");
+    }
+
+    [Fact]
+    public async Task UpdateRecordNode_MovingADirectMessageFromAMatterToAContact_IsNotRefused_AndMovesNoOwner()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+
+        await UpdateRecordCore(world, DirectMessageOwnerStepTests.PartiallyConfigured(DirectMessageOwnerTeam.OwnerTeamNameConfigKey))
+            .UpdateAsync(new UpdateRecordActionInput(
+                "sprk_communication", MessageId, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_regardingmatter"] = null },
+                Lookups: [new RenderedLookup("sprk_RegardingPerson", "contact", ContactId.ToString("D"))],
+                ImpersonateSystemUserId: Person), CancellationToken.None);
+
+        world.Assignments.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
+        _calls.Should().BeEmpty();
+    }
+
+    // ── The payload reader every unfile writer passes (RecordReparent.RegardingLinksSetIn) ───────────────────────────────
+
+    [Fact]
+    public void RegardingLinksSetIn_ReadsTheTypedRegardingsThatFileNothing_InEverySpelling()
+    {
+        var account = Guid.NewGuid();
+        var organization = Guid.NewGuid();
+
+        var links = RecordReparent.RegardingLinksSetIn("sprk_communication", new Dictionary<string, object?>
+        {
+            ["sprk_RegardingPerson@odata.bind"] = $"/contacts({ContactId:D})",
+            ["sprk_regardingaccount"] = new EntityReference("account", account),
+            ["sprk_RegardingOrganization@odata.bind"] = System.Text.Json.JsonSerializer.SerializeToElement($"sprk_organizations({organization:D})"),
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_regardingproject"] = null,
+            ["sprk_name"] = "x",
+        });
+
+        links.Keys.Should().BeEquivalentTo("sprk_regardingperson", "sprk_regardingaccount", "sprk_regardingorganization");
+        links["sprk_regardingperson"].Should().Be(new EntityReference("contact", ContactId));
+        links["sprk_regardingaccount"].Id.Should().Be(account);
+        links["sprk_regardingorganization"].Id.Should().Be(organization);
+    }
+
+    [Fact]
+    public void RegardingLinksSetIn_ReadsNothingForAnotherTable_OrABindThatNamesNoRow()
+    {
+        RecordReparent.RegardingLinksSetIn("sprk_event", new Dictionary<string, object?>
+        {
+            ["sprk_regardingperson"] = new EntityReference("contact", ContactId),
+        }).Should().BeEmpty();
+        RecordReparent.RegardingLinksSetIn("sprk_communication", new Dictionary<string, object?>
+        {
+            ["sprk_RegardingPerson@odata.bind"] = $"/accounts({ContactId:D})",
+            ["sprk_regardingaccount"] = new EntityReference("account", Guid.Empty),
+        }).Should().BeEmpty();
+    }
+
     // ── UpdateRecordActionCore ───────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -198,6 +274,15 @@ public class DirectUnfileGenericPathTests
         .WithOrdinaryRoot("sprk_matter", MatterId);
 
     private static Dictionary<string, object?> Unfile() => new() { ["sprk_regardingmatter"] = null };
+
+    private static readonly Guid ContactId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c6");
+
+    /// <summary>The re-file from the matter to a contact: the matter cleared and the contact bound in one update.</summary>
+    private static Dictionary<string, object?> ToAContact() => new()
+    {
+        ["sprk_regardingmatter"] = null,
+        ["sprk_RegardingPerson@odata.bind"] = $"/contacts({ContactId:D})",
+    };
 
     private static UpdateRecordActionInput UnfileInput(Guid person) => new(
         "sprk_communication", MessageId, FieldMappings: null,

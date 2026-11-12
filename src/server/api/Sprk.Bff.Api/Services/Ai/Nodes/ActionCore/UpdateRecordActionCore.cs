@@ -387,6 +387,7 @@ internal sealed class UpdateRecordActionCore
                     // nobody keeps the acting-user rule, so with no person named it is refused as before.
                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                         input.EntityLogicalName, actsForAPerson: input.ImpersonateSystemUserId is not null, directOwner),
+                    RegardingLinksSet = RecordReparent.RegardingLinksSetIn(input.EntityLogicalName, updatePayload),
                     // Task 146 c1-r1, owner round 13 item 8: a move out of a secure root (F3) is asked of the user this
                     // update IMPERSONATES — the person it acts for — with RetrievePrincipalAccess asked as that user. An
                     // update that impersonates nobody (a system run's playbook node) passes no caller and is refused such
