@@ -68,6 +68,75 @@ describe('invoicedBy', () => {
     expect(await createFirmChoices(() => undefined).invoicedBy('sprk_matter', MATTER_ID)).toEqual({ firms: [], complete: false });
   });
 
+  describe('the 5,000-row cap is not silent (K1)', () => {
+    it('a nextLink on the invoice read (more rows than one page) is an incomplete list, and the firms found are still offered', async () => {
+      const api = fakeApi(entity =>
+        entity === 'sprk_invoice'
+          ? Promise.resolve({ entities: [{ _sprk_vendororg_value: FENWICK.id }], nextLink: 'https://org.crm.dynamics.com/api/data/v9.2/sprk_invoices?$skiptoken=x' })
+          : rows({ sprk_organizationid: FENWICK.id, sprk_organizationname: FENWICK.name })
+      );
+      expect(await createFirmChoices(() => api).invoicedBy('sprk_matter', MATTER_ID)).toEqual({ firms: [{ id: FENWICK.id, name: FENWICK.name }], complete: false });
+    });
+
+    it('a nextLink with no firm on the page is still incomplete (and reads no organization)', async () => {
+      const api = fakeApi(() => Promise.resolve({ entities: [], nextLink: 'next' }));
+      expect(await createFirmChoices(() => api).invoicedBy('sprk_matter', MATTER_ID)).toEqual({ firms: [], complete: false });
+      expect(api.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+    });
+
+    it('no nextLink (or an empty one) is complete', async () => {
+      for (const nextLink of [undefined, '']) {
+        const api = fakeApi(entity =>
+          entity === 'sprk_invoice'
+            ? Promise.resolve({ entities: [{ _sprk_vendororg_value: FENWICK.id }], nextLink })
+            : rows({ sprk_organizationid: FENWICK.id, sprk_organizationname: FENWICK.name })
+        );
+        expect((await createFirmChoices(() => api).invoicedBy('sprk_matter', MATTER_ID)).complete).toBe(true);
+      }
+    });
+  });
+
+  describe('chunking the firm-name read (20 ids a chunk)', () => {
+    const firmId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const ids = Array.from({ length: 45 }, (_, i) => firmId(i + 1));
+    const invoiceRows = () => rows(...ids.map(id => ({ _sprk_vendororg_value: id })));
+    /** The organization read answers every id in the filter, named after its number. */
+    const nameRows = (options: string) =>
+      rows(...[...options.matchAll(/sprk_organizationid eq ([0-9a-f-]{36})/g)].map(m => ({ sprk_organizationid: m[1], sprk_organizationname: `Firm ${m[1].slice(-2)}` })));
+
+    it('45 firm ids are read in chunks of 20, 20 and 5, each id once, and every firm comes back', async () => {
+      const api = fakeApi((entity, options) => (entity === 'sprk_invoice' ? invoiceRows() : nameRows(options)));
+      const result = await createFirmChoices(() => api).invoicedBy('sprk_matter', MATTER_ID);
+
+      const nameCalls = (api.retrieveMultipleRecords as jest.Mock).mock.calls.filter(c => c[0] === 'sprk_organization');
+      expect(nameCalls.map(c => c[1])).toEqual([firmNameQuery(ids.slice(0, 20)), firmNameQuery(ids.slice(20, 40)), firmNameQuery(ids.slice(40))]);
+      expect(result.complete).toBe(true);
+      expect(result.firms.map(f => f.id)).toEqual(ids); // names sort 01..45
+    });
+
+    it('exactly 20 ids are one chunk; 21 are two', async () => {
+      for (const [count, chunks] of [[20, 1], [21, 2]] as const) {
+        const some = ids.slice(0, count);
+        const api = fakeApi((entity, options) => (entity === 'sprk_invoice' ? rows(...some.map(id => ({ _sprk_vendororg_value: id }))) : nameRows(options)));
+        await createFirmChoices(() => api).invoicedBy('sprk_matter', MATTER_ID);
+        expect((api.retrieveMultipleRecords as jest.Mock).mock.calls.filter(c => c[0] === 'sprk_organization')).toHaveLength(chunks);
+      }
+    });
+
+    it('one chunk failing while the others succeed offers the firms that were read, with complete false', async () => {
+      const second = firmNameQuery(ids.slice(20, 40));
+      const api = fakeApi((entity, options) => {
+        if (entity === 'sprk_invoice') return invoiceRows();
+        return options === second ? Promise.reject(new Error('boom')) : nameRows(options);
+      });
+      const result = await createFirmChoices(() => api).invoicedBy('sprk_matter', MATTER_ID);
+
+      expect(result.complete).toBe(false);
+      // Chunks 1 and 3 (ids 1-20 and 41-45) are offered; chunk 2 (21-40) is not. The failed chunk did not stop the third.
+      expect(result.firms.map(f => f.id)).toEqual([...ids.slice(0, 20), ...ids.slice(40)]);
+    });
+  });
+
   it('a record id that is not a GUID reads nothing (the id goes into an OData filter)', async () => {
     const api = fakeApi(() => rows());
     expect(await createFirmChoices(() => api).invoicedBy('sprk_matter', "x' or 1 eq 1")).toEqual({ firms: [], complete: false });

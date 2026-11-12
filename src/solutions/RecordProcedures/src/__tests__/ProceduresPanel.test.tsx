@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import * as fs from 'fs';
 import * as path from 'path';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { ProceduresPanel } from '../components/ProceduresPanel';
 import { createRecordProceduresApi } from '../services/recordProceduresApi';
@@ -22,7 +22,7 @@ import {
   waProcedures,
   waRules,
 } from './fixtures';
-import { BASE, serverFake, problem, type Handler } from './testKit';
+import { AuthError, BASE, serverFake, problem, type Handler, type Query } from './testKit';
 
 interface Setup {
   procedures?: Handler;
@@ -280,6 +280,20 @@ describe('firm and date pickers', () => {
     expect(screen.getByTestId('gap-bar')).toHaveTextContent(/^Invoices for work dated/);
   });
 
+  it('an incomplete list that still holds readable firms (a failed chunk, or more than one page) offers them AND shows the caption', async () => {
+    renderPanel({ firms: { firms: [{ id: OKAFOR.id, name: OKAFOR.name! }], complete: false } });
+    await ready();
+    expect(screen.getByTestId('firms-incomplete')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('combobox'));
+    expect((await screen.findAllByRole('option')).map(o => o.textContent)).toEqual(['Fenwick & Calder LLP (billing firm)', 'Okafor Lane LLP']);
+  });
+
+  it('no caption when the list of firms is complete', async () => {
+    renderPanel({ firms: { firms: [{ id: OKAFOR.id, name: OKAFOR.name! }], complete: true } });
+    await ready();
+    expect(screen.queryByTestId('firms-incomplete')).not.toBeInTheDocument();
+  });
+
   it('says so when the list of firms that have invoiced is incomplete, and still shows the lists', async () => {
     renderPanel({ firms: { firms: [], complete: false } });
     await ready();
@@ -403,12 +417,232 @@ describe('failures show no rows (never a partial list)', () => {
     for (const [err, kind] of [
       [problem(400, 'procedures.invalid_query'), 'invalidQuery'],
       [new TypeError('Failed to fetch'), 'network'],
+      [new AuthError('no token', 'token_unavailable' as never), 'signin'],
     ] as const) {
       const r = renderPanel({ procedures: () => err });
       expect(await screen.findByTestId('recordprocedures-error')).toHaveAttribute('data-error-kind', kind);
       NO_ROWS();
       r.unmount();
     }
+  });
+
+  it('a sign-in failure is its own standalone state (no pickers), says sign-in could not be verified, and Retry reads both routes again', async () => {
+    let n = 0;
+    const { calls } = renderPanel({ procedures: () => (n++ === 0 ? new AuthError('no token', 'token_unavailable' as never) : matterProcedures) });
+    const err = await screen.findByTestId('recordprocedures-error');
+    expect(err).toHaveAttribute('data-error-kind', 'signin');
+    expect(err).toHaveTextContent('Unable to load');
+    expect(err).toHaveTextContent('Sign-in could not be verified');
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    NO_ROWS();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await ready();
+    expect(calls.filter(c => c.leaf === 'procedures')).toHaveLength(2);
+    expect(calls.filter(c => c.leaf === 'rules-in-force')).toHaveLength(2);
+    expect(rowIds('procedure')).toHaveLength(6);
+  });
+
+  describe('ready, then a change whose re-read fails: neither tab shows rows', () => {
+    const CHANGE_DATE = '2025-06-30';
+    const triggers = {
+      'a firm change': {
+        fails: (q: Query) => q.firmId === OKAFOR.id,
+        change: async () => {
+          fireEvent.click(screen.getByRole('combobox'));
+          fireEvent.click(await screen.findByRole('option', { name: OKAFOR.name! }));
+        },
+      },
+      'a date change': {
+        fails: (q: Query) => q.date === CHANGE_DATE,
+        change: async () => {
+          fireEvent.change(screen.getByLabelText('Work dated'), { target: { value: CHANGE_DATE } });
+        },
+      },
+    } as const;
+    const routes = {
+      'both routes fail': { procedures: true, rules: true },
+      'only the Procedures route fails': { procedures: true, rules: false },
+      'only the rules route fails': { procedures: false, rules: true },
+    } as const;
+
+    for (const [triggerName, trigger] of Object.entries(triggers)) {
+      for (const [routeName, failing] of Object.entries(routes)) {
+        for (const startTab of ['Procedures', 'Rules in force'] as const) {
+          it(`${triggerName}, ${routeName}, from the ${startTab} tab: 503 procedures.unavailable shows no rows on either tab`, async () => {
+            const { calls } = renderPanel({
+              procedures: q => (failing.procedures && trigger.fails(q) ? problem(503, 'procedures.unavailable') : matterProcedures),
+              rules: q => (failing.rules && trigger.fails(q) ? problem(503, 'procedures.unavailable') : matterRules),
+            });
+            await ready();
+            expect(rowIds('procedure')).toHaveLength(6);
+            fireEvent.click(screen.getByRole('tab', { name: new RegExp(startTab) }));
+            const before = calls.length;
+
+            await trigger.change();
+            const err = await screen.findByTestId('recordprocedures-error');
+            expect(err).toHaveAttribute('data-error-kind', 'unavailable');
+            // Both routes were read again for the change, whichever one failed.
+            expect(calls.slice(before).map(c => c.leaf).sort()).toEqual(['procedures', 'rules-in-force']);
+            // No tab at all, so no way to reach rows on the other one; no row of either kind is in the page.
+            NO_ROWS();
+            expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+          });
+        }
+      }
+    }
+  });
+
+  describe('out-of-order responses: the newer read wins', () => {
+    interface Deferred {
+      query: Query;
+      resolve: (body: unknown) => void;
+    }
+    /** The first read (mount) answers at once with the matter lists; every later read waits for the test to answer it. */
+    function deferredPanel() {
+      const procs: Deferred[] = [];
+      const rules: Deferred[] = [];
+      let first = { procedures: true, rules: true };
+      const later = (list: Deferred[], q: Query) =>
+        new Promise<unknown>(resolve => {
+          list.push({ query: q, resolve });
+        }) as never;
+      const view = renderPanel({
+        procedures: q => {
+          if (first.procedures) {
+            first = { ...first, procedures: false };
+            return matterProcedures;
+          }
+          return later(procs, q);
+        },
+        rules: q => {
+          if (first.rules) {
+            first = { ...first, rules: false };
+            return matterRules;
+          }
+          return later(rules, q);
+        },
+      });
+      const settle = (ms = 25) => act(async () => new Promise(r => setTimeout(r, ms)));
+      return { ...view, procs, rules, settle };
+    }
+
+    it('after two date changes, the newer (resolved first) rows stay when the older response arrives later', async () => {
+      const d = deferredPanel();
+      await ready();
+
+      fireEvent.change(screen.getByLabelText('Work dated'), { target: { value: '2025-06-30' } });
+      await waitFor(() => expect(d.procs).toHaveLength(1));
+      fireEvent.change(screen.getByLabelText('Work dated'), { target: { value: '2025-07-31' } });
+      await waitFor(() => expect(d.procs).toHaveLength(2));
+      await waitFor(() => expect(d.rules).toHaveLength(2));
+      const [olderP, newerP] = d.procs;
+      const [olderR, newerR] = d.rules;
+      expect([olderP.query.date, newerP.query.date]).toEqual(['2025-06-30', '2025-07-31']);
+
+      // The NEWER request answers first (the project lists), then the OLDER one (the matter lists).
+      await act(async () => {
+        newerP.resolve(projectProcedures);
+        newerR.resolve(projectRules);
+      });
+      await ready();
+      expect(rowIds('procedure')).toEqual(['p-ocg', 'p-rate']);
+
+      await act(async () => {
+        olderP.resolve(matterProcedures);
+        olderR.resolve(matterRules);
+      });
+      await d.settle();
+      expect(rowIds('procedure')).toEqual(['p-ocg', 'p-rate']);
+      expect(screen.getByRole('tab', { name: 'Procedures (2)' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('tab', { name: /Rules in force/ }));
+      expect(rowIds('rule')).toEqual(['r-block', 'r-rush-rec']);
+      expect(screen.getByLabelText('Work dated')).toHaveValue('2025-07-31');
+    });
+
+    it('after a firm change and a change back to the billing firm, the newer (billing firm) rows stay when the older (Okafor) response arrives later', async () => {
+      const d = deferredPanel();
+      await ready();
+
+      fireEvent.click(screen.getByRole('combobox'));
+      fireEvent.click(await screen.findByRole('option', { name: OKAFOR.name! }));
+      await waitFor(() => expect(d.procs).toHaveLength(1));
+      fireEvent.click(screen.getByRole('combobox'));
+      fireEvent.click(await screen.findByRole('option', { name: /billing firm/ }));
+      await waitFor(() => expect(d.procs).toHaveLength(2));
+      await waitFor(() => expect(d.rules).toHaveLength(2));
+      const [olderP, newerP] = d.procs;
+      const [olderR, newerR] = d.rules;
+      expect([olderP.query.firmId, newerP.query.firmId]).toEqual([OKAFOR.id, FENWICK.id.toLowerCase()]);
+
+      await act(async () => {
+        newerP.resolve(matterProcedures);
+        newerR.resolve(matterRules);
+      });
+      await ready();
+      expect(rowIds('procedure')).toHaveLength(6);
+
+      // The older (Okafor) answer is the project lists; it must not replace the billing firm's rows.
+      await act(async () => {
+        olderP.resolve(projectProcedures);
+        olderR.resolve(projectRules);
+      });
+      await d.settle();
+      expect(rowIds('procedure')).toHaveLength(6);
+      expect(screen.getByRole('tab', { name: 'Procedures (6)' })).toBeInTheDocument();
+      expect(screen.getByRole('combobox')).toHaveValue('Fenwick & Calder LLP (billing firm)');
+    });
+
+    it('an older response that arrives late, in either order of its two routes, is ignored', async () => {
+      const d = deferredPanel();
+      await ready();
+      fireEvent.change(screen.getByLabelText('Work dated'), { target: { value: '2025-06-30' } });
+      await waitFor(() => expect(d.procs).toHaveLength(1));
+      fireEvent.change(screen.getByLabelText('Work dated'), { target: { value: '2025-07-31' } });
+      await waitFor(() => expect(d.rules).toHaveLength(2));
+      const [olderP, newerP] = d.procs;
+      const [olderR, newerR] = d.rules;
+
+      await act(async () => {
+        newerR.resolve(projectRules);
+        newerP.resolve(projectProcedures);
+      });
+      await ready();
+      await act(async () => {
+        olderR.resolve(matterRules);
+      });
+      await act(async () => {
+        olderP.resolve(matterProcedures);
+      });
+      await d.settle();
+      expect(rowIds('procedure')).toEqual(['p-ocg', 'p-rate']);
+    });
+
+    it('an older FAILURE that arrives after the newer success does not replace the rows with an error', async () => {
+      const d = deferredPanel();
+      await ready();
+      fireEvent.change(screen.getByLabelText('Work dated'), { target: { value: '2025-06-30' } });
+      await waitFor(() => expect(d.procs).toHaveLength(1));
+      fireEvent.change(screen.getByLabelText('Work dated'), { target: { value: '2025-07-31' } });
+      await waitFor(() => expect(d.rules).toHaveLength(2));
+      const [olderP] = d.procs;
+      const [olderR, newerR] = d.rules;
+      const newerP = d.procs[1];
+
+      await act(async () => {
+        newerP.resolve(projectProcedures);
+        newerR.resolve(projectRules);
+      });
+      await ready();
+      // The older read answers with a body that is not the view (a failure) and an ok body.
+      await act(async () => {
+        olderP.resolve({ unexpected: true });
+        olderR.resolve(matterRules);
+      });
+      await d.settle();
+      expect(screen.queryByTestId('recordprocedures-error')).not.toBeInTheDocument();
+      expect(rowIds('procedure')).toEqual(['p-ocg', 'p-rate']);
+    });
   });
 
   it('a body that is not the view is a failure, not an empty list', async () => {

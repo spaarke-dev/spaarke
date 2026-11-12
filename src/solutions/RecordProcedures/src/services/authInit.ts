@@ -3,9 +3,10 @@
  *
  * Thin consumer of the canonical `createCodePageAuthInitializer` factory from
  * `@spaarke/auth` (ADR-028) — mirrors
- * `src/solutions/EmailPage/src/services/authInit.ts` exactly. No new auth
- * surface, no token snapshots (NFR-07): every Files page call (list, open,
- * download) goes through the `authenticatedFetch` exported here.
+ * `src/solutions/EmailPage/src/services/authInit.ts`. No new auth surface, no
+ * token snapshots (NFR-07): every call this page makes (the GET reads of
+ * `.../procedures` and `.../rules-in-force`) goes through the
+ * `authenticatedFetch` exported here.
  *
  * Lazy factory construction (mirrors EmailPage): runtime config
  * (`getMsalClientId`, `getBffBaseUrl`, `getBffOAuthScope`) is NOT available at

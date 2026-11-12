@@ -14,7 +14,9 @@
  * Read is never put in the picker. `sprk_vendororg` is field-secured "readable by everyone" (EB-D-200), so the invoice read returns it.
  *
  * Known limit K1: one page of the record's invoices (the platform's page, 5,000 rows, newest first) is read. A record with more invoices
- * than that could miss an older firm; the billing firm is always offered either way.
+ * than that could miss an older firm; the billing firm is always offered either way. The page is not followed, but it is not silent
+ * either: when the platform returns a `nextLink` (more rows exist) the result is `complete: false`, so the panel's caption shows.
+ * A failed name chunk is the same: the firms that were read are offered, with `complete: false`.
  *
  * Nothing here writes: the adapter has no write method.
  */
@@ -23,7 +25,7 @@ import type { CoreTable } from './launch';
 
 /** The minimal `Xrm.WebApi` read surface (injected; the tests pass a fake). */
 export interface WebApiLike {
-  retrieveMultipleRecords(entity: string, options: string): Promise<{ entities: Array<Record<string, unknown>> }>;
+  retrieveMultipleRecords(entity: string, options: string): Promise<{ entities: Array<Record<string, unknown>>; nextLink?: string }>;
 }
 
 export interface FirmOption {
@@ -74,6 +76,7 @@ export function createFirmChoices(webApi: () => WebApiLike | undefined): FirmCho
       if (!GUID.test(recordId)) return { firms: [], complete: false };
 
       let firmIds: string[];
+      let complete = true;
       try {
         const result = await api.retrieveMultipleRecords('sprk_invoice', invoiceFirmQuery(table, recordId));
         const seen = new Set<string>();
@@ -82,14 +85,15 @@ export function createFirmChoices(webApi: () => WebApiLike | undefined): FirmCho
           if (typeof id === 'string' && GUID.test(id)) seen.add(id.toLowerCase());
         }
         firmIds = [...seen];
+        // More invoices than one page: older firms may be missing (K1), and the panel says so.
+        if (result.nextLink) complete = false;
       } catch {
         return { firms: [], complete: false };
       }
-      if (firmIds.length === 0) return { firms: [], complete: true };
+      if (firmIds.length === 0) return { firms: [], complete };
 
       // Only the organizations the caller can Read come back, which is exactly the set the routes will accept (K2).
       const firms: FirmOption[] = [];
-      let complete = true;
       for (let i = 0; i < firmIds.length; i += CHUNK) {
         try {
           const result = await api.retrieveMultipleRecords('sprk_organization', firmNameQuery(firmIds.slice(i, i + CHUNK)));
@@ -98,6 +102,7 @@ export function createFirmChoices(webApi: () => WebApiLike | undefined): FirmCho
             const name = row['sprk_organizationname'];
             if (typeof id === 'string' && GUID.test(id)) firms.push({ id: id.toLowerCase(), name: typeof name === 'string' && name ? name : id });
           }
+          if (result.nextLink) complete = false;
         } catch {
           complete = false;
         }

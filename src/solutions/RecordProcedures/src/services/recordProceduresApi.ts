@@ -221,7 +221,7 @@ export function failureKind(f: ApiFailure): PanelFailureKind {
   // 404 is the uniform answer: an unknown record and one the caller cannot Read are the same body, and so the same message.
   if (f.status === 404) return 'notAvailable';
   if (f.errorCode === CODE_EBILLING_DISABLED) return 'ebillingOff';
-  if (f.status === 503 && f.errorCode === CODE_PROCEDURES_UNAVAILABLE) return 'unavailable';
+  // Any 503 (procedures.unavailable included) is the one "cannot be shown right now" answer.
   if (f.status === 503) return 'unavailable';
   if (f.errorCode === CODE_INVALID_QUERY || f.status === 400) return 'invalidQuery';
   if (f.status === 0) return 'network';
