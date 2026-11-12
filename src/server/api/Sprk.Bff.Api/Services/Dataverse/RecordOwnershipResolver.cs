@@ -3885,7 +3885,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// whether the parent's team could be the Direct team. A team proven not to be it (a default team, an access team, a team
     /// other than the one the configuration names) gives <c>null</c>. Otherwise the answer is a refusal
     /// (<see cref="RecordOwnerRefusal.ParentUnresolved"/>) logged with <see cref="DirectParentUndecidedEvent"/>: the row is not
-    /// written, and the parent business unit's default team is never the answer.</item>
+    /// written, and the parent business unit's default team is never the answer. When the answer is unknown BECAUSE a read faulted
+    /// (the lookup's, or the check's), it is not a refusal: the fault propagates, as every other read fault in this resolver does,
+    /// so the caller retries instead of reporting a permanent refusal.</item>
     /// </list>
     /// Only a communication parent takes this rule. A Secure-owned parent was answered before it (secure-if-any). Without the lookup
     /// (a construction that does not compose it) the rule is off.
@@ -3919,7 +3921,15 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         if (isDirect == true)
             return RecordOwnerResolution.Owned(parentTeam);
 
-        _logger.LogError(DirectParentUndecidedEvent, direct.Fault,
+        // An unknown answer behind a FAULTED read is not an answer to refuse on (it would surface as a permanent 409): the fault
+        // propagates, as ReadFilingRowAsync's does. The shared check swallows its own faults into "unknown", so when the lookup
+        // itself did not fault, the identity read it relies on is asked once more for the fault it hid.
+        var fault = direct.Fault
+                    ?? (await _directMessageOwnerTeam.IdentifyDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false)).Fault;
+        if (fault is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
+
+        _logger.LogError(DirectParentUndecidedEvent,
             "Refusing to resolve an owning team: the parent {ParentEntity} {ParentId} is owned by team {TeamId}, and whether that is "
             + "the Direct message owner team cannot be decided ({Refusal}). The row is given no owner.",
             primary.Parent.EntityLogicalName, primary.Parent.RecordId, parentTeam, direct.Refusal);

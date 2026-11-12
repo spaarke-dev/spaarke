@@ -73,17 +73,16 @@ public class RecordOwnershipResolverDirectParentTests
     }
 
     [Fact]
-    public async Task LookupFaults_AMessageOwnedByATeamThatMayBeTheDirectTeam_Refuses_NeverTheDefaultTeam()
+    public async Task LookupFaults_AMessageOwnedByATeamThatMayBeTheDirectTeam_TheFaultPropagates_NotARefusal()
     {
         var world = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
         world.Faults = true;
 
-        var resolution = await Resolver(World().WithMessage(DirectUnit, DirectTeam), world.Lookup()).ResolveOwnerAsync(
+        var act = () => Resolver(World().WithMessage(DirectUnit, DirectTeam), world.Lookup()).ResolveOwnerAsync(
             RecordOwnershipContext.ContentOf("sprk_communication", MessageId), CancellationToken.None);
 
-        resolution.IsRefused.Should().BeTrue();
-        resolution.OwningTeamId.Should().BeNull();
-        _log.Entries.Should().ContainSingle(e => e.Event.Id == 5418 && e.Level == LogLevel.Error);
+        await act.Should().ThrowAsync<HttpRequestException>("a faulted read is retried by the caller, never a permanent refusal");
+        _log.Entries.Should().NotContain(e => e.Event.Id == 5418);
     }
 
     // ── Must not fire ────────────────────────────────────────────────────────────────────────────────────────────────────
