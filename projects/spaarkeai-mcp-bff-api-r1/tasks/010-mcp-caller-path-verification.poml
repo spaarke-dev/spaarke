@@ -55,6 +55,7 @@
     <constraint source="project">The PR is reviewed by unified-access-control-r2 and gets two adversarial-reviewer passes (root CLAUDE.md §8.5, auth tag).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;. The wire fake is a hand-written HttpMessageHandler subclass.</constraint>
     <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
+    <constraint source="project">Before each push run `bash scripts/quality/check-changed-cs-format.sh origin/master` (blocking Tier 1 'Format (changed C# files)'; it covers the new test files under tests/). CS0618 (obsolete API) is a build error since master 9456083c78: migrate the call or escalate, never suppress it in Directory.Build.props, NoWarn or a file-wide pragma.</constraint>
   </constraints>
 
   <knowledge>

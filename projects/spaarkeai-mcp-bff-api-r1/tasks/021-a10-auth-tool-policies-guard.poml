@@ -23,12 +23,14 @@
   <goal>/mcp/* enforces A10 with refusals before any tool runs; tools carry per-tool policies that reuse existing policies; the ArchTest guard covers MapMcp with must-fire and must-not-fire controls and checks every tool's ReadOnly annotation and title; uac-r2's four checks pass.</goal>
 
   <context>
-    <background>Spec FR-02 and its review conditions; ADR-028 A10; design §6 and §8 B-7, B-8. AuthorizationModule.cs: ApplyFallbackPolicy L914, AuthSchemes.Ciam and WorkforceHome. RouteAuthorizationGuardTests recognises Map{Verb}, MapMethods and MapHealthChecks today (verb list ~L2642).</background>
+    <background>Spec FR-02 and its review conditions; ADR-028 A10; design §6 and §8 B-7, B-8. AuthorizationModule.cs: ApplyFallbackPolicy L914, AuthSchemes.Ciam and WorkforceHome. RouteAuthorizationGuardTests recognises Map{Verb}, MapMethods and MapHealthChecks via `ReadRegistrationVocabulary` (RouteAuthorizationGuardTests.cs ~L2661) and RouteAuthorizationGuardTests.Scanner.cs; the MapMcp scanner vocabulary and its must-fire/must-not-fire control were already added by task 020 (it needed them to keep the ArchTests green), together with the minimum census, GovernedFile and interim Pending-waiver entries for Api/Mcp/McpEndpoints.cs.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs (ONLY if A10 needs a scheme change: ApplyFallbackPolicy L914; AuthSchemes.Ciam / WorkforceHome)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/Mcp/McpEndpoints.cs (auth metadata, challenge)</file>
       <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolAuthorization.cs (AddAuthorizationFilters + per-tool [Authorize(Policy = …)] wiring)</file>
-      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (MapMcp in the scanned verbs ~L2642; tool ReadOnly/title check; no AI-internal types in tools)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (`ReadRegistrationVocabulary` ~L2661 already has MapMcp from task 020; add the tool ReadOnly/title check and the no-AI-internal-types check)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs (census, GovernedFile entry for Api/Mcp/McpEndpoints.cs and the final ledger entries, replacing 020's interim Pending waiver)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs (scanner logic; MapMcp vocabulary already added by task 020)</file>
       <file role="new">tests/integration/auth/Mcp/McpAuthTests.cs</file>
       <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md (A10)</file>
       <file role="canonical-reference">PnP mcp-cs-customers-secure-server (auth pattern, SDK 1.2.0 → 2.3.1; external sample, MIT)</file>
@@ -48,7 +50,9 @@
     <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
     <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
-    <constraint source="FR-02">The MapMcp scanner, census vocabulary and must-fire/must-not-fire controls can be reused from spike guard commit fdfd7b1d23 (branch spike/spaarkeai-mcp-phase0). The spike's Permanent route-ledger waivers (CallerScopedOnly, CallerSuppliedContentOnly), its census count and its GovernedFiles entries must NOT be carried over. Every production /mcp/* tool gets a real tool-level policy, and its ledger entries are rebuilt from scratch (uac-r2 condition, 2026-11-07; uac-r2 reviews this against FR-02).</constraint>
+    <constraint source="FR-02">The MapMcp scanner, census vocabulary and must-fire/must-not-fire controls were ported from spike guard commit fdfd7b1d23 (branch spike/spaarkeai-mcp-phase0) by task 020 (scanner vocabulary already added by 020). The spike's Permanent route-ledger waivers (CallerScopedOnly, CallerSuppliedContentOnly), its census count and its GovernedFiles entries must NOT be carried over. Every production /mcp/* tool gets a real tool-level policy, and its ledger entries are rebuilt from scratch, replacing the interim Pending waiver 020 had to add (uac-r2 condition, 2026-11-07; uac-r2 reviews this against FR-02).</constraint>
+    <constraint source="project">Rebuild the census data from master, not from the spike. `ExpectedEndpointFileCount` was 152 on master (RouteAuthorizationGuardTests.Ledger.cs:1200); task 020 bumped it to 153 for Api/Mcp/McpEndpoints.cs with a dated history line. Verify that entry, and if master has moved again take master's count + 1. Make the GovernedFile("Api/Mcp/McpEndpoints.cs", Scope.…, reason) entry carry a written reason and an ADR-028 A10 citation (tests/CLAUDE.md census rule; the guard requires a GovernedFiles entry and a count bump "with a history line", RouteAuthorizationGuardTests.cs ~L2384-2389). This task keeps the ledger entries, tool policies, ReadOnly/title and no-AI-type checks.</constraint>
+    <constraint source="project">Before each push run `bash scripts/quality/check-changed-cs-format.sh origin/master` (blocking Tier 1 'Format (changed C# files)'; fix with `dotnet format whitespace . --folder --include &lt;file&gt;`). The Stop hook also runs the ArchTests. CS0618 (obsolete API) is a build error since master 9456083c78: migrate the call or escalate, never suppress it in Directory.Build.props, NoWarn or a file-wide pragma.</constraint>
     <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
   </constraints>
 
@@ -87,7 +91,7 @@
     <step order="2">Configure /mcp/* to the default workforce scheme with explicit refusal of CIAM and A9 home-directory tokens before endpoint execution; change AuthorizationModule.cs only if the existing schemes cannot express A10.</step>
     <step order="3">Emit a 401 with a WWW-Authenticate challenge per the MCP authorization spec (escalation below if it needs an anonymous metadata route).</step>
     <step order="4">Add McpToolAuthorization: AddAuthorizationFilters and per-tool policies reusing existing policies.</step>
-    <step order="5">Extend RouteAuthorizationGuardTests: MapMcp scanned; every [McpServerTool] has explicit ReadOnly and Title; no tool constructor injects a Services/Ai/** type; must-fire, must-not-fire and the seeding proof.</step>
+    <step order="5">Extend RouteAuthorizationGuardTests (the MapMcp scanner vocabulary and its controls already exist from task 020; confirm they still fire and record the seeding proof): replace 020's interim waiver with the final ledger entries and verify the census entry; every [McpServerTool] has explicit ReadOnly and Title; no tool constructor injects a Services/Ai/** type; must-fire, must-not-fire and the seeding proof.</step>
     <step order="6">Write McpAuthTests covering the acceptance criteria; run auth, contract and ArchTests suites.</step>
     <step order="7">Request unified-access-control-r2 review and two adversarial-reviewer passes; measure the publish-size delta.</step>
     <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
@@ -116,6 +120,7 @@
     <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpEndpoints.cs</output>
     <output type="test">tests/integration/auth/Mcp/McpAuthTests.cs</output>
     <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</output>
   </outputs>
 
   <acceptance-criteria>
@@ -126,6 +131,8 @@
     <criterion testable="true">A valid A10 token for a licensed user runs the probe tool as that caller.</criterion>
     <criterion testable="true">/mcp/* falls under the FallbackPolicy: a test endpoint mapped under /mcp without explicit auth still returns 401.</criterion>
     <criterion testable="true">RouteAuthorizationGuardTests: an unauthenticated MapMcp fixture fails (must-fire), an authenticated one passes (must-not-fire), and the seeding proof is recorded.</criterion>
+    <criterion testable="true">`TheEndpointFileCensusIsPinned` passes with `ExpectedEndpointFileCount` at master's count + 1 (153 when master is still at 152) and a dated history line naming Api/Mcp/McpEndpoints.cs; the GovernedFile entry for it has a written reason citing ADR-028 A10; no Permanent waiver or GovernedFile entry from the spike is present, and 020's interim Pending waiver is gone.</criterion>
+    <criterion testable="true">`bash scripts/quality/check-changed-cs-format.sh origin/master` exits 0, and `dotnet test tests/Spaarke.ArchTests/` passes.</criterion>
     <criterion testable="true">The guard fails a fixture tool without an explicit ReadOnly annotation or title, and a fixture tool injecting a Services/Ai type.</criterion>
     <criterion testable="true">No MCP endpoint or tool carries the ExternalCollaboration policy (arch test); grep shows no token or claim value logged.</criterion>
     <criterion testable="true">The PR records unified-access-control-r2's review of the four checks, two adversarial passes, and the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>

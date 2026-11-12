@@ -34,7 +34,7 @@
 | O-16 | Widget HTML is embedded in the BFF. Aim under 1 MB (the `widget-design` skill rule); 3 MB is the hard ceiling (refined 2026-11-06). |
 | O-17 | **This project creates and configures the connector** (and the plugin package) in the dev tenant. |
 | O-18 | **Entry points (Q-8):** v1 starts with the **`/` skill**, and users can also **ask directly** in a normal prompt. Organisational prompts are not v1. |
-| O-19 | **Brand for a family, not one connector (Q-9), approved as proposed in §5.5:** one Copilot connector per product area, named "Spaarke" + area. The core member is **"Spaarke"** (v1); routes are `/mcp/{area}`. |
+| O-19 | **Brand for a family, not one connector (Q-9), approved as proposed in §5.5:** one Copilot connector per product area, named "Spaarke" + area. The core member was approved as **"Spaarke"** (v1) and is now the connector **"Spaarke MCP"** (owner 2026-11-10; supersedes O-19's core-member name); routes are `/mcp/{area}`. |
 | O-20 | **Tenant admin (Q-10):** the owner holds Global Admin in the dev tenant and runs the admin-center steps; a second admin can be designated for testing. |
 | O-21 | **Backlog issues (Q-11):** filed. See §19. |
 | O-22 | **Terms:** a Signal produces a **Work Item**; resolving it writes a **Decision Record**. The Decide grid lists Work Items (§4.1). |
@@ -217,7 +217,7 @@ The decisions capability is the first of several. Patent, Trademark and other ca
 
 **Proposal:**
 - **Members, named "Spaarke" + area:**
-  - **Spaarke**: core legal operations (decisions, billing review and approval, matters). **v1 ships this one.** Keeping it short makes "…in Spaarke" route naturally (§5.4).
+  - **Spaarke** (as proposed; the connector's display name is now **"Spaarke MCP"**, owner 2026-11-10): core legal operations (decisions, billing review and approval, matters). **v1 ships this one.** Keeping it short makes "…in Spaarke" route naturally (§5.4).
   - **Spaarke Patents** and **Spaarke Trademarks** later, as add-ons that match their SKUs.
   - The alternative "Spaarke Legal Operations" for the core reads more clearly in a list of sources, but "…in Spaarke" then matches less well.
 - **Family name** in docs and marketing: "Spaarke for Microsoft 365 Copilot". It needs a check against Microsoft's trademark and marketplace naming rules before any public listing; that isn't needed for v1.
@@ -245,7 +245,7 @@ Phase 0 adds:
 ADR-028 A8 (proven live 2026-10-08): in **Model 1**, a per-customer stamp in Spaarke's tenant, licensed customer staff are **B2B guests** whose `systemuser` record is keyed on the **guest `oid` in Spaarke's tenant**. Only an authority **pinned to Spaarke's tenant** issues that `oid`. A token from the user's home tenant has a different `oid`, so it does not match any `systemuser`, and the BFF's credentials cannot exchange it OBO for Spaarke-tenant Dataverse.
 
 - **Entra SSO through Copilot** issues from the **user's home tenant**. That works only when the user's home tenant **is** the BFF's tenant: v1's dev tenant (O-4) and Model 2 stamps. **It fails for Model 1 customers**, which is the main production shape.
-- **OAuth 2.0** (a static registration in the Teams Developer Portal, authorize and token endpoints at `login.microsoftonline.com/{spaarke-tenant}`, PKCE) issues Spaarke-tenant tokens with the guest `oid`, in the shape A8 requires. The April package already used this shape (`spaarke-bff-openapi.yaml:1301-1302`), and April recorded "OAuth worked".
+- **OAuth 2.0** (a static registration in the Teams Developer Portal, authorize and token endpoints at `login.microsoftonline.com/{spaarke-tenant}`; a confidential client with a secret held only in Microsoft's registration, T5 2026-11-08/12) issues Spaarke-tenant tokens with the guest `oid`, in the shape A8 requires. The April package already used this shape (`spaarke-bff-openapi.yaml:1301-1302`), and April recorded "OAuth worked".
 
 ### 6.2 Decision (approved, O-24)
 
@@ -259,11 +259,12 @@ ADR-028 A8 (proven live 2026-10-08): in **Model 1**, a per-customer stamp in Spa
   - whether a connector created in the customer's tenant accepts an OAuth registration whose authority is another tenant (Spaarke's);
   - which app registration is the OAuth client;
   - where its credential lives (CLAUDE.md §9 Key Vault rules; client-secret writes need owner confirmation).
+- **Answered (T5 passed 2026-11-12, OBO via "Spaarke MCP"):** the Dev Portal requires a client secret (owner-confirmed 2026-11-08), so the public client is not accepted and the connector client is confidential: public client flows off, redirect on the Web platform, the secret only in the Dev Portal registration, dev expiry up to 24 months (ADR-028 A10 Path A).
 
 **ADR-028 review and amendment is a project deliverable (O-12, Phase A).** A Copilot connector is a **new client plane**: a Microsoft-hosted token store acting as an OAuth client for the BFF. A8 governs the SPA and Teams workforce clients and doesn't mention it. The project reviews ADR-028 against this plane and drafts the amendment. **Done: written as ADR-028 Amendment A10** (2026-11-05, owner-approved path B; `.claude/adr/ADR-028-spaarke-auth-architecture.md`, summarised in `.claude/constraints/auth.md`). It:
-- adds a Copilot / Cowork connector client plane: Spaarke-tenant authority, PKCE, BFF audience, `user_impersonation` scope, tools as the caller (OBO), `systemuser` callers only;
+- adds a Copilot / Cowork connector client plane: Spaarke-tenant authority, a confidential client (the Dev Portal requires a secret), BFF audience, `user_impersonation` scope, tools as the caller (OBO), `systemuser` callers only;
 - makes Entra SSO Model-2-only;
-- requires a dedicated connector client (public with PKCE if the registration allows; otherwise one per stamp, with its secret only in Microsoft's registration);
+- requires a dedicated connector client (a confidential client, one per stamp, with its secret only in Microsoft's registration; the Dev Portal does not accept a public client, T5 2026-11-08/12);
 - refuses CIAM and A9 home-directory tokens on `/mcp/*`.
 
 Also rejected in A10: A9's home-directory token plus stored link, because that token can't be exchanged OBO into the Spaarke tenant, so every tool would have to run app-only.
@@ -315,6 +316,7 @@ BFF  POST /mcp/legal-operations   stateless · RequireAuthorization · rate-limi
 - **Naming:** a `spaarke_` prefix, because connector tools share Copilot's tool space with other vendors.
 - **Descriptions:** at most 1,024 characters, with "use for / not for" wording.
 - **Error results:** errors come back as tool results with `isError` and a message that says how to fix the call, never as transport errors (§8 B-2).
+- **Commit warnings:** commit results keep `warnings[]` and each step's `warning` (D-216, for example `inquiry_email_not_archived`). `spaarke_complete_decision` returns `DecisionCommitResult` unchanged and the widget shim passes them through, so the Done step can show them (spec FR-08, FR-13).
 - **Writes through the model:** a model-visible "complete" tool is **not in v1** (O-14).
 
 ### 7.2 Why tools call services, not HTTP routes
@@ -338,7 +340,7 @@ The review found the decision services well shaped, but coupled to `HttpContext`
 | **B-5** | **Slim list projection:** `WorklistItemSummary` without `EvidenceRefs` or `Steps`; the full row arrives with the plan on open | Rows are about 1–2 KB each, so 30–50 rows exceed Cowork's 64 KiB inline cap | v1 |
 | **B-6** | **MCP placement:** `Api/Mcp/` + `AddMcpModule` + `MapMcpEndpoints` in `EndpointMappingExtensions` (ADR-010). An ADR-032 null-object kill switch `Mcp:Enabled`. Explicit `.RequireAuthorization()`, a dedicated rate-limit policy (partitioned per caller), and a request-size limit on `/mcp/*`. **Routes are per product area, `/mcp/{area}`, and v1 maps only `/mcp/legal-operations`** (§5.5). Each tool is tagged with its area. | The connector URL is set in each customer's tenant. A flat `/mcp` would force every customer to re-create the connector when the Patents or Trademarks area arrives. | v1 |
 | **B-7** | **Tool authorization as policies:** `AddAuthorizationFilters()` plus per-tool `[Authorize(Policy = …)]`, reusing existing policies. Never `ExternalCollaboration`. | Checks held in endpoint filters (Finance, AI) don't reach tools | v1 |
-| **B-8** | **Guard coverage:** extend `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (it recognises only `Map{Verb}`, `MapMethods` and `MapHealthChecks`) to cover `MapMcp` and assert every tool carries an explicit `ReadOnly` annotation | New auth surface invisible to the ratchet | v1 |
+| **B-8** | **Guard coverage:** extend `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (it recognises only `Map{Verb}`, `MapMethods` and `MapHealthChecks` via `ReadRegistrationVocabulary`) to cover `MapMcp` and assert every tool carries an explicit `ReadOnly` annotation. The `MapMcp` scanner vocabulary lands with the host (task 020), because the existing guard turns red on any unread `Map*` call; the ledger entries, tool policies and annotation checks follow in task 021 | New auth surface invisible to the ratchet | v1 |
 | **B-9** | **The April 2026 Copilot surface stays (O-15).** That means the "Spaarke AI" agent package (`src/solutions/CopilotAgent/`, 28-function OpenAPI action), `/api/agent/*`, and the unused `AgentTokenService`, `SpaarkeAgentHandler`, `AdaptiveCardFormatterService` and `Microsoft.Agents.Hosting.AspNetCore` package. **One point of interference:** if the declarative-agent fallback (§5.2) is adopted, the Spaarke AI package is rebuilt on the MCP action, and its OpenAPI action must go, because the two would compete for the same prompts (April's routing problem). The unused code is filed as #2575 (and #1523). | The code is unused but harmless, so leave it | Only with the fallback |
 | **B-10** | Accept `because` from the wizard | The server supports it (`DecisionCommitService.cs` `Because`); the client never sends it | v1 (trivial) |
 
@@ -511,7 +513,7 @@ The unused `Microsoft.Agents.Hosting.AspNetCore` package stays (O-15; removal tr
   <spaarke-ai>NO — src/solutions/SpaarkeAi/** untouched; shared-lib decision components may gain props (lookup/shim seams), consumed unchanged by the Console</spaarke-ai>
   <ci-workflows>YES — widget build step feeding the BFF embedded resource; MCP conformance run; possibly a connector/plugin package build</ci-workflows>
   <skill-directives>YES — rewrite .claude/skills/mcp-tool-handler; update declarative-agent and widget-design skills to current schemas</skill-directives>
-  <root-CLAUDE-md>YES — §1.1 product-name table gains the "Spaarke for Microsoft 365 Copilot" family and its "Spaarke" core member (spec FR-18)</root-CLAUDE-md>
+  <root-CLAUDE-md>YES — §1.1 product-name table gains the "Spaarke for Microsoft 365 Copilot" family and its "Spaarke MCP" core connector (spec FR-18)</root-CLAUDE-md>
 </hot-path-declaration>
 ```
 
@@ -558,7 +560,7 @@ O-1 to O-21 (§0). The second review round settled:
 
 The third round settled:
 - **Q-8:** the `/` skill plus direct prompts; org prompts later (O-18, §5.4);
-- **Q-9:** branding as proposed, core member "Spaarke" (O-19);
+- **Q-9:** branding as proposed, core member "Spaarke" (O-19); the core connector's display name is now "Spaarke MCP" (owner 2026-11-10);
 - **Q-10:** the owner runs the admin steps as Global Admin (O-20);
 - **Q-11:** issues filed. The April agent code is **#2575** (new, `spaarkeai-mcp-bff-api-r1`, `notes/defer-issues.md` ISS-001). The "DEBUG" token logger was **already filed as #1574**, and `AgentTokenService` as **#1523**, so neither was duplicated.
 

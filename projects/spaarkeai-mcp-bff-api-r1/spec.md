@@ -50,7 +50,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 **Registration (dev tenant)**
 - The Copilot registration, created and configured by this project:
   - the A10 OAuth connector client registration;
-  - the federated connector **"Spaarke"**;
+  - the federated connector **"Spaarke MCP"** (owner 2026-11-10; supersedes "Spaarke");
   - the plugin package with the **`spaarke-decisions`** skill;
   - a repeatable runbook for each.
 - The **Spaarke AI** declarative agent fallback, rebuilt on one MCP action, **only if** Phase 0 test T1 shows no widget in Copilot Chat through the connector.
@@ -194,12 +194,14 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
    - Input: `signalId` and a `DecisionReview` (the same contract as `POST /api/v1/signals/{id}/decision`).
    - It calls `DecisionCommitService` unchanged: plan re-derivation, `DecisionCallerRights`, as-caller execution, one Decision Record, Signal closure, idempotency on `{oid}:{reviewId}`.
    - The widget sends it only from the wizard's explicit Confirm action.
+   - Commit results keep `warnings[]` and each step's `warning` (D-216, for example `inquiry_email_not_archived`, a Done budget inquiry whose `.eml` was not archived). The tool returns `DecisionCommitResult` unchanged and never drops or re-projects them.
    - Acceptance:
      - one completion writes one Decision Record and closes the Signal;
      - the same `reviewId` sent twice returns the first outcome and writes nothing new;
      - a commit is validated against the Signal's current plan; the server's plan-read stamp only sets the review start (missing = now; ontology ruling on ISS-004 / #2628, 2026-11-07, D-207). A commit with no plan read is never looser: a system-closed Signal gets `signal_not_open`, and a mismatched action gets `actions_do_not_match_plan`. The MCP commit tool may still require the plan tool to have run first, as a usability guard;
      - a commit by a caller without Write on a subject is refused;
-     - nothing in the server relies on a host confirmation prompt.
+     - nothing in the server relies on a host confirmation prompt;
+     - structuredContent carries `warnings[]` and each step's `warning` unchanged: a budget-inquiry commit whose archival fails returns success with `warnings` containing `inquiry_email_not_archived`, matching REST for the same input.
 
 9. **FR-09 — One result mapper (B-2).** `SignalReadResult` and `DecisionCommitResult` map to ProblemDetails (REST) or to an MCP tool error result (`isError`, a message that says how to fix the call, a `reasonCode`) through one mapper, with one `reasonCode` vocabulary.
    - Acceptance:
@@ -244,6 +246,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
     - Every parameter kind works, and person and lookup parameters use an inline type-ahead backed by FR-07.
     - It opens as an in-frame Fluent dialog and requests fullscreen. The fallbacks are master-detail in fullscreen, then `openLink` to the Console's wizard for that item.
     - Related records render as text plus an "Open in Spaarke" link.
+    - The shim passes the commit's `warnings[]` and each step's `warning` through unchanged, so the Done step shows them (for example `inquiry_email_not_archived`: "The inquiry email was sent, but a copy of it could not be saved to the matter.").
     - Acceptance:
       - a licensed dev-tenant user resolves one Work Item of each lookup-bearing action type end to end;
       - after Confirm, the row leaves the lane and the count drops by one;
@@ -257,8 +260,8 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
 
 16. **FR-16 — Registration in the dev tenant (O-17, O-19, O-20).**
     - The project creates:
-      - the A10 connector client registration (a public client with PKCE if the registration accepts it; otherwise a confidential client whose secret lives only in Microsoft's registration, with human confirmation per CLAUDE.md §9);
-      - the federated connector, display name **"Spaarke"**, pointing at `/mcp/legal-operations`, with a description of at most 4,000 characters;
+      - the A10 connector client registration: a confidential client (the Dev Portal requires a secret, owner-confirmed 2026-11-08): public client flows off, redirect on the Web platform, the secret only in the Dev Portal registration (human-confirmed per CLAUDE.md §9), dev expiry up to 24 months (ADR-028 A10 Path A, see ADR Tensions);
+      - the federated connector, display name **"Spaarke MCP"** (owner 2026-11-10), pointing at `/mcp/legal-operations`, with a description of at most 4,000 characters;
       - the plugin package (app manifest 1.30, `agentConnectors`) with the **`spaarke-decisions`** skill.
     - The owner runs the admin-center step as Global Admin.
     - Each step has a repeatable runbook. Whether the connector can be created by script is recorded.
@@ -273,7 +276,7 @@ Spaarke becomes a tool provider inside the user's normal Microsoft 365 Copilot C
     - Acceptance: `@Spaarke AI` in Chat renders the widget and resolves a Work Item. The OpenAPI action is gone, so the two cannot compete for prompts.
 
 18. **FR-18 — Docs, terminology and skills.**
-    - Add one CLAUDE.md §1.1 row for "Spaarke for Microsoft 365 Copilot" / "Spaarke", citing `ontology-component-model.md` §1.1. The ontology project wrote that text (commit `1e9d16bdba`). Follow the CLAUDE.md maintainer notes: a `.claude/CHANGELOG.md` entry with the byte delta, the 200-line / 30 KB budget, and `ai-procedure-maintenance` Checklist F.
+    - Add one CLAUDE.md §1.1 row for "Spaarke for Microsoft 365 Copilot" / core connector "Spaarke MCP" (owner 2026-11-10), citing `ontology-component-model.md` §1.1. The ontology project wrote that text (commit `1e9d16bdba`) and must update its §1.1 row to "Spaarke MCP" first, because terms originate there. Follow the CLAUDE.md maintainer notes: a `.claude/CHANGELOG.md` entry with the byte delta; root CLAUDE.md is already 218 lines (over its 200-line budget), so it gains no net lines unless the owner explicitly OKs the +1, and stays at or under 30 KB; and `ai-procedure-maintenance` Checklist F.
     - Record the naming conventions (`notes/coordination/2026-11-06-copilot-naming-and-ownership.md` §1) in `mcp-tool-handler` (tool names) and `widget-design` (widget URI, folder, size).
     - Write an MCP architecture doc (`docs/architecture/`) and a "how to add a tool" guide plus a connector runbook (`docs/guides/`).
     - Rewrite `.claude/skills/mcp-tool-handler` to the real conventions.
@@ -380,7 +383,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
   <spaarke-ai>NO — src/solutions/SpaarkeAi/** untouched; shared-lib decision and worklist components may gain props (single-lane, paging, lookup seams), consumed unchanged by the Console</spaarke-ai>
   <ci-workflows>YES — widget build step feeding the BFF embedded resource; MCP conformance run; bundle-size budget; possibly a plugin package build</ci-workflows>
   <skill-directives>YES — rewrite .claude/skills/mcp-tool-handler; update declarative-agent and widget-design skills to current schemas</skill-directives>
-  <root-CLAUDE-md>YES — §1.1 product-name table gains the "Spaarke for Microsoft 365 Copilot" family and its "Spaarke" core member (FR-18)</root-CLAUDE-md>
+  <root-CLAUDE-md>YES — §1.1 product-name table gains the "Spaarke for Microsoft 365 Copilot" family and its "Spaarke MCP" core connector (FR-18)</root-CLAUDE-md>
 </hot-path-declaration>
 ```
 
@@ -479,7 +482,7 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 | Widget size (O-16) | Hosting and budget? | Embedded in the BFF, 3 MB | NFR-03 |
 | Connector (O-17) | Who creates it? | This project | FR-16 |
 | Entry points (O-18) | @, / or suggested prompts? | The `/` skill first, plus direct prompts; org prompts later | FR-16; out of scope |
-| Branding (O-19) | Name for a family of capabilities? | One connector per product area, "Spaarke" + area; core member "Spaarke"; routes `/mcp/{area}` | FR-01, FR-16, FR-18 |
+| Branding (O-19) | Name for a family of capabilities? | One connector per product area, "Spaarke" + area; core connector "Spaarke MCP" (owner 2026-11-10; supersedes the core member name "Spaarke"); routes `/mcp/{area}` | FR-01, FR-16, FR-18 |
 | Admin (O-20) | Who runs the admin steps? | The owner (Global Admin); a second admin can be designated | Dependencies |
 | Terms (O-22) | Decision Record vs item? | A Signal produces a Work Item; resolving it writes a Decision Record | Terminology throughout; FR-18 |
 | Privilege (spec interview) | What does the model see for privileged Work Items? | A neutral line only ("N privileged items — open to review"); detail only in the widget | FR-04 |
@@ -497,13 +500,13 @@ Copied from design.md §16 (`root-CLAUDE-md` = **YES**: FR-18 edits the CLAUDE.m
 - **Latency targets**: NFR-01's numbers (3 s / 1.5 s / 15 s p95, 30 s ceiling) are working targets. The owner set none. Affects tool design and the commit path.
 - **Page size**: page 1 carries at most 50 slim rows, which keeps it well under 64 KiB at 600 bytes per row. Affects FR-05.
 - **Privilege flag source** (superseded 2026-11-08): the assumption that the Signal or its subject carries `sprk_privilegeflagged` did not hold, because nothing writes that column (ontology DI-64). FR-04 now states the owner's derivation rule.
-- **Connector client**: a public client with PKCE if the Developer Portal registration accepts one; otherwise one confidential client per stamp (A10). Affects FR-16; decided by T5.
+- **Connector client**: a confidential client. The Developer Portal requires a secret (owner-confirmed 2026-11-08), so the public client with PKCE that A10 preferred was not accepted. Public client flows are off and the redirect is on the Web platform; the secret lives only in the Dev Portal registration; the dev expiry may be up to 24 months (A10 Path A); customer stamps get one confidential client each under the 180-day cap. Affects FR-16; decided by T5 (passed 2026-11-12).
 - **Telemetry sink**: the existing App Insights instance and dimensions; no new store. Affects NFR-05.
 - **Caller context is request-bound (v1 limitation, option C)**: decision capabilities run only inside an HTTP request. This holds while `/mcp/*` stays stateless with `PerSessionExecutionContext=false`, which task 010 pins with a test. Off-request callers (durable agents, queued continuations, Teams proactive) are out of v1. The user-token problem blocks them, not the deferred `ICallerContext`; `ComposeProfileDispatcher.cs:88/117-134` shows today's detached-context workaround. Affects FR-10 and any later off-request slice.
 
 ## Unresolved Questions
 
-- [ ] **T5:** does a connector accept an OAuth registration whose authority is the Spaarke tenant (relevant later when connectors are created in customer tenants), and does it accept a public client? - Blocks: FR-02 / FR-16 build order; A10's open point.
+- [x] **T5:** does a connector accept an OAuth registration whose authority is the Spaarke tenant (relevant later when connectors are created in customer tenants), and does it accept a public client? - Answered: T5 passed 2026-11-12 (OBO via 'Spaarke MCP'); public client not accepted, confidential client used. Was: blocks FR-02 / FR-16 build order; A10's open point.
 - [ ] **T1:** does the connector render the widget in Copilot Chat? - Blocks: whether FR-17 (agent fallback) is built.
 - [ ] **T13:** can SDK 2.3.1 serve different tool sets on two routes in one host? - Blocks: the FR-01 route mechanism (fallback: one route that filters the tool list by path).
 - [ ] **T3 / T4:** does the host confirm widget-initiated writes, and per call? - Blocks: nothing, because the server enforces writes (NFR-06). It informs wizard copy.

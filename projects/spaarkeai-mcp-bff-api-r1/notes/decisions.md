@@ -290,3 +290,21 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
 - **Consequences:**
   - the connector app becomes a confidential client: "Allow public client flows" off, and the portal redirect URI goes on the **Web** platform;
   - a rotation runbook is still owed (`docs/guides/`, task 052).
+
+
+## 2026-11-12 — Plan refreshed against master (1,435 commits since bcdc0e0069)
+
+- **Why:** before Phase B, the owner asked that the open tasks be checked against current master. Read-only review: `git diff bcdc0e0069 origin/master` over every path the open POMLs, spec, design and plan cite. All 29 POMLs still parse and the status drift check is clean.
+- **020 now ports the route-guard scanner vocabulary for `MapMcp`** (from spike commit `fdfd7b1d23`). The first `MapMcp` call otherwise turns `NoRouteIsRegisteredInAFormTheScannerCannotRead` red, and the Stop hook and CI `arch-tests` block on it. 020 also makes the minimum census changes the scanner forces: count 152 → 153, a `GovernedFile` entry, a `NotAuthorizationForm` entry and an interim **Pending** waiver owned by 021. The spike's Permanent waivers stay forbidden. 021 keeps the final ledger entries, tool policies and annotation checks.
+- **Repo-wide changes the open tasks now follow:**
+  - a blocking Tier 1 "Format (changed C# files)" check (PR #2663);
+  - CS0618 is a build error again (`9456083c78`); migrate or escalate, never suppress;
+  - the Stop hook runs ArchTests;
+  - adding a Tier 1 job (025) needs an owner-approved §6.5 Path-A exception to FR-A02.
+- **Contract additions:** 024/032 carry D-216 commit warnings (`inquiry_email_not_archived`) through unchanged; 022 maps an Unavailable lanes read (`core_pair_read_failed`) to a tool error, never a partial list.
+- **Names and facts brought current:**
+  - the connector is "Spaarke MCP" everywhere (ontology row updated in `324cf6e5e2`, docs branch);
+  - the connector client is confidential (no PKCE);
+  - T5 is answered;
+  - task 050 can no longer meet "≤ 200 lines", because root CLAUDE.md is already 218. It now adds no net lines without the owner's OK.
+- Report: session scratchpad `plan-drift-report.md` (not committed); this entry is the record.

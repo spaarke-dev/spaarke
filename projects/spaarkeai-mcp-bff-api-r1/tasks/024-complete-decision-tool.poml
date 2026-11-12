@@ -40,7 +40,7 @@
 
   <constraints>
     <constraint source="project">spaarke_complete_decision is app-only (never model-visible), readOnlyHint false, destructiveHint false, idempotentHint true, named per the naming note, with a title and a 'use for / not for' description of at most 1,024 characters.</constraint>
-    <constraint source="ADR-002">This task adds no billing-refusal check of its own: D-207 (ontology.decision.decided_in_invoice_review) applies only through DecisionCommitService's existing (1c-billing) step (DecisionCommitService.cs:974-996).</constraint>
+    <constraint source="ADR-002">This task adds no billing-refusal check of its own: D-207 (ontology.decision.decided_in_invoice_review) applies only through DecisionCommitService's existing (1c-billing) step (DecisionCommitService.cs:975-996).</constraint>
     <constraint source="ADR-002">The tool calls only IDecisionCapability.CommitAsync with the DecisionReview deserialised by the same contract and JSON options as POST /api/v1/signals/{id}/decision; it adds no validation, rights check or write of its own, and relies on no host confirmation prompt (NFR-06).</constraint>
     <constraint source="ADR-028">Every tool this task adds reads the request HttpContext from IHttpContextAccessor and passes it (or its User) to the decision capability. A null HttpContext or an unauthenticated caller returns an isError result with UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) before any capability call, and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
     <constraint source="ADR-019">Every domain failure from a tool added by this task is returned as an isError tool result produced by DecisionResultMapper.ToToolError → Api/Mcp/McpToolResults (reasonCode plus a fix-the-call message); no domain failure is returned as a transport error or exception.</constraint>
@@ -51,6 +51,8 @@
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
     <constraint source="project">The `spaarke_complete_decision` error result for a Failed commit carries the D-17 `Partial` payload from task 014 (`DecisionToolError.Partial`) in its structured content, so the host and the widget can tell the user which writes landed and whether a resend with the same review id resumes the decision (ontology, 2026-11-07).</constraint>
     <constraint source="FR-10">One caller per call (013 known limit, confirmed by ontology review, 2026-11-07). The capability's guard checks the `HttpContext` passed in, while `SignalCoreRecordAccess`, `IDataverseUserClient` and the plan stamp run as the ambient request's caller. This tool passes exactly `IHttpContextAccessor.HttpContext`, never a constructed or cached `HttpContext`. A test pins that the tool's call uses the same instance as `IHttpContextAccessor.HttpContext`.</constraint>
+    <constraint source="project">Before each push run `bash scripts/quality/check-changed-cs-format.sh origin/master` (blocking Tier 1 'Format (changed C# files)'; fix with `dotnet format whitespace . --folder --include &lt;file&gt;`). CS0618 (obsolete API) is a build error since master 9456083c78: migrate the call or escalate, never suppress it in Directory.Build.props, NoWarn or a file-wide pragma.</constraint>
+    <constraint source="FR-08">The tool returns the commit result unchanged. `DecisionCommitResult.Warnings` (DecisionCommitService.cs ~L191; D-216, ontology task 176) and each step's `Warning` (`DecisionActionOutcome` / `DecisionCommitStep`, for example `inquiry_email_not_archived`) must reach structuredContent. Do not slim, re-project or drop them.</constraint>
   </constraints>
 
   <knowledge>
@@ -78,7 +80,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Implement CompleteDecisionTool: input signalId + DecisionReview (same contract as the REST route); read the HttpContext from IHttpContextAccessor (null or unauthenticated → isError UserContextRequired) and call IDecisionCapability.CommitAsync with it; return the commit result as structuredContent or failures through McpToolResults.</step>
+    <step order="1">Implement CompleteDecisionTool: input signalId + DecisionReview (same contract as the REST route); read the HttpContext from IHttpContextAccessor (null or unauthenticated → isError UserContextRequired) and call IDecisionCapability.CommitAsync with it; return the commit result unchanged as structuredContent (including `warnings[]` and each step's `warning`) or failures through McpToolResults.</step>
     <step order="2">Write data-mutation tests for the acceptance criteria, reusing #2580's billing fixture shapes for the one billing test.</step>
     <step order="3">Run the suites (including Task174_* and 011's commit baselines); measure the publish-size delta.</step>
     <step order="4">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
@@ -114,6 +116,7 @@
     <criterion testable="true">Negative: a billing Signal (subject sprk_invoice or sprk_billingevent) returns isError reasonCode ontology.decision.decided_in_invoice_review, writes nothing and does not call the rights probe (the one MCP billing test).</criterion>
     <criterion testable="true">Negative: with no HttpContext (accessor null) or an unauthenticated caller, the tool returns an isError result with UserContextRequired and writes nothing.</criterion>
     <criterion testable="true">A because value in the DecisionReview appears on the written Decision Record (FR-15 server half).</criterion>
+    <criterion testable="true">structuredContent carries `DecisionCommitResult` unchanged, including `warnings[]` and each step's `warning`. Test: a budget-inquiry commit whose archival fails returns success with `warnings` containing `inquiry_email_not_archived`, matching REST for the same input.</criterion>
     <criterion testable="true">grep shows no billing check, IsBillingSubject call or rights check under Api/Mcp/.</criterion>
     <criterion testable="true">The PR records the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>

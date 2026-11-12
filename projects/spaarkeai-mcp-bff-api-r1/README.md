@@ -38,7 +38,7 @@ Spaarke users already live in Microsoft 365 Copilot Chat and Cowork, where Work 
 
 ## Solution Summary
 
-One stateless MCP server in the BFF, authenticated per ADR-028 A10 (OAuth at the Spaarke-tenant authority, OBO as the caller), exposes `spaarke_show_decisions` (model-visible) and three app-only tools (plan, lookup search, complete) plus an app-only paging call. The BFF decision slice is reworked so REST and MCP are two thin adapters over one transport-free decision capability (B-1 to B-10), with `DecisionCommitService` unchanged as the single owner of the completion invariant. A single-file widget (`ui://spaarke/decisions.html`) reuses the Console's `WorklistLanePanel` and `DecisionWizardHost` over MCP fetch shims. The project registers it in the dev tenant as a federated connector "Spaarke" plus a plugin package with the `spaarke-decisions` skill, and builds the Spaarke AI agent fallback only if Phase 0 test T1 requires it.
+One stateless MCP server in the BFF, authenticated per ADR-028 A10 (OAuth at the Spaarke-tenant authority, OBO as the caller), exposes `spaarke_show_decisions` (model-visible) and three app-only tools (plan, lookup search, complete) plus an app-only paging call. The BFF decision slice is reworked so REST and MCP are two thin adapters over one transport-free decision capability (B-1 to B-10), with `DecisionCommitService` unchanged as the single owner of the completion invariant. A single-file widget (`ui://spaarke/decisions.html`) reuses the Console's `WorklistLanePanel` and `DecisionWizardHost` over MCP fetch shims. The project registers it in the dev tenant as a federated connector "Spaarke MCP" plus a plugin package with the `spaarke-decisions` skill, and builds the Spaarke AI agent fallback only if Phase 0 test T1 requires it.
 
 ## Graduation Criteria
 
@@ -65,7 +65,7 @@ The project is considered **complete** when (spec Success Criteria):
 - Tools `spaarke_show_decisions`, `spaarke_get_decision_plan`, `spaarke_search_decision_lookup`, `spaarke_complete_decision`, plus an app-only paging call (FR-03–FR-08)
 - BFF rework B-1 (capability), B-2 (result mapper), B-3 (workforce lookup search + REST route), B-4 (`ICallerContext`, deferred — option C, 2026-11-07), B-5 (slim projection), B-6 (placement), B-7 (tool policies), B-8 (route-guard coverage), B-10 (`because`)
 - Widget `ui://spaarke/decisions.html` in `src/client/widgets/spaarke-decisions/`: Decide lane and Decision wizard with every parameter kind (FR-12, FR-13); text path when no widget renders (FR-14)
-- Dev-tenant registration: A10 connector client, federated connector "Spaarke", plugin package with `spaarke-decisions`, runbooks (FR-16); Spaarke AI agent fallback only if T1 requires it (FR-17)
+- Dev-tenant registration: A10 connector client, federated connector "Spaarke MCP", plugin package with `spaarke-decisions`, runbooks (FR-16); Spaarke AI agent fallback only if T1 requires it (FR-17)
 - Phase 0 platform tests T0–T14, E1–E5 (FR-19); docs, terminology and skill rewrites (FR-18)
 
 ### Out of Scope

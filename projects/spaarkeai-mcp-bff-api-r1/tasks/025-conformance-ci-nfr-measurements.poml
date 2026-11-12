@@ -26,12 +26,12 @@
     <background>Spec NFR-09, NFR-01, NFR-02, FR-01 ('tools/list returns exactly the v1 tools'); design §12 (protocol tests, test-token injector). Live NFR-01 latency on the dev BFF is measured in 042.</background>
     <relevant-files>
       <file role="new">tests/integration/Mcp.Conformance.Host/ (test-only console host: runs the BFF via WebApplicationFactory on localhost with a test authentication handler)</file>
-      <file role="modify">.github/workflows/ci-tier1-blocking.yml (add job mcp-conformance)</file>
+      <file role="modify">.github/workflows/ci-tier1-blocking.yml (add job mcp-conformance after job 7 `format-changed-cs`, which now ends the file; only after the owner-approved Path-A exception below, otherwise .github/workflows/ci-tier2-advisory.yml)</file>
       <file role="modify">tests/integration/contract/Api/Mcp/McpHostContractTests.cs (exact five-tool tools/list assertion)</file>
       <file role="new">tests/integration/regression/Mcp/McpResultSizeTests.cs</file>
       <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/nfr-measurements.md</file>
       <file role="canonical-reference">tests/integration/contract/Api/Mcp/McpTestHost.cs (from 020)</file>
-      <file role="canonical-reference">.github/workflows/ci-tier1-blocking.yml (existing job structure, e.g. arch-tests L388)</file>
+      <file role="canonical-reference">.github/workflows/ci-tier1-blocking.yml (existing job structure, e.g. arch-tests L393; job 7 `format-changed-cs` is the model for a Path-A-excepted job: numbered CONTENTS entry in the header plus a job comment block)</file>
     </relevant-files>
     <dependencies>
       <dependency task="010" status="pending">MCP caller-path verification (FR-10 option C) green before conformance and NFR runs</dependency>
@@ -47,6 +47,8 @@
     <constraint source="project">tools/list on /mcp/legal-operations is asserted to be exactly spaarke_show_decisions, the paging tool (final name from 022), spaarke_get_decision_plan, spaarke_search_decision_lookup and spaarke_complete_decision.</constraint>
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
     <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
+    <constraint source="CLAUDE.md §6.5">Adding a Tier 1 job requires an owner-approved root CLAUDE.md §6.5 Path-A exception to FR-A02: the header of ci-tier1-blocking.yml (L10) says "CONTENTS (strict scope list — do not extend without spec amendment)". Raise 🔔 ADR Conflict before editing the workflow. On approval, add a numbered CONTENTS entry in the header and a job comment block like job 7's (precedents: `xrm-capability-guard`, 2026-10-06; `format-changed-cs`, owner-approved 2026-11-10, PR #2663). Otherwise put the job in ci-tier2-advisory.yml, which does not satisfy NFR-09 'blocking'. Editing the header list without the owner's approval is a blocking error.</constraint>
+    <constraint source="project">Before each push run `bash scripts/quality/check-changed-cs-format.sh origin/master` (blocking Tier 1 'Format (changed C# files)'; fix with `dotnet format whitespace . --folder --include &lt;file&gt;`). CS0618 (obsolete API) is a build error since master 9456083c78: migrate the call or escalate, never suppress it in Directory.Build.props, NoWarn or a file-wide pragma.</constraint>
   </constraints>
 
   <knowledge>
@@ -70,7 +72,7 @@
 
   <steps mode="directional">
     <step order="1">Create the test-only conformance host under tests/integration/Mcp.Conformance.Host/ that starts the BFF in-process on a localhost port with a test auth handler and seeded fakes.</step>
-    <step order="2">Add the mcp-conformance job to ci-tier1-blocking.yml: build, start the host, run the pinned conformance CLI with --spec-version 2026-07-28, fail on any failure.</step>
+    <step order="2">Get the owner's §6.5 Path-A exception for a new Tier 1 job (see the constraint), then add the mcp-conformance job to ci-tier1-blocking.yml with its header CONTENTS entry and comment block: build, start the host, run the pinned conformance CLI with --spec-version 2026-07-28, fail on any failure.</step>
     <step order="3">Add the exact five-tool tools/list assertion to McpHostContractTests.</step>
     <step order="4">Add McpResultSizeTests at 200 seeded items for every tool; measure in-process p95 per tool over 50 calls; write notes/nfr-measurements.md.</step>
     <step order="5">Run the job locally (act or the same commands) and in CI.</step>
@@ -81,11 +83,12 @@
   <escalation>
     <trigger>If a conformance failure requires changing SDK behaviour or the transport, STOP and escalate with the failing case.</trigger>
     <trigger>If the suite cannot run without a test-auth path inside src/, STOP and escalate.</trigger>
+    <trigger>If the owner has not approved a §6.5 Path-A exception to FR-A02 for a new Tier 1 job, STOP before editing the ci-tier1-blocking.yml header and raise 🔔 ADR Conflict; do not extend the CONTENTS list on your own.</trigger>
   </escalation>
 
   <justification>
     <existing>No conformance or MCP CI job exists (grep -l conformance .github/workflows returns nothing); tests/integration/contract/Api/Mcp/McpTestHost.cs (020) is an in-process xunit host, not an HTTP endpoint the external suite can call.</existing>
-    <extension>Partly: the job is added to the existing ci-tier1-blocking.yml rather than a new workflow; the host project is new because the conformance CLI needs a listening HTTP server.</extension>
+    <extension>Partly: the job is added to the existing ci-tier1-blocking.yml rather than a new workflow, which needs the owner-approved Path-A exception to FR-A02 (see constraints); the host project is new because the conformance CLI needs a listening HTTP server.</extension>
     <cost-of-doing-nothing>Protocol regressions (e.g. a broken 2026-07-28 transport behaviour) reach the dev tenant unnoticed, and NFR-09 has no evidence.</cost-of-doing-nothing>
   </justification>
 
@@ -104,6 +107,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">The mcp-conformance job runs the pinned conformance suite with --spec-version 2026-07-28 against /mcp/legal-operations and passes in CI (run URL in task notes).</criterion>
+    <criterion testable="true">The owner's §6.5 Path-A exception for the new Tier 1 job is cited in the PR, and ci-tier1-blocking.yml has a numbered CONTENTS entry in its header and a job comment block for mcp-conformance; if the exception was not granted, the job is in ci-tier2-advisory.yml and the PR says NFR-09 'blocking' is not met.</criterion>
     <criterion testable="true">Negative: breaking the dual-Accept handling locally (seed) makes the conformance job fail; restored afterwards.</criterion>
     <criterion testable="true">tools/list is asserted to be exactly the five v1 tools.</criterion>
     <criterion testable="true">At 200 seeded items, every tool result is under 64 KiB (McpResultSizeTests).</criterion>

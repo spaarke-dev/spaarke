@@ -41,7 +41,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">Names exactly per the naming note: package slug spaarke with explicit display name 'Spaarke'; skill folder and name spaarke-decisions; connector display 'Spaarke'; never 'Spaarke Copilot' or 'Spaarke Connect'.</constraint>
+    <constraint source="project">Names exactly per the naming note: package slug spaarke with explicit display name 'Spaarke'; skill folder and name spaarke-decisions; connector display 'Spaarke MCP' (owner 2026-11-10, supersedes the naming note's 'Spaarke'; the plugin package display name stays 'Spaarke'); never 'Spaarke Copilot' or 'Spaarke Connect'.</constraint>
     <constraint source="project">validate-plugin.mjs fails on any skill name not matching ^spaarke(-[a-z0-9]+)+$ or longer than 64 characters, and on a manifestVersion other than 1.30; it runs in CI through client-tests.yml.</constraint>
     <constraint source="project">The skill text uses 'Work Item' and 'Decision Record'; uses 'Finding' only for billing link-outs (D-208); qualifies 'playbook' by format where the format matters (D-209); never instructs the model to complete a decision (O-14).</constraint>
     <constraint source="ADR-028">The manifest holds no secret, tenant id or client secret; environment values (BFF URL, app ids) are placeholders resolved per environment, as env.dev.json does for the April package.</constraint>

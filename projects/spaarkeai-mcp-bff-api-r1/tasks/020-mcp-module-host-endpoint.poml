@@ -34,6 +34,8 @@
       <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs (builder.Services.AddMcpModule(builder.Configuration) beside AddSignalsModule, L110)</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (app.MapMcpEndpoints())</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (Mcp: { Enabled: false })</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs (MapMcp scanner vocabulary, ported from spike commit fdfd7b1d23, plus its must-fire/must-not-fire control; the `ReadRegistrationVocabulary` set lives in RouteAuthorizationGuardTests.cs ~L2661, so edit whichever file holds it)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs and RouteAuthorizationGuardTests.Ledger.cs (only what the scanner change forces for Api/Mcp/McpEndpoints.cs: census 152 → 153 with a history line, one GovernedFile entry, an interim Pending waiver owned by 021; see the ArchTests constraint)</file>
       <file role="new">tests/integration/contract/Api/Mcp/McpHostContractTests.cs</file>
       <file role="new">tests/integration/contract/Api/Mcp/McpTestHost.cs (in-process host + test token helper, tests only)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/NotificationsModule.cs:20-55 (options + null object)</file>
@@ -61,6 +63,8 @@
     <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
     <constraint source="project">Any defect found and not fixed in this task is filed with /project-defer-issue-tracking (notes/defer-issues.md AND a GitHub issue), never one without the other (project CLAUDE.md §2).</constraint>
     <constraint source="FR-10">One caller per call (013 known limit, 2026-11-07). `DecisionCapability` checks the caller and keys the plan stamp on the `HttpContext` passed in, while the Dataverse reads take the token from `IHttpContextAccessor`. Every MCP tool must pass exactly `IHttpContextAccessor.HttpContext` (the ambient request context), never a constructed or cached `HttpContext`, so the guard and the reads see the same principal.</constraint>
+    <constraint source="project">Adding `MapMcp` turns `RouteAuthorizationGuardTests.NoRouteIsRegisteredInAFormTheScannerCannotRead` red (tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs ~L2769-2779), because `MapMcp` is SDK-declared and is not in `ReadRegistrationVocabulary` (~L2661). With the Stop hook now running the ArchTests and CI `arch-tests` blocking the PR, this task must end with `dotnet test tests/Spaarke.ArchTests/` green. In this task, port only the scanner and census vocabulary part of spike commit fdfd7b1d23 (`MapMcp(path)` read as one POST route with its fluent chain, plus its must-fire/must-not-fire control `MapMcp_Controls_ReadAsARouteAndJudgedByRuleA`) into RouteAuthorizationGuardTests.Scanner.cs (or wherever `ReadRegistrationVocabulary` lives). Once the scanner reads the route, the same suite also requires the minimum data for Api/Mcp/McpEndpoints.cs: census `ExpectedEndpointFileCount` 152 → 153 with a dated history line (if master has moved, take master's count + 1), one GovernedFile entry with a written reason, a NotAuthorizationForm entry for any no-I/O filter on the chain (for example buffering off), and an interim Pending waiver for POST /mcp/legal-operations owned by task 021. Do NOT carry over the spike's Permanent waivers (CallerScopedOnly, CallerSuppliedContentOnly). Ledger entries, per-tool policies and the tool-annotation checks stay in task 021, which replaces the interim waiver.</constraint>
+    <constraint source="project">Before each push run `bash scripts/quality/check-changed-cs-format.sh origin/master` (blocking Tier 1 'Format (changed C# files)'; fix with `dotnet format whitespace . --folder --include &lt;file&gt;`). The Stop hook also runs the ArchTests. CS0618 (obsolete API) is a build error since master 9456083c78: migrate the call or escalate, never suppress it in Directory.Build.props, NoWarn or a file-wide pragma.</constraint>
   </constraints>
 
   <knowledge>
@@ -103,18 +107,20 @@
 
   <steps mode="directional">
     <step order="1">Read notes/phase0-results.md (T0, T13) and the spike measurements note; adopt the route mechanism they record.</step>
-    <step order="2">Update the csproj: add ModelContextProtocol.AspNetCore 2.3.1; move Microsoft.Extensions.AI and .OpenAI to 10.11.x and adjust the pinned chain; dotnet build with 0 warnings.</step>
+    <step order="2">Update the csproj: add ModelContextProtocol.AspNetCore 2.3.1; move Microsoft.Extensions.AI and .OpenAI to 10.11.x and adjust the pinned chain; dotnet build with 0 warnings. Merge origin/master first (CS0618 is an error since 9456083c78). If the bump makes existing AI code hit CS0618, migrate the call or STOP and escalate. Never re-add CS0618 to WarningsNotAsErrors or NoWarn, and never use a file-wide pragma (Directory.Build.props L18-23 on master).</step>
     <step order="3">Run the AI unit and integration suites (tests/unit/domain/Ai, tests/integration/regression/Ai, tests/integration/contract/Api/Ai) and record the counts.</step>
     <step order="4">Create McpOptions, McpModule (AddMcpModule: options binding, SDK registration stateless, per-area attribute discovery, null object when disabled) and McpEndpoints (MapMcpEndpoints for legal-operations with RequireAuthorization, RequireRateLimiting("mcp"), 256 KiB body limit, buffering off).</step>
     <step order="5">Add the mcp policy to RateLimitingModule.cs, wire Program.cs and EndpointMappingExtensions.cs, add Mcp to appsettings.template.json.</step>
     <step order="6">Create McpToolResults (DecisionToolError → CallToolResult with isError, reasonCode in structured content, message text).</step>
-    <step order="7">Write McpHostContractTests with a test-only probe tool registered inside the test host; run them; measure the publish-size delta and CVEs.</step>
-    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
-    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+    <step order="7">Port the MapMcp scanner and census vocabulary and its must-fire/must-not-fire control from spike commit fdfd7b1d23 (scanner part only; use `git show fdfd7b1d23 -- tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`), then make the minimum census, GovernedFile, NotAuthorizationForm and interim Pending-waiver entries the suite demands for Api/Mcp/McpEndpoints.cs. Run `dotnet test tests/Spaarke.ArchTests/` and record the counts.</step>
+    <step order="8">Write McpHostContractTests with a test-only probe tool registered inside the test host; run them; measure the publish-size delta and CVEs. Run `bash scripts/quality/check-changed-cs-format.sh origin/master` before pushing.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="10">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
   </steps>
 
   <escalation>
     <trigger>If the Microsoft.Extensions.AI bump breaks any AI test or forces a package downgrade elsewhere, STOP and escalate (NFR-08, risk R5) rather than pinning around it.</trigger>
+    <trigger>If the bump makes existing AI code hit CS0618 (obsolete API, a build error since 9456083c78) and the call cannot simply be migrated, STOP and escalate; never suppress it.</trigger>
     <trigger>If SDK 2.3.1 needs a session or state store for the features used, STOP: v1 is stateless.</trigger>
     <trigger>If the publish-size delta is +5 MB or more, or the total exceeds 55 MB, STOP and escalate with the measurement.</trigger>
   </escalation>
@@ -136,6 +142,7 @@
     <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpOptions.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/McpToolResults.cs</output>
     <output type="test">tests/integration/contract/Api/Mcp/McpHostContractTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs (and RouteAuthorizationGuardTests.cs / RouteAuthorizationGuardTests.Ledger.cs as the scanner change forces)</output>
   </outputs>
 
   <acceptance-criteria>
@@ -149,6 +156,8 @@
     <criterion testable="true">McpToolResults converts a DecisionToolError into a CallToolResult with isError true, the reasonCode and the message (unit test).</criterion>
     <criterion testable="true">AI unit and integration suites pass on Microsoft.Extensions.AI 10.11.x (counts recorded in task notes).</criterion>
     <criterion testable="true">No BackgroundService is added; the PR records the publish-size delta (expected about +1.6 MB; total at or under 60 MB) and no new HIGH CVE.</criterion>
+    <criterion testable="true">`dotnet test tests/Spaarke.ArchTests/` passes with `MapMcp` mapped: the scanner reads `MapMcp(path)` as one POST route (must-fire control: an unauthenticated MapMcp fixture fails; must-not-fire control: an authenticated one passes), `NoRouteIsRegisteredInAFormTheScannerCannotRead` and `TheEndpointFileCensusIsPinned` are green, and none of the spike's Permanent waivers is present.</criterion>
+    <criterion testable="true">`bash scripts/quality/check-changed-cs-format.sh origin/master` exits 0, and `dotnet build` shows no CS0618 and no new suppression of it.</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
     <criterion testable="true">On a real stateless MCP host, a test shows that the `HttpContext` a tool hands to `IDecisionCapability` is the same instance (ReferenceEquals) as `IHttpContextAccessor.HttpContext` during the call, and as the context the request middleware saw.</criterion>
   </acceptance-criteria>

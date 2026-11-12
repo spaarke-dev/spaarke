@@ -87,7 +87,7 @@
       <url>https://m365.cloud.microsoft/chat</url>
       <steps>
         <step>Sign in as the licensed non-admin test user</step>
-        <step>Ask a prompt that calls the spike tool through the 'Spaarke' connector</step>
+        <step>Ask a prompt that calls the spike tool through the 'Spaarke MCP' connector (Copilot shows its tools as `SpaarkeMCP_&lt;tool&gt;`; the user needs a Microsoft 365 Copilot licence)</step>
         <step>Verify whether the ui://spaarke/spike.html widget renders in Chat; repeat in Cowork</step>
         <step>Check the browser console for JavaScript errors from the widget frame</step>
       </steps>

@@ -14,7 +14,7 @@
 - `/mcp/legal-operations` in the BFF: stateless, ADR-028 A10 auth, `mcp` rate-limit policy, size limit, `Mcp:Enabled` kill switch
 - Four `spaarke_*` tools plus an app-only paging tool, over a transport-free decision capability (B-1 to B-10)
 - Widget `ui://spaarke/decisions.html` (Decide lane + Decision wizard), embedded in the BFF
-- Dev-tenant registration: A10 connector client, federated connector "Spaarke", plugin package with `spaarke-decisions`, runbooks; Spaarke AI agent fallback only if T1 requires it
+- Dev-tenant registration: A10 connector client, federated connector "Spaarke MCP" (owner 2026-11-10), plugin package with `spaarke-decisions`, runbooks; Spaarke AI agent fallback only if T1 requires it
 - Phase 0 platform tests (T0–T14, E1–E5); docs, terminology and skill rewrites
 
 **Timeline**: no dates (owner controls the calendar) | **Estimated effort**: 28–40 working days across about 24 tasks. Phase 0 elapsed time depends on owner admin-center steps; Phase D's dev deploy depends on ontology's #2580/#2579 pair deploying first.
@@ -113,7 +113,7 @@
 - Rate limits: `Infrastructure/DI/RateLimitingModule.cs` (per-user partition ~L301-322)
 - Response buffering off: `Api/Workspace/WorkspaceMatterEndpoints.cs:196-200`
 - Result-mapper sources: `Api/Signals/DecisionCommitEndpoints.cs:61` (`ToHttp`) and `:93`; `Api/Signals/SignalReadEndpoints.cs:46`, `:85`; `Api/Signals/DecisionPlanEndpoints.cs:251-345`
-- Scoped server-side lookup: `Api/ExternalAccess/ExternalModuleDataEndpoints.cs` (guard L897, scope injection L301-356) — copy the pattern, not the plane
+- Scoped server-side lookup: `Api/ExternalAccess/ExternalModuleDataEndpoints.cs` (guard `EvaluateFetchXmlGuard` L1128, scope injection ~L300-390; the file grew by 362 lines on master and 016 is done) — copy the pattern, not the plane
 - Auth: `Infrastructure/DI/AuthorizationModule.cs` (`ApplyFallbackPolicy` L914; `AuthSchemes.Ciam` / `WorkforceHome`)
 - Caller: `Infrastructure/Authentication/CallerResolution.cs`, `Infrastructure/Dataverse/CallerWhoAmIMemo.cs`, `Infrastructure/Dataverse/DataverseUserClient.cs` (`UserContextRequired` = `DATAVERSE_USER_CONTEXT_REQUIRED`)
 - Commit owner: `Services/Signals/DecisionCommitService.cs` (`CommitAsync` L439; 1c-billing L974-996; `IsBillingSubject` ~L1684; `sprk_privilegeflagged` select L313)
@@ -216,8 +216,8 @@ Wrap-up (090)                              — test-diet, lessons learned
 2. Ship the five tools as thin adapters over the capability, with conformance in CI.
 
 **Deliverables:**
-- [ ] 020 MCP module: `ModelContextProtocol.AspNetCore` 2.3.1, `Microsoft.Extensions.AI` 10.3.0 → 10.11.x (AI suite regression, NFR-08), `AddMcpModule` / `MapMcpEndpoints` for `/mcp/{area}`, `Mcp:Enabled` null object → 503, `mcp` rate-limit policy, request-size limit, buffering off; publish-size delta recorded
-- [ ] 021 A10 auth on `/mcp/*` + B-7 per-tool policies + B-8 ArchTest `MapMcp` guard and `ReadOnly` annotation check. Auth tag: FULL, two adversarial passes, uac-r2's four checks (opus)
+- [ ] 020 MCP module: `ModelContextProtocol.AspNetCore` 2.3.1, `Microsoft.Extensions.AI` 10.3.0 → 10.11.x (AI suite regression, NFR-08), `AddMcpModule` / `MapMcpEndpoints` for `/mcp/{area}`, `Mcp:Enabled` null object → 503, `mcp` rate-limit policy, request-size limit, buffering off; the `MapMcp` scanner vocabulary and its must-fire/must-not-fire control ported from spike commit fdfd7b1d23 into `RouteAuthorizationGuardTests` so `dotnet test tests/Spaarke.ArchTests/` stays green; publish-size delta recorded
+- [ ] 021 A10 auth on `/mcp/*` + B-7 per-tool policies + B-8 ArchTest ledger entries (census, GovernedFile, per-tool policies; the `MapMcp` scanner vocabulary came with 020) and `ReadOnly` annotation check. Auth tag: FULL, two adversarial passes, uac-r2's four checks (opus)
 - [ ] 022 `spaarke_show_decisions` (closed `category` enum incl. `invoiceDecisions`) + FR-04 privilege reduction + FR-14 text path + app-only paging tool (FR-05)
 - [ ] 023 `spaarke_get_decision_plan` (writes the plan-read stamp) + `spaarke_search_decision_lookup` (app-only, readOnly)
 - [ ] 024 `spaarke_complete_decision` (app-only write via `DecisionCommitService`; idempotency on `reviewId`; one MCP billing-refusal test; no second check)
@@ -277,7 +277,7 @@ Wrap-up (090)                              — test-diet, lessons learned
 2. Leave an architecture doc, a how-to guide and a connector runbook that name real files.
 
 **Deliverables:**
-- [ ] 050 Root CLAUDE.md §1.1 row "Spaarke for Microsoft 365 Copilot" / "Spaarke" citing `ontology-component-model.md` §1.1 + `.claude/CHANGELOG.md` entry with byte delta + 200-line / 30 KB budget + `ai-procedure-maintenance` Checklist F — **main session only**
+- [ ] 050 Root CLAUDE.md §1.1 row "Spaarke for Microsoft 365 Copilot" / core connector "Spaarke MCP" citing `ontology-component-model.md` §1.1 (ontology updates its row first) + `.claude/CHANGELOG.md` entry with byte delta + no net lines in root CLAUDE.md without the owner's explicit OK (already 218 lines) and at most 30 KB + `ai-procedure-maintenance` Checklist F — **main session only**
 - [ ] 051 Rewrite `mcp-tool-handler` (tool naming, real conventions); update `widget-design` (URI, folder, size) and `declarative-agent` (current schemas) — **main session only**
 - [ ] 052 MCP architecture doc (`docs/architecture/`), "how to add a tool" guide and connector runbook (`docs/guides/`); `doc-drift-audit` clean
 

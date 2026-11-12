@@ -18,7 +18,7 @@
     <estimated-effort>4-8 hours (elapsed time depends on the owner)</estimated-effort>
   </metadata>
 
-  <prompt>Re-point the 'Spaarke' connector at the dev BFF's /mcp/legal-operations, deploy the plugin package, finalise the runbooks into docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md, and prove the full flow live in Cowork and Copilot Chat with a licensed non-admin user, plus the 20-prompt routing eval and NFR-01 latency.</prompt>
+  <prompt>Re-point the 'Spaarke MCP' connector at the dev BFF's /mcp/legal-operations, deploy the plugin package, finalise the runbooks into docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md, and prove the full flow live in Cowork and Copilot Chat with a licensed non-admin user, plus the 20-prompt routing eval and NFR-01 latency.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Microsoft 365 Copilot and Cowork administration and live acceptance testing.</role>
   <goal>A non-admin user resolves Work Items end to end in Cowork and in Chat (connector widget or the 043 agent) with Decision Record ids captured; routing-eval rate and NFR-01 p95s are recorded; the runbook reproduces the setup from scratch.</goal>
 
@@ -42,7 +42,7 @@
   <constraints>
     <constraint source="project">The owner (Global Admin) runs every admin-center step (connector re-point, plugin package approval); consent and approval behaviour is tested with a licensed non-admin user (O-20).</constraint>
     <constraint source="ADR-015">Live evidence saved to notes or docs contains no token, claim value or privileged record text; for the FR-04 spot-check, record only whether the marker appeared.</constraint>
-    <constraint source="project">The runbook names only real artifacts (app registrations by display name, files by repo path) and holds no secret; each step states who runs it and whether it is scriptable.</constraint>
+    <constraint source="project">The runbook names only real artifacts (app registrations by display name, files by repo path) and holds no secret; each step states who runs it and whether it is scriptable. The runbook covers the confidential client (decided 2026-11-08; ADR-028 A10 Path A): the secret is created by the owner in Entra and pasted only into the Dev Portal registration, the runbook records its expiry (2028-11-09) and a rotation procedure, and the test user needs a Microsoft 365 Copilot licence.</constraint>
     <constraint source="project">No write is attempted from the text path or by the model; completions happen only through the widget's Confirm (NFR-06).</constraint>
   </constraints>
 
@@ -70,7 +70,7 @@
   </knowledge>
 
   <steps mode="prescriptive">
-    <step order="1">With the owner, re-point the 'Spaarke' connector to {devBffUrl}/mcp/legal-operations and deploy the plugin package (owner approval).</step>
+    <step order="1">With the owner, re-point the 'Spaarke MCP' connector to {devBffUrl}/mcp/legal-operations and deploy the plugin package (owner approval).</step>
     <step order="2">Verify seed data (at least 200 Decide-lane items, 3 matters, privileged items, every lookup-bearing action type).</step>
     <step order="3">Cowork: the non-admin user connects once in Settings › Sources; /spaarke-decisions renders the lane with Console-equal counts; resolve one Work Item of each lookup-bearing action type with a because rationale; capture Decision Record ids; confirm the Console shows them resolved.</step>
     <step order="4">Chat: a direct prompt 'what decisions are waiting on me in Spaarke?' calls spaarke_show_decisions; resolve one Work Item through the connector widget or, if 043 was built, @Spaarke AI; capture the id.</step>
@@ -151,7 +151,7 @@
     <criterion testable="true">A because rationale entered in the wizard appears on the written Decision Record (FR-15).</criterion>
     <criterion testable="true">Negative: a billing Work Item offers only the Invoice Review link-out; the FR-04 spot-check shows no privileged marker in model text.</criterion>
     <criterion testable="true">NFR-01 p95 over 50 calls each is recorded for show/page/plan (target 3 s), lookup (1.5 s) and complete (15 s), every call under 30 s.</criterion>
-    <criterion testable="true">docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md exists, holds no secret, and a second admin or clean re-run reproduced the setup from it (result recorded).</criterion>
+    <criterion testable="true">docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md exists, holds no secret, covers the confidential client (secret created by the owner in Entra and pasted only into the Dev Portal registration, its expiry and a rotation procedure) and the Microsoft 365 Copilot licence the test user needs, and a second admin or clean re-run reproduced the setup from it (result recorded).</criterion>
     <criterion testable="true">The Console worklist and wizard smoke on dev passes after the live runs (success criterion 7).</criterion>
   </acceptance-criteria>
 

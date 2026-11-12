@@ -23,7 +23,7 @@
   <goal>Opening a non-billing row runs the wizard end to end against mocked callServerTool for every lookup-bearing action type; after Confirm the row leaves the lane and the count drops by one; refusals show the server message and leave the item open; because reaches the commit; the bundle stays under budget.</goal>
 
   <context>
-    <background>Spec FR-13, FR-15 (because), NFR-06 (Confirm is the only write trigger), NFR-03; design §9.2–§9.4 (in-frame Fluent Dialog; requestDisplayMode fullscreen; fallbacks master-detail in fullscreen, then openLink to the Console wizard). decisionDisplay.ts already maps decided_in_invoice_review to 'Decide this in Invoice Review' if the shim passes reasonCode through. Rewrite fallback if over budget: keep decisionDraft.ts and re-render only the step UI.</background>
+    <background>Spec FR-13, FR-15 (because), NFR-06 (Confirm is the only write trigger), NFR-03; design §9.2–§9.4 (in-frame Fluent Dialog; requestDisplayMode fullscreen; fallbacks master-detail in fullscreen, then openLink to the Console wizard). decisionDisplay.ts already maps decided_in_invoice_review to 'Decide this in Invoice Review' if the shim passes reasonCode through, and maps commit warnings (WARNING_TEXT, for example inquiry_email_not_archived) if the shim passes `warnings` through. The billing-only actions assign-firm and add-line (master, DecisionActionCatalog.cs) are not in the lookup-bearing list below. Rewrite fallback if over budget: keep decisionDraft.ts and re-render only the step UI.</background>
     <relevant-files>
       <file role="new">src/client/widgets/spaarke-decisions/src/wizard/WizardDialog.tsx (in-frame dialog, fullscreen request, fallbacks)</file>
       <file role="new">src/client/widgets/spaarke-decisions/src/wizard/wizardFetch.ts (plan, suppression, decision and lookup paths → tools)</file>
@@ -32,7 +32,7 @@
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizardHost.tsx (ONLY if needed: optional lookup seam; props L25-40)</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionItemWizard.tsx (ONLY if needed: send because on Confirm)</file>
       <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDraft.ts and decisionWizardTypes.ts (because, draft state)</file>
-      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts (failureHeading/failureMessage, INVOICE_REVIEW_REASON L116)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts (failureHeading/failureMessage, INVOICE_REVIEW_REASON L116; WARNING_TEXT ~L193 incl. inquiry_email_not_archived)</file>
       <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/worklist.registration.ts:94-114 (wizard wiring in the Console)</file>
       <file role="canonical-reference">.claude/patterns/ui/modal-shell.md (ADR-050 shared modal shell)</file>
     </relevant-files>
@@ -167,6 +167,7 @@
     <criterion testable="true">Every parameter kind (text, choice, money, date, boolean, person, lookup) renders and submits.</criterion>
     <criterion testable="true">After a successful Confirm, the row leaves the lane and the count drops by one.</criterion>
     <criterion testable="true">Negative: a server refusal (not_authorized, stale plan) shows the server's message in the wizard and leaves the Work Item open; decided_in_invoice_review shows 'Decide this in Invoice Review'.</criterion>
+    <criterion testable="true">With mocked callServerTool returning a success with `warnings: ['inquiry_email_not_archived']`, the Done step shows 'The inquiry email was sent, but a copy of it could not be saved to the matter.' (decisionDisplay.ts `WARNING_TEXT` ~L193, covered on master by DecisionWizard.assignTaskNotify.test.tsx; the shim passes `warnings` and each step's `warning` through unchanged).</criterion>
     <criterion testable="true">Negative: no tool other than plan/lookup is called before Confirm, and spaarke_complete_decision is never called on open, step change or close (spy).</criterion>
     <criterion testable="true">A because rationale entered in the wizard is sent in the DecisionReview on Confirm.</criterion>
     <criterion testable="true">When fullscreen is refused, master-detail in fullscreen is used; when unavailable, openLink to the Console wizard for the item is called (unit tests per branch).</criterion>
