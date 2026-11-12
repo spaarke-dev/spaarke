@@ -269,6 +269,30 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         WarningsOf(result).Should().Contain(RecordCreationService.MappingSourceRestrictedStripped);
     }
 
+    /// <summary>UAC-r2 (2026-11-12): an agreement is a source-only table for the Restricted-source check (the unit suite pins
+    /// the predicate). On the caller path an agreement named as the source maps nothing today: the caller's own read of it
+    /// cannot be asked (no entity set for it in the access map), so it is never read app-only — fail closed.</summary>
+    [Fact]
+    public async Task RestrictedSource_ARestrictedAgreementNamedAsTheSource_MapsNothing()
+    {
+        TheRestrictedMatter();
+        var agreement = Guid.Parse("a022b000-0000-4000-8000-000000000002");
+        _readable.Add(agreement);
+        _sources[("sprk_agreement", agreement)] = new Entity("sprk_agreement", agreement)
+        {
+            ["sprk_description"] = "From the agreement",
+            [InheritedAccessPermission.Column] = new OptionSetValue(InheritedAccessPermission.Restricted),
+        };
+        Profile("sprk_agreement", "sprk_event", Rule("sprk_description", "sprk_description", Memo));
+
+        var outcome = await Service().CreateAsync(
+            EventUnder(OrdinaryMatter, mappingSource: ("sprk_agreement", agreement)), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _creates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description");
+        outcome.MappingWarnings.Should().NotBeEmpty("the source mapped nothing, and the create says so");
+    }
+
     /// <summary>AC1: a target table without the column is never Restricted — even filed under the Restricted source.</summary>
     [Fact]
     public async Task RestrictedSource_IntoATableWithoutTheColumn_IsStripped_EvenFiledUnderTheRestrictedSource()

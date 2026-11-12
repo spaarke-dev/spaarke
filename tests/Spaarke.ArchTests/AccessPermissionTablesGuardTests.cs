@@ -6,32 +6,22 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// field-mapping-server-write-path-r1 task 022b — the Restricted-source rule reads a mapping source's
-/// <c>sprk_accesspermission</c> only on a table the code says carries it (<see cref="InheritedAccessPermission.CarriesColumn"/>:
-/// the four inheriting tables and the secure roots, from the table registry). That set must equal the solution's tables that
-/// define the column. A table the code leaves out is never read for it, so values copied from it are never checked; a table
-/// the code names that lacks the column would fail every read of it.
+/// <c>sprk_accesspermission</c> only on a table the code says carries it (<see cref="InheritedAccessPermission.SourceCarriesColumn"/>:
+/// the four inheriting tables, the secure roots from the table registry, and the source-only tables). That set must equal
+/// the solution's tables that define the column, exactly. A table the code leaves out is never read for it, so values copied
+/// from it are never checked; a table the code names that lacks the column would fail every read of it.
 /// </summary>
 /// <remarks>
 /// <para><b>The source.</b> Every <c>Entity.xml</c> of <c>src/dataverse/solutions/SpaarkeMaster</c> whose attributes include
 /// one with the logical name <c>sprk_accesspermission</c> (exactly; <c>sprk_accesspermissiongrant</c> is another column). The
 /// table is the entity folder's name, lower-cased.</para>
-/// <para><b>Ratchet.</b> <see cref="KnownDisagreements"/> lists each table on which the two sides disagree today, with the
-/// reason. A new disagreement fails; an entry that no longer disagrees fails too (remove it).</para>
+/// <para><b>No baseline.</b> Any disagreement fails (UAC-r2, 2026-11-12).</para>
 /// <para><b>Controls.</b> <see cref="Disagreements_MustFireAndMustNotFire"/> runs the same comparison over seeded sets: a
 /// table only the solution has, and one only the code has, are reported (must fire); equal sets are not (must not fire).</para>
 /// </remarks>
 public class AccessPermissionTablesGuardTests
 {
     private const string AccessPermission = "sprk_accesspermission";
-
-    /// <summary>Tables where the code's set and the solution disagree today, each with the reason (logical names).</summary>
-    private static readonly IReadOnlyDictionary<string, string> KnownDisagreements = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        ["sprk_agreement"] =
-            "The solution defines the column on the agreement; the code's set (the inheriting tables and the secure roots) does " +
-            "not name it, so the Restricted-source rule does not read it there. Reported for a decision on where the agreement " +
-            "is declared (task 022b notes, known limits).",
-    };
 
     private static string SolutionRoot => Path.Combine(SourceScan.RepoRoot, "src", "dataverse", "solutions", "SpaarkeMaster");
 
@@ -63,35 +53,24 @@ public class AccessPermissionTablesGuardTests
             .ToList();
     }
 
-    /// <summary>The disagreements <see cref="KnownDisagreements"/> does not hold, and the entries that are stale. Pure.</summary>
-    private static IReadOnlyList<string> Problems(IEnumerable<string> code, IEnumerable<string> solution,
-        IReadOnlyDictionary<string, string> known)
-    {
-        var found = Disagreements(code, solution);
-        var tables = found.Select(d => d[..d.IndexOf(':')]).ToHashSet(StringComparer.Ordinal);
-        return found.Where(d => !known.ContainsKey(d[..d.IndexOf(':')])).Select(d => $"NEW disagreement {d}")
-            .Concat(known.Keys.Where(k => !tables.Contains(k)).Select(k => $"STALE entry {k}: the two sides agree now; remove it"))
-            .ToList();
-    }
-
-    [Fact(DisplayName = "Task 022b: the tables the code reads sprk_accesspermission on are the solution's tables that define it")]
+    [Fact(DisplayName = "Task 022b: the tables the code reads sprk_accesspermission on are exactly the solution's tables that define it")]
     public void TheCodesTablesAreTheSolutionsTables()
     {
         var solution = SolutionTables();
-        var code = InheritedAccessPermission.TablesCarryingColumn().ToList();
+        var code = InheritedAccessPermission.SourceTablesCarryingColumn().ToList();
 
         // Non-vacuity: both sides see the tables the rule is about.
         Assert.Contains("sprk_matter", solution);
         Assert.Contains("sprk_document", solution);
         Assert.Contains("sprk_matter", code);
         Assert.Contains("sprk_todo", code);
-        Assert.All(code, table => Assert.True(InheritedAccessPermission.CarriesColumn(table), table));
+        Assert.All(code, table => Assert.True(InheritedAccessPermission.SourceCarriesColumn(table), table));
 
-        var problems = Problems(code, solution, KnownDisagreements);
-        Assert.True(problems.Count == 0,
-            "The Restricted-source rule reads sprk_accesspermission only on the tables InheritedAccessPermission.CarriesColumn " +
-            "names (the inheriting tables and the secure roots). They must be the solution's tables that define the column:\n" +
-            string.Join("\n", problems));
+        var disagreements = Disagreements(code, solution);
+        Assert.True(disagreements.Count == 0,
+            "The Restricted-source rule reads sprk_accesspermission only on the tables " +
+            "InheritedAccessPermission.SourceCarriesColumn names (the inheriting tables, the secure roots and the source-only " +
+            "tables). They must be exactly the solution's tables that define the column:\n" + string.Join("\n", disagreements));
     }
 
     [Fact(DisplayName = "Task 022b guard control: a seeded table only one side names is reported; equal sets are not")]
@@ -104,14 +83,8 @@ public class AccessPermissionTablesGuardTests
             Disagreements(code, ["sprk_matter", "sprk_todo", "sprk_seeded"]));
         Assert.Equal(new[] { "sprk_todo: the code names it, the solution does not define it" },
             Disagreements(code, ["sprk_matter"]));
-        Assert.Equal(new[] { "NEW disagreement sprk_seeded: the solution defines it, the code does not name it" },
-            Problems(code, ["sprk_matter", "sprk_todo", "sprk_seeded"], new Dictionary<string, string>()));
-        Assert.Equal(new[] { "STALE entry sprk_gone: the two sides agree now; remove it" },
-            Problems(code, ["sprk_matter", "sprk_todo"], new Dictionary<string, string> { ["sprk_gone"] = "x" }));
 
-        // Must not fire: equal sets (case aside), and a disagreement the baseline holds.
+        // Must not fire: equal sets (case aside).
         Assert.Empty(Disagreements(code, ["SPRK_TODO", "sprk_matter"]));
-        Assert.Empty(Problems(code, ["sprk_matter", "sprk_todo", "sprk_seeded"],
-            new Dictionary<string, string> { ["sprk_seeded"] = "x" }));
     }
 }

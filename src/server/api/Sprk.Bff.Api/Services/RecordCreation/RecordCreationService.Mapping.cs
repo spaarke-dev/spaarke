@@ -593,9 +593,9 @@ internal sealed partial class RecordCreationService
     }
 
     /// <summary>Task 022b: the source column the Restricted-source rule reads, in step 3's one app-only read, when the source's
-    /// table carries it (<see cref="InheritedAccessPermission.CarriesColumn"/>); none otherwise. Pure.</summary>
+    /// table carries it as a source (<see cref="InheritedAccessPermission.SourceCarriesColumn"/>); none otherwise. Pure.</summary>
     internal static IEnumerable<string> MappingSourceAccessColumns(string sourceTable) =>
-        InheritedAccessPermission.CarriesColumn(sourceTable) ? [InheritedAccessPermission.Column] : [];
+        InheritedAccessPermission.SourceCarriesColumn(sourceTable) ? [InheritedAccessPermission.Column] : [];
 
     /// <summary>
     /// Task 022b: the source's Access Permission from step 3's app-only read (<paramref name="read"/>, which holds
@@ -605,7 +605,7 @@ internal sealed partial class RecordCreationService
     /// </summary>
     internal static MappingSourceAccess MappingSourceAccessOf(string sourceTable, Entity? read)
     {
-        if (!InheritedAccessPermission.CarriesColumn(sourceTable))
+        if (!InheritedAccessPermission.SourceCarriesColumn(sourceTable))
             return MappingSourceAccess.NoColumn;
         if (read is null)
             return MappingSourceAccess.Unreadable;

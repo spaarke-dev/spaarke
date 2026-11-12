@@ -506,21 +506,45 @@ internal static class InheritedAccessPermission
     internal static bool AppliesTo(string? table) => table is not null && Tables.Contains(table);
 
     /// <summary>
-    /// field-mapping-server-write-path-r1 task 022b: the tables that carry <see cref="Column"/>, from the metadata this code
-    /// already holds — the four inheriting tables (<see cref="Tables"/>) and every secure root whose server-owned columns name
-    /// it (<see cref="SecureRootColumns"/>, from the table registry). No list of its own: a table added to either is here.
-    /// Held equal to the solution's tables that define the column by <c>AccessPermissionTablesGuardTests</c>.
+    /// field-mapping-server-write-path-r1 task 022b: the tables that carry <see cref="Column"/> as a TARGET of a create, from
+    /// the metadata this code already holds — the four inheriting tables (<see cref="Tables"/>) and every secure root whose
+    /// server-owned columns name it (<see cref="SecureRootColumns"/>, from the table registry). No list of its own: a table
+    /// added to either is here.
     /// </summary>
     internal static IEnumerable<string> TablesCarryingColumn() =>
         Tables.Concat(SecureRootColumns.Where(root => root.Value.Contains(Column)).Select(root => root.Key))
             .Select(table => table.ToLowerInvariant())
             .Distinct(StringComparer.Ordinal);
 
-    /// <summary>Task 022b: true when rows of <paramref name="table"/> carry <see cref="Column"/> (<see cref="TablesCarryingColumn"/>).
-    /// A table without it is never read for it, and its rows can never be Restricted.</summary>
+    /// <summary>Task 022b: true when rows of <paramref name="table"/> carry <see cref="Column"/> as a create's target
+    /// (<see cref="TablesCarryingColumn"/>). Any other table's new row is never Restricted.</summary>
     internal static bool CarriesColumn(string? table) =>
         table is not null
         && (Tables.Contains(table) || (SecureRootColumns.TryGetValue(table, out var columns) && columns.Contains(Column)));
+
+    /// <summary>
+    /// Task 022b (UAC-r2, 2026-11-12): the tables whose <see cref="Column"/> is read ONLY as a mapping SOURCE — the
+    /// Restricted-source check reads it there and fails closed on it. This adds no inheritance and no enforcement on these
+    /// tables: they are not in <see cref="Tables"/> or <see cref="SecureRootColumns"/>, and a new row of one is never
+    /// Restricted (<see cref="CarriesColumn"/>).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> SourceOnlyTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_agreement",
+    };
+
+    /// <summary>
+    /// Task 022b: every table whose rows carry <see cref="Column"/> as a mapping source: <see cref="TablesCarryingColumn"/> and
+    /// <see cref="SourceOnlyTables"/>. Held exactly equal to the solution's tables that define the column by
+    /// <c>AccessPermissionTablesGuardTests</c>.
+    /// </summary>
+    internal static IEnumerable<string> SourceTablesCarryingColumn() =>
+        TablesCarryingColumn().Concat(SourceOnlyTables.Select(table => table.ToLowerInvariant())).Distinct(StringComparer.Ordinal);
+
+    /// <summary>Task 022b: true when a mapping source of <paramref name="table"/> carries <see cref="Column"/>
+    /// (<see cref="SourceTablesCarryingColumn"/>). A source table without it is never read for it.</summary>
+    internal static bool SourceCarriesColumn(string? table) =>
+        table is not null && (CarriesColumn(table) || SourceOnlyTables.Contains(table));
 
     /// <summary>
     /// The most restrictive of <paramref name="values"/> (null counts as Standard), or <see langword="null"/> when one of

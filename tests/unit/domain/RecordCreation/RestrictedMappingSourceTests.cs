@@ -42,9 +42,37 @@ public class RestrictedMappingSourceTests
     public void AnyOtherTable_DoesNotCarryIt_AndIsNeverReadForIt(string? table)
     {
         InheritedAccessPermission.CarriesColumn(table).Should().BeFalse();
+        InheritedAccessPermission.SourceCarriesColumn(table).Should().BeFalse();
         if (table is not null)
             RecordCreationService.MappingSourceAccessColumns(table).Should().BeEmpty();
     }
+
+    /// <summary>UAC-r2 (2026-11-12): the agreement is read as a mapping SOURCE only — no inheritance, no enforcement, and a
+    /// new agreement is never Restricted.</summary>
+    [Fact]
+    public void TheAgreement_IsASourceOnlyTable()
+    {
+        const string agreement = "sprk_agreement";
+
+        InheritedAccessPermission.SourceCarriesColumn(agreement).Should().BeTrue();
+        InheritedAccessPermission.SourceTablesCarryingColumn().Should().Contain(agreement);
+        RecordCreationService.MappingSourceAccessColumns(agreement).Should().Equal(InheritedAccessPermission.Column);
+        RecordCreationService.MappingSourceAccessOf(agreement,
+                new Entity(agreement, Id) { [InheritedAccessPermission.Column] = new OptionSetValue(InheritedAccessPermission.Restricted) })
+            .Should().Be(RecordCreationService.MappingSourceAccess.Restricted);
+        RecordCreationService.MappingSourceAccessOf(agreement, null).Should().Be(RecordCreationService.MappingSourceAccess.Unreadable);
+
+        InheritedAccessPermission.CarriesColumn(agreement).Should().BeFalse("a new agreement is never Restricted");
+        InheritedAccessPermission.TablesCarryingColumn().Should().NotContain(agreement);
+        InheritedAccessPermission.AppliesTo(agreement).Should().BeFalse("no inheritance");
+        InheritedAccessPermission.SecureRootColumns.Should().NotContainKey(agreement, "no enforcement");
+    }
+
+    [Theory]
+    [InlineData("sprk_todo")]
+    [InlineData("sprk_matter")]
+    public void EveryTargetTable_IsAlsoASourceTable(string table) =>
+        InheritedAccessPermission.SourceCarriesColumn(table).Should().BeTrue();
 
     // ── What a source's value says ─────────────────────────────────────────────────────────────────────────────────────
 
