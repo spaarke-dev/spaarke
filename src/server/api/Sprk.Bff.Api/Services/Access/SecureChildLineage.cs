@@ -319,21 +319,21 @@ internal static class SecureChildLineage
         // ebilling-r1 task 089a (procedure model 5.2, agreed with unified-access-control-r2; ontology F3-e): a rule of a
         // record-scoped rule set is that set's child (live spaarkedev1 2026-11-03: sprk_policy.sprk_ruleset). A Procedure's or
         // a legacy set has no record lookup, so it is never reached and its rules stay outside the family.
-        T("sprk_policy", "sprk_policies", ExternalMarker.None,
+        T("sprk_policy", "sprk_policies", ExternalMarker.HardDeny,
             ("sprk_matter", Matter), ("sprk_ruleset", "sprk_ruleset")),
-        T("sprk_policyversion", "sprk_policyversions", ExternalMarker.None,
+        T("sprk_policyversion", "sprk_policyversions", ExternalMarker.HardDeny,
             ("sprk_policy", "sprk_policy")),
         // ebilling-r1 task 089a (procedure model 5.1, 5.2): a Procedure assignment or override is a secure child of the one
         // record it names (live spaarkedev1 2026-11-03: sprk_matter, sprk_project, sprk_workassignment, one set per row). Its
         // other lookups cite and file nothing (RecordOwnershipResolver.CitationLookups): the Procedure, the pinned Procedure
         // Version and the excluded rule.
-        T("sprk_procedureassignment", "sprk_procedureassignments", ExternalMarker.None,
+        T("sprk_procedureassignment", "sprk_procedureassignments", ExternalMarker.HardDeny,
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         // ebilling-r1 task 089a (procedure model 5.2): a record-scoped rule set (sprk_scope Record or Firm record) is a secure
         // child of its record; one record lookup per core type (live spaarkedev1 2026-11-03), RemoveLink. A Procedure's or a
         // legacy set has none of them set, so it is never reached. sprk_procedure, sprk_firm and sprk_sourcedocument are not
         // filing (a Procedure set carries the Procedure; a legacy uploaded set carries its source document, a CitationLookups entry).
-        T("sprk_ruleset", "sprk_rulesets", ExternalMarker.None,
+        T("sprk_ruleset", "sprk_rulesets", ExternalMarker.HardDeny,
             ("sprk_matter", Matter), ("sprk_project", Project), ("sprk_workassignment", WorkAssignment)),
         T("sprk_reportcard", "sprk_reportcards", ExternalMarker.None,
             Regarding(Matter, Project)),
@@ -365,7 +365,7 @@ internal static class SecureChildLineage
         // purpose: sprk_procedureversion and sprk_billingexport (a Procedure-source or export file is not a secure child, model 5.2 / F4-c,
         // so a row with no sprk_invoice is never reached), and sprk_sourcedocument / sprk_sourcecommunication (no root's walk reaches a
         // Stored File through its source; they stay in the row's own question as secure-if-any parents after the invoice, uac-r2 194b re-check K).
-        T("sprk_storedfile", "sprk_storedfiles", ExternalMarker.None,
+        T("sprk_storedfile", "sprk_storedfiles", ExternalMarker.HardDeny,
             ("sprk_invoice", "sprk_invoice")),
         T("sprk_todo", "sprk_todos", ExternalMarker.None,
             Regarding("sprk_agreement", "sprk_analysis", "sprk_budget", "sprk_communication", "sprk_document", "sprk_event",
@@ -436,7 +436,7 @@ internal static class SecureChildLineage
             .ToDictionary(t => t.LogicalName, StringComparer.OrdinalIgnoreCase);
 }
 
-/// <summary>Task 191b: the three kinds of external marker a registry table declares (#2179 design v2 §3.3).</summary>
+/// <summary>Task 191b: the kinds of external marker a registry table declares (#2179 design v2 §3.3).</summary>
 internal enum ExternalMarkerKind
 {
     /// <summary>No rule of its own: only what the row inherits (its roots' Restricted, and the taint of its lineage parents).</summary>
@@ -447,13 +447,21 @@ internal enum ExternalMarkerKind
 
     /// <summary>Never externally visible, whatever it is filed under.</summary>
     Never = 2,
+
+    /// <summary>
+    /// A hard-deny table (<c>RecordOwnershipResolver.RestrictedContentTables</c>: policy, policy version, Procedure assignment,
+    /// rule set, Stored File): never externally visible (#2179 design §0 item 1). Kept apart from <see cref="Never"/>, which is
+    /// the communication-content set the assistant's guard refuses with its own message.
+    /// </summary>
+    HardDeny = 3,
 }
 
 /// <summary>Task 191b: the own-row rule of a <see cref="ExternalMarkerKind.Predicate"/> marker. Each names an EXISTING rule;
 /// the predicate (<c>ExternalVisibility</c>) calls it and never re-implements it.</summary>
 internal enum ExternalOwnRule
 {
-    /// <summary>No own rule (a <see cref="ExternalMarkerKind.None"/> or <see cref="ExternalMarkerKind.Never"/> marker).</summary>
+    /// <summary>No own rule (a <see cref="ExternalMarkerKind.None"/>, <see cref="ExternalMarkerKind.Never"/> or
+    /// <see cref="ExternalMarkerKind.HardDeny"/> marker).</summary>
     None = 0,
 
     /// <summary>The task 065 rule: flag explicitly false, a thread set, that thread explicitly Open now
@@ -475,7 +483,7 @@ internal enum ExternalOwnRule
 /// Task 191b: what an external caller's visibility asks of a registry table's OWN row (#2179 design v2 §3.3). Required on
 /// every <see cref="SecureChildLineage.Table"/>, so a new table cannot be registered without that decision.
 /// </summary>
-/// <remarks>Instances are the four statics and <see cref="Predicate"/>; nothing else can make one.</remarks>
+/// <remarks>Instances are the statics and <see cref="Predicate"/>; nothing else can make one.</remarks>
 internal sealed record ExternalMarker
 {
     private ExternalMarker(ExternalMarkerKind kind, ExternalOwnRule rule, bool carriesDocumentText)
@@ -506,6 +514,9 @@ internal sealed record ExternalMarker
 
     /// <summary>Never externally visible.</summary>
     public static ExternalMarker Never { get; } = new(ExternalMarkerKind.Never, ExternalOwnRule.None, carriesDocumentText: false);
+
+    /// <summary>A hard-deny table: never externally visible (<see cref="ExternalMarkerKind.HardDeny"/>).</summary>
+    public static ExternalMarker HardDeny { get; } = new(ExternalMarkerKind.HardDeny, ExternalOwnRule.None, carriesDocumentText: false);
 
     /// <summary>An own-row rule on top of inherited taint.</summary>
     public static ExternalMarker Predicate(ExternalOwnRule rule) => rule == ExternalOwnRule.None

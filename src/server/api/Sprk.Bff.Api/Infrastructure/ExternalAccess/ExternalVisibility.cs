@@ -42,15 +42,21 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <para><b>The document chain keeps task 188's bound.</b> 188's own walk owns a document's parent-document chain (its
 /// Restricted ancestors and its first communication link, at most <see cref="ExternalDocumentNarrowing.MaxHops"/> hops; a deeper
 /// chain or a cycle is <see cref="DocumentNarrowingReason.ChainTooLong"/> / <see cref="DocumentNarrowingReason.Cycle"/>, Undecided
-/// here). So a document the walk reaches through a <c>sprk_parentdocument</c> edge (a chain member) contributes everything EXCEPT
-/// its own 188 verdict and its own communication link, which belong to the 188 walk of the document below it; and a chain longer
-/// than <see cref="ExternalDocumentNarrowing.MaxHops"/> is Undecided. Every other edge into a document (an analysis's source, a
+/// here). A document the walk reaches through a <c>sprk_parentdocument</c> edge (a chain member) contributes everything EXCEPT
+/// its own 188 verdict: its lookups, its communication link included, are lineage edges like any other, so an attachment under
+/// the .eml of a hidden communication is hidden with it (design §3.3 rule 3: no hidden lineage parent). A chain longer than
+/// <see cref="ExternalDocumentNarrowing.MaxHops"/> is Undecided. Every other edge into a document (an analysis's source, a
 /// to-do's regarding document, a canonical copy) asks that document's own 188 verdict.</para>
+/// <para><b>Own rules are dispatched on the declared marker.</b> Each row's own rule is the <see cref="ExternalOwnRule"/> its
+/// table declares; <see cref="RuleTables"/> names the one table each rule's implementation reads, and a rule declared on any other
+/// table, or a rule with no implementation, faults the decision (fail closed) rather than being skipped.</para>
 /// <para><b>Fail closed.</b> A row or parent that does not come back, a lookup value that is not a reference, a malformed core
 /// pair or a type the catalog maps to no core table, a table the registry does not know, an unreadable root, a 188 chain that
 /// cannot be known, an invoice decision that failed and a closure that reaches no root (a parentless row, a rootless cycle) are
-/// Undecided, never Visible. A failed read of any kind, thrown or answered as faulted by a rule, makes EVERY row Undecided
-/// (<see cref="ExternalVisibilityResult.Faulted"/>); cancellation propagates. A row the decision was not asked about is
+/// Undecided, never Visible. A hard-deny table (<see cref="ExternalMarkerKind.HardDeny"/>) and a Never table are Hidden. A read
+/// that throws makes EVERY row Undecided; a rule that answers faulted keeps the rows already Hidden (a hide decided by a sound
+/// rule stays sound) and makes every other row Undecided. Either way the result is
+/// <see cref="ExternalVisibilityResult.Faulted"/>; cancellation propagates. A row the decision was not asked about is
 /// Undecided. Hidden beats Undecided, which beats Visible.</para>
 /// <para><b>Whose reads.</b> Every reader in <see cref="Readers"/> must be the BFF's app-only one (the external plane's): this is a
 /// security check, so a column field security masks for a user can never read as "no parent" or "no link".</para>
@@ -74,10 +80,19 @@ internal static class ExternalVisibility
     /// <summary>Log event name of the decision summary and of a fault (counts and codes only).</summary>
     internal const string LogEvent = "sdap.external.visibility";
 
-    private const string DocumentTable = ExternalDocumentNarrowing.DocumentTable;
-    private const string CommunicationTable = "sprk_communication";
-    private const string ThreadTable = "sprk_communicationthread";
-    private const string InvoiceTable = "sprk_invoice";
+    /// <summary>
+    /// The one table each own-row rule's implementation reads: the 065 rule reads communications, the thread rule threads, task
+    /// 188 documents and (a′) invoices. Rows are dispatched on the rule their table DECLARES (<see cref="ExternalMarker.Rule"/>);
+    /// a declared rule missing here, or declared on another table, faults the decision. Pinned against the registry's declared
+    /// (table, rule) pairs by <c>ExternalVisibilityTests</c>.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<ExternalOwnRule, string> RuleTables = new Dictionary<ExternalOwnRule, string>
+    {
+        [ExternalOwnRule.Communication065] = "sprk_communication",
+        [ExternalOwnRule.ThreadOpen] = "sprk_communicationthread",
+        [ExternalOwnRule.DocumentNarrowing] = ExternalDocumentNarrowing.DocumentTable,
+        [ExternalOwnRule.InvoiceSource] = "sprk_invoice",
+    };
 
     /// <summary>
     /// ebilling (a′) over a batch of invoices with no caller (no firm rule): <c>ExternalInvoiceVisibility.DecideAsync</c> over the
@@ -128,11 +143,13 @@ internal static class ExternalVisibility
             if (run.Faulted)
             {
                 // A rule answered "my read failed" rather than throwing (188's DocumentNarrowingResult.ReadFailed, an (a′)
-                // decision with a failed read): the same as a throw, so a caller sees ONE notion of a fault.
+                // decision with a failed read). A row already Hidden by a sound rule (a Restricted root, a Never or hard-deny
+                // table, the 065 rule) stays Hidden; every other row is undecided, and the result says Faulted.
+                var failed = Failed(asked, decided);
                 readers.Logger.LogWarning(
-                    "[EXTERNAL-VISIBILITY] {LogEvent} a rule's read failed; every one of the {Rows} rows is undecided.",
-                    LogEvent, asked.Count);
-                return AllFailed(asked);
+                    "[EXTERNAL-VISIBILITY] {LogEvent} a rule's read failed; {Undecided} of the {Rows} rows are undecided (the rest stay hidden).",
+                    LogEvent, asked.Count(n => !failed.For(n.Table, n.Id).IsHidden), asked.Count);
+                return failed;
             }
 
             readers.Logger.LogDebug(
@@ -149,13 +166,18 @@ internal static class ExternalVisibility
             readers.Logger.LogWarning(
                 "[EXTERNAL-VISIBILITY] {LogEvent} a read failed ({ErrorType}); every one of the {Rows} rows is undecided.",
                 LogEvent, ex.GetType().Name, asked.Count);
-            return AllFailed(asked);
+            return Failed(asked, decided: null);
         }
     }
 
-    private static ExternalVisibilityResult AllFailed(IReadOnlyList<Node> asked) =>
-        new(asked.ToDictionary(n => n, n => new ExternalVisibilityDecision(
-                ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed, n.Table, n.Id)),
+    /// <summary>A faulted decision: every asked row <see cref="ExternalVisibilityReason.ReadFailed"/>, except a row
+    /// <paramref name="decided"/> already holds as Hidden (kept).</summary>
+    private static ExternalVisibilityResult Failed(
+        IReadOnlyList<Node> asked, IReadOnlyDictionary<Node, ExternalVisibilityDecision>? decided) =>
+        new(asked.ToDictionary(n => n, n =>
+                decided is not null && decided.TryGetValue(n, out var d) && d.Verdict == ExternalVisibilityVerdict.Hidden
+                    ? d
+                    : new ExternalVisibilityDecision(ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed, n.Table, n.Id)),
             faulted: true);
 
     /// <summary>The 188 reasons that say the document cannot be decided (Undecided), rather than that the rule hides it.</summary>
@@ -281,15 +303,14 @@ internal static class ExternalVisibility
                 subject.Full.Add(node);
             if (table.External.Kind == ExternalMarkerKind.Never)
                 subject.Add(ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.NeverExternal, node);
+            if (table.External.Kind == ExternalMarkerKind.HardDeny)
+                subject.Add(ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.HardDeny, node);
 
-            var isDocument = node.Table == DocumentTable;
+            // Every lookup is a lineage edge, a chain member's communication link included (design §3.3 rule 3).
+            var isDocument = table.External.Rule == ExternalOwnRule.DocumentNarrowing;
             var parents = new List<(Node Parent, bool ChainEdge)>();
             foreach (var column in table.LookupOrder)
             {
-                // A chain member's own communication link is its 188 walk's first-link question, not the closure's.
-                if (chainMember && isDocument
-                    && string.Equals(column, ExternalDocumentNarrowing.RelatedCommunicationAttribute, StringComparison.OrdinalIgnoreCase))
-                    continue;
                 if (!row.Attributes.TryGetValue(column, out var value) || value is null)
                     continue;
                 if (value is not EntityReference reference)
@@ -383,7 +404,7 @@ internal static class ExternalVisibility
             {
                 var table = SecureChildLineage.Children[group.Key];
                 var columns = table.LineageColumns.ToList();
-                if (group.Key == DocumentTable)
+                if (table.External.Rule == ExternalOwnRule.DocumentNarrowing)
                     columns.Add(DriveColumn);
                 var ids = group.Select(n => n.Id).ToList();
                 var chunks = await CommunicationOpenThreadGate.ReadChunksAsync(ids, (chunk, c) =>
@@ -418,12 +439,26 @@ internal static class ExternalVisibility
             var narrowed = new Dictionary<Node, ExternalVisibilityDecision>();
             void Set(Node node, ExternalVisibilityVerdict verdict, ExternalVisibilityReason reason) =>
                 verdicts[node] = new ExternalVisibilityDecision(verdict, reason, node.Table, node.Id);
-            List<Guid> IdsOf(string tableName, bool fullOnly) => subjects
-                .SelectMany(s => fullOnly ? s.Full : s.All)
-                .Where(n => n.Table == tableName)
-                .Select(n => n.Id)
-                .Distinct()
-                .ToList();
+            // Each reached row's own rule is the one its table DECLARES (ExternalMarker.Rule). A rule with no implementation, or
+            // declared on a table its implementation does not read, faults the decision (fail closed); it is never skipped.
+            var byRule = subjects.SelectMany(s => s.All).Distinct()
+                .GroupBy(n => SecureChildLineage.Children[n.Table].External.Rule)
+                .Where(g => g.Key != ExternalOwnRule.None)
+                .ToDictionary(g => g.Key, g => g.ToList());
+            foreach (var (rule, nodes) in byRule)
+            {
+                if (!RuleTables.TryGetValue(rule, out var ruleTable) || nodes.Any(n => n.Table != ruleTable))
+                    throw new InvalidOperationException($"The own-row rule {rule} is declared on a table its implementation does not read.");
+            }
+
+            var handled = new HashSet<ExternalOwnRule>();
+            List<Node> NodesOf(ExternalOwnRule rule, bool fullOnly)
+            {
+                handled.Add(rule);
+                if (!byRule.TryGetValue(rule, out var nodes))
+                    return new List<Node>();
+                return fullOnly ? nodes.Where(n => subjects.Any(s => s.Full.Contains(n))).ToList() : nodes;
+            }
 
             // 1. Roots: Restricted through filing (effective), an unreadable root is undecidable.
             foreach (var group in subjects.SelectMany(s => s.Roots).Distinct().GroupBy(n => n.Table))
@@ -439,67 +474,73 @@ internal static class ExternalVisibility
                 }
             }
 
-            // 2. Communications: THE 065 rule.
-            var communications = IdsOf(CommunicationTable, fullOnly: false);
+            // 2. Communication065: THE 065 rule.
+            var communications = NodesOf(ExternalOwnRule.Communication065, fullOnly: false);
             if (communications.Count > 0)
             {
-                var visible = await CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync(communications, readers.Query, ct)
-                    .ConfigureAwait(false);
-                foreach (var id in communications.Where(id => !visible.Contains(id)))
-                    Set(new Node(CommunicationTable, id), ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.CommunicationHidden);
+                var visible = await CommunicationOpenThreadGate.ReadVisibleCommunicationIdsAsync(
+                    communications.Select(n => n.Id).ToList(), readers.Query, ct).ConfigureAwait(false);
+                foreach (var node in communications.Where(n => !visible.Contains(n.Id)))
+                    Set(node, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.CommunicationHidden);
             }
 
-            // 3. Threads: explicitly Open now.
-            var threads = IdsOf(ThreadTable, fullOnly: false);
+            // 3. ThreadOpen: explicitly Open now.
+            var threads = NodesOf(ExternalOwnRule.ThreadOpen, fullOnly: false);
             if (threads.Count > 0)
             {
                 var open = await CommunicationOpenThreadGate.ReadOpenThreadIdsAsync(
-                    threads, (odata, c) => readers.Query(CommunicationOpenThreadGate.ThreadSet, odata, c), ct).ConfigureAwait(false);
-                foreach (var id in threads.Where(id => !open.Contains(id)))
-                    Set(new Node(ThreadTable, id), ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.ThreadNotOpen);
+                    threads.Select(n => n.Id).ToList(), (odata, c) => readers.Query(CommunicationOpenThreadGate.ThreadSet, odata, c), ct)
+                    .ConfigureAwait(false);
+                foreach (var node in threads.Where(n => !open.Contains(n.Id)))
+                    Set(node, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.ThreadNotOpen);
             }
 
-            // 4. Documents: a legacy Procedure Library document (any document reached), then task 188 (documents reached in full).
+            // 4. DocumentNarrowing: a legacy Procedure Library document (any document reached), then task 188 (documents reached
+            //    in full).
             var library = readers.ProcedureLibraryDriveId;
-            foreach (var id in IdsOf(DocumentTable, fullOnly: false))
+            foreach (var node in NodesOf(ExternalOwnRule.DocumentNarrowing, fullOnly: false))
             {
-                var node = new Node(DocumentTable, id);
                 if (!string.IsNullOrWhiteSpace(library) && _rows.TryGetValue(node, out var row) && row is not null
                     && string.Equals(row.GetAttributeValue<string>(DriveColumn)?.Trim(), library.Trim(), StringComparison.OrdinalIgnoreCase))
                     Set(node, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.ProcedureLibraryDocument);
             }
 
-            var documents = IdsOf(DocumentTable, fullOnly: true);
+            var documents = NodesOf(ExternalOwnRule.DocumentNarrowing, fullOnly: true);
             if (documents.Count > 0)
             {
-                var narrowing = await readers.Documents(documents, ct).ConfigureAwait(false);
+                var narrowing = await readers.Documents(documents.Select(n => n.Id).ToList(), ct).ConfigureAwait(false);
                 Faulted |= narrowing.Faulted;
-                foreach (var id in documents)
+                foreach (var node in documents)
                 {
-                    var reason = narrowing.Faulted ? DocumentNarrowingReason.ReadFailed : narrowing.ReasonFor(id);
+                    var reason = narrowing.Faulted ? DocumentNarrowingReason.ReadFailed : narrowing.ReasonFor(node.Id);
                     if (reason == DocumentNarrowingReason.Visible)
                         continue;
-                    narrowed[new Node(DocumentTable, id)] = new ExternalVisibilityDecision(
+                    narrowed[node] = new ExternalVisibilityDecision(
                         IsUndecidable(reason) ? ExternalVisibilityVerdict.Undecided : ExternalVisibilityVerdict.Hidden,
                         IsUndecidable(reason) ? ExternalVisibilityReason.DocumentUndecided : ExternalVisibilityReason.DocumentHidden,
-                        DocumentTable, id);
+                        node.Table, node.Id);
                 }
             }
 
-            // 5. Invoices: ebilling (a′).
-            var invoices = IdsOf(InvoiceTable, fullOnly: false);
+            // 5. InvoiceSource: ebilling (a′).
+            var invoices = NodesOf(ExternalOwnRule.InvoiceSource, fullOnly: false);
             if (invoices.Count > 0)
             {
-                var decision = await readers.Invoices(invoices, ct).ConfigureAwait(false);
+                var decision = await readers.Invoices(invoices.Select(n => n.Id).ToList(), ct).ConfigureAwait(false);
                 Faulted |= decision.AnyFaulted;
-                foreach (var id in invoices.Where(id => !decision.IsVisible(id)))
+                foreach (var node in invoices.Where(n => !decision.IsVisible(n.Id)))
                 {
-                    var undecidable = decision.IsFaultedFor(id) || decision.HiddenReason(id) is not { } reason || IsUndecidable(reason);
-                    Set(new Node(InvoiceTable, id),
+                    var undecidable = decision.IsFaultedFor(node.Id) || decision.HiddenReason(node.Id) is not { } reason
+                        || IsUndecidable(reason);
+                    Set(node,
                         undecidable ? ExternalVisibilityVerdict.Undecided : ExternalVisibilityVerdict.Hidden,
                         undecidable ? ExternalVisibilityReason.InvoiceUndecided : ExternalVisibilityReason.InvoiceHidden);
                 }
             }
+
+            // Every declared rule reached must have been asked: a rule added to RuleTables without its step faults, never skips.
+            if (byRule.Keys.Except(handled).Any())
+                throw new InvalidOperationException("An own-row rule was declared on a reached row but has no step here.");
 
             return (verdicts, narrowed);
         }
@@ -564,6 +605,10 @@ internal enum ExternalVisibilityReason
     /// <summary>A table marked <see cref="ExternalMarkerKind.Never"/> (communication content).</summary>
     NeverExternal,
 
+    /// <summary>A hard-deny table (<see cref="ExternalMarkerKind.HardDeny"/>: policy, policy version, Procedure assignment, rule
+    /// set, Stored File), or a row filed under one.</summary>
+    HardDeny,
+
     /// <summary>A communication the 065 rule hides (internal-only, a blank or unreadable flag, a Private or missing thread).</summary>
     CommunicationHidden,
 
@@ -623,6 +668,9 @@ internal readonly record struct ExternalVisibilityDecision(
 {
     /// <summary>Visible: the only answer that shows the row.</summary>
     internal bool IsVisible => Verdict == ExternalVisibilityVerdict.Visible;
+
+    /// <summary>A rule hides the row.</summary>
+    internal bool IsHidden => Verdict == ExternalVisibilityVerdict.Hidden;
 }
 
 /// <summary>Task 191b: the answer for one batch (<see cref="ExternalVisibility.DecideAsync"/>).</summary>

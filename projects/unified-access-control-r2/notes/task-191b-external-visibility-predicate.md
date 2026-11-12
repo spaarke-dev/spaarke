@@ -1,66 +1,107 @@
 # Task 191b — the `ExternalVisibility` predicate (notes)
 
-> Branch `task/uac-191b`. Rigor FULL. Owner decisions 2026-11-11 (Q1–Q7) applied as given; none re-asked.
+> Branch `task/uac-191b`, PR #2711. Rigor FULL. The owner decisions of 2026-11-11 (Q1–Q7) are applied as given; none was re-asked. The second-pass fixes (F1–F4) are the main session's decisions under the project's round-75 rule.
 
 ## What landed
 
 | File | Change |
 |---|---|
-| `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs` | Every `Table` declares a required `ExternalMarker` (null throws; omitting it does not compile). `OutsideLineage` (`sprk_affinity` = Never), `ExternalMarkerOf`, `NeverExternalTables`, `DocumentTextTables`. |
-| `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalVisibility.cs` (new) | THE predicate: `DecideAsync(rows, Readers, ct)` → Visible / Hidden / Undecided per row. No DI, no endpoint, no package; its callers come in 191c/191g/191h. |
-| `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs` | Its two table lists now derive from the registry markers. Contents unchanged (pinned by tests). |
-| `tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs` | "No second table → internal-only map" guard (must-fire / must-not-fire controls, reasoned baseline of 6), predicate added to the 188 seam allow-list. |
-| `tests/Spaarke.ArchTests/ExternalLookupAbsentReadGuardTests.cs`, `ExternalInvoiceVisibilityGuardTests.cs` | Reviewed entries for the predicate's lookup read and its (a′) call (review finding 1). |
-| `tests/unit/...` | `ExternalVisibilityTests` (new), `SecureChildLineageTests` (marker pins). `ChildMirrorMask_OnEveryHardDenyTable_CarriesReadOnly` fails on master already (#2689 added three hard-deny lineage children). ebilling PR #2708 fixes it, so 191b leaves that test as it is on master. |
+| `src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs` | Every `Table` must declare an `ExternalMarker`: a null one throws, and leaving it out does not compile. New marker kind `HardDeny`. New members: `OutsideLineage` (`sprk_affinity` = Never), `ExternalMarkerOf`, `NeverExternalTables`, `DocumentTextTables`. |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalVisibility.cs` (new) | THE predicate. `DecideAsync(rows, Readers, ct)` answers Visible, Hidden or Undecided for each row. Each row's own rule is chosen from its table's declared marker (`RuleTables`). It adds no DI, endpoint or package; its callers come in 191c, 191g and 191h. |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/ExternalCallerCommunicationGuard.cs` | Its two table lists are now derived from the registry markers. Their contents and order are unchanged, and tests pin them. |
+| `tests/Spaarke.ArchTests/ExternalDocumentNarrowingGuardTests.cs` | New guard: no second map from table to internal-only. It has must-fire and must-not-fire controls and a reasoned baseline of 6. The predicate is added to the 188 seam allow-list. |
+| `tests/Spaarke.ArchTests/ExternalLookupAbsentReadGuardTests.cs`, `ExternalInvoiceVisibilityGuardTests.cs` | Reviewed entries for the predicate's lookup read and its (a′) call. |
+| `tests/unit/...` | New `ExternalVisibilityTests`. New marker and hard-deny pins in `SecureChildLineageTests`. |
 
-## Marker assignment (36 lineage tables + 1 outside)
+**Pre-existing failure, not changed here.** `ChildMirrorMask_OnEveryHardDenyTable_CarriesReadOnly` already fails on master, because #2689 added three hard-deny lineage children. Ebilling PR #2708 fixes it, so 191b leaves that test as it is on master.
 
-- `Predicate(Communication065)`: communication. `Predicate(ThreadOpen)`: communicationthread. `Predicate(DocumentNarrowing)`: document. `Predicate(InvoiceSource)`: invoice.
-- `Never`: emailartifact, attachmentartifact, emailreviewlog (and `sprk_affinity`, outside the lineage).
-- `DocumentText`: analysis, analysisoutput (carry document text; taint through the walk).
-- `None`: every other table, including the five hard-deny tables (per the POML; see K9).
+## Marker assignment (36 lineage tables, plus 1 outside the lineage)
 
-## Deviations from the POML wording (and why)
+| Marker | Tables |
+|---|---|
+| `Predicate(Communication065)` | communication |
+| `Predicate(ThreadOpen)` | communicationthread |
+| `Predicate(DocumentNarrowing)` | document |
+| `Predicate(InvoiceSource)` | invoice |
+| `Never` | emailartifact, attachmentartifact, emailreviewlog, and `sprk_affinity` (outside the lineage). This set is also the AI guard's refused list and message, unchanged. |
+| `HardDeny` | policy, policyversion, procedureassignment, ruleset, storedfile (`RecordOwnershipResolver.RestrictedContentTables`, design §0 item 1). Always Hidden, and so is any row filed under one. They are kept out of the Never set. A pin test stops a new hard-deny table from arriving with marker None. |
+| `DocumentText` | analysis, analysisoutput. These carry document text and are tainted through the walk. |
+| `None` | every other table |
 
-1. **A non-document lineage path cycle is skipped**, as the secure-child lineage walk does; the AC "a cycle → Undecided" holds for the document chain through 188's `Cycle`, and (after review finding 2) any closure that reaches no root — a rootless cycle included — is Undecided (`NoRoot`).
-2. **Chain-member documents** (reached through `sprk_parentdocument`) contribute everything except their own 188 verdict and their own communication link. This keeps 188's first-link rule and its 3-hop bound unchanged, and is what makes "4 hops → Undecided" hold.
-3. **The taint closure is stricter than 188 alone**: it adds the roots of a document's parent, its other related links and its communication's lineage.
+## How the rules are applied
+
+1. **Document chain.** A document reached through `sprk_parentdocument` (a chain member) contributes everything except its own 188 verdict. All of its lookups, its communication link included, are lineage edges.
+   - So an attachment under the .eml of a hidden communication is Hidden (design §3.3 rule 3, second-pass F1). This is stricter than 188's first-link answer.
+   - The 3-hop bound still holds. Documents up to 3 hops below a hidden communication are Hidden. The document 4 hops below is Undecided: its chain is past the bound, so the walk never reaches the communication.
+2. **Cycles.** A cycle is decided by the rows on it. A document and its current version name each other, so every versioned document is on a cycle. A document-chain cycle is Undecided through 188's `Cycle`. A closure that reaches no root, including a cycle with no root, is Undecided (`NoRoot`).
+   - The POML criterion "a cycle … answers Undecided, never Visible" is amended to: **a cycle is decided by the rows on it; a cycle that reaches no root, an over-deep chain or a failed parent read answers Undecided, never Visible.**
+   - Design §3.3 is amended to match, in `notes/2179-flagged-external-dataverse-design.md`.
+3. **Faults.**
+   - A read that throws makes every row Undecided (`ReadFailed`).
+   - A rule that reports a failed read without throwing (188, (a′)) keeps the rows already Hidden by a sound rule (second-pass F2). Every other row becomes `ReadFailed`.
+   - In both cases `Faulted` is true.
+4. **Own rules come from the declared marker** (second-pass F4).
+   - `RuleTables` names the one table each rule's implementation reads.
+   - A rule declared on any other table faults the decision, as does a rule with no step. Neither is ever skipped.
+   - A pin test checks that the registry's declared (table, rule) pairs equal `RuleTables`.
 
 ## Review findings and disposition
 
+**First adversarial pass**
+
 | # | Finding | Class | Disposition |
 |---|---|---|---|
-| 1 | Two existing ArchTest guards failed on the new file (lookup-absent read, invoice-family surface) | F4 | Fixed: reviewed entries added with reasons. |
-| 2 | A closure that reaches no root (parentless row, rootless cycle, a service-request core) answered Visible | F1 (latent, no caller yet) | Fixed: `NoRoot` → Undecided. Tests added. |
-| 3 | A rule that answers faulted (not throwing) made only its rows Undecided; `Faulted` stayed false | F4 | Fixed: a faulted 188 or (a′) answer faults the whole decision, as a throw does. Tests added. |
-| 4 | The "no second map" ArchTest sees only static-constructor string loads of the Never tables | K4 | Recorded below (K10). |
-| 5 | Hard-deny tables answer by lineage (marker None) | K | Recorded (K9); 191h decides before wiring reads. |
-| 6 | Notes missing from the commit | process | This file. TASK-INDEX is owned by the main session. |
-| — | Mutation run: "Hidden beats Undecided" had no test that failed when broken | F4 | Fixed: `AHiddenFinding_BeatsAnEarlierUndecidedOne`. |
-| — | Mutation run: the closure's own chain bound was masked by 188's (the real seam bounds the chain too) | F4 | Fixed: `TheClosureBoundsTheDocumentChain_EvenWhenTheSeamSaysVisible`. |
+| 1 | Two existing ArchTest guards failed on the new file | F4 | Fixed: added reviewed entries. |
+| 2 | A closure that reaches no root answered Visible | F1 (latent) | Fixed: answers `NoRoot` (Undecided). |
+| 3 | A rule that reported a failed read did not set `Faulted` | F4 | Fixed: see Faults above. |
+| 4 | The "no second map" ArchTest has a narrow view | K4 | Recorded as K10. |
+| 5 | Hard-deny tables answered by lineage | K | Superseded by second-pass F3. |
 
-**Mutation check.** 21 single-point mutations of `ExternalVisibility.cs` were run against `ExternalVisibilityTests`. They cover every rule leg, every fail-closed branch, the chain and depth bounds, Combine order, `NoRoot` and the fault flags. After the two fixes above, each mutation fails at least one test. Four were first written as constant conditions, which the compiler rejects as unreachable code (CS0162), so they were re-run in a non-constant form.
+**Second adversarial pass**
+
+| # | Finding | Class | Disposition |
+|---|---|---|---|
+| F1 | A document under a hidden parent document answered Visible | F1 | Fixed: removed the chain-member link skip. `AnAttachmentUnderTheEmlOfAHiddenCommunication_IsHidden`. |
+| F2 | A fault discarded Hidden answers that were already sound | F | Fixed: Hidden rows are kept. `AHiddenRow_StaysHidden_WhenAnotherRuleAnswersFaulted`. |
+| F3 | Hard-deny tables were marked None | F | Fixed: new `HardDeny` marker. `AHardDenyTable_IsHidden_UnderAStandardRoot`, `EveryHardDenyTableInTheRegistry_IsNeverExternallyVisible`. |
+| F4 | `ExternalMarker.Rule` was never read | F | Fixed: dispatch on the declared rule. `TheDeclaredOwnRules_AreExactlyTheOnesThePredicateImplements`. |
+
+**Mutation checks.**
+- **First run:** 21 single-point mutations, covering every rule leg, every fail-closed branch, both bounds, the combine order, `NoRoot` and the fault flags. After two test additions (`AHiddenFinding_BeatsAnEarlierUndecidedOne` and `TheClosureBoundsTheDocumentChain_EvenWhenTheSeamSaysVisible`), every mutation failed at least one test.
+- **Second-pass spot check:** see the PR comment.
 
 ## Known limits (K-class)
 
-- **K1** The filing parents of roots (a root filed under an event or an invoice) are not taint-walked; root Restricted through filing is covered by `EffectiveRootFlagReader`.
-- **K2** The path check keeps the first path per (row, chain run); a later path to the same state is not re-walked (closure over a finite set).
-- **K3** (narrowed by finding 2) A registry child whose closure reaches no root is Undecided (`NoRoot`), never Visible.
-- **K4** An unset `ProcedureLibraryDriveId` means no document is treated as a Procedure Library document.
-- **K5** An event has no document regarding lookup, so "an event regarding a document" cannot be represented.
-- **K6** The Secure and Inactive root flags are not part of the predicate (Secure is decided per user elsewhere; owner Q4).
-- **K7** No cache: one decision per call, batched per level and table.
-- **K8** The Hidden-versus-Undecided split of 188 and (a′) reasons is for reporting only; every caller treats both as not visible.
-- **K9** The five hard-deny tables carry marker None per the POML and answer by lineage. The predicate must not be the only gate for them (the external role holds no privilege on them by design).
-- **K10** The "no second map" ArchTest finds only static-constructor string loads of the Never table names; a map built elsewhere, or over other tables, is a reviewer's catch.
-- **K11** A document whose only route to a root runs through a chain ancestor's communication link is Undecided (`NoRoot`): that link is 188's question, not the closure's. Fail-closed; pinned by a test.
+- **K1** The filing parents of roots are not walked for taint. Restricted through filing is still covered by `EffectiveRootFlagReader`.
+- **K2** Only the first path to each (row, chain run) state is walked.
+- **K3** A registry child whose closure reaches no root answers Undecided (`NoRoot`), never Visible.
+- **K4** If `ProcedureLibraryDriveId` is not set, no document is treated as a Procedure Library document.
+- **K5** An event has no lookup to a document, so "an event regarding a document" cannot be represented.
+- **K6** The Secure and Inactive root flags are not part of the predicate (owner Q4).
+- **K7** There is no cache.
+- **K8** The split between Hidden and Undecided is for reporting only. See the 191g handoff for single-record callers.
+- **K9** (corrected) The five hard-deny tables are `HardDeny`: always Hidden. The external role also holds no privilege on them.
+- **K10** The "no second map" ArchTest only finds the Never table names loaded as strings in a static constructor.
+- (K11 is removed: a document whose only root is through its parent document's communication link now gets that root.)
 
 ## Handoffs
 
-- **191c (share job):** bind `ExternalVisibility.Readers` from the external plane's app-only readers. A DI type that resolves `AppOnlyDocumentNarrowing` must be added to the 188 seam allow-list ArchTest. The caller-less (a′) reader set is private in `ExternalDataService` today, so 191c needs an entry point for it. Bind `Finance:ProcedureLibraryContainerId`. Undecided or `Faulted` → no grant, no revoke, carry the previous state. Measure the `NoRoot` count on dev before relying on attachments being shared (K11).
-- **191g (Office edit):** refuse unless the verdict is Visible.
-- **191h (SPA lists, AI tools):** moving 188 surfaces onto the predicate makes document results stricter (the taint closure, `NoRoot`); the design says "unchanged result", so this needs an owner call. Do not make the predicate the only gate for stored files or procedure content (K9). Rows shared outside the root model (for example direct-message participant shares) answer `NoRoot` when rootless; such a surface keeps its own gate.
+**191c (share job)**
+- Bind `ExternalVisibility.Readers` to the external plane's app-only readers.
+- Add the DI type that resolves `AppOnlyDocumentNarrowing` to the 188 seam allow-list ArchTest.
+- The (a′) readers that take no caller are private in `ExternalDataService`; 191c needs an entry point for them.
+- Bind `Finance:ProcedureLibraryContainerId`.
+- When a row is Undecided or the batch is `Faulted`, follow design §6: no grant, revoke any existing team or flagged-user share, and carry the row to retry.
+- `DirectThreadAccessService` still grants `sprk_emailreviewlog` to direct-message participants. That table is Never here, so the share job must not depend on that grant, and that grant path needs its own decision.
+
+**191g (Office edit) and any single-record caller**
+- Refuse unless the verdict is Visible.
+- Hidden and Undecided can be told apart: an id that does not exist answers `RowNotFound`. Map every non-Visible answer to the same response, so the endpoint never reveals whether a record exists.
+
+**191h (SPA lists, AI tools)**
+- Moving the 188 surfaces onto the predicate makes document results stricter: the taint closure, attachments of hidden .eml files, and `NoRoot`. The design says "unchanged result", so this needs an owner decision.
+- Rows shared outside the root model (for example direct-message participant shares) answer `NoRoot` when they have no root. Such a surface keeps its own gate.
 
 ## Gates
 
-See the PR body for test counts, the publish-size delta and the CVE result.
+Test counts, the publish-size delta and the CVE result are in the PR body and its comments.

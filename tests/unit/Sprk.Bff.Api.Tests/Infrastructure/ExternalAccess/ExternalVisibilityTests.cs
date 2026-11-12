@@ -135,6 +135,30 @@ public sealed class ExternalVisibilityTests
         decision.Reason.Should().Be(ExternalVisibilityReason.NeverExternal);
     }
 
+    /// <summary>The five hard-deny tables (design §0 item 1) are Hidden under a Standard root, whatever their parent answers,
+    /// and so is a row filed under one.</summary>
+    [Theory]
+    [InlineData("sprk_policy")]
+    [InlineData("sprk_policyversion")]
+    [InlineData("sprk_procedureassignment")]
+    [InlineData("sprk_ruleset")]
+    [InlineData("sprk_storedfile")]
+    public async Task AHardDenyTable_IsHidden_UnderAStandardRoot(string table)
+    {
+        var matter = _world.Root();
+        var row = table switch
+        {
+            "sprk_policyversion" => _world.Add(table, ("sprk_policy", _world.Add("sprk_policy", ("sprk_matter", matter)))),
+            "sprk_storedfile" => _world.Add(table, ("sprk_invoice", _world.Add("sprk_invoice", ("sprk_matter", matter)))),
+            _ => _world.Add(table, ("sprk_matter", matter)),
+        };
+
+        var decision = await DecideOne(table, row);
+
+        decision.Verdict.Should().Be(ExternalVisibilityVerdict.Hidden);
+        decision.Reason.Should().Be(ExternalVisibilityReason.HardDeny);
+    }
+
     [Fact]
     public async Task ANeverTableOutsideTheLineage_IsHidden_WithoutARead()
     {
@@ -272,10 +296,11 @@ public sealed class ExternalVisibilityTests
         result.For("sprk_document", chain[4]).Verdict.Should().Be(ExternalVisibilityVerdict.Undecided);
     }
 
-    /// <summary>188's first link decides a document's communication: an attachment with its own visible link under an .eml
-    /// linked to a hidden communication stays VISIBLE (188's answer, unchanged); the .eml itself is hidden.</summary>
+    /// <summary>No hidden lineage parent (design §3.3 rule 3): an attachment with its own visible link, under an .eml linked to
+    /// a hidden communication, is HIDDEN with the .eml (the parent document's communication link is a lineage edge like any
+    /// other, even though 188's first link alone would show the attachment).</summary>
     [Fact]
-    public async Task AChainMembersOwnLink_DoesNotOverride188sFirstLink()
+    public async Task AnAttachmentUnderTheEmlOfAHiddenCommunication_IsHidden()
     {
         var matter = _world.Root();
         var eml = _world.Document(communication: _world.Communication(internalOnly: true, _world.Thread(Open), matter), matter: matter);
@@ -284,7 +309,8 @@ public sealed class ExternalVisibilityTests
 
         var result = await Decide(("sprk_document", attachment), ("sprk_document", eml));
 
-        result.For("sprk_document", attachment).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
+        result.For("sprk_document", attachment).Verdict.Should().Be(ExternalVisibilityVerdict.Hidden);
+        result.For("sprk_document", attachment).Reason.Should().Be(ExternalVisibilityReason.CommunicationHidden);
         result.For("sprk_document", eml).Verdict.Should().Be(ExternalVisibilityVerdict.Hidden);
     }
 
@@ -437,14 +463,12 @@ public sealed class ExternalVisibilityTests
         var invoice = _world.Add("sprk_invoice", ("sprk_matter", matter));
         _world.InvoiceReasons[invoice] = Enum.Parse<InvoiceHiddenReason>(reasonName);
         var line = _world.Add("sprk_billingevent", ("sprk_invoice", invoice), ("sprk_matter", matter));
-        var file = _world.Add("sprk_storedfile", ("sprk_invoice", invoice));
         var approval = _world.Add("sprk_invoiceapproval", ("sprk_invoice", invoice));
 
-        var result = await Decide(("sprk_invoice", invoice), ("sprk_billingevent", line), ("sprk_storedfile", file),
-            ("sprk_invoiceapproval", approval));
+        var result = await Decide(("sprk_invoice", invoice), ("sprk_billingevent", line), ("sprk_invoiceapproval", approval));
 
-        foreach (var (table, id) in new[] { ("sprk_invoice", invoice), ("sprk_billingevent", line), ("sprk_storedfile", file),
-                     ("sprk_invoiceapproval", approval) })
+        // (A Stored File under the invoice is a hard-deny table: Hidden whatever its invoice answers; see the HardDeny test.)
+        foreach (var (table, id) in new[] { ("sprk_invoice", invoice), ("sprk_billingevent", line), ("sprk_invoiceapproval", approval) })
         {
             result.For(table, id).Reason.Should().Be(ExternalVisibilityReason.InvoiceHidden, table);
         }
@@ -524,6 +548,31 @@ public sealed class ExternalVisibilityTests
 
     /// <summary>Hidden beats Undecided whatever the order the findings were made in: an unreadable link found first does not
     /// mask a hidden communication found after it.</summary>
+    /// <summary>A rule that answers faulted does not throw away a hide another sound rule already decided: a row under a
+    /// Restricted root stays Hidden when (a′) or 188 reports a failed read in the same batch; the rest are ReadFailed.</summary>
+    [Theory]
+    [InlineData("invoices")]
+    [InlineData("documents")]
+    public async Task AHiddenRow_StaysHidden_WhenAnotherRuleAnswersFaulted(string rule)
+    {
+        var standard = _world.Root();
+        var invoice = _world.Add("sprk_invoice", ("sprk_matter", standard));
+        var document = _world.Document(matter: standard);
+        var hidden = _world.Add("sprk_todo", ("sprk_regardingmatter", _world.Root(restricted: true)));
+        var readers = rule == "documents"
+            ? _world.Readers() with { Documents = (_, _) => Task.FromResult(DocumentNarrowingResult.ReadFailed) }
+            : _world.Readers() with { Invoices = (ids, _) => Task.FromResult(InvoiceVisibilityResult.ReadFailed(ids)) };
+
+        var result = await ExternalVisibility.DecideAsync(
+            new[] { ("sprk_invoice", invoice), ("sprk_document", document), ("sprk_todo", hidden) }, readers, CancellationToken.None);
+
+        result.Faulted.Should().BeTrue();
+        result.For("sprk_todo", hidden).Verdict.Should().Be(ExternalVisibilityVerdict.Hidden);
+        result.For("sprk_todo", hidden).Reason.Should().Be(ExternalVisibilityReason.RootRestricted);
+        result.For(rule == "documents" ? "sprk_document" : "sprk_invoice", rule == "documents" ? document : invoice)
+            .Reason.Should().Be(ExternalVisibilityReason.ReadFailed);
+    }
+
     [Fact]
     public async Task AHiddenFinding_BeatsAnEarlierUndecidedOne()
     {
@@ -570,10 +619,10 @@ public sealed class ExternalVisibilityTests
         decision.Reason.Should().Be(ExternalVisibilityReason.NoRoot);
     }
 
-    /// <summary>Known limit (fail closed): a chain member's own communication link is 188's question, not the closure's, so a
-    /// document whose only way to a root runs through its parent document's communication link reaches no root.</summary>
+    /// <summary>A parent document's communication link is a lineage edge: a document whose only way to a root runs through it
+    /// gets that root (visible here), instead of reaching none.</summary>
     [Fact]
-    public async Task ADocumentWhoseOnlyRootIsThroughAChainMembersCommunication_IsUndecided()
+    public async Task ADocumentWhoseOnlyRootIsThroughItsParentsCommunication_IsDecidedByThatRoot()
     {
         var communication = _world.Communication(internalOnly: false, _world.Thread(Open), _world.Root());
         var eml = _world.Document(communication: communication);
@@ -582,7 +631,7 @@ public sealed class ExternalVisibilityTests
         var result = await Decide(("sprk_document", eml), ("sprk_document", attachment));
 
         result.For("sprk_document", eml).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
-        result.For("sprk_document", attachment).Reason.Should().Be(ExternalVisibilityReason.NoRoot);
+        result.For("sprk_document", attachment).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
     }
 
     [Fact]
@@ -733,6 +782,24 @@ public sealed class ExternalVisibilityTests
 
         result.For("sprk_document", chain[3]).Verdict.Should().Be(ExternalVisibilityVerdict.Visible);
         result.For("sprk_document", chain[4]).Reason.Should().Be(ExternalVisibilityReason.ChainTooLong);
+    }
+
+    // ── Own rules are dispatched on the declared marker ─────────────────────────────────────────────────────────
+
+    /// <summary>The (table, rule) pairs the registry declares are exactly the ones the predicate implements: a rule declared on
+    /// a new table, or a new rule, fails here before it can fault every decision that reaches it.</summary>
+    [Fact]
+    public void TheDeclaredOwnRules_AreExactlyTheOnesThePredicateImplements()
+    {
+        var declared = SecureChildLineage.Children.Values
+            .Where(t => t.External.Kind == ExternalMarkerKind.Predicate)
+            .Select(t => (t.External.Rule, Table: t.LogicalName.ToLowerInvariant()))
+            .OrderBy(p => p.Rule)
+            .ToList();
+
+        declared.Should().Equal(ExternalVisibility.RuleTables.Select(kv => (kv.Key, kv.Value)).OrderBy(p => p.Key));
+        ExternalVisibility.RuleTables.Keys.Should().BeEquivalentTo(
+            Enum.GetValues<ExternalOwnRule>().Where(r => r != ExternalOwnRule.None), "every own rule has an implementation");
     }
 
     // ── The AI guard's two lists, now derived from the registry (results unchanged) ─────────────────────────────

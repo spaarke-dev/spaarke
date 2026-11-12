@@ -105,9 +105,10 @@ public class ExternalInvoiceVisibilityGuardTests
             "Derives, once at type load, which tables are filed under an invoice-linked row but carry no link of their own (ebilling-r1 task 130-0 F3b); uses the family test only to leave the invoice family to its own (a') step; reads no row.",
         [$"{typeof(ExternalInvoiceReviewDetail).FullName}::Applies"] =
             "Decides whether a module is the invoice module for the review-detail projection (082c-2 fix round 3, U1); reads no row. The projection runs on rows the route already hid.",
-        ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility::OwnVerdictsAsync"] =
-            "uac-r2 191b: the external-visibility predicate asks (a') for the invoices its walk reached through its InvoiceDecider "
-            + "input (bound by its caller to ExternalInvoiceVisibility.DecideAsync) and returns verdicts, never an invoice-family row.",
+        ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility::.cctor"] =
+            "uac-r2 191b: RuleTables names the table the InvoiceSource rule reads (configuration; reads no row). The predicate asks "
+            + "(a') through its InvoiceDecider input (bound by its caller to ExternalInvoiceVisibility.DecideAsync) and returns "
+            + "verdicts, never an invoice-family row.",
         // ── reads that return no invoice-family row ──
         [$"{typeof(ExternalInvoiceSubmissionAuthorizationFilter).FullName}::DenyUnlinkedFirmAsync"] =
             "Checks the firm is linked to the core record (D-106); returns a refusal or nothing, no submission row.",

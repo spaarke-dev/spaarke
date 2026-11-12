@@ -641,6 +641,11 @@ public class SecureChildLineageTests
             ["sprk_emailreviewlog"] = ExternalMarker.Never,
             ["sprk_analysis"] = ExternalMarker.DocumentText,
             ["sprk_analysisoutput"] = ExternalMarker.DocumentText,
+            ["sprk_policy"] = ExternalMarker.HardDeny,
+            ["sprk_policyversion"] = ExternalMarker.HardDeny,
+            ["sprk_procedureassignment"] = ExternalMarker.HardDeny,
+            ["sprk_ruleset"] = ExternalMarker.HardDeny,
+            ["sprk_storedfile"] = ExternalMarker.HardDeny,
         };
 
         foreach (var table in SecureChildLineage.Children.Values)
@@ -677,12 +682,34 @@ public class SecureChildLineageTests
         ExternalMarker.DocumentText.CarriesDocumentText.Should().BeTrue();
         ExternalMarker.None.CarriesDocumentText.Should().BeFalse();
         ExternalMarker.Never.Kind.Should().Be(ExternalMarkerKind.Never);
+        ExternalMarker.HardDeny.Kind.Should().Be(ExternalMarkerKind.HardDeny);
+        ExternalMarker.HardDeny.Should().NotBe(ExternalMarker.Never);
         ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen).Should().Be(ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen));
         ExternalMarker.None.Should().NotBe(ExternalMarker.DocumentText);
     }
 
+    /// <summary>
+    /// Task 191b (#2179 design §0 item 1): every hard-deny table (<see cref="RecordOwnershipResolver.RestrictedContentTables"/>)
+    /// the registry knows is <see cref="ExternalMarkerKind.HardDeny"/> (or <see cref="ExternalMarkerKind.Never"/>), so a new
+    /// hard-deny table cannot arrive as None and be shared with externals; and none is in the Never set, which is the
+    /// assistant guard's refused list and message (unchanged).
+    /// </summary>
+    [Fact]
+    public void EveryHardDenyTableInTheRegistry_IsNeverExternallyVisible()
+    {
+        var inRegistry = RecordOwnershipResolver.RestrictedContentTables
+            .Where(t => SecureChildLineage.ExternalMarkerOf(t) is not null)
+            .ToList();
+
+        inRegistry.Should().NotBeEmpty();
+        foreach (var table in inRegistry)
+            SecureChildLineage.ExternalMarkerOf(table)!.Kind.Should().BeOneOf(
+                new[] { ExternalMarkerKind.HardDeny, ExternalMarkerKind.Never }, $"{table} is a hard-deny table");
+        SecureChildLineage.NeverExternalTables.Should().NotIntersectWith(RecordOwnershipResolver.RestrictedContentTables);
+    }
+
     /// <summary>Task 191b: the predicate's two document edges are registry lookups of the document (a renamed column would
-    /// silently stop the chain bound or the chain member's link skip).</summary>
+    /// silently stop the chain bound).</summary>
     [Fact]
     public void TheDocumentChainAndLinkColumns_AreDocumentLookups()
     {
