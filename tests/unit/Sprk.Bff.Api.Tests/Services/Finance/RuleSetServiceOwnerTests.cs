@@ -33,12 +33,10 @@ public sealed class RuleSetServiceOwnerTests
             .Select(i => (RecordOwnershipContext)i.Arguments[0])
             .ToList();
 
-    /// <summary>A draft rule set with a source document, as the drafting job reads it.</summary>
+    /// <summary>A Draft version of a Billing Procedure with its rule set and one source file (task 116), as the drafting job reads it.</summary>
     private static Guid RuleSetWithSource(Harness h)
     {
-        var id = h.RuleSet();
-        h.Row("sprk_ruleset", id)["sprk_sourcedocument"] = new EntityReference("sprk_document", SourceId);
-        return id;
+        return h.DraftVersion().Version;
     }
 
     private static DraftedRule Drafted() =>
@@ -153,21 +151,6 @@ public sealed class RuleSetServiceOwnerTests
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         h.Rows["sprk_policyversion"].Single(v => v.Id != v1).GetAttributeValue<EntityReference>("ownerid").Id
             .Should().Be(OwnershipDirectory.RestrictedContentTeam);
-    }
-
-    [Fact(DisplayName = "EB-D-168a: an uploaded rule set is owned by the restricted-content owner team; its source document by the caller's business-unit team")]
-    public async Task Create_TheRuleSetIsOwnedByTheRestrictedContentTeam_TheDocumentByTheCallersTeam()
-    {
-        var h = WithRealOwnership(CallerIn(OwnershipDirectory.CustomerChildBu));
-
-        var outcome = await h.Service().CreateAsync(
-            new RuleSetCreateRequest("Acme OCG", RuleSetSourceKind.Guideline, RuleSetScope.ClientDefault, null, "ocg.pdf", CallerOid),
-            new byte[] { 1 }, default);
-
-        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
-        OwnersOf(h, "sprk_ruleset").Should().ContainSingle().Which.Should().Be(OwnershipDirectory.RestrictedContentTeam);
-        h.DocumentCreates.Should().ContainSingle().Which.OwningTeamId.Should().Be(OwnershipDirectory.CustomerChildTeam,
-            "sprk_document is not a hard-deny table");
     }
 
     [Fact(DisplayName = "EB-D-168a: a caller in the Secure Record business unit gets the Secure Record owner team for a drafted rule")]

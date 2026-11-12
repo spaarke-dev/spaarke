@@ -1127,6 +1127,100 @@ public class ProcedureService
         return (procedure, versions, version, null);
     }
 
+    /// <summary>
+    /// Task 116: the target of the version-file route. The version must be one of <paramref name="procedureId"/>'s (else the unknown-id 404
+    /// <c>procedure.version_not_found</c>), the Procedure not Retired (409 <c>procedure.retired</c>), and the version a Draft (409
+    /// <c>procedure_version.not_draft</c>; a missing status is not a Draft, fail closed). Reads only.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<ProcedureVersionView>> GetDraftVersionForFileAsync(Guid procedureId, Guid versionId, CancellationToken ct)
+    {
+        var (_, _, version, refusal) = await LoadForVersionAsync<ProcedureVersionView>(procedureId, versionId, ct);
+        if (refusal is not null)
+        {
+            return refusal;
+        }
+
+        if (version!.Row.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft)
+        {
+            return Refused<ProcedureVersionView>(StatusCodes.Status409Conflict, RuleSetService.CodeVersionNotDraft, "A file can be stored only on a Draft version.");
+        }
+
+        return RuleSetOutcome<ProcedureVersionView>.Done(version.View);
+    }
+
+    /// <summary>
+    /// Task 116 fix round 1 (owner ruling 2026-11-10, "reset and allow redraft"): re-reads the version and answers whether it is still a Draft
+    /// (a missing status is not). When it is a Draft that a drafting run has marked drafted, the marker <c>sprk_notconverted</c> is set No. A
+    /// version that is not drafted is not written. A fault throws (the caller refuses the upload). The version-file route calls it before the
+    /// new file is staged.
+    /// <para>Fix round 2: this first reset writes ONLY the marker. The list stays until <see cref="RecheckDraftAfterNewFileAsync(Guid,
+    /// CancellationToken)"/> has seen the version still a Draft once the new file is Servable, so a publish that lands between the two keeps
+    /// its version's list. A list under No is never shown (the rule set read shows it only for a drafted version).</para>
+    /// <para>Fix round 3: the marker is written only when the list names no file (the earlier bare list, or no list). A version whose list is
+    /// an envelope is not written: its drafted state is already stale once the envelope's file is no longer the one Servable source file, and
+    /// an upload that never lands leaves it drafted, list shown, as before the request.</para>
+    /// </summary>
+    public virtual Task<bool> ResetDraftedStateIfDraftAsync(Guid versionId, CancellationToken ct) =>
+        ResetDraftedStateIfDraftAsync(_entities, versionId, _logger, ct);
+
+    /// <inheritdoc cref="ResetDraftedStateIfDraftAsync(Guid, CancellationToken)"/>
+    /// <remarks>Static over the entity seam, as <see cref="RecheckDraftAfterNewFileAsync(IGenericEntityService, Guid, ILogger, CancellationToken)"/>.</remarks>
+    internal static Task<bool> ResetDraftedStateIfDraftAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct) =>
+        ResetDraftedStateAsync(entities, versionId, logger, clearList: false, ct);
+
+    /// <summary>
+    /// Task 116 fix round 2: the re-check once the new file is Servable (<see cref="Files.StoredFileService.ReplaceForCallerAsync"/>'s
+    /// <c>parentStillAccepts</c>). Re-reads the version and answers whether it is still a Draft (a missing status is not; nothing is written
+    /// then). For a Draft: the marker No if a run marked it meanwhile, THEN the list cleared, written as
+    /// <see cref="RuleSetService.ClearedNotConverted"/> (an envelope that names no file, so a run that lands its marker after this clear
+    /// leaves a version that reads as not drafted). Nothing is written for a version with neither. A fault throws (the replace withdraws the
+    /// new file).
+    /// </summary>
+    public virtual Task<bool> RecheckDraftAfterNewFileAsync(Guid versionId, CancellationToken ct) =>
+        RecheckDraftAfterNewFileAsync(_entities, versionId, _logger, ct);
+
+    /// <inheritdoc cref="RecheckDraftAfterNewFileAsync(Guid, CancellationToken)"/>
+    /// <remarks>Static over the entity seam so the rate-card import's replace (<see cref="RateCardImportService"/>) re-checks through the same
+    /// method without holding this service.</remarks>
+    internal static Task<bool> RecheckDraftAfterNewFileAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct) =>
+        ResetDraftedStateAsync(entities, versionId, logger, clearList: true, ct);
+
+    private static async Task<bool> ResetDraftedStateAsync(IGenericEntityService entities, Guid versionId, ILogger logger, bool clearList, CancellationToken ct)
+    {
+        var query = new QueryExpression(ProcedureEntity.VersionEntity)
+        {
+            ColumnSet = new ColumnSet(ProcedureEntity.VersionStatusColumn, RuleSetService.VersionDraftedColumn, RuleSetService.VersionNotConvertedListColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_procedureversionid", ConditionOperator.Equal, versionId);
+        var version = (await entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(v => v.Id == versionId);
+        if (version?.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft)
+        {
+            return false;
+        }
+
+        // Fix round 3: the first reset (clearList false) writes the marker only for a list that names no file (the earlier bare list, or no
+        // list); an envelope's file id already makes "drafted" stale once its file is replaced, so a first reset whose upload never lands
+        // leaves an envelope version as it was. The re-check (clearList true) runs once the new file is Servable and writes No as before.
+        if (version.GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn) == true
+            && (clearList || !RuleSetService.ParseStoredNotConverted(version.GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn)).IsEnvelope))
+        {
+            await entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, versionId, new Dictionary<string, object> { [RuleSetService.VersionDraftedColumn] = false }, ct);
+            logger.LogInformation("Procedure Version {ProcedureVersionId}: drafted marker reset for a new source file", versionId);
+        }
+
+        if (clearList && version.GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn) is { Length: > 0 } list
+            && !string.Equals(list, RuleSetService.ClearedNotConverted, StringComparison.Ordinal))
+        {
+            await entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, versionId,
+                new Dictionary<string, object> { [RuleSetService.VersionNotConvertedListColumn] = RuleSetService.ClearedNotConverted }, ct);
+        }
+
+        return true;
+    }
+
     private async Task<int> CountServableSourceFilesAsync(Guid versionId, CancellationToken ct)
     {
         var query = new QueryExpression(ProcedureEntity.StoredFileEntity) { ColumnSet = new ColumnSet(ProcedureEntity.StoredFileProcedureVersionColumn), TopCount = 2 };

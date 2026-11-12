@@ -814,4 +814,4 @@ The **Communication Account** form includes the following sections:
 
 ---
 
-*Admin guide for Communication Account management. See also: [Deployment Guide](COMMUNICATION-DEPLOYMENT-GUIDE.md) | [User Guide](communication-user-guide.md) | [Data Schema](../data-model/sprk_communication-data-schema.md)*
+*Admin guide for Communication Account management. See also: [Deployment Guide](COMMUNICATION-DEPLOYMENT-GUIDE.md) | [User Guide](communication-user-guide.md) | [Data Schema](../data-model/sprk_communication.md)*

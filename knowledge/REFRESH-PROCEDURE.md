@@ -57,9 +57,13 @@ For each of the 11 topics in `knowledge/<topic>/`:
    - For each doc file, re-fetch its `source:` URL (from YAML frontmatter).
    - If the URL 404s, find the canonical replacement (`gh search`, web search). Update frontmatter; log the URL change.
    - Update `fetched:` date.
-6. **Update `SOURCE.md`** with new commit SHAs, new fetch dates, any newly-included or removed files.
-7. **Update `NOTES.md`** — usually no change unless a platform shift invalidates a Spaarke pattern. If so, flag for senior-engineer review (add a `> ⚠️ REVIEW: <reason>` callout under the affected section).
-8. **Delete temp clone**: `rm -rf c:/tmp/<repo-name>`.
+6. **Fix links that point outside the snapshot.** Upstream pages link to sibling pages, images and files we did not copy, and the Markdown Link Validator (`scripts/validate-markdown-links.ps1`, Tier 2 advisory CI) scans `knowledge/**`. For each re-copied file, run `pwsh scripts/validate-markdown-links.ps1 -Path knowledge/<topic> -NoNetwork`, then:
+   - a relative link to a Microsoft Learn or GitHub page → the absolute upstream URL (resolve it against the `source:` URL, and check that it loads);
+   - an image, video or notebook that was not copied → replace the image markup with the line *(image not included in this snapshot: <alt text>)*;
+   - any other file that was not copied → drop the link and keep its text.
+7. **Update `SOURCE.md`** with new commit SHAs, new fetch dates, any newly-included or removed files.
+8. **Update `NOTES.md`** — usually no change unless a platform shift invalidates a Spaarke pattern. If so, flag for senior-engineer review (add a `> ⚠️ REVIEW: <reason>` callout under the affected section).
+9. **Delete temp clone**: `rm -rf c:/tmp/<repo-name>`.
 
 ### Step 3: Look for new patterns and topics
 

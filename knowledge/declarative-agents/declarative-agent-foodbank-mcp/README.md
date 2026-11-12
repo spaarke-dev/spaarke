@@ -1,12 +1,12 @@
 # Declarative Agent - Foodbank Friend
 
-![Declarative Agent - Foodbank Friend](./assets/example.gif)
+*(image not included in this snapshot: Declarative Agent - Foodbank Friend)*
 
 ## Summary
 
 This repository contains a declarative agent that helps users in the UK find local food banks, see what items they need, and schedule volunteer donation visits. The agent connects to the [GiveFood API](https://www.givefood.org.uk/api/) to search for nearby food banks and their current needs, then coordinates the scheduling process by creating Outlook calendar appointments and tracking volunteer commitments in SharePoint. A key point of emphasis on this agent was combining multiple action types - **Remote MCP Servers** for Microsoft 365 services (Outlook Calendar and SharePoint Lists) alongside a traditional **OpenAPI** connector for the external GiveFood API. The agent is built using the Microsoft 365 Agents Toolkit.
 
-![Solution diagram](./assets/solution-diagram.png)
+*(image not included in this snapshot: Solution diagram)*
 
 ## Contributors
 

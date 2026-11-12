@@ -2,7 +2,7 @@
 
 > **Last Updated**: {YYYY-MM-DD}  
 > **Status**: Draft | Ready for Tasks | In Progress | Complete  
-> **Spec**: [SPEC.md](SPEC.md)
+> **Spec**: `spec.md` (in the project folder)
 
 ---
 

@@ -70,6 +70,40 @@ function Resolve-RepoPath([string]$base, [string]$rel) {
     return ($parts -join '/')
 }
 
+# Is $p gitignored? A folder reference (`dir/`) is probed through a child path (`dir/<probe>`):
+# on Windows, with .gitignore checked out with CRLF endings, `git check-ignore --no-index` reports EVERY
+# path ending in "/" as ignored (it attributes the match to a blank line), which silently skipped every
+# folder reference there while the Linux CI runner reported them (#2684). A child of an ignored folder
+# is ignored on both platforms; a child of a non-ignored folder is not. A reference without the trailing
+# slash may still name a folder (`.claude/worktrees`), and a folder-only pattern (`.claude/worktrees/`)
+# matches it only through a child, so that is probed too.
+function Test-IgnoredPath([string]$p) {
+    $probes = if ($p.EndsWith('/')) { @($p + '.instruction-path-probe') } else { @($p, "$p/.instruction-path-probe") }
+    foreach ($probe in $probes) {
+        git check-ignore -q --no-index -- $probe 2>$null
+        if ($LASTEXITCODE -eq 0) { return $true }
+    }
+    return $false
+}
+
+# Self-test (must-fire / must-not-fire) so a platform quirk cannot silently disable the ignore check again.
+$selfTest = @(
+    @{ Path = 'zzz-instruction-path-probe/nothing/'; Ignored = $false },   # must fire: a dead folder reference is reported
+    @{ Path = 'zzz-instruction-path-probe/nothing'; Ignored = $false },
+    @{ Path = 'node_modules/'; Ignored = $true },                         # must not fire: build output is legitimately absent
+    @{ Path = 'src/client/pcf/Foo/node_modules/x'; Ignored = $true },
+    @{ Path = 'node_modules'; Ignored = $true }                          # folder named without its trailing slash
+)
+foreach ($t in $selfTest) {
+    if ((Test-IgnoredPath $t.Path) -ne $t.Ignored) {
+        throw "Self-test failed: Test-IgnoredPath '$($t.Path)' should be $($t.Ignored). The ignore check would hide or invent findings on this platform."
+    }
+}
+foreach ($t in @(@{ In = 'a/b.cs:113,247-249'; Out = 'a/b.cs' }, @{ In = 'a/b.cs:12-14'; Out = 'a/b.cs' }, @{ In = 'a/b.cs'; Out = 'a/b.cs' })) {
+    $got = $t.In -replace ':\d+(-\d+)?(,\d+(-\d+)?)*$', ''
+    if ($got -ne $t.Out) { throw "Self-test failed: line-suffix strip of '$($t.In)' gave '$got', expected '$($t.Out)'." }
+}
+
 $findings = [System.Collections.Generic.List[string]]::new()
 foreach ($file in $corpus) {
     $dir = Split-Path $file -Parent
@@ -79,15 +113,15 @@ foreach ($file in $corpus) {
         $p = $m.Groups[1].Value.TrimEnd('.', ',', ';', ':', ')')
         if ($p -match $skipPattern) { continue }
         if ($p -match '^src/([^/]+)' -and $srcChildren -cnotcontains $Matches[1]) { continue }
-        $p = ($p -split '#')[0] -replace ':\d+(-\d+)?$', '' -replace ':\w+\(?$', ''   # drop anchors, :line and :member suffixes
+        # Drop anchors, :line suffixes (incl. comma lists such as `:113,247-249`) and :member suffixes.
+        $p = ($p -split '#')[0] -replace ':\d+(-\d+)?(,\d+(-\d+)?)*$', '' -replace ':\w+\(?$', ''
         if (-not $p) { continue }
         $candidates = @((Resolve-RepoPath '' $p))
         if ($dir) { $candidates += (Resolve-RepoPath ($dir -replace '\\', '/') $p) }
         if (-not ($candidates | Where-Object { $tracked.Contains($_) })) {
             # Build output and local config (out/, dist/, publish/, .env.local, ...) are gitignored and
             # legitimately absent from a checkout; naming them is not drift.
-            git check-ignore -q --no-index -- $p 2>$null
-            if ($LASTEXITCODE -eq 0) { continue }
+            if (Test-IgnoredPath $p) { continue }
             $findings.Add("$file|$p")
         }
     }

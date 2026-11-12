@@ -129,5 +129,5 @@ See `.claude/patterns/ui/fluent-v9-portal-gotcha.md` for the canonical rule.
 - [Tasks 030–034 — Component implementation series](../../../../../../../projects/ai-spaarke-insights-engine-widgets-r1/tasks/)
 - [Task 035 — This sandbox](../../../../../../../projects/ai-spaarke-insights-engine-widgets-r1/tasks/035-storybook-stories.poml)
 - [Task 042 — Matter form host integration](../../../../../../../projects/ai-spaarke-insights-engine-widgets-r1/tasks/042-host-card-on-matter-form.poml)
-- [ADR-021 — Fluent v9 + semantic tokens](../../../../../../../.claude/adr/ADR-021-fluent-v9.md)
-- [ADR-012 — Shared component library](../../../../../../../.claude/adr/ADR-012-shared-component-library.md)
+- [ADR-021 — Fluent v9 + semantic tokens](../../../../../../../.claude/adr/ADR-021-fluent-design-system.md)
+- [ADR-012 — Shared component library](../../../../../../../.claude/adr/ADR-012-shared-components.md)

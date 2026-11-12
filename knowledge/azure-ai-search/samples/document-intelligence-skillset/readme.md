@@ -22,7 +22,7 @@ You can create or use an existing Azure AI Search and Azure OpenAI account with 
 
 ## Architecture Diagram
 
-![Picture](./media/docintelcustom.png)
+*(image not included in this snapshot: Picture)*
 
 ## Prerequisites
 
@@ -72,7 +72,7 @@ This sample uses [`azd`](https://learn.microsoft.com/azure/developer/azure-devel
 
    The deployment creates multiple Azure resources and runs multiple jobs. It takes several minutes to complete. The deployment is complete when you get a command line notification stating "SUCCESS: Your up workflow to provision and deploy to Azure completed."
 
-1. Open the [notebook](./document-intelligence-custom-skill.ipynb) to run sample queries once the sample is provisioned and the indexer has finished running.
+1. Open the notebook to run sample queries once the sample is provisioned and the indexer has finished running.
 
 1. If you can't run the queries, navigate to your search service in the Azure portal and confirm the document-intelligence-index exists and has a positive document count. You should also check the indexer for errors.
 

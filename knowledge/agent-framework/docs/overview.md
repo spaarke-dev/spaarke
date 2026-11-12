@@ -9,8 +9,8 @@ Agent Framework offers two primary categories of capabilities:
 
 | - | Description |
 | --- | --- |
-| **[Agents](../agents/)** | Individual agents that use LLMs to process inputs, call [tools](../agents/tools/) and [MCP servers](../agents/tools/hosted-mcp-tools), and generate responses. Supports Microsoft Foundry, Anthropic, Azure OpenAI, OpenAI, Ollama, and [more](../agents/providers/). |
-| **[Workflows](../workflows/)** | Graph-based workflows that connect agents and functions for multi-step tasks with type-safe routing, checkpointing, and human-in-the-loop support. |
+| **[Agents](https://learn.microsoft.com/en-us/agent-framework/agents/)** | Individual agents that use LLMs to process inputs, call [tools](https://learn.microsoft.com/en-us/agent-framework/agents/tools/) and [MCP servers](https://learn.microsoft.com/en-us/agent-framework/agents/tools/hosted-mcp-tools), and generate responses. Supports Microsoft Foundry, Anthropic, Azure OpenAI, OpenAI, Ollama, and [more](https://learn.microsoft.com/en-us/agent-framework/integrations/by-component/model-providers/). |
+| **[Workflows](https://learn.microsoft.com/en-us/agent-framework/workflows/)** | Graph-based workflows that connect agents and functions for multi-step tasks with type-safe routing, checkpointing, and human-in-the-loop support. |
 
 The framework also provides foundational building blocks, including model clients (chat completions and responses), an agent session for state management, context providers for agent memory, middleware for intercepting agent actions, and MCP clients for tool integration. Together, these components give you the flexibility and power to build interactive, robust, and safe AI applications.
 
@@ -89,4 +89,4 @@ To learn more about migrating from either Semantic Kernel or AutoGen, see the Mi
 
 > **Third-Party Systems disclaimer**: If you use Microsoft Agent Framework to build applications that operate with any third-party servers, agents, code, or non-Azure Direct models, you do so at your own risk. Third-Party Systems are Non-Microsoft Products under the Microsoft Product Terms and are governed by their own third-party license terms.
 >
-> You are responsible for carefully reviewing and testing applications you build using Microsoft Agent Framework in the context of your specific use cases, and making all appropriate decisions and customizations. This includes implementing your own responsible AI mitigations such as metaprompt, content filters, or other safety systems. See also: [Transparency FAQ](https://github.com/microsoft/agent-framework/blob/main/TRANSPARENCY_FAQS.md)
+> You are responsible for carefully reviewing and testing applications you build using Microsoft Agent Framework in the context of your specific use cases, and making all appropriate decisions and customizations. This includes implementing your own responsible AI mitigations such as metaprompt, content filters, or other safety systems. See also: [Transparency FAQ](https://github.com/microsoft/agent-framework/blob/main/TRANSPARENCY_FAQ.md)
