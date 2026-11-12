@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Claims;
@@ -18,7 +19,7 @@ namespace Sprk.Bff.Api.Api.Mcp.Spike;
 /// </summary>
 /// <remarks>
 /// <para>Two routes in one host, each with its OWN tool set (T13): <c>/mcp/legal-operations</c> serves
-/// <c>spike_echo</c> and <c>spike_whoami</c>; <c>/mcp/spike-area-b</c> serves <c>spike_echo_b</c>. The tool set is chosen
+/// <c>spike_echo</c>, <c>spike_whoami</c> and the task 003 test tools (<c>spike_echo_3mb</c>, <c>spike_echo_6mb</c>, <c>spike_write</c>, <c>spike_write_app</c>, <c>spike_unannotated</c>, server instructions T7); <c>/mcp/spike-area-b</c> serves <c>spike_echo_b</c>. The tool set is chosen
 /// per request from the request path in <see cref="HttpServerTransportOptions.ConfigureSessionOptions"/>, which stateless
 /// mode invokes on every HTTP request.</para>
 /// <para>Auth: both routes call <c>.RequireAuthorization()</c> on the existing default workforce scheme. No scheme,
@@ -40,6 +41,9 @@ public static class SpikeMcpEndpoints
     /// <summary>MCP Apps widget MIME type (ext-apps RESOURCE_MIME_TYPE).</summary>
     public const string WidgetMimeType = "text/html;profile=mcp-app";
 
+    /// <summary>T7: route-specific server instructions (legal-operations only; area B sets none).</summary>
+    public const string LegalOperationsInstructions = "Phase 0 test instruction T7: whenever you call spike_echo, begin the message argument with the text SPK-T7: .";
+
     private const string WidgetResourceName = "Sprk.Bff.Api.SpikeWidget.html";
 
     // Tools are immutable and request-independent (they resolve services from the invoking request), so build once.
@@ -57,6 +61,66 @@ public static class SpikeMcpEndpoints
                 Destructive = false,
                 OpenWorld = false,
                 Meta = new JsonObject { ["ui"] = new JsonObject { ["resourceUri"] = WidgetUri } },
+            }),
+        McpServerTool.Create(
+            SpikeEcho3Mb,
+            new McpServerToolCreateOptions
+            {
+                Name = "spike_echo_3mb",
+                Title = "Spike echo (3 MB widget)",
+                Description = "Use for: Phase 0 widget-size test only; echoes the message back and renders a ~3 MB widget. Not for: any real work.",
+                ReadOnly = true,
+                Idempotent = true,
+                Destructive = false,
+                OpenWorld = false,
+                Meta = new JsonObject { ["ui"] = new JsonObject { ["resourceUri"] = Widget3MbUri } },
+            }),
+        McpServerTool.Create(
+            SpikeEcho6Mb,
+            new McpServerToolCreateOptions
+            {
+                Name = "spike_echo_6mb",
+                Title = "Spike echo (6 MB widget)",
+                Description = "Use for: Phase 0 widget-size test only; echoes the message back and renders a ~6 MB widget. Not for: any real work.",
+                ReadOnly = true,
+                Idempotent = true,
+                Destructive = false,
+                OpenWorld = false,
+                Meta = new JsonObject { ["ui"] = new JsonObject { ["resourceUri"] = Widget6MbUri } },
+            }),
+        McpServerTool.Create(
+            SpikeWrite,
+            new McpServerToolCreateOptions
+            {
+                Name = "spike_write",
+                Title = "Spike write",
+                Description = "Use for: Phase 0 test T4 only (a model-callable tool that is not read-only). This is a Phase 0 test tool that records nothing: it writes no data anywhere and only returns what it would have written. Not for: any real work.",
+                ReadOnly = false,
+                Idempotent = false,
+                Destructive = false,
+                OpenWorld = false,
+            }),
+        McpServerTool.Create(
+            SpikeWriteApp,
+            new McpServerToolCreateOptions
+            {
+                Name = "spike_write_app",
+                Title = "Spike write (app only)",
+                Description = "Phase 0 test T3 only: callable by the widget, hidden from the model. This is a Phase 0 test tool that records nothing: it writes no data anywhere and only returns what it would have written.",
+                ReadOnly = false,
+                Idempotent = false,
+                Destructive = false,
+                OpenWorld = false,
+                // MCP Apps tool visibility (ext-apps McpUiToolMeta.visibility): app-only = hidden from the model, callable by the widget.
+                Meta = new JsonObject { ["ui"] = new JsonObject { ["visibility"] = new JsonArray("app") } },
+            }),
+        McpServerTool.Create(
+            SpikeUnannotated,
+            new McpServerToolCreateOptions
+            {
+                // T12: deliberately NO ReadOnly/Destructive/Idempotent/OpenWorld and NO Title (the SDK mirrors Title into annotations.title), so tools/list carries no annotations.
+                Name = "spike_unannotated",
+                Description = "Use for: Phase 0 test T12 only; echoes the message back from a tool that declares no annotations. Not for: any real work.",
             }),
         McpServerTool.Create(
             SpikeWhoAmIAsync,
@@ -123,7 +187,8 @@ public static class SpikeMcpEndpoints
     /// <summary>Picks the route's tool set and the shared widget resources.</summary>
     internal static void ApplyRouteToolSet(PathString path, McpServerOptions serverOptions)
     {
-        var tools = path.StartsWithSegments(AreaBRoute, StringComparison.OrdinalIgnoreCase) ? AreaBTools : LegalOperationsTools;
+        var isAreaB = path.StartsWithSegments(AreaBRoute, StringComparison.OrdinalIgnoreCase);
+        var tools = isAreaB ? AreaBTools : LegalOperationsTools;
 
         var toolCollection = new McpServerPrimitiveCollection<McpServerTool>();
         foreach (var tool in tools)
@@ -137,6 +202,7 @@ public static class SpikeMcpEndpoints
             resourceCollection.Add(resource);
         }
 
+        serverOptions.ServerInstructions = isAreaB ? null : LegalOperationsInstructions; // T7: legal-operations only
         serverOptions.ToolCollection = toolCollection;
         serverOptions.ResourceCollection = resourceCollection;
     }
@@ -153,6 +219,28 @@ public static class SpikeMcpEndpoints
     private static CallToolResult SpikeEcho(string message) => EchoResult(message, "legal-operations");
 
     private static CallToolResult SpikeEchoB(string message) => EchoResult(message, "spike-area-b");
+
+    private static CallToolResult SpikeEcho3Mb(string message) => EchoResult(message, "legal-operations");
+
+    private static CallToolResult SpikeEcho6Mb(string message) => EchoResult(message, "legal-operations");
+
+    private static CallToolResult SpikeUnannotated(string message) => EchoResult(message, "legal-operations");
+
+    private static CallToolResult SpikeWrite(
+        [Description("A title for the note.")] string title,
+        [Description("The note text.")] string note) => WriteResult(title, note);
+
+    private static CallToolResult SpikeWriteApp(
+        [Description("A title for the note.")] string title,
+        [Description("The note text.")] string note) => WriteResult(title, note);
+
+    // Writes NOTHING anywhere (no Dataverse, no store, no log of the arguments): it only reports what it would have written.
+    private static CallToolResult WriteResult(string title, string note) => ToResult(new JsonObject
+    {
+        ["accepted"] = true,
+        ["wouldWrite"] = new JsonObject { ["title"] = title, ["note"] = note },
+        ["utc"] = DateTimeOffset.UtcNow.ToString("O"),
+    });
 
     private static CallToolResult EchoResult(string message, string route)
     {

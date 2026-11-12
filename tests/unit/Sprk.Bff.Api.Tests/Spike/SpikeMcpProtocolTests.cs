@@ -84,15 +84,140 @@ public sealed class SpikeMcpProtocolTests : IAsyncLifetime
 
     // ---- tool sets per route (T13, local) -----------------------------------------------------------------------
 
+    private static readonly string[] ReadOnlyTools = ["spike_echo", "spike_echo_3mb", "spike_echo_6mb", "spike_whoami"];
+    private static readonly string[] WriteTools = ["spike_write", "spike_write_app"];
+
     [Fact]
-    public async Task ToolsList_LegalOperations_ReturnsExactlyEchoAndWhoAmI_BothReadOnly()
+    public async Task ToolsList_LegalOperations_ReturnsExactlyTheSevenSpikeTools()
     {
         var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "tools/list", new { });
 
         var tools = result.GetProperty("tools").EnumerateArray().ToList();
-        Assert.Equal(["spike_echo", "spike_whoami"], tools.Select(t => t.GetProperty("name").GetString()!).OrderBy(n => n, StringComparer.Ordinal));
+        Assert.Equal(
+            new[] { "spike_echo", "spike_echo_3mb", "spike_echo_6mb", "spike_unannotated", "spike_whoami", "spike_write", "spike_write_app" },
+            tools.Select(t => t.GetProperty("name").GetString()!).OrderBy(n => n, StringComparer.Ordinal));
+        Assert.All(
+            tools.Where(t => t.GetProperty("name").GetString() != "spike_unannotated"),
+            t => Assert.False(string.IsNullOrWhiteSpace(t.GetProperty("title").GetString())));
+    }
+
+    [Fact]
+    public async Task ToolsList_LegalOperations_AnnotationsMatchTheTestPlan()
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "tools/list", new { });
+        var tools = result.GetProperty("tools").EnumerateArray().ToDictionary(t => t.GetProperty("name").GetString()!);
+
+        foreach (var name in ReadOnlyTools)
+        {
+            var a = tools[name].GetProperty("annotations");
+            Assert.True(a.GetProperty("readOnlyHint").GetBoolean(), name);
+            Assert.True(a.GetProperty("idempotentHint").GetBoolean(), name);
+            Assert.False(a.GetProperty("destructiveHint").GetBoolean(), name);
+            Assert.False(a.GetProperty("openWorldHint").GetBoolean(), name);
+        }
+
+        foreach (var name in WriteTools)
+        {
+            var a = tools[name].GetProperty("annotations");
+            Assert.False(a.GetProperty("readOnlyHint").GetBoolean(), name);
+            Assert.False(a.GetProperty("destructiveHint").GetBoolean(), name);
+            Assert.False(a.GetProperty("idempotentHint").GetBoolean(), name);
+            Assert.False(a.GetProperty("openWorldHint").GetBoolean(), name);
+        }
+    }
+
+    [Fact]
+    public async Task ToolsList_Unannotated_DeclaresNoAnnotationHints()
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "tools/list", new { });
+
+        var tool = result.GetProperty("tools").EnumerateArray().Single(t => t.GetProperty("name").GetString() == "spike_unannotated");
+
+        // SDK 2.3.1 omits the annotations object entirely when no hint (and no Title, which it mirrors into annotations.title) is set.
+        Assert.False(tool.TryGetProperty("annotations", out _));
+    }
+
+    [Fact]
+    public async Task ToolsList_WriteAppTool_IsListedWithAppOnlyVisibility_AndOthersAreNot()
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "tools/list", new { });
+        var tools = result.GetProperty("tools").EnumerateArray().ToDictionary(t => t.GetProperty("name").GetString()!);
+
+        var visibility = tools["spike_write_app"].GetProperty("_meta").GetProperty("ui").GetProperty("visibility").EnumerateArray().Select(v => v.GetString()).ToList();
+        Assert.Equal(["app"], visibility);
+
+        Assert.All(
+            tools.Where(t => t.Key != "spike_write_app"),
+            t => Assert.False(t.Value.TryGetProperty("_meta", out var meta) && meta.TryGetProperty("ui", out var ui) && ui.TryGetProperty("visibility", out _), t.Key));
+    }
+
+    [Theory]
+    [InlineData("spike_echo", SpikeMcpEndpoints.WidgetUri)]
+    [InlineData("spike_echo_3mb", SpikeMcpEndpoints.Widget3MbUri)]
+    [InlineData("spike_echo_6mb", SpikeMcpEndpoints.Widget6MbUri)]
+    public async Task ToolsList_EchoVariants_AreBoundToTheirWidgetResource(string tool, string expectedUri)
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "tools/list", new { });
+
+        var entry = result.GetProperty("tools").EnumerateArray().Single(t => t.GetProperty("name").GetString() == tool);
+        Assert.Equal(expectedUri, entry.GetProperty("_meta").GetProperty("ui").GetProperty("resourceUri").GetString());
+    }
+
+    [Fact]
+    public async Task ToolsList_AreaB_IsAllReadOnly()
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.AreaBRoute, "tools/list", new { });
+
+        var tools = result.GetProperty("tools").EnumerateArray().ToList();
         Assert.All(tools, t => Assert.True(t.GetProperty("annotations").GetProperty("readOnlyHint").GetBoolean()));
-        Assert.All(tools, t => Assert.False(string.IsNullOrWhiteSpace(t.GetProperty("title").GetString())));
+    }
+
+    // ---- T7 server instructions ---------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Initialize_LegalOperations_ReturnsTheT7Instructions()
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "initialize", InitializeParams);
+
+        Assert.Equal(
+            "Phase 0 test instruction T7: whenever you call spike_echo, begin the message argument with the text SPK-T7: .",
+            result.GetProperty("instructions").GetString());
+    }
+
+    [Fact]
+    public async Task Initialize_AreaB_ReturnsNoInstructions()
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.AreaBRoute, "initialize", InitializeParams);
+
+        Assert.False(result.TryGetProperty("instructions", out var instructions) && instructions.ValueKind == JsonValueKind.String && instructions.GetString()!.Length > 0);
+    }
+
+    // ---- write tools (T3, T4): accept and record nothing --------------------------------------------------------
+
+    [Theory]
+    [InlineData("spike_write")]
+    [InlineData("spike_write_app")]
+    public async Task WriteTools_ReturnAcceptedWouldWrite_AndWriteNothing(string tool)
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "tools/call", new { name = tool, arguments = new { title = "T-title-7f3a", note = "T-note-91c2" } });
+
+        var sc = result.GetProperty("structuredContent");
+        Assert.True(sc.GetProperty("accepted").GetBoolean());
+        Assert.Equal("T-title-7f3a", sc.GetProperty("wouldWrite").GetProperty("title").GetString());
+        Assert.Equal("T-note-91c2", sc.GetProperty("wouldWrite").GetProperty("note").GetString());
+        Assert.True(DateTimeOffset.TryParse(sc.GetProperty("utc").GetString(), out _));
+
+        // Nothing is written anywhere: no Dataverse call (the only data client the host has) and the arguments are not logged.
+        Assert.Equal(0, _dataverse.Calls);
+        Assert.DoesNotContain(_logs.Messages, m => m.Contains("T-title-7f3a", StringComparison.Ordinal) || m.Contains("T-note-91c2", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ToolsCall_Unannotated_EchoesLikeEcho()
+    {
+        var result = await RpcAsync(SpikeMcpEndpoints.LegalOperationsRoute, "tools/call", new { name = "spike_unannotated", arguments = new { message = "plain" } });
+
+        Assert.Equal("plain", result.GetProperty("structuredContent").GetProperty("echo").GetString());
     }
 
     [Fact]
@@ -246,6 +371,13 @@ public sealed class SpikeMcpProtocolTests : IAsyncLifetime
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------------
+
+    private static readonly object InitializeParams = new
+    {
+        protocolVersion = "2025-06-18",
+        capabilities = new { },
+        clientInfo = new { name = "spike-test", version = "0.0.1" },
+    };
 
     private static string MintToken() => new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
     {

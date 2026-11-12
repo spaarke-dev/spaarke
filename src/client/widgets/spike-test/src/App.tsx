@@ -12,6 +12,7 @@ export function App() {
   const [theme, setTheme] = useState<Theme>('light');
   const [toolResult, setToolResult] = useState<string>('(no tool result yet)');
   const [echo, setEcho] = useState<string>('(not called)');
+  const [writeResult, setWriteResult] = useState<string>('(not called)');
   const [initMs, setInitMs] = useState<number | null>(null);
   const routeRef = useRef<string>('legal-operations');
 
@@ -48,6 +49,20 @@ export function App() {
     }
   };
 
+  // T3: the widget calls a tool that is hidden from the model (_meta.ui.visibility = ["app"]).
+  const callWriteApp = async () => {
+    if (!app) return;
+    try {
+      const result = await app.callServerTool({
+        name: 'spike_write_app',
+        arguments: { title: 'Phase 0 T3', note: 'from the widget' },
+      });
+      setWriteResult(JSON.stringify(result.structuredContent ?? result.content));
+    } catch (e) {
+      setWriteResult(`error: ${(e as Error).message}`);
+    }
+  };
+
   return (
     <FluentProvider theme={theme === 'dark' ? webDarkTheme : webLightTheme}>
       <div style={{ padding: 12, background: tokens.colorNeutralBackground1, color: tokens.colorNeutralForeground1 }}>
@@ -68,6 +83,10 @@ export function App() {
           Call echo
         </Button>
         <Text block>echo result: {echo}</Text>
+        <Button appearance="secondary" onClick={callWriteApp} disabled={!isConnected}>
+          Call write (app-only)
+        </Button>
+        <Text block>write result: {writeResult}</Text>
       </div>
     </FluentProvider>
   );
