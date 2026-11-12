@@ -414,7 +414,8 @@ public sealed class PolicyVersionValidator
 
     /// <summary>
     /// The fail-closed billing gate (ebilling-r1 task 070, spec FR-24): the ONLY way to obtain a
-    /// <see cref="BillingRuleDefinition"/>. Mirrors <see cref="TryPrepareForEvaluation"/>: it runs the same save-time checks
+    /// <see cref="BillingRuleDefinition"/> for an evaluation. Its one sibling, <see cref="TryPrepareBillingRuleForRead"/>, is a display-only
+    /// entry over the same decision (no log, no meter; 084e), allowed only in the record read models (<c>BillingGateForReadCallerGuardTests</c>). Mirrors <see cref="TryPrepareForEvaluation"/>: it runs the same save-time checks
     /// as <see cref="ValidateForSave"/> for a billing type (length cap, the type's schema, the template against the type's
     /// fact-field set) and on refusal logs <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> (id, code and bounded
     /// reason only; the message names it a billing policy version), meters <see cref="OntologyWriterTelemetry.RecordBillingRuleInvalid"/>
