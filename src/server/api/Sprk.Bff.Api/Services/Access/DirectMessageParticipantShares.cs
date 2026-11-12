@@ -26,6 +26,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Access;
@@ -50,6 +51,15 @@ namespace Sprk.Bff.Api.Services.Access;
 /// flag read does not return, a user-flag fault, an undecidable Restricted value, a capped or faulted content-row read, a share
 /// read or grant fault, or an unconfirmed revoke: the outcome is incomplete. The share job carries an incomplete message to its next
 /// run; nothing is ever granted beyond the participants.</para>
+/// <para><b>Flagged participants (uac-r2 task 197b; owner option B, design §5).</b> A participant whose stored
+/// <c>sprk_isexternal</c> is <c>true</c> (or whose flag the user read did not return: never granted) is granted a row only when THE
+/// external visibility predicate (<see cref="AppOnlyExternalVisibility"/>, the 191h seam) allows it
+/// (<see cref="DecideForDirectParticipantsAsync"/>). A Hidden row (065 internal-only, a thread not Open, a Never table such as the
+/// email review log, a Restricted or tainted parent) is not granted and the flagged participant's existing share on it is revoked;
+/// an undecidable row is not granted (retried when a later read may answer it). A message positively owned by the Direct team is filed under no record by
+/// definition, so its closure reaches no root: for its own named participants only, "undecided only because no root" counts as
+/// allowed. Flagged participants keep Direct messaging; the NoRoot exemption is participant-scoped. Unflagged participants are
+/// unchanged and never ask the predicate.</para>
 /// </remarks>
 internal sealed class DirectMessageParticipantShares
 {
@@ -94,6 +104,7 @@ internal sealed class DirectMessageParticipantShares
     private readonly DirectMessageOwnerTeam? _directTeam;
     private readonly IConfiguration _configuration;
     private readonly RestrictedFilingShareBar _bar;
+    private readonly AppOnlyExternalVisibility? _visibility;
     private readonly ILogger _logger;
 
     // One Secure answer per team per instance: the share job builds one instance per run, the re-file step one per call.
@@ -107,6 +118,10 @@ internal sealed class DirectMessageParticipantShares
     /// <param name="probe">Which columns a table has (the Restricted bar's filing walk).</param>
     /// <param name="webApi">The user-flag read (the Restricted bar).</param>
     /// <param name="logger">The caller's logger.</param>
+    /// <param name="visibility">uac-r2 task 197b: THE external visibility predicate (the 191h seam) for flagged participants.
+    /// <c>null</c>: no flagged participant is granted (incomplete, retried) and none is revoked; unflagged participants are
+    /// unaffected. The share job passes it; the re-file step (task 197a's file) does not yet, so the job grants within its
+    /// two-minute run.</param>
     internal DirectMessageParticipantShares(
         IGenericEntityService dataverse,
         IDataverseRecordShareService? shares,
@@ -114,13 +129,15 @@ internal sealed class DirectMessageParticipantShares
         IConfiguration configuration,
         CoreAncestorResolver.EntityColumnProbe? probe,
         DataverseWebApiClient? webApi,
-        ILogger logger)
+        ILogger logger,
+        AppOnlyExternalVisibility? visibility = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _shares = shares;
         _directTeam = directTeam;
+        _visibility = visibility;
         _bar = new RestrictedFilingShareBar(dataverse, probe, shares, webApi, logger);
     }
 
@@ -150,9 +167,11 @@ internal sealed class DirectMessageParticipantShares
     /// <param name="Revoked">Confirmed revokes on the message: users.</param>
     /// <param name="Complete">Nothing was left undecided, unwritten or unconfirmed; <c>false</c> = retry the message.</param>
     /// <param name="Detail">Why, when not reconciled.</param>
+    /// <param name="HiddenRevoked">uac-r2 task 197b: confirmed revokes of a flagged participant's share on a row the predicate
+    /// hides: (table, row, user). <c>null</c>: none.</param>
     internal sealed record Outcome(
         Status Status, IReadOnlyList<(string Table, Guid RowId, Guid UserId)> Granted, IReadOnlyList<Guid> Revoked, bool Complete,
-        string? Detail = null)
+        string? Detail = null, IReadOnlyList<(string Table, Guid RowId, Guid UserId)>? HiddenRevoked = null)
     {
         internal static Outcome Settled(Status status, string? detail = null) => new(status, [], [], true, detail);
 
@@ -330,9 +349,13 @@ internal sealed class DirectMessageParticipantShares
         }
 
         // ── 6. Who may be granted: the Restricted bar; a disabled participant is not granted (and not retried) ──
-        var (eligibleList, complete) = await _bar.EligibleForGrantAsync(communicationId, participants.ToList(), excludeDisabled: true, ct)
+        var eligibility = await _bar.EligibilityForGrantAsync(communicationId, participants.ToList(), excludeDisabled: true, ct)
             .ConfigureAwait(false);
-        var eligible = eligibleList.ToHashSet();
+        var eligible = eligibility.Eligible.ToHashSet();
+        var complete = eligibility.Complete;
+
+        // uac-r2 197b: the participants the user read returned flagged external (eligible or not: a Hidden row revokes theirs too).
+        var flagged = participants.Where(eligibility.FlaggedExternal.Contains).ToHashSet();
 
         // ── 7. The rows: the message, then its content rows the Direct team owns ──
         var rows = new List<(string Table, string EntitySet, Guid Id)>
@@ -365,10 +388,30 @@ internal sealed class DirectMessageParticipantShares
             }
         }
 
+        // ── 7b. uac-r2 197b: THE predicate decides every row for the flagged participants (one call; unflagged never ask) ──
+        // Steps 2 and 5 positively recognized the Direct team as the owner and read a valid pair, and only participants are
+        // decided here: the three bounds of the participant-scoped NoRoot exemption.
+        IReadOnlyDictionary<(string Table, Guid Id), FlaggedAnswer>? answers = null;
+        if (flagged.Count > 0)
+        {
+            answers = await DecideForDirectParticipantsAsync(_visibility, communicationId, rows.Select(r => (r.Table, r.Id)).ToList(),
+                directTeamOwnedWithPair: true, _logger, ct).ConfigureAwait(false);
+        }
+
+        FlaggedAnswer AnswerFor(string table, Guid id) =>
+            answers is not null && answers.TryGetValue((table, id), out var answer) ? answer : FlaggedAnswer.Defer;
+
         var granted = new List<(string Table, Guid RowId, Guid UserId)>();
         var revoked = new List<Guid>();
+        var hiddenRevoked = new List<(string Table, Guid RowId, Guid UserId)>();
         foreach (var (table, entitySet, id) in rows)
         {
+            // A flagged participant is granted this row only on a Grant answer; a deferred one is retried, a withheld one settled.
+            var rowAnswer = flagged.Count > 0 ? AnswerFor(table, id) : FlaggedAnswer.Grant;
+            var rowEligible = eligible.Where(u => !flagged.Contains(u) || rowAnswer == FlaggedAnswer.Grant).ToList();
+            if (rowAnswer == FlaggedAnswer.Defer && eligible.Any(flagged.Contains))
+                complete = false;
+
             // Fix round 1 R5: the message may have been re-filed (re-owned) since step 1. Its owner is read again right before
             // its own grant, and again before its revokes; a changed or unreadable owner writes nothing more and is retried.
             if (table == CommunicationTable && !await OwnerUnchangedAsync(communicationId, owner, "grant", ct).ConfigureAwait(false))
@@ -392,16 +435,38 @@ internal sealed class DirectMessageParticipantShares
             // the message's pre-check above and the grant), or one whose owner cannot be read, has every grant ATTEMPTED here
             // revoked and is retried. Never anyone but an eligible participant; a share held before the call is never revoked.
             var (rowGranted, rowComplete) = await GrantContentRowAndConfirmAsync(_dataverse, _shares, table, id, owner,
-                eligible, access, communicationId, _logger, ct).ConfigureAwait(false);
+                rowEligible, access, communicationId, _logger, ct).ConfigureAwait(false);
             granted.AddRange(rowGranted.Select(user => (table, id, user)));
             complete &= rowComplete;
+
+            // uac-r2 197b: on a row the predicate HIDES, a flagged participant's existing share is revoked (whatever made it); the
+            // message's owner is read again first, as before every revoke here. Never on a deferred row (remove only on a
+            // positive answer, round 70), and never an unflagged user's.
+            if (rowAnswer == FlaggedAnswer.Hidden)
+            {
+                var held = DirectUsers(access).Where(flagged.Contains).ToList();
+                if (held.Count > 0 && !await OwnerUnchangedAsync(communicationId, owner, "hidden revoke", ct).ConfigureAwait(false))
+                {
+                    return new Outcome(Status.Unknown, granted, revoked, false, "the message's owner changed before a hidden-row revoke",
+                        hiddenRevoked);
+                }
+
+                foreach (var user in held)
+                {
+                    if (await RevokeAndConfirmAsync(table, entitySet, id, user, communicationId, ct).ConfigureAwait(false))
+                        hiddenRevoked.Add((table, id, user));
+                    else
+                        complete = false;
+                }
+            }
+
             if (table != CommunicationTable)
                 continue;
 
             // On the message: no direct user share for anyone who is not a participant (an unfile's anchor grantees).
             var others = DirectUsers(access).Where(u => !participants.Contains(u)).ToList();
             if (others.Count > 0 && !await OwnerUnchangedAsync(communicationId, owner, "revoke", ct).ConfigureAwait(false))
-                return new Outcome(Status.Unknown, granted, revoked, false, "the message's owner changed before its revokes");
+                return new Outcome(Status.Unknown, granted, revoked, false, "the message's owner changed before its revokes", hiddenRevoked);
 
             foreach (var other in others)
             {
@@ -428,14 +493,141 @@ internal sealed class DirectMessageParticipantShares
             }
         }
 
-        if (granted.Count > 0 || revoked.Count > 0 || !complete)
+        if (granted.Count > 0 || revoked.Count > 0 || hiddenRevoked.Count > 0 || !complete)
         {
-            _logger.LogInformation("{Prefix} {Table} {Id}: granted {Granted} share(s) to its participants and removed {Revoked} other " +
-                "user share(s); complete {Complete}.", LogPrefix, CommunicationTable, communicationId, granted.Count, revoked.Count,
-                complete);
+            _logger.LogInformation("{Prefix} {Table} {Id}: granted {Granted} share(s) to its participants, removed {Revoked} other " +
+                "user share(s) and {HiddenRevoked} flagged participant share(s) on hidden rows; complete {Complete}.", LogPrefix,
+                CommunicationTable, communicationId, granted.Count, revoked.Count, hiddenRevoked.Count, complete);
         }
 
-        return new Outcome(Status.Reconciled, granted, revoked, complete);
+        return new Outcome(Status.Reconciled, granted, revoked, complete, HiddenRevoked: hiddenRevoked);
+    }
+
+    // ── uac-r2 task 197b: flagged participants and THE external visibility predicate ─────────────────────────────────
+
+    /// <summary>What a flagged participant may have on one row of a Direct-team-owned message.</summary>
+    internal enum FlaggedAnswer
+    {
+        /// <summary>Not decided now, for a reason a later read may answer (no seam, a throw, a fault, a transient Undecided:
+        /// <see cref="ExternalRowVisibility.MayAnswerLater"/>): no grant, no revoke, retried.</summary>
+        Defer = 0,
+
+        /// <summary>Undecided for a structural reason other than the exemption (a chain too long, a table the registry does not
+        /// know, ...): no grant, no revoke, settled (a change to the row moves <c>modifiedon</c> and the job lists it again).</summary>
+        Withhold,
+
+        /// <summary>Allowed: Visible, or (bounded) undecided only because the closure reaches no root.</summary>
+        Grant,
+
+        /// <summary>A rule hides it (the row itself, or its message): no grant, and an existing share is revoked.</summary>
+        Hidden,
+    }
+
+    /// <summary>
+    /// uac-r2 task 197b (owner option B, coordinator bounds 2026-11-12): one call to THE predicate (<paramref name="visibility"/>,
+    /// the 191h seam) over the message and its content rows, answered for a FLAGGED participant.
+    /// <para><b>The participant-scoped NoRoot exemption</b> applies only when <paramref name="directTeamOwnedWithPair"/> is
+    /// <c>true</c>, which a caller passes only when ALL hold: (i) the message is positively owned by the Direct-message owner team
+    /// (<see cref="IsDirectOwnerTeamAsync"/> or the job's resolved team, compared by id); (ii) its stamped participant pair is valid
+    /// (<see cref="ParticipantsOf"/>); (iii) the answer is applied only to those two participants. Under them the message is filed
+    /// under no record by definition, so the predicate's <see cref="ExternalRowVisibility.UndecidedOnlyForNoRoot"/> counts as
+    /// allowed. Otherwise (a user-owned Direct message, another team's) NoRoot stays Undecided: no grant.</para>
+    /// <para><b>The message decides its content rows:</b> a content row is Hidden when it or its message is; allowed only when its
+    /// message is allowed and its own answer allows it; deferred otherwise. No separate content-row exemption.</para>
+    /// <para><b>Fail closed:</b> no seam, a throw, or a faulted decision defers every row a sound rule did not hide (a Hidden row
+    /// stays Hidden even in a faulted decision; a Visible one in a faulted decision is not trusted). Cancellation propagates.</para>
+    /// </summary>
+    internal static async Task<IReadOnlyDictionary<(string Table, Guid Id), FlaggedAnswer>> DecideForDirectParticipantsAsync(
+        AppOnlyExternalVisibility? visibility, Guid communicationId, IReadOnlyCollection<(string Table, Guid Id)> rows,
+        bool directTeamOwnedWithPair, ILogger logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        ArgumentNullException.ThrowIfNull(logger);
+        var message = (Table: CommunicationTable, Id: communicationId);
+        var asked = rows.Append(message).Where(r => r.Id != Guid.Empty).Distinct().ToList();
+        var answers = asked.ToDictionary(r => r, _ => FlaggedAnswer.Defer);
+        if (visibility is null)
+        {
+            logger.LogWarning("{Prefix} {Table} {Id}: no external visibility decision is available, so no participant flagged external " +
+                "is granted now; it is retried.", LogPrefix, CommunicationTable, communicationId);
+            return answers;
+        }
+
+        ExternalRowVisibility decision;
+        try
+        {
+            decision = await visibility(asked, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "{Prefix} {Table} {Id}: the external visibility decision failed, so no participant flagged external is " +
+                "granted or revoked now; it is retried.", LogPrefix, CommunicationTable, communicationId);
+            return answers;
+        }
+
+        FlaggedAnswer Own((string Table, Guid Id) row)
+        {
+            if (!decision.IsVisible(row.Table, row.Id) && !decision.IsUndecided(row.Table, row.Id))
+                return FlaggedAnswer.Hidden; // a sound rule hid it, faulted decision or not
+            if (decision.Faulted)
+                return FlaggedAnswer.Defer;
+            if (decision.IsVisible(row.Table, row.Id)
+                || (directTeamOwnedWithPair && decision.UndecidedOnlyForNoRoot(row.Table, row.Id)))
+            {
+                return FlaggedAnswer.Grant;
+            }
+
+            return decision.MayAnswerLater(row.Table, row.Id) ? FlaggedAnswer.Defer : FlaggedAnswer.Withhold;
+        }
+
+        var messageAnswer = Own(message);
+        foreach (var row in asked)
+        {
+            if (row == message)
+            {
+                answers[row] = messageAnswer;
+                continue;
+            }
+
+            var own = Own(row);
+            answers[row] = own == FlaggedAnswer.Hidden || messageAnswer == FlaggedAnswer.Hidden ? FlaggedAnswer.Hidden
+                : messageAnswer == FlaggedAnswer.Grant ? own
+                : own == FlaggedAnswer.Defer || messageAnswer == FlaggedAnswer.Defer ? FlaggedAnswer.Defer
+                : FlaggedAnswer.Withhold;
+        }
+
+        if (answers.Values.Any(a => a != FlaggedAnswer.Grant))
+        {
+            logger.LogInformation("{Prefix} {Table} {Id}: for its participants flagged external, {Hidden} row(s) are hidden, {Deferred} " +
+                "deferred and {Withheld} withheld ({Reasons}).", LogPrefix, CommunicationTable, communicationId,
+                answers.Values.Count(a => a == FlaggedAnswer.Hidden), answers.Values.Count(a => a == FlaggedAnswer.Defer),
+                answers.Values.Count(a => a == FlaggedAnswer.Withhold), decision.Summary(asked));
+        }
+
+        return answers;
+    }
+
+    /// <summary>uac-r2 task 197b: revokes one user's share on one row and confirms it by a strict read-back. Never throws
+    /// (cancellation aside); <c>false</c> (logged) when it failed or is not confirmed.</summary>
+    private async Task<bool> RevokeAndConfirmAsync(string table, string entitySet, Guid id, Guid user, Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            await _shares!.RevokeAccessAsync(entitySet, id, DataversePrincipalRef.User(user), ct).ConfigureAwait(false);
+            var after = await _shares.GetPrincipalAccessOrThrowAsync(table, id, ct).ConfigureAwait(false);
+            if (!DirectUsers(after).Contains(user))
+                return true;
+
+            _logger.LogError("{Prefix} Removing flagged participant {UserId}'s share on hidden {Table} {RowId} (of {Communication} {Id}) " +
+                "was NOT confirmed: it is still there; it is retried.", LogPrefix, user, table, id, CommunicationTable, communicationId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "{Prefix} Removing flagged participant {UserId}'s share on hidden {Table} {RowId} (of {Communication} {Id}) " +
+                "failed or could not be confirmed; it is retried.", LogPrefix, user, table, id, CommunicationTable, communicationId);
+        }
+
+        return false;
     }
 
     /// <summary>

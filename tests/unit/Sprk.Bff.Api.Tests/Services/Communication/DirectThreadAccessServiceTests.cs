@@ -587,7 +587,9 @@ public class DirectThreadAccessServiceTests
             .WithGateRecord(GateRecordId, CommunicationId, Caller)
             .Share(Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld.Communication, CommunicationId, Other);
 
-    private DirectThreadAccessService BuildSut(Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords) => new(
+    private DirectThreadAccessService BuildSut(
+        Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords, UserFlagDirectoryDouble? users = null,
+        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? scopes = null) => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
@@ -595,8 +597,9 @@ public class DirectThreadAccessServiceTests
         Mock.Of<ILogger<DirectThreadAccessService>>(),
         gateDecisionRecords,
         DirectMessageOwnerTeamDouble.Unconfigured(),
-        new UserFlagDirectoryDouble(),
-        HostColumnProbe());
+        users ?? new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser),
+        HostColumnProbe(),
+        scopes);
 
     /// <summary>
     /// uac-r2 task 198 R3: the core-ancestor resolver the host always injects (its column probe is the Restricted bar's filing
@@ -979,7 +982,8 @@ public class DirectThreadAccessServiceTests
     /// </summary>
     private DirectThreadAccessService DirectTeamSut(
         DirectMessageOwnerTeamDouble? directory = null, ILogger<DirectThreadAccessService>? logger = null,
-        UserFlagDirectoryDouble? users = null, Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gate = null) => new(
+        UserFlagDirectoryDouble? users = null, Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing? gate = null,
+        bool probe = false, Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? scopes = null) => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
@@ -987,7 +991,9 @@ public class DirectThreadAccessServiceTests
         logger ?? Mock.Of<ILogger<DirectThreadAccessService>>(),
         gate ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
         (directory ?? DirectDirectory()).Lookup(),
-        users ?? new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser));
+        users ?? new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser),
+        probe ? HostColumnProbe() : null,
+        scopes);
 
     /// <summary>Task 198 R2: the message's stamped sender and recipient (<c>null</c>: not stamped). Read when the message is.</summary>
     private Guid? _stampedSender = Caller;
@@ -1592,7 +1598,7 @@ public class DirectThreadAccessServiceTests
             config,
             Mock.Of<ILogger<DirectThreadAccessService>>(),
             new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
-            DirectMessageOwnerTeamDouble.Unconfigured());
+            DirectMessageOwnerTeamDouble.Unconfigured(), new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser));
 
         await sut.GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
@@ -1634,7 +1640,7 @@ public class DirectThreadAccessServiceTests
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
             Mock.Of<ILogger<DirectThreadAccessService>>(),
             new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
-            DirectMessageOwnerTeamDouble.Unconfigured());
+            DirectMessageOwnerTeamDouble.Unconfigured(), new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser));
 
         await sut.GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
@@ -1673,7 +1679,7 @@ public class DirectThreadAccessServiceTests
             }).Build(),
             Mock.Of<ILogger<DirectThreadAccessService>>(),
             new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
-            DirectMessageOwnerTeamDouble.Unconfigured());
+            DirectMessageOwnerTeamDouble.Unconfigured(), new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser));
 
         await sut.GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
@@ -1761,6 +1767,182 @@ public class DirectThreadAccessServiceTests
             Array.Empty<(Guid, string)>());
     }
 
+    // ── uac-r2 task 197b: participants flagged external go through THE external visibility predicate ──────────────────
+
+    /// <summary>The host's scope factory with the visibility seam registered (scoped, as ExternalAccessModule registers it).</summary>
+    private static Microsoft.Extensions.DependencyInjection.IServiceScopeFactory Scopes(
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility seam) =>
+        Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<
+            Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(
+            Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(
+                Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(
+                    new Microsoft.Extensions.DependencyInjection.ServiceCollection(), _ => seam)));
+
+    private static UserFlagDirectoryDouble OtherFlagged()
+    {
+        var users = new UserFlagDirectoryDouble().Internal(Caller, ThirdUser);
+        users.Flags[Other] = true;
+        return users;
+    }
+
+    /// <summary>Every row of the Direct-team message (no root: unfiled Direct), the review log hidden as the predicate marks it.</summary>
+    private static ExternalVisibilitySeamStub NoRootDirectMessage(ExternalVisibilitySeamStub? stub = null)
+    {
+        stub ??= new ExternalVisibilitySeamStub();
+        foreach (var (table, id) in new[]
+                 {
+                     ("sprk_communication", CommunicationId), ("sprk_communicationattachment", AttachmentRowId),
+                     ("sprk_communicationparticipant", ParticipantRowId), ("sprk_document", DocumentRowId),
+                 })
+        {
+            stub.Set(table, id, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NoRoot);
+        }
+
+        return stub.Set("sprk_emailreviewlog", ReviewLogRowId, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Hidden,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NeverExternal);
+    }
+
+    private void VerifyNeverGranted(Guid user) =>
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), User(user), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+    [Fact(DisplayName = "197b must-fire: a flagged participant on an ordinary Open Direct-team message (no root) is granted it and its content, never the review log")]
+    public async Task R197b_DirectTeam_AFlaggedParticipant_OnANoRootMessage_IsGranted_ButNotTheReviewLog()
+    {
+        DirectTeamMessageWorld();
+        var stub = NoRootDirectMessage();
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true, scopes: Scopes(stub.Seam)).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+        VerifyGrant("sprk_communicationattachments", AttachmentRowId, Other);
+        VerifyGrant("sprk_communicationparticipants", ParticipantRowId, Other);
+        VerifyGrant("sprk_documents", DocumentRowId, Other);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_emailreviewlogs", ReviewLogRowId, User(Other), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        VerifyGrant("sprk_emailreviewlogs", ReviewLogRowId, Caller);
+        stub.Calls.Should().ContainSingle("one predicate call decides every row");
+    }
+
+    [Theory(DisplayName = "197b must-not-fire: a flagged participant on a hidden Direct-team message (internal-only, thread not Open) is granted nothing; the other is granted")]
+    [InlineData("CommunicationHidden")]
+    [InlineData("ThreadNotOpen")]
+    public async Task R197b_DirectTeam_AHiddenMessage_GrantsTheFlaggedParticipantNothing(string reasonName)
+    {
+        var reason = Enum.Parse<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason>(reasonName);
+        DirectTeamMessageWorld();
+        var stub = NoRootDirectMessage().Set("sprk_communication", CommunicationId,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Hidden, reason);
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true, scopes: Scopes(stub.Seam)).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(Other);
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+        VerifyGrant("sprk_communicationattachments", AttachmentRowId, Caller);
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: with no visibility seam in the host, a flagged participant is granted nothing live; the other is granted")]
+    public async Task R197b_DirectTeam_NoSeam_GrantsTheFlaggedParticipantNothing()
+    {
+        DirectTeamMessageWorld();
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(Other);
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+    }
+
+    [Theory(DisplayName = "197b must-not-fire: the predicate faults, throws or cannot answer yet, a flagged participant is granted nothing live")]
+    [InlineData("faulted")]
+    [InlineData("throws")]
+    [InlineData("transient")]
+    public async Task R197b_DirectTeam_NoUsableAnswer_GrantsTheFlaggedParticipantNothing(string how)
+    {
+        DirectTeamMessageWorld();
+        var stub = new ExternalVisibilitySeamStub(); // every row Visible unless set
+        switch (how)
+        {
+            case "faulted": stub.Faulted = true; break;
+            case "throws": stub.Throws = new InvalidOperationException("seam"); break;
+            default:
+                stub.Set("sprk_communication", CommunicationId, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided,
+                    Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.ReadFailed);
+                break;
+        }
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true, scopes: Scopes(stub.Seam)).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(Other);
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: unflagged participants never ask the predicate and are granted as before")]
+    public async Task R197b_DirectTeam_UnflaggedParticipants_NeverAskThePredicate()
+    {
+        DirectTeamMessageWorld();
+        var stub = new ExternalVisibilitySeamStub { Throws = new InvalidOperationException("must not be asked") };
+
+        await DirectTeamSut(probe: true, scopes: Scopes(stub.Seam)).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        stub.Calls.Should().BeEmpty();
+        VerifyGrant("sprk_communications", CommunicationId, Other);
+        VerifyGrant("sprk_emailreviewlogs", ReviewLogRowId, Other);
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: a NoRoot message the Direct team does not own (user-owned) grants a flagged participant nothing")]
+    public async Task R197b_UserOwned_ANoRootMessage_GrantsTheFlaggedParticipantNothing()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var stub = new ExternalVisibilitySeamStub().Set("sprk_communication", CommunicationId,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NoRoot);
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, OtherFlagged(), Scopes(stub.Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(Other);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+        stub.Calls.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "197b: on a user-owned message a flagged (or unreadable-flag) participant is granted only when the predicate shows it Visible")]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task R197b_UserOwned_AFlaggedParticipant_IsGrantedOnlyWhenVisible(bool flagReadable, bool visible)
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var users = flagReadable ? OtherFlagged() : new UserFlagDirectoryDouble().Internal(Caller, ThirdUser); // Other not returned
+        var stub = new ExternalVisibilitySeamStub();
+        if (!visible)
+        {
+            stub.Set("sprk_communication", CommunicationId, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Hidden,
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.CommunicationHidden);
+        }
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, users, Scopes(stub.Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
+            visible ? Times.Once() : Times.Never()); // an unreadable flag is treated as flagged: only Visible grants
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     /// <summary>
     /// A grant SUT over the REAL derivation: <paramref name="anchorEntity"/> discovers <c>ownerid</c> (user/team),
     /// <c>owningteam</c> and <c>sprk_assignedattorney</c>; every team expands to <paramref name="teamMembers"/>.
@@ -1801,7 +1983,7 @@ public class DirectThreadAccessServiceTests
             new Lazy<IThreadMembershipDerivationService>(() => derivation),
             new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             Mock.Of<ILogger<DirectThreadAccessService>>(), new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
-            DirectMessageOwnerTeamDouble.Unconfigured(), new UserFlagDirectoryDouble(), HostColumnProbe());
+            DirectMessageOwnerTeamDouble.Unconfigured(), new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser), HostColumnProbe());
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────

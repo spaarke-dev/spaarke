@@ -142,9 +142,12 @@ public class DirectMessageParticipantSharesTests
     // ── The scheduled job ────────────────────────────────────────────────────────────────────────────────────────────
 
     private SecureChildShareReconciliationJob Job(
-        GateDecisionRecordSharing? gate = null, Microsoft.Extensions.Logging.ILogger<SecureChildShareReconciliationJob>? logger = null)
+        GateDecisionRecordSharing? gate = null, Microsoft.Extensions.Logging.ILogger<SecureChildShareReconciliationJob>? logger = null,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility? visibility = null)
     {
         var services = new ServiceCollection();
+        if (visibility is not null)
+            services.AddScoped(_ => visibility); // 197b: the host registers the seam scoped (ExternalAccessModule)
         if (gate is not null)
             services.AddSingleton(gate); // 198 pass 2 N2: the host registers it (SignalsModule)
         var provider = services
@@ -792,9 +795,9 @@ public class DirectMessageParticipantSharesTests
     // owner or sharees. An invalid pair grants and revokes nothing and is settled; a read fault is retried.
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    private DirectMessageParticipantShares Reconciler198() => new(
+    private DirectMessageParticipantShares Reconciler198(Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility? visibility = null) => new(
         SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares, Lookup(), _configuration,
-        SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance);
+        SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance, visibility);
 
     [Fact(DisplayName = "198 R2 must-fire: the job grants the stamped pair and revokes a third user's share on the message")]
     public async Task R2_Job_GrantsTheStampedPair_AndRevokesAThirdUsersShare()
@@ -1326,5 +1329,235 @@ public class DirectMessageParticipantSharesTests
 
         Grants().Should().Be(0, "steady state: nothing is granted, and the mirror is not run");
         Holds("sprk_decisionrecord", record, Other).Should().BeFalse("the mirror runs only after a pass that granted");
+    }
+
+    // ── uac-r2 task 197b: participants flagged external go through THE external visibility predicate ──────────────────
+    // Flagged participants keep Direct messaging; the NoRoot exemption is participant-scoped (Direct-team owner, a valid pair,
+    // the grantee one of the pair). Hidden wins and revokes; a transient Undecided grants nothing and is retried.
+
+    private const Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict VUndecided =
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided;
+
+    private const Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict VHidden =
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Hidden;
+
+    /// <summary>The predicate's answer for an ordinary unfiled Direct message: every row no root, the review log never external.</summary>
+    private static ExternalVisibilitySeamStub NoRoot(IReadOnlyList<(string Table, Guid Id)> rows)
+    {
+        var stub = new ExternalVisibilitySeamStub();
+        foreach (var (table, id) in rows)
+        {
+            if (table == "sprk_emailreviewlog")
+                stub.Set(table, id, VHidden, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NeverExternal);
+            else
+                stub.Set(table, id, VUndecided, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NoRoot);
+        }
+
+        return stub;
+    }
+
+    [Fact(DisplayName = "197b must-fire: a flagged participant on an ordinary Open Direct message is shared it and its content; never the review log")]
+    public async Task R197b_AFlaggedParticipant_OnAnOrdinaryDirectMessage_IsShared_ButNeverTheReviewLog()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var stub = NoRoot(rows);
+
+        var outcome = await Reconciler198(stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue(outcome.Detail);
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Other).Should().Be(table != "sprk_emailreviewlog", $"{table}: the flagged participant follows the predicate");
+            Holds(table, id, Caller).Should().BeTrue($"the internal participant reads {table}");
+        }
+
+        stub.Calls.Should().ContainSingle("one predicate call decides every row");
+    }
+
+    [Fact(DisplayName = "197b must-fire: the scheduled job hands the host's seam to the reconcile, so a flagged participant is shared")]
+    public async Task R197b_Job_UsesTheHostsSeam()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+
+        var run = await Job(visibility: NoRoot(rows).Seam).ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Holds("sprk_communication", message, Other).Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "197b must-not-fire: a hidden Direct message (internal-only, thread not Open) shares the flagged participant nothing and revokes what it holds")]
+    [InlineData("CommunicationHidden")]
+    [InlineData("ThreadNotOpen")]
+    public async Task R197b_AHiddenMessage_SharesTheFlaggedParticipantNothing_AndRevokesItsShares(string reasonName)
+    {
+        var reason = Enum.Parse<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason>(reasonName);
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        foreach (var (table, id) in rows)
+            _shares.Seed(table, id, DataversePrincipalRef.User(Other), Read);
+        var stub = NoRoot(rows).Set("sprk_communication", message, VHidden, reason);
+
+        var outcome = await Reconciler198(stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue(outcome.Detail);
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Other).Should().BeFalse($"{table} follows its hidden message: the flagged participant's share is revoked");
+            Holds(table, id, Caller).Should().BeTrue($"the internal participant keeps {table}");
+        }
+
+        outcome.HiddenRevoked.Should().HaveCount(rows.Count).And.OnlyContain(r => r.UserId == Other);
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: the review log a flagged participant already holds is revoked (never external)")]
+    public async Task R197b_TheReviewLog_IsRevokedFromAFlaggedParticipant()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var log = rows.Single(r => r.Table == "sprk_emailreviewlog");
+        _shares.Seed(log.Table, log.Id, DataversePrincipalRef.User(Other), Read);
+
+        var outcome = await Reconciler198(NoRoot(rows).Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        Holds(log.Table, log.Id, Other).Should().BeFalse();
+        Holds(log.Table, log.Id, Caller).Should().BeTrue();
+        outcome.HiddenRevoked.Should().ContainSingle().Which.Should().Be((log.Table, log.Id, Other));
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: a flagged NON-participant is never shared, even on a row the predicate shows")]
+    public async Task R197b_AFlaggedNonParticipant_IsNeverShared()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Outsider] = true;
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+        var stub = new ExternalVisibilitySeamStub(); // every row Visible
+
+        await Reconciler198(stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        foreach (var (table, id) in rows)
+            Holds(table, id, Outsider).Should().BeFalse($"{table}: the Outsider is not one of the message's pair");
+        stub.Calls.Should().BeEmpty("no participant is flagged, so the predicate is not asked");
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: a transient undecided answer grants the flagged participant nothing and is retried; the next run grants")]
+    public async Task R197b_ATransientUndecided_GrantsNothing_IsRetried_ThenGrants()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var transient = NoRoot(rows).Set("sprk_communication", message, VUndecided,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.ReadFailed);
+
+        var first = await Reconciler198(transient.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        first.Complete.Should().BeFalse("a transient answer is retried");
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeFalse($"{table} follows its undecided message");
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+
+        var second = await Reconciler198(NoRoot(rows).Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        second.Complete.Should().BeTrue(second.Detail);
+        Holds("sprk_communication", message, Other).Should().BeTrue("the retry lands once the predicate answers");
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: a structural undecided answer grants the flagged participant nothing and is settled, not retried")]
+    public async Task R197b_AStructuralUndecided_GrantsNothing_AndIsSettled()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var stub = NoRoot(rows).Set("sprk_communication", message, VUndecided,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.ChainTooLong);
+
+        var outcome = await Reconciler198(stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue("a structural answer will not change on a retry");
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeFalse($"{table} follows its undecided message");
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: a content row the predicate shows is NOT granted while its message is withheld")]
+    public async Task R197b_AContentRow_FollowsItsMessage()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var stub = new ExternalVisibilitySeamStub().Set("sprk_communication", message, VUndecided,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.UnknownTable); // content rows Visible
+
+        await Reconciler198(stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeFalse($"{table} has no exemption of its own");
+    }
+
+    [Theory(DisplayName = "197b must-not-fire: no seam, a throwing seam or a faulted decision grants the flagged participant nothing and is retried")]
+    [InlineData("none")]
+    [InlineData("throws")]
+    [InlineData("faulted")]
+    public async Task R197b_NoUsableDecision_GrantsTheFlaggedParticipantNothing_AndIsRetried(string how)
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var content = rows.Where(r => r.Table != "sprk_communication").ToList();
+        foreach (var (table, id) in content)
+            _shares.Seed(table, id, DataversePrincipalRef.User(Other), Read);
+        var stub = new ExternalVisibilitySeamStub(); // Visible rows: a faulted Visible is still not trusted
+        if (how == "throws")
+            stub.Throws = new InvalidOperationException("seam");
+        if (how == "faulted")
+            stub.Faulted = true;
+
+        var outcome = await Reconciler198(how == "none" ? null : stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeFalse("no usable answer is retried");
+        Holds("sprk_communication", message, Other).Should().BeFalse("nothing is granted without a decision");
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+        (outcome.HiddenRevoked ?? []).Should().BeEmpty("nothing is removed on an unknown answer");
+        foreach (var (table, id) in content)
+            Holds(table, id, Other).Should().BeTrue($"{table}: a held share is kept while the answer is unknown");
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: the flag read faults, nothing is granted (the predicate does not stand in for it)")]
+    public async Task R197b_AFlagReadFault_GrantsNothing()
+    {
+        var (message, _) = DirectMessage();
+        _users.Faults = true;
+
+        var outcome = await Reconciler198(new ExternalVisibilitySeamStub().Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeFalse();
+        Grants().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: unflagged participants never ask the predicate and are shared as before")]
+    public async Task R197b_UnflaggedParticipants_NeverAskThePredicate()
+    {
+        var (message, rows) = DirectMessage();
+        var stub = new ExternalVisibilitySeamStub { Throws = new InvalidOperationException("must not be asked") };
+
+        var outcome = await Reconciler198(stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue(outcome.Detail);
+        stub.Calls.Should().BeEmpty();
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeTrue($"the unflagged participant reads {table}");
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: without the Direct-team bound, a NoRoot answer is withheld (the exemption is the Direct team's alone)")]
+    public async Task R197b_TheNoRootExemption_NeedsTheDirectTeamBound()
+    {
+        var message = Guid.NewGuid();
+        var rows = new List<(string Table, Guid Id)> { ("sprk_communication", message) };
+        var seam = NoRoot(rows).Seam;
+
+        var bounded = await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
+            seam, message, rows, directTeamOwnedWithPair: true, NullLogger.Instance, CancellationToken.None);
+        var unbounded = await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
+            seam, message, rows, directTeamOwnedWithPair: false, NullLogger.Instance, CancellationToken.None);
+
+        bounded[("sprk_communication", message)].Should().Be(DirectMessageParticipantShares.FlaggedAnswer.Grant);
+        unbounded[("sprk_communication", message)].Should().Be(DirectMessageParticipantShares.FlaggedAnswer.Withhold);
     }
 }
