@@ -5,16 +5,13 @@
 
 ---
 
-**Checkpoint 2026-11-12** (context 85%). Branch `work/reuse-governance-tightening-r1`, all committed and pushed (`eaf2aada0f`). Working tree clean. No PR open.
+**Checkpoint 2026-11-12** (after task 020). Branch `work/reuse-governance-tightening-r1`, all committed and pushed. No PR open.
 
-**Done (8/19; board synced 8)**: 001, 002, 041, 042 (2026-11-11); 010, 011, 012, 021 (2026-11-12). 041/042 merged to master (#2705 `530b9b9185`, #2706 `9456083c78`); master merged into the branch (`29bcda5fe3`).
-- Item 1 (capability index) and item 2 (reuse scan in design-to-spec Step 3/4/5, pipeline Step 2 fallback, task-create 3.5.6 citation) are complete on the branch.
-- Task 010 dry-run: GO (owner 2026-11-12); both cases caught at `low`, ~36k tokens per scan. `notes/reuse-scan-dry-run.md`.
-- Task 021: `adversarial-reviewer.md` has the capability-duplication (F2/K) and requirements-trace (F4/K) checks; its class list now matches task-execute; task-execute 9.5 rule 3 passes the POML/spec path. Verification run on 042 produced a full trace and found an F2 in 042 (stale CS0618 comments), fixed on the branch (commit after 021).
+**Done (9/19; board synced 9)**: 001, 002, 041, 042 (2026-11-11); 010, 011, 012, 021, 020 (2026-11-12). 041/042 merged to master (#2705, #2706); master merged into the branch (`29bcda5fe3`).
+- Items 1 (capability index), 2 (reuse scan: design-to-spec, pipeline fallback, task-create citation) and 3 (jscpd sweep + adversarial-reviewer checks) are complete on the branch.
+- Task 020: weekly `duplication-sweep` job in `nightly-health.yml` (Mon 07:00 UTC cron, dispatch input `duplication_sweep_only`), `.jscpd.json`. Verified by dispatch runs 43289750101 and 43293619731: 38 s, artifact uploaded, 17 new / 192 old cross-area clusters, status failing in dry-run. The first master run after merge will open the `weekly/duplication-sweep` alert for those 17 (intended).
 
-**Active task**: none. **Next**: **020** weekly jscpd duplication sweep in `nightly-health.yml` (STANDARD, sonnet/high). Check Dependabot PR #909 on `nightly-health.yml` first. Verify by `workflow_dispatch` on the branch (alerts dry-run off master). Seed input: the 7 private nav-prop discovery copies listed in `notes/reuse-scan-dry-run.md`.
-After 020: items 1–3 go out as ONE PR (NFR-05), owner approves before opening. Then 030 (package decision records, owner gate; merge master first, check PR #935), 040 (Learn MCP; owner agreed to do the per-machine approval when ready), 043, 080, 090.
-
+**Active task**: none. **Next**: propose the items 1–3 PR (NFR-05) — **owner approves before it is opened**. Then 030 (package decision records, owner gate; merge master first, check PR #935), 040 (Learn MCP; owner does the per-machine approval), 043, 080, 090.
 **Open, reported to owner**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
 - ISS-003 #2713 — fixed on branch (`65224ce73f`, power-page-deploy archived); closes when the branch reaches master.

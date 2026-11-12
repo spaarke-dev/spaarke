@@ -4,7 +4,7 @@
     <title>Weekly jscpd duplication sweep in nightly-health</title>
     <phase>3 Sweep and reviewer checks</phase>
     <gate>blocked until 001 and 041</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new config file and modifies a CI workflow (phase 3, integration)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -32,8 +32,8 @@
       <file role="canonical-reference">.claude/patterns/CAPABILITY-INDEX.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Index rows named in the alert summary</dependency>
-      <dependency task="041" status="pending">Sequences edits to nightly-health.yml and ci-cd-workflow.md</dependency>
+      <dependency task="001" status="done">Index rows named in the alert summary</dependency>
+      <dependency task="041" status="done">Sequences edits to nightly-health.yml and ci-cd-workflow.md</dependency>
     </dependencies>
   </context>
 
@@ -100,6 +100,7 @@
 
   <notes>OQ-8: tune the floor only after four weekly reports.</notes>
 
+  <completion-notes>Completed 2026-11-12. .jscpd.json (src/, typescript/tsx/csharp, 50/5 defaults, exclusions incl. .claude/worktrees/agent-*/**, absolute paths, json+markdown, exitCode 0). nightly-health.yml: cron '0 7 * * 1' plus dispatch input duplication_sweep_only; all 8 daily root jobs gated off it, and flake-hunt/coverage-observation/report/alerts as always() AND the gate; new duplication-sweep job (fetch-depth 0, filter blob:none; npx jscpd@5.4.2 continue-on-error; bash decide step that always exits 0; upload-artifact jscpd-report; quality-alert weekly/duplication-sweep with the existing dry-run expression). Area = first 4 segments under src/client and src/server, else 3. Guards: no readable report = failing; un-stripped absolute paths = failing (a silent pass otherwise). ci-cd-workflow.md: diagram, two schedule tables, job row, dispatch input, alert row. .gitignore: jscpd-report/. PR #909 still open, not merged: no conflict step needed. Verification: dispatch run 43289750101 success in 38 s, every daily job skipped, artifact jscpd-report (705 KB), jscpd parsed C# (4030 clones in 4399 files, 3 formats), decide log: 524 pairs at the floor, 209 cross-area, 17 new (alert), 192 old (logged, not alerted: criterion 2), status failing, alert dry-run (no issue created). The 17 include the seeded nav-prop copy (ResolverWriteHandler.ts with ConnectionsWriteHandler.ts). Found in that run and fixed: the CAPABILITY-INDEX row matcher used a plain path prefix and tagged Api/PermissionsEndpoints.cs as row 5; now exact file, same folder, then folder cell (16dd4d487d), checked locally on 8 paths and on dispatch run 43293619731 (success). Local negative path: with no jq the decide step reported failing and exited 0. Known limit (K2): the row hint is path-based, so concept duplicates outside a canonical file read "no row"; the first master run will raise the alert for the 17 clusters (intended: they changed this week). No baseline file, no package.json change. Not a .claude/ change, so no CHANGELOG entry. actionlint not installed; YAML parsed with PyYAML and GitHub accepted both dispatches. rework: 1 (row matcher) task 020</completion-notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
