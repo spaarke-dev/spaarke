@@ -51,7 +51,7 @@ Run as the **licensed non-admin test user** (`demo@…`) unless a step says "own
 | T13 setup | Admin center › Copilot › Connectors: add a second federated connector named **"Spaarke MCP B"** for `https://spaarke-bff-dev.azurewebsites.net/mcp/spike-area-b`, same OAuth registration if the portal accepts it | Whether the same registration was accepted for the second URL |
 | T13 | As the test user, new chat, select both sources; "Use the B echo tool with 'route b'" | In **Sources**: how both display names show. Which tools each lists (A: `spike_echo`, `spike_whoami`; B: `spike_echo_b` only) |
 
-## Batch C — after the new spike SHA is deployed (owner per-SHA go in uac-r2)
+## Batch C — runnable now (spike `d7369fecf1` deployed 2026-11-12 ~20:30Z in dev BFF `4e64670ea0`)
 
 | # | Where | Do | Record |
 |---|---|---|---|

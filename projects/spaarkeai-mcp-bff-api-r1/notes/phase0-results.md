@@ -2,7 +2,7 @@
 
 > Test list and gates: `design.md` §13. Every result comes from a live run in the dev tenant against the deployed spike. Evidence names a screenshot, an App Insights record or a transcript excerpt; no tokens, claim values or privileged record text (ADR-015).
 >
-> **Spike deployed:** spike tip `755987b385` on `spike/spaarkeai-mcp-phase0`, inside dev BFF `6dbe69b9e2` (uac-r2 local merge of master `a654da59c4` + spike). Route `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations`; second route `/mcp/spike-area-b` (T13).
+> **Spike deployed:** results before 2026-11-12 20:30Z ran on spike `755987b385` (dev BFF `6dbe69b9e2`). From 2026-11-12 ~20:30Z the dev BFF is `4e64670ea0` (uac-r2 local merge of master `350ca3da66` + spike `755987b385` + spike `d7369fecf1`, owner per-SHA go); verified 20:34Z: `tools/list` has all seven legal-operations tools and `initialize` returns the T7 instructions. Route `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations`; second route `/mcp/spike-area-b` (T13).
 > **Connector:** federated connector "Spaarke MCP" (dev tenant), OAuth registration and client in `phase0-registration-facts.md`.
 > **Test user (consent and approval tests):** `demo@…` (licensed non-admin; Microsoft 365 Copilot licence; no Entra roles; verified 2026-11-12, `phase0-registration-facts.md` §d). The owner's admin account is not used for user-behaviour results.
 > **Owner review:** _pending_ (step 7).
