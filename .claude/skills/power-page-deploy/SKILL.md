@@ -28,7 +28,7 @@ Build and deploy a Vite + React 18 SPA to Power Pages as a **Code Site**. This s
 | Deployable output | `dist/assets/app.js` (~1 MB IIFE) + `dist/index.html` (entry HTML) |
 | Deploy script | `scripts/Deploy-PowerPages.ps1` |
 | Deploy command | `pac pages upload-code-site` |
-| Site root (new format) | `src/client/external-spa/.site-download/spaarke-external-workspace/` |
+| Site root (new format) | `external-spa/.site-download/spaarke-external-workspace/` under `src/client/` (created by `pac pages download-code-site`; not committed) |
 | Portal name | `Spaarke External Workspace` |
 | Portal URL | `https://sprk-external-workspace.powerappsportals.com` |
 | Website ID | `a79315b5-d91e-4e27-b016-439ad439babe` |
@@ -234,7 +234,7 @@ pac pages upload-code-site `
     --siteName "Spaarke External Workspace"
 ```
 
-The `.site-download/spaarke-external-workspace/` folder is committed to the repo. Future uploads always use this folder as `--rootPath`.
+The `.site-download/spaarke-external-workspace/` folder is **not** committed to the repo (it has never been in git history), so a fresh checkout does not have it: run the download above once per machine. Future uploads always use this folder as `--rootPath`.
 
 **If you need to re-run the download** (e.g., portal metadata has changed significantly):
 ```powershell
@@ -290,7 +290,7 @@ npm run dev   # http://localhost:3000 with VITE_DEV_MOCK=true
 |------|---------|
 | `scripts/Deploy-PowerPages.ps1` | **Main deploy script** — build + upload to Code Site |
 | `src/client/external-spa/vite.config.ts` | Vite IIFE build config, dev proxy setup |
-| `src/client/external-spa/.site-download/spaarke-external-workspace/` | New-format Code Site workspace (PAC CLI 2.4.x rootPath) |
+| `external-spa/.site-download/spaarke-external-workspace/` (under `src/client/`) | New-format Code Site workspace (PAC CLI 2.4.x rootPath); local only, created by the download |
 | `src/client/external-spa/powerpages.config.json` | Legacy site config (kept for reference, not used by upload) |
 | `src/client/external-spa/.env.local` | Local dev overrides (`VITE_DEV_MOCK=true`) |
 | `src/client/external-spa/.env.production.local` | Production build overrides (`VITE_DEV_MOCK=false` + credentials) |

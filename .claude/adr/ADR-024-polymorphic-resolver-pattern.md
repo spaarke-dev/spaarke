@@ -153,7 +153,7 @@ ADR-024 exception: the tension dissolves once "related-to" is understood as inte
 
 | Component | Purpose | Location |
 |-----------|---------|----------|
-| RegardingLink PCF | Grid customizer for clickable regarding links | `src/client/pcf/RegardingLink/` |
+| RegardingLink PCF | Deleted 2026-03-15 (`ded4e037c2`, removal of 10 deprecated PCF controls). Was a grid customizer for clickable regarding links. | — |
 | UpdateRelatedButton PCF | Parent form button to push field mappings | `src/client/pcf/UpdateRelatedButton/` |
 
 ---
