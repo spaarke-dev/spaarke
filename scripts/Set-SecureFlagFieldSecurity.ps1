@@ -44,7 +44,8 @@
           Administrator profile gets full access automatically and cannot be narrowed — owner decision F4 accepts it;
           every holder of the System Administrator role is LISTED (informational).
       (d) publish the four tables.
-    sprk_accesspermission is NOT touched (owner-accepted: it stays editable by Write-holders).
+    sprk_accesspermission is NOT touched here: it stays editable by INTERNAL users and is locked against flagged
+    external users by scripts/Set-AccessMarkerFieldSecurity.ps1 (engine target AccessMarkerColumns, task 191f).
 
     LIVE ORDER (task 150 step 6): Repair-SecureFlagNulls.ps1 -Apply → deploy the BFF → deploy the client (confirm no
     cached old bundle) → Set-RecordCreatorPersonSchema.ps1 -Apply (profiles + members) → THIS SCRIPT -Apply → -Verify
