@@ -12,14 +12,15 @@
       docs/assessments/bff-warning-suppression-analysis-2026-06-01.md
 
       WarningsNotAsErrors: downgrades these specific codes from build-blocking errors
-      back to non-blocking warnings (still visible in build output). Counts refreshed
-      2026-08-15 (quality-r3-followups) against an actual Release rebuild — the prior
-      comment materially understated them.
-        CS0618: 14x obsolete DemoProvisioningOptions.Environments/DefaultEnvironment
-                callers — blocked on the DemoExpirationService multi-env refactor.
-                Obsolete-marker says "Will be removed after DemoExpirationService
-                migration." Suppression honors the planned-removal contract. (Was
-                mislabeled "7x"; the refactor is a tracked follow-on remediation project.)
+      back to non-blocking warnings (still visible in build output). The list is
+      currently EMPTY.
+
+      CS0618 (use of an [Obsolete] member) is a build ERROR again — re-armed 2026-11-11
+      (reuse-governance-tightening-r1 task 042). Marking a member [Obsolete] therefore
+      fails the build at every existing caller: the change that adds the marker must
+      migrate those callers, or give the attribute a DiagnosticId (e.g. SPRK001) and
+      suppress only that ID, at the call site or here, with a one-line reason. Never
+      re-add CS0618 itself to WarningsNotAsErrors / NoWarn or as a file-wide pragma.
       REMOVED from the allowlist 2026-08-15 (quality-r3-followups):
         CS0109 — the single test site (UploadIntegrationTests.cs, unnecessary `new`) was
                  FIXED; 0 instances remain. Re-arms the gate.
@@ -38,6 +39,5 @@
       now pin System.Security.Cryptography.Xml 10.0.11 (non-vulnerable). Verified: clean restore reports
       ZERO NU1903 with the suppression gone. Graph 5->6 / Kiota 1->2 is the separate task 033.
     -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618</WarningsNotAsErrors>
   </PropertyGroup>
 </Project>
