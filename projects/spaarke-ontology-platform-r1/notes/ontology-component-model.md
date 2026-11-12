@@ -26,7 +26,7 @@ Four clauses, each load-bearing. Drop **consolidate** → a point solution. Drop
 | The external SPA | **Spaarke External Access** |
 | Source-system integration (SKU) | **Spaarke Connect** (component name: **Connection Engine**; code namespace `Sprk.Connect.*`) |
 | Microsoft 365 Copilot / Cowork offering (family) `[2026-11-06]` | **Spaarke for Microsoft 365 Copilot** (docs and marketing; check Microsoft trademark rules before any public listing) |
-| The Copilot connector for core legal operations `[2026-11-06]` | **Spaarke**; later product areas are **Spaarke {Area}** (e.g. **Spaarke Patents**, **Spaarke Trademarks**). One connector per product area, not per function. In admin text say **"Copilot connector"**: "connector" alone keeps its Spaarke meaning (Connection Engine, inbound) |
+| The Copilot connector for core legal operations `[2026-11-06; renamed 2026-11-10]` | **Spaarke MCP** (owner, 2026-11-10, recorded in `projects/spaarkeai-mcp-bff-api-r1/notes/phase0-registration-facts.md`; supersedes **Spaarke**). Copilot shows it under that name in Sources and prefixes its tools `SpaarkeMCP_`. Unchanged: plugin display name **Spaarke**, slug `spaarke`, agent name **Spaarke AI**. Later product areas were named **Spaarke {Area}** (e.g. **Spaarke Patents**, **Spaarke Trademarks**) before the rename; whether they become **Spaarke {Area} MCP** is not decided yet. One connector per product area, not per function. In admin text say **"Copilot connector"**: "connector" alone keeps its Spaarke meaning (Connection Engine, inbound) |
 | The declarative agent (fallback only) | **Spaarke AI** (unchanged) |
 | Retired | ~~Spaarke Copilot~~ (overlaps the family name) |
 
@@ -577,7 +577,7 @@ The 13-rung ladder with an explicit deterministic/AI partition (`RungKind.cs`), 
 | **Spaarke External Access** (SPA) | requesters, Legal Front Door | Request origination |
 | **Office add-ins** | Outlook / Word | capture, save, share |
 | **MCP server** | external agents + Foundry IQ as a knowledge source | object read, link traversal, fact query, gated action invocation |
-| **Spaarke for Microsoft 365 Copilot** (the **Spaarke** Copilot connector, MCP tools in the BFF; spaarkeai-mcp-bff-api-r1) `[2026-11-06]` | M365 Copilot / Cowork users | the Decide lane and the Decision wizard over the same services as the Console; billing Work Items appear as a link out to Invoice Review (D-207) |
+| **Spaarke for Microsoft 365 Copilot** (the **Spaarke MCP** Copilot connector, renamed from **Spaarke** 2026-11-10; MCP tools in the BFF; spaarkeai-mcp-bff-api-r1) `[2026-11-06]` | M365 Copilot / Cowork users | the Decide lane and the Decision wizard over the same services as the Console; billing Work Items appear as a link out to Invoice Review (D-207) |
 | **Copilot declarative agent** (**Spaarke AI**, fallback) | M365 | existing |
 
 **Two scope reductions that fell out:** policy authoring and connection admin are **model-driven app forms**, not custom surfaces. Dataverse gives the form, version list, row security and audit for free.
