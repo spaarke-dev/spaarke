@@ -4,7 +4,7 @@
     <title>Submission on the file store: uploads stage Stored Files, extraction reads the blob, review gets file id, 028 retires</title>
     <phase>3 Rules (WP3) — Procedures and files (EB-D-148), wave W3-C</phase>
     <gate>090 merged; 050a merged (same files: InvoiceSubmissionService, InvoiceSubmissionPersister, the job handler); the Procedure Library half of step 6 also needs its three readers gone (escalation below); no live writes</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the invoice write path (049's transaction and after-step order), the submission intake of both channels, extraction input and start-up configuration.</rigor-reason>
     <model-tier>opus</model-tier>

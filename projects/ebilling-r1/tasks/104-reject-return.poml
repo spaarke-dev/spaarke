@@ -4,7 +4,7 @@
     <title>Reject and Return to Firm; resubmission linkage</title>
     <phase>4 Review and approval (WP4) — wave W4-3</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Terminal invoice decisions (Rejected is final) with authorization and Decision Record obligations, plus a change to the accepted-submission write path (supersedes link).</rigor-reason>
     <model-tier>sonnet</model-tier>

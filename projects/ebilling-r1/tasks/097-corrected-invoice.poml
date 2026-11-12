@@ -4,7 +4,7 @@
     <title>Corrected invoice: the old invoice closes Superseded in step 4 (guarded) and its open Signals close Superseded</title>
     <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-F</phase>
     <gate>blocked until 094, 104 and 088 are done</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the invoice write path and lifecycle (a new close inside the commit transaction), an authorization guard across firms, and append-only Signal history (tags bff-api, auth).</rigor-reason>
     <model-tier>opus</model-tier>

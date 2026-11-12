@@ -4,7 +4,7 @@
     <title>Mark Paid route and AP export file download</title>
     <phase>6 Export and index (WP6) — wave W6-2 (split from 151, EB-D-181)</phase>
     <gate>startable after 150</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds two routes to the BFF behind the Finance route gate; one moves money-relevant state (Paid is final) and one serves payment files. Tags include bff-api and auth.</rigor-reason>
     <model-tier>sonnet</model-tier>

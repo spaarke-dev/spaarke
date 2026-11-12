@@ -4,7 +4,7 @@
     <title>Override releases a no-version-in-force gap hold for that invoice only, recorded through WriteBillingDecisionAsync</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-F</phase>
     <gate>082 (gap finding and hold) and 105 (Override server, in progress) merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes which held invoices a privileged Override may release and what its Decision Record carries; .cs changes on an authorization-gated decision path.</rigor-reason>
     <model-tier>sonnet</model-tier>

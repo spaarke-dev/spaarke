@@ -4,7 +4,7 @@
     <title>Field-secure the invoice money and firm columns (EB-D-200 part 1)</title>
     <phase>4 Review</phase>
     <gate>None for source and script. The dev apply needs the owner's go typed in the ebilling session.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Field security on columns that feed approval, spend and firm scope.</rigor-reason>
     <model-tier>sonnet</model-tier>
