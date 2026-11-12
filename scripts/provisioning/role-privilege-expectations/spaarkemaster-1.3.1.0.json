@@ -1,0 +1,215 @@
+{
+  "release": "SpaarkeMaster 1.3.1.0",
+  "source": "ebilling-r1, 2026-11-12: role XML diff of the published 1.3.0.0 (d53d67f604) to the 1.3.1.0 source. Cumulative: carries every 1.3.0.0 expectation unchanged (still true in the 1.3.1.0 source), because a stamp on 1.2.3.1 or 1.3.0.0 upgrades straight to 1.3.1.0. New in 1.3.1.0: the role Spaarke Decision Record Reader (ebilling-r1 DEF-059), holding Read on sprk_DecisionRecord at Global and nothing else (FeatureRolePrivilegeGuardTests pins the role file). No privilege is taken off any role. Earlier history: customer-provisioning-orchestration-r1, 2026-11-06: role XML diff of the published 1.2.4.0 (a4b6459da3) to the 1.3.0.0 source. Cumulative: carries every 1.2.4.0 expectation (still true in the 1.3.0.0 source), because a stamp on 1.2.3.1 (ACME) upgrades straight to 1.3.0.0. New in 1.3.0.0: sprk_InvoiceLineItem is removed from the package (ebilling-r1 task 029), so its privileges leave Basic User, Core User and Ontology Service; Basic and Core User lose Read on sprk_ExternalServiceConfig and read AI/grid configuration at Global (#2474); the eBilling tables (#2591, ebilling-r1) are added to Basic, Core and Office Add In User; the new role Spaarke Billing Administrator (ebilling-r1 task 120, EB-D-162). Task 046c of field-mapping-server-write-path-r1 (owner ruling 2026-11-06): Spaarke Basic User is read-only on Spaarke tables, so the 80 privileges of removals gap R3 (config/feature-role-privileges.json) are absent on it; Spaarke Core User gains the three reference-table AppendTo privileges of gap G17. The ruled changes of task 046b (G1, G2, G4 to G8) are in the present lists and removal R1 in the absent list, so every entry of config/feature-role-privileges.json is checked (FeatureRolePrivilegeGuardTests).",
+  "note": "absent = must not be held at any depth. present = must be held at exactly this depth. Checked on the ROOT copy of each role (inherited copies report the root's set). Only a managed stage-and-upgrade removes privileges from a managed role; a leftover after a plain update import is an import-method error, and a privilege added by hand after the last import is drift.",
+  "roles": {
+    "Spaarke Console User": {
+      "absent": [
+        "prvReadsprk_Policy",
+        "prvReadsprk_PolicyVersion",
+        "prvWritesprk_Signal",
+        "prvCreatesprk_DecisionRecord"
+      ],
+      "present": {
+        "prvReadsprk_Signal": "Deep",
+        "prvReadsprk_DecisionRecord": "Deep",
+        "prvAppendsprk_Signal": "Deep",
+        "prvAppendsprk_DecisionRecord": "Deep",
+        "prvAppendTosprk_Signal": "Deep",
+        "prvAppendTosprk_DecisionRecord": "Deep",
+        "prvAppendTosprk_Policy": "Deep",
+        "prvAppendTosprk_PolicyVersion": "Deep"
+      }
+    },
+    "Spaarke Ontology Administrator": {
+      "absent": ["prvCreatesprk_DecisionRecord", "prvWritesprk_Signal", "prvCreatesprk_BudgetRevision"],
+      "present": {
+        "prvReadsprk_Policy": "Deep",
+        "prvCreatesprk_Policy": "Deep",
+        "prvWritesprk_Policy": "Deep",
+        "prvDeletesprk_Policy": "Deep",
+        "prvAppendsprk_Policy": "Deep",
+        "prvAppendTosprk_Policy": "Deep",
+        "prvReadsprk_PolicyVersion": "Deep",
+        "prvCreatesprk_PolicyVersion": "Deep",
+        "prvWritesprk_PolicyVersion": "Deep",
+        "prvDeletesprk_PolicyVersion": "Deep",
+        "prvAppendsprk_PolicyVersion": "Deep",
+        "prvAppendTosprk_PolicyVersion": "Deep",
+        "prvReadsprk_Signal": "Deep",
+        "prvAppendsprk_Signal": "Deep",
+        "prvAppendTosprk_Signal": "Deep",
+        "prvAssignsprk_Signal": "Deep",
+        "prvDeletesprk_Signal": "Deep",
+        "prvReadsprk_DecisionRecord": "Deep",
+        "prvAppendsprk_DecisionRecord": "Deep",
+        "prvAppendTosprk_DecisionRecord": "Deep"
+      }
+    },
+    "Spaarke Basic User": {
+      "absent": [
+        "prvReadsprk_Policy",
+        "prvReadsprk_InvoiceLineItem",
+        "prvAppendTosprk_InvoiceLineItem",
+        "prvReadsprk_ExternalServiceConfig",
+        "prvAppendTosprk_AccountType_Ref",
+        "prvAppendTosprk_Agreement",
+        "prvAppendsprk_Agreement",
+        "prvCreatesprk_Agreement",
+        "prvWritesprk_Agreement",
+        "prvDeletesprk_Agreement",
+        "prvAssignsprk_Agreement",
+        "prvSharesprk_Agreement",
+        "prvAppendTosprk_AgreementType",
+        "prvAppendTosprk_analysis",
+        "prvAppendsprk_analysis",
+        "prvCreatesprk_analysis",
+        "prvWritesprk_analysis",
+        "prvDeletesprk_analysis",
+        "prvAssignsprk_analysis",
+        "prvSharesprk_analysis",
+        "prvAppendTosprk_billingexport",
+        "prvAppendTosprk_Communication",
+        "prvAppendsprk_Communication",
+        "prvCreatesprk_Communication",
+        "prvWritesprk_Communication",
+        "prvDeletesprk_Communication",
+        "prvAssignsprk_Communication",
+        "prvSharesprk_Communication",
+        "prvAppendTosprk_CommunicationAccount",
+        "prvAppendsprk_CommunicationAccount",
+        "prvCreatesprk_CommunicationAccount",
+        "prvWritesprk_CommunicationAccount",
+        "prvDeletesprk_CommunicationAccount",
+        "prvAssignsprk_CommunicationAccount",
+        "prvSharesprk_CommunicationAccount",
+        "prvAppendTosprk_CommunicationAttachment",
+        "prvAppendsprk_CommunicationAttachment",
+        "prvCreatesprk_CommunicationAttachment",
+        "prvWritesprk_CommunicationAttachment",
+        "prvDeletesprk_CommunicationAttachment",
+        "prvAssignsprk_CommunicationAttachment",
+        "prvSharesprk_CommunicationAttachment",
+        "prvAppendTosprk_CommunicationChannelRef",
+        "prvAppendsprk_CommunicationChannelRef",
+        "prvCreatesprk_CommunicationChannelRef",
+        "prvWritesprk_CommunicationChannelRef",
+        "prvDeletesprk_CommunicationChannelRef",
+        "prvAssignsprk_CommunicationChannelRef",
+        "prvSharesprk_CommunicationChannelRef",
+        "prvAppendTosprk_CommunicationParticipant",
+        "prvAppendsprk_CommunicationParticipant",
+        "prvCreatesprk_CommunicationParticipant",
+        "prvWritesprk_CommunicationParticipant",
+        "prvDeletesprk_CommunicationParticipant",
+        "prvAssignsprk_CommunicationParticipant",
+        "prvSharesprk_CommunicationParticipant",
+        "prvAppendTosprk_CommunicationThread",
+        "prvAppendsprk_CommunicationThread",
+        "prvCreatesprk_CommunicationThread",
+        "prvWritesprk_CommunicationThread",
+        "prvDeletesprk_CommunicationThread",
+        "prvAssignsprk_CommunicationThread",
+        "prvSharesprk_CommunicationThread",
+        "prvSharesprk_ContactOrganization",
+        "prvAppendTosprk_Document",
+        "prvAppendTosprk_DocumentType",
+        "prvAppendTosprk_documenttype_ref",
+        "prvAppendTosprk_Event",
+        "prvAppendTosprk_externalidentifier",
+        "prvAppendTosprk_Invoice",
+        "prvAppendTosprk_invoiceapproval",
+        "prvAppendTosprk_invoicecorrection",
+        "prvAppendTosprk_invoicesubmission",
+        "prvAppendTosprk_Matter",
+        "prvAppendTosprk_Memo",
+        "prvAppendTosprk_NavItem",
+        "prvAppendTosprk_Organization",
+        "prvAppendTosprk_OrganizationType_Ref",
+        "prvAppendTosprk_Project",
+        "prvAppendTosprk_RecordType_Ref",
+        "prvAppendTosprk_Report",
+        "prvAppendTosprk_ReportCard",
+        "prvAppendTosprk_Todo",
+        "prvAppendTosprk_WorkAssignment"
+      ],
+      "present": {
+        "prvReadsprk_Signal": "Basic",
+        "prvReadsprk_DecisionRecord": "Basic",
+        "prvReadsprk_invoicesubmission": "Deep",
+        "prvReadsprk_billingexport": "Deep",
+        "prvReadsprk_ebillingsetting": "Global",
+        "prvReadsprk_billingcode": "Global",
+        "prvReadsprk_analysisplaybook": "Global",
+        "prvReadsprk_GridConfiguration": "Global"
+      }
+    },
+    "Spaarke Core User": {
+      "absent": [
+        "prvReadsprk_InvoiceLineItem",
+        "prvCreatesprk_InvoiceLineItem",
+        "prvWritesprk_InvoiceLineItem",
+        "prvDeletesprk_InvoiceLineItem",
+        "prvReadsprk_ExternalServiceConfig"
+      ],
+      "present": {
+        "prvCreatesprk_invoicesubmission": "Deep",
+        "prvWritesprk_invoicesubmission": "Deep",
+        "prvReadsprk_billingexport": "Deep",
+        "prvReadsprk_billingcode": "Global",
+        "prvReadsprk_ratecard": "Deep",
+        "prvReadsprk_analysisplaybook": "Global",
+        "prvReadsprk_GridConfiguration": "Global",
+        "prvAppendTosprk_AgreementType": "Global",
+        "prvAppendTosprk_OrganizationType_Ref": "Global",
+        "prvAppendTosprk_documenttype_ref": "Global",
+        "prvCreatesprk_ReportCard": "Deep",
+        "prvAppendsprk_ReportCard": "Deep",
+        "prvAppendTosprk_ReportCard": "Deep"
+      }
+    },
+    "Spaarke Office Add In User": {
+      "absent": [],
+      "present": {
+        "prvReadsprk_billingcode": "Global",
+        "prvReadsprk_BillingEvent": "Deep",
+        "prvReadsprk_billingexport": "Deep",
+        "prvReadsprk_ebillingoverride": "Global",
+        "prvReadsprk_ebillingsetting": "Global",
+        "prvAppendTosprk_EventType_Ref": "Global",
+        "prvAppendToContact": "Deep",
+        "prvWritesprk_Document": "Deep",
+        "prvAppendToAccount": "Deep",
+        "prvAppendTosprk_Budget": "Deep"
+      }
+    },
+    "Spaarke Ontology Service": {
+      "absent": ["prvWritesprk_DecisionRecord", "prvReadsprk_InvoiceLineItem"],
+      "present": {
+        "prvCreatesprk_Signal": "Global",
+        "prvReadsprk_Signal": "Global",
+        "prvWritesprk_Signal": "Global",
+        "prvCreatesprk_DecisionRecord": "Global",
+        "prvReadsprk_DecisionRecord": "Global"
+      }
+    },
+    "Spaarke Billing Administrator": {
+      "absent": [],
+      "present": {
+        "prvReadsprk_ruleset": "Deep",
+        "prvCreatesprk_ruleset": "Basic",
+        "prvWritesprk_ruleset": "Basic",
+        "prvReadsprk_Policy": "Deep",
+        "prvWritesprk_Policy": "Basic",
+        "prvReadsprk_PolicyVersion": "Deep",
+        "prvReadsprk_procedure": "Deep"
+      }
+    },
+    "Spaarke Decision Record Reader": {
+      "absent": [],
+      "present": {
+        "prvReadsprk_DecisionRecord": "Global"
+      }
+    }
+  }
+}
