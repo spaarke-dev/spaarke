@@ -10,6 +10,7 @@
  *   - O-20: a rule that names one firm can only be excluded for that firm; the firm field is fixed.
  *
  * The wizard does not know whether the caller may write: the route decides, and a refusal is shown with its title with the wizard still open.
+ * The panel may open it `readOnly` (task 084g): every choice is then disabled, without its fields, and the frame has no Confirm.
  */
 
 import * as React from 'react';
@@ -43,6 +44,8 @@ export interface RuleWizardProps {
   record: { table: string; name: string | null };
   /** The firms the "For invoices from" field offers besides "All firms". */
   firms: readonly FirmOption[];
+  /** Task 084g: show only; every choice disabled with the reason, no Confirm. */
+  readOnly: boolean;
   api: OverridesApi;
   nav?: WizardNav;
   onChanged: OnChanged;
@@ -78,7 +81,7 @@ export function ruleNow(r: RuleItem): string {
   return r.parameterSummary ? `${badges} · ${r.parameterSummary}` : badges;
 }
 
-export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, record, firms, api, nav, onChanged, onClose }) => {
+export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, record, firms, readOnly, api, nav, onChanged, onClose }) => {
   const s = useWizardStyles();
   const [form, setForm] = React.useState<Form>(() => initialForm(row));
   const [seen, setSeen] = React.useState(ruleKey(row));
@@ -230,9 +233,12 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
     ),
   });
 
+  // Read-only (084g): every choice disabled, and none shows its fields.
+  const shown = readOnly ? options.map(o => ({ ...o, disabled: true, body: undefined })) : options;
+
   const modeStep = (
     <div className={s.step} data-testid="mode-step">
-      <ChoiceGroup ariaLabel="On this record" options={options} value={form.choice} onChange={choice => set({ choice })} />
+      <ChoiceGroup ariaLabel="On this record" options={shown} value={form.choice} onChange={choice => set({ choice })} />
     </div>
   );
 
@@ -270,6 +276,7 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       api={api}
       core={core}
       recordId={recordId}
+      readOnly={readOnly}
       reviewLabel="Rule"
       reviewStep={reviewStep}
       modeStep={modeStep}

@@ -11,7 +11,20 @@
  */
 
 import type { MetricCardConfig, StatusBadgeTone } from '@spaarke/ui-components';
-import type { GapView, ProcedureItem, RuleItem, RuleMark, SourceView } from './recordProceduresApi';
+import type { GapView, ProcedureItem, RuleItem, RuleMark, SourceView, WritePermissions } from './recordProceduresApi';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Write permissions (task 084g, EB-D-221)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Whether the wizards open read-only, from the `permissions` of the answers the lists came from (both routes answer it). A wizard can plan an
+ * assignment or exclusion and a removal (a switch is both), so it may write only when EVERY answer gives both `assignOrExclude` and `remove`;
+ * `change` is task 084c's and opens nothing yet. No answer at all is read-only. A hint only: the write routes still decide.
+ */
+export function wizardReadOnly(...answers: ReadonlyArray<WritePermissions>): boolean {
+  return answers.length === 0 || !answers.every(p => p.assignOrExclude === true && p.remove === true);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Words

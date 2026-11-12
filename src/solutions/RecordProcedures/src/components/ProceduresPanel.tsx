@@ -10,6 +10,9 @@
  * the one not-available message, whether the record is missing or the caller cannot read it. The page decides nothing about who may see a
  * row: the server already refuses unless the caller can Read every row it names.
  *
+ * Task 084g (EB-D-221): a wizard opens read-only unless the answers' `permissions` say the caller may write (`wizardReadOnly`). The flag is
+ * taken with the row the wizard opens on, like the rest of the snapshot. It only disables: the write routes still decide every write.
+ *
  * The panel imports shared components only through `@spaarke/ui-components` (MetricCardRow, StatusBadge) and Fluent v9 tokens, so the host's
  * light/dark theme (resolved in `main.tsx`) is the only thing that decides colours (ADR-021).
  */
@@ -60,6 +63,7 @@ import {
   resolveFilter,
   runningCount,
   todayIso,
+  wizardReadOnly,
   type ProcedureFilter,
   type RuleFilter,
 } from '../services/model';
@@ -117,10 +121,15 @@ const STANDALONE: ReadonlySet<PanelFailureKind> = new Set(['notAvailable', 'ebil
 /** The failures a retry can cure. */
 const RETRYABLE: ReadonlySet<PanelFailureKind> = new Set(['signin', 'unavailable', 'network', 'other', 'invalidQuery']);
 
-/** The row a wizard is open on: a snapshot of the row and of the answer it came from, so a re-read after a write does not change the open wizard. */
+/**
+ * The row a wizard is open on: a snapshot of the row and of the answer it came from, so a re-read after a write does not change the open wizard.
+ * `readOnly` (084g) is taken from the same answers.
+ */
 type OpenRow =
-  | { kind: 'procedure'; key: string; row: ProcedureItem; gaps: GapView[]; date: string }
-  | { kind: 'rule'; key: string; row: RuleItem };
+  | { kind: 'procedure'; key: string; row: ProcedureItem; gaps: GapView[]; date: string; readOnly: boolean }
+  | { kind: 'rule'; key: string; row: RuleItem; readOnly: boolean };
+
+const readOnlyOf = (procedures: RecordProceduresView, rules: RecordRulesInForceView): boolean => wizardReadOnly(procedures.permissions, rules.permissions);
 
 const procedureKey = (p: ProcedureItem): string => p.id.toLowerCase();
 const ruleKey = (r: RuleItem): string => `${r.policyId}:${r.policyVersionId ?? ''}`.toLowerCase();
@@ -181,15 +190,16 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
             setLoad({ state: 'ready', procedures: procedures.value, rules: rules.value });
             const cur = openRef.current;
             if (outcome !== 'partial' || !cur) return false;
+            const readOnly = readOnlyOf(procedures.value, rules.value);
             if (cur.kind === 'procedure') {
               const row = procedures.value.procedures.find(p => procedureKey(p) === cur.key);
               if (!row) return false;
-              setOpen({ kind: 'procedure', key: cur.key, row, gaps: procedures.value.gaps, date: procedures.value.date });
+              setOpen({ kind: 'procedure', key: cur.key, row, gaps: procedures.value.gaps, date: procedures.value.date, readOnly });
               return true;
             }
             const row = rules.value.rules.find(r => ruleKey(r) === cur.key);
             if (!row) return false;
-            setOpen({ kind: 'rule', key: cur.key, row });
+            setOpen({ kind: 'rule', key: cur.key, row, readOnly });
             return true;
           }
           const [first, second] = [procedures, rules].flatMap(r => (r.ok ? [] : [r.failure]));
@@ -290,9 +300,20 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
   const shownProcedureRows = readyLoad ? readyLoad.procedures.procedures.filter(p => matchesProcedureFilter(resolveFilter(PROCEDURE_FILTERS, readyLoad.procedures.procedures, pf), p)) : [];
   const shownRuleRows = readyLoad ? readyLoad.rules.rules.filter(r => matchesRuleFilter(resolveFilter(RULE_FILTERS, readyLoad.rules.rules, rf), r)) : [];
   const openProcedure = (p: ProcedureItem) => {
-    if (readyLoad) setOpen({ kind: 'procedure', key: procedureKey(p), row: p, gaps: readyLoad.procedures.gaps, date: readyLoad.procedures.date });
+    if (readyLoad) {
+      setOpen({
+        kind: 'procedure',
+        key: procedureKey(p),
+        row: p,
+        gaps: readyLoad.procedures.gaps,
+        date: readyLoad.procedures.date,
+        readOnly: readOnlyOf(readyLoad.procedures, readyLoad.rules),
+      });
+    }
   };
-  const openRule = (r: RuleItem) => setOpen({ kind: 'rule', key: ruleKey(r), row: r });
+  const openRule = (r: RuleItem) => {
+    if (readyLoad) setOpen({ kind: 'rule', key: ruleKey(r), row: r, readOnly: readOnlyOf(readyLoad.procedures, readyLoad.rules) });
+  };
 
   /** ‹ › through the list as the user sees it (filters applied); absent when the open row is not in it any more. */
   function navFor<T>(rows: readonly T[], keyOf: (row: T) => string, currentKey: string, show: (row: T) => void) {
@@ -331,6 +352,7 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         recordId={recordId}
         record={record}
         date={open.date}
+        readOnly={open.readOnly}
         api={overrides}
         nav={navFor(shownProcedureRows, procedureKey, open.key, openProcedure)}
         onChanged={refresh}
@@ -343,6 +365,7 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         recordId={recordId}
         record={record}
         firms={ruleFirms}
+        readOnly={open.readOnly}
         api={overrides}
         nav={navFor(shownRuleRows, ruleKey, open.key, openRule)}
         onChanged={refresh}

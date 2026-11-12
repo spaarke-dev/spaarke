@@ -8,6 +8,7 @@
  * dry run: Impact shows the removal preview where an override is removed, and otherwise what changes from this row's own data.
  *
  * The wizard does not know whether the caller may write: the route decides, and a refusal is shown with its title with the wizard still open.
+ * The panel may open it `readOnly` (task 084g): every choice is then disabled, without its fields, and the frame has no Confirm.
  * The Pin picker's versions come from task 081's read of the Procedure (084's view lists the version in force and the newer one only).
  */
 
@@ -39,6 +40,8 @@ export interface ProcedureWizardProps {
   record: { table: string; name: string | null };
   /** The work date the lists were read for (yyyy-MM-dd). */
   date: string;
+  /** Task 084g: show only; every choice disabled with the reason, no Confirm. */
+  readOnly: boolean;
   api: OverridesApi;
   nav?: WizardNav;
   onChanged: OnChanged;
@@ -83,7 +86,7 @@ export function procedureAfter(p: ProcedureItem, choice: ProcedureChoice, versio
   }
 }
 
-export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, core, recordId, record, date, api, nav, onChanged, onClose }) => {
+export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, core, recordId, record, date, readOnly, api, nav, onChanged, onClose }) => {
   const s = useWizardStyles();
   const [form, setForm] = React.useState<Form>(() => initialForm(row));
   const [seen, setSeen] = React.useState(row.id);
@@ -96,7 +99,7 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
 
   // ── The Pin picker's versions (task 081's read), asked for when Pin is the selected choice ──
   const [versions, setVersions] = React.useState<Versions | null>(null);
-  const wantsVersions = form.choice === 'pin';
+  const wantsVersions = !readOnly && form.choice === 'pin';
   const askedFor = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!wantsVersions || askedFor.current === row.id) return;
@@ -268,10 +271,13 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
     }
   });
 
+  // Read-only (084g): every choice disabled, and none shows its fields.
+  const shown = readOnly ? options.map(o => ({ ...o, disabled: true, body: undefined })) : options;
+
   const modeStep = (
     <div className={s.step} data-testid="mode-step">
-      <ChoiceGroup ariaLabel="On this record" options={options} value={form.choice} onChange={choice => set({ choice })} />
-      {form.choice === 'pin' && versions?.state === 'ready' && pinnable.length === 0 && (
+      <ChoiceGroup ariaLabel="On this record" options={shown} value={form.choice} onChange={choice => set({ choice })} />
+      {!readOnly && form.choice === 'pin' && versions?.state === 'ready' && pinnable.length === 0 && (
         <MessageBar intent="warning">
           <MessageBarBody>No version of this Procedure has been in force yet, so there is nothing to pin.</MessageBarBody>
         </MessageBar>
@@ -302,6 +308,7 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
       api={api}
       core={core}
       recordId={recordId}
+      readOnly={readOnly}
       reviewLabel="Procedure"
       reviewStep={reviewStep}
       modeStep={modeStep}

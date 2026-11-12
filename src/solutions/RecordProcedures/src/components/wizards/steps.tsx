@@ -26,6 +26,9 @@ export const useWizardStyles = makeStyles({
 export const O21_LINE =
   'Nothing is re-checked automatically. Affected open invoices show "The procedures that apply to this invoice have changed; re-check to apply them." Invoices checked from now on use the change.';
 
+/** Task 084g (EB-D-221): the reason a read-only wizard gives, above its disabled choices. */
+export const READ_ONLY_LINE = 'You can view this, but not change it.';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Key / value block
 // ─────────────────────────────────────────────────────────────────────────────

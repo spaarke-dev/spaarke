@@ -26,9 +26,13 @@ import type {
   RuleMark,
   SourceView,
   VersionView,
+  WritePermissions,
 } from '../services/recordProceduresApi';
 
 export const TODAY = '2026-10-21';
+
+/** Task 084g: the fixtures are a caller who may make every write (084b's tests); the read-only tests pass their own. */
+export const WRITE_ALL: WritePermissions = { assignOrExclude: true, remove: true, change: true };
 
 export const MATTER_ID = '4471aaaa-0000-4000-8000-000000000001';
 export const PROJECT_ID = '20418bbb-0000-4000-8000-000000000002';
@@ -152,6 +156,7 @@ export const MATTER_GAP: GapView = {
 export const matterProcedures: RecordProceduresView = {
   record: MATTER,
   date: TODAY,
+  permissions: WRITE_ALL,
   firm: FENWICK,
   firmSource: 'Record',
   procedures: [
@@ -215,6 +220,7 @@ export const matterProcedures: RecordProceduresView = {
 export const matterRules: RecordRulesInForceView = {
   record: MATTER,
   date: TODAY,
+  permissions: WRITE_ALL,
   firm: FENWICK,
   firmSource: 'Record',
   gaps: [MATTER_GAP],
@@ -251,6 +257,7 @@ const projectPin = override({ rowId: 'row-ppin', mode: 'Pinned', chainRecord: PR
 export const projectProcedures: RecordProceduresView = {
   record: PROJECT,
   date: TODAY,
+  permissions: WRITE_ALL,
   firm: FENWICK,
   firmSource: 'Record',
   gaps: [],
@@ -275,6 +282,7 @@ export const projectProcedures: RecordProceduresView = {
 export const projectRules: RecordRulesInForceView = {
   record: PROJECT,
   date: TODAY,
+  permissions: WRITE_ALL,
   firm: FENWICK,
   firmSource: 'Record',
   gaps: [],
@@ -309,6 +317,7 @@ export const WA_GAP: GapView = {
 export const waProcedures: RecordProceduresView = {
   record: WA,
   date: TODAY,
+  permissions: WRITE_ALL,
   firm: FENWICK,
   firmSource: 'Record',
   gaps: [WA_GAP],
@@ -348,6 +357,7 @@ export const waProcedures: RecordProceduresView = {
 export const waRules: RecordRulesInForceView = {
   record: WA,
   date: TODAY,
+  permissions: WRITE_ALL,
   firm: FENWICK,
   firmSource: 'Record',
   gaps: [WA_GAP],
