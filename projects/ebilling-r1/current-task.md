@@ -6,8 +6,13 @@
 > - **Dev:** uac-r2 deployed the dev BFF `b3ca99cad5`, a local merge of master `ddae82fa90` with mcp-r1's spike `755987b385`, never pushed. Every later dev deploy must include the spike.
 > - **164 ribbon `-Apply`:** done on dev; `-Verify` PASS; uac-r2 notified before and after.
 > - **116:** merged into work (`cd9d90aaa0`, pushed). Not on master yet.
-> - **Follow-up PR #2708** (branch `fix/ebilling-2689-followups`, worktree `C:\wtfx2689`): fixes the hard-deny child test pin that has failed on master since #2689, and adds the Tier 2 shard `api-ai-finance-external` (api-seam timed out). uac-r2 APPROVED it. It merges only with the owner's go.
-> - **uac-r2 SecureChild `-Verify` on dev: 10 FAILs**, all from 096b's invoice side (the web resource is stale; the `sprk_invoice` hides and the closed-table StringParameter are not live). Native invoice New is still open on dev. The 096b live steps need the owner's go, then notices to uac-r2 before and after. If the owner declines, file it and send uac-r2 the issue number.
+> - **Follow-up PR #2708 MERGED** (`654e39c685`; owner: "Merge on green"). It fixed the hard-deny child test pin and added the Tier 2 shard `api-ai-finance-external`. Worktree `C:\wtfx2689` can be removed with `Remove-WorktreeSafe.ps1`.
+> - **096b invoice side APPLIED on dev** (owner go, 2026-11-11), together with task 029's 7 Activate/Deactivate hides (owner approved restoring them). SecureChild `-Verify` exits 0. Record: `notes/096b-close-direct-create.md` "Dev apply". uac-r2 re-runs its `-Verify`.
+> - **Next:**
+>   - 116 to master: open a PR from work, then tell uac-r2, who folds it into the next dev deploy with #2695 and #2708.
+>   - ontology K4 comment fix.
+>   - Deferred issue: Invoice Review doesn't poll while `firmNeeded`.
+>   - 084 scope: awaiting the owner.
 > - **word-add-in-r1 is unreachable:** it is still owed the dev sha `b3ca99cad5` (095a and the others are live).
 
 ## Quick recovery
