@@ -25,7 +25,7 @@
 - ISS-002 #2684 — `Test-InstructionPaths.ps1` exits 1 on master (2 false positives).
 - 042 code-review K-class: S2 "never re-add CS0618" is prose only (guard cut per §10.7); S3 `knowledge/` / spike `.csproj`s now fail closed on obsolete calls.
 
-**Registered**: Project Issue #2682 under Epic #427, Board #2, label `reuse-governance-tightening-r1`. Board "Tasks Completed" not yet synced for Wave 1 (`/devops-project-sync`).
+**Registered**: Project Issue #2682 under Epic #427, Board #2, label `reuse-governance-tightening-r1`. Board synced 2026-11-11: Tasks Completed 4/19, Status Reason "In progress".
 
 ## Standing directives (owner)
 
