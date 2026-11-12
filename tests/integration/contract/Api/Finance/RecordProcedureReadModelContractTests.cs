@@ -311,7 +311,8 @@ public sealed class RecordProcedureReadModelContractTests
 
         running.InForce.Should().BeTrue();
         running.Marks.Select(m => m.Kind).Should().Equal("Changed");
-        stranded.Should().Match<RuleInForceView>(r => !r.InForce && r.RecordRule && r.Code == "DROPPED");
+        // One row per changed rule, keyed by the record rule's id (as an in-force changed rule is); the base rule's id is in the mark's code only.
+        stranded.Should().Match<RuleInForceView>(r => !r.InForce && r.RecordRule && r.Code == "DROPPED" && r.PolicyId == recordRule && r.PolicyId != dropped);
         stranded.Marks.Select(m => m.Kind).Should().Equal("Changed", "BaseRetired");
         stranded.Marks.Single(m => m.Kind == "BaseRetired").Should().Match<RuleMarkView>(m =>
             m.RecordRuleId == recordRule && m.BasedOn!.Id == droppedVersion && m.BaseCode == "DROPPED");
@@ -346,6 +347,33 @@ public sealed class RecordProcedureReadModelContractTests
         {
             ("sprk_projects", P), ("sprk_matters", M), (ProcedureEntity.EntitySet, a.Procedure), (ProcedureEntity.VersionEntitySet, a.Version),
             (ProcedureAssignmentEntity.EntitySet, assignment), ("systemusers", Reviewer), ("sprk_organizations", F),
+        });
+    }
+
+    [Fact(DisplayName = "084 rules: every row a changed rule and a base-retired record rule expose is in the ONE batched check, exactly")]
+    public async Task EveryRowOfAChangedAndABaseRetiredRule_IsInTheOneBatchedCheck()
+    {
+        var rig = new RecordProcedureRig();
+        var s = rig.SeedChangedAndBaseRetired();
+
+        var view = await Rules(rig, Project, P, date: Mar15);
+
+        view.Rules.Select(r => (r.InForce, r.Code, r.PolicyId)).Should().BeEquivalentTo(new[]
+        {
+            (true, "GENERAL", s.Changed.RecordRule), (false, "DROPPED", s.Retired.RecordRule),
+        });
+        rig.Probe.CallerLookups.Should().Be(1);
+        rig.Probe.Batches.Should().ContainSingle();
+        rig.Probe.Asked.Should().BeEquivalentTo(new (string, Guid)[]
+        {
+            ("sprk_projects", P), ("sprk_matters", M), (ProcedureEntity.EntitySet, s.Procedure), (ProcedureEntity.VersionEntitySet, s.Version),
+            // the changed rule: the base rule, the version it is based on, the base's version in force, the record rule, its version and set, the Exclude row
+            ("sprk_policies", s.ChangedBase), ("sprk_policyversions", s.ChangedBaseV1), ("sprk_policyversions", s.ChangedBaseV2),
+            ("sprk_policies", s.Changed.RecordRule), ("sprk_policyversions", s.Changed.RuleVersion), ("sprk_rulesets", s.Changed.RuleSet),
+            (ProcedureAssignmentEntity.EntitySet, s.Changed.Exclude),
+            // the base-retired record rule: the base rule, the record rule, its set, the version it is based on, the Exclude row
+            ("sprk_policies", s.RetiredBase), ("sprk_policies", s.Retired.RecordRule), ("sprk_rulesets", s.Retired.RuleSet),
+            ("sprk_policyversions", s.RetiredBaseVersion), (ProcedureAssignmentEntity.EntitySet, s.Retired.Exclude),
         });
     }
 

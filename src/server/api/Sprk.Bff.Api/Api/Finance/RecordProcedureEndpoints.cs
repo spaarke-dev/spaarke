@@ -3,7 +3,6 @@ using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
-using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Api.Finance;
@@ -19,7 +18,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// (2) Read on the core record (<c>finance.read</c>, <see cref="FinanceDenial.UniformNotFound"/>): unknown and unreadable answer the same
 /// 404, byte for byte. (3) The eBilling flag. (4) In the service: ONE batched check that the caller can Read EVERY row the answer exposes
 /// (EB-D-218); otherwise 503, never a partial list.</para>
-/// <para><b>Refusal shapes.</b> 404: step 0, or the uniform record not found. 400: a <c>firmId</c> or <c>date</c> that does not parse (after
+/// <para><b>Refusal shapes.</b> 404: step 0, or the uniform record not found. 400 <c>procedures.invalid_query</c>: a <c>firmId</c> or <c>date</c> that does not parse (after
 /// the record is known readable). 503 <c>ebilling.disabled</c>. 503 <c>procedures.unavailable</c>: the rows could not be read or resolved,
 /// or the caller cannot Read a row the answer would expose, or the rights could not be established.</para>
 /// <para><b>Query.</b> <c>firmId</c> (default: the record's billing firm, else none) and <c>date</c> (<c>yyyy-MM-dd</c>, default today UTC).</para>
@@ -30,6 +29,9 @@ public static class RecordProcedureEndpoints
 {
     private const string Route = "/api/finance";
     private const string RecordRouteKey = "recordId";
+
+    /// <summary>The 400 <c>errorCode</c> of a <c>firmId</c> or <c>date</c> that does not parse.</summary>
+    internal const string InvalidQueryErrorCode = "procedures.invalid_query";
 
     public static IEndpointRouteBuilder MapRecordProcedureEndpoints(this IEndpointRouteBuilder app)
     {
@@ -131,6 +133,14 @@ public static class RecordProcedureEndpoints
             }),
     };
 
+    /// <summary>The 400 for a query value that does not parse: a stable <c>errorCode</c> (ADR-019), as the sibling Finance routes answer.</summary>
+    private static IResult InvalidQuery(string detail) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Validation Error",
+            detail: detail,
+            extensions: new Dictionary<string, object?> { ["errorCode"] = InvalidQueryErrorCode });
+
     private static bool TryParseQuery(string? firmId, string? date, out Guid? firm, out DateOnly? day, out IResult? invalid)
     {
         firm = null;
@@ -140,7 +150,7 @@ public static class RecordProcedureEndpoints
         {
             if (!Guid.TryParse(firmId, out var parsedFirm) || parsedFirm == Guid.Empty)
             {
-                invalid = ProblemDetailsHelper.ValidationError("firmId must be a GUID.");
+                invalid = InvalidQuery("firmId must be a GUID.");
                 return false;
             }
 
@@ -151,7 +161,7 @@ public static class RecordProcedureEndpoints
         {
             if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDay))
             {
-                invalid = ProblemDetailsHelper.ValidationError("date must be a calendar date, yyyy-MM-dd.");
+                invalid = InvalidQuery("date must be a calendar date, yyyy-MM-dd.");
                 return false;
             }
 

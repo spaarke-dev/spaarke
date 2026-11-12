@@ -244,6 +244,7 @@ public sealed class RecordProcedureEndpointsContractTests
         {
             var response = await host.Client.SendAsync(Get($"/api/finance/matters/{M}/{list}?{query}"));
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("procedures.invalid_query");
         }
 
         host.Rig.World.QueriedTables.Should().BeEmpty();
@@ -365,6 +366,129 @@ public sealed class RecordProcedureEndpointsContractTests
             case "resolver fault: two versions in force": rig.AddVersion(s.Procedure, 2, Jan1, null); break;
             default: throw new ArgumentOutOfRangeException(nameof(what), what, null);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 503: what the rules list derives from the Procedure's deciding rows (fix round 1, F1)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Matter M pins Procedure X to its version 1 (version 2 is newer); queried on project P (filed under M), date 2026-02-01.</summary>
+    private static (Guid Procedure, Guid Pin) SeedParentPin(RecordProcedureRig rig)
+    {
+        var procedure = rig.AddProcedure("Pinned", ProcedureAppliesTo.AssignedRecordsOnly);
+        var v1 = rig.AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        rig.AddVersion(procedure, 2, Mar1, null);
+        rig.AddRuleVersion(rig.AddProcedureRule(procedure, "PIN-1"), v1, Jan1);
+        return (procedure, rig.Assign(Matter, M, procedure, ProcedureAssignmentEntity.ModePinned, v1));
+    }
+
+    [Fact(DisplayName = "084 must-not-fire: a pin on the parent, nothing refused, is 200 and the rules route says pinned, ManualParent, distance 1")]
+    public async Task ParentPin_NothingRefused_RulesRouteSaysPinnedManualParent()
+    {
+        await using var host = await Host.StartAsync();
+        SeedParentPin(host.Rig);
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/projects/{P}/rules-in-force?date=2026-02-01"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rule = (await Json(response))["rules"]!.AsArray().Should().ContainSingle().Subject!;
+        rule["procedure"]!["pinned"]!.GetValue<bool>().Should().BeTrue();
+        rule["level"]!.GetValue<string>().Should().Be("ManualParent");
+        rule["distance"]!.GetValue<int>().Should().Be(1);
+    }
+
+    [Theory(DisplayName = "084 must-fire (F1): the parent's pin row, or the parent record it sits on, unreadable is 503 on BOTH routes (pinned, level and distance derive from them)")]
+    [InlineData("procedures", "parent pin row")]
+    [InlineData("rules-in-force", "parent pin row")]
+    [InlineData("procedures", "parent chain record")]
+    [InlineData("rules-in-force", "parent chain record")]
+    public async Task ParentPin_Unreadable_Is503_OnBothRoutes(string list, string what)
+    {
+        await using var host = await Host.StartAsync();
+        var pin = SeedParentPin(host.Rig);
+        host.Rig.Probe.Denied.Add(what == "parent pin row" ? (ProcedureAssignmentEntity.EntitySet, pin.Pin) : ("sprk_matters", M));
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/projects/{P}/{list}?date=2026-02-01"));
+
+        await AssertUnavailable(response, host);
+    }
+
+    [Theory(DisplayName = "084 must-fire (F1): the Exclude row that removed a whole Procedure's rules from the list unreadable is 503 on the rules route")]
+    [InlineData("exclude row")]
+    [InlineData("chain record")]
+    public async Task ExcludedProcedure_ItsExcludeRowUnreadable_Is503_OnTheRulesRoute(string what)
+    {
+        await using var host = await Host.StartAsync();
+        host.Rig.Simple("GENERAL");
+        var removed = host.Rig.Simple("REMOVED");
+        var exclude = host.Rig.Assign(Matter, M, removed.Procedure, ProcedureAssignmentEntity.ModeExcluded);
+        var url = $"/api/finance/projects/{P}/rules-in-force?date=2026-02-01";
+
+        var open = await host.Client.SendAsync(Get(url));
+        open.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await open.Content.ReadAsStringAsync()).Should().Contain("GENERAL").And.NotContain("REMOVED");
+        host.Rig.Probe.Denied.Add(what == "exclude row" ? (ProcedureAssignmentEntity.EntitySet, exclude) : ("sprk_matters", M));
+
+        await AssertUnavailable(await host.Client.SendAsync(Get(url)), host);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 503: the rows of a changed rule and a base-retired record rule (fix round 1, F2)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static TheoryData<string> ChangeAndRetiredRows => new()
+    {
+        "changed: base rule", "changed: based-on version", "changed: base version in force", "changed: record rule", "changed: record rule set",
+        "changed: exclude row", "retired: base rule", "retired: record rule", "retired: record rule set", "retired: based-on version",
+        "retired: exclude row",
+    };
+
+    [Theory(DisplayName = "084 must-fire (F2): any one row of a changed rule or a base-retired record rule that the caller cannot Read is 503 on the rules route")]
+    [MemberData(nameof(ChangeAndRetiredRows))]
+    public async Task ChangedAndBaseRetiredRows_OneUnreadable_Is503(string what)
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.SeedChangedAndBaseRetired();
+        host.Rig.Probe.Denied.Add(what switch
+        {
+            "changed: base rule" => ("sprk_policies", s.ChangedBase),
+            "changed: based-on version" => ("sprk_policyversions", s.ChangedBaseV1),
+            "changed: base version in force" => ("sprk_policyversions", s.ChangedBaseV2),
+            "changed: record rule" => ("sprk_policies", s.Changed.RecordRule),
+            "changed: record rule set" => ("sprk_rulesets", s.Changed.RuleSet),
+            "changed: exclude row" => (ProcedureAssignmentEntity.EntitySet, s.Changed.Exclude),
+            "retired: base rule" => ("sprk_policies", s.RetiredBase),
+            "retired: record rule" => ("sprk_policies", s.Retired.RecordRule),
+            "retired: record rule set" => ("sprk_rulesets", s.Retired.RuleSet),
+            "retired: based-on version" => ("sprk_policyversions", s.RetiredBaseVersion),
+            "retired: exclude row" => (ProcedureAssignmentEntity.EntitySet, s.Retired.Exclude),
+            _ => throw new ArgumentOutOfRangeException(nameof(what), what, null),
+        });
+
+        await AssertUnavailable(await host.Client.SendAsync(Get($"/api/finance/projects/{P}/rules-in-force?date=2026-03-15")), host);
+    }
+
+    [Fact(DisplayName = "084 must-not-fire (F2): the same seed with nothing refused is 200 with the changed rule and the base-retired record rule")]
+    public async Task ChangedAndBaseRetired_NothingRefused_Is200()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.SeedChangedAndBaseRetired();
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/projects/{P}/rules-in-force?date=2026-03-15"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rules = (await Json(response))["rules"]!.AsArray();
+        rules.Select(r => r!["policyId"]!.GetValue<Guid>()).Should().BeEquivalentTo(new[] { s.Changed.RecordRule, s.Retired.RecordRule });
+    }
+
+    private static async Task AssertUnavailable(HttpResponseMessage response, Host host)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await Json(response);
+        body["errorCode"]!.GetValue<string>().Should().Be("procedures.unavailable");
+        body.ContainsKey("procedures").Should().BeFalse("never a partial list");
+        body.ContainsKey("rules").Should().BeFalse("never a partial list");
+        host.Rig.NoWrites();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

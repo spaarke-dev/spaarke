@@ -617,8 +617,30 @@ public class RecordProcedureReadService
         // Record rules whose base rule is not in force on the date: the resolver gives them no slot, so they do not run.
         views.AddRange(await BaseRetiredRulesAsync(r, ct).ConfigureAwait(false));
 
+        // What is absent is derived from rows too: a Procedure a Procedure-level Exclude removed lists none of its rules, and a base rule a record
+        // rule replaced is listed only through the record rule's mark. The rows that decided that are part of what the caller must be able to Read.
+        foreach (var excludedProcedure in onDate.ExcludedProcedures)
+        {
+            ExposeOverrides(r, excludedProcedure.Overrides);
+        }
+
+        foreach (var replaced in onDate.ExcludedRules.Where(e => e.ReplacedByRecordRule))
+        {
+            ExposeOverrides(r, replaced.Overrides);
+        }
+
         return new RecordRulesInForceView(
             RecordView(r, r.RecordId), r.Date, FirmOf(r, r.FirmId), r.FirmSource, views, onDate.Gaps.Select(g => BuildGap(r, g)).ToList());
+    }
+
+    /// <summary>Exposes override rows that decided something the answer shows (or omits), and the chain record each sits on.</summary>
+    private void ExposeOverrides(Reading r, IEnumerable<ProcedureOverrideRow> rows)
+    {
+        foreach (var row in rows)
+        {
+            r.Expose(ProcedureAssignmentEntity.EntitySet, row.RowId);
+            ChainRecordOf(r, row.ChainRecord);
+        }
     }
 
     private async Task<RuleInForceView> InForceRuleAsync(Reading r, ResolvedRule rule, CancellationToken ct)
@@ -673,6 +695,8 @@ public class RecordProcedureReadService
         r.Expose(PolicyVersionSet, version.PolicyVersionId);
         r.Expose(RuleSetSet, version.RuleSetId);
         r.Expose(ProcedureEntity.EntitySet, applied.ProcedureId);
+        // Pinned, Level and Distance below derive from the rows that decided the Procedure (EB-D-218: the caller must be able to Read them).
+        ExposeOverrides(r, applied.Overrides);
         var procedureVersion = r.Rows.Versions.FirstOrDefault(v => v.Id == applied.ProcedureVersionId);
         return new RuleInForceView(
             version.PolicyId, version.PolicyVersionId,
@@ -736,7 +760,7 @@ public class RecordProcedureReadService
             var stamp = StampOf(r, exclude);
             var chainRecord = ChainRecordOf(r, exclude.ChainRecord);
             views.Add(new RuleInForceView(
-                basePolicy, null, code, null, null, null, null, null, InForce: false, RecordRule: true, setId, null, null, null, FirmOf(r, exclude.FirmId),
+                recordRuleId, null, code, null, null, null, null, null, InForce: false, RecordRule: true, setId, null, null, null, FirmOf(r, exclude.FirmId),
                 [
                     new RuleMarkView("Changed", exclude.Reason, FirmOf(r, exclude.FirmId), exclude.Distance, chainRecord, stamp, exclude.RowId, recordRuleId, basedOn, null, code),
                     new RuleMarkView("BaseRetired", RecordRuleId: recordRuleId, BasedOn: basedOn, BaseCode: code),

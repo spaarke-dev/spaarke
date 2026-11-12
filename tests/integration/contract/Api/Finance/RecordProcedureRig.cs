@@ -205,10 +205,17 @@ internal sealed class RecordProcedureRig
     }
 
     /// <summary>A changed rule (089c): the base rule's Exclude row plus the record rule's first version based on <paramref name="baseVersion"/>.</summary>
-    public Guid ChangeRule(string table, Guid record, Guid basePolicy, Guid baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1", string? reason = null)
+    public Guid ChangeRule(string table, Guid record, Guid basePolicy, Guid baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1", string? reason = null) =>
+        ChangeRuleRows(table, record, basePolicy, baseVersion, from, firm, code, reason).RecordRule;
+
+    /// <summary>The rows <see cref="ChangeRuleRows"/> seeded: the record rule, the record rule set, the base rule's Exclude row and the record rule's version.</summary>
+    public sealed record ChangedRows(Guid RecordRule, Guid RuleSet, Guid Exclude, Guid RuleVersion);
+
+    /// <summary>As <see cref="ChangeRule"/>, naming every row it seeded.</summary>
+    public ChangedRows ChangeRuleRows(string table, Guid record, Guid basePolicy, Guid baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1", string? reason = null)
     {
         var at = Tick();
-        ExcludeRule(table, record, basePolicy, firm, at, reason);
+        var exclude = ExcludeRule(table, record, basePolicy, firm, at, reason);
         var set = ProcedureAssignmentService.RecordRuleSetIdFor(table, record, firm);
         var setColumns = new List<(string, object)>
         {
@@ -218,8 +225,34 @@ internal sealed class RecordProcedureRig
         if (firm is { } f) setColumns.Add(("sprk_firm", Ref("sprk_organization", f)));
         World.Add(RuleSet, set, setColumns.ToArray());
         var recordRule = AddRule(set, code, ProcedureAssignmentService.RecordRulePolicyIdFor(set, basePolicy));
-        AddRuleVersion(recordRule, null, from, basedOn: baseVersion, created: at, headline: "Changed rate");
-        return recordRule;
+        var ruleVersion = AddRuleVersion(recordRule, null, from, basedOn: baseVersion, created: at, headline: "Changed rate");
+        return new ChangedRows(recordRule, set, exclude, ruleVersion);
+    }
+
+    /// <summary>The ids of <see cref="SeedChangedAndBaseRetired"/>: a changed rule that is still in force on Mar15 and a record rule whose base is gone by then.</summary>
+    public sealed record ChangedAndRetired(
+        Guid Procedure, Guid Version, Guid ChangedBase, Guid ChangedBaseV1, Guid ChangedBaseV2, ChangedRows Changed,
+        Guid RetiredBase, Guid RetiredBaseVersion, ChangedRows Retired);
+
+    /// <summary>
+    /// One Procedure (all records; version 1 to Mar 1, version 2 after). GENERAL is published under both versions and changed on the record
+    /// (so on Mar15 it is a Changed rule, Stale because version 2 moved on); DROPPED is published under version 1 only and changed on the
+    /// record (so on Mar15 it is a BaseRetired record rule). GENERAL is changed on matter M and DROPPED on project P, so the two record rule sets
+    /// differ. Ask for project P, Mar15.
+    /// </summary>
+    public ChangedAndRetired SeedChangedAndBaseRetired()
+    {
+        var procedure = AddProcedure("Guideline", ProcedureAppliesTo.AllRecords);
+        var v1 = AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        var v2 = AddVersion(procedure, 2, Mar1, null);
+        var general = AddProcedureRule(procedure, "GENERAL");
+        var generalV1 = AddRuleVersion(general, v1, Jan1);
+        var generalV2 = AddRuleVersion(general, v2, Mar1, number: 2);
+        var dropped = AddProcedureRule(procedure, "DROPPED");
+        var droppedVersion = AddRuleVersion(dropped, v1, Jan1);
+        var changed = ChangeRuleRows(Matter, M, general, generalV1, Jan15, code: "BRR-GENERAL");
+        var retired = ChangeRuleRows(Project, P, dropped, droppedVersion, Jan15, code: "BRR-DROPPED");
+        return new ChangedAndRetired(procedure, v2, general, generalV1, generalV2, changed, dropped, droppedVersion, retired);
     }
 
     /// <summary>A Procedure with one version [from, open) and one rule <paramref name="code"/> published under it.</summary>
