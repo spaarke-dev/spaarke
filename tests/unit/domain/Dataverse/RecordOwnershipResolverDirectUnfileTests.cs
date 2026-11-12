@@ -381,6 +381,41 @@ public class RecordOwnershipResolverDirectUnfileTests
 
     // ── Pass 3 (F1): a move off the Secure owner is asked F3 on every unfile branch ──────────────────────────────────────
 
+    /// <summary>
+    /// The answer decided the message leaves the Secure owner (it named the Secure Record unit then), and the F3 check reads the
+    /// unit again. When that second read returns no unit, the question is left open, never cleared: a caller who did not create the
+    /// row is refused and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task ClearingTheLastContact_OfADirectMessageTheSecureTeamOwns_WhenTheSecureUnitCannotBeNamedAgain_ByAnotherCaller_IsForbidden()
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(Sender);
+        var nameReads = 0;
+        directory.BeforeAnswer = query =>
+        {
+            if (query.EntityName == "businessunit"
+                && query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "name") is { } byName
+                && Equals(byName.Values.FirstOrDefault(), FakeDirectory.SecureBuName)
+                && ++nameReads > 1)
+            {
+                // The Secure Record unit is not found by the read the F3 check makes after the answer named it.
+                byName.Values[0] = "no business unit has this name";
+            }
+        };
+        var request = ClearTheContact() with { SecureExitCaller = CallerHoldingNoAccess() };
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        nameReads.Should().BeGreaterThan(1, "the answer named the unit, then the F3 check read it again");
+        resolution.IsForbidden.Should().BeTrue("a unit that cannot be named again does not clear the row");
+        resolution.DirectUnfile.Should().BeNull();
+        applied.Should().BeFalse("nothing is written");
+        directory.Assignments.Should().BeEmpty();
+    }
+
     public static TheoryData<string> CallersWhoDidNotCreateIt => new() { "no rights", "full access on every record" };
 
     /// <summary>

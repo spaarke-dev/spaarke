@@ -3491,11 +3491,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             left.AddRange(threadRoots.Roots.Where(root => !keptByOwn.Roots.Contains(root) && !left.Contains(root)));
         }
 
-        // Held in the Secure Record business unit, about to leave its isolation, yet no secure root above it can be named.
+        // Held in the Secure Record business unit, about to leave its isolation, yet no secure root above it can be named. A
+        // writer that moves the row off the Secure owner (leavesSecureOwner) already named the unit when it decided so: the
+        // unit being unreadable now does not clear the row, it leaves the question open and F3 asks (fail closed).
         var unidentified = left.Count == 0
             && mayLeaveIsolation
-            && secureBu.Id is { } secureBuId
-            && (leavesSecureOwner || current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId);
+            && (leavesSecureOwner
+                || (secureBu.Id is { } secureBuId
+                    && current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId));
 
         if (left.Count == 0 && !unidentified)
         {
