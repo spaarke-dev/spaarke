@@ -1,6 +1,7 @@
 # Client Resources Inventory — Definitive Reference
 
 > **Last Updated**: 2026-07-10 (added §0 orphaned-PCF determination — supersedes scattered "verify usage" rows below for those controls)
+> **Last Reviewed**: 2026-11-12 (the Power Pages deploy references only, repointed to the archived skill; the rest of the inventory was not re-reviewed)
 > **Purpose**: Single source of truth for "what client-side components do we have, what's their status, when were they last updated, and ARE THEY ACTUALLY USED on forms?"
 
 ---
