@@ -209,6 +209,11 @@ public partial class FieldMappingPushSourceGateTests
             childColumns: ChildAccess(Level(InheritedAccessPermission.Restricted)));
 
         (await world.Gate().RefusalForChildAsync(Target, ChildId, TextOnly, CancellationToken.None)).Should().BeNull();
+        // The one child read asks for the owner (the secure rule) AND the Access Permission (the Restricted rule): the double
+        // returns every column, so only this proves the secure path's read carries the access column.
+        world.Entities.Verify(e => e.RetrieveAsync(Target, ChildId,
+                It.Is<string[]>(c => c.Contains("ownerid") && c.Contains(AccessColumn)), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     public static TheoryData<string, object?> SourcesThatAreNotRestricted => new()

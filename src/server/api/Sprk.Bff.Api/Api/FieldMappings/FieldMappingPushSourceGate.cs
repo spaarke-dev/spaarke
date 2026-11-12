@@ -263,7 +263,9 @@ internal sealed class FieldMappingPushSourceGate
             }
 
             // Task 022c (the Restricted-source rule, as the create applies it): values mapped from a Restricted source, or from a
-            // source whose Access Permission cannot be read, are written only into a child that is Restricted.
+            // source whose Access Permission cannot be read, are written only into a child that is Restricted. The push never
+            // writes the column itself (it is never a mapping target: RecordCreationService.AccessColumnsNeverMapped), so the
+            // stored value is the value the child ends with.
             if (!restricted || RecordCreationService.StoredRowIsRestricted(targetEntity, child))
                 return null;
             if (access == RecordCreationService.MappingSourceAccess.Unreadable)

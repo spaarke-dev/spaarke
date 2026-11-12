@@ -59,6 +59,11 @@ public record PushFieldMappingsResponse
     /// Detailed results for each field mapping rule applied.
     /// Only populated when detailed results are requested.
     /// </summary>
+    /// <remarks>Task 022c (unified-access-control-r2, 2026-11-12): a rule whose target is an access column (<c>sprk_issecure</c>,
+    /// <c>sprk_accesspermission</c>, <c>sprk_accessinheritance</c>, <c>sprk_securitybu</c>, <c>sprk_containerid</c>) is never
+    /// applied, on any table: its entry is <see cref="FieldMappingStatus.Skipped"/> and its
+    /// <see cref="FieldMappingResultDto.ErrorMessage"/> carries the code <c>field_mapping.push.access_column_not_mapped</c>. A
+    /// preview does not list the column in <see cref="Changes"/>.</remarks>
     public FieldMappingResultDto[] FieldResults { get; init; } = [];
 
     /// <summary>
@@ -169,7 +174,8 @@ public record FieldMappingResultDto
     public string Status { get; init; } = string.Empty;
 
     /// <summary>
-    /// Error message if the mapping failed, null otherwise.
+    /// Error message if the mapping failed, null otherwise. On a skipped rule, why it was skipped; a stable code, where the skip
+    /// has one, is in parentheses (task 022c: <c>field_mapping.push.access_column_not_mapped</c>).
     /// </summary>
     public string? ErrorMessage { get; init; }
 }

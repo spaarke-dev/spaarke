@@ -606,6 +606,20 @@ internal sealed partial class RecordCreationService
     private const string ContainerColumn = "sprk_containerid";
 
     /// <summary>
+    /// The access columns that are NEVER a mapping target, on any table and from any source (unified-access-control-r2,
+    /// 2026-11-12): the secure flag, the Access Permission, the access inheritance record, the security unit and the container.
+    /// They decide access and change only through the access endpoints and the stamp / reconcile path. Repair skips them
+    /// (<see cref="ColumnsRepairNeverMaps"/>, <see cref="RecordRepairReason.MappedValueConfersAccess"/>), and the field-mapping
+    /// push skips a rule that targets one, visibly, with its code (task 022c,
+    /// <c>FieldMappingEndpoints.AccessColumnNotMappedReasonCode</c>). The regarding pair is not in this list. Pure.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> AccessColumnsNeverMapped = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        AccessFollowsParent.SecureFlagColumn, InheritedAccessPermission.Column, AccessInheritance.Column,
+        SecurityBusinessUnitColumn, ContainerColumn,
+    };
+
+    /// <summary>
     /// UAC-r2 condition (b) F1-1: the target columns Repair's mapping never fills on <paramref name="table"/>, each with its
     /// reason — on EVERY table, not only where Create's protected set names them (Create's set is unchanged). The secure flag,
     /// the access record, the access inheritance, the security unit and the container decide access
@@ -623,12 +637,7 @@ internal sealed partial class RecordCreationService
     {
         // A column → reason map of what is NOT written (never a payload): built from column lists.
         var columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        string[] confersAccess =
-        [
-            AccessFollowsParent.SecureFlagColumn, InheritedAccessPermission.Column, AccessInheritance.Column,
-            SecurityBusinessUnitColumn, ContainerColumn,
-        ];
-        foreach (var column in confersAccess)
+        foreach (var column in AccessColumnsNeverMapped)
             columns.TryAdd(column, RecordRepairReason.MappedValueConfersAccess);
         foreach (var column in new[] { SecureRootInheritance.PairIdColumn, SecureRootInheritance.PairTypeColumn })
             columns.TryAdd(column, RecordRepairReason.MappedValueWouldRefilePair);

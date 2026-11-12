@@ -106,11 +106,12 @@ public class PushRuleSelectionTests
         => FieldMappingEndpoints.PushMayWrite(table, column).Should().BeFalse();
 
     [Fact]
-    public void AnOrdinaryColumn_IsWritable_AndAMatterStillTakesItsOwnAccessPermission()
+    public void AnOrdinaryColumn_IsWritable_AndNoTableTakesItsAccessPermissionFromAPush()
     {
         FieldMappingEndpoints.PushMayWrite("sprk_event", "sprk_clientreference").Should().BeTrue();
-        FieldMappingEndpoints.PushMayWrite("sprk_matter", "sprk_accesspermission").Should().BeTrue(
-            "the push runs as its caller, who may edit a matter's access permission through the form anyway");
+        // Task 022c (unified-access-control-r2, 2026-11-12): an access column is never a mapping target, a matter's included.
+        FieldMappingEndpoints.PushMayWrite("sprk_matter", "sprk_accesspermission").Should().BeFalse(
+            "the access columns change only through the access endpoints and the stamp / reconcile path");
     }
 
     // ───────────────────── the one classifier (task 040 fix round 1) ─────────────────────
