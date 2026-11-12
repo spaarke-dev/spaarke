@@ -3,7 +3,7 @@
   <metadata>
     <title>Procedures on the record (B3): "Change for this record", with a typed parameter form per billing rule type</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
-    <gate>084b merged into work.</gate>
+    <gate>084b and 084g merged into work (084g gives the Change choice its permission flag).</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend code (.tsx) that writes record rules through a BFF route, plus a client/server agreement test.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>P3-E2</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Extends 084b's Rule wizard (same files).</parallel-reason>
-    <deps>084b</deps>
+    <deps>084b, 084g</deps>
     <tags>frontend, react, typescript, fluent-ui, testing</tags>
     <estimated-effort>3-4 days</estimated-effort>
   </metadata>
