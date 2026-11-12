@@ -233,7 +233,7 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 
 4. **After merge to master, watch the auto-deploy**: it triggers immediately on push-to-master with matching path filter. `gh run watch` confirms the deploy completes successfully before the next project's merge can run cleanly.
 
-**Cross-reference**: [`docs/guides/bff-deploy-coordination.md`](../../docs/guides/bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
+**Cross-reference**: [`docs/procedures/dev-bff-deploy-coordination.md`](../../docs/procedures/dev-bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
 
 #### F.5 Tier-1-IOptions Deploy Checklist (Binding per customer-provisioning-orchestration-r1 task 204e / punch row B15)
 
@@ -297,7 +297,7 @@ A `KnownDrift` entry is a confirmed deployment gap with a filed punch-list row, 
 **Cross-reference**:
 - [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md) — the canonical decision tree + worked examples (R4 surfaces, updated R7 Wave 6 task 062 for new 4-Home tree).
 - Root [`CLAUDE.md`](../../CLAUDE.md) §10 BFF Hygiene — invokes this constraint file at every BFF-touching task.
-- [`docs/adr/ADR-013-bff-ai-architecture.md`](../../docs/adr/ADR-013-bff-ai-architecture.md) — BFF AI architecture (IInvokePlaybookAi triangle stays canonical; R7 deepens, doesn't replace).
+- [`docs/adr/ADR-013-ai-architecture.md`](../../docs/adr/ADR-013-ai-architecture.md) — BFF AI architecture (IInvokePlaybookAi triangle stays canonical; R7 deepens, doesn't replace).
 - R7 spec FR-07 (single-hop dispatch), FR-08 (delete structural fallback), FR-09 (delete Action override branch), FR-12 (AiCompletionNodeExecutor), FR-29 (this rewrite), FR-16 (typed config schemas).
 
 ---
@@ -417,8 +417,8 @@ app.MapPost("/api/my-feature", async (HttpContext ctx, ...) => { ... });  // do 
 
 - [ADR-001 Minimal API](../../docs/adr/ADR-001-minimal-api-and-workers.md) — the single BFF runtime
 - [ADR-052 Workload Placement](../../docs/adr/ADR-052-workload-placement.md) — where background, scheduled and event-driven work runs
-- [ADR-007 SpeFileStore Facade](../../docs/adr/ADR-007-spefilestore.md) — file access via facade
-- [ADR-008 Endpoint Filters](../../docs/adr/ADR-008-endpoint-filters.md) — authorization model
+- [ADR-007 SpeFileStore Facade](../../docs/adr/ADR-007-spe-storage-seam-minimalism.md) — file access via facade
+- [ADR-008 Endpoint Filters](../../docs/adr/ADR-008-authorization-endpoint-filters.md) — authorization model
 - [ADR-010 DI Minimalism](../../docs/adr/ADR-010-di-minimalism.md) — feature-module DI
 - [ADR-013 AI Architecture (refined 2026-05-20)](../../docs/adr/ADR-013-ai-architecture.md) — decision criteria for AI placement; supersedes the prior categorical rejection of separate AI services
 - ADR-029 (forthcoming, from `projects/sdap-bff-api-remediation-fix/`) — publish hygiene + CI guards

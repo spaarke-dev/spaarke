@@ -978,7 +978,7 @@ If notifications were created but the user can't see them: check the `recipientI
 - **BFF Hygiene §10** (binding governance for BFF additions): root [`CLAUDE.md` §10](../../CLAUDE.md#10-bff-hygiene-binding).
 - **BFF extensions constraints §G** (actions / nodes / scopes / configjson boundary, binding): [`.claude/constraints/bff-extensions.md` §G](../../.claude/constraints/bff-extensions.md#g-actions--nodes--scopes--configjson-boundary-binding-per-r4-canonical-truth-loop-2026-06-26).
 - **R3 reference playbooks**: `projects/spaarke-daily-update-service/notes/playbooks/` — `notification-new-documents.json`, `notification-new-emails.json`, `notification-new-events.json`.
-- **ADR-013 BFF AI Architecture**: [`docs/adr/ADR-013-bff-ai-architecture.md`](../adr/ADR-013-bff-ai-architecture.md).
+- **ADR-013 BFF AI Architecture**: [`docs/adr/ADR-013-ai-architecture.md`](../adr/ADR-013-ai-architecture.md).
 - **ADR-034 user-record membership** (binding rules for `LookupUserMembership`): [`.claude/adr/ADR-034-user-record-membership.md`](../../.claude/adr/ADR-034-user-record-membership.md).
 
 ---

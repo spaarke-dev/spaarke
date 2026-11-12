@@ -81,4 +81,4 @@ The [**Foundry IQ Cookbook**](./foundry-iq-cookbook.ipynb) walks you through bui
 
 - Episode 2 README
 - [Microsoft Foundry Documentation](https://learn.microsoft.com/azure/ai-foundry/)
-- [Knowledge Sources Overview](https://learn.microsoft.com/azure/search/agentic-retrieval-how-to-create-knowledge-source)
+- [Knowledge Sources Overview](https://learn.microsoft.com/azure/search/agentic-knowledge-source-overview)

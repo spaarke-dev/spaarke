@@ -106,7 +106,7 @@ npm run dev
 4. Sideload the package into Teams via the Teams Admin Center or Developer Portal.
 5. Open Microsoft 365 Copilot and try the sample prompts above.
 
-If you are customizing tool definitions, you can use M365 Agents Toolkit to generate a declarative agent from your MCP server URL. See [M365 Agents Toolkit Instructions](../../../M365-Agents-Toolkit-Instructions.md) for details.
+If you are customizing tool definitions, you can use M365 Agents Toolkit to generate a declarative agent from your MCP server URL. See [M365 Agents Toolkit Instructions](https://github.com/microsoft/mcp-interactiveUI-samples/blob/main/M365-Agents-Toolkit-Instructions.md) for details.
 
 ## 6. Next steps
 

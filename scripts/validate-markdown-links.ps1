@@ -81,8 +81,20 @@
 
 .PARAMETER MaxExternalChecks
     Cap on external requests to DISTINCT URLs (default 200) to bound runtime on large repos;
-    a repeated URL is answered from the cache and does not count. Once exceeded, remaining
-    external URLs are not checked (not failures); the summary prints how many were left out.
+    a repeated URL is answered from the cache and does not count.
+
+    ROTATION (2026-11-12): the governed corpus holds far more distinct external URLs than the
+    cap (1,752 on 2026-11-12). Previously the cap took the first 200 in scan order, so the same
+    200 were checked every run and the rest were never checked at all, without a warning. Now
+    the distinct URLs are sorted and each run checks a window of -MaxExternalChecks of them that
+    moves by one window per UTC day, so every URL is checked once per ceil(URLs / cap) days
+    (9 days at 1,752 / 200). URLs outside today's window are NOT failures; the summary prints
+    how many there are and the cycle length, and a ::warning:: line surfaces it in CI.
+    The 200 cap stays because the advisory job has a 5-minute budget.
+
+.PARAMETER RotationDay
+    The rotation day index (default: whole days since 1970-01-01 UTC). Pass a number to reproduce
+    a particular day's window.
 
 .EXAMPLE
     pwsh ./scripts/validate-markdown-links.ps1 -Path projects/ci-cd-unit-test-remediation-r1
@@ -118,6 +130,9 @@ param(
 
     [int]$MaxExternalChecks = 200,
 
+    # See ROTATION under -MaxExternalChecks in the header.
+    [int]$RotationDay = [int][Math]::Floor(([DateTime]::UtcNow - [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)).TotalDays),
+
     # Private-by-design URL prefixes: reported as unverifiable, never requested.
     # See EXTERNAL VERDICTS in the header for the reason behind each entry.
     [string[]]$UnverifiableUrlPrefixes = @(
@@ -130,6 +145,12 @@ param(
 )
 
 $UnverifiableStatusCodes = @(401, 403, 429)
+
+# Follow an https -> http redirect as a browser does. Without this, PowerShell 7.4+ throws
+# InvalidOperationException and a live page (e.g. griffel.js.org, which redirects to http and back)
+# was reported broken. Older PowerShell follows such redirects anyway and lacks the parameter.
+$redirectArgs = @{}
+if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey('AllowInsecureRedirect')) { $redirectArgs['AllowInsecureRedirect'] = $true }
 
 # One definition of "which files are scanned", shared by the scan and the self-test.
 # -Force: see the dot-folder note in the header.
@@ -169,6 +190,18 @@ function Test-IsTimeoutError($ErrorRecord) {
     return $false
 }
 
+# Which of the distinct external URLs this run checks (ROTATION in the header). $Urls must be sorted
+# so the window is stable between machines; it moves by $Cap each day and wraps at the end.
+function Get-RotationWindow([string[]]$Urls, [int]$Cap, [int]$Day) {
+    $set = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $n = $Urls.Count
+    if ($n -eq 0 -or $Cap -le 0) { return , $set }
+    if ($n -le $Cap) { foreach ($u in $Urls) { [void]$set.Add($u) }; return , $set }
+    $start = [int](([long]$Day * $Cap) % $n)
+    for ($i = 0; $i -lt $Cap; $i++) { [void]$set.Add($Urls[($start + $i) % $n]) }
+    return , $set
+}
+
 # Self-test (must-fire / must-not-fire), root CLAUDE.md §16: a platform quirk or a refactor must not
 # silently stop dot-folders being scanned, or start failing runs on unverifiable links.
 function Invoke-SelfTest {
@@ -189,6 +222,13 @@ function Invoke-SelfTest {
         [System.Net.Http.HttpRequestException]::new('No such host is known.'), 'selftest', 'ConnectionError', $null)
     if (-not (Test-IsTimeoutError $timeout)) { throw 'Self-test failed (must-fire): an HttpClient timeout was not recognised as a timeout.' }
     if (Test-IsTimeoutError $dns) { throw 'Self-test failed (must-not-fire): a DNS failure was classified as a timeout and would be hidden.' }
+    # Rotation: ceil(n / cap) consecutive days cover every URL (from any start day); one day checks exactly cap.
+    $urls = @('a', 'b', 'c', 'd', 'e', 'f', 'g')
+    $covered = [System.Collections.Generic.HashSet[string]]::new()
+    foreach ($day in 20404..20406) { foreach ($u in (Get-RotationWindow $urls 3 $day)) { [void]$covered.Add($u) } }
+    if ($covered.Count -ne $urls.Count) { throw "Self-test failed (must-fire): 3 days of rotation at cap 3 covered $($covered.Count) of 7 URLs; some links would never be checked." }
+    if ((Get-RotationWindow $urls 3 20404).Count -ne 3) { throw 'Self-test failed (must-not-fire): one rotation window does not hold exactly cap URLs.' }
+    if ((Get-RotationWindow $urls 10 20404).Count -ne 7) { throw 'Self-test failed: under the cap, not every URL is checked.' }
 
     # End to end, offline: a child run over a throwaway repo with a dot-folder.
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('mdlink-selftest-' + [guid]::NewGuid().ToString('N'))
@@ -198,17 +238,30 @@ function Invoke-SelfTest {
         # On Windows a dot-folder is not hidden by name; mark it so the control reproduces Linux semantics.
         if ($IsWindows) { $d = Get-Item -LiteralPath (Join-Path $tmp '.dotdir'); $d.Attributes = $d.Attributes -bor [IO.FileAttributes]::Hidden }
         Set-Content -LiteralPath (Join-Path $tmp 'private.md') -Value '[board](https://github.com/users/spaarke-dev/projects/2)'
+        # An indented fence holding an odd backtick, then a broken link, then a code span.
+        Set-Content -LiteralPath (Join-Path $tmp 'fence.md') -Value @('1. Step', '   ```bash', '   echo `x', '   ```', '[gone](missing-after-fence.md)', 'Run `foo`.')
 
         # Must fire: the broken link inside the dot-folder fails the run.
         $out = & pwsh -NoProfile -File $PSCommandPath -Path $tmp -SkipSelfTest 2>&1 | Out-String
         if ($LASTEXITCODE -ne 1 -or $out -notmatch 'does-not-exist\.md') {
             throw "Self-test failed (must-fire): a broken link in a dot-folder did not fail the run (exit $LASTEXITCODE). Dot-folders such as .claude/** would be skipped silently."
         }
+        # Must fire: a broken link after an indented fence is still seen (backticks do not pair across lines).
+        if ($out -notmatch 'missing-after-fence\.md') {
+            throw 'Self-test failed (must-fire): a broken link after an indented code fence was hidden by backtick pairing across lines.'
+        }
         # Must not fire: an allowlisted private URL is listed as unverifiable and the run passes.
-        Remove-Item -LiteralPath (Join-Path $tmp '.dotdir/broken.md')
+        Remove-Item -LiteralPath (Join-Path $tmp '.dotdir/broken.md'), (Join-Path $tmp 'fence.md')
         $out = & pwsh -NoProfile -File $PSCommandPath -Path $tmp -SkipSelfTest 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0 -or $out -notmatch 'unverifiable.*spaarke-dev/projects/2') {
             throw "Self-test failed (must-not-fire): an allowlisted private URL failed the run or was not listed (exit $LASTEXITCODE)."
+        }
+        # Must fire: a URL outside the day's window is reported as not checked (and not requested -
+        # .invalid never resolves, so a request would fail the run).
+        Set-Content -LiteralPath (Join-Path $tmp 'external.md') -Value '[x](https://example.invalid/not-requested)'
+        $out = & pwsh -NoProfile -File $PSCommandPath -Path $tmp -MaxExternalChecks 0 -SkipSelfTest 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -or $out -notmatch 'External links NOT checked this run: 1 ') {
+            throw "Self-test failed (must-fire): a URL outside the rotation window was requested or not reported (exit $LASTEXITCODE). Skipped links would be silent again."
         }
     } finally {
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -287,18 +340,25 @@ if ($excludedByCorpus -gt 0) {
 # (which excludes most images-with-parens-in-url cases; acceptable trade-off)
 $linkRegex = [regex]'\[(?<text>[^\]]+)\]\((?<target>[^)\s]+)(?:\s+"[^"]*")?\)'
 
-# Inline-code span detector — used to drop spans before scanning
-$inlineCodeRegex = [regex]'`[^`]+`'
+# Inline-code span detector — used to drop spans before scanning. One line only: an unpaired
+# backtick (e.g. inside an indented fence the old fence pattern missed) used to pair with a backtick
+# lines later and blank every link in between - 14 broken links were hidden that way (2026-11-12).
+$inlineCodeRegex = [regex]'`[^`\r\n]+`'
 
-# Fenced-code block detector — drop entire ```...``` blocks
-$fencedCodeRegex = [regex]'(?ms)^```[\s\S]*?^```'
+# Fenced-code block detector — drop entire ```...``` / ~~~...~~~ blocks, including indented ones
+# (fences inside list items).
+$fencedCodeRegex = [regex]'(?ms)^[ \t]*(```|~~~)[\s\S]*?^[ \t]*\1'
 
 $results = [System.Collections.Generic.List[object]]::new()
 $unverifiable = [System.Collections.Generic.List[object]]::new()
 $externalCheckCount = 0
-$externalSkippedByCap = 0
+$externalSkipped = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 $externalCache = @{}  # URL -> result (avoid duplicate HEAD)
 
+# Pass 1: collect every link, so the external cap can choose WHICH distinct URLs to check
+# (ROTATION in the header) instead of taking whichever come first in scan order.
+$fileLinks = [System.Collections.Generic.List[object]]::new()
+$distinctExternal = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 foreach ($file in $mdFiles) {
     $content = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
     if (-not $content) { continue }
@@ -307,6 +367,7 @@ foreach ($file in $mdFiles) {
     $stripped = $fencedCodeRegex.Replace($content, { param($m) ' ' * $m.Length })
     $stripped = $inlineCodeRegex.Replace($stripped, { param($m) ' ' * $m.Length })
 
+    $targets = [System.Collections.Generic.List[string]]::new()
     foreach ($match in $linkRegex.Matches($stripped)) {
         $target = $match.Groups['target'].Value.Trim()
 
@@ -319,7 +380,20 @@ foreach ($file in $mdFiles) {
         if ($target.StartsWith('mailto:') -or $target.StartsWith('#')) {
             continue
         }
+        $targets.Add($target)
+        if ($target -match '^https?://' -and -not (Test-UnverifiableUrl $target)) { [void]$distinctExternal.Add($target) }
+    }
+    if ($targets.Count) { $fileLinks.Add([pscustomobject]@{ File = $file; Targets = $targets }) }
+}
 
+$sortedExternal = [string[]]@($distinctExternal)
+[Array]::Sort($sortedExternal, [StringComparer]::Ordinal)
+$checkThisRun = Get-RotationWindow $sortedExternal $MaxExternalChecks $RotationDay
+
+# Pass 2: validate.
+foreach ($entry in $fileLinks) {
+    $file = $entry.File
+    foreach ($target in $entry.Targets) {
         $isExternal = $target -match '^https?://'
         $status = 'ok'
         $reason = ''
@@ -337,19 +411,19 @@ foreach ($file in $mdFiles) {
                 $cached = $externalCache[$target]
                 $status = $cached.Status
                 $reason = $cached.Reason
-            } elseif ($externalCheckCount -ge $MaxExternalChecks) {
-                $externalSkippedByCap++
-                continue  # cap hit; counted and reported in the summary
+            } elseif (-not $checkThisRun.Contains($target)) {
+                [void]$externalSkipped.Add($target)
+                continue  # outside today's rotation window; counted and reported in the summary
             } else {
                 $externalCheckCount++
                 try {
-                    $resp = Invoke-WebRequest -Uri $target -Method Head -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5
+                    $resp = Invoke-WebRequest -Uri $target -Method Head -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5 @redirectArgs
                     $status = Get-StatusVerdict $resp.StatusCode
                     if ($status -ne 'ok') { $reason = "HTTP $($resp.StatusCode)" }
                 } catch {
                     # Some servers reject HEAD; retry once with GET (range 0-0) before failing.
                     try {
-                        $resp = Invoke-WebRequest -Uri $target -Method Get -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5 -Headers @{Range='bytes=0-0'}
+                        $resp = Invoke-WebRequest -Uri $target -Method Get -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5 @redirectArgs -Headers @{Range='bytes=0-0'}
                         $status = Get-StatusVerdict $resp.StatusCode
                         if ($status -ne 'ok') { $reason = "HTTP $($resp.StatusCode)" }
                     } catch {
@@ -360,7 +434,7 @@ foreach ($file in $mdFiles) {
                         } elseif (Test-IsTimeoutError $_) {
                             # Slow host: one more try with a longer timeout before calling it unverifiable.
                             try {
-                                $resp = Invoke-WebRequest -Uri $target -Method Get -TimeoutSec 20 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5 -Headers @{Range='bytes=0-0'}
+                                $resp = Invoke-WebRequest -Uri $target -Method Get -TimeoutSec 20 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5 @redirectArgs -Headers @{Range='bytes=0-0'}
                                 $status = Get-StatusVerdict $resp.StatusCode
                                 if ($status -ne 'ok') { $reason = "HTTP $($resp.StatusCode)" }
                             } catch {
@@ -435,8 +509,10 @@ Write-Host "Results"
 Write-Host "================================================"
 Write-Host "  Files scanned:       $($mdFiles.Count)"
 Write-Host "  External checks run: $externalCheckCount (distinct URLs; cap $MaxExternalChecks)"
-if ($externalSkippedByCap -gt 0) {
-    Write-Host "  External links NOT checked (cap reached): $externalSkippedByCap"
+if ($externalSkipped.Count -gt 0) {
+    $cycleDays = if ($MaxExternalChecks -gt 0) { [Math]::Ceiling($sortedExternal.Count / $MaxExternalChecks) } else { 'never (cap 0)' }
+    Write-Host "  External links NOT checked this run: $($externalSkipped.Count) of $($sortedExternal.Count) distinct URLs (rotation day $RotationDay; every URL is checked once per $cycleDays day(s))"
+    Write-Host "::warning title=Markdown Link Validator::$($externalSkipped.Count) of $($sortedExternal.Count) distinct external URLs were not checked this run (cap $MaxExternalChecks, daily rotation; full cycle $cycleDays day(s))."
 }
 Write-Host "  Broken links found:  $($results.Count)"
 Write-Host "  Unverifiable links:  $($unverifiable.Count) (listed, not failing - EXTERNAL VERDICTS in the script header)"
