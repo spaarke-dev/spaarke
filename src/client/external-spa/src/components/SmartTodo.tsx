@@ -17,11 +17,11 @@
  *
  * WHO MAY CREATE (R4 task 006, FR-06). Create posts to the record's own route (`createRootTodo`,
  * POST /api/v1/external/{root}/{id}/todos). The right comes from the server's answers, never from the record kind:
- *   - a `/me` level (`accessLevel`; the host passes one only for a record `/me` carries a level for, a project) decides
- *     for a caller without `writeAccessPerRecord`: Collaborate / Full Access may create, View Only may not;
- *   - otherwise the BFF's `canCreate` on this list decides, and a missing one is "cannot" (fail closed).
- *   Inside the record template (`onCreateActionChange`) the right is `createRightOf` (recordAccess.ts): the list must
- *   have answered, and a level must also agree with the list's answer when it gave one.
+ *   the right is `createRightOf` (recordAccess.ts), in the record template and on the project page alike (D-9): the list
+ *   must have answered (loading or failed = not offered) and its `canCreate` must allow; a `/me` level (`accessLevel`; the
+ *   host passes one only for a record `/me` carries a level for, a project) must also allow for a caller without
+ *   `writeAccessPerRecord` (Collaborate / Full Access). A list that answered without `canCreate` follows that level, or,
+ *   with no level, is "cannot" (fail closed).
  * STATUS TOGGLE. Offered only where the caller's right to PATCH the to-do is known from a server answer: the `/me` level
  * (and, on the project page, a per-record caller, whose PATCH decides - task 036 fix round 2). No list or row carries a
  * PATCH answer for a matter or work-assignment to-do, so it is never offered there (no level is passed for them).
@@ -668,14 +668,13 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
 
   // Task 036 fix round 1: the BFF's `canCreate` on this list (null = not said).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
-  // Task 006 (FR-06): the create rule lives in recordAccess.ts (`listCreateRightOf`, shared with EventsCalendar). The
-  // `/me` level decides when there is one that decides (a level the host has - a project - for a caller whose write
-  // access is not per record), otherwise the list's `canCreate`. In the record template (task 004 wiring) the right must
-  // be known `true` (the list has answered, and a level must agree with it); outside it (the project page) the rule is
-  // unchanged: the level, else the list's `canCreate` (a missing one is "cannot").
+  // Task 006 (FR-06): the create rule lives in recordAccess.ts (`listCreateRightOf`, shared with EventsCalendar and
+  // DocumentLibrary). Offered only when the right is known `true`: the list has answered, its `canCreate` allows, and a
+  // `/me` level that decides (a level the host has - a project - for a caller whose write access is not per record) allows
+  // too. The same rule in the record template and on the project page (D-9 #2716: the page used to offer on the level
+  // alone, which a workforce role ceiling refuses with 403).
   const inRecordTemplate = onCreateActionChange !== undefined;
   const { right, allowed: allowCreate } = listCreateRightOf({
-    inRecordTemplate,
     loaded: !isLoading && !accessFailure && !loadError,
     listCanCreate,
     levelAllows: levelVerdictOf(accessLevel, writeAccessPerRecord),
@@ -686,7 +685,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({
   //   - in the record template it is never offered, on any root, projects included (task 006 fix round 1: never offer an
   //     action that can only be refused);
   //   - on the project page the rule is unchanged: the `/me` level (Collaborate / Full Access), or - task 036 fix round
-  //     2 - a per-record caller on a record with a level, where the PATCH decides (a 403 reverts it).
+  //     2 - a per-record caller on a record with a level, where the PATCH decides (a 403 reverts it). Not covered by D-9:
+  //     the toggle stays level-based there until the BFF answers the PATCH right (D-10 #2717).
   const allowToggle = !inRecordTemplate && accessLevel !== undefined && (writeAccessPerRecord || canEdit(accessLevel));
 
   // Delete-own (task 054): the to-do leaves the list on the server's 204; any refusal keeps it and is shown.

@@ -8,11 +8,12 @@
  *
  * RIGHTS (task 054). Upload needs Create and download needs Read on the record. A host that knows better passes
  * `canUpload` / `canDownload`; otherwise download follows `accessLevel` (Collaborate / Full Access), and Upload follows
- * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request) or `accessLevel`
- * (a project). For a caller whose write access is decided per record (`writeAccessPerRecord`, task 036), download and
- * version history are offered wherever the list rendered (the list already passed the Read the download routes need), and
- * a project's Upload follows its list's `canCreate`. This is only what is SHOWN: the server decides, and a refused upload
- * shows its 403 as an error.
+ * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request), or, on a project,
+ * that `canCreate` AND `accessLevel` (R4 D-9: the shared `listCreateRightOf` rule; a list that answered without
+ * `canCreate` follows the level; nothing is offered before the list answers). For a caller whose write access is decided
+ * per record (`writeAccessPerRecord`, task 036), download and version history are offered wherever the list rendered (the
+ * list already passed the Read the download routes need), and a project's Upload follows its list's `canCreate` alone.
+ * This is only what is SHOWN: the server decides, and a refused upload shows its 403 as an error.
  *
  * DELETE-OWN (task 054, FR-26). With a `caller` identity, a row the caller created (creator stamp = the signed-in
  * principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the row; a 403 / 409 / 503 / 500 shows a
@@ -86,7 +87,7 @@ import {
   type CreateActionReporter,
 } from './createAction';
 import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
-import { createRightOf, type CreateRight } from './record/recordAccess';
+import { levelVerdictOf, listCreateRightOf, type CreateRight } from './record/recordAccess';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -671,9 +672,10 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
   /** The authenticated user's access level for this record: the default for `canUpload` / `canDownload`. */
   accessLevel?: AccessLevel;
   /**
-   * Show the Upload control. When the host passes none: a project follows `accessLevel` (Collaborate / Full Access); any
-   * other record follows the BFF's `canCreate` on its document list (the right the upload route checks), else
-   * `accessLevel`. The server enforces Create either way.
+   * The level's verdict on Upload, decided by the host. When the host passes none: a project uses `accessLevel`
+   * (Collaborate / Full Access) for a caller whose write access is not per record; any other record follows the BFF's
+   * `canCreate` on its document list (the right the upload route checks), else `accessLevel`. On a project (and inside the
+   * record template) the list's `canCreate` must agree (D-9). The server enforces Create either way.
    */
   canUpload?: boolean;
   /**
@@ -771,18 +773,28 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // Task 066: why the last download failed (null = none); cleared when the next download starts.
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
-  // A project follows the access level unless the caller's write access is per record (task 036 fix round 1); then it
-  // follows `canCreate` like every other record, and a missing one reads as "cannot".
-  const uploadFromList = root === 'projects' ? (writeAccessPerRecord ? (listCanCreate ?? false) : null) : listCanCreate;
-  const showUpload = canUpload ?? uploadFromList ?? canUploadOrDownload(accessLevel);
-  // In the record template the toolbar's Upload replaces this list's button (task 004): offered exactly when the right is
-  // known to be `true` (task 006, FR-06: `createRightOf`, the rule every list in the template shares), and the dialog
-  // stays here. A host's `canUpload` is the level's verdict there (a project, a level-decided caller: `uploadOverride`),
-  // which must also agree with the list's answer; with none, the list's `canCreate` decides. The list must have answered
-  // (a re-read after an upload keeps the last answer, so the action does not blink out).
+  // The Upload right (task 006, FR-06: `listCreateRightOf` / `createRightOf`, the rule SmartTodo and EventsCalendar
+  // share): offered exactly when it is known to be `true`. The list must have answered (a re-read after an upload keeps
+  // the last answer, so the action does not blink out) and its `canCreate` must allow. A level that decides must allow
+  // too: the host's `canUpload` (the record template's `uploadOverride`), else, on a project, the `/me` level for a caller
+  // whose write access is not per record (`levelVerdictOf`; a per-record caller follows the list alone, task 036 fix round
+  // 1). D-9 (#2716): the project page used to offer Upload on that level alone, so a `canCreate: false` (a workforce role
+  // ceiling) was offered an upload the POST refuses with 403.
+  const levelAllows =
+    canUpload ?? (root === 'projects' ? levelVerdictOf(accessLevel, writeAccessPerRecord) : undefined);
+  const { right, allowed: uploadAllowed } = listCreateRightOf({
+    loaded: loadedOnce && !error,
+    listCanCreate,
+    levelAllows,
+  });
+  // The list's own button (outside the template, and the invoice Files list inside it). A project follows the shared
+  // rule; every other record keeps its R3 rule, unchanged: the host's `canUpload`, else the list's `canCreate`, else
+  // `accessLevel`.
+  const showUpload =
+    root === 'projects' ? uploadAllowed : (canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel));
+  // In the record template the toolbar's Upload replaces this list's button (task 004), and the dialog stays here.
   const ownUploadButton = onCreateActionChange === undefined;
-  const right = createRightOf({ loaded: loadedOnce && !error, listCanCreate, levelAllows: canUpload });
-  useOfferCreateAction(onCreateActionChange, right === true, upload.show, right);
+  useOfferCreateAction(onCreateActionChange, uploadAllowed, upload.show, right);
   // The same right, told to a host that wants it without a toolbar action (the invoice Files list). Read through a ref, so
   // a new callback identity never re-reports; unmount reports "unknown".
   const onUploadRightChangeRef = React.useRef(onUploadRightChange);
@@ -797,7 +809,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
     []
   );
   // Whether Upload is available at all: the list's own button outside the template, the toolbar's inside it.
-  const uploadAvailable = ownUploadButton ? showUpload : right === true;
+  const uploadAvailable = ownUploadButton ? showUpload : uploadAllowed;
   // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
   // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
   const canActOnDocuments = canDownload ?? (writeAccessPerRecord || canUploadOrDownload(accessLevel));

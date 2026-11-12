@@ -14,7 +14,7 @@ marker with the issue number.
 | D-6 | 2026-11-11, task 004 (pre-existing) | Create Event dialog collects an event type that is never sent | Defect (user-visible) | #2703 |
 | D-7 | 2026-11-11, task 004 (shared library gap) | SprkModal presets give no focus return for a controlled child dialog | Component gap (shared) | #2707 |
 | D-8 | 2026-11-11, task 004 review (K-class, pre-existing) | A child dialog opened within ~250 ms of its parent modal is left aria-hidden | Accessibility (shared) | #2704 |
-| D-9 | 2026-11-11, task 006 review (F1, pre-existing, owner question) | ProjectPage offers creates the project list refused (workforce ceiling → 403) | Defect (user-visible) | #2716 |
+| D-9 | 2026-11-11, task 006 review (F1, pre-existing, owner question) | ProjectPage offers creates the project list refused (workforce ceiling → 403) | Defect (user-visible) — **resolved in R4** (owner folded it in, 2026-11-11) | #2716 (closed) |
 | D-10 | 2026-11-11, task 006 | No server answer for the to-do PATCH right; status toggle hidden in the record view | Feature gap (BFF) | #2717 |
 | D-11 | 2026-11-11, task 006 review pass 2 (F2, out of scope) | Access-level label switch duplicated in five places | Maintainability | #2718 |
 
@@ -162,6 +162,11 @@ before opening a child and assert the child is not aria-hidden.
 an immediately opened child is not aria-hidden.
 
 ## D-9 — ProjectPage offers creates the project list refused
+
+**Resolved 2026-11-11 (owner: fold into R4).** ProjectPage now uses the record view's one rule (`listCreateRightOf` in
+`record/recordAccess.ts`): Add Task / Create Event / Upload are offered only when the `/me` level allows AND the list has
+answered AND `canCreate` is not false. The status toggle is excluded (no server answer; D-10 #2717). Detail:
+`notes/task-006-notes.md` "D-9 follow-up".
 
 **Where.** The standalone ProjectPage's own create buttons: `src/client/external-spa/src/components/EventsCalendar.tsx` and `SmartTodo.tsx` (standalone rule `levelAllows ?? listCanCreate === true`), `DocumentLibrary.tsx` (`uploadFromList` is `null` for a level-decided project caller), and the to-do status toggle in `SmartTodo.tsx`. Same gate at the commit before task 006.
 

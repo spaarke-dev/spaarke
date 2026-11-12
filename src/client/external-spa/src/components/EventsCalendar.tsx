@@ -13,9 +13,10 @@
  *   root        — which kind of record that is (task 057): 'projects' (default), 'matters' or 'workassignments'. Reads
  *                 GET /api/v1/external/{root}/{id}/events; Create posts to the same record's route (`createRootEvent`,
  *                 R4 task 006 - every root has one since task 002).
- *   accessLevel — The caller's `/me` level, passed only for a record `/me` carries a level for (a project): it decides
- *                 create for a caller without `writeAccessPerRecord`. Without one, the list's `canCreate` decides and a
- *                 missing one is "cannot" (FR-06; inside the record template the rule is `createRightOf`).
+ *   accessLevel — The caller's `/me` level, passed only for a record `/me` carries a level for (a project): for a caller
+ *                 without `writeAccessPerRecord` it must allow create AND agree with the list's `canCreate`. Without one,
+ *                 the list's `canCreate` decides and a missing one is "cannot" (FR-06; `createRightOf`, in the record
+ *                 template and on the project page alike, D-9).
  *   caller      — The signed-in principal (task 054, FR-26): an event the caller CREATED shows Delete (asks first;
  *                 a refusal shows an error and the event stays). Independent of accessLevel; none without `caller`.
  *
@@ -611,14 +612,13 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // -------------------------------------------------------------------------
 
   // Every root has an event create route (task 002). Task 006 (FR-06): the create rule lives in recordAccess.ts
-  // (`listCreateRightOf`, shared with SmartTodo). The `/me` level decides when there is one that decides (a level the host
-  // has - a project - for a caller whose write access is not per record); otherwise the list's `canCreate` (task 036 fix
-  // round 1; null = not said, read as "cannot"). In the record template the right must be known `true` (the list has
-  // answered, and a level must agree with it); outside it (the project page) the rule is unchanged.
+  // (`listCreateRightOf`, shared with SmartTodo and DocumentLibrary). Offered only when the right is known `true`: the
+  // list has answered, its `canCreate` allows (task 036 fix round 1), and a `/me` level that decides (a level the host has
+  // - a project - for a caller whose write access is not per record) allows too. The same rule in the record template and
+  // on the project page (D-9 #2716: the page used to offer on the level alone, which a role ceiling refuses with 403).
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const inRecordTemplate = onCreateActionChange !== undefined;
   const { right, allowed: canCreate } = listCreateRightOf({
-    inRecordTemplate,
     loaded: !loading && !accessFailure && !loadError,
     listCanCreate,
     levelAllows: levelVerdictOf(accessLevel, writeAccessPerRecord),

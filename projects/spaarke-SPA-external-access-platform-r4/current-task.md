@@ -9,7 +9,7 @@
 |-------|-------|
 | **Task** | none active — task 006 completed |
 | **Step** | — |
-| **Status** | 006 ✅ in TASK-INDEX and POML; two adversarial passes + fix round 1 + scoped re-check done |
+| **Status** | 006 ✅ in TASK-INDEX and POML; two adversarial passes + fix round 1 + scoped re-check done; D-9 follow-up (ProjectPage) done |
 | **Next Action** | Begin task 007 (`tasks/007-*.poml`, Submit invoice record action, FR-10) |
 
 ### Critical Context
@@ -21,8 +21,6 @@
 - Hold: any section/host `onBusyChange(true)` holds paging, Close and Refresh (Refresh hidden).
 
 ## Open owner questions
-- D-9 #2716: ProjectPage's standalone buttons offer creates a list refused (workforce ceiling → 403). Fix there too
-  (changes ProjectPage tests), or leave? The POML said both "ProjectPage unchanged" and "must agree with the list".
 - Post-merge R4 look at ebilling's `src/client/external-spa/**` changes in #2689 (ebilling-r1 asked; waits on owner go).
 - D-6 #2703: send the Create Event type, or remove the select?
 - D-4 #2693: should Copy link carry `?customer={activeKey}`?

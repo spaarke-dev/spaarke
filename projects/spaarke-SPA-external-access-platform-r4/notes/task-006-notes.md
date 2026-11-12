@@ -375,3 +375,147 @@ Each mutation was applied with `perl`, the named tests were run, and the origina
   51 files / 1423 passed.
 
 rework: fix-round-1 task 006
+
+## D-9 follow-up (#2716) — ProjectPage creates agree with the list
+
+Owner-approved fold-in (2026-11-11) of defer item D-9, including changes to ProjectPage-path tests. Implementer
+sub-agent. Nothing was committed, pushed or stashed. No BFF code changed. Nothing under `.claude/`, `tasks/`,
+`TASK-INDEX.md`, `current-task.md`, `notes/defer-issues.md` or the project `CLAUDE.md` was touched.
+
+**Before → after.** On the standalone ProjectPage, a project caller WITHOUT `writeAccessPerRecord` was offered Add
+Task / Create Event / Upload on the `/me` level alone (`levelAllows ?? listCanCreate === true` in SmartTodo and
+EventsCalendar; `uploadFromList = null` in DocumentLibrary). A Collaborate workforce contact whose role ceiling refuses
+the create saw the button, and the POST answered 403. Now the page follows the record view's rule
+(`createRightOf`): offered only when the level allows AND the list has answered AND its `canCreate` is not `false`.
+Out-of-scope finding 1 above is fixed by this.
+- The kept exception is unchanged: a level-decided project caller whose LOADED list omits `canCreate` follows the level
+  (K1 above).
+- A list that is still loading or failed offers nothing. SmartTodo used to draw Add Task in its card header during the
+  first read and beside a failed read. EventsCalendar and DocumentLibrary already hid it, because they render a spinner
+  or an error instead of the toolbar.
+- Callers WITH `writeAccessPerRecord` are unchanged: `levelVerdictOf` gives no level for them, so the list decides.
+- The to-do status toggle on ProjectPage is NOT changed. It stays level-based (and PATCH-decided for a per-record
+  caller), because no server answer exists for the PATCH right. That gap is D-10 #2717; a comment at `allowToggle` in
+  `SmartTodo.tsx` says so.
+- No other root's behaviour changed. The record template's rights are identical. In the template a project's
+  `canUpload` (`uploadOverride`) is always defined for a level-decided caller, and `levelVerdictOf` is `undefined` for a
+  per-record caller, so the new `levelAllows` equals the old one there.
+
+**One rule.** `listCreateRightOf` (recordAccess.ts) lost its `inRecordTemplate` input and the standalone branch. It is
+now `{ right: createRightOf(input), allowed: right === true }`, used by SmartTodo, EventsCalendar and DocumentLibrary
+(a project's Upload). A grep of `src/` for `levelAllows ??`, `uploadFromList` and `inRecordTemplate ? right` finds only
+the explanatory comment in `recordAccess.ts`. The `createRightOf(` / `listCreateRightOf(` call sites are
+`RecordMessages.tsx` (thread, unchanged), `DocumentLibrary.tsx`, `EventsCalendar.tsx` and `SmartTodo.tsx`.
+
+One rule is deliberately left as it was: DocumentLibrary's own button on a NON-project root (`canUpload ?? listCanCreate
+?? canUploadOrDownload(accessLevel)`). This is the invoice Files list inside the template. The brief says no other root
+changes. For every caller in `src/` it already equals `listCanCreate === true` (no host passes `accessLevel` for a
+non-project root), so it cannot offer a refused upload today.
+
+### Files
+
+- `src/client/external-spa/src/components/record/recordAccess.ts`: `listCreateRightOf(input: CreateRightInput)`; the
+  `ListCreateInput` type and the standalone branch are removed; the header comment is updated.
+- `src/client/external-spa/src/components/SmartTodo.tsx`: the call drops `inRecordTemplate`; the header and rule
+  comments are updated; there is a D-10 note at `allowToggle`. `inRecordTemplate` is still used for the toggle and the
+  own button.
+- `src/client/external-spa/src/components/EventsCalendar.tsx`: the same change, with the header `accessLevel` doc
+  updated.
+- `src/client/external-spa/src/components/DocumentLibrary.tsx`:
+  - `levelAllows = canUpload ?? (root === 'projects' ? levelVerdictOf(accessLevel, writeAccessPerRecord) : undefined)`;
+  - `listCreateRightOf` gives `right` / `uploadAllowed`;
+  - `showUpload` is `uploadAllowed` for a project, and the R3 expression for other roots;
+  - the offer and `uploadAvailable` use `uploadAllowed`;
+  - the header and `canUpload` docs are updated.
+- `src/client/external-spa/tests/PerRecordWriteAccess.test.tsx`: three assertions changed (below), each paired with a
+  must-fire twin.
+- `src/client/external-spa/tests/ProjectPage.createAgreesWithList.test.tsx` (new, 12 tests): the ProjectPage matrix.
+
+### Changed assertions (and why)
+
+All three are in `tests/PerRecordWriteAccess.test.tsx`. Each pinned the defect: a Collaborate caller without
+`writeAccessPerRecord` was offered the create over a list that said `canCreate: false`.
+
+| Old test | New assertion | Why |
+|---|---|---|
+| SmartTodo "every other caller keeps the level rule, whatever a list says" (`canCreate: false`, Collaborate → Add Task offered) | "every other caller is NOT offered Add Task when the list says canCreate=false, even at Collaborate (D-9)": not in the DOM | `canCreate: false` is the POST's own 403 (task 002), e.g. a role ceiling the level does not show. FR-07/NFR-04. |
+| EventsCalendar "every other caller keeps the level rule" (same shape → Create Event offered) | "… NOT offered Create Event when the list says canCreate=false, even at Collaborate (D-9)" | Same reason. |
+| DocumentLibrary "every other caller keeps the level rule for a project (the list canCreate is not consulted)" | "… NOT offered Upload on a project when the list says canCreate=false, even at Collaborate (D-9)" | Same reason. |
+
+Each gets a new must-fire twin, "every other caller follows the level [on a project] where the list sent no canCreate
+(the kept exception)" (Collaborate, `canCreate` omitted → offered), so the level path stays pinned.
+
+`tests/ProjectPage.perRecordWrite.test.tsx` and `tests/ProjectPage.contactGrant.test.tsx` needed no change and pass
+unmodified. The first pins per-record callers and a View Only partner, which the fix does not change.
+
+### New ProjectPage tests (`ProjectPage.createAgreesWithList.test.tsx`)
+
+The setup renders the real page, its Overview and Calendar tabs, DocumentLibrary, EventsCalendar, SmartTodo and
+`useAccessLevel`. The partner is in `/me` with a project level and no `writeAccessPerRecord`. `bffApiCall` answers the
+three project lists the same way in each case. "Not offered" means no button by that name AND no disabled or
+aria-disabled element carrying it.
+
+| Case | Upload | Create Event / Add Task |
+|---|---|---|
+| Collaborate + `canCreate: true` | offered (must fire) | offered (must fire) |
+| Collaborate + `canCreate: false` (ceiling) | not in the DOM, no placeholder | not in the DOM, no placeholder |
+| Collaborate + list pending | not offered | not offered |
+| Collaborate + list failed (500) | not offered | not offered |
+| Collaborate + loaded, `canCreate` omitted | offered (kept exception) | offered (kept exception) |
+| View Only + `canCreate: true` | not offered | not offered |
+
+### Fail-before evidence
+
+The four source files were set back to HEAD with `git checkout HEAD -- <file>` (this session's versions were saved to
+the scratchpad first). The new file and `PerRecordWriteAccess` were run, then the fixed files were copied back.
+
+Result: **7 failed / 32 passed of 39**.
+- Failed: the three changed `PerRecordWriteAccess` assertions; ProjectPage `canCreate: false` for Upload and for
+  Event/Task; ProjectPage pending and failed for Event/Task (SmartTodo drew Add Task during and after a failed read).
+- Passed before as well (regression pins, not D-9 behaviour): Upload and Create Event while pending or failed (the
+  spinner or error view already replaced the button), the must-fire cases, the kept exception and View Only.
+
+### Mutation checks
+
+Each mutation was applied to the fixed source, the suites `ProjectPage.createAgreesWithList`, `PerRecordWriteAccess`
+and `ProjectPage.perRecordWrite` (41 tests) were run, and the file was restored from the saved copy.
+
+| # | Mutation | Result |
+|---|---|---|
+| MD9-1 | `listCreateRightOf`: `allowed: input.levelAllows ?? right === true` (the old standalone rule) | 7 failed (all `canCreate: false` cases; pending and failed Event/Task) |
+| MD9-2 | `createRightOf` with a level: `return levelAllows` (ignore the list) | 5 failed (all `canCreate: false` cases) |
+| MD9-3 | DocumentLibrary project: `showUpload = levelAllows ?? uploadAllowed` | 2 failed (both Upload `canCreate: false` cases) |
+| MD9-4 | `createRightOf`: remove `if (!loaded) return null` | 2 failed (ProjectPage pending and failed Event/Task) |
+| MD9-5 | `createRightOf` with a level: `listCanCreate === true` (drops the kept exception) | 5 failed (all kept-exception cases) |
+| MD9-6 | `createRightOf` with a level: `return listCanCreate !== false` (ignore the level); run with `RecordTemplateAccess` too | 7 failed of 93 (View Only + `canCreate: true` on ProjectPage ×2, `ProjectPage.perRecordWrite` View Only, 4 `RecordTemplateAccess` level cases) |
+
+All six were killed.
+
+### Results (`src/client/external-spa`)
+
+- `npm run typecheck`: clean.
+- `npm run lint`: clean.
+- `npx prettier --check` on the six touched files: clean, after `--write` on `DocumentLibrary.tsx` and the new test.
+- `npx vitest run` (full): **52 files, 1437 passed / 1 failed of 1438**. The failure was
+  `DocumentUploadPage.externalUpload` "401 (after the one fresh-token retry)…", the same load-timing failure seen in
+  task 006. Re-run alone it passes 25/25, and that page uses none of the changed code.
+- Affected suites before the full run: the ProjectPage, SmartTodo, DocumentLibrary, DetailEventsTodosRoots,
+  PerRecordWriteAccess, RecordTemplateAccess, DetailDocumentsDelete and TasksEventsSection suites all passed, apart from
+  the three intended `PerRecordWriteAccess` assertion changes above.
+
+### Left open
+
+- D-10 #2717: the ProjectPage to-do status toggle stays on the `/me` level and can still answer 403 under a workforce
+  `UpdateTodo` ceiling. It needs the server's PATCH answer.
+- `notes/defer-issues.md` D-9 and GitHub #2716 still read "deferred". Closing them is for the main session.
+
+### D-9 follow-up — review (main session)
+
+- **Scoped re-check (Sonnet):** no F-class findings. Template behaviour identical to HEAD; `writeAccessPerRecord`
+  callers and non-project roots unchanged; failed re-reads hide the action.
+- Known limits: K1 `DocumentLibrary` does not reset `listCanCreate`/`loadedOnce` on a `recordId` change without a
+  remount (pre-existing; the spinner hides the toolbar during the new load, and the template remounts); K2 the kept
+  exception (loaded list omitting `canCreate` → level) is dead against the current BFF; K3 no ProjectPage test for a
+  failed re-read after a successful first read (the code hides the action).
+- **Checks (main session):** typecheck, lint clean; `npx vitest run` 52 files / 1438 passed.
+- D-9 marked resolved in `notes/defer-issues.md`; #2716 closed.

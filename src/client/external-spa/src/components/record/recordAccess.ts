@@ -5,7 +5,8 @@
  * ONE PLACE FOR:
  *   (a) the right behind each of the record's four create actions (Upload, New message, Add to-do, Add event):
  *       `createRightOf`, used by every list inside the record template, so the four follow one rule; and the list-host
- *       rule of SmartTodo and EventsCalendar in and out of the template (`levelVerdictOf`, `listCreateRightOf`);
+ *       rule of SmartTodo, EventsCalendar and a project's DocumentLibrary, the same in and out of the template
+ *       (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too);
  *   (b) the header's "Your access" value: `yourAccessOf`, from `recordAccessFactsOf` and the lists' rights;
  *   (c) the one short "why" line a read-only section shows: `readOnlyNoteOf`;
  *   and the texts of (b) and (c): `RECORD_ACCESS_TEXT` (the level labels: `ACCESS_LEVEL_LABELS`).
@@ -14,8 +15,8 @@
  *   - each list's `canCreate`: the BFF's answer of the matching POST for this caller on this record (task 002: the
  *     documents, to-do, event and message lists of projects, matters and work assignments; the message thread of every
  *     record). It is the ONLY source for a matter, a work assignment, an invoice and a service request.
- *   - a project's `/me` level, for a caller WITHOUT `writeAccessPerRecord` (the one exception, today's ProjectPage rule):
- *     `/me` carries levels for projects only. When the project's list also answered, both must allow.
+ *   - a project's `/me` level, for a caller WITHOUT `writeAccessPerRecord` (the one exception): `/me` carries levels for
+ *     projects only. When the project's list also answered, both must allow (on the project page too, D-9).
  * Unknown (the list still loading, failed, or silent; `/me` not read) is `null`: the action is hidden and nothing is said.
  *
  * The client decides only what is SHOWN. It never sends a level, and every action is still checked by the server
@@ -146,23 +147,18 @@ export function levelVerdictOf(
   return accessLevel !== undefined && !writeAccessPerRecord ? levelCanCreate(accessLevel) : undefined;
 }
 
-export interface ListCreateInput extends CreateRightInput {
-  /** The list is inside the record template (it reports its action to the toolbar instead of drawing a button). */
-  inRecordTemplate: boolean;
-}
-
 /**
- * The create rule of a list that owns a create dialog (SmartTodo, EventsCalendar), in one place:
- *   - `right`: the shared template rule (`createRightOf`), reported with the toolbar offer;
- *   - `allowed`: whether the list offers its create at all. Inside the template only a known `true`. Outside it (the
- *     project page) the R3 rule, unchanged: the level when it decides, else the list's `canCreate` (missing = cannot).
+ * The create rule of a list that owns a create dialog (SmartTodo, EventsCalendar, DocumentLibrary's Upload on a project),
+ * in one place and the same in and out of the record template:
+ *   - `right`: the shared rule (`createRightOf`), reported with the toolbar offer;
+ *   - `allowed`: whether the list offers its create at all: only a known `true`.
+ * D-9 (#2716): the project page used to offer on the `/me` level alone (`levelAllows ?? …`), so a level-decided caller
+ * whose list answered `canCreate: false` (a workforce role ceiling the level does not show) was offered a create the POST
+ * refuses with 403. Now the level and the list must both allow there too, and nothing is offered before the list answers.
  */
-export function listCreateRightOf({ inRecordTemplate, loaded, listCanCreate, levelAllows }: ListCreateInput): {
-  right: CreateRight;
-  allowed: boolean;
-} {
-  const right = createRightOf({ loaded, listCanCreate, levelAllows });
-  return { right, allowed: inRecordTemplate ? right === true : (levelAllows ?? listCanCreate === true) };
+export function listCreateRightOf(input: CreateRightInput): { right: CreateRight; allowed: boolean } {
+  const right = createRightOf(input);
+  return { right, allowed: right === true };
 }
 
 /** Strict `/me` label → level: anything else is not an answer (unlike `mapAccessLevelString`, which defaults to ViewOnly). */
