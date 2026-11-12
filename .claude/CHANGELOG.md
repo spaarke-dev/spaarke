@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-12 — `design-to-spec` runs one reuse scan in Step 3
+
+`reuse-governance-tightening-r1` task 011 (FR-04), after the task 010 dry-run caught both known duplicates at `low` (about 36k tokens per scan) and the owner said go.
+
+- **`design-to-spec`** Step 3: the "quick Grep/Glob" exception becomes one `code-mapper` agent (sonnet; `low` from its definition) that searches by concept, synonym and interface shape, starting from the capability index, and returns a fixed JSON schema. The orchestrator judges each capability: none found, one extend target, or 2+ (an owner question). Step 4 writes `notes/reuse-scan.md`; Step 5 asks the reuse questions and records them under Owner Clarifications. The Constraints line and the Step 3 scope limitation now name this scan as the single discovery pass; everything else stays in project-pipeline Step 2. No step renumbered.
+- **`references/spec-template.md`**: the §11 overlap column and Owner Clarifications point at `notes/reuse-scan.md`. No new heading.
+- **`project-pipeline`** Step 2: the sentence describing design-to-spec Step 3 is corrected. The fallback scan (task 012) is not yet added.
+
 ###### 2026-11-12 — `power-page-deploy` skill archived (Power Pages deploy retired)
 
 The owner confirmed the Power Pages Code Site deploy for the external SPA is retired; the SPA deploys to Azure Static Web Apps through `.github/workflows/deploy-external-spa.yml` (ISS-003, #2713, found by `reuse-governance-tightening-r1`).

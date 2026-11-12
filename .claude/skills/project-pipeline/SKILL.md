@@ -133,7 +133,7 @@ SUMMARIZE "N tensions (X A, Y B, Z C) on the record" and CONTINUE. Do not block:
 - Overlap → **HARD WARNING** in the Step 2 output, naming the projects and a coordination recommendation. Do not block; the user decides the sequencing. (Purpose: no silent collisions on shared files when many worktrees touch one surface; in one count, 13 of 17 worktrees touched the BFF.)
 - None → log "✅ Hot-path surfaces unique among active worktrees". The project's own row is appended in Step 4.
 
-**Part 1: Resource discovery.** This is the comprehensive pass: design-to-spec Step 3 loaded only ADR constraints to enrich the spec, while this step loads everything implementation needs.
+**Part 1: Resource discovery.** This is the comprehensive pass: design-to-spec Step 3 loaded ADR constraints and ran one reuse scan (`notes/reuse-scan.md`) to enrich the spec, while this step loads everything implementation needs.
 
 ```
 1. IDENTIFY resource types from spec.md: technologies, operations, components (API, PCF, storage, AI, jobs)

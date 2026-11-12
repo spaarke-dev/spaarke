@@ -4,7 +4,7 @@
     <title>Add the reuse scan to design-to-spec Step 3</title>
     <phase>2 Reuse scan</phase>
     <gate>blocked until 010 is go</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies a skill's contract under explicit project constraints (FR-04)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -31,7 +31,7 @@
       <file role="canonical-reference">.claude/agents/code-mapper.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="010" status="pending">Go decision and the effort level</dependency>
+      <dependency task="010" status="done">Go decision and the effort level</dependency>
     </dependencies>
   </context>
 
@@ -86,6 +86,8 @@
   </acceptance-criteria>
 
   <notes>Skill-directive hot path; keep edits local.</notes>
+
+  <completion-notes>Completed 2026-11-12. Precondition met: task 010 go (owner, 2026-11-12), effort low. design-to-spec SKILL.md: Step 3 adds the reuse scan (one code-mapper agent, model sonnet, effort low from the definition, design.md 4.1 schema, index first, excludes projects/ and .claude/worktrees/), the orchestrator judges, result held for Step 4; Step 4 writes notes/reuse-scan.md (per capability searches, candidates, verdict; plan-level duplication check; model/effort/tokens); Step 5 asks the 2+ candidate questions and records them under Owner Clarifications; Constraints line and Step 3 scope limitation rewritten; gotcha, success criteria and stamps updated. spec-template: section 11 overlap column and Owner Clarifications point at reuse-scan.md, no new heading. No heading or step number changed; code-mapper.md unchanged; 246 to 277 lines (cap 500). Citation grep: project-pipeline SKILL.md:136 described design-to-spec Step 3 as ADR-only; corrected here (one clause). Skill-length guard 0 new; Test-InstructionPaths 0 new. CHANGELOG entry added. Step 9.5 not run: STANDARD, documentation-only. rework: none task 011</completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
