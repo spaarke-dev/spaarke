@@ -1593,6 +1593,8 @@ public static class FieldMappingEndpoints
                                         targetEntity, actsForAPerson: true, directOwner),
                                     RegardingLinksSet = Sprk.Bff.Api.Services.Dataverse.RecordReparent.RegardingLinksSetIn(
                                         targetEntity, updatePayload),
+                                    UnfileRuleColumnsWritten = Sprk.Bff.Api.Services.Dataverse.RecordReparent.UnfileRuleColumnsWrittenIn(
+                                        targetEntity, updatePayload),
                                     // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
                                     SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                                         callerSystemUserId,

@@ -176,6 +176,158 @@ public class DirectUnfileGenericPathTests
         _calls.Should().BeEmpty();
     }
 
+    // ── Pass 2 (F1): a re-file to a contact, then the contact cleared ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateHandler_MovedToAContact_ThenTheContactCleared_ReturnsTheMessageAndItsContentRowsToTheDirectTeam()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam)
+            .WithRecord(AttachmentTable, AttachmentId, FakeDirectory.ChildBu, owningTeam: FakeDirectory.ChildTeam, extra: AttachmentOf());
+        var threads = ThreadReconciles();
+        var (handler, writes) = UpdateHandler(world, Resolved(), threads: threads.Object);
+
+        await handler.UpdateAsync("sprk_communication", MessageId, ToAContact(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam, "a message linked to a contact is not unfiled");
+        _calls.Clear();
+
+        await handler.UpdateAsync("sprk_communication", MessageId, ClearTheContact(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: Person);
+
+        writes.Should().HaveCount(2);
+        OwningTeam(world).Should().Be(DirectTeam);
+        world.Row(AttachmentTable, AttachmentId).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(DirectTeam, "an ordinary unfile moves the content rows with the message");
+        _calls.Should().Equal(
+            "grant DirectParticipants", "owner sprk_communication", "owner " + AttachmentTable, "grant DirectParticipants",
+            "reconcile after the re-file");
+    }
+
+    [Fact]
+    public async Task UpdateHandler_MovedFromASecureRecordToAContact_ThenTheContactCleared_MovesTheMessage_AndRunsTheSecureChildReconcile()
+    {
+        var world = World().WithSecureRoot("sprk_matter", SecureMatterId)
+            .WithMessageFiledUnder(SecureMatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .WithRecord(AttachmentTable, AttachmentId, FakeDirectory.SecureBu, owningTeam: FakeDirectory.SecureNamedTeam, extra: AttachmentOf());
+        var threads = ThreadReconciles();
+        var (handler, _) = UpdateHandler(world, Resolved(), threads: threads.Object, shares: FullRights());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, ToAContact(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+        OwningTeam(world).Should().Be(FakeDirectory.SecureNamedTeam);
+        _calls.Clear();
+
+        await handler.UpdateAsync("sprk_communication", MessageId, ClearTheContact(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: Person);
+
+        OwningTeam(world).Should().Be(DirectTeam);
+        world.Row(AttachmentTable, AttachmentId).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(FakeDirectory.SecureNamedTeam, "from the Secure team the content rows are the secure-child reconcile's");
+        _calls.Should().Equal(
+            "grant DirectParticipants", "owner sprk_communication", "grant DirectParticipants", "reconcile after the re-file");
+    }
+
+    [Theory]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task UpdateHandler_ClearingTheLastContact_OfADirectMessage_WithAPartialConfig_IsRefused409_AndWritesNothing(string onlySet)
+    {
+        var world = World().WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var (handler, writes) = UpdateHandler(world, DirectMessageOwnerStepTests.PartiallyConfigured(onlySet));
+
+        var act = () => handler.UpdateAsync("sprk_communication", MessageId, ClearTheContact(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: Person);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnusable);
+        writes.Should().BeEmpty();
+        world.Assignments.Should().BeEmpty();
+        _calls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(CommunicationType.Email, true)]
+    [InlineData(CommunicationType.Message, false)]
+    public async Task UpdateHandler_ClearingAContact_OfAMessageThatIsNotAnEligibleDirectMessage_WritesNoOwner_AndAsksNoLookup(
+        CommunicationType type, bool withRecipient)
+    {
+        var world = World().WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type, withRecipient);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        lookup.Faults = true;
+        var (handler, writes) = UpdateHandler(world, lookup.Lookup());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, ClearTheContact(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle();
+        lookup.Reads.Should().Be(0);
+        world.Assignments.Should().BeEmpty();
+        world.ConditionalWrites.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
+        _calls.Should().BeEmpty();
+    }
+
+    // ── Pass 2 (K2): the writer passes every column the rule reads ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateHandler_SettingTheTypeToMessage_AndClearingTheMatter_ReturnsTheMessageToTheDirectTeam()
+    {
+        // The pair columns are BFF-owned (054b: a generic writer refuses them), so the type is the rule's column a writer can write.
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email);
+        var (handler, _) = UpdateHandler(world, Resolved());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["sprk_regardingmatter"] = null,
+            ["sprk_communicationtype"] = (int)CommunicationType.Message,
+        },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, impersonateSystemUserId: Person);
+
+        OwningTeam(world).Should().Be(DirectTeam);
+        _calls.Should().Equal("grant DirectParticipants", "owner sprk_communication", "grant DirectParticipants");
+    }
+
+    [Fact]
+    public async Task UpdateHandler_SettingTheTypeToEmail_AndClearingTheMatter_WithAPartialConfig_IsNotRefused_AndMovesNoOwner()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var (handler, writes) = UpdateHandler(world, DirectMessageOwnerStepTests.PartiallyConfigured(
+            DirectMessageOwnerTeam.OwnerTeamNameConfigKey));
+
+        await handler.UpdateAsync("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["sprk_regardingmatter"] = null,
+            ["sprk_communicationtype"] = (int)CommunicationType.Email,
+        },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle();
+        world.Assignments.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
+        _calls.Should().BeEmpty();
+    }
+
+    // ── Pass 2 (F3a): the field-mapping push ─────────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Push_ReFilingADirectMessageToAnotherRecord_FollowsTheRecord_IsNeverRefusedForTheDirectTeam_AndGrantsNothing(
+        bool lookupResolves)
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam)
+            .WithRecord("sprk_matter", OtherMatterId, FakeDirectory.CustomerChildBu, isSecure: false, owningTeam: FakeDirectory.CustomerChildTeam);
+        var lookup = lookupResolves
+            ? Resolved()
+            : DirectMessageOwnerStepTests.PartiallyConfigured(DirectMessageOwnerTeam.BusinessUnitNameConfigKey);
+
+        var (updated, failed, _, errors, _) = await PushAsync(world, lookup, $"/sprk_matters({OtherMatterId:D})");
+
+        errors.Should().BeEmpty();
+        (updated, failed).Should().Be((1, 0));
+        OwningTeam(world).Should().Be(FakeDirectory.CustomerChildTeam);
+        _calls.Should().BeEmpty("a message re-filed to a record is not unfiled: no participant is granted");
+    }
+
     // ── The payload reader every unfile writer passes (RecordReparent.RegardingLinksSetIn) ───────────────────────────────
 
     [Fact]
@@ -275,6 +427,76 @@ public class DirectUnfileGenericPathTests
 
     private static Dictionary<string, object?> Unfile() => new() { ["sprk_regardingmatter"] = null };
 
+    private static readonly Guid SecureMatterId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c7");
+    private static readonly Guid OtherMatterId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c8");
+    private static readonly Guid AttachmentId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c9");
+    private const string AttachmentTable = "sprk_communicationattachment";
+
+    private static Dictionary<string, object> AttachmentOf() => new()
+    {
+        ["sprk_communication"] = new EntityReference("sprk_communication", MessageId),
+    };
+
+    /// <summary>The second step: the contact cleared, nothing else.</summary>
+    private static Dictionary<string, object?> ClearTheContact() => new() { ["sprk_regardingperson"] = null };
+
+    /// <summary>The thread reconcile the step after a re-file runs for a communication: seen as one call in order.</summary>
+    private Mock<IThreadResolver> ThreadReconciles()
+    {
+        var threads = new Mock<IThreadResolver>();
+        threads
+            .Setup(t => t.ReconcileThreadForFilingAsync(
+                It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(),
+                It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => _calls.Add("reconcile after the re-file"))
+            .Returns(Task.CompletedTask);
+        return threads;
+    }
+
+    /// <summary>The impersonated person holds every right (F3 permits leaving the secure record).</summary>
+    private static Sprk.Bff.Api.Services.Access.IDataverseRecordShareService FullRights()
+    {
+        var shares = new Mock<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>();
+        shares
+            .Setup(s => s.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share
+                          | AccessRights.Delete);
+        return shares.Object;
+    }
+
+    /// <summary>The field-mapping push, re-filing the message by a lookup rule bound to <paramref name="bind"/>.</summary>
+    private Task<(int Updated, int Failed, int Skipped, Sprk.Bff.Api.Api.FieldMappings.Dtos.PushFieldMappingsError[] Errors,
+        Sprk.Bff.Api.Api.FieldMappings.Dtos.FieldMappingResultDto[] FieldResults)> PushAsync(
+        FakeDirectory world, DirectMessageOwnerTeam lookup, string bind)
+    {
+        var rule = new Sprk.Bff.Api.Models.FieldMapping.FieldMappingRuleDto
+        {
+            SourceField = "sprk_mattersource",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
+        };
+        var plans = new Dictionary<Sprk.Bff.Api.Models.FieldMapping.FieldMappingRuleDto, Sprk.Bff.Api.Api.FieldMappings.LookupBindPlan>(
+            ReferenceEqualityComparer.Instance)
+        {
+            [rule] = new("sprk_RegardingMatter@odata.bind", bind, null),
+        };
+        var scopes = new ServiceCollection()
+            .AddSingleton<IRecordOwnershipResolver>(world.Resolver(directMessageOwnerTeam: lookup))
+            .AddSingleton(SecureChildReconcilerFixtures.OverEmptyWorld())
+            .AddSingleton(Step(world, lookup))
+            .BuildServiceProvider()
+            .GetRequiredService<IServiceScopeFactory>();
+        return Sprk.Bff.Api.Api.FieldMappings.FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
+            FieldWrites(world, new List<Dictionary<string, object?>>()),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+            [rule], new Dictionary<string, object?> { ["sprk_mattersource"] = Guid.NewGuid() },
+            "sprk_communication", [MessageId], Person, NullLogger.Instance, CancellationToken.None,
+            scopes, rootFiling: null, lookupBinds: plans, appOnlyEntities: Mock.Of<IGenericEntityService>());
+    }
+
     private static readonly Guid ContactId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c6");
 
     /// <summary>The re-file from the matter to a contact: the matter cleared and the contact bound in one update.</summary>
@@ -295,7 +517,8 @@ public class DirectUnfileGenericPathTests
     private static DirectMessageOwnerTeam Resolved() => new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam).Lookup();
 
     private (DataverseUpdateHandler Handler, List<Dictionary<string, object?>> Writes) UpdateHandler(
-        FakeDirectory world, DirectMessageOwnerTeam lookup, bool withStep = true)
+        FakeDirectory world, DirectMessageOwnerTeam lookup, bool withStep = true, IThreadResolver? threads = null,
+        Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null)
     {
         var writes = new List<Dictionary<string, object?>>();
         var handler = new DataverseUpdateHandler(
@@ -303,7 +526,8 @@ public class DirectUnfileGenericPathTests
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             world.Resolver(directMessageOwnerTeam: lookup),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            SecureChildReconcilerFixtures.OverEmptyWorld(),
+            SecureChildReconcilerFixtures.OverEmptyWorld(threads),
+            shares: shares,
             directOwner: withStep ? Step(world, lookup) : null);
         return (handler, writes);
     }
@@ -336,14 +560,20 @@ public class DirectUnfileGenericPathTests
         return fields.Object;
     }
 
-    /// <summary>The real step over the directory: rows read by id, content rows none, owner writes conditional.</summary>
+    /// <summary>The real step over the directory: rows read by id, the message's attachment (when seeded) its one content row,
+    /// owner writes conditional.</summary>
     private DirectMessageOwnerStep Step(FakeDirectory world, DirectMessageOwnerTeam lookup)
     {
         var dataverse = new Mock<IGenericEntityService>();
         dataverse
             .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
-                q.Criteria.Conditions.Any(c => c.AttributeName == q.EntityName + "id") ? world.Answer(q) : new EntityCollection());
+                q.Criteria.Conditions.Any(c => c.AttributeName == q.EntityName + "id")
+                    ? world.Answer(q)
+                    : q.EntityName == AttachmentTable
+                      && world.Row(AttachmentTable, AttachmentId).GetAttributeValue<EntityReference>("sprk_communication")?.Id == MessageId
+                        ? new EntityCollection(new List<Entity> { world.Row(AttachmentTable, AttachmentId) })
+                        : new EntityCollection());
         dataverse
             .Setup(d => d.UpdateIfRowVersionMatchesAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))

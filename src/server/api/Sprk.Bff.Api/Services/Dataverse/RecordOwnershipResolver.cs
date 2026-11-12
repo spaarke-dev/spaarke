@@ -1154,6 +1154,118 @@ public sealed record RecordReparent
     }
 
     /// <summary>
+    /// fm task 054 piece 3b: the other columns of a communication the unfile rule reads that the change WRITES: its type
+    /// (<c>sprk_communicationtype</c>) and its stamped pair (<c>sprk_sentby</c>, <c>sprk_directrecipient</c>), read from the
+    /// payload by <see cref="UnfileRuleColumnsWrittenIn{TValue}"/>. The unfile rule judges the row as the change leaves it
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange"/>), so the judgement made
+    /// before the write is the one made of the row read back after it.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?> UnfileRuleColumnsWritten { get; init; } =
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// fm task 054 piece 3b: every column of a communication the unfile rule reads, other than its record links and its thread,
+    /// that <paramref name="fields"/> writes, keyed by its column (<c>@odata.bind</c> and <c>_x_value</c> spellings normalized):
+    /// the type as an <see cref="OptionSetValue"/>, a pair column as an <see cref="EntityReference"/> to a systemuser, and
+    /// <c>null</c> for a column the change clears or writes in a shape that names no value of that kind (the rule then reads the
+    /// row as not holding it). Empty for any other table. The ONE reader every re-file writer passes to
+    /// <see cref="UnfileRuleColumnsWritten"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, object?> UnfileRuleColumnsWrittenIn<TValue>(
+        string entityLogicalName, IEnumerable<KeyValuePair<string, TValue>> fields)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        ArgumentNullException.ThrowIfNull(fields);
+        var written = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!RecordThreadFiling.AppliesTo(entityLogicalName.Trim().ToLowerInvariant()))
+            return written;
+
+        foreach (var (key, raw) in fields)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
+            object? value = raw is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined }
+                ? null
+                : raw;
+            if (string.Equals(column, CommunicationTypeColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                written[column] = OptionValueOf(value) is { } option ? new OptionSetValue(option) : null;
+            }
+            else if (string.Equals(column, Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares.SentByColumn, StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(column, Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares.DirectRecipientColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                written[column] = SystemUserOf(value) is { } user ? new EntityReference(SystemUserTable, user) : null;
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    /// fm task 054 piece 3b: whether the change sets or clears a typed regarding lookup of a communication
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap"/>): one it sets onto a table that is no ownership
+    /// parent (<see cref="RegardingLinksSet"/>), or any it clears (a <c>null</c> in <see cref="ParentChanges"/>). Clearing the last
+    /// link a message holds unfiles it even when the link files it under no ownership parent.
+    /// </summary>
+    internal bool ChangesARegardingLink() =>
+        RecordThreadFiling.AppliesTo(EntityLogicalName?.Trim().ToLowerInvariant())
+        && (RegardingLinksSet.Count > 0
+            || ParentChanges.Any(change => change.Value is null && IsRegardingColumn(change.Key)));
+
+    /// <summary>fm task 054 piece 3b: whether <paramref name="column"/> (any spelling) is a typed regarding lookup of a
+    /// communication.</summary>
+    internal static bool IsRegardingColumn(string? column) =>
+        !string.IsNullOrWhiteSpace(column)
+        && Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.AllRegardingFields.Contains(
+            Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(column), StringComparer.OrdinalIgnoreCase);
+
+    private const string CommunicationTypeColumn = "sprk_communicationtype";
+    private const string SystemUserTable = "systemuser";
+
+    /// <summary>An option value as a payload carries one, or <c>null</c>.</summary>
+    private static int? OptionValueOf(object? value) => value switch
+    {
+        OptionSetValue option => option.Value,
+        int number => number,
+        long number when number is >= int.MinValue and <= int.MaxValue => (int)number,
+        short number => number,
+        string text when int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } element when element.TryGetInt32(out var parsed) => parsed,
+        _ => null,
+    };
+
+    /// <summary>A systemuser a payload names: an <see cref="EntityReference"/> to one, or a bind
+    /// (<c>/systemusers(&lt;id&gt;)</c>, relative or absolute); otherwise <c>null</c>.</summary>
+    private static Guid? SystemUserOf(object? value)
+    {
+        if (value is EntityReference reference)
+        {
+            return string.Equals(reference.LogicalName, SystemUserTable, StringComparison.OrdinalIgnoreCase) && reference.Id != Guid.Empty
+                ? reference.Id
+                : null;
+        }
+
+        var path = (value switch
+        {
+            string text => text,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => element.GetString(),
+            _ => null,
+        })?.Trim();
+        if (path is null)
+            return null;
+
+        var segment = path[(path.LastIndexOf('/') + 1)..];
+        var open = segment.IndexOf('(');
+        return open > 0 && segment.EndsWith(')')
+               && string.Equals(segment[..open], "systemusers", StringComparison.OrdinalIgnoreCase)
+               && Guid.TryParse(segment[(open + 1)..^1], out var id) && id != Guid.Empty
+            ? id
+            : null;
+    }
+
+    /// <summary>
     /// The parent changes as <see cref="EntityReference"/> values from an update payload: every
     /// <see cref="EntityReference"/> value whose type is an ownership parent. A payload that names no parent yields
     /// an empty map — the caller then has no reparent to do.
@@ -1252,10 +1364,13 @@ public sealed record RecordReparent
         var table = entityLogicalName.Trim().ToLowerInvariant();
         // #2143 round 7c: a message's thread set or cleared re-files it (IsThreadFilingColumn).
         var threadFiles = RecordThreadFiling.AppliesTo(table);
+        // fm task 054 piece 3b: a message's typed regarding lookup cleared may unfile it (its last link), even when the link files
+        // it under no ownership parent, so the writer reads isolation before the write and the step after a re-file can run.
         return lookupTargets.Any(RecordOwnershipResolver.IsOwnershipParent)
             || (threadFiles && lookupTargets.Any(t => string.Equals(t, RecordThreadFiling.ThreadTable, StringComparison.OrdinalIgnoreCase)))
             || clearedColumns.Any(c => FilingParentOf(table, Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(c)) is not null
-                                       || IsThreadFilingColumn(table, c));
+                                       || IsThreadFilingColumn(table, c)
+                                       || (threadFiles && IsRegardingColumn(c)));
     }
 
     /// <summary>
@@ -2332,9 +2447,37 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         {
             // Nothing the row is filed under changes, so its owner does not either: write the change and decide nothing
             // (task 146 verifier item 8 — the writer passed every null it writes; none of them was a parent).
-            await applyChange(ct).ConfigureAwait(false);
             var unchanged = RecordOwnerResolution.Unchanged(
                 $"the change to {request.EntityLogicalName} {request.RecordId:D} sets no parent and clears none it holds");
+
+            // fm task 054 piece 3b: but a change to a communication's typed regarding lookups that files it under no ownership
+            // parent (a contact, an account, an organization) can still leave it linked to nothing: an unfile, decided by the same
+            // rule BEFORE the write, refused the same way when the Direct team cannot be confirmed. No secure root is left here
+            // (its filing does not change), so there is no F3 question.
+            if (request.WhenUnfiled == UnfiledOwnership.UnfiledCommunication
+                && request.ChangesARegardingLink()
+                && byColumn.Count == 0 && threadAfter.Count == 0)
+            {
+                var rowAfter = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange(
+                    current, request.ParentChanges, request.RegardingLinksSet, threadIdAfter, request.UnfileRuleColumnsWritten);
+                var answer = await DirectUnfileAnswerAsync(rowAfter, threadIdAfter, unchanged, ct).ConfigureAwait(false);
+                if (answer.IsRefused)
+                {
+                    _logger.LogWarning(
+                        "Refusing to re-file {Entity} {RecordId}: {Reason} ({Code}). The change was NOT written.",
+                        request.EntityLogicalName, request.RecordId, answer.Reason, answer.RefusalCode);
+                    return answer;
+                }
+
+                if (answer.DirectUnfile is not null)
+                {
+                    // The message returns to the Direct team: the writer moves it and runs the step after a re-file.
+                    await applyChange(ct).ConfigureAwait(false);
+                    return answer with { ParentsUnchanged = false };
+                }
+            }
+
+            await applyChange(ct).ConfigureAwait(false);
             return unchanged with { ParentsUnchanged = !movesALineageLookup };
         }
 
@@ -2402,7 +2545,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             && string.Equals(request.EntityLogicalName.Trim(), RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {
             var rowAfter = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange(
-                current, request.ParentChanges, request.RegardingLinksSet, threadIdAfter);
+                current, request.ParentChanges, request.RegardingLinksSet, threadIdAfter, request.UnfileRuleColumnsWritten);
             resolution = await DirectUnfileAnswerAsync(rowAfter, threadIdAfter, resolution, ct).ConfigureAwait(false);
             if (resolution.IsRefused)
             {

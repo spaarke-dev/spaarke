@@ -346,9 +346,204 @@ public class RecordOwnershipResolverDirectUnfileTests
         directory.Assignments.Should().BeEmpty();
     }
 
+    // ── Pass 2 (F1): clearing the last link that files nothing is an unfile too ───────────────────────────────────────────
+
+    [Fact]
+    public async Task ClearingTheLastContact_OfADirectMessageAnOrdinaryTeamOwns_IsAnUnfile_DecidedBeforeTheWrite()
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var request = ClearTheContact();
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.DirectUnfile.Should().Be(new DirectUnfileDue(ThreadId, LeavesSecureOwner: false));
+        resolution.ParentsUnchanged.Should().BeFalse("the writer runs the step after a re-file for a message that moves");
+        directory.Assignments.Should().BeEmpty("the writer's step moves the message after the change, never the resolver");
+    }
+
+    [Fact]
+    public async Task ClearingTheLastContact_OfADirectMessageTheSecureTeamOwns_LeavesItsContentRowsToTheSecureChildReconcile()
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam);
+        var request = ClearTheContact();
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.DirectUnfile.Should().Be(new DirectUnfileDue(ThreadId, LeavesSecureOwner: true));
+        resolution.ParentsUnchanged.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task ClearingTheLastContact_WithOnlyOneSettingSet_IsRefused409_BeforeAnythingIsWritten(string onlySet)
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var request = ClearTheContact();
+        var applied = false;
+
+        var resolution = await Resolver(directory, DirectMessageOwnerStepTests.PartiallyConfigured(onlySet))
+            .ReparentAsync(request, Applies(directory, request, () => applied = true), CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnusable);
+        applied.Should().BeFalse();
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson")?.Id
+            .Should().Be(ContactId, "nothing was written");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClearingTheLastContact_WhenTheLookupFaults_IsRefused503_BeforeAnythingIsWritten()
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        lookup.Faults = true;
+        var request = ClearTheContact();
+        var applied = false;
+
+        var resolution = await Resolver(directory, lookup.Lookup()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnavailable);
+        applied.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(CommunicationType.Email, true)]
+    [InlineData(CommunicationType.Message, false)]
+    public async Task ClearingAContact_OfAMessageThatIsNotAnEligibleDirectMessage_WritesNoOwner_AndReadsNothingMore(
+        CommunicationType type, bool withRecipient)
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type, withRecipient);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        lookup.Faults = true;
+        var request = ClearTheContact();
+        var applied = false;
+
+        var resolution = await Resolver(directory, lookup.Lookup()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.IsRefused.Should().BeFalse();
+        resolution.DirectUnfile.Should().BeNull();
+        resolution.ParentsUnchanged.Should().BeTrue("nothing it is filed under moved and no move is due");
+        lookup.Reads.Should().Be(0, "a communication that is not an eligible Direct message costs no lookup read");
+        directory.QueriedEntities.Count(e => e == "sprk_communicationthread").Should().Be(1, "only the reparent's own thread read");
+        directory.Assignments.Should().BeEmpty();
+        directory.ConditionalWrites.Should().BeEmpty();
+    }
+
+    // ── Pass 2 (K2): every column the rule reads, as the write leaves it ─────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task AWriteThatStampsTheRecipient_AndClearsTheMatter_IsJudgedEligible_SoAPartialConfigRefusesIt(string onlySet)
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, withRecipient: false);
+        var request = Unfile() with { UnfileRuleColumnsWritten = StampsTheRecipient() };
+        var applied = false;
+
+        var resolution = await Resolver(directory, DirectMessageOwnerStepTests.PartiallyConfigured(onlySet))
+            .ReparentAsync(request, Applies(directory, request, () => applied = true), CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnusable, "the row the write leaves carries a valid pair");
+        applied.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AWriteThatStampsTheRecipient_AndClearsTheMatter_CarriesTheMove_ForTheRowItLeaves()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, withRecipient: false);
+        var request = Unfile() with { UnfileRuleColumnsWritten = StampsTheRecipient() };
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.DirectUnfile.Should().Be(new DirectUnfileDue(ThreadId, LeavesSecureOwner: false));
+        DirectMessageOwnerStep.WhyNotAnEligibleUnfile(directory.Row("sprk_communication", MessageId), ThreadId)
+            .Should().BeNull("the judgement before the write is the one made of the row after it");
+    }
+
+    public static TheoryData<string> WritesThatLeaveNoEligibleMessage => new() { "recipient cleared", "type set to Email", "sender unreadable" };
+
+    [Theory]
+    [MemberData(nameof(WritesThatLeaveNoEligibleMessage))]
+    public async Task AWriteThatClearsTheMatter_AndLeavesNoEligibleMessage_IsNotRefused_AndCarriesNoMove(string write)
+    {
+        var columns = write switch
+        {
+            "recipient cleared" => new Dictionary<string, object?> { ["sprk_directrecipient"] = null },
+            "type set to Email" => new Dictionary<string, object?> { ["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Email) },
+            _ => new Dictionary<string, object?> { ["sprk_sentby"] = null },
+        };
+        foreach (var resolved in new[] { true, false })
+        {
+            var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+            var request = Unfile() with { UnfileRuleColumnsWritten = columns };
+            var applied = false;
+
+            var resolution = await Resolver(directory, resolved
+                    ? Resolved()
+                    : DirectMessageOwnerStepTests.PartiallyConfigured(DirectMessageOwnerTeam.OwnerTeamNameConfigKey))
+                .ReparentAsync(request, Applies(directory, request, () => applied = true), CancellationToken.None);
+
+            resolution.IsRefused.Should().BeFalse($"{write}: the row the write leaves is no eligible Direct message");
+            applied.Should().BeTrue();
+            resolution.DirectUnfile.Should().BeNull();
+            DirectMessageOwnerStep.WhyNotAnEligibleUnfile(directory.Row("sprk_communication", MessageId), ThreadId)
+                .Should().NotBeNull("the judgement before the write is the one made of the row after it");
+        }
+    }
+
+    [Fact]
+    public void UnfileRuleColumnsWrittenIn_ReadsTheTypeAndThePair_InEverySpelling_AndAClearOrAnUnreadableValueAsNull()
+    {
+        var recipient = Guid.NewGuid();
+        var sender = Guid.NewGuid();
+
+        var written = RecordReparent.UnfileRuleColumnsWrittenIn("sprk_communication", new Dictionary<string, object?>
+        {
+            ["sprk_DirectRecipient@odata.bind"] = $"/systemusers({recipient:D})",
+            ["sprk_sentby"] = new EntityReference("systemuser", sender),
+            ["sprk_communicationtype"] = System.Text.Json.JsonSerializer.SerializeToElement((int)CommunicationType.Message),
+            ["sprk_name"] = "x",
+        });
+
+        written.Keys.Should().BeEquivalentTo("sprk_directrecipient", "sprk_sentby", "sprk_communicationtype");
+        written["sprk_directrecipient"].Should().Be(new EntityReference("systemuser", recipient));
+        written["sprk_sentby"].Should().Be(new EntityReference("systemuser", sender));
+        ((OptionSetValue)written["sprk_communicationtype"]!).Value.Should().Be((int)CommunicationType.Message);
+
+        var cleared = RecordReparent.UnfileRuleColumnsWrittenIn("sprk_communication", new Dictionary<string, object?>
+        {
+            ["sprk_directrecipient"] = null,
+            ["sprk_SentBy@odata.bind"] = $"/contacts({sender:D})",
+            ["sprk_communicationtype"] = "not a number",
+        });
+        cleared.Should().HaveCount(3).And.OnlyContain(entry => entry.Value == null);
+
+        RecordReparent.UnfileRuleColumnsWrittenIn("sprk_event", new Dictionary<string, object?> { ["sprk_sentby"] = null })
+            .Should().BeEmpty();
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private static readonly Guid ContactId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003bb");
+    private static Dictionary<string, object?> StampsTheRecipient() => new()
+    {
+        ["sprk_directrecipient"] = new EntityReference("systemuser", Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003b9")),
+    };
+
+    /// <summary>The second step of a re-file to a contact: the contact cleared, nothing else.</summary>
+    private static RecordReparent ClearTheContact() => Unfile() with
+    {
+        ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_regardingperson"] = null },
+    };
+
+    private static readonly Guid ContactId = DirectUnfileWorldExtensions.ContactId;
 
     /// <summary>The re-file from the matter to a contact: the matter cleared and the contact set in one change.</summary>
     private static RecordReparent ToAContact() => Unfile() with
@@ -391,6 +586,8 @@ public class RecordOwnershipResolverDirectUnfileTests
             var written = request.ParentChanges.ToDictionary(change => change.Key, change => (object?)change.Value);
             foreach (var (column, link) in request.RegardingLinksSet)
                 written[column] = link;
+            foreach (var (column, value) in request.UnfileRuleColumnsWritten)
+                written[column] = value;
             directory.Write(request.EntityLogicalName, request.RecordId, written);
             alsoDone?.Invoke();
             return Task.CompletedTask;
@@ -438,6 +635,22 @@ internal static class DirectUnfileWorldExtensions
     /// <summary>A Direct message filed under nothing, in its Direct thread.</summary>
     public static OwnershipDirectory WithUnfiledDirectMessage(this OwnershipDirectory directory, Guid owningBusinessUnit, Guid owningTeam) =>
         directory.WithThread(100000001, false).WithMessage(owningBusinessUnit, owningTeam, CommunicationType.Message, true, null);
+
+    /// <summary>The contact a message is linked to after a re-file from a record to a contact.</summary>
+    public static readonly Guid ContactId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003bb");
+
+    /// <summary>A message in its Direct thread linked only to <see cref="ContactId"/>, still owned as the record it left owned it.</summary>
+    public static OwnershipDirectory WithMessageLinkedOnlyToAContact(
+        this OwnershipDirectory directory, Guid owningBusinessUnit, Guid owningTeam,
+        CommunicationType type = CommunicationType.Message, bool withRecipient = true)
+    {
+        directory.WithThread(100000001, false).WithMessage(owningBusinessUnit, owningTeam, type, withRecipient, null);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["sprk_regardingperson"] = new EntityReference("contact", ContactId),
+        });
+        return directory;
+    }
 
     private static OwnershipDirectory WithThread(this OwnershipDirectory directory, int threadType, bool isDefault) =>
         directory.WithRecord("sprk_communicationthread", ThreadId, OwnershipDirectory.ChildBu, extra: new()

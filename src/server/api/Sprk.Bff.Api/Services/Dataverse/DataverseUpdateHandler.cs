@@ -213,6 +213,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                         entityLogicalName, actsForAPerson: impersonateSystemUserId is not null, _directOwner),
                     RegardingLinksSet = RecordReparent.RegardingLinksSetIn(entityLogicalName, fields),
+                    UnfileRuleColumnsWritten = RecordReparent.UnfileRuleColumnsWrittenIn(entityLogicalName, fields),
                     SecureExitCaller = secureExitCaller = impersonateSystemUserId is { } person
                         ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(person, _shares)
                         : null,

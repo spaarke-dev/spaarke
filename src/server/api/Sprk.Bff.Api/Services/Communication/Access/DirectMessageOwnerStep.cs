@@ -213,15 +213,18 @@ public sealed class DirectMessageOwnerStep
     /// <summary>
     /// Piece 3b: the row a re-file leaves, judged BEFORE it is written: <paramref name="current"/> (as read before the change) with
     /// every column the change clears removed, every lookup it sets applied (<paramref name="parentChanges"/>), every typed regarding
-    /// lookup it sets onto a table that is no ownership parent applied (<paramref name="regardingLinksSet"/>), and its thread lookup
-    /// naming <paramref name="threadIdAfter"/>. <see cref="DecideUnfileAsync"/> asks <see cref="WhyNotAnEligibleUnfile"/> of it,
-    /// the rule <see cref="AfterReparentAsync"/> asks of the row read back after the write.
+    /// lookup it sets onto a table that is no ownership parent applied (<paramref name="regardingLinksSet"/>), every other column
+    /// the rule reads that it writes applied (<paramref name="ruleColumnsWritten"/>: the type and the stamped pair; a <c>null</c>
+    /// removes the column), and its thread lookup naming <paramref name="threadIdAfter"/>. <see cref="DecideUnfileAsync"/> asks
+    /// <see cref="WhyNotAnEligibleUnfile"/> of it, the rule <see cref="AfterReparentAsync"/> asks of the row read back after the
+    /// write.
     /// </summary>
     internal static Entity RowAfterChange(
         Entity current,
         IReadOnlyDictionary<string, EntityReference?> parentChanges,
         IReadOnlyDictionary<string, EntityReference> regardingLinksSet,
-        Guid? threadIdAfter)
+        Guid? threadIdAfter,
+        IReadOnlyDictionary<string, object?>? ruleColumnsWritten = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(parentChanges);
@@ -246,6 +249,17 @@ public sealed class DirectMessageOwnerStep
         {
             if (!string.IsNullOrWhiteSpace(key) && link is { } set && set.Id != Guid.Empty)
                 after[SecureRootInheritance.NormalizeColumn(key)] = set;
+        }
+
+        foreach (var (key, value) in ruleColumnsWritten ?? new Dictionary<string, object?>())
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = SecureRootInheritance.NormalizeColumn(key);
+            if (value is null)
+                after.Attributes.Remove(column);
+            else
+                after[column] = value;
         }
 
         if (threadIdAfter is { } thread && thread != Guid.Empty)

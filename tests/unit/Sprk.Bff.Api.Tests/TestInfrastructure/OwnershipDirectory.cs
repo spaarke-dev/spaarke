@@ -279,6 +279,9 @@ internal sealed class OwnershipDirectory
         // fm task 054 piece 3b: a communication's typed regarding lookups that file nothing (a contact, an account) land too.
         foreach (var (column, link) in RecordReparent.RegardingLinksSetIn(entity, payload))
             changes[column] = link;
+        // Pass 2 (K2): and its type and stamped pair, read the way the writers read them.
+        foreach (var (column, value) in RecordReparent.UnfileRuleColumnsWrittenIn(entity, payload))
+            changes[column] = value;
         Write(entity, id, changes);
     }
 
