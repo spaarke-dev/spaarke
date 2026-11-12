@@ -34,7 +34,7 @@
 | 032 | Widget Decision wizard over MCP shims | C | 🔲 [open] | 023, 024, 031 | Group H | sonnet / xhigh | FULL |
 | 040 | Plugin package and spaarke-decisions skill | D | 🔲 [open] | 003, 030 | Group G | sonnet / high | STANDARD |
 | 041 | Dev BFF deploy (gated on ontology pair) | D | 🔲 [open] | 025, 032 | Group I (alone) | sonnet / high | STANDARD |
-| 043 | Spaarke AI agent fallback on MCP (if T1 fails) | D | 🔲 [open] | 003, 041 | Group J (alone) | sonnet / high | STANDARD |
+| 043 | Spaarke AI agent fallback on MCP (if T1 fails) | D | 🚫 [cancelled] | 003, 041 | Group J (alone) | sonnet / high | STANDARD |
 | 042 | Connector, runbooks and live E2E in Cowork and Chat | D | 🔲 [open] | 040, 041, 043 | Group K (alone) | sonnet / high | STANDARD |
 | 050 | Root CLAUDE.md §1.1 row and CHANGELOG | E | 🔲 [open] | 042 | Group L (main session) | sonnet / high | STANDARD |
 | 051 | Rewrite mcp-tool-handler; update widget and DA skills | E | 🔲 [open] | 042, 043, 050 | Group L (main session) | sonnet / high | STANDARD |
