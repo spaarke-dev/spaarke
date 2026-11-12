@@ -483,3 +483,10 @@ Ten review items, all fixed in `src/solutions/RecordProcedures/` (no BFF, shared
 Results: `npx jest` 10 suites, 197 tests, all pass (was 8 suites, 180 tests: the two new files add 18, the refusal table loses its 422 row, and one test is replaced). `npm run build` succeeds (tsc-surface-gate: 0 errors in the page's own files).
 
 **Owner decision on the read-only escalation (2026-11-12):** EB-D-221. The read routes will return the caller's write permissions, and the wizards will open read-only from them. That is task 084g (uac-r2 conditions U-1 to U-5), which makes the "Read-only user" ui-test satisfiable. The shared WizardShell gap from review finding 2 is filed as ISS-016 (#2755).
+
+**084e fix round 2 and close (2026-11-12).** ontology-r1 re-checked fix round 1 (`47d8dbc337..f823ac6489`) and approved it, with two items:
+
+- **The guard.** `tests/Spaarke.ArchTests/BillingGateForReadCallerGuardTests` IL-scans the BFF and allows `TryPrepareBillingRuleForRead` callers only in `Sprk.Bff.Api.Services.Finance.Procedures`. It carries a must-fire control (a fixture caller outside the read models) and a must-not-fire control (the read service call is seen and allowed).
+- **The doc comment.** `TryPrepareBillingRule`'s summary now says it is the only way to obtain a definition *for an evaluation*, and names its display-only sibling.
+
+Both are in commit `068b0911de`, and ontology-r1 asked for no further re-check. Known limit, accepted by ontology-r1: the read-entry Debug line reuses the `PolicyVersionInvalid` event id. 084e is DONE.
