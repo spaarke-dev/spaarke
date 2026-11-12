@@ -87,8 +87,8 @@ Create these files in the `config/` directory:
 ## 📚 **Documentation**
 
 ### **🎯 Essential Reading**
-- **[Project Restart Guide](docs/project-management/sdap_project/Sprint%202/SDAP_Project_Restart_Guide.md)** - Complete development continuation guide
-- **[Repository Structure](docs/Repository_Structure.md)** - Complete codebase organization
+- **[Documentation Index](docs/INDEX.md)** - Where every current guide, architecture doc and procedure lives
+- **[CLAUDE.md](CLAUDE.md)** - Repository orientation, entry points and build commands
 
 ### **🏛️ Architecture Decisions (ADRs)**
 - **[ADR-002](docs/adr/ADR-002-no-heavy-plugins.md)** - Thin plugin architecture (<50ms, <200 LoC)
@@ -106,7 +106,7 @@ dotnet test tests/unit/Sprk.Bff.Api.Tests/
 
 ## 🤝 **Contributing**
 
-1. **Review**: [Project Restart Guide](docs/project-management/sdap_project/Sprint%202/SDAP_Project_Restart_Guide.md)
+1. **Review**: [Documentation Index](docs/INDEX.md)
 2. **Follow**: Architecture Decision Records (ADRs)
 3. **Test**: Comprehensive testing required
 4. **Document**: Update relevant documentation

@@ -5,12 +5,10 @@
  *   server answers 409 `ruleset.concurrent_edit` (another admin changed the rule after this page loaded it), the page reloads the
  *   rule set, works out what changed and reports it; nothing was accepted or rejected.
  * - {@link saveEdit}: an edit, then a reload (the response to a write carries no version token, so the page always decides from a read).
- * - {@link runDraft}: start the drafting job (075, 202) and poll the rule set read until the run has left its marker.
  * - {@link publishNotice}: what the publish confirmation says about firms seeing clause quotes (D-66).
  */
 
 import {
-  CODE_ALREADY_DRAFTED,
   MAX_REJECTION_REASON,
   isStale,
   type ApiFailure,
@@ -179,69 +177,6 @@ export async function saveEdit(api: RuleSetApi, ruleSetId: string, policyId: str
 
   const reloaded = await api.get(ruleSetId);
   return reloaded.ok ? { kind: 'stale', detail: reloaded.value, failure: result.failure } : { kind: 'failed', failure: result.failure };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Drafting (075 trigger, then poll the rule set read)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type DraftOutcome =
-  | { kind: 'finished'; detail: RuleSetDetail }
-  | { kind: 'timeout'; detail: RuleSetDetail | null }
-  | { kind: 'failed'; failure: ApiFailure };
-
-export interface PollOptions {
-  intervalMs?: number;
-  timeoutMs?: number;
-  sleep?: (ms: number) => Promise<void>;
-  now?: () => number;
-  /** Called with each poll's read, so the page can show the rules as they appear. */
-  onProgress?: (detail: RuleSetDetail) => void;
-  isCancelled?: () => boolean;
-}
-
-const defaultSleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
-
-/** A finished run has written its not-converted list, even when empty (075): `null` means the run has not finished. */
-export const draftFinished = (detail: RuleSetDetail): boolean => detail.notConverted !== null;
-
-/**
- * Start the drafting job (202) and poll the rule set read until its not-converted list is present. `409 ruleset.already_drafted` is
- * not an error to the admin: the run already happened, so the current read is returned.
- */
-export async function runDraft(api: RuleSetApi, ruleSetId: string, options: PollOptions = {}): Promise<DraftOutcome> {
-  const { intervalMs = 3000, timeoutMs = 5 * 60_000, sleep = defaultSleep, now = Date.now, onProgress, isCancelled } = options;
-
-  const started = await api.draft(ruleSetId);
-  if (!started.ok && started.failure.errorCode !== CODE_ALREADY_DRAFTED) {
-    return { kind: 'failed', failure: started.failure };
-  }
-
-  const deadline = now() + timeoutMs;
-  let last: RuleSetDetail | null = null;
-  for (;;) {
-    // Checked before the read as well as after it, so a page that was left mid-wait does not issue one more request.
-    if (isCancelled?.()) {
-      return { kind: 'timeout', detail: last };
-    }
-
-    const read = await api.get(ruleSetId);
-    if (!read.ok) {
-      return { kind: 'failed', failure: read.failure };
-    }
-
-    last = read.value;
-    onProgress?.(last);
-    if (draftFinished(last)) {
-      return { kind: 'finished', detail: last };
-    }
-
-    if (isCancelled?.() || now() >= deadline) {
-      return { kind: 'timeout', detail: last };
-    }
-
-    await sleep(intervalMs);
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -324,9 +324,9 @@ If any row above fails, the host is non-compliant with this contract. Re-read th
 
 ### 9.2 ADRs
 
-- [`ADR-012`](../adr/ADR-012-shared-component-libraries.md) — `@spaarke/*` lib placement. Underpins the "config init crosses singletons" pattern in §2.
-- [`ADR-021`](../adr/ADR-021-fluent-design-system.md) — Fluent v9 tokens. Theme ownership in §3 inherits.
-- [`ADR-022`](../adr/ADR-022-react-version-for-code-pages.md) — React 19 for Code Pages. Both host and embedded tree are React 19.
+- [`ADR-012`](../adr/ADR-012-shared-component-library.md) — `@spaarke/*` lib placement. Underpins the "config init crosses singletons" pattern in §2.
+- [`ADR-021`](../adr/ADR-021-fluent-ui-design-system.md) — Fluent v9 tokens. Theme ownership in §3 inherits.
+- [`ADR-022`](../adr/ADR-022-pcf-platform-libraries.md) — React 19 for Code Pages. Both host and embedded tree are React 19.
 - [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Function-based auth. §5.4 BFF auth requirements + §2.3 auth-config resolution flow inherit ADR-028 directly. **Load this ADR before reading §2 or §5.4.**
 
 ### 9.3 Reference implementation (SpaarkeAi)

@@ -4,9 +4,7 @@ import {
   countProposals,
   decideProposal,
   diffProposals,
-  draftFinished,
   publishNotice,
-  runDraft,
   saveEdit,
 } from '../services/reviewActions';
 import { toFailure } from '../services/ruleSetApi';
@@ -238,75 +236,6 @@ describe('saveEdit', () => {
     api.edit.mockResolvedValue(fail(409, 'ruleset.concurrent_edit'));
     api.get.mockResolvedValue(ok(detail()));
     expect((await saveEdit(api, SET_ID, POLICY_ID, { consequence: 'Reject' })).kind).toBe('stale');
-  });
-});
-
-describe('runDraft', () => {
-  const instant = { sleep: async () => undefined, intervalMs: 1 };
-
-  it('starts the run, then polls until the not-converted list appears', async () => {
-    const api = mockApi();
-    api.draft.mockResolvedValue(ok({ ruleSetId: SET_ID, jobId: 'j', statusUrl: '/s' }));
-    api.get
-      .mockResolvedValueOnce(ok(detail([], { notConverted: null })))
-      .mockResolvedValueOnce(ok(detail([], { notConverted: null })))
-      .mockResolvedValueOnce(ok(detail([proposal()], { notConverted: [] })));
-
-    const progress: number[] = [];
-    const outcome = await runDraft(api, SET_ID, { ...instant, onProgress: d => progress.push(d.proposals.length) });
-
-    expect(outcome.kind).toBe('finished');
-    expect(api.get).toHaveBeenCalledTimes(3);
-    expect(progress).toEqual([0, 0, 1]);
-  });
-
-  it('an empty not-converted list means finished; null means not yet', () => {
-    expect(draftFinished(detail([], { notConverted: [] }))).toBe(true);
-    expect(draftFinished(detail([], { notConverted: null }))).toBe(false);
-  });
-
-  it('already_drafted is not an error: it reads the current rules', async () => {
-    const api = mockApi();
-    api.draft.mockResolvedValue(fail(409, 'ruleset.already_drafted'));
-    api.get.mockResolvedValue(ok(detail([proposal()], { notConverted: [] })));
-    expect((await runDraft(api, SET_ID, instant)).kind).toBe('finished');
-  });
-
-  it('a refused start (not an admin) fails without polling', async () => {
-    const api = mockApi();
-    api.draft.mockResolvedValue(fail(403, null));
-    const outcome = await runDraft(api, SET_ID, instant);
-    expect(outcome.kind).toBe('failed');
-    expect(api.get).not.toHaveBeenCalled();
-  });
-
-  it('times out when the run never finishes', async () => {
-    const api = mockApi();
-    api.draft.mockResolvedValue(ok({ ruleSetId: SET_ID, jobId: 'j', statusUrl: '/s' }));
-    api.get.mockResolvedValue(ok(detail([], { notConverted: null })));
-    let clock = 0;
-    const outcome = await runDraft(api, SET_ID, {
-      intervalMs: 10, timeoutMs: 25, sleep: async ms => { clock += ms; }, now: () => clock,
-    });
-    expect(outcome.kind).toBe('timeout');
-  });
-
-  it('stops polling when cancelled while waiting, without one more read', async () => {
-    const api = mockApi();
-    api.draft.mockResolvedValue(ok({ ruleSetId: SET_ID, jobId: 'j', statusUrl: '/s' }));
-    api.get.mockResolvedValue(ok(detail([], { notConverted: null })));
-    let cancelled = false;
-    const outcome = await runDraft(api, SET_ID, { intervalMs: 1, sleep: async () => { cancelled = true; }, isCancelled: () => cancelled });
-    expect(outcome.kind).toBe('timeout');
-    expect(api.get).toHaveBeenCalledTimes(1);
-  });
-
-  it('a page that was left before the first read issues no read', async () => {
-    const api = mockApi();
-    api.draft.mockResolvedValue(ok({ ruleSetId: SET_ID, jobId: 'j', statusUrl: '/s' }));
-    const outcome = await runDraft(api, SET_ID, { ...instant, isCancelled: () => true });
-    expect(outcome.kind).toBe('timeout');
-    expect(api.get).not.toHaveBeenCalled();
   });
 });
 

@@ -4,7 +4,7 @@
     <title>T191c: the External team share: grant every visible ordinary row to the External Collaborators team, withdraw it when hidden (#2179)</title>
     <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
     <gate>blocked: 191b and 191d merged</gate>
-    <status>not-started</status>
+    <status>completed (PR open, not merged; writes ship off; turning them on is 191i)</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes POA shares on every lineage row and revokes flagged users' shares; security and tenant isolation.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -121,7 +121,7 @@
     <criterion testable="true">Test scope: the transitions in design §3.7 and the faults in §3.8; the placement job and Office are other tasks.</criterion>
   </acceptance-criteria>
 
-  <notes>POA volume on dev is about 1,100 rows (spike S3: 12.7 grants per second).</notes>
+  <notes>POA volume on dev is about 1,100 rows (spike S3: 12.7 grants per second). Done 2026-11-11 on task/uac-191c: deviations, review dispositions, known limits and the 191i owner-go list are in notes/task-191c-external-team-share-job.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

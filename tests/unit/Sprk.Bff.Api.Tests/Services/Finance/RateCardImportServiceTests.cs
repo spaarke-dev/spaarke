@@ -5,12 +5,11 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Graph;
-using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Tests.Finance.Files;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
@@ -22,8 +21,9 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// </summary>
 /// <remarks>
 /// Maintain-class (ADR-038): the guarantees admins and the rules (046, 071, 072) rely on — an invalid row writes nothing (no record, no
-/// file), nothing is Published or Approved before publish, overlap is refused twice, and the source workbook lands unlinked in the
-/// Procedure Library. Dataverse and SPE are substituted at their narrow seams; the parser, the validator and the orchestration are real.
+/// file), nothing is Published or Approved before publish, overlap is refused twice, and the source workbook becomes the Procedure Version's
+/// source file (task 116) after the rows, a refused or failed file write removing them. Dataverse is substituted at its narrow seam; the file
+/// store is the REAL <see cref="StoredFileService"/> over its fakes; the parser, the validator and the orchestration are real.
 /// </remarks>
 public sealed class RateCardImportServiceTests
 {
@@ -32,9 +32,8 @@ public sealed class RateCardImportServiceTests
     internal static readonly Guid VersionId = Guid.NewGuid();
     private static readonly Guid TeamId = Guid.NewGuid();
     internal static readonly Guid UsdId = Guid.NewGuid();
-    private static readonly Guid DocumentId = Guid.NewGuid();
     private static readonly Guid CallerOid = Guid.NewGuid();
-    private const string Drive = "b!procedurelibrary";
+    private static readonly StoredFileParent VersionParent = new(StoredFileParentKind.ProcedureVersion, VersionId);
 
     // ── Workbook helpers (rows are positional per RateCardWorkbook's column order) ──
 
@@ -56,66 +55,35 @@ public sealed class RateCardImportServiceTests
     internal sealed class Harness
     {
         public readonly Mock<IGenericEntityService> Entities = new();
-        public readonly Mock<IDocumentDataverseService> Documents = new();
-        public readonly Mock<SpeFileStore> Spe;
         public readonly Mock<IRecordOwnershipResolver> Ownership = new();
-        public readonly FinanceOptions Options = new() { ProcedureLibraryContainerId = Drive };
+
+        /// <summary>Task 116: the REAL file store over its fakes; the caller holds Write on <see cref="VersionId"/> unless a test says otherwise.</summary>
+        public readonly StoredFileRig Files;
 
         public readonly Dictionary<string, List<Entity>> Rows = new();
         public readonly List<Entity> Created = new();
         public readonly List<(string Entity, Guid Id)> Deleted = new();
         public readonly List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updated = new();
         public readonly List<(string Entity, List<(Guid id, Dictionary<string, object> fields)> Updates)> BulkUpdated = new();
-        public readonly List<(string Drive, string Name, byte[] Bytes, ConflictBehavior Conflict)> Uploads = new();
-        public readonly List<(string Drive, string Item)> FileDeletes = new();
-        public readonly List<CreateDocumentRequest> DocumentCreates = new();
-        public readonly List<UpdateDocumentRequest> DocumentUpdates = new();
         public readonly List<RecordOwnershipContext> OwnerContexts = new();
         public Func<Entity, bool>? FailCreateWhen;
         public Exception CreateFailure = new InvalidOperationException("simulated Dataverse failure");
         public RecordOwnerResolution OwnerAnswer = RecordOwnerResolution.Owned(TeamId);
 
-        public int CreatedWrites => Created.Count + DocumentCreates.Count + Uploads.Count;
+        /// <summary>Rows created plus every file store write (row writes and blobs).</summary>
+        public int CreatedWrites => Created.Count + Files.Dataverse.Writes + Files.Gateway.Names.Count;
 
-        public Harness()
+        /// <summary>The version's stored-file rows, by status.</summary>
+        public IEnumerable<Entity> FilesWith(StoredFileStatus status) =>
+            Files.Dataverse.Rows.Values.Where(r => r.GetAttributeValue<OptionSetValue>(StoredFileSchema.Status)?.Value == (int)status);
+
+        public Harness(bool storeConfigured = true)
         {
+            Files = new StoredFileRig(configured: storeConfigured);
+            Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read | AccessRights.Write);
             Seed(new Entity("sprk_organization", FirmId));
             Seed(ProcedureRow(ProcedureId, ProcedureType.RateCard, FirmId), VersionRow(VersionId, ProcedureId, ProcedureEntity.VersionStatusDraft));
             Seed(Currency("USD", UsdId), Currency("EUR", Guid.NewGuid()));
-
-            var gcf = Mock.Of<IGraphClientFactory>();
-            Spe = new Mock<SpeFileStore>(
-                MockBehavior.Strict,
-                new ContainerOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<ContainerOperations>>()),
-                new DriveItemOperations(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<ILogger<DriveItemOperations>>()),
-                new UploadSessionManager(gcf, TestSpeOwnership.AllowAll(gcf), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
-                new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
-                null!);
-
-            Spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string name, Stream content, ConflictBehavior conflict, CancellationToken _) =>
-                {
-                    using var copy = new MemoryStream();
-                    content.CopyTo(copy);
-                    Uploads.Add((drive, name, copy.ToArray(), conflict));
-                    return new FileHandleDto("item-1", name, null, copy.Length, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, false, "https://web/item-1", drive);
-                });
-            Spe.Setup(s => s.DeleteFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string item, CancellationToken _) =>
-                {
-                    FileDeletes.Add((drive, item));
-                    return true;
-                });
-
-            Documents.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((CreateDocumentRequest r, CancellationToken _) =>
-                {
-                    DocumentCreates.Add(r);
-                    return DocumentId.ToString();
-                });
-            Documents.Setup(d => d.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
-                .Callback((string _, UpdateDocumentRequest r, CancellationToken _) => DocumentUpdates.Add(r))
-                .Returns(Task.CompletedTask);
 
             Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((RecordOwnershipContext c, CancellationToken _) =>
@@ -155,9 +123,7 @@ public sealed class RateCardImportServiceTests
         }
 
         public RateCardImportService Service() => new(
-            Entities.Object, Documents.Object, Spe.Object, Ownership.Object,
-            Mock.Of<IOptionsMonitor<FinanceOptions>>(m => m.CurrentValue == Options),
-            Mock.Of<ILogger<RateCardImportService>>());
+            Entities.Object, Files.Service, Ownership.Object, Mock.Of<ILogger<RateCardImportService>>());
 
         public void Seed(params Entity[] rows)
         {
@@ -232,7 +198,11 @@ public sealed class RateCardImportServiceTests
     }
 
     internal static RateCardImportRequest Request(Guid? firm = null, Guid? version = null) =>
-        new(firm, "2026 Acme rates", version ?? VersionId, CallerOid);
+        new(firm, "2026 Acme rates", version ?? VersionId, CallerOid, StoredFileRig.Caller(), "caller-token");
+
+    /// <summary>Task 116: the card names no source lookup (the workbook is the version's file).</summary>
+    private static void NamesNoSourceLookup(Entity card) =>
+        card.Attributes.Keys.Should().NotContain(k => k.StartsWith("sprk_source", StringComparison.Ordinal), "the workbook is the version's file (task 116)");
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Template and parser
@@ -379,7 +349,7 @@ public sealed class RateCardImportServiceTests
         card.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(RateCardImportService.CardDraft);
         card.GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId, "the firm comes from the Procedure");
         card.GetAttributeValue<EntityReference>("sprk_procedureversion").Id.Should().Be(VersionId);
-        card.GetAttributeValue<EntityReference>("sprk_sourcedocument").Id.Should().Be(DocumentId);
+        NamesNoSourceLookup(card);
         card.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
         card.GetAttributeValue<DateTime>("sprk_effectivefrom").Should().Be(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         card.GetAttributeValue<DateTime>("sprk_effectiveto").Should().Be(new DateTime(2026, 12, 31, 0, 0, 0, DateTimeKind.Utc));
@@ -413,37 +383,88 @@ public sealed class RateCardImportServiceTests
         h.BulkUpdated.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task Import_Valid_StoresTheWorkbookInTheProcedureLibrary_AsAnUnlinkedDocument_LinkedAsTheCardsSource()
+    [Fact(DisplayName = "116: the workbook becomes the version's ONE Servable source file, written after the rows, as the caller; the result carries its id")]
+    public async Task Import_Valid_StoresTheWorkbookAsTheVersionsSourceFile_AfterTheRows()
     {
         var h = new Harness();
         var workbook = ValidWorkbook();
+        var rowsWhenTheFileWasStaged = -1;
+        h.Files.Gateway.BeforeOp = (op, _) => rowsWhenTheFileWasStaged = rowsWhenTheFileWasStaged < 0 ? h.Created.Count : rowsWhenTheFileWasStaged;
 
         var outcome = await h.Service().ImportAsync(Request(), workbook, default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
-        var upload = h.Uploads.Should().ContainSingle().Subject;
-        upload.Drive.Should().Be(Drive);
-        upload.Bytes.Should().Equal(workbook);
-        upload.Name.Should().EndWith(".xlsx").And.NotContain("/");
+        var file = h.FilesWith(StoredFileStatus.Servable).Should().ContainSingle().Subject;
+        outcome.Value!.SourceFileId.Should().Be(file.Id);
+        file.GetAttributeValue<EntityReference>(StoredFileSchema.ProcedureVersionTable).Id.Should().Be(VersionId);
+        file.GetAttributeValue<OptionSetValue>(StoredFileSchema.Purpose).Value.Should().Be((int)StoredFilePurpose.ProcedureSource);
+        file.GetAttributeValue<string>(StoredFileSchema.ContentType).Should().Be("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        file.GetAttributeValue<string>(StoredFileSchema.Name).Should().EndWith(".xlsx").And.NotContain("/");
+        rowsWhenTheFileWasStaged.Should().Be(h.Created.Count, "the file is written after every card, rate and timekeeper row");
+        h.Files.Probe.Calls.Should().Contain(c => c.Set == StoredFileSchema.ProcedureVersionEntitySet && c.Id == VersionId && c.Token == "caller-token",
+            "the caller's own Write on the version is asked, with the caller's token");
+    }
 
-        h.DocumentCreates.Should().ContainSingle().Which.ContainerId.Should().Be(Drive);
-        h.DocumentCreates[0].OwningTeamId.Should().Be(TeamId);
-        var pointers = h.DocumentUpdates.Should().ContainSingle().Subject;
-        pointers.GraphDriveId.Should().Be(Drive);
-        pointers.GraphItemId.Should().Be("item-1");
+    [Fact(DisplayName = "116: a second import replaces the version's source file: the new one Servable, the earlier one Removed")]
+    public async Task Import_Again_ReplacesTheVersionsEarlierSourceFile()
+    {
+        var h = new Harness();
+        var earlier = Guid.NewGuid();
+        h.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
 
-        // DEF-015: no Procedure Library document row is linked to a matter, project or work assignment (or any other record).
-        typeof(UpdateDocumentRequest).GetProperties()
-            .Where(p => p.Name.EndsWith("Lookup", StringComparison.Ordinal))
-            .Should().OnlyContain(p => p.GetValue(pointers) == null, "the source document is created unlinked (DEF-015)");
-        // The create carries links too (task 030b's Association, task 034's ParentDocumentLookup): the one this import sends
-        // sets none of them.
-        var create = h.DocumentCreates[0];
-        create.Association.Should().BeNull("the source document is created unlinked (DEF-015)");
-        typeof(CreateDocumentRequest).GetProperties()
-            .Where(p => p.Name.EndsWith("Lookup", StringComparison.Ordinal))
-            .Should().OnlyContain(p => p.GetValue(create) == null, "the source document is created unlinked (DEF-015)");
+        var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
+        h.FilesWith(StoredFileStatus.Servable).Select(r => r.Id).Should().Equal(outcome.Value!.SourceFileId);
+        h.FilesWith(StoredFileStatus.Removed).Select(r => r.Id).Should().Equal(earlier);
+    }
+
+    [Theory(DisplayName = "116 must-fire: a refused file write removes every row the import created and returns the store's refusal")]
+    [InlineData("noWrite", StoredFileRefusal.NoWriteOnParent)]
+    [InlineData("noOwner", StoredFileRefusal.OwnerUnresolved)]
+    public async Task Import_WhenTheFileWriteIsRefused_RemovesTheRows_AndReturnsTheRefusal(string scenario, string code)
+    {
+        var h = new Harness();
+        var earlier = Guid.NewGuid();
+        h.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        if (scenario == "noWrite")
+        {
+            h.Files.Probe.Grant(StoredFileSchema.ProcedureVersionEntitySet, VersionId, AccessRights.Read);
+        }
+        else
+        {
+            h.Files.OwnerAnswer = RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team");
+        }
+
+        var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.FileRefused);
+        outcome.FileRefusal!.RefusalCode.Should().Be(code);
+        h.Created.Should().NotBeEmpty("the rows were written before the file");
+        h.Deleted.Select(d => d.Id).Should().BeEquivalentTo(h.Created.Select(e => e.Id), "every row it created is removed");
+        h.Rows["sprk_ratecard"].Should().BeEmpty();
+        h.Rows["sprk_timekeeper"].Should().BeEmpty();
+        h.FilesWith(StoredFileStatus.Servable).Select(r => r.Id).Should().Equal(new[] { earlier }, "the earlier source file is untouched");
+    }
+
+    [Fact(DisplayName = "116 must-fire: a file write that faults (the earlier file cannot be withdrawn) removes the rows; 500 import_failed; the earlier file stays Servable")]
+    public async Task Import_WhenTheFileWriteFaults_RemovesTheRows_AndAnswersImportFailed()
+    {
+        var h = new Harness();
+        var earlier = Guid.NewGuid();
+        h.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        h.Files.Dataverse.Mock.Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                StoredFileSchema.Entity, earlier, It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse 429"));
+
+        var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.Refused);
+        outcome.StatusCode.Should().Be(500);
+        outcome.ErrorCode.Should().Be(RateCardImportService.CodeImportFailed);
+        h.Deleted.Select(d => d.Id).Should().BeEquivalentTo(h.Created.Select(e => e.Id));
+        h.Rows["sprk_ratecard"].Should().BeEmpty();
+        h.FilesWith(StoredFileStatus.Servable).Select(r => r.Id).Should().Equal(new[] { earlier });
     }
 
     [Fact]
@@ -461,10 +482,6 @@ public sealed class RateCardImportServiceTests
         // 194b R3b-2: asked through ForRow for the card's table.
         context.ChildEntityLogicalName.Should().Be(RateCardImportService.RateCardEntity);
 
-        // DEF-015: the Procedure Library document is not linked to any record.
-        typeof(UpdateDocumentRequest).GetProperties()
-            .Where(p => p.Name.EndsWith("Lookup", StringComparison.Ordinal))
-            .Should().OnlyContain(p => p.GetValue(h.DocumentUpdates.Single()) == null);
     }
 
     [Fact]
@@ -606,7 +623,7 @@ public sealed class RateCardImportServiceTests
         copy.GetAttributeValue<EntityReference>("sprk_procedureversion").Id.Should().Be(NextVersionId);
         copy.GetAttributeValue<EntityReference>("sprk_firm").Id.Should().Be(FirmId);
         copy.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(TeamId);
-        copy.Contains("sprk_sourcedocument").Should().BeFalse("the previous workbook is not the new card's source");
+        NamesNoSourceLookup(copy);
         copy.Contains("sprk_matter").Should().BeFalse();
         var rates = creates.Where(e => e.LogicalName == "sprk_ratecardrate").ToList();
         rates.Should().OnlyContain(r => r.GetAttributeValue<EntityReference>("sprk_ratecard").Id == copy.Id);
@@ -850,18 +867,18 @@ public sealed class RateCardImportServiceTests
     // Import: refusals and failure
     // ═══════════════════════════════════════════════════════════════════════════
 
-    [Fact]
-    public async Task Import_WhenTheProcedureLibraryIsNotConfigured_IsRefusedWith503_AndWritesNothing()
+    [Fact(DisplayName = "116: a file store that is not configured refuses 503 stored_file.store_not_configured before anything is written")]
+    public async Task Import_WhenTheFileStoreIsNotConfigured_IsRefusedWith503_AndWritesNothing()
     {
-        var h = new Harness();
-        h.Options.ProcedureLibraryContainerId = string.Empty;
+        var h = new Harness(storeConfigured: false);
 
         var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), default);
 
         outcome.Kind.Should().Be(RateCardOutcomeKind.Refused);
         outcome.StatusCode.Should().Be(503);
-        outcome.ErrorCode.Should().Be(RateCardImportService.CodeContainerNotConfigured);
+        outcome.ErrorCode.Should().Be(StoredFileRefusal.NotConfigured);
         h.CreatedWrites.Should().Be(0);
+        h.OwnerContexts.Should().BeEmpty("refused before any read or owner question");
     }
 
     [Fact]
@@ -878,7 +895,7 @@ public sealed class RateCardImportServiceTests
     }
 
     [Fact]
-    public async Task Import_WhenAWriteFailsPartWay_RemovesEverythingItCreated_IncludingTheUploadedFile()
+    public async Task Import_WhenAWriteFailsPartWay_RemovesEverythingItCreated_AndStoresNoFile()
     {
         var h = new Harness();
         var rateWrites = 0;
@@ -890,9 +907,10 @@ public sealed class RateCardImportServiceTests
         outcome.ErrorCode.Should().Be(RateCardImportService.CodeImportFailed);
         outcome.StatusCode.Should().Be(500);
         h.Created.Count.Should().Be(2 + 1 + 1, "two timekeepers, the card and the first rate had been written");
-        h.Deleted.Select(d => d.Id).Should().BeEquivalentTo(h.Created.Select(e => e.Id).Append(DocumentId));
+        h.Deleted.Select(d => d.Id).Should().BeEquivalentTo(h.Created.Select(e => e.Id));
         h.Deleted.First().Entity.Should().Be("sprk_ratecardrate", "cleanup runs in reverse order");
-        h.FileDeletes.Should().ContainSingle().Which.Should().Be((Drive, "item-1"));
+        h.Files.Dataverse.Writes.Should().Be(0, "the file is written last, so a row failure stores none");
+        h.Files.Gateway.Names.Should().BeEmpty();
         h.Rows["sprk_ratecard"].Should().BeEmpty();
         h.Rows["sprk_timekeeper"].Should().BeEmpty();
     }
@@ -914,7 +932,7 @@ public sealed class RateCardImportServiceTests
 
         await act.Should().ThrowAsync<OperationCanceledException>();
         h.Rows["sprk_timekeeper"].Should().BeEmpty("the timekeepers written before the cancel are removed");
-        h.FileDeletes.Should().ContainSingle("the uploaded workbook is removed");
+        h.Files.Dataverse.Writes.Should().Be(0, "no file was stored before the cancel");
         h.Deleted.Select(d => d.Entity).Should().Contain("sprk_timekeeper");
     }
 
@@ -1033,7 +1051,7 @@ public sealed class RateCardImportServiceTests
         outcome.Kind.Should().Be(RateCardOutcomeKind.Refused);
         outcome.ErrorCode.Should().Be(RateCardImportService.CodeResultTruncated);
         h.Created.Should().BeEmpty();
-        h.Uploads.Should().BeEmpty();
+        h.CreatedWrites.Should().Be(0);
     }
 
     [Fact]
@@ -1171,4 +1189,45 @@ public sealed class RateCardImportServiceTests
     [InlineData("04/03/2026", false)]
     public void TryParseDate_AcceptsIsoTextAndExcelSerials_Only(string text, bool ok) =>
         RateCardImportService.TryParseDate(text, out _).Should().Be(ok);
+
+    [Fact(DisplayName = "116 fix 1 (A1) must-fire: a version published while the workbook is stored: the new file is withdrawn, every row removed, the earlier file stays Servable")]
+    public async Task Import_AVersionPublishedDuringTheFileWrite_IsRefused_AndRemovesTheRows()
+    {
+        var h = new Harness();
+        var earlier = Guid.NewGuid();
+        h.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        h.Files.Gateway.BeforeOp = (_, _) =>
+            h.Rows[ProcedureEntity.VersionEntity].Single(r => r.Id == VersionId)[ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive);
+
+        var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), default);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.FileRefused);
+        outcome.FileRefusal!.RefusalCode.Should().Be(StoredFileRefusal.ParentNoLongerAccepts);
+        h.Deleted.Select(d => d.Id).Should().BeEquivalentTo(h.Created.Select(e => e.Id), "the refusal runs the row compensation");
+        h.FilesWith(StoredFileStatus.Servable).Select(r => r.Id).Should().Equal(new[] { earlier });
+    }
+
+    [Fact(DisplayName = "116 fix 1 (A3) must-fire: a request cancelled once the workbook is Servable completes: rows kept, exactly one Servable file")]
+    public async Task Import_CancelledOnceTheFileIsServable_KeepsTheRowsAndOneFile()
+    {
+        var h = new Harness();
+        var earlier = Guid.NewGuid();
+        h.Files.SeedFile(earlier, VersionParent, new byte[] { 1 }, purpose: StoredFilePurpose.ProcedureSource);
+        using var request = new CancellationTokenSource();
+        h.Files.Dataverse.Mock.Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                StoredFileSchema.Entity, earlier, It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string _, Dictionary<string, object> fields, CancellationToken token) =>
+            {
+                request.Cancel(); // the client goes away right after the new file became Servable
+                token.ThrowIfCancellationRequested(); // a real call observes the token it is given
+                h.Files.Dataverse.Rows[id][StoredFileSchema.Status] = fields[StoredFileSchema.Status];
+                return Task.CompletedTask;
+            });
+
+        var outcome = await h.Service().ImportAsync(Request(), ValidWorkbook(), request.Token);
+
+        outcome.Kind.Should().Be(RateCardOutcomeKind.Done);
+        h.Deleted.Should().BeEmpty();
+        h.FilesWith(StoredFileStatus.Servable).Should().ContainSingle().Which.Id.Should().Be(outcome.Value!.SourceFileId);
+    }
 }

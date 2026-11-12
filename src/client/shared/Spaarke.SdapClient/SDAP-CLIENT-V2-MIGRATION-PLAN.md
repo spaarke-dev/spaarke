@@ -847,4 +847,4 @@ requests
 **Document Version:** 1.0
 **Last Updated:** December 2, 2025
 **Status:** ✅ Ready for Migration
-**Next:** See [INTEGRATION-GUIDE.md](./INTEGRATION-GUIDE.md) for platform-specific integration patterns
+**Next:** See [INTEGRATION-GUIDE.md](./SDAP-CLIENT-V2-INTEGRATION-GUIDE.md) for platform-specific integration patterns

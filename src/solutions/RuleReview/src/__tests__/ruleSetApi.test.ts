@@ -130,43 +130,26 @@ describe('createRuleSetApi routes', () => {
     expect(JSON.parse(init.body)).toEqual({ consequence: 'Reject' });
   });
 
-  it('draft, publish, assignment and visibility use their 076/075 routes', async () => {
+  it('publish, assignment and visibility use their 076 routes', async () => {
     const f = fetchReturning({});
     const api = createRuleSetApi(f, BASE);
-    await api.draft(SET_ID);
     await api.publish(SET_ID, '2026-11-01');
     await api.assign(SET_ID, 'Firm', 'abc');
     await api.assign(SET_ID, 'ClientDefault', 'ignored');
     await api.setVisibility(SET_ID, true);
     const urls = f.mock.calls.map(c => `${c[1].method} ${String(c[0]).replace(`${BASE}/api/finance/rulesets/${SET_ID}`, '')}`);
-    expect(urls).toEqual(['POST /draft', 'POST /publish', 'PUT /assignment', 'PUT /assignment', 'PUT /visibility']);
-    expect(JSON.parse(f.mock.calls[1][1].body)).toEqual({ effectiveDate: '2026-11-01' });
-    expect(JSON.parse(f.mock.calls[2][1].body)).toEqual({ scope: 'Firm', firmId: 'abc' });
-    expect(JSON.parse(f.mock.calls[3][1].body)).toEqual({ scope: 'ClientDefault', firmId: null });
-    expect(JSON.parse(f.mock.calls[4][1].body)).toEqual({ visibleToFirms: true });
+    expect(urls).toEqual(['POST /publish', 'PUT /assignment', 'PUT /assignment', 'PUT /visibility']);
+    expect(JSON.parse(f.mock.calls[0][1].body)).toEqual({ effectiveDate: '2026-11-01' });
+    expect(JSON.parse(f.mock.calls[1][1].body)).toEqual({ scope: 'Firm', firmId: 'abc' });
+    expect(JSON.parse(f.mock.calls[2][1].body)).toEqual({ scope: 'ClientDefault', firmId: null });
+    expect(JSON.parse(f.mock.calls[3][1].body)).toEqual({ visibleToFirms: true });
   });
 
-  it('create puts the metadata in the query and the file in the multipart body', async () => {
-    const f = fetchReturning({});
-    const file = new Blob(['guideline'], { type: 'application/pdf' });
-    await createRuleSetApi(f, BASE).create({ name: 'A & B', sourceKind: 'Guideline', scope: 'Firm', firmId: 'f-1', file, fileName: 'g.pdf' });
-    const [url, init] = f.mock.calls[0];
-    const u = new URL(String(url));
-    expect(u.pathname).toBe('/api/finance/rulesets');
-    expect(u.searchParams.get('name')).toBe('A & B');
-    expect(u.searchParams.get('sourceKind')).toBe('Guideline');
-    expect(u.searchParams.get('scope')).toBe('Firm');
-    expect(u.searchParams.get('firmId')).toBe('f-1');
-    expect(init.body).toBeInstanceOf(FormData);
-    expect((init.body as FormData).get('file')).toBeTruthy();
-  });
-
-  it('create leaves the firm out of a client default', async () => {
-    const f = fetchReturning({});
-    await createRuleSetApi(f, BASE).create({
-      name: 'N', sourceKind: 'RateCard', scope: 'ClientDefault', firmId: 'f-1', file: new Blob(['x']), fileName: 'r.xlsx',
-    });
-    expect(new URL(String(f.mock.calls[0][0])).searchParams.has('firmId')).toBe(false);
+  it('the client has no create or draft call: the BFF routes are retired (116), a rule set comes with its Procedure', () => {
+    const api = createRuleSetApi(fetchReturning({}), BASE) as unknown as Record<string, unknown>;
+    expect(api.create).toBeUndefined();
+    expect(api.draft).toBeUndefined();
+    expect(Object.keys(api).sort()).toEqual(['accept', 'assign', 'edit', 'get', 'list', 'publish', 'reject', 'setVisibility']);
   });
 
   it('a throwing fetch becomes a failed result, never an exception', async () => {

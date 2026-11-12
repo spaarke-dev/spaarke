@@ -45,6 +45,10 @@ public class PairedGrantFollowsShareRevokeGuardTests
         ["Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar"] =
             "uac-r2 task 198 Part D (merged from master): a filed communication and its content rows (attachments, " +
             "participants, review logs, documents): not a grant root, so no grant is paired there",
+        ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer"] =
+            "uac-r2 task 191c: revokes the External Collaborators TEAM share (no contact grant is ever paired with a team share) " +
+            "and flagged users' per-user shares on CHILD rows only (roots are the Restricted remover's, I-14): not a grant root, " +
+            "so no grant is paired there",
         ["Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares"] =
             "uac-r2 task 198 Part C (merged from master): a Direct message's participant shares on the communication and its " +
             "content rows: not a grant root, so no grant is paired there",

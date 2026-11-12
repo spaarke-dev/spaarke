@@ -381,7 +381,7 @@ catch (MsalServiceException ex)
 ## Related Articles
 
 - [oauth-obo-errors.md](oauth-obo-errors.md) - Error codes and fixes
-- [sdap-auth-patterns.md](sdap-auth-patterns.md) - SDAP-specific auth flows
+- [sdap-auth-patterns.md](../architecture/sdap-auth-patterns.md) - SDAP-specific auth flows
 
 ---
 

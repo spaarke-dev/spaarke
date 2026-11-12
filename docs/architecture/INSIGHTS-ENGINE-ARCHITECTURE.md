@@ -1594,12 +1594,12 @@ These curated knowledge documents informed the Engine's design and are reference
 | ADR | Relevance |
 |---|---|
 | [ADR-001](../adr/ADR-001-minimal-api-and-workers.md) | BFF runtime (Minimal API endpoints); Functions placement is now [ADR-052](../adr/ADR-052-workload-placement.md) |
-| [ADR-008](../adr/ADR-008-endpoint-filter-authorization.md) | Endpoint filter authorization on `POST /api/insights/ask` |
-| [ADR-009](../adr/ADR-009-redis-first-caching.md) | Redis-first caching applied to two-tier memory and per-question TTL |
+| [ADR-008](../adr/ADR-008-authorization-endpoint-filters.md) | Endpoint filter authorization on `POST /api/insights/ask` |
+| [ADR-009](../adr/ADR-009-caching-redis-first.md) | Redis-first caching applied to two-tier memory and per-question TTL |
 | [ADR-010](../adr/ADR-010-di-minimalism.md) | DI minimalism; `InsightsModule.cs` follows the registration-audit pattern |
 | [ADR-013](../adr/ADR-013-ai-architecture.md) | AI architecture; Engine is an extension of this |
 | [ADR-016](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md) | Rate limiting on Insight endpoints |
-| [ADR-019](../adr/ADR-019-problemdetails.md) | ProblemDetails error envelope |
+| [ADR-019](../adr/ADR-019-api-errors-and-problemdetails.md) | ProblemDetails error envelope |
 | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Canonical Spaarke Auth v2 architecture (accepted 2026-05-19); Engine auth design must remain consistent |
 
 ### 17.6 Other Spaarke projects coordinating with this Engine
@@ -2250,12 +2250,12 @@ This requires the production metrics infrastructure to be running and the corpus
 
 - [ADR-001 — Minimal API and Workers](../adr/ADR-001-minimal-api-and-workers.md) (BFF endpoints; its Functions provisions are superseded by ADR-052)
 - [ADR-052 — Workload placement](../adr/ADR-052-workload-placement.md) (where this engine's Functions and any Durable Task orchestration run)
-- [ADR-008 — Endpoint Filter Authorization](../adr/ADR-008-endpoint-filter-authorization.md)
-- [ADR-009 — Redis-First Caching](../adr/ADR-009-redis-first-caching.md)
+- [ADR-008 — Endpoint Filter Authorization](../adr/ADR-008-authorization-endpoint-filters.md)
+- [ADR-009 — Redis-First Caching](../adr/ADR-009-caching-redis-first.md)
 - [ADR-010 — DI Minimalism](../adr/ADR-010-di-minimalism.md)
 - [ADR-013 — AI Architecture](../adr/ADR-013-ai-architecture.md)
 - [ADR-016 — AI Cost, Rate Limit, and Backpressure](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md)
-- [ADR-019 — ProblemDetails](../adr/ADR-019-problemdetails.md)
+- [ADR-019 — ProblemDetails](../adr/ADR-019-api-errors-and-problemdetails.md)
 - [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Canonical Spaarke Auth v2 architecture (accepted 2026-05-19). Engine auth design must remain consistent.
 - [ADR-029](../../.claude/adr/ADR-029-bff-publish-hygiene.md) — BFF Publish Hygiene + CVE override (applies to any Phase 1.5 wave adding NuGet packages)
 - [ADR-032](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — **NEW 2026-06-01** BFF Null-Object Kill-Switch Pattern. Applies to any new Insights service in a `*Module.cs` `if (flag) { ... }` block consumed by unconditionally-mapped endpoints (P1 Promote-to-unconditional, P2 Quiet no-op — query services FORBIDDEN, P3 Fail-fast via `FeatureDisabledException` → 503 ProblemDetails). Affects r2 Wave C/D/E.

@@ -9,11 +9,11 @@ The following blog post describes the complete solution setup:[Building a Copilo
 
 ### List/Retrieve my To-Do Tasks
 
-!["Graph API To-Do List Tasks "](./assets/action_listtasks.gif)
+*(image not included in this snapshot: "Graph API To-Do List Tasks ")*
 
 ### Create my To-Do Tasks
 
-!["Graph API To-Do Create Tasks "](./assets/action_createToDoTask.gif)
+*(image not included in this snapshot: "Graph API To-Do Create Tasks ")*
 
 ## Contributors
 
@@ -89,7 +89,7 @@ We'll add the video from the community call recording here
 
 ## Video
 
-[![YouTube video title](./assets/video-thumbnail.jpg)](https://www.youtube.com/watch?v=XXXXX "YouTube video title")
+[*(image not included in this snapshot: YouTube video title)*](https://www.youtube.com/watch?v=XXXXX "YouTube video title")
 -->
 
 ## Help

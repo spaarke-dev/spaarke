@@ -292,9 +292,17 @@ internal sealed class RecordingRightsProbe : CallerRecordAccessProbe
 
     public void Grant(string set, Guid id, AccessRights rights) => Rights[(set, id)] = rights;
 
+    /// <summary>Task 116 fix round 4 (K1): when set, the single rights question throws it (a Dataverse fault), after recording the call.</summary>
+    public Exception? Fault { get; set; }
+
     public override Task<AccessRights> GetCallerRightsAsync(string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
     {
         Calls.Enqueue((entitySet, recordId, callerBearerToken));
+        if (Fault is { } fault)
+        {
+            return Task.FromException<AccessRights>(fault);
+        }
+
         return Task.FromResult(callerBearerToken is not null && Rights.TryGetValue((entitySet, recordId), out var r) ? r : AccessRights.None);
     }
 
