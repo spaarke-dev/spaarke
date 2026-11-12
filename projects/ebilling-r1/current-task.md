@@ -5,13 +5,13 @@
 > - **#2689, #2708 and #2724 (116) MERGED** to master. #2724 merged at 05:25Z (merge commit, auto-merge, owner "Yes proceed").
 > - **Dev:** BFF `6dbe69b9e2` (deployed by uac-r2 2026-11-12; a local merge of master `a654da59c4` and mcp-r1's spike `755987b385`; carries #2724 (116), #2708, #2695, #2719, #2721, #2723; every later dev deploy must include the spike). 164 and 096b ribbons applied (with 029's hides); SecureChild `-Verify` exits 0.
 > - **116's column `sprk_procedureversion.sprk_notconvertedlist` IS on dev** (Memo, secured, audited, created 2026-11-10 14:35 by 116's own run of 080's script). A 2026-11-12 `-WhatIf` of `Deploy-EbillingProcedureSchema.ps1` reported 0 created, 0 changed; no write was made. The earlier "not on dev" note was wrong; uac-r2 and provisioning-r1 were told so. #2724 may go into a dev deploy. **Stamps** still need SpaarkeMaster 1.3.1.0 (which adds the column to source) before they get a BFF carrying 116.
-> - **SpaarkeMaster 1.3.1.0** (Build over the published 1.3.0.0, `d53d67f604`) is committed locally as `4085149e85`, NOT pushed. It contains:
+> - **SpaarkeMaster 1.3.1.0** (Build over the published 1.3.0.0, `d53d67f604`) MERGED to master in #2727 (`2b79f06b4b`, 2026-11-12 14:41Z); NOT yet published. It contains:
 >   - the version bump and 116's memo in source, with `sprk_notconverted`'s grants and the EB-D-211 Description;
 >   - a release-history row in `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`;
 >   - `spaarkemaster-1.3.1.0.json`.
 >
 >   ArchTests 2505/2505; agreement and procedure tests 551/551. Publishing (`publish-dataverse-solutions-manifest.yml`, `publish: true`, from master) is the owner's step after merge. provisioning-r1 is waiting for the published version, because its H7b S26 stops new runs until 166's lock ships.
-> - **#2725 (profile matched by name):** our three scripts are fixed locally as `f7240c397b` (not pushed). The other 15 sites belong to uac-r2 and R3.
+> - **#2725 (profile matched by name):** our three scripts are fixed (`f7240c397b`, merged in #2727). The other 15 sites belong to uac-r2 and R3.
 > - **Next (checkpoint 2026-11-12, late):**
 >   - **084 RUNNING:** fresh implementer `impl-084r` on `task/ebilling-084-r1` from work `afe78f9d01` (agent worktree). Owner decisions: EB-D-218 (option A: app-only rows + ONE batched caller-rights check over every exposed row, 503 `procedures.unavailable` on any refusal; uac-r2's 4 conditions) and EB-D-219 (displaced → new task **084e**, POML written, TASK-INDEX row added, 112 deps updated). The first agent's branch `task/ebilling-084` (empty, at `0b466586e7`) sits in a finished agent worktree: remove that worktree with `Remove-WorktreeSafe.ps1` later. When impl-084r reports: review, code-review + adr-check, merge into work, close out 084, send the branch to uac-r2 for review.
 >   - **uac-r2 condition 2 is MINE:** make the access invariant behind EB-D-218 a checked step (add it to a verify run after imports, or file with provisioning-r1). Keep all detail out of the repo; tell uac-r2 which.
