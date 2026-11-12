@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
 using Xunit;
@@ -166,5 +167,104 @@ public class RestrictedMappingSourceTests
         undetermined.NoRestrictedAncestor.Should().BeFalse();
         empty.Unknown.Should().BeTrue();
         empty.NoRestrictedAncestor.Should().BeFalse();
+    }
+
+    // ── UAC-r2 Q2: a project's or work assignment's answer, by the secure-root plan's floor ───────────────────────────
+
+    private static SecureFilingParent AMatter => new(Matter, Id, "A matter");
+
+    [Fact]
+    public void ThePlansFloor_IsTheStrictestValueItRead_WhenEveryParentWasRead()
+    {
+        var restricted = new SecureParentsAnswer([], null)
+        {
+            StrictestPermission = new FilingPermission(InheritedAccessPermission.Restricted, AMatter),
+        };
+        var standard = new SecureParentsAnswer([], null);
+
+        AccessPermissionFloor.Of(restricted).Should().Be(new AccessPermissionFloor(InheritedAccessPermission.Restricted, true));
+        AccessPermissionFloor.Of(restricted).IsRestricted.Should().BeTrue();
+        AccessPermissionFloor.Of(standard).Should().Be(new AccessPermissionFloor(null, true));
+        AccessPermissionFloor.Of(standard).IsRestricted.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ThePlansFloor_IsUndecided_WhenAParentCouldNotBeRead_EvenWithARestrictedValueBeside_It()
+    {
+        var unread = new SecureParentsAnswer([], "whether the sprk_matter it is filed under is secure could not be read")
+        {
+            StrictestPermission = new FilingPermission(InheritedAccessPermission.Restricted, AMatter),
+        };
+
+        AccessPermissionFloor.Of(unread).Should().Be(AccessPermissionFloor.Undecided);
+        AccessPermissionFloor.Of(unread).IsRestricted.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AnOrdinaryPlan_FilesUnderNothing_AndARefusedPlan_IsUndecided()
+    {
+        SecureRootCreatePlan.Ordinary.AccessPermissionFloor.Should().Be(AccessPermissionFloor.NoParent);
+        SecureRootCreatePlan.Refused(RecordOwnerResolution.Refused("code", "words"))
+            .AccessPermissionFloor.Should().Be(AccessPermissionFloor.Undecided);
+    }
+
+    [Fact]
+    public void ARoot_UnderARestrictedFloor_EndsRestricted_AndWritesNothing()
+    {
+        var access = RecordCreationService.RootAccessPermission(
+            ownReadable: true, ownRestricted: false, new AccessPermissionFloor(InheritedAccessPermission.Restricted, true));
+
+        access.EndsRestricted.Should().BeTrue();
+        access.Undetermined.Should().BeFalse();
+        access.Write.Should().BeNull("the cascade owns a project's stored value");
+        access.Record.Should().BeNull("the access record is the cascade's alone");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(InheritedAccessPermission.Standard)]
+    [InlineData(InheritedAccessPermission.Limited)]
+    public void ARoot_UnderADecidedFloorThatIsNotRestricted_IsNotRestricted(int? floor)
+    {
+        var access = RecordCreationService.RootAccessPermission(true, false, new AccessPermissionFloor(floor, true));
+
+        access.EndsRestricted.Should().BeFalse();
+        access.Undetermined.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ARoot_UnderAnUndecidedFloor_OrNoPlan_IsNeverRestricted_AndIsUndetermined()
+    {
+        foreach (var floor in new[] { AccessPermissionFloor.Undecided, null })
+        {
+            var access = RecordCreationService.RootAccessPermission(true, false, floor);
+
+            access.EndsRestricted.Should().BeFalse();
+            access.Undetermined.Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public void ARoot_WhoseOwnValueIsRestricted_EndsRestricted_WhateverTheFloor()
+    {
+        RecordCreationService.RootAccessPermission(true, true, AccessPermissionFloor.Undecided).EndsRestricted.Should().BeTrue();
+        RecordCreationService.RootAccessPermission(true, true, AccessPermissionFloor.NoParent).EndsRestricted.Should().BeTrue();
+    }
+
+    /// <summary>What the create relies on: once the cascade follows a new project's parents (after the create, outside the
+    /// create request), a Restricted parent raises its stored value to Restricted.</summary>
+    [Fact]
+    public void TheCascade_RaisesANewProjectUnderARestrictedParent_ToRestricted()
+    {
+        var ancestry = new SecureParentsAnswer([], null)
+        {
+            DirectParents = [new FilingParentState(AMatter, EffectiveSecure: false, EffectiveRank: 2)],
+        };
+
+        var decided = SecureRootInheritance.Decide(storedSecure: false, storedPermission: null, markerText: null, ancestry);
+
+        decided.Stop.Should().BeNull();
+        decided.TargetPermission.Should().Be(InheritedAccessPermission.Restricted);
+        decided.Tighten.Should().BeTrue();
     }
 }

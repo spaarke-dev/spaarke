@@ -638,13 +638,14 @@ internal sealed partial class RecordCreationService
             DataverseWriteItemMapper.MappedItem callerItem, DataverseWriteItemMapper.MappedItem item,
             IReadOnlyDictionary<string, JsonElement> mappedValues, IReadOnlySet<string> defaultColumns,
             IReadOnlyCollection<(string Column, string Source)> copiedDefaults, IReadOnlySet<string> stepThreeMappedColumns,
-            IReadOnlyDictionary<string, object>? stampPlan, List<RecordCreationWarning> warnings, string noun, CancellationToken ct)
+            IReadOnlyDictionary<string, object>? stampPlan, AccessPermissionFloor? rootFloor, List<RecordCreationWarning> warnings,
+            string noun, CancellationToken ct)
     {
         var source = MappingSourceAccessOf(gate.SourceTable, gate.Read);
         if (source is MappingSourceAccess.NoColumn or MappingSourceAccess.NotRestricted)
             return (null, item, mappedValues, null);
 
-        var access = await InCreateAccessPermissionAsync(table, item, stampPlan, ct).ConfigureAwait(false);
+        var access = await InCreateAccessPermissionAsync(table, item, stampPlan, rootFloor, ct).ConfigureAwait(false);
         if (access.EndsRestricted)
             return (null, item, mappedValues, access);
 

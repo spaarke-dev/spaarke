@@ -1,9 +1,13 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.RecordCreation;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.RecordCreation;
@@ -249,24 +253,124 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         WarningsOf(result).Should().Contain(RecordCreationService.MappingSourceRestrictedStripped);
     }
 
-    /// <summary>A project's Access Permission is the server's: a caller's create never writes it, so a project is not
-    /// Restricted in its create, even filed under the Restricted matter (its parents raise it after the create). The rule
-    /// reads the value written in the create, so the mapped values are removed.</summary>
-    [Fact]
-    public async Task RestrictedSource_AProjectFiledUnderTheRestrictedMatter_IsNotRestrictedInItsCreate_SoMapsNothing()
+    // ── UAC-r2 Q2 (option c): a project or work assignment, by the floor its secure-root plan read ───────────────────────
+
+    /// <summary>
+    /// The secure-root plan's own app-only reads, holding the matters as the plan reads them (flag, name, Access Permission):
+    /// the floor comes from that read and nothing else. <paramref name="fault"/>: every matter read throws.
+    /// </summary>
+    private static SecureRootFilingGate PlanReadingMatters(bool fault = false, params (Guid Id, int Permission)[] matters)
     {
-        TheRestrictedMatter();
-        MatterToProjectProfile();
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) => fault
+                ? throw new InvalidOperationException("the plan's matter read failed")
+                : Task.FromResult(new EntityCollection(matters
+                    .Where(m => q.Criteria.Conditions.Any(c => c.Values.Contains(m.Id)))
+                    .Select(m => new Entity("sprk_matter", m.Id)
+                    {
+                        ["sprk_issecure"] = false,
+                        ["sprk_mattername"] = "A matter",
+                        [InheritedAccessPermission.Column] = new OptionSetValue(m.Permission),
+                    })
+                    .ToList())));
+        entities.AnswersRecordTypeCatalog();
+        return SecureRootFilingGateFixtures.Over(entities.Object);
+    }
+
+    /// <summary>The pair's type, read by the caller, the stamp and the service's own reader (the project's filing).</summary>
+    private void TheMatterTypeIsReadable()
+    {
         _scripted.RecordTypes[RecordTypeCatalogSetup.MatterTypeId] = "sprk_matter";
         _stamps.RecordType(RecordTypeCatalogSetup.MatterTypeId, "sprk_matter");
         _sourceReader.AnswersRecordTypeCatalog();
+    }
+
+    /// <summary>UAC-r2 Q2 (must fire): a project filed in its create under the Restricted matter is Restricted once the cascade
+    /// follows its parents, so the plan's floor lets the values map. The create itself writes neither the Access Permission
+    /// nor the access record (both stay the cascade's, task 175 F1-1).</summary>
+    [Fact]
+    public async Task RestrictedSource_AProjectFiledUnderTheRestrictedMatter_Maps_ByThePlansFloor_AndWritesNoAccessRecord()
+    {
+        TheRestrictedMatter();
+        MatterToProjectProfile();
+        TheMatterTypeIsReadable();
+        _rootFiling = () => PlanReadingMatters(false, (RestrictedMatter, InheritedAccessPermission.Restricted));
 
         var result = await RouteCreate("sprk_project", AProjectFiledUnder(RestrictedMatter));
 
         StatusOf(result).Should().Be(StatusCodes.Status201Created, DetailOf(result));
-        _creates.Should().ContainSingle().Which.Fields.Should().NotContainKey("sprk_description")
-            .And.NotContainKey(InheritedAccessPermission.Column);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_description").Should().Be("From the restricted matter");
+        fields.Should().NotContainKey(AccessInheritance.Column, "the access record is the cascade's alone")
+            .And.NotContainKey(InheritedAccessPermission.Column, "the project's stored value is the cascade's, after the create");
+        WarningsOf(result).Should().NotContain(RecordCreationService.MappingSourceRestrictedStripped)
+            .And.NotContain(RecordCreationService.MappingSourceRestrictedUndetermined);
+    }
+
+    /// <summary>UAC-r2 Q2 (must fire): a work assignment filed under the Restricted matter maps the same way.</summary>
+    [Fact]
+    public async Task RestrictedSource_AWorkAssignmentFiledUnderTheRestrictedMatter_Maps_ByThePlansFloor_AndWritesNoAccessRecord()
+    {
+        TheRestrictedMatter();
+        _user.Columns["sprk_workassignment"] = new()
+        {
+            ["sprk_name"] = ("String", true),
+            ["sprk_description"] = ("Memo", true),
+            ["sprk_regardingmatter"] = ("Lookup", true),
+        };
+        Profile("sprk_matter", "sprk_workassignment", Rule("sprk_matterdescription", "sprk_description", Memo));
+        _rootFiling = () => PlanReadingMatters(false, (RestrictedMatter, InheritedAccessPermission.Restricted));
+
+        var outcome = await Service().CreateAsync(
+            Request("sprk_workassignment", new Dictionary<string, object?>
+            {
+                ["sprk_name"] = "Review the lease",
+                ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({RestrictedMatter:D})",
+            }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        StringOf(fields, "sprk_description").Should().Be("From the restricted matter");
+        fields.Should().NotContainKey(AccessInheritance.Column).And.NotContainKey(InheritedAccessPermission.Column);
+        outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.MappingSourceRestrictedCode);
+    }
+
+    /// <summary>UAC-r2 Q2 (must not fire): a project filed under a Standard matter, from the Restricted matter named as the
+    /// source, is not Restricted by its floor: the values are removed.</summary>
+    [Fact]
+    public async Task RestrictedSource_AProjectFiledUnderAStandardMatter_FromARestrictedSource_IsStripped()
+    {
+        TheRestrictedMatter();
+        MatterToProjectProfile();
+        TheMatterTypeIsReadable();
+        _rootFiling = () => PlanReadingMatters(false,
+            (OrdinaryMatter, InheritedAccessPermission.Standard), (RestrictedMatter, InheritedAccessPermission.Restricted));
+
+        var result = await RouteCreate("sprk_project", AProjectFiledUnder(OrdinaryMatter), "sprk_matter", RestrictedMatter.ToString("D"));
+
+        StatusOf(result).Should().Be(StatusCodes.Status201Created, DetailOf(result));
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_description").And.NotContainKey(AccessInheritance.Column);
         WarningsOf(result).Should().Contain(RecordCreationService.MappingSourceRestrictedStripped);
+    }
+
+    /// <summary>UAC-r2 Q2 (must not fire): a parent the plan cannot read leaves the floor undecided. Through the real plan that
+    /// refuses the create before anything is mapped or written (the plan's own rule, unchanged); the strip an undecided floor
+    /// gives where the plan proceeds is pinned on <see cref="RecordCreationService.RootAccessPermission"/> in the unit suite.</summary>
+    [Fact]
+    public async Task RestrictedSource_AProjectWhoseParentCannotBeRead_MapsNothing_AndNothingIsCreated()
+    {
+        TheRestrictedMatter();
+        MatterToProjectProfile();
+        TheMatterTypeIsReadable();
+        _rootFiling = () => PlanReadingMatters(fault: true);
+
+        var result = await RouteCreate("sprk_project", AProjectFiledUnder(RestrictedMatter));
+
+        StatusOf(result).Should().Be(StatusCodes.Status409Conflict, DetailOf(result));
+        _creates.Should().BeEmpty();
     }
 
     /// <summary>UAC-r2 (2026-11-12): an agreement is a source-only table for the Restricted-source check (the unit suite pins
