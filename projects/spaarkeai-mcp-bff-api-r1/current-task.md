@@ -24,7 +24,9 @@
 
 ## Active Lanes
 - **Dev BFF runs `6dbe69b9e2`** (2026-11-12, uac-r2): local, never-pushed merge of origin/master `a654da59c4` + spike `755987b385`; ledger count 153. Gates: build clean, ArchTests 2506/2506, /healthz 200, /ping 200, anonymous `POST /mcp/legal-operations` 401. **Standing rule:** every uac-r2 dev deploy includes the spike tip until we declare Phase 0 done. The spike stays off master (PR #2615 draft, never merged).
-- This branch: current with master at `d269f0abe7` (+ baseline re-record `c14e4bf3a4`).
+- This branch: current with master as of 2026-11-12 (merges `204395070f` + `d3d983a9a4`, master `9456083c78`): build 0/0, ArchTests 2507/2507, MCP/decision/contract unit tests 5694/5694.
+- **Plan refreshed against master 2026-11-12** (`c4b8394737`; `notes/decisions.md` entry). Key changes for executors: 020 ports the `MapMcp` route-guard scanner vocabulary (else ArchTests go red); CS0618 is a build error; a blocking "Format (changed C# files)" check; 025's Tier 1 job needs an owner Path-A exception; 024/032 pass D-216 warnings through.
+- **Before resuming MCP work (owner, 2026-11-12):** finish the side review/fix work. Open: PRs #2729 (mutation test selection, #1821), #2732 (fix #2709, uac-r2's bug; needs uac-r2/owner OK), #2734 (ArchTests job caps, #2527), all being finished by side session `local_88739aa2…` (no auto-merge until owner go). New pre-existing F1 #2731 filed (Direct carry over cap holds the watermark; uac-r2 design). #1821 stays open after the merges (needs a dispatch mutation run, likely more survivor tests). #1717: links fixed by #2720, the issue is still open.
 
 ## Next Actions
 1. 003 (above). The size-test widgets (1/3/6 MB) are not built; they need a new spike SHA and a uac-r2 deploy with the owner's per-SHA go.
