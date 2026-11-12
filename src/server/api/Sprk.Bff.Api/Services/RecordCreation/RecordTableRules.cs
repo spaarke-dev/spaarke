@@ -422,8 +422,11 @@ internal static partial class RecordTableRules
             OwnershipException = new NamedRule(
                 "UnfiledCommunicationKeepsCreator",
                 "Escalation E1: a communication filed under nothing keeps its creator (UnfiledOwnership.KeepCreator; " +
-                "OwnedChildWrite.PathFor / KeepsItsCreatorWhenUnfiled). The per-user master thread and Direct-thread " +
-                "privacy rest on it; a team owner would show one person's mail to their whole business unit."),
+                "OwnedChildWrite.PathFor / KeepsItsCreatorWhenUnfiled). The per-user master thread rests on it. This service never " +
+                "creates a communication filed under nothing, so it never creates a Direct message. The Direct owner rule is a " +
+                "writer rule, not a registry rule: DirectMessageOwnerStep assigns a Direct message filed under no record to the " +
+                "Direct message owner team after the ingestor or send path has created it (and on an unfile), the same way the " +
+                "gate Decision Record follows its communication through GateDecisionRecordSharing."),
         },
 
         // Task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor, spec FR-36 of the ontology's task

@@ -232,6 +232,104 @@ public sealed class CrossSurfaceOwnerTests
         _world.Creates.Should().BeEmpty();
         _world.OwnerQuestions.Should().Be(0, "the exception is decided before any owner is resolved");
     }
+
+    // =====================================================================================
+    // fm task 054 piece 3: the Direct owner rule — one Direct message, one owner for its content, whichever surface asks
+    // =====================================================================================
+
+    private static readonly Guid DirectUnit = DirectMessageOwnerTeamDouble.DirectUnitId;
+    private static readonly Guid DirectTeam = Guid.Parse("a0540000-0000-4000-8000-000000000001");
+    private static readonly Guid DirectUnitDefaultTeam = Guid.Parse("a0540000-0000-4000-8000-000000000002");
+    private static readonly Guid DirectTeamMessage = Guid.Parse("a0540000-0000-4000-8000-000000000003");
+    private static readonly Guid RecordFiledMessage = Guid.Parse("a0540000-0000-4000-8000-000000000004");
+
+    /// <summary>The standard directory plus the Direct business unit (its default team and its named Direct team), a message the
+    /// Direct team owns, and a message filed under a record, which its business unit's default team owns.</summary>
+    private static Directory DirectWorld() => Directory.Standard()
+        .WithBusinessUnit(DirectUnit, DirectMessageOwnerTeamDouble.BusinessUnitName, parent: Directory.GeneralBu)
+        .WithTeam(DirectUnitDefaultTeam, DirectUnit, isDefault: true, teamType: 0, DirectMessageOwnerTeamDouble.BusinessUnitName)
+        .WithTeam(DirectTeam, DirectUnit, isDefault: false, teamType: 0, DirectMessageOwnerTeamDouble.OwnerTeamName)
+        .WithRecord("sprk_communication", DirectTeamMessage, DirectUnit, owningTeam: DirectTeam)
+        .WithRecord("sprk_communication", RecordFiledMessage, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+    private static DirectMessageOwnerTeam ResolvedDirectTeam() => new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam).Lookup();
+
+    /// <summary>Every question a surface asks the resolver about a message's content, each answered by the same resolver: the
+    /// chat and Office attachment writers ask for content of the message, a participant, attachment or review-log row asks for its
+    /// own row, and the gate writer asks with the message as its first parent.</summary>
+    private static async Task<Dictionary<string, Guid>> ContentOwnersAsync(IRecordOwnershipResolver resolver, Guid message)
+    {
+        static Entity RowOf(string table, string lookup, Guid message) =>
+            new(table, Guid.NewGuid()) { [lookup] = new EntityReference("sprk_communication", message) };
+
+        var owners = new Dictionary<string, Guid>
+        {
+            ["content of the message (ResolveOwnerAsync)"] =
+                (await resolver.ResolveOwnerAsync(RecordOwnershipContext.ContentOf("sprk_communication", message), CancellationToken.None)).OwningTeamId!.Value,
+            ["content of the message (ResolveOwningTeamAsync)"] =
+                (await resolver.ResolveOwningTeamAsync(RecordOwnershipContext.ContentOf("sprk_communication", message), CancellationToken.None))!.Value,
+            ["gate Decision Record"] =
+                (await resolver.ResolveOwnerAsync(
+                    RecordOwnershipContext.ForParents([new RecordOwnershipParent("sprk_communication", message)]) with { KeepCreatorUnlessTargetIsTeamOwned = true },
+                    CancellationToken.None)).OwningTeamId!.Value,
+        };
+
+        foreach (var (table, lookup) in RestrictedFilingShareBar.ContentRows.Where(c => c.Table != "sprk_document"))
+        {
+            owners[$"{table} row"] =
+                (await resolver.ResolveOwnerAsync(RecordOwnershipContext.ForChild(RowOf(table, lookup, message)), CancellationToken.None)).OwningTeamId!.Value;
+        }
+
+        return owners;
+    }
+
+    [Fact]
+    public async Task AContentRowOfADirectTeamMessage_IsTheDirectTeams_ForEverySurfaceThatAsks()
+    {
+        var resolver = DirectWorld().Resolver(directMessageOwnerTeam: ResolvedDirectTeam());
+
+        var owners = await ContentOwnersAsync(resolver, DirectTeamMessage);
+
+        owners.Count.Should().BeGreaterThan(3, "the content tables are asked as well as the attachment and gate questions");
+        owners.Values.Should().AllBeEquivalentTo(DirectTeam,
+            "every surface asking for the owner of the same Direct message's content gets the Direct team — never the Direct " +
+            "business unit's default team: {0}", string.Join(", ", owners.Select(o => $"{o.Key}={o.Value:D}")));
+    }
+
+    [Fact]
+    public async Task AContentRowOfARecordFiledMessage_IsNotRoutedToTheDirectTeam_OnAnySurface()
+    {
+        var resolver = DirectWorld().Resolver(directMessageOwnerTeam: ResolvedDirectTeam());
+
+        var owners = await ContentOwnersAsync(resolver, RecordFiledMessage);
+
+        owners.Values.Should().AllBeEquivalentTo(Directory.ChildTeam,
+            "a message filed under a record is owned by that record's business-unit team, and so is its content: {0}",
+            string.Join(", ", owners.Select(o => $"{o.Key}={o.Value:D}")));
+        owners.Values.Should().NotContain(DirectTeam);
+    }
+
+    [Fact]
+    public async Task AContentRowOfADirectTeamMessage_WhileTheDirectSettingsAreUnset_KeepsTodaysOwner_OnEverySurface()
+    {
+        var resolver = DirectWorld().Resolver(directMessageOwnerTeam: DirectMessageOwnerTeamDouble.Unconfigured());
+
+        var owners = await ContentOwnersAsync(resolver, DirectTeamMessage);
+
+        owners.Values.Should().AllBeEquivalentTo(DirectUnitDefaultTeam,
+            "the Direct owner rule is off while both settings are unset: {0}", string.Join(", ", owners.Select(o => $"{o.Key}={o.Value:D}")));
+    }
+
+    [Fact]
+    public async Task ARowThatIsNotMessageContent_FiledUnderADirectTeamMessage_IsNotRoutedToTheDirectTeam()
+    {
+        var resolver = DirectWorld().Resolver(directMessageOwnerTeam: ResolvedDirectTeam());
+        var row = new Entity("sprk_event", Guid.NewGuid()) { ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", DirectTeamMessage) };
+
+        var resolution = await resolver.ResolveOwnerAsync(RecordOwnershipContext.ForChild(row), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(DirectUnitDefaultTeam, "the rule reads the message content tables only");
+    }
 }
 
 /// <summary>
