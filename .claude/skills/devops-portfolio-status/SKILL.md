@@ -135,7 +135,7 @@ Save to `docs/portfolio/snapshot-{YYYY-MM-DD}.md`. Print "Snapshot written to {p
 
 ### Step 4: Cleanup
 
-If `docs/portfolio/` doesn't exist, create it (no `.gitkeep` needed; first snapshot file is the seed).
+If the docs/portfolio/ folder doesn't exist, create it (no `.gitkeep` needed; first snapshot file is the seed).
 
 ## Outputs
 
