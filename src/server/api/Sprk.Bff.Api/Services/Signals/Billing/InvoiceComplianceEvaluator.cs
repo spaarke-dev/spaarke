@@ -613,10 +613,7 @@ public sealed class InvoiceComplianceEvaluator
         }
     }
 
-    /// <summary>
-    /// The billing rule type of a version whose stated consequence that type may not carry (or that is none of the three defined
-    /// values), else <c>null</c>: no consequence stated, a type the gate refuses anyway (unknown or not billing), or an allowed one.
-    /// </summary>
+    /// <summary>True when the version's rule type is a system type (D-125), which is never evaluated from a body or grouped for precedence.</summary>
     internal static bool IsSystemRule(BillingRuleCandidate candidate) =>
         RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type) && BillingRuleCatalogue.IsSystemType(type);
 
@@ -656,6 +653,10 @@ public sealed class InvoiceComplianceEvaluator
             subjects.Where(s => s.LineIndex is not null).Select(s => s.LineIndex!.Value).Distinct().Order().ToList());
     }
 
+    /// <summary>
+    /// The billing rule type of a version whose stated consequence that type may not carry (or that is none of the three defined
+    /// values), else <c>null</c>: no consequence stated, a type the gate refuses anyway (unknown or not billing), or an allowed one.
+    /// </summary>
     internal static RuleType? DisallowedConsequenceType(BillingRuleCandidate candidate) =>
         candidate.Consequence is { } stated
         && RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type)
