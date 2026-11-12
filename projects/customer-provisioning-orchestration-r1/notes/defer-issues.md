@@ -10,6 +10,15 @@
 
 ## Open (in priority order)
 
+### ISS-028 — Operator scripts excuse the System Administrator field-security profile by name (#2725)
+
+| Field | Value |
+|---|---|
+| Found | 2026-11-11, task 268 review (H7b had the same defect; fixed there by the fixed id `572329c1-a042-4e22-be47-367c6374ea45`) |
+| Issue | https://github.com/spaarke-dev/spaarke/issues/2725 |
+| Fails without it | A profile NAMED "System Administrator" with create/update on a locked column is excused by 19 scripts' `-Verify` (list in the issue), so the script reports the lock whole while an ordinary member can write the column. |
+| Owner | unified-access-control-r2 / external-access r3 (most scripts), ebilling-r1 (four). Not ours to fix in 268. |
+
 ### ISS-001 — Hand-off owed by UAC-r2: how a new environment gets `sprk_noaccessentry`
 
 | Field | Value |
