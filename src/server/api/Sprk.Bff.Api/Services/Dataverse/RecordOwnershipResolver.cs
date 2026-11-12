@@ -2294,8 +2294,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "no parent is named; this writer's unfiled rows keep their creating identity (task 146 E1)");
         }
 
-        // fm task 054 piece 3b: an unfiled communication's owner is Unchanged pending #2722; a re-file then asks the Direct rule
-        // (ReparentAsync, DirectUnfileAnswerAsync).
+        // fm task 054 piece 3b: an unfiled communication's owner is Unchanged here; a re-file then asks the Direct rule
+        // (ReparentAsync, DirectUnfileAnswerAsync), and a communication that is not an eligible Direct message is decided in
+        // NonDirectUnfileAnswer (#2722).
         if (context.WhenUnfiled == UnfiledOwnership.UnfiledCommunication)
         {
             return RecordOwnerResolution.Unchanged("no parent is named; an unfiled communication's owner is Unchanged pending #2722");
@@ -4223,6 +4224,21 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// carries its name) is <see cref="RecordOwnerRefusal.DirectTeamUnusable"/>, a configuration an administrator fixes; a fault
     /// reading it is <see cref="RecordOwnerRefusal.DirectTeamUnavailable"/>. No owner is written here.
     /// </summary>
+    /// <summary>
+    /// The ONE decision point for what an unfile does with a communication that is not an eligible Direct message (including
+    /// every communication while the Direct owner rule is off). Both re-file paths that unfile a communication reach it through
+    /// <see cref="DirectUnfileAnswerAsync"/>. Today it keeps the owner (Unchanged). The owner's decision on #2722 replaces this
+    /// body: the creator's business-unit team (D-11), except a communication that left a Secure or Restricted record keeps its
+    /// former owner.
+    /// </summary>
+    /// <param name="message">The row as the change leaves it.</param>
+    /// <param name="unchanged">The re-file's Unchanged answer.</param>
+    private static RecordOwnerResolution NonDirectUnfileAnswer(Entity message, RecordOwnerResolution unchanged)
+    {
+        _ = message;
+        return unchanged;
+    }
+
     private async Task<RecordOwnerResolution> DirectUnfileAnswerAsync(
         Entity message, Guid? threadId, RecordOwnerResolution unchanged, CancellationToken ct)
     {
@@ -4240,7 +4256,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             case Sprk.Bff.Api.Services.Communication.Access.DirectUnfileVerdict.ToDirectTeam:
                 break;
             default:
-                return unchanged;
+                return NonDirectUnfileAnswer(message, unchanged);
         }
 
         bool leavesSecureOwner;
