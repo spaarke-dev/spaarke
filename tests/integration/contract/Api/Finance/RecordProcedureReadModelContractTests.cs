@@ -370,8 +370,8 @@ public sealed class RecordProcedureReadModelContractTests
         result.Value.Should().BeNull();
     }
 
-    [Fact(DisplayName = "084 rules: the marks array is open and carries only the four kinds (the outranked mark is task 084e)")]
-    public async Task Marks_AreFourKindsOnly()
+    [Fact(DisplayName = "084 rules: the marks array is open; with no rule of a higher rank in the same key, only the four record kinds appear (Excluded, Changed, Stale, BaseRetired; 084e adds the precedence kinds Outranked and CapOutranked)")]
+    public async Task Marks_WithNoHigherRankedRule_AreTheFourRecordKindsOnly()
     {
         var rig = new RecordProcedureRig();
         var general = rig.Simple("GENERAL");
