@@ -1,0 +1,95 @@
+# Task 191e: the flagged-user placement job and the placement-drift census
+
+> 2026-11-11. Branch `task/uac-191e` off origin/master `654e39c685`. Rigor FULL, opus @ xhigh. Nothing was applied live:
+> the dev reads below are metadata-only (attribute and ownership metadata), as the operator's az CLI identity.
+
+## 1. What was built
+
+| File | What it is |
+|---|---|
+| `Services/ExternalAccess/FlaggedUserPlacementJob.cs` (new) | The `IScheduledJob`, every 2 minutes. Reads every systemuser whose stored `sprk_isexternal` reads true, classifies each (pure `Classify`), and with writes on moves it into the unit (PATCH `businessunitid`), associates the role copy that lives in the unit, and reads both back. Report-only by default. |
+| `Services/ExternalAccess/ExternalCollaboratorPlacement.cs` (new) | The shared reads (unit, role, System Administrator copies, flagged users, direct roles, memberships, team roles, unflagged users in the unit) and the placement-drift census grader. Static, like `SecureRecordIsolationCensus`. |
+| `Services/ExternalAccess/SecureRecordIsolationCensusJob.cs` | Runs the placement census beside the secure census, in its own try; CRITICAL per finding; `placement` section in `ResultJson`; heartbeat gains `placementStatus`, `placementFindings`, `flaggedUsers`. |
+| `Services/ExternalAccess/SecureRecordIsolationCensus.cs` | `Query`, `RetrieveAllAsync`, `OptionalGuid`, `RequiredGuid` made `internal` (reused, not copied). No behaviour change. |
+| `Infrastructure/DI/ExternalAccessModule.cs` | One `AddScheduledJob<FlaggedUserPlacementJob>` line with its comment. |
+| `tests/unit/.../Services/ExternalAccess/FlaggedUserPlacementJobTests.cs` (new) | The job's tests over an in-memory directory that behaves as spike S2 found, plus the shared condition evaluator (`FakeConditions`). |
+| `tests/integration/auth/UnifiedAccessControl/SecureRecordIsolationCensusJobTests.cs` | The census directory evaluates every condition (shared evaluator); 16 placement cases. |
+
+## 2. Behaviour (the rules the tests pin)
+
+**The job.**
+- Candidate: stored flag reads `true` (filtered by Dataverse AND re-checked in code; an absent or masked value is internal).
+- Never moved: application users; disabled users; System Administrator held directly or through a team (matched by role
+  template id, never by name); the Administrative access mode; any access mode but Read-Write (0) or Read (2); a user whose
+  unit, disabled state or access mode was not returned.
+- Never moved OUT: the only business-unit write targets the unit, for a user outside it. A user in the unit whose flag no
+  longer reads true is reported (`unflaggedInUnit`, Warning) for an administrator (round 115).
+- Before each write the user is re-read; if its decision changed (flag cleared, disabled, moved), nothing is written.
+- Success = in the unit, holding THE role, no other direct role. Anything else (write threw, accepted PATCH that did not
+  move, roles kept contrary to S2, read-back failed) = one Critical `ALERT` line for that user, run unsuccessful, retried
+  next tick. A user moved but left without the role is picked up as "assign the role" next run.
+- Unit or role not exactly one: nobody is written (a move without the role leaves the user with none). With writes on, one
+  Critical `ALERT` line naming the waiting ids; report-only lists them as `unplaceable`.
+- Any read failure before the write phase: nothing written, heartbeat `status=error`, throw (ADR-036 A1 rule 4).
+- At most 25 users written per run; the rest are `deferred` to the next tick.
+- Setting (positively named; absent, empty or unparseable = report-only): `ExternalAccess:FlaggedUserPlacement:WritesEnabled`
+  (App Service: `ExternalAccess__FlaggedUserPlacement__WritesEnabled`). Report-only lists `wouldMove` and
+  `wouldAssignRole` ids.
+
+**The census** (CRITICAL per finding, one line each, by id; enabled human flagged users only — the secure census's
+`IsHumanPrincipal`):
+
+| Kind | Fires when |
+|---|---|
+| `FlaggedUserOutsideExternalUnit` | business unit ≠ the unit |
+| `RoleFromAnotherUnit` | a direct role (or a role of the unit's default team) assigned from another unit, or unreadable |
+| `UnexpectedRole` | a role from the unit that is not THE External Collaborator role (direct, or on the default team) |
+| `LineageDepthAboveBasic` | any held role (direct or through a team, THE role included) has Local/Deep/Global on any privilege of any lineage-registry table |
+| `WriteUserPrivilege` | any held role has `prvWriteUser` at any depth |
+| `OtherOwnerTeamMembership` | member of a team other than the unit's default team (access teams, type 1, excluded) |
+| `LineageRowOwnedByFlaggedPrincipal` | a lineage-registry row owned by a flagged user or by the unit's default team |
+| `FlaggedManagerUnderHierarchySecurity` | hierarchy security on and a flagged user manages someone (manager model) or holds a position (position model) |
+| `UnitAmbiguous` | more than one unit of the name, or not directly under the root |
+
+No unit yet: `inert`, one Warning with the flagged-user count, not a finding, run success unchanged (decision D-3).
+
+## 3. Decisions and deviations
+
+- **D-1 One adversarial pass, not two.** The POML step 4 says two (auth, security); the operator's brief for this run says
+  one Opus pass. Operator instruction followed; recorded here.
+- **D-2 POML step 5 (TASK-INDEX) not done; `current-task.md` untouched.** Reserved for the uac-r2 session by the operator.
+  The POML status is left for that session too, so the drift check stays consistent.
+- **D-3 Inert placement is not a census failure.** Before task 191i creates the unit, every environment would otherwise
+  turn the 15-minute census red for the documented pre-migration state (design section 1). The secure census treats a
+  missing secure BU as inert-and-failing; here the unit's absence is the expected state until an owner go, so it is a
+  Warning with the count and leaves success unchanged. Once the unit exists every drift kind is graded.
+- **D-4 "Only the role" is the rule the census grades, not just "a role from another unit".** Design 3.15 names a role
+  from another unit; a second role copy assigned FROM the unit (every root role has a copy there) would pass that check
+  and could carry Global on a Procedure table, which is outside the lineage registry the depth check reads. `UnexpectedRole`
+  closes it without a second table list. Same for roles on the unit's default team (191d's `-Verify` checks the team too,
+  but only when run).
+- **D-5 Hierarchy, position model.** Design says "hierarchy security on with a flagged manager". In the position model a
+  flagged user holding any position is reported (fail toward reporting; the census cannot cheaply tell whether a position
+  has children).
+- **D-6 No config override for the unit and role names.** They are compiled constants pinned to
+  `config/external-collaborator-role.json` by a test (the script has no override either).
+
+## 4. Known limits (one line each)
+
+- K-1 The ownership check reads at most 500 rows per table and owner chunk; past that it says "at least N".
+- K-2 Access-team memberships (type 1) are not graded: they are per-record shares, the share writers' concern (191c).
+- K-3 The job does not remove roles a move left behind (S2 says there are none); it alerts and the census keeps reporting
+  them. An S2 deviation is an escalation trigger, not something the job repairs.
+- K-4 Disabled, application, support and non-interactive flagged users are not graded by the census (they cannot sign in
+  interactively), matching what the job never moves.
+
+## 5. Dev metadata read (2026-11-11, read-only)
+
+- `systemuser.sprk_isexternal`: Boolean, not secured; `parentsystemuserid`, `positionid`, `accessmode`, `applicationid`,
+  `isdisabled`, `businessunitid` exist; `organization.ishierarchicalsecuritymodelenabled` and `usepositionhierarchy` exist;
+  `systemuserroles_association` exists.
+- Every lineage-registry table (and the three roots) is UserOwned, so the `ownerid` query is valid on each.
+
+## 6. Results
+
+(filled in below as the gates run)

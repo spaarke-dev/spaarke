@@ -27,6 +27,14 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// <see cref="LogLevel.Critical"/>, one line each, naming the principal; a clause-5 gap is logged at
 /// <see cref="LogLevel.Error"/>, naming the table — it makes secure-child writes fail closed, it exposes nothing.</para>
 ///
+/// <para><b>Flagged-user placement</b> (task 191e, #2179 design 3.8 / 3.15). Each run also grades where every enabled,
+/// human systemuser flagged <c>sprk_isexternal = true</c> sits (<see cref="ExternalCollaboratorPlacement.EvaluateCensusAsync"/>):
+/// outside the External Collaborators unit, a role from another unit or any role but the External Collaborator role,
+/// depth above Basic on a lineage table, <c>prvWriteUser</c>, another owner team, a lineage row owned by a flagged user or
+/// by the unit's default team, and a flagged manager under hierarchy security. One CRITICAL line per finding, by id. Before
+/// the unit exists (task 191i) placement is inert: a Warning with the flagged-user count, not a finding. The acceptance
+/// route does not run it.</para>
+///
 /// <para><b>What it never does.</b> It writes nothing to Dataverse, moves nobody, strips no role (relocating users is
 /// an owner decision) and touches no CI. The run result carries the findings for <c>/api/admin/jobs/{id}/status</c>.</para>
 ///
@@ -84,8 +92,9 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
     public string Description =>
         "Read-only census of the Secure Record business unit (spec NFR-05): no role reaches it by depth, it holds no " +
         "users, its named owner team resolves and has no members, only that team holds the owner role, and the role " +
-        "covers every table in config/secure-record-owner-role.json. Logs a CRITICAL line per exposure and an ERROR " +
-        "line per coverage gap. Writes nothing.";
+        "covers every table in config/secure-record-owner-role.json. Also grades where flagged-external users sit (the " +
+        "External Collaborators unit, its one role, Basic depth, no other owner team, no owned lineage rows). Logs a " +
+        "CRITICAL line per exposure or placement drift and an ERROR line per coverage gap. Writes nothing.";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -95,25 +104,66 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
         var started = _timeProvider.GetTimestamp();
         SecureBuAssertionOutcome? outcome = null;
         SecureRecordIsolationCensusResult? result = null;
+        PlacementCensusOutcome? placement = null;
         Exception? readFailure = null;
         var status = StatusError;
+        var placementStatus = PlacementCensusStatus.Error;
 
-        try
+        using (var scope = _scopeFactory.CreateScope())
         {
-            using var scope = _scopeFactory.CreateScope();
             var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
-            outcome = await SecureRecordIsolationCensus.EvaluateAsync(dataverse, _configuration, cancellationToken)
-                .ConfigureAwait(false);
-            status = SecureRecordIsolationCensus.StatusOf(outcome);
-            result = SecureRecordIsolationCensus.ToResult(outcome);
+            try
+            {
+                outcome = await SecureRecordIsolationCensus.EvaluateAsync(dataverse, _configuration, cancellationToken)
+                    .ConfigureAwait(false);
+                status = SecureRecordIsolationCensus.StatusOf(outcome);
+                result = SecureRecordIsolationCensus.ToResult(outcome);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                readFailure = ex;
+                _logger.LogError(ex,
+                    "[SECURE-CENSUS] The census could not be read, so isolation of secure records is UNKNOWN this run — " +
+                    "not reported as clean. attempt={Attempt} correlationId={CorrelationId}",
+                    context.Attempt, context.CorrelationId);
+            }
+
+            // Task 191e (#2179 design 3.8 / 3.15): placement of flagged-external users, graded in its own try so a failure of
+            // one census never blinds the other. A failure of either fails the attempt below.
+            try
+            {
+                placement = await ExternalCollaboratorPlacement.EvaluateCensusAsync(dataverse, cancellationToken)
+                    .ConfigureAwait(false);
+                placementStatus = placement.Status;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                readFailure ??= ex;
+                _logger.LogError(ex,
+                    "[SECURE-CENSUS] The flagged-user placement census could not be read, so placement of flagged-external users " +
+                    "is UNKNOWN this run — not reported as clean. attempt={Attempt} correlationId={CorrelationId}",
+                    context.Attempt, context.CorrelationId);
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+
+        if (placement is not null)
         {
-            readFailure = ex;
-            _logger.LogError(ex,
-                "[SECURE-CENSUS] The census could not be read, so isolation of secure records is UNKNOWN this run — " +
-                "not reported as clean. attempt={Attempt} correlationId={CorrelationId}",
-                context.Attempt, context.CorrelationId);
+            if (placement.Status == PlacementCensusStatus.Inert && placement.FlaggedUsers > 0)
+            {
+                // Before task 191i creates the unit, flagged users are where design section 1 found them. Loud, not CRITICAL,
+                // and not a finding: it is the documented pre-migration state, and the placement job has nowhere to move them.
+                _logger.LogWarning(
+                    "[SECURE-CENSUS] PlacementInert: no '{Unit}' business unit, so {Flagged} flagged-external user(s) cannot be " +
+                    "placed and placement is not graded. correlationId={CorrelationId}",
+                    ExternalCollaboratorPlacement.BusinessUnitName, placement.FlaggedUsers, context.CorrelationId);
+            }
+
+            foreach (var finding in placement.Findings)
+            {
+                _logger.LogCritical(
+                    "[SECURE-CENSUS] Placement {Kind}: {Message} correlationId={CorrelationId}",
+                    finding.Kind, finding.Message, context.CorrelationId);
+            }
         }
 
         if (outcome is not null)
@@ -158,15 +208,21 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
         }
 
         var findingCount = outcome?.Findings.Count ?? 0;
+        var placementFindingCount = placement?.Findings.Count ?? 0;
         var duration = _timeProvider.GetElapsedTime(started);
+
+        // Placement passes when it is graded clean, or inert (no unit yet: not graded, see above).
+        var placementPasses = placementStatus is PlacementCensusStatus.Clean or PlacementCensusStatus.Inert;
 
         // THE HEARTBEAT (ADR-036 A1 rule 5). Every attempt, including a clean one — "isolated" and "the job died" must
         // not look alike.
         _logger.Log(
-            status == StatusIsolated ? LogLevel.Information : LogLevel.Warning,
-            "[SECURE-CENSUS] heartbeat status={Status} verdict={Verdict} findings={Findings} attempt={Attempt} " +
+            status == StatusIsolated && placementPasses ? LogLevel.Information : LogLevel.Warning,
+            "[SECURE-CENSUS] heartbeat status={Status} verdict={Verdict} findings={Findings} placementStatus={PlacementStatus} " +
+            "placementFindings={PlacementFindings} flaggedUsers={FlaggedUsers} attempt={Attempt} " +
             "durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
-            status, outcome?.Verdict.ToString() ?? "unknown", findingCount, context.Attempt,
+            status, outcome?.Verdict.ToString() ?? "unknown", findingCount, placementStatus, placementFindingCount,
+            placement?.FlaggedUsers ?? 0, context.Attempt,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         if (readFailure is not null)
@@ -176,19 +232,33 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                 "The Secure Record isolation census could not be read; isolation is unknown this run.", readFailure);
         }
 
+        var success = status == StatusIsolated && placementPasses;
         return new JobRunResult(
-            Success: status == StatusIsolated,
-            ErrorMessage: status == StatusIsolated ? null : outcome!.Message,
-            ProcessedItems: findingCount,
+            Success: success,
+            ErrorMessage: success
+                ? null
+                : string.Join(" ", new[]
+                {
+                    status == StatusIsolated ? null : outcome!.Message,
+                    placementPasses ? null : $"Flagged-user placement: {placementFindingCount} finding(s), first: {placement!.Findings[0].Kind}.",
+                }.Where(part => part is not null)),
+            ProcessedItems: findingCount + placementFindingCount,
             Duration: duration,
             // The SAME result type the acceptance route returns (SecureRecordIsolationCensusResult), camelCase as the route
-            // serialises it, plus this run's attempt.
+            // serialises it, plus this run's attempt — and, since task 191e, the placement census beside it (the acceptance
+            // route does not run it: it grades secure-record isolation only).
             ResultJson: JsonSerializer.Serialize(
                 new
                 {
                     status,
                     verdict = result!.Verdict,
                     findings = result.Findings,
+                    placement = new
+                    {
+                        status = placementStatus,
+                        flaggedUsers = placement!.FlaggedUsers,
+                        findings = placement.Findings.Select(f => new { kind = f.Kind.ToString(), message = f.Message }).ToArray(),
+                    },
                     attempt = context.Attempt
                 },
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)));
