@@ -236,6 +236,7 @@ export const DataverseLookupField: React.FC<IDataverseLookupFieldProps> = ({
     } catch {
       // A failed pane is a cancel: the value is unchanged and the user can retry.
       // Log the entity only, never the error object (it can carry host/session detail).
+      // eslint-disable-next-line no-restricted-syntax -- a failed pane is a cancel: the value is unchanged and the user can retry; the warning is the diagnostic
       console.warn(`[DataverseLookupField] openLookup failed for "${entityType}"; treated as cancel`);
     } finally {
       opening.current = false;
