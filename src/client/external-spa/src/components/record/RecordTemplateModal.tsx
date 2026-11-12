@@ -33,8 +33,9 @@
  * `RECORD_DETAIL_ENTITIES` description: the same id-filtered module fetch, the same columns. The caller's `/me` context
  * (who they are, their project levels) is read once per opening, as R3 did, and handed to every section. Refresh re-runs
  * the record read, keeps the record on screen until the new answer arrives, and changes `refreshSignal`, on which every
- * section re-reads. Copy link writes `{origin}{path}?record={token}:{id}`. Submit invoice has no handler or host yet, so it
- * stays hidden (hide, don't disable) until task 007 (FR-10) wires it.
+ * section re-reads. Copy link writes `{origin}{path}?record={token}:{id}`. Submit invoice (Matter, Project, Work assignment;
+ * task 007, FR-10) is an action host (`actions/SubmitInvoiceAction.tsx`): offered only when the caller's firms are linked
+ * to the record, and it leaves through the opener's `onNavigate` (no router import here).
  *
  * ADR-021: Fluent UI v9 semantic tokens via `makeStyles` only; the modal inherits the host FluentProvider.
  */
@@ -116,6 +117,12 @@ export interface RecordTemplateModalProps {
    * where nothing was learned yet). The `?record=` deep link keeps the link in the address bar until then.
    */
   onSettled?: () => void;
+  /**
+   * The host's in-app navigation (task 007, FR-10): what "Submit invoice" uses to leave for the submission page. The
+   * template imports no router, so the opener hands it down (`RecordOpenerProvider`, the grid widgets). Absent: the
+   * action is hidden.
+   */
+  onNavigate?: (path: string) => void;
   /** Renders one section of the shown record. Default: the template's sections (`renderRecordSection`). */
   renderSection?: (id: RecordSectionId, context: RecordSectionContext) => React.ReactNode;
 }
@@ -241,6 +248,7 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   onIndexChange,
   onRecordDeleted,
   onSettled,
+  onNavigate,
   renderSection = renderRecordSection,
 }) => {
   const styles = useStyles();
@@ -479,6 +487,13 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     ...viewContext(row, rowId),
     onBusyChange: busyCallbackFor(`action:${actionId}`),
     onActionChange: hostActionCallbackFor(actionId),
+    onNavigate,
+    // The same guard as the footer Close: refused while an operation holds the view.
+    requestClose: () => {
+      if (holdNavigation) return false;
+      onClose();
+      return true;
+    },
   });
 
   // The action hosts the record's toolbar lists, mounted with the record (their dialogs and notices live here).

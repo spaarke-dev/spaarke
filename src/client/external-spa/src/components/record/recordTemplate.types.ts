@@ -159,4 +159,14 @@ export interface RecordHostAction {
 export interface RecordActionHostContext extends RecordViewContext {
   /** Offer (or withdraw, with `null`) this host's toolbar action. Stable for the host's lifetime. */
   onActionChange: (action: RecordHostAction | null) => void;
+  /**
+   * Task 007 (FR-10). The host's in-app navigation, handed down by whoever opened the record (`RecordOpenerProvider`, a grid
+   * widget); the template imports no router. Absent (a test, a surface with no router): an action that navigates is hidden.
+   */
+  onNavigate?: (path: string) => void;
+  /**
+   * Close the record view before leaving it. Returns false, and closes nothing, while an operation holds the view
+   * (`onBusyChange`): an action must not navigate away from an operation in flight.
+   */
+  requestClose: () => boolean;
 }

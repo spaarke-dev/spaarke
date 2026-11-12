@@ -91,7 +91,7 @@ function useAmbientTheme(): Theme {
  * plugs into `widgetRegistry.ts`'s `lazyLoader` unchanged.
  */
 export function createGridWidgetBody(configId: string): WidgetBodyComponent {
-  const GridWidgetBody: React.FC<WidgetBodyProps> = () => {
+  const GridWidgetBody: React.FC<WidgetBodyProps> = ({ onNavigate }) => {
     const s = useStyles();
     const theme = useAmbientTheme();
     // The grid's loaded rows, in grid order. A ref, not state: the grid re-fires `onRecordsLoaded` whenever its
@@ -156,6 +156,7 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
             index={detail.index}
             onIndexChange={handleIndexChange}
             onRecordDeleted={handleRecordDeleted}
+            onNavigate={onNavigate}
           />
         )}
       </div>

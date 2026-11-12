@@ -42,7 +42,16 @@ export function useOpenRecord(): OpenRecord {
 
 const noopIndexChange = (): void => undefined;
 
-export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export interface RecordOpenerProviderProps {
+  children: React.ReactNode;
+  /**
+   * The host's in-app navigation (App.tsx hands the router's `navigate`), passed on to the record template for its
+   * "Submit invoice" action (R4 task 007, FR-10). Absent: that action is hidden. This file imports no router.
+   */
+  onNavigate?: (path: string) => void;
+}
+
+export const RecordOpenerProvider: React.FC<RecordOpenerProviderProps> = ({ children, onNavigate }) => {
   // The last record shown, kept after the modal closes (#2658). A Fluent Dialog unmounted while open, or re-keyed while
   // open, leaves the page aria-hidden for good. So the modal closes with `open={false}`, `seq` keys each opening and
   // changes only while closed, and a record opened over an open one replaces it through props (the modal reads by id).
@@ -103,6 +112,7 @@ export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ 
           open={shown.open}
           onClose={handleClose}
           onSettled={fireTerminal}
+          onNavigate={onNavigate}
           config={shown.config}
           recordIds={[shown.target.recordId]}
           index={0}

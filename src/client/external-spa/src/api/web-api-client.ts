@@ -1011,7 +1011,7 @@ const INVOICE_RECORD_READS = [
 ] as const;
 
 /** The body of GET /api/v1/external/invoice-submissions/firm-records (task 051 / D-106): the caller's readable records the firm is linked to. */
-interface InvoiceFirmRecordsResponse {
+export interface InvoiceFirmRecordsResponse {
   firmId: string;
   matters?: string[];
   projects?: string[];
@@ -1022,6 +1022,25 @@ interface InvoiceFirmRecordsResponse {
 }
 
 const sameId = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+/**
+ * One firm's firm-records answer: the caller's readable records the firm is linked to (a single read, not paged; the BFF
+ * flags a cut-short answer `truncated` and a partly failed one `partial`). Rejects with an {@link InvoiceSubmissionError}.
+ * Used by {@link listInvoiceCoreRecords} (the wizard's Record step) and by the record view's "Submit invoice" rule
+ * (R4 task 007, FR-10).
+ */
+export async function readInvoiceFirmRecords(firmId: string): Promise<InvoiceFirmRecordsResponse> {
+  if (!GUID_RE.test(firmId)) {
+    throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
+  }
+  try {
+    return await bffApiCall<InvoiceFirmRecordsResponse>(
+      `/api/v1/external/invoice-submissions/firm-records?firmId=${encodeURIComponent(firmId)}`
+    );
+  } catch (err) {
+    throw toInvoiceSubmissionError(err);
+  }
+}
 
 /**
  * The core records the caller can pick for an invoice: their accessible projects (the external projects route) plus
@@ -1041,11 +1060,7 @@ export async function listInvoiceCoreRecords(query: InvoiceRecordQuery = {}): Pr
     throw new InvoiceSubmissionError({ message: 'Invalid firm id.' });
   }
   const linkedRead: Promise<InvoiceFirmRecordsResponse | null> = firmId
-    ? bffApiCall<InvoiceFirmRecordsResponse>(
-        `/api/v1/external/invoice-submissions/firm-records?firmId=${encodeURIComponent(firmId)}`
-      ).catch(err => {
-        throw toInvoiceSubmissionError(err);
-      })
+    ? readInvoiceFirmRecords(firmId)
     : Promise.resolve(null);
 
   const [linked, reads] = await Promise.all([

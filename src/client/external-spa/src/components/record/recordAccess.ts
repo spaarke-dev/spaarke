@@ -7,6 +7,8 @@
  *       `createRightOf`, used by every list inside the record template, so the four follow one rule; and the list-host
  *       rule of SmartTodo, EventsCalendar and a project's DocumentLibrary, the same in and out of the template
  *       (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too);
+ *   (a2) whether "Submit invoice" is offered (task 007, FR-10): `submitInvoiceRightOf`, from `/me` `firms` and the
+ *       firm-records answers (read by `actions/SubmitInvoiceAction.tsx`);
  *   (b) the header's "Your access" value: `yourAccessOf`, from `recordAccessFactsOf` and the lists' rights;
  *   (c) the one short "why" line a read-only section shows: `readOnlyNoteOf`;
  *   and the texts of (b) and (c): `RECORD_ACCESS_TEXT` (the level labels: `ACCESS_LEVEL_LABELS`).
@@ -22,6 +24,8 @@
  * The client decides only what is SHOWN. It never sends a level, and every action is still checked by the server
  * (ADR-028 A1); a 403 from an offered action shows the action's existing error and changes nothing.
  */
+import type { InvoiceCoreRecordKind } from '@spaarke/ui-components/components/InvoiceSubmission';
+import type { InvoiceFirmRecordsResponse } from '../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../auth/bff-client';
 import { canCreate as levelCanCreate, mapAccessLevelString } from '../../hooks/useAccessLevel';
 import { AccessLevel } from '../../types';
@@ -264,6 +268,65 @@ export function isCreateActionOffered(offer: RecordHostAction | undefined): bool
 
 export function isRecordCreateAction(id: RecordToolbarActionId): id is RecordCreateActionId {
   return (RECORD_CREATE_ACTIONS as readonly string[]).includes(id);
+}
+
+// ---------------------------------------------------------------------------
+// (a2) "Submit invoice" (R4 task 007, FR-10)
+// ---------------------------------------------------------------------------
+
+/** The invoice-submission kind of each record entity that offers "Submit invoice"; every other entity has none. */
+const INVOICE_KIND_OF_ENTITY: Readonly<Record<string, InvoiceCoreRecordKind>> = {
+  sprk_matter: 'matter',
+  sprk_project: 'project',
+  sprk_workassignment: 'workassignment',
+};
+
+export function invoiceKindOfEntity(entity: string): InvoiceCoreRecordKind | undefined {
+  return Object.prototype.hasOwnProperty.call(INVOICE_KIND_OF_ENTITY, entity)
+    ? INVOICE_KIND_OF_ENTITY[entity]
+    : undefined;
+}
+
+/**
+ * One firm's firm-records answer as the rule reads it: `'failed'` for a read that failed, `undefined` while it has not
+ * answered. The answer's own `partial` / `truncated` flags are not used: a record LISTED is linked, whatever else is
+ * flagged, and one that is NOT listed is not shown even when the answer says it may be incomplete (hide, don't guess:
+ * the action is never offered on `firms` alone, task 007 escalation 2).
+ */
+export type FirmRecordsRead = InvoiceFirmRecordsResponse | 'failed' | undefined;
+
+/** The ids of the caller's firms from `/me`: `[]` when `firms` is absent, null or empty (the `InvoicesWidget` rule). */
+export function callerFirmIdsOf(callerContext: ExternalUserContextResponse | null): readonly string[] {
+  const firms = callerContext?.firms;
+  return Array.isArray(firms) ? firms.map(f => f.firmId) : [];
+}
+
+const FIRM_RECORD_LIST_OF_KIND: Readonly<Record<InvoiceCoreRecordKind, 'matters' | 'projects' | 'workAssignments'>> = {
+  matter: 'matters',
+  project: 'projects',
+  workassignment: 'workAssignments',
+};
+
+/**
+ * Whether the record view offers "Submit invoice" on this record. `/me` `firms` must be a non-empty array AND the
+ * firm-records answer of at least one of those firms must list this record's id under its kind. A failed, unanswered or
+ * non-listing answer is a no (hidden), for every firm. The server re-checks Read, Create and the firm link on submit; this
+ * is the display rule only.
+ */
+export function submitInvoiceRightOf(input: {
+  callerContext: ExternalUserContextResponse | null;
+  kind: InvoiceCoreRecordKind | undefined;
+  recordId: string;
+  reads: Readonly<Record<string, FirmRecordsRead>>;
+}): boolean {
+  const { callerContext, kind, recordId, reads } = input;
+  if (!kind) return false;
+  const wanted = recordId.toLowerCase();
+  return callerFirmIdsOf(callerContext).some(firmId => {
+    const read = reads[firmId];
+    if (!read || read === 'failed') return false;
+    return (read[FIRM_RECORD_LIST_OF_KIND[kind]] ?? []).some(id => id.toLowerCase() === wanted);
+  });
 }
 
 // ---------------------------------------------------------------------------

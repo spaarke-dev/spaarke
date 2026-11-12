@@ -4,7 +4,7 @@
     <title>"Submit invoice" record action on Matter, Project and Work Assignment (FR-10)</title>
     <phase>1 Record template and actions</phase>
     <gate>after 006; step 1 is a coordination gate with ebilling-r1 (see escalation)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx files (tags frontend, react; code implementation)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -128,7 +128,10 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-10. Anchor drift: spec cites `InvoicesWidget.tsx:66` for the gating; :66 is the button label — the condition is at :59 (verified 2026-11-10). Design §3 says the submission routes hang off `/{matters,projects,workassignments}/{id}/invoice-submissions`; the server re-checks Read, Create and the firm link on submit, so the client rule is a display rule only.</notes>
+  <notes>Spec FR-10. Anchor drift: spec cites `InvoicesWidget.tsx:66` for the gating; :66 is the button label — the condition is at :59 (verified 2026-11-10). Design §3 says the submission routes hang off `/{matters,projects,workassignments}/{id}/invoice-submissions`; the server re-checks Read, Create and the firm link on submit, so the client rule is a display rule only.
+
+Completed 2026-11-12: page param is `?invoiceRecord={kind}:{id}` (renamed from the agreed `?record=`, which collided with the app-wide deep link; ebilling-r1 re-confirmed and approved the page diff). Router-free link module `pages/invoiceSubmitLink.ts`; shared `components/detail/RouterRecordOpener.tsx`. Opus adversarial pass + scoped Sonnet re-check; every F-class finding fixed. Browser check of #2658 after navigating from a grid-opened record is left to task 018. Details: notes/task-007-notes.md.
+rework: fix-round-1 task 007</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

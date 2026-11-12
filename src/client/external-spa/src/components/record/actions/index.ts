@@ -13,9 +13,12 @@ import type * as React from 'react';
 import type { RecordActionHostContext, RecordToolbarActionId } from '../recordTemplate.types';
 import { DocumentDownloadAction } from './DocumentDownloadAction';
 import { ServiceRequestDeleteActionHost } from './ServiceRequestDeleteAction';
+import { SubmitInvoiceAction } from './SubmitInvoiceAction';
 
 export const RECORD_ACTION_HOSTS: Readonly<Partial<Record<RecordToolbarActionId, React.FC<RecordActionHostContext>>>> =
   {
     download: DocumentDownloadAction,
     delete: ServiceRequestDeleteActionHost,
+    // Task 007 (FR-10): Matter, Project and Work assignment list it; the host decides when it is offered.
+    submitInvoice: SubmitInvoiceAction,
   };
