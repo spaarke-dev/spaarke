@@ -5,6 +5,7 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { ProceduresPanel } from '../components/ProceduresPanel';
 import { createRecordProceduresApi } from '../services/recordProceduresApi';
+import { createOverridesApi } from '../services/overridesApi';
 import type { FirmChoices, InvoicedFirms } from '../services/firmChoices';
 import { DIMMED_MARK_KINDS } from '../services/model';
 import {
@@ -48,9 +49,10 @@ function renderPanel(setup: Setup = {}) {
     invoicedBy: jest.fn(() => Promise.resolve(setup.firms ?? { firms: [{ id: OKAFOR.id, name: OKAFOR.name! }], complete: true })),
   };
   const api = createRecordProceduresApi(server.fetchFn, BASE);
+  const overrides = createOverridesApi(server.fetchFn, BASE);
   const view = render(
     <FluentProvider theme={setup.theme ?? webLightTheme}>
-      <ProceduresPanel core={k.core} table={k.table} recordId={k.id} api={api} firmChoices={firmChoices} today={TODAY} />
+      <ProceduresPanel core={k.core} table={k.table} recordId={k.id} api={api} overrides={overrides} firmChoices={firmChoices} today={TODAY} />
     </FluentProvider>
   );
   return { ...view, ...server, firmChoices };
@@ -679,32 +681,32 @@ describe('empty lists', () => {
   });
 });
 
-describe('read-only', () => {
-  it('no row has a button, a link or a tab stop, and a row click opens nothing and calls nothing', async () => {
-    const { calls } = renderPanel({ kind: 'workassignment', procedures: () => waProcedures, rules: () => waRules });
+describe('reads', () => {
+  it('a row is a tab stop that opens the wizard on a click or on Enter, and opening it calls nothing (no button, no link inside the row)', async () => {
+    const { calls, mock } = renderPanel({ kind: 'workassignment', procedures: () => waProcedures, rules: () => waRules });
     await ready();
     const before = calls.length;
 
     const procedureTable = screen.getByTestId('procedure-list');
     expect(within(procedureTable).queryAllByRole('button')).toHaveLength(0);
     expect(within(procedureTable).queryAllByRole('link')).toHaveLength(0);
-    for (const row of screen.getAllByTestId(/^procedure-row-/)) {
-      expect(row).not.toHaveAttribute('tabindex');
-      fireEvent.click(row);
-      fireEvent.keyDown(row, { key: 'Enter' });
-    }
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    for (const row of screen.getAllByTestId(/^procedure-row-/)) expect(row).toHaveAttribute('tabindex', '0');
+    expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: /Rules in force/ }));
-    const ruleTable = screen.getByTestId('rule-list');
-    expect(within(ruleTable).queryAllByRole('button')).toHaveLength(0);
-    expect(within(ruleTable).queryAllByRole('link')).toHaveLength(0);
-    for (const row of screen.getAllByTestId(/^rule-row-/)) {
-      expect(row).not.toHaveAttribute('tabindex');
-      fireEvent.click(row);
-    }
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('procedure-row-p-ocg'));
+    expect(await screen.findByRole('dialog', { name: 'Acme Outside Counsel Guidelines', hidden: true })).toBeInTheDocument();
     expect(calls.length).toBe(before);
+    expect(mock.mock.calls.length).toBe(before);
+  });
+
+  it('Enter on a focused row opens the wizard; another key does not', async () => {
+    renderPanel();
+    await ready();
+    const row = screen.getByTestId('procedure-row-p-rate');
+    fireEvent.keyDown(row, { key: 'a' });
+    expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument();
+    fireEvent.keyDown(row, { key: 'Enter' });
+    expect(await screen.findByRole('dialog', { name: 'Fenwick rate card', hidden: true })).toBeInTheDocument();
   });
 
   it('every request is a GET of the two read routes: no 089 route (assignments, overrides, previews, deletes) is ever called', async () => {
@@ -727,9 +729,9 @@ describe('read-only', () => {
     }
   });
 
-  it('the page sources have no 089 route, no write verb and no Dataverse write call (control: the scan sees one)', () => {
+  it('the READ modules have no 089 route, no write verb and no Dataverse write call (control: the scan sees one)', () => {
     const root = path.join(__dirname, '..');
-    const files = ['main.tsx', 'components/ProceduresPanel.tsx', 'components/ProcedureList.tsx', 'components/RuleList.tsx', 'services/recordProceduresApi.ts', 'services/firmChoices.ts', 'services/model.ts'];
+    const files = ['services/recordProceduresApi.ts', 'services/firmChoices.ts', 'services/model.ts', 'components/ProcedureList.tsx', 'components/RuleList.tsx', 'components/rowOpen.ts'];
     const forbidden = /procedure-assignments|rule-overrides|removal-preview|\/overrides|method:\s*['"](POST|PUT|PATCH|DELETE)['"]|\.(createRecord|updateRecord|deleteRecord)\(/;
     for (const f of files) expect([f, forbidden.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false]);
     expect(forbidden.test("fetch(url, { method: 'POST' })")).toBe(true);

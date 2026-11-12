@@ -536,6 +536,27 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 **Fails without it**: a rare double delivery over a source changed without a new row version is undone instead of retried.
 
 ---
+### ISS-016 — WizardShell keeps header navigation and close active while a save is running
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-12 |
+| **Source** | ebilling-r1 task 084b adversarial review (finding 2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2755 |
+
+**Description**: `WizardShell` disables only its footer buttons while `onFinish` runs (`isFinishing`). The ‹ › `nav` and the × / dismiss it passes to `SprkModal` stay active. After navigating mid-save, the earlier save's result shows under another item's title. After closing mid-save, an error from a multi-call save is never shown. 084b guards this locally in `WizardFrame`; the other WizardShell consumers (9 solutions) do not.
+
+**Entry-points**: `src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx` (`handleFinish` ~336, the `SprkModal` render ~548); `grep -rln WizardShell src/solutions --include=*.tsx`.
+
+**Suggested fix**: while `isFinishing`, disable `nav` and make `onClose`/dismiss no-ops; add a WizardShell test; then drop 084b's local guard.
+
+**Fails without it**: a save's outcome is shown against the wrong item, or not at all.
+
+**Estimated effort**: 2-3 hours. **Blockers**: none. **Related**: task 084b.
+
+---
 ### ISS-015 — eBilling code pages are not linted (lint script without eslint, outside client-lint CI)
 
 | Field | Value |

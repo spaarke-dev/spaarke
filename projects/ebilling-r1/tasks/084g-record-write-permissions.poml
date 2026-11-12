@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084g" project="ebilling-r1">
+  <metadata>
+    <title>Procedures on the record: the read routes return the caller's write permissions, and 084b's wizards open read-only from them (EB-D-221)</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217, EB-D-221)</phase>
+    <gate>startable: 084 closed and 084b merged into work. uac-r2 reviews the BFF diff before merge.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF read-route change that reports authorization outcomes (tags bff-api, auth), plus the .tsx client.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization-sensitive: the permissions must be computed from 089's own declarations without a second copy of the rules, and must fail closed without breaking EB-D-218's read.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches RecordProcedureReadService.cs and RecordProcedureEndpoints.cs, which 084e also changes; run after 084e merges (or rebase on it), never alongside.</parallel-reason>
+    <deps>084, 084b, 084e</deps>
+    <tags>bff-api, api, endpoints, auth, frontend, react, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Add to both of 084's read routes (GET .../procedures and .../rules-in-force, every core-record type) a `permissions` object with one boolean per 089 write on this record: `assignOrExclude` (procedure-assignments and rule-overrides/exclude), `remove` (removal-preview and DELETE overrides/{id}) and `change` (rule-overrides/change). Compute each from the record-level and privilege checks that 089's own *Targets declarations in ProcedureAssignmentEndpoints.cs make, evaluated for the caller, without the per-subject Read checks (the read already Exposes every subject row under EB-D-218). Then make 084b's wizards open read-only when the matching permission is false.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, the Finance authorization filter (FinanceAuthorizationCheck, BillingAdminAuthorization) and React code pages.</role>
+
+  <goal>A user who may not change a record's Procedures opens the wizard and sees every write choice disabled, with the reason "You can view this, but not change it."; a user who may write sees today's behaviour. The flags come from the same declarations the write routes enforce, so they cannot drift from them, and the write routes remain the only decision.</goal>
+
+  <context>
+    <background>EB-D-221 (owner, 2026-11-12) in notes/decisions-log.md. 084b escalation: notes/084-procedure-review-ui.md section "084b". 089's authorization: the remarks on ProcedureAssignmentEndpoints (record Write and AppendTo; the billing-admin privilege; Write on sprk_policy for Remove; Create/Write on rule set, Create on policy, Create/Write on policy version and Write on policy for Change). 084's read and EB-D-218: notes/084-procedure-review-ui.md (all 084 sections, including the uac-r2 fix rounds and the 084e section).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs (expose the record-level and privilege parts of AssignTargets/ExcludeTargets, RemoveTargets and ChangeTargets as reusable declarations, without the per-subject Read; the routes keep calling the same composition, behaviour unchanged)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs and/or src/server/api/Sprk.Bff.Api/Api/Finance/RecordProcedureEndpoints.cs (add `permissions` to both DTOs)</file>
+      <file role="modify">src/solutions/RecordProcedures/src/services/model.ts, the wizards under src/components/wizards/** (read-only from permissions)</file>
+      <file role="modify">tests/integration/contract/Api/Finance/RecordProcedure*.cs; src/solutions/RecordProcedures/src/__tests__/**</file>
+      <file role="canonical-reference">the existing evaluation of FinanceAuthorizationTargets inside the Finance authorization filter (find it from AddFinanceAuthorizationFilter): reuse its evaluator for the caller; do not re-implement privilege checks</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="EB-D-221">Every permission is computed from the same check declarations 089's routes use (one source: a shared declaration both the write route and the read call). No hand-written list of privilege names in the read service. A guard test asserts that, for each write route, the declaration the route enforces equals the one the matching flag evaluates, plus that route's per-subject Read.</constraint>
+    <constraint source="EB-D-221, fail closed">If any check faults, cannot establish the caller, or is not answered, that flag is false. A fault there never turns the read into 503 and never into true; the list itself still follows EB-D-218 unchanged (any refusal or fault on an exposed row is 503 procedures.unavailable).</constraint>
+    <constraint source="EB-D-221">The flags are a hint for the client only. No write route reads them, caches them or skips any check because of them. The record-level checks keep the uniform-404 rule of the write routes; on the read the record is already readable, so a false flag reveals only the caller's own rights.</constraint>
+    <constraint source="EB-D-218">The read's existing behaviour, filter order (step 0, record Read, eBilling flag), error codes and guards (EveryAskedRow_DeniedAlone_Is503_WithNoList, EveryVersionRow_IsAsked_OrExemptBecauseTheBodyDoesNotDependOnIt, Every200Guid_WasAskedOfTheCaller) stay green and unchanged in meaning. Batch the permission checks into as few calls as the existing evaluator allows; record the call count added per read in the notes.</constraint>
+    <constraint source="084b, client">The client never decides authorization beyond disabling: with a false flag every write choice in the Procedure and Rule wizards is disabled with the reason text, and Confirm is absent; with a true flag behaviour is exactly 084b's (a 403 from the write route is still shown with its title). A response without `permissions` (an older BFF) is treated as all false.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019, .claude/constraints/bff-extensions.md">No new route, no new package; ledger entries unchanged unless a basis changes; publish-size delta recorded.</constraint>
+    <constraint source="uac-r2 U-1 (2026-11-12)">Each flag is the caller's own rights, evaluated the way the 089 write route evaluates them (the check half of its filter): never app-only, and never a role lookup the write route does not do. If the Finance evaluator has an app-only branch (list filtering), the flags must not take it.</constraint>
+    <constraint source="uac-r2 U-2">A flag is a hint, never authority. The wizard still handles a refusal at Confirm when the flag was true, because the per-subject Read and races are not in the flag. A contract test proves a true flag plus a failing per-subject Read still gets the write route's refusal.</constraint>
+    <constraint source="uac-r2 U-3">No caching across callers: the flags travel only on that caller's response. If the read result is cached anywhere, the flags sit outside the cache or the cache is keyed by caller. The notes and the PR say which.</constraint>
+    <constraint source="uac-r2 U-4">Vetoes apply: Restricted, No Access and the 191 flagged-external predicate give false wherever the matching write route would refuse. Take this from the write route's own evaluator, never from a re-implementation. Add one test where a Restricted record gives all flags false for a caller the write route would refuse. The read routes refuse a flagged-external caller at step 0 (no body, so no flags); assert that in the same test file.</constraint>
+    <constraint source="uac-r2 U-5">Fault gives false (as above). Log the fault, structured and at Warning. The fault never fails or empties the read response: the record still returns, with the flags false.</constraint>
+    <constraint source="public repository">Notes, comments and commits name the checks by their declaration names only; no identity, membership or access-gap detail.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/decisions-log.md (EB-D-218, EB-D-220, EB-D-221)</file>
+      <file>projects/ebilling-r1/notes/084-procedure-review-ui.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Find how the Finance authorization filter evaluates FinanceAuthorizationTargets for the caller; split 089's *Targets into (record + privilege) and (per-subject Read) without changing any route's effective checks.</step>
+    <step order="2">Evaluate the three (record + privilege) declarations for the caller in the read; add `permissions` to both DTOs; contract tests.</step>
+    <step order="3">Client: model type, read-only wizards, tests.</step>
+    <step order="4">dotnet build and test (BFF tests, ArchTests); npm test and npm run build in RecordProcedures; publish-size delta.</step>
+    <step order="5">Notes section "084g" in notes/084-procedure-review-ui.md; send uac-r2 the BFF diff; on its pass set TASK-INDEX.md to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 089's checks cannot be split so the write routes and the read share one declaration (the filter's evaluator is not reusable outside the filter), STOP and escalate (root CLAUDE.md §6) rather than writing a second copy of the privilege list.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>089's *Targets declarations and the Finance authorization filter compute exactly these outcomes for the write routes; 084's read routes return no permission today (084b notes).</existing>
+    <extension>Yes: the read evaluates the existing declarations for the caller and adds one DTO field; no new route, service or check.</extension>
+    <cost-of-doing-nothing>A user without the privilege walks the four wizard steps and is refused at Confirm (EB-D-221), and 084b's "Read-only user" ui-test cannot pass.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Read-only user (084b's test, now satisfiable)">
+      <steps><step>Sign in as a user without the billing-admin privilege; open a Procedure, then a rule</step></steps>
+      <expected>Both wizards open read-only: every write choice disabled with the reason, no Confirm; no console errors</expected>
+    </test>
+    <test name="Billing admin">
+      <steps><step>Sign in as a billing admin; open the same Procedure</step></steps>
+      <expected>Write choices enabled as in 084b</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both read routes, on every core-record type, return `permissions` {assignOrExclude, remove, change}; for a caller holding every check all three are true, and each flag turns false when exactly one of its checks is denied (one test per check).</criterion>
+    <criterion testable="true">A guard asserts each write route's enforced declaration equals its flag's declaration plus that route's per-subject Read (must-fire: adding a check to one side only fails it).</criterion>
+    <criterion testable="true">A faulted or unanswered permission check gives that flag false with a 200 list; it never yields 503 or true (negative). The EB-D-218 guards pass unchanged.</criterion>
+    <criterion testable="true">No write route's behaviour changes: 089's existing contract tests pass unchanged.</criterion>
+    <criterion testable="true">Client: with a false flag the wizard shows every write choice disabled with the reason and no Confirm; with true it behaves as 084b; a missing `permissions` is all false (negative).</criterion>
+    <criterion testable="true">084b's ui-test "Read-only user" (no write choice enabled) is satisfiable; it runs at 112.</criterion>
+    <criterion testable="true">Build 0 warnings; publish-size delta recorded; no package; no new HIGH CVE.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-11-12 from EB-D-221 (owner chose "Add canWrite field" over refusing at Confirm). Deployment: 112.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
