@@ -4,7 +4,7 @@
     <title>Deploy the in-app wizard migration and verify on dev</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>111, 113 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment of the Console and Legal Workspace code pages to a shared environment.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,4 +94,8 @@
 2026-10-09: dependency on 121 (LegalWorkspace deploy path) removed — 121 deferred by D-106; 114 runs as part of the D-112 end-to-end dev deploy.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    2026-11-12: owner UAT round 4 PASS on dev (in-app wizards correct; open from the command bar). The two round 1 findings were fixed by #2281 (field mapping) and task 162. notes/uat-v4-log.md, Round 4. The Create Project Assign Work outside-counsel search defect (F-R4-1) is pre-existing and tracked separately.
+  </completion>
+
 </task>
