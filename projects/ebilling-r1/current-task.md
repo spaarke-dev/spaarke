@@ -19,7 +19,7 @@
 >   - Owner step: publish SpaarkeMaster 1.3.1.0 (`publish-dataverse-solutions-manifest.yml`, publish: true, from master); then tell provisioning-r1.
 >   - ontology-r1 note (not blocking): check which role supplies the spend reader's Decision Record read since DEF-059; answer by message.
 >   - word-add-in-r1 got the dev sha `6dbe69b9e2` (2026-11-12); its #2552 waits on the owner.
->   - **Next tasks (084 done):** 084a (read-only panel) → 084b → 084c; 084d after 084b; 084e (outranked mark, opus, ontology-r1 reviews Signals diff) is startable now.
+>   - **084a RUNNING (2026-11-12, owner "Start 084a"):** implementer `impl-084a` on `task/ebilling-084a` from work `cfe9a7b460` (agent worktree), rigor FULL, sonnet/high. Then: review, code-review + adr-check, merge, close out. **Then:** 084b → 084c; 084d after 084b; 084e (outranked mark, opus, ontology-r1 reviews Signals diff) is startable now.
 
 ## Quick recovery
 
