@@ -416,10 +416,14 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                 var (rows, horizon, capped) = await ListAsync(dataverse, table, messageLookup, team, since, ct).ConfigureAwait(false);
                 foreach (var (id, changedAt) in rows)
                 {
-                    if (!firstChange.TryGetValue(id, out var first) || changedAt < first)
-                        firstChange[id] = changedAt;
-                    if (!lastChange.TryGetValue(id, out var last) || changedAt > last)
-                        lastChange[id] = changedAt;
+                    // A row without modifiedon (Dataverse always returns it) is the earliest change for ordering and the latest
+                    // for the skip, so it is worked early and never skipped: missing data fails toward working the message.
+                    var earliest = changedAt ?? since;
+                    var latest = changedAt ?? DateTimeOffset.MaxValue;
+                    if (!firstChange.TryGetValue(id, out var first) || earliest < first)
+                        firstChange[id] = earliest;
+                    if (!lastChange.TryGetValue(id, out var last) || latest > last)
+                        lastChange[id] = latest;
                 }
 
                 if (capped)
@@ -638,7 +642,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     /// <see cref="MaxDirectListedPerTable"/> rows. <c>Capped</c> when the cap was reached; <c>Horizon</c> is then the last listed
     /// row's <c>modifiedon</c> (null when it carries none). A fault propagates (the caller holds the window).
     /// </summary>
-    private static async Task<(List<(Guid Id, DateTimeOffset ChangedAt)> Rows, DateTimeOffset? Horizon, bool Capped)> ListAsync(
+    private static async Task<(List<(Guid Id, DateTimeOffset? ChangedAt)> Rows, DateTimeOffset? Horizon, bool Capped)> ListAsync(
         Spaarke.Dataverse.IGenericEntityService dataverse, string table, string? messageLookup, Guid team, DateTimeOffset since,
         CancellationToken ct)
     {
@@ -656,10 +660,10 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         query.AddOrder(table + "id", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
         var rows = ((await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
             ?? Enumerable.Empty<Microsoft.Xrm.Sdk.Entity>()).ToList();
-        // A row without modifiedon (Dataverse always returns it) counts as changed at the window's start: the earliest it can be.
-        DateTimeOffset ChangedAt(Microsoft.Xrm.Sdk.Entity e) => e.GetAttributeValue<DateTime?>("modifiedon") is { } at
+        // Null when a row carries no modifiedon; the caller decides what that means.
+        static DateTimeOffset? ChangedAt(Microsoft.Xrm.Sdk.Entity e) => e.GetAttributeValue<DateTime?>("modifiedon") is { } at
             ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc))
-            : since;
+            : null;
         var listed = rows
             .Select(e => (Id: messageLookup is null ? e.Id : e.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(messageLookup)?.Id ?? Guid.Empty,
                 ChangedAt: ChangedAt(e)))
