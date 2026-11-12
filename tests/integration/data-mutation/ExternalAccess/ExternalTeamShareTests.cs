@@ -1127,4 +1127,93 @@ public class ExternalTeamShareTests
         result.Examined.Should().BeGreaterThan(ExternalTeamShareSynchronizer.MaxFamilyRows);
         result.Tables.Single(t => t.Table == "sprk_event").TeamGrants.Should().BeGreaterThan(ExternalTeamShareSynchronizer.MaxFamilyRows);
     }
+
+    // ── uac-r2 task 197b: one source for the External Collaborators unit's name ─────────────────────────────────────
+
+    [Fact(DisplayName = "197b must-fire: the retired unit-name setting is not read; the role file's unit is found though it names another unit")]
+    public async Task R197b_TheRetiredUnitNameSetting_IsNotRead()
+    {
+        var world = World();
+        var decoyBu = Guid.NewGuid();
+        var decoyTeam = Guid.NewGuid();
+        world.Add("businessunit", decoyBu, ("name", "Some Other Unit"),
+            ("parentbusinessunitid", new EntityReference("businessunit", SecureChildShareWorld.GeneralBu)));
+        world.Team(decoyTeam, decoyBu, "Some Other Unit", isDefault: true, teamType: 0);
+        var configuration = new ConfigurationBuilder().AddConfiguration(Config()).AddInMemoryCollection(
+            new Dictionary<string, string?> { [ExternalTeamShareSynchronizer.RetiredBusinessUnitNameConfigKey] = "Some Other Unit" }).Build();
+
+        var (team, refusal) = await Engine(world, configuration).ResolveExternalTeamAsync(CancellationToken.None);
+
+        refusal.Should().BeNull();
+        team.Should().Be(ExternalTeam, "the unit is the one config/external-collaborator-role.json names");
+    }
+
+    [Fact(DisplayName = "197b: no External Collaborators unit yet is no team and no refusal")]
+    public async Task R197b_NoUnit_IsNoTeam_AndNoRefusal()
+    {
+        var (team, refusal) = await Engine(World(withExternalUnit: false), Config()).ResolveExternalTeamAsync(CancellationToken.None);
+
+        team.Should().BeNull();
+        refusal.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "197b must-fire: a unit carrying the name that is not a direct child of the root is refused (the one lookup every reader uses)")]
+    public async Task R197b_AUnitNotUnderTheRoot_IsRefused()
+    {
+        var world = World(withExternalUnit: false);
+        var middle = Guid.NewGuid();
+        world.Add("businessunit", middle, ("name", "Middle"),
+            ("parentbusinessunitid", new EntityReference("businessunit", SecureChildShareWorld.GeneralBu)));
+        world.Add("businessunit", ExternalBu, ("name", Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName),
+            ("parentbusinessunitid", new EntityReference("businessunit", middle)));
+        world.Team(ExternalTeam, ExternalBu, "External Collaborators", isDefault: true, teamType: 0);
+
+        var (team, refusal) = await Engine(world, Config()).ResolveExternalTeamAsync(CancellationToken.None);
+
+        team.Should().BeNull();
+        refusal.Should().NotBeNull();
+    }
+
+    [Fact(DisplayName = "197b must-fire: a leftover value in the retired setting is reported once at startup, by its key only")]
+    public void R197b_ALeftoverRetiredSetting_IsReported_ByKeyOnly()
+    {
+        const string leftover = "a-leftover-unit-name-value";
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { [ExternalTeamShareSynchronizer.RetiredBusinessUnitNameConfigKey] = leftover }).Build();
+        var logger = new MessageLogger();
+
+        ExternalTeamShareSynchronizer.ReportRetiredSettings(configuration, logger).Should().BeTrue();
+
+        logger.Messages.Should().ContainSingle().Which.Should().Match<(Microsoft.Extensions.Logging.LogLevel Level, string Text)>(m =>
+            m.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+            && m.Text.Contains(ExternalTeamShareSynchronizer.RetiredBusinessUnitNameConfigKey)
+            && !m.Text.Contains(leftover));
+    }
+
+    [Theory(DisplayName = "197b must-not-fire: the retired setting unset or blank, nothing is reported")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void R197b_NoRetiredSetting_ReportsNothing(string? value)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { [ExternalTeamShareSynchronizer.RetiredBusinessUnitNameConfigKey] = value }).Build();
+        var logger = new MessageLogger();
+
+        ExternalTeamShareSynchronizer.ReportRetiredSettings(configuration, logger).Should().BeFalse();
+
+        logger.Messages.Should().BeEmpty();
+    }
+
+    private sealed class MessageLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Text)> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) => Messages.Add((logLevel, formatter(state, exception)));
+    }
 }
