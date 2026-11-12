@@ -429,6 +429,55 @@ public sealed class PolicyVersionValidator
     {
         ArgumentNullException.ThrowIfNull(pv);
 
+        if (TryPrepareBillingRuleCore(pv, out definition, out var reason))
+        {
+            return true;
+        }
+
+        _logger.LogError(
+            OntologyWriterEvents.PolicyVersionInvalid,
+            "Billing policy version {PolicyVersionId} ({PolicyCode}) failed validation at the billing gate; it is not " +
+            "evaluated (reason={Reason}).",
+            pv.PolicyVersionId, pv.PolicyCode, reason);
+        // K3 (fix-round-1): its own instrument, so ontology.policy.invalid counts Ontology policies only.
+        OntologyWriterTelemetry.RecordBillingRuleInvalid(reason);
+
+        return false;
+    }
+
+    /// <summary>
+    /// ebilling-r1 084e fix round 1 (ontology-r1 design): the billing gate's decision for a READ-SIDE DISPLAY only, such as the "Outranked by X"
+    /// mark on a record's rules-in-force list. It refuses exactly what <see cref="TryPrepareBillingRule"/> refuses (one shared core), but a
+    /// refusal is at most a Debug log: no <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> error and no <c>billing.rule.invalid</c>
+    /// meter, so a page view does not drive the gate's alerting. Its definition must NEVER feed an evaluation: an evaluation caller uses
+    /// <see cref="TryPrepareBillingRule"/>, whose refusals (FR-24) are always logged and metered.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pv"/> is null (a caller bug).</exception>
+    public bool TryPrepareBillingRuleForRead(PolicyVersionSnapshot pv, [NotNullWhen(true)] out BillingRuleDefinition? definition)
+    {
+        ArgumentNullException.ThrowIfNull(pv);
+
+        if (TryPrepareBillingRuleCore(pv, out definition, out var reason))
+        {
+            return true;
+        }
+
+        _logger.LogDebug(
+            OntologyWriterEvents.PolicyVersionInvalid,
+            "Billing policy version {PolicyVersionId} ({PolicyCode}) is refused by the billing gate; the read shows no precedence from it " +
+            "(reason={Reason}).",
+            pv.PolicyVersionId, pv.PolicyCode, reason);
+        return false;
+    }
+
+    /// <summary>
+    /// The billing gate's decision, shared by <see cref="TryPrepareBillingRule"/> and <see cref="TryPrepareBillingRuleForRead"/>: no log and no
+    /// meter (each caller does its own). On refusal <paramref name="definition"/> is null and <paramref name="reason"/> is the bounded reason.
+    /// Never throws for the row's content.
+    /// </summary>
+    private bool TryPrepareBillingRuleCore(
+        PolicyVersionSnapshot pv, [NotNullWhen(true)] out BillingRuleDefinition? definition, [NotNullWhen(false)] out string? reason)
+    {
         PolicyVersionValidationResult result;
         definition = null;
         try
@@ -462,18 +511,11 @@ public sealed class PolicyVersionValidator
 
         if (result.IsValid && definition is not null)
         {
+            reason = null;
             return true;
         }
 
-        var reason = result.Reason ?? OntologyWriterFailureReason.InternalError;
-        _logger.LogError(
-            OntologyWriterEvents.PolicyVersionInvalid,
-            "Billing policy version {PolicyVersionId} ({PolicyCode}) failed validation at the billing gate; it is not " +
-            "evaluated (reason={Reason}).",
-            pv.PolicyVersionId, pv.PolicyCode, reason);
-        // K3 (fix-round-1): its own instrument, so ontology.policy.invalid counts Ontology policies only.
-        OntologyWriterTelemetry.RecordBillingRuleInvalid(reason);
-
+        reason = result.Reason ?? OntologyWriterFailureReason.InternalError;
         definition = null;
         return false;
     }
