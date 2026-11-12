@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -349,7 +350,26 @@ internal static class AdminAttentionText
             _ => "record",
         };
         var id = item.SubjectId is { Length: > 0 } text ? " " + (text.Length > IdPrefixLength ? text[..IdPrefixLength] : text) : string.Empty;
-        return $"{item.Code ?? "unknown"} ({item.PolicyCode ?? "unknown"} on {subject}{id})";
+        return $"{item.Code ?? "unknown"} ({ReaderPolicy(item.PolicyCode)} on {subject}{id})";
+    }
+
+    /// <summary>
+    /// 082c-2 fix round 2 (uac-r2 option (i), condition (a)): the policy as this reader text names it. The stored refusal's <c>policyCode</c> is the
+    /// internal join key and stays as stored; a record rule's key (<c>BRR-</c> plus its policy id) is never printed: the text carries the reader
+    /// code (<see cref="ProcedureRulesOnDate.ReaderCodeOf(string, string?, ILogger?)"/>; a stored key has no base code, so blank)
+    /// and the record-rule flag as the token <c>record rule</c>.
+    /// </summary>
+    private static string ReaderPolicy(string? storedPolicyCode)
+    {
+        if (storedPolicyCode is null)
+        {
+            return "unknown";
+        }
+
+        var readerCode = ProcedureRulesOnDate.ReaderCodeOf(storedPolicyCode, baseCode: null, logger: null);
+        return ProcedureRulesOnDate.IsRecordRuleCode(storedPolicyCode)
+            ? (readerCode.Length > 0 ? readerCode + " record rule" : "record rule")
+            : readerCode;
     }
 
     private static string? Text(JsonObject node, string name) =>

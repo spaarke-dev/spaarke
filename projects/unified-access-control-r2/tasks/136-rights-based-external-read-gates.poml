@@ -4,7 +4,7 @@
     <title>C2 — external read gates test RIGHTS, not key presence: a None-rights root stops admitting reads (including document content download) on both planes, and /me stops leaking None ids</title>
     <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C2)</phase>
     <gate>after-135-131</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization gates on live /api/v1/external read routes (.cs), including an app-only file stream; tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>

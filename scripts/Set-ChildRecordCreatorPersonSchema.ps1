@@ -161,11 +161,12 @@ $Column = 'sprk_createdbyperson'
 $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
-$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection', 'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion', 'sprk_ruleset', 'sprk_procedureassignment')
+$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision', 'sprk_decisionrecord', 'sprk_signal', 'sprk_invoicesubmission', 'sprk_invoiceapproval', 'sprk_externalidentifier', 'sprk_invoicecorrection', 'sprk_procedure', 'sprk_procedureversion', 'sprk_policy', 'sprk_policyversion', 'sprk_ruleset', 'sprk_procedureassignment', 'sprk_storedfile')
 # ebilling-r1 task 081 (procedure model 13, O-23; ontology F4-1 / D-173; UAC #2276): before this script secures ANY unsecured column, on any
 # table, it asserts the column holds no value yet (Test-ColumnEmptyBeforeSecuring, section (c)). 080 created the four Procedure/policy
 # columns unsecured; the owner created sprk_budgetrevision's, sprk_decisionrecord's and sprk_signal's by hand. ebilling-r1 task 090 (UAC
 # answer to 081 Q5): 080 also created sprk_ruleset's and sprk_procedureassignment's unsecured; they pass the same gate.
+# ebilling-r1 task 086: 088 created sprk_storedfile's unsecured (Deploy-EbillingStoredFileSchema.ps1); it passes the same gate.
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 # D-136 (owner 2026-10-13): the ontology writer's narrow profile. Fixed id so the live profile and SpaarkeMaster's source
@@ -216,6 +217,9 @@ $SolutionHomes = @{
     # both in SpaarkeMaster; this script secures the column and checks it, never creates it.
     sprk_ruleset              = @('SpaarkeMaster')
     sprk_procedureassignment  = @('SpaarkeMaster')
+    # ebilling-r1 task 086: 088 created sprk_storedfile with the column (Deploy-EbillingStoredFileSchema.ps1, SpaarkeMaster, canonical
+    # relationship name); this script secures the column and checks it, never creates it.
+    sprk_storedfile           = @('SpaarkeMaster')
 }
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
@@ -263,6 +267,7 @@ function New-Label([string]$Text) {
 
 $IsDryRun = -not $Apply.IsPresent
 . (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
+. (Join-Path $PSScriptRoot 'common/OntologyWriterUnit.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 function Report([string]$State, [string]$What) {
     $color = switch ($State) { 'OK' { 'Green' } 'MISSING' { 'Yellow' } 'WOULD' { 'Cyan' } 'DONE' { 'Green' } 'INFO' { 'Gray' } default { 'Red' } }
@@ -369,7 +374,9 @@ if ($OntologyWriterApplicationId) {
     $u = @((Invoke-DvGet "systemusers?`$select=systemuserid,fullname&`$filter=applicationid eq $OntologyWriterApplicationId").value) | Select-Object -First 1
     if ($u) { $ontologyWriterUsers += $u } else { Report 'FAIL' "no application user for the ontology writer appId $OntologyWriterApplicationId in this environment" }
 }
-$defaultTeams = @((Invoke-DvGet 'teams?$select=teamid,name&$filter=isdefault eq true').value)
+# Task 267 (#2618): every default team but the ontology writer unit's -- that team must be in NO field-security profile (H7b S24).
+$defaultTeamSplit = Split-DvDefaultTeamsByOntologyWriterUnit -Api $Api -Headers $headers -DefaultTeams @((Invoke-DvGet 'teams?$select=teamid,name,_businessunitid_value&$filter=isdefault eq true').value)
+$defaultTeams = $defaultTeamSplit.ReaderTeams
 function Ensure-Member([string]$ProfileId, [string]$ProfileName, [string]$Nav, [string]$Set, $Id, [string]$Label) {
     if (-not $ProfileId) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "$ProfileName member: $Label"; return }
     $key = if ($Set -eq 'teams') { 'teamid' } else { 'systemuserid' }
@@ -382,6 +389,9 @@ function Ensure-Member([string]$ProfileId, [string]$ProfileName, [string]$Nav, [
 }
 foreach ($u in $bffUsers) { Ensure-Member $writerId $WriterProfileName 'systemuserprofiles_association' 'systemusers' $u.systemuserid "app user '$($u.fullname)'" }
 foreach ($t in $defaultTeams) { Ensure-Member $readerId $ReaderProfileName 'teamprofiles_association' 'teams' $t.teamid "default team '$($t.name)'" }
+foreach ($t in @(Get-DvOntologyWriterUnitTeamsOnProfile -Api $Api -Headers $headers -ProfileId $readerId -WriterUnitTeams $defaultTeamSplit.WriterUnitTeams)) {
+    Report 'FAIL' "default team '$($t.name)' of the '$OntologyWriterBusinessUnitName' business unit is on $ReaderProfileName -- the ontology writer's unit team must be in NO field-security profile (H7b S24 refuses it); remove it from the profile by hand"
+}
 foreach ($u in $ontologyWriterUsers) { Ensure-Member $ontologyWriterProfileId $OntologyWriterProfileName 'systemuserprofiles_association' 'systemusers' $u.systemuserid "app user '$($u.fullname)'" }
 
 # A writer profile's membership IS the lock: a human — or a team — added to it can name anyone as a record's creator,

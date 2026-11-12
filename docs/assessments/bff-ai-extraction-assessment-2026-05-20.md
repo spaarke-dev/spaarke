@@ -391,7 +391,7 @@ The recommendation flips to "**full extraction now**" only if BOTH a §22.2 trig
 | `git log` on `Services/Ai/**` and CRUD folders | Release cadence |
 | [`docs/architecture/INSIGHTS-ENGINE-ARCHITECTURE.md`](../architecture/INSIGHTS-ENGINE-ARCHITECTURE.md) | MCP server design, §22.2 triggers |
 | [ADR-013](../adr/ADR-013-ai-architecture.md) | Current binding decision |
-| [ADR-001](../adr/ADR-001-minimal-api.md) | Single Minimal API constraint |
+| [ADR-001](../adr/ADR-001-minimal-api-and-workers.md) | Single Minimal API constraint |
 | [ADR-010](../adr/ADR-010-di-minimalism.md) | DI minimalism baseline |
 | [`projects/sdap-bff-api-remediation-fix/design.md`](../../projects/sdap-bff-api-remediation-fix/design.md) | Parallel project context |
 

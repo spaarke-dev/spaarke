@@ -14,9 +14,10 @@
                                       + config); exit 0 required for H13 acceptance to pass.
                                       Per customer-provisioning-orchestration-r1 spec FR-35 +
                                       SC #17 + design.md H13. Added by r1 task 021.
-      6. Org Auditing  -  organization.isauditenabled = true and auditretentionperiodv2 = -1
-                          (Forever). H6 sets both (#2027); this catches an environment where
-                          auditing was turned off or shortened after provisioning.
+      6. Org Auditing  -  organization.isauditenabled = true, auditretentionperiodv2 = -1
+                          (Forever) and isuseraccessauditenabled = true. H6 sets all three
+                          (#2027; access logging owner decision 2026-11-10); this catches an
+                          environment where auditing was turned off or shortened after provisioning.
 
     This is the capstone validation tool for the production environment setup project.
     Run this after deploying to any non-dev environment to catch configuration issues.
@@ -450,7 +451,7 @@ function Test-NamingConformance {
 function Test-OrgAuditing {
     Write-TestHeader "CHECK 6: Org Auditing"
 
-    $apiUrl = "$DataverseUrl/api/data/v9.2/organizations?`$select=isauditenabled,auditretentionperiodv2"
+    $apiUrl = "$DataverseUrl/api/data/v9.2/organizations?`$select=isauditenabled,auditretentionperiodv2,isuseraccessauditenabled"
     $response = az rest --method GET --url $apiUrl --resource "$DataverseUrl" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Add-TestResult -Group 'Org Auditing' -Test 'organization row readable' -Status 'Fail' `
@@ -479,6 +480,14 @@ function Test-OrgAuditing {
         $shown = if ($null -eq $org[0].auditretentionperiodv2) { 'null' } else { $org[0].auditretentionperiodv2 }
         Add-TestResult -Group 'Org Auditing' -Test 'auditretentionperiodv2 = -1 (Forever)' -Status 'Fail' `
             -Message "Audit retention is $shown; the contract is -1 (Forever, #2027). Set it to Forever before audit rows age out."
+    }
+
+    if ($org[0].isuseraccessauditenabled -eq $true) {
+        Add-TestResult -Group 'Org Auditing' -Test 'isuseraccessauditenabled = true' -Status 'Pass'
+    }
+    else {
+        Add-TestResult -Group 'Org Auditing' -Test 'isuseraccessauditenabled = true' -Status 'Fail' `
+            -Message "User access logging is '$($org[0].isuseraccessauditenabled)': sign-ins to the environment are not recorded. Turn on 'Log access' (Power Platform admin center > Settings > Audit and logs, or resume H6)."
     }
 }
 

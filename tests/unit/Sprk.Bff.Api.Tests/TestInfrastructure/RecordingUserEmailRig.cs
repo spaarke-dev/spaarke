@@ -22,6 +22,9 @@ internal sealed class RecordingUserEmailRig
     public const string UserEmail = "finance.user@contoso.com";
     public const string UserObjectId = "55555555-5555-5555-5555-555555555555";
 
+    /// <summary>The caller's ENABLED systemuser: a send as user is refused without one (issue #2033).</summary>
+    public static readonly Guid UserSystemUserId = Guid.Parse("55555555-5555-5555-5555-5555555555aa");
+
     public RecordingChannel Channel { get; } = new();
 
     public RecordOwnershipResolverDouble Owners { get; } = new();
@@ -62,10 +65,14 @@ internal sealed class RecordingUserEmailRig
             [Channel],
             [new EmailArchiver(new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>()))]);
 
+        var communicationDataverse = new Mock<ICommunicationDataverseService>();
+        communicationDataverse.Setup(c => c.QuerySystemUserByAzureAdOidAsync(UserObjectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UserSystemUserId);
+
         Service = new CommunicationService(
             dispatcher,
             senderValidator,
-            Mock.Of<ICommunicationDataverseService>(),
+            communicationDataverse.Object,
             Entities.Object,
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService: not reached (no archive, no document attachments)

@@ -153,6 +153,7 @@ public sealed class RuleSetServiceConsequenceTests
         var real = await h.Service().PublishAsync(set, Effective, default);
         await using var host = await RuleSetEndpointsTests.Host.StartAsync();
         host.Service.Setup(s => s.PublishAsync(set, It.IsAny<DateOnly>(), It.IsAny<CancellationToken>())).ReturnsAsync(real);
+        host.Access.Grant("sprk_rulesets", set, Spaarke.Dataverse.AccessRights.Read); // 089e: the by-id routes ask the caller's Read on the set
 
         var response = await host.Client.SendAsync(RateCardImportEndpointsTests.Req(
             "POST", $"/api/finance/rulesets/{set}/publish", content: JsonContent.Create(new { effectiveDate = "2026-11-01" })));
@@ -227,15 +228,6 @@ public sealed class RuleSetServiceConsequenceTests
 
     // ── Drafting (075): a model's proposal is validated before it is stored ──────────────────────────────────────
 
-    private static Guid RuleSetWithSource(Harness h)
-    {
-        var id = h.RuleSet();
-        h.Row("sprk_ruleset", id)["sprk_sourcedocument"] = new EntityReference("sprk_document", SourceId);
-        h.Documents.Setup(d => d.GetDocumentAsync(SourceId.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Spaarke.Dataverse.DocumentEntity { Id = SourceId.ToString(), Name = "guidelines", GraphDriveId = Drive, GraphItemId = "item-1", FileName = "guidelines.pdf" });
-        return id;
-    }
-
     private static DraftedRule Drafted(RuleType type, string consequence, string quote)
     {
         var (headline, template) = BillingRuleDraftTranslator.Wording(type);
@@ -254,11 +246,11 @@ public sealed class RuleSetServiceConsequenceTests
         RuleType type, string drafted, string citation)
     {
         var h = new Harness();
-        var id = RuleSetWithSource(h);
+        var d = h.DraftVersion();
         var kept = Drafted(RuleType.InvoiceAge, "Reject", "Invoices older than 90 days will be rejected.");
         var lowered = Drafted(type, drafted, "Invoices that break this will be returned.");
 
-        var outcome = await h.Service().AddDraftsAsync(id, new[] { kept, lowered }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+        var outcome = await h.Service().AddDraftsAsync(d.Version, new[] { kept, lowered }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
 
         outcome.Value!.Stored.Should().Be(2, "the clause is not lost");
         outcome.Value.NotConverted.Should().BeEmpty();
@@ -272,7 +264,7 @@ public sealed class RuleSetServiceConsequenceTests
         // The untouched Reject rule keeps its code, and the lowered rule passes the review's own validation (it can be accepted).
         h.Rows["sprk_policyversion"].Single(v => v.GetAttributeValue<string>("sprk_clausereference") == "Invoices older than 90 days will be rejected.")
             .GetAttributeValue<string>("sprk_proposedaction").Should().Be("billing-reject");
-        var detail = await h.Service().GetAsync(id, CancellationToken.None);
+        var detail = await h.Service().GetAsync(d.RuleSet, CancellationToken.None);
         detail.Value!.Proposals.Should().OnlyContain(p => p.ValidationErrors.Count == 0);
     }
 
@@ -280,13 +272,13 @@ public sealed class RuleSetServiceConsequenceTests
     public async Task AddDrafts_ALineLevelDuplicateDraftedAsReject_IsLoweredToFlag_OwnerQuestion3()
     {
         var h = new Harness();
-        var id = RuleSetWithSource(h);
+        var d = h.DraftVersion();
         var (headline, template) = BillingRuleDraftTranslator.Wording(RuleType.Duplicate);
         var lines = new DraftedRule(
             nameof(RuleType.Duplicate), """{"type":"Duplicate","matchFields":["timekeeper","lineDate","hours"]}""", template, headline,
             "Reject", "Duplicate entries will be rejected.", "Section 2");
 
-        var outcome = await h.Service().AddDraftsAsync(id, new[] { lines }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+        var outcome = await h.Service().AddDraftsAsync(d.Version, new[] { lines }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
 
         outcome.Value!.Stored.Should().Be(1);
         var row = h.Rows["sprk_policyversion"].Should().ContainSingle().Subject;
@@ -299,13 +291,13 @@ public sealed class RuleSetServiceConsequenceTests
     {
         // Lowering applies only when the consequence is the ONLY problem; an invalid body is a real refusal (body-first precedence).
         var h = new Harness();
-        var id = RuleSetWithSource(h);
+        var d = h.DraftVersion();
         var (headline, template) = BillingRuleDraftTranslator.Wording(RuleType.TimeIncrement);
         var broken = new DraftedRule(
             nameof(RuleType.TimeIncrement), """{"type":"TimeIncrement","incrementHours":"a tenth"}""", template, headline, "Reject",
             "Time must be billed in tenths.", "Section 4");
 
-        var outcome = await h.Service().AddDraftsAsync(id, new[] { broken }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
+        var outcome = await h.Service().AddDraftsAsync(d.Version, new[] { broken }, Array.Empty<NotConvertedClause>(), CallerOid, CancellationToken.None);
 
         outcome.Value!.Stored.Should().Be(0);
         h.Rows.GetValueOrDefault("sprk_policyversion").Should().BeNullOrEmpty();

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "description": "The 'Billing Rule Reader' role (ebilling-r1 task 089d; owner 2026-11-03: 'yes Billing Administrator can have read on rules across whole organization'; owner 2026-11-04: '089d - use direct role approach', option R). The 089b Exclude route (POST .../rule-overrides/exclude) checks the caller's own Read on the rule (sprk_policies). Billing Administrator reads sprk_policy at Deep from the unit its holder is homed in, so a billing admin homed in a CHILD unit of the customer's top unit cannot read a rule owned in the top unit (403). This role fixes that in Dataverse, not in the BFF. It holds Read at Deep on sprk_policy, sprk_ruleset and sprk_procedure and nothing else (sprk_ruleset and sprk_procedure added by ebilling-r1 task 089e fix round 2, owner 2026-11-04 \"Approve role + dev apply\": the rule-set by-id routes and the rule-set list ask the caller's Read on the set, and Procedure override removal and preview ask the caller's Read on the Procedure). It is assigned DIRECTLY to each child-unit billing admin, and the copy assigned is the one in the customer's TOP business unit (the direct child of the root that provisioning H10 creates, the unit RestrictedContentOwnerTeam resolves), never the root's copy, never Secure Record's and never the admin's own unit's. That needs the org setting EnableOwnershipAcrossBusinessUnits (matrix business units), which provisioning sets. A role's depth is measured from the business unit of the role COPY a principal holds, so a holder reads every rule, rule set and Procedure owned in the customer's top unit and the units below it, and none owned in Secure Record, a sibling of the top unit. No team holds it. Global Read, and Deep from the root's copy, are ruled out (D-123): both reach Secure Record. The role is created once in the root (Dataverse copies it into every child unit). This file is the ONE definition. scripts/Set-CustomerOwnerTeams.ps1 and RestrictedContentOwnerRoleGuardTests read it. Do not copy it anywhere else.",
+  "howToExtend": [
+    "Do not add a table without evidence that the Exclude route (or another caller-checked route that needs org-wide rule Read) reads it AS THE CALLER. sprk_policyversion is not listed: on 2026-11-03 the Exclude route's only caller check on a rule is Read on sprk_policies (ProcedureAssignmentEndpoints.ExcludeTargets), and the one policy version it reads (the system-rule check) is read as the application (ProcedureAssignmentService.IsSystemRuleAsync, IGenericEntityService). RestrictedContentOwnerRoleGuardTests fails the build if this file lists any table other than sprk_policy, sprk_ruleset and sprk_procedure.",
+    "Never change 'depth', 'businessUnit' or 'isinherited'. Deep from the customer top unit's copy reaches that unit and its children only. Global reaches Secure Record, and so does Deep from the root's copy; Business Unit (Local) would not reach the child units. 'isinherited' 0 is 'Team privileges only': the role is never meant for a team, and the pin keeps a team holder from passing the role's privileges to its members as their own. The guard and the script refuse any other value.",
+    "'assignment' is 'users': the role is assigned to users only, never to a team. 'holderPrivilege' is the billing-admin marker the BFF checks (BillingAdminAuthorization.WriteRuleSetPrivilege): every holder must hold it, so the role never gives an end user direct Read on rule configuration (D-185). Every holder must also be homed in the customer's top unit or a unit below it: a holder from another customer's unit would read this customer's rules.",
+    "Assign it with the script, not the admin UI: scripts/Set-CustomerOwnerTeams.ps1 -EnvironmentUrl <url> -CustomerBusinessUnitId <id> -AssignBillingRuleReader <systemuserid>[,...] (dry run), then the same with -Apply. The admin UI offers the copy in the user's OWN unit first, which reaches nothing above it. -Verify fails on any holder of another copy, any team holder, a holder without the marker or homed elsewhere, the org setting off, isinherited 1, and any privilege or depth outside this file.",
+    "Then run, for each customer top business unit: scripts/Set-CustomerOwnerTeams.ps1 -EnvironmentUrl <url> -CustomerBusinessUnitId <id> (dry run), then -Apply (owner go), then -Verify. The same run sets up the two owner teams."
+  ],
+  "roleName": "Billing Rule Reader",
+  "assignment": "users",
+  "businessUnit": "customer",
+  "access": "Read",
+  "depth": "Deep",
+  "isinherited": 0,
+  "holderPrivilege": "prvWritesprk_ruleset",
+  "requiresOrgSetting": "EnableOwnershipAcrossBusinessUnits",
+  "tables": [
+    {
+      "logicalName": "sprk_policy",
+      "privilegeName": "prvReadsprk_Policy",
+      "reason": "ebilling-r1 089b: the Exclude route's second filter checks the caller's Read on the rule (sprk_policies) before the billing-admin marker; uac-r2 kept that check (2026-11-03) and ruled out a filter that infers rule rights from Procedure rights. Deep from the customer top unit's copy gives each holder Read on every rule owned there and below.",
+      "evidence": "Read-only, spaarkedev1, 2026-11-03: metadata names prvReadsprk_Policy (Id=eda1df58-8428-4b7a-827c-d9c9ebf6140f), the same Read privilege config/restricted-content-owner-role.json declares. The one Billing rule (BILL-SYSTEM-SUBMISSION) is owned by 'Spaarke Restricted Content Owners' in 'Spaarke Business Unit 1' (the customer top unit); no Billing rule is owned in the root.",
+      "addedBy": "ebilling-r1 task 089d"
+    },
+    {
+      "logicalName": "sprk_ruleset",
+      "privilegeName": "prvReadsprk_ruleset",
+      "reason": "ebilling-r1 089e: every rule-set by-id route (draft, GET, proposal edit, accept, reject, publish, assignment, visibility) and the rule-set list ask the caller's own Read on the sprk_rulesets row (RuleSetEndpoints.RequireAccessToTheRuleSet, ListRuleSets). Billing Administrator reads sprk_ruleset at Deep from the unit its holder is homed in, so a billing admin homed in a CHILD unit cannot read a set owned in the customer's top unit. Deep from the customer top unit's copy gives each holder Read on every set owned there and below, and none owned in Secure Record.",
+      "evidence": "Read-only, spaarkedev1, 2026-11-04: metadata names prvReadsprk_ruleset (Id=717306f0-6f28-42d0-83ca-5ce3a9fe8e42; CanBeDeep true), the name SecureBuRoleDepthAssertion.RestrictedContentPrivileges grades. No sprk_ruleset row exists on dev yet (0 rows).",
+      "addedBy": "ebilling-r1 task 089e fix round 2"
+    },
+    {
+      "logicalName": "sprk_procedure",
+      "privilegeName": "prvReadsprk_procedure",
+      "reason": "ebilling-r1 089e: removing or previewing a Procedure override asks the caller's own Read on that Procedure (ProcedureAssignmentEndpoints.RequireReadOnTheOverridesSubject), and the rule-set list and GET ask Read on a set's Procedure (BillingAdminAuthorization). Billing Administrator holds it at Deep from its holder's own unit (089e fix round 1), which misses a Procedure owned in the customer's top unit for a child-unit admin; Deep from the customer top unit's copy reaches it, and none owned in Secure Record.",
+      "evidence": "Read-only, spaarkedev1, 2026-11-04: metadata names prvReadsprk_procedure (Id=3618ae14-d40b-4fc2-ad79-87d0fd4d0ed9; CanBeDeep true), the name the Billing Administrator role source holds (src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml). A Procedure is owned by its creator's business-unit team (ProcedureService.CreateAsync, no parents); Secure Record holds no users (NFR-05 clause 2). No sprk_procedure row exists on dev yet (0 rows).",
+      "addedBy": "ebilling-r1 task 089e fix round 2"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 /**
  * One rule set under review (ebilling-r1 task 077, FR-28): its rules in a grid beside the selected rule and the clause it was drafted
- * from; "Draft rules" (075), Accept / Reject / Edit per rule, Publish, assignment and "visible to firms".
+ * from; Accept / Reject / Edit per rule, Publish, assignment and "visible to firms". Drafting is started from a Procedure Version, not here (116).
  *
  * Every state change is a BFF call and is followed by a reload of the rule set, so what the admin sees is what the server stored. A
  * decision names the version of the rule that was displayed; when it is refused because the rule changed, the page reloads, says what
@@ -33,7 +33,6 @@ import type { FirmLookup } from '../services/firmLookup';
 import {
   countProposals,
   decideProposal,
-  runDraft,
   saveEdit,
 } from '../services/reviewActions';
 import type {
@@ -75,7 +74,7 @@ export interface RuleSetDetailViewProps {
   onBack: () => void;
   /** Every failure is reported up, so a 403 turns the page read-only and a disabled eBilling flag shows its notice. */
   onFailure: (failure: ApiFailure) => void;
-  /** The list is out of date (a rule set was drafted, published, assigned ...). */
+  /** The list is out of date (a rule set was published, assigned ...). */
   onListChanged: () => void;
 }
 
@@ -90,7 +89,6 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   const [selected, setSelected] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<Notice | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [drafting, setDrafting] = React.useState(false);
   const [publishOpen, setPublishOpen] = React.useState(false);
   const [publishNotice, setPublishNotice] = React.useState<Notice | null>(null);
   const [rejecting, setRejecting] = React.useState<ProposalView | null>(null);
@@ -135,30 +133,6 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
   const counts = detail ? countProposals(detail) : null;
   const proposal = detail?.proposals.find(p => p.policyId === selected) ?? null;
   const retired = detail?.ruleSet.status === 'Retired';
-
-  // ── Draft rules (075) ──────────────────────────────────────────────────────
-  const handleDraft = async (): Promise<void> => {
-    setDrafting(true);
-    setNotice({ intent: 'info', text: 'Drafting rules from the document. This can take a few minutes; the rules appear as they are stored.' });
-    const outcome = await runDraft(api, ruleSetId, { onProgress: d => mounted.current && apply(d), isCancelled: () => !mounted.current });
-    if (!mounted.current) return;
-    setDrafting(false);
-    onListChanged();
-    if (outcome.kind === 'finished') {
-      apply(outcome.detail);
-      const left = Array.isArray(outcome.detail.notConverted) ? outcome.detail.notConverted.length : 0;
-      setNotice({
-        intent: 'success',
-        title: 'Drafting finished',
-        text: `${outcome.detail.proposals.length} rule(s) proposed${left > 0 ? `; ${left} clause(s) could not be converted and are listed below` : ''}. Review each rule beside its clause.`,
-      });
-    } else if (outcome.kind === 'timeout') {
-      if (outcome.detail) apply(outcome.detail);
-      setNotice({ intent: 'warning', title: 'Drafting is still running', text: 'Reload in a few minutes to see the rest of the rules.' });
-    } else {
-      fail(outcome.failure, 'Drafting could not be started');
-    }
-  };
 
   // ── Accept / Reject ────────────────────────────────────────────────────────
   const decide = async (shown: ProposalView, accept: boolean, reason = ''): Promise<void> => {
@@ -297,7 +271,6 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
 
   const summary = detail.ruleSet;
   const notConverted = detail.notConverted;
-  const draftable = canWrite && !retired && notConverted === null && !drafting;
   const notConvertedList: NotConvertedClause[] = Array.isArray(notConverted) ? notConverted : [];
 
   return (
@@ -316,16 +289,10 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
         </div>
         <RuleSetStatusBadge status={summary.status} />
         <Button icon={<ArrowClockwiseRegular />} appearance="subtle" disabled={loading || busy} onClick={() => void load()} aria-label="Reload the rule set" />
-        {draftable && (
-          <Button disabled={busy} onClick={() => void handleDraft()} data-testid="draft-rules">
-            Draft rules
-          </Button>
-        )}
-        {drafting && <Spinner size="tiny" label="Drafting rules" labelPosition="after" data-testid="drafting" />}
         {canWrite && !retired && (
           <Button
             appearance="primary"
-            disabled={busy || drafting || (counts?.toPublish ?? 0) === 0}
+            disabled={busy || (counts?.toPublish ?? 0) === 0}
             onClick={() => {
               setPublishNotice(null);
               setPublishOpen(true);
@@ -344,7 +311,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
         firmName={summary.firmId ? (firmNames[summary.firmId.toLowerCase()] ?? null) : null}
         firmLookup={firmLookup}
         canWrite={canWrite}
-        busy={busy || drafting}
+        busy={busy}
         onAssign={(scope, firmId) => void assign(scope, firmId)}
         onVisibility={visible => void setVisibility(visible)}
       />
@@ -355,15 +322,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
             proposals={detail.proposals}
             selectedPolicyId={selected}
             onSelect={setSelected}
-            emptyMessage={
-              drafting
-                ? 'Drafting rules from the document...'
-                : notConverted === null
-                  ? canWrite
-                    ? 'No rules yet. Choose "Draft rules" to propose rules from the guideline document.'
-                    : 'No rules yet.'
-                  : 'The document produced no rules.'
-            }
+            emptyMessage={notConverted === null ? 'No rules yet.' : 'The document produced no rules.'}
           />
         </div>
         <PanelSplitter
@@ -378,7 +337,7 @@ export const RuleSetDetailView: React.FC<RuleSetDetailViewProps> = ({
             proposal={proposal}
             canWrite={canWrite}
             editable={!retired}
-            busy={busy || drafting || loading}
+            busy={busy || loading}
             onAccept={p => void decide(p, true)}
             onReject={p => setRejecting(p)}
             onSave={save}

@@ -344,12 +344,15 @@ public partial class RouteAuthorizationGuardTests
             + "Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, D-76, fail closed), "
             + "plus a Read check on any matter, project or work assignment the card is scoped to; the eBilling kill switch runs after it."),
         new GovernedFile("Api/Finance/RuleSetEndpoints.cs", Scope.RouteLevelGate,
-            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- create a rule set from a source document, list / read it with its rules, "
-            + "edit / accept / reject a rule, publish, assign, visibility, and (task 075, FR-27) POST .../{ruleSetId}/draft which queues the rule "
-            + "drafting job (the count of endpoint files is unchanged at 137: a route in an existing file). Each route declares the billing-admin Dataverse table privileges the "
+            "/api/finance/rulesets/* (ebilling-r1 task 076, FR-28) -- list / read a rule set with its rules, "
+            + "edit / accept / reject a rule, publish, assign, visibility. Task 116 RETIRED POST / (create from a source document) and POST "
+            + ".../{ruleSetId}/draft (drafting moved per Procedure Version to ProcedureEndpoints.cs); the count of endpoint files is unchanged. "
+            + "Each route declares the billing-admin Dataverse table privileges the "
             + "caller must hold (BillingAdminAuthorization via AddFinanceAuthorizationFilter, D-76, fail closed; Write on sprk_ruleset is the marker "
             + "because the Ontology Administrator holds every privilege on the shared policy tables); reads of the proposals are admin-only too. "
-            + "The eBilling kill switch runs after it."),
+            + "The eBilling kill switch runs after it. Task 089e: every route that takes a rule set id then carries RequireAccessToTheRuleSet "
+            + "(the caller's Read on the set and, for a record-scoped set, on its record; the uniform 404 otherwise, 409 ruleset.record_scoped "
+            + "when both pass), before the Procedure filter where the route has one."),
         new GovernedFile("Api/Finance/ProcedureEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/procedures/* (ebilling-r1 task 081, EB-D-148) -- Procedures and their versions. Step 0 on the group "
             + "(RequireInternalFinanceCaller, reads included: Procedures are internal-only). Each route then declares its basis through "
@@ -358,7 +361,29 @@ public partial class RouteAuthorizationGuardTests
             + "Procedure (Record path, sprk_procedures); PATCH /{procedureId}, PATCH .../versions/{versionId}, POST .../versions/{versionId}/retire "
             + "and GET .../retire-preview -- Write on the Procedure AND the billing-admin marker (Write on sprk_ruleset); POST .../versions -- the "
             + "same plus Create on sprk_policyversion; POST .../versions/{versionId}/publish -- the same plus Write on sprk_policyversion and "
-            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. The eBilling kill switch runs after it."),
+            + "sprk_policy; POST .../retire -- the same plus Write on sprk_policy. Task 116 adds two routes in this file (the count of endpoint "
+            + "files is unchanged): POST .../versions/{versionId}/draft -- BillingAdminAuthorization.DraftProcedureVersion: Write on the Procedure "
+            + "(Record path) plus DraftRules() (Write on sprk_ruleset, Create on sprk_policy and sprk_policyversion) plus DecideRule()'s privileges "
+            + "(what a reject of the drafts needs), no Delete check (EB-D-216); then, in the handler, the version's own Read and Write (K1), and "
+            + "BEFORE any read of draft state the reject route's two caller checks on the version's rule set, by the same bodies its filters run: "
+            + "RuleSetEndpoints.CallerAccessToTheRuleSetRefusalAsync (Read on the set, answered as the missing-version 404, its record when "
+            + "record-scoped) and BillingAdminAuthorization.CallerRightsOnTheRuleSetsProcedureRefusalAsync (Write on its Procedure, 403) "
+            + "(EB-D-216a: row-level rights on draft rows are not the gate). A superseded draft outside the checked set or version is 409 "
+            + "ruleset.redraft_scope_mismatch, nothing written; the route holds the drafting job's per-version lock around plan, deactivate and "
+            + "queue (409 ruleset.drafting_in_progress when a run holds it), and the application deactivates the drafts all or none; PUT .../versions/{versionId}/file "
+            + "-- WriteProcedure, then the file store's own step 0 and the caller's Write on the version (UploadForCallerAsync). On both, a version of "
+            + "another Procedure is the unknown-id 404. The eBilling kill switch runs after it."),
+        new GovernedFile("Api/Finance/ProcedureAssignmentEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude (ebilling-r1 "
+            + "task 089b, EB-D-148) -- assign, pin or exclude a Procedure, and exclude a rule, for one core record; the core table is fixed per "
+            + "literal route chain. Step 0 on the group (RequireInternalFinanceCaller). Each route then carries two AddFinanceAuthorizationFilter "
+            + "declarations, as the caller, fail closed: Write and AppendTo on the route record (ebilling.record.override, the uniform 404), then "
+            + "(403) Read on the body's Procedure (assign) or rule's policy (exclude) plus the billing-admin privilege composed from "
+            + "BillingAdminAuthorization.Admin() (Write on sprk_ruleset). Task 089c adds POST .../rule-overrides/change (the same record "
+            + "filter, then Read on the body's policy plus Create and Write on sprk_ruleset, sprk_policy and sprk_policyversion), GET "
+            + ".../overrides/{overrideId}/removal-preview (record filter, Admin()) and DELETE .../overrides/{overrideId} (record filter, "
+            + "Admin() plus Write on sprk_policy); both removal routes then carry RequireReadOnTheOverridesSubject (the caller's Read on "
+            + "the stored row's Procedure or rule; unreadable is the 404 a missing row gets), after the eBilling kill switch (review K2)."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
@@ -380,9 +405,10 @@ public partial class RouteAuthorizationGuardTests
             + "from their own token) and a correction never touches a line's status, approved amount or decision."),
         new GovernedFile("Api/Finance/InvoiceLineReviewEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/review and POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision, .../lines/decisions, "
-            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions. Every route carries "
+            + ".../lines/accept-clean (ebilling-r1 task 100, FR-31) -- the Invoice Review read model and the line decisions -- and POST "
+            + "/api/finance/invoices/{invoiceId}/lines (Add line, task 164, EB-D-188). Every route carries "
             + "AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail closed: the read with \"finance.read\" (Read), the three "
-            + "decisions with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
+            + "decisions and Add line with \"ebilling.invoice.decide\" (Write, D-77); invoice access reaches the caller through the core record (013, ADR-034). The "
             + "eBilling kill switch runs after it. Every line id is checked against the invoice's own lines (uniform 404) before a write; the decider "
             + "is the caller's systemuserid from their own token, never the body."),
         new GovernedFile("Api/Finance/InvoiceRelatedWorkEndpoints.cs", Scope.RouteLevelGate,
@@ -405,7 +431,15 @@ public partial class RouteAuthorizationGuardTests
             + "CheckFirmLinkAsync. And GET /api/finance/core-records/{entityType}/{entityId}/firms (finance.read on the core record, "
             + "uniform 404), which lists only the record's active linked firms. Task 097e adds GET /api/finance/invoices/{invoiceId}/correction-prefill "
             + "(\"ebilling.invoice.decide\", Write on the invoice as the caller, uniform 404 for no Write, an unknown invoice, step 0 and a rights fault); "
-            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement."),
+            + "its canCorrect is the Correction intake's own guard, and its optional replacedBy is put to the caller's own Read (finance.read) on the replacement. "
+            + "Task 095a adds GET /api/finance/invoice-submissions?internetMessageId=... (the add-in's \"already submitted\" banner): the Finance filter with "
+            + "step 0 (uniform 404 for a genuine refusal), the Message-ID shape check (uniform 404) and the caller's table-level Read on "
+            + "sprk_invoicesubmissions as the credited check; the filter runs in the fail-closed mode (FinanceDenial.UniformNotFoundFailClosed): a "
+            + "refusal that is a system failure (a step-0 flag-read or lookup fault, an OBO, WhoAmI or privilege-read fault) is the route's 503 "
+            + "ebilling.submission.record_unavailable, never the no-match 404; the handler then puts the .eml documents the Message-ID names, and EACH candidate submission (found by sprk_sourceemaildocument, newest "
+            + "first), to the caller's own Read (finance.read, per record): an unreadable .eml or submission is skipped and is indistinguishable from no match "
+            + "(the uniform 404); a read or rights-read fault (including a Faulted rights snapshot with no Read) is a 503, never \"not submitted\". "
+            + "submittedBy is the sprk_createdbyperson name (null when none), never createdby; the source-email link is never returned."),
         new GovernedFile("Api/Finance/CodeSetMappingEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/code-set-mappings/* (ebilling-r1 task 048, FR-22) -- AI code-set proposals (GET) and the admin confirm that writes one "
             + "default code set (POST). Each route declares the Dataverse table privileges the caller must hold (AddFinanceAuthorizationFilter, "
@@ -425,7 +459,12 @@ public partial class RouteAuthorizationGuardTests
             + "the invoice named in the path (finance.read: Read; ebilling.invoice.decide: Write), fail closed; the eBilling kill switch runs after "
             + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
             + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
-            + "decision id are derived server-side, never taken from the request."),
+            + "decision id are derived server-side, never taken from the request. From task 095d-1b, POST /api/finance/invoices/{invoiceId}/firm "
+            + "(Set firm on a held no-firm invoice): Write on the invoice in the path (ebilling.invoice.assign_firm, uniform 404), then Read and "
+            + "AppendTo on the body's firm (read, finance.attach_invoice: 403; no firm is the 400 before any rights query), as the caller, fail "
+            + "closed; the kill switch runs after them. InvoiceAssignFirmService then asks, as the caller, AppendTo on the core record and Write on "
+            + "the firm_missing Signal's subject, and the firm's link to the core record; the submission, the number and the decision id are "
+            + "derived server-side."),
         new GovernedFile("Api/Finance/InvoiceRejectReturnEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/finance/invoices/{invoiceId}/reject and POST /api/finance/invoices/{invoiceId}/return (ebilling-r1 task 104, FR-36, "
             + "FR-11, D-43, D-122) -- an eligible approver rejects an invoice (final) or returns it to the firm. Each route carries "
@@ -558,6 +597,15 @@ public partial class RouteAuthorizationGuardTests
             + "most 500 examined, with partial and truncated flags; a systemuser is refused), a systemuser refusal on a submit before any "
             + "write, and the firm-to-record link a submit requires. The filter's link check is an early copy: the owner is "
             + "InvoiceSubmissionService.SubmitAsync (D-110), so the internal route enforces the same rule with the same codes."),
+        new GovernedFile("Api/ExternalAccess/FirmOutcomeEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome "
+            + "(ebilling-r1 task 130b, FR-38, NFR-10) on the COLLABORATION group, each chain attaching AddFirmOutcomeAuthorizationFilter "
+            + "(FirmOutcomeEndpoints.cs:28, :39) BEFORE RequireEbillingEnabled (:30, :41). The filter requires a non-systemuser caller, "
+            + "the item's firm among the caller's active firms, Read on the item's core record and that the (a') predicate does not hide the "
+            + "item; every refusal and a missing item are the same 403, a firm or visibility read that cannot be completed is 403/503, "
+            + "never a pass. The handlers read the FirmFindingsProjection only for the id the filter admitted (a handler that finds no "
+            + "admitted subject answers 403, :55-75; the submission handler passes the filter's InvoiceDecided to the projection, :75); a "
+            + "Degraded or Unavailable outcome is a 503."),
         new GovernedFile("Api/ExternalAccess/ExternalRegistrationEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/external/registration (spaarke-SPA-external-access-platform-r3 task 047, ADR-028 A9) on its OWN "
             + "group: RequireAuthorization(ExternalCollaboration) WITHOUT CallerPrincipalAuthorizationFilter (the caller is "
@@ -1138,7 +1186,18 @@ public partial class RouteAuthorizationGuardTests
     // GET /api/finance/export-batches/candidates, POST /api/finance/export-batches, GET /api/finance/export-batches/{batchId}. Classified by GovernedFiles
     // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter on each route; the per-invoice decide right is asked inside the service
     // through the one authorization seam); .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 150;
+    //
+    // 150 -> 151 (2026-11-03, ebilling-r1 task 089b, EB-D-148). Net +1: Api/Finance/ProcedureAssignmentEndpoints.cs ADDED -- POST
+    // /api/finance/{matters|projects|workassignments}/{recordId}/procedure-assignments and .../rule-overrides/exclude. Classified by
+    // GovernedFiles (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter twice per route as the caller: the record's
+    // ebilling.record.override, then Read on the Procedure or rule plus the billing-admin privilege); .RequireEbillingEnabled is already in
+    // NotAuthorizationForms.
+    //
+    // 151 -> 152 (2026-11-08, ebilling-r1 task 130b, FR-38). Net +1: Api/ExternalAccess/FirmOutcomeEndpoints.cs ADDED -- GET
+    // /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome on the
+    // external collaboration group. Classified by GovernedFiles (GroupGated: AddFirmOutcomeAuthorizationFilter, credited above);
+    // .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 152;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1184,13 +1243,37 @@ public partial class RouteAuthorizationGuardTests
             "Each route declares the id it authorizes; the filter evaluates it as the caller via GetCallerRecordAccessAsync + "
             + "OperationAccessPolicy.HasRequiredRights (FinanceAuthorizationFilter.cs:409-412), uniform 404 on deny (task 130)."),
         new CreditedForm("RequireWriteOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:172) and, when set, asks the caller's own Write on "
-            + "sprk_procedures via CallerReadCheck.CheckAsync (:191); a read fault or an unanswered question is 403 system_failure (:178, :200) "
-            + "(ebilling-r1 081, uac D; /draft added in re-check round 2)."),
+            "Reads the route rule set's Procedure (BillingAdminAuthorization.cs:301) and, when set, asks the caller's own Write on "
+            + "sprk_procedures via CallerReadCheck.CheckAsync (:319); a read fault or an unanswered question is 403 system_failure (:307, :332) "
+            + "(ebilling-r1 081, uac D; /draft added in re-check round 2; the body is CallerRightsOnTheRuleSetsProcedureRefusalAsync (:295), "
+            + "which the Procedure Version /draft handler also calls for the version's rule set, task 116 fix round 5)."),
+        new CreditedForm("RequireWriteOnTheVersionsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
+            "Reads the Procedure of the route's procedureVersionId app-only (RateCardImportEndpoints.cs:148, :241) and asks the caller's own Write "
+            + "on sprk_procedures via CallerReadCheck.CheckAsync (:159, :267); a read fault or an unanswered question is 403 system_failure "
+            + "(:151, :280), denied is 403 insufficient_rights (:277) (ebilling-r1 085, I-P5)."),
+        new CreditedForm("RequireWriteOnTheCardsProcedure", "Api/Finance/RateCardImportEndpoints.cs",
+            "The publish route's own check: reads the route card's Procedure Version app-only (RateCardImportEndpoints.cs:194), that version's "
+            + "Procedure (:214, :241) and asks the caller's own Write on sprk_procedures via the same CallerReadCheck.CheckAsync body as the import "
+            + "(:225, :267); an unknown card, a card with no version and a version with no Procedure are 403 insufficient_rights (:211, :222), a "
+            + "read fault or an unanswered question 403 system_failure (:206, :217, :280); it records the version it checked (:231) and the "
+            + "service refuses 409 ratecard.version_changed if the card names another (ebilling-r1 085 fix round 1, uac-r2 approved)."),
         new CreditedForm("RequireReadOnTheRuleSetsProcedure", "Api/Finance/BillingAdminAuthorization.cs",
-            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:172) and CallerReadCheck.CheckAsync "
-            + "(:191) asking Read; denied is 403 insufficient_rights, an unanswered question or a read fault 403 system_failure (:178, :200) "
+            "The sibling for the rule set READ: the same Procedure resolution (BillingAdminAuthorization.cs:301) and CallerReadCheck.CheckAsync "
+            + "(:319) asking Read; denied is 403 insufficient_rights (:329), an unanswered question or a read fault 403 system_failure (:307, :332) "
             + "(ebilling-r1 081, uac r2 I-P5)."),
+        new CreditedForm("RequireAccessToTheRuleSet", "Api/Finance/RuleSetEndpoints.cs",
+            "Asks the caller's own Read on the route rule set via CallerReadCheck.CheckAsync (RuleSetEndpoints.cs:468) and answers anything but "
+            + "Readable with the uniform 404 ruleset.not_found (:473) before reading the set; then reads the set's record home app-only "
+            + "(:479, a fault is 403 system_failure :484) and, for a record-scoped set, asks the caller's Read on its core record through "
+            + "FinanceAuthorizationFilter.CallerHoldsRightsAsync, the record routes' own check (:502); a refusal, a fault or no single core "
+            + "record is the same 404 (:496, :513), and only then 409 ruleset.record_scoped (:528) (ebilling-r1 089e; the body is "
+            + "CallerAccessToTheRuleSetRefusalAsync, which the Procedure Version /draft handler also calls, task 116 fix round 5)."),
+        new CreditedForm("RequireReadOnTheOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
+            "Reads the route record's stored override through ProcedureAssignmentService.SubjectOfOverrideAsync "
+            + "(ProcedureAssignmentEndpoints.cs:346) and asks the caller's own Read on the Procedure or rule it overrides via "
+            + "CallerReadCheck.CheckAsync with AuthorizationService (:364); denied is the same 404 assignment.override_not_found a missing "
+            + "row gets, also when there is no row at all and the filter answers it itself (:359, :375; review K1, pass 2), an unparseable id, a read fault or an unanswered question 403 system_failure (:339, :351, :376) "
+            + "(ebilling-r1 089c)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
             + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "
@@ -1276,6 +1359,19 @@ public partial class RouteAuthorizationGuardTests
             + "(principal.RightsOn, ExternalInvoiceSubmissionAuthorizationFilter.cs:153) and a firm among the caller contact's conferring "
             + "memberships (:180, :256; an unreadable read is 503, never 'no firm'); a read needs the submission's firm among them and "
             + "Read on its core record, else one uniform 404 (:206-225); a missing principal denies (:119)."),
+        new CreditedForm("AddFirmOutcomeAuthorizationFilter", "Api/ExternalAccess/FirmOutcomeAuthorizationFilter.cs",
+            "ebilling-r1 task 130b: a systemuser is refused (FirmOutcomeAuthorizationFilter.cs:135); the invoice's (or submission's) firm "
+            + "must be among the caller contact's ACTIVE firms (:227, :379; an unreadable or faulting firm read is a retryable 503, never "
+            + "'no firm' and never a pass, :150-153 and :183-189; a decided empty set is the 403, :155-158) AND the caller holds Read on its "
+            + "core record from the evaluator's post-veto rights (principal.RightsOn, :235, :385; on the submission's own row as read a second time, :412, fix round 7), AND every secure root the record (an invoice, "
+            + "or a submission's own row, whether or not its invoice exists yet) names is one the caller can read, by the invoices module's own "
+            + "rule (ExternalMultiRootRule, one function, DecideSecureRootsAsync :291-325, called at :243 and :418; a status read that "
+            + "failed is a 503, never a pass), AND the item is not hidden by the (a') "
+            + "predicate (:251-276, :426-439); every refusal, a missing item included, is the same 403 (:218), and a missing principal "
+            + "denies (:127-130). A submission's derived invoice is then decided by the same invoice rule (:453; fix round 1). The "
+            + "InvoiceDecided rule (fix round 2): a submission's invoice that does not exist yet passes UNDECIDED (:218), the decision is "
+            + "stored with the admitted id (:168), and the projection then reads nothing of that invoice "
+            + "(in progress: no billed total; Accepted: 503)."),
         new CreditedForm("AddInsightsAskAuthorizationFilter", "Api/Insights/InsightEndpoints.cs",
             "Task 163 f1: the shared playbook-parameter policy, registered insights-ask playbooks only, then Read on the subject "
             + "matter (Write when a node that can write reaches it) and each record parameter, as the caller, through "
@@ -1464,6 +1560,11 @@ public partial class RouteAuthorizationGuardTests
             + "filter. It switches on step 0 inside the route's own AddFinanceAuthorizationFilter (CreditedForms), which refuses a "
             + "flagged-external, row-less or unreadable caller before its record checks. It only narrows that filter and decides "
             + "nothing itself; FinanceStepZeroCoverageGuardTests pins it on every /api/finance route."),
+        new NotAuthorizationForm("RequireRateCardCreateOnARateCardProcedure",
+            "ebilling-r1 task 085 fix round 1: a table-privilege requirement (Create on sprk_ratecard and sprk_ratecardrate) on the Procedure "
+            + "version-create route, applied only when the route's Procedure is a Rate card Procedure, because copy-forward then creates cards "
+            + "(BillingAdminAuthorization.cs). It only narrows who may call; the route's record decision stays its AddFinanceAuthorizationFilter "
+            + "and it decides nothing about any record."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),

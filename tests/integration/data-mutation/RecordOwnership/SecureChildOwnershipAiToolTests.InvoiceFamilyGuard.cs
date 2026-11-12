@@ -37,40 +37,89 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     // ── Create: POST /api/v1/child-records/{table} ─────────────────────────────────────────────────────────────
 
-    [Theory]
-    [InlineData("sprk_invoice", "sprk_Matter", "sprk_Project")]
-    [InlineData("sprk_billingevent", "sprk_matter", "sprk_project")]
-    public async Task ChildCreate_AnInvoiceFamilyRowNamingTwoCoreRecords_IsRefusedWithTheGuardsCode_AndCreatesNothing(
-        string table, string matterNavigation, string projectNavigation)
-    {
-        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+    // ── ebilling-r1 task 096b (EB-D-201): an invoice is not created on the route either ──────────────────────────
+    // Invoices are created only by submission (the Create Invoice wizard and the Outlook Submit Invoice). Every shape the FR-05
+    // guard used to decide on this route's create (two core records, a plain-valued core lookup, a superseded invoice of the same or
+    // another core record, one the caller cannot read) is now refused as a table the route does not create, before any read or
+    // write. The guard itself is unchanged (RecordCreationService keeps it for its other callers); its update cases stay below.
 
-        var result = await CreateChild(table, new()
+    [Theory(DisplayName = "096b (must fire): the child-record route refuses an invoice, whatever it names, before any read or write")]
+    [InlineData("two core records")]
+    [InlineData("a core lookup written as a plain value")]
+    [InlineData("supersedes an invoice of another core record")]
+    [InlineData("supersedes an invoice of the same core record")]
+    [InlineData("supersedes an invoice the caller cannot read")]
+    [InlineData("a secure matter")]
+    public async Task ChildCreate_AnInvoice_IsRefusedAsATableTheRouteDoesNotCreate(string shape)
+    {
+        StoredInvoice(SupersededInvoice, "sprk_matter", shape == "supersedes an invoice of another core record" ? SecureMatter : OrdinaryMatter);
+        if (shape == "supersedes an invoice the caller cannot read")
+            _user.UnreadableRows.Add(SupersededInvoice);
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+        var body = new Dictionary<string, object?>
         {
             ["sprk_name"] = "x",
-            [$"{matterNavigation}@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-            [$"{projectNavigation}@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})",
-        });
+            ["sprk_Matter@odata.bind"] = $"/sprk_matters({(shape == "a secure matter" ? SecureMatter : OrdinaryMatter):D})",
+        };
+        if (shape == "two core records")
+            body["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})";
+        if (shape == "a core lookup written as a plain value")
+            body["sprk_project"] = OrdinaryProject.ToString("D");
+        if (shape.StartsWith("supersedes", StringComparison.Ordinal))
+            body["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})";
+
+        var result = await CreateChild("sprk_invoice", body);
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
-        _appCreates.Should().BeEmpty("FR-05: refused, never picked");
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.UnsupportedTableCode);
+        ChildRecordEndpoints.CreateTables.Should().NotContain("sprk_invoice");
+        _appCreates.Should().BeEmpty("nothing is created by the application");
+        _user.Posts.Should().BeEmpty("nor as the caller");
+        reads.Should().BeEmpty("refused on the table alone, before any read");
     }
 
-    [Fact]
-    public async Task ChildCreate_ABillingEventNamingOnlyItsInvoice_IsRefusedNoCoreRecord_TheLinesCoreRecordIsItsOwn()
-    {
-        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+    // ── ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line is not created on the route ─────────────────────────────
+    // A new line has one server-side owner (extraction, a line decision, Add line), so the route no longer creates one: every
+    // shape the FR-05 guard used to decide here (no core record, the invoice's own matter, another matter, an unreadable
+    // invoice) is refused as a table the route does not create, before any read or write. The guard's update cases stay below.
 
-        var result = await CreateChild("sprk_billingevent", new()
+    [Theory(DisplayName = "164a-1 (must fire): the child-record route refuses an invoice line, whatever it names, before any read or write")]
+    [InlineData("only its invoice")]
+    [InlineData("its invoice's own matter")]
+    [InlineData("another matter than its invoice's")]
+    [InlineData("an invoice the caller cannot read")]
+    public async Task ChildCreate_AnInvoiceLine_IsRefusedAsATableTheRouteDoesNotCreate(string shape)
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", shape == "another matter than its invoice's" ? SecureMatter : OrdinaryMatter);
+        if (shape == "an invoice the caller cannot read")
+            _user.UnreadableRows.Add(GuardInvoice);
+        var reads = new List<string>();
+        _user.GetOverride = path =>
         {
-            ["sprk_name"] = "New billing event",
+            reads.Add(path);
+            return null;
+        };
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "x",
             ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
-        });
+        };
+        if (shape != "only its invoice")
+            body["sprk_matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})";
+
+        var result = await CreateChild("sprk_billingevent", body);
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.NoCoreRecordCode, "D-75: never derived from the invoice");
-        _appCreates.Should().BeEmpty();
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.UnsupportedTableCode);
+        ChildRecordEndpoints.CreateTables.Should().NotContain("sprk_billingevent");
+        _appCreates.Should().BeEmpty("nothing is created by the application");
+        _user.Posts.Should().BeEmpty("nor as the caller");
+        reads.Should().BeEmpty("refused on the table alone, before any read");
     }
 
     // ── Task 026 (fix-round-1 item 3b): a line belongs only to an invoice of its own core record ─────────────────
@@ -89,59 +138,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
             extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", matter), ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice) });
     }
 
-    [Fact]
-    public async Task ChildCreate_ALineOfAnInvoiceOfItsOwnMatter_IsCreated()
-    {
-        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
-
-        var result = await CreateChild("sprk_billingevent", new()
-        {
-            ["sprk_name"] = "x",
-            ["sprk_matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-            ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
-        });
-
-        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
-        _appCreates.Should().ContainSingle().Which.Table.Should().Be("sprk_billingevent");
-    }
-
-    [Fact]
-    public async Task ChildCreate_ALineOfAnInvoiceOfAnotherMatter_IsRefusedLineMismatch_AndCreatesNothing()
-    {
-        StoredInvoice(GuardInvoice, "sprk_matter", SecureMatter);
-
-        var result = await CreateChild("sprk_billingevent", new()
-        {
-            ["sprk_name"] = "x",
-            ["sprk_matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-            ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
-        });
-
-        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
-        _appCreates.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ChildCreate_ALineOfAnInvoiceTheCallerCannotRead_IsTheUniformNotFound_AndCreatesNothing()
-    {
-        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
-        _user.UnreadableRows.Add(GuardInvoice);
-
-        var result = await CreateChild("sprk_billingevent", new()
-        {
-            ["sprk_name"] = "x",
-            ["sprk_matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-            ["sprk_Invoice@odata.bind"] = $"/sprk_invoices({GuardInvoice:D})",
-        });
-
-        Status(result).Should().Be(StatusCodes.Status404NotFound, Detail(result));
-        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
-        _appCreates.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task CreateRecordTool_ALineOfAnInvoiceOfAnotherMatter_IsRefusedLineMismatch()
+    [Fact(DisplayName = "164a-1 (must fire): the chat create tool refuses an invoice line of another matter's invoice before the guard is asked")]
+    public async Task CreateRecordTool_ALineOfAnInvoiceOfAnotherMatter_IsRefusedAsAGenericCreate()
     {
         StoredInvoice(GuardInvoice, "sprk_matter", SecureMatter);
 
@@ -151,8 +149,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
             Lookup("sprk_invoice", "sprk_invoice", GuardInvoice));
 
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        result.ErrorCode.Should().Be(Sprk.Bff.Api.Services.Ai.ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Be(
+            Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler.CreatedOnlyByItsWriterCreateBlockedMessage("sprk_billingevent"));
         _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
     }
 
     [Fact]
@@ -192,58 +193,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
         result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
         reads.Should().Contain(p => p.StartsWith($"sprk_invoices({GuardInvoice:D})?$select=", StringComparison.Ordinal));
         _user.Patches.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ChildCreate_AnInvoiceSupersedingAnInvoiceOfAnotherCoreRecord_IsRefusedMismatch_AndCreatesNothing()
-    {
-        StoredInvoice(SupersededInvoice, "sprk_matter", SecureMatter);
-
-        var result = await CreateChild("sprk_invoice", new()
-        {
-            ["sprk_name"] = "x",
-            ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-            ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})",
-        });
-
-        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
-        _appCreates.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ChildCreate_AnInvoiceSupersedingAnInvoiceOfTheSameCoreRecord_IsCreated()
-    {
-        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
-
-        var result = await CreateChild("sprk_invoice", new()
-        {
-            ["sprk_name"] = "x",
-            ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-            ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})",
-        });
-
-        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
-        _appCreates.Should().ContainSingle().Which.Table.Should().Be("sprk_invoice");
-        _user.Patches.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ChildCreate_AnInvoiceSupersedingAnInvoiceTheCallerCannotRead_IsTheUniformNotFound_AndCreatesNothing()
-    {
-        StoredInvoice(SupersededInvoice, "sprk_matter", OrdinaryMatter);
-        _user.UnreadableRows.Add(SupersededInvoice);
-
-        var result = await CreateChild("sprk_invoice", new()
-        {
-            ["sprk_name"] = "x",
-            ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
-            ["sprk_SupersedesInvoice@odata.bind"] = $"/sprk_invoices({SupersededInvoice:D})",
-        });
-
-        Status(result).Should().Be(StatusCodes.Status404NotFound, Detail(result));
-        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode, "fail closed, and nothing about the row is disclosed");
-        _appCreates.Should().BeEmpty();
     }
 
     // ── Update: PATCH /api/v1/child-records/sprk_invoice/{id} — the stored lookups overlaid with the change ─────
@@ -627,21 +576,6 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _world.Assignments.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task ChildCreate_AnInvoiceWhoseCoreLookupIsWrittenAsAPlainValue_IsRefused_NeverReadAsUnset()
-    {
-        var result = await CreateChild("sprk_invoice", new()
-        {
-            ["sprk_name"] = "x",
-            ["sprk_Project@odata.bind"] = $"/sprk_projects({FlaggedProject:D})",
-            ["sprk_matter"] = OrdinaryMatter.ToString("D"),
-        });
-
-        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode);
-        _appCreates.Should().BeEmpty();
-    }
-
     // ── The chat tools share the same core ──────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -658,8 +592,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Patches.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task CreateRecordTool_ABillingEventNamingTwoCoreRecords_IsRefusedWithTheGuardsCode()
+    [Fact(DisplayName = "164a-1 (must fire): the chat create tool refuses an invoice line naming two core records before the guard is asked")]
+    public async Task CreateRecordTool_ABillingEventNamingTwoCoreRecords_IsRefusedAsAGenericCreate()
     {
         _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
 
@@ -669,8 +603,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
             Lookup("sprk_project", "sprk_project", OrdinaryProject));
 
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        result.ErrorCode.Should().Be(Sprk.Bff.Api.Services.Ai.ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Contain("sprk_billingevent").And.Contain("REJECTED");
         _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
     }
 
     [Fact]

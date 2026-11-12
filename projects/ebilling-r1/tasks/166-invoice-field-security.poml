@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="166" project="ebilling-r1">
+  <metadata>
+    <title>Field-secure the invoice money and firm columns (EB-D-200 part 1)</title>
+    <phase>4 Review</phase>
+    <gate>None for source and script. The dev apply needs the owner's go typed in the ebilling session.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Field security on columns that feed approval, spend and firm scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copies an existing script and test pattern exactly (Set-EbillingSourceEmailFieldSecurity.ps1).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <deps>EB-D-200</deps>
+    <tags>dataverse, field-security, ebilling</tags>
+  </metadata>
+
+  <prompt>Binding: EB-D-200 in projects/ebilling-r1/notes/decisions-log.md.
+    Copy, do not invent:
+    - scripts/ebilling/Set-EbillingSourceEmailFieldSecurity.ps1 (-WhatIf, apply, -Verify, -Revert);
+    - its agreement tests (SourceEmailFieldSecurityAgreementTests);
+    - the SpaarkeMaster source entries for sprk_firmhold (Writers 4/4/4 AND Readers 4/0/0; users read these columns).</prompt>
+
+  <goal>sprk_invoice columns sprk_totalamount, sprk_approvedtotal, sprk_feestotal, sprk_expensestotal, sprk_lineadjustmentstotal,
+    sprk_invoiceadjustmentstotal and sprk_vendororg are field-secured:
+    - "Spaarke BFF-Managed Field Writers" 4/4/4;
+    - "Spaarke BFF-Managed Field Readers" 4/0/0;
+    - no other profile grants access to them (System Administrator excepted).</goal>
+
+  <acceptance-criteria>
+    <criterion>PRECONDITION, checked first and recorded in the notes: every BFF writer of each column writes as the app identity, never as the caller.
+      List the writers with file:line and their identity. Known writers to check:
+      - InvoiceTotalsService:157-161;
+      - InvoiceSubmissionPersister:1512,1542;
+      - InvoiceAssignFirmService:1012;
+      - InvoiceCorrectionService:273 (the sprk_totalamount header correction);
+      - OfficeService:2250-2255 (the invoice create).
+      Also check any form script or flow that writes them as the user (the forms are read-only by script).
+      If any writer runs as the caller, STOP and report.</criterion>
+    <criterion>SpaarkeMaster source:
+      - Entities/sprk_Invoice/Entity.xml has IsSecured 1 on the seven columns;
+      - Other/FieldSecurityProfiles.xml has the Writers 4/4/4 and Readers 4/0/0 entries.</criterion>
+    <criterion>The script scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 has -WhatIf, apply, -Verify and -Revert.
+      -Verify asserts:
+      - IsSecured;
+      - both profile grants;
+      - no other profile grants access;
+      - every BFF application user is a Writers member.</criterion>
+    <criterion>Agreement tests: the script and the solution XML agree, with seeded drifts of the parser.</criterion>
+    <criterion>No live apply in this task. Run only the read-only -WhatIf against dev, and record its output in the notes.</criterion>
+    <criterion>Notes: projects/ebilling-r1/notes/166-invoice-field-security.md.</criterion>
+  </acceptance-criteria>
+</task>

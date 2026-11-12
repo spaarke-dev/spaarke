@@ -535,9 +535,9 @@ public sealed partial class SignalWriter
     /// <param name="recordTypes">The <c>sprk_recordtype_ref</c> lookup the shared regarding builder types the pair from
     /// (<c>QueryRecordTypeRefAsync</c>; the same source <c>TaskActionCore</c> and the To Do writers hand it). Task 141.</param>
     /// <param name="scopes">Task 143: the scope this singleton resolves two SCOPED, already-registered services from, per call
-    /// (the <see cref="SignalSuppressionService"/> pattern): <see cref="AssignedAccessStore"/> for the D-134 assignee read
+    /// (the <see cref="SignalSuppressionService"/> pattern): <see cref="ContactUserRepresentation"/> for the D-134 assignee read
     /// (<see cref="PersonalToDoAssignee"/>) and <see cref="SecureChildReconciler"/> for the no-core re-own
-    /// (<see cref="ReassignNoCoreOwnerAsync"/>). No new registration.</param>
+    /// (<see cref="ReassignNoCoreOwnerAsync"/>).</param>
     public SignalWriter(
         OntologyWriterDataverseClient writerClient,
         IGenericEntityService sysadminClient,
@@ -943,8 +943,10 @@ public sealed partial class SignalWriter
     /// Task 031 (FR-16, FR-15): closes ONE Signal as a system resolution (<see cref="ResolutionConditionCleared"/>,
     /// <see cref="ResolutionSuperseded"/> or <see cref="ResolutionPolicyRetired"/>). <c>sprk_decisionrecord</c> and
     /// <c>sprk_resolvedby</c> are not written by the close. Task 153 (D-145b): after a Do-lane ConditionCleared close the job writes a
-    /// Routine Decision Record and links it with <see cref="LinkConditionClearedRecordAsync"/>; every other system closure (Superseded,
-    /// PolicyRetired, a Decide-lane ConditionCleared) stays record-free. The update is conditional on <paramref name="rowVersion"/>
+    /// Routine Decision Record and links it with <see cref="LinkConditionClearedRecordAsync"/>. ebilling-r1 095d-2b-2 (D-201 095d-2 Q1): after
+    /// the assign-firm re-run closes the invoice's shared Decide-lane Signal as ConditionCleared, it links the assign-firm Decision Record the
+    /// same way. Every other system closure (Superseded, PolicyRetired, any other Decide-lane ConditionCleared) stays record-free. The update
+    /// is conditional on <paramref name="rowVersion"/>
     /// (<c>sprk_signal</c> has optimistic concurrency enabled), so a Signal a person resolved after the evaluator read it is
     /// never closed a second time; that case returns <see cref="SignalCloseOutcome.ChangedSinceRead"/> and writes nothing.
     /// A failure is logged at Error (<see cref="OntologyWriterEvents.WriteRefused"/>), metered and rethrown.
@@ -1146,8 +1148,16 @@ public sealed partial class SignalWriter
     }
 
     /// <summary>
-    /// Task 153 (D-145b): links a Do-lane Signal the job closed as ConditionCleared to its Routine Decision Record: <c>sprk_decisionrecord</c>
-    /// and, when the record names the person who did the work, <c>sprk_resolvedby</c>. Nothing else. Reads the Signal first and writes only
+    /// Links a Signal a system path closed as ConditionCleared to the Decision Record that cleared its condition: <c>sprk_decisionrecord</c>
+    /// and, when the record names the person who did the work, <c>sprk_resolvedby</c>. Nothing else. Two uses:
+    /// <list type="bullet">
+    /// <item><b>Do lane</b> (task 153, D-145b): the job closed a Do-lane Signal and links its Routine Decision Record.</item>
+    /// <item><b>Decide lane</b> (ebilling-r1 095d-2b-2, D-201 095d-2 Q1): the assign-firm re-run closed the invoice's shared hold Signal
+    /// because the re-run started by the assign-firm decision found no hold reason left, and links that decision's record, with
+    /// <paramref name="resolvedBy"/> = the decider and <paramref name="expectedPriorRecordId"/> = null. The record's resolved set stays empty;
+    /// the link is the Signal pointing to the record. Only that run's close is linked: a Signal another path clears is not.</item>
+    /// </list>
+    /// Reads the Signal first and writes only
     /// when it is still Resolved as ConditionCleared, conditional on the version just read, so a person's decision that re-closed it in
     /// between (with its own record) is never overwritten.
     /// <para><b>Replacing the link (adversarial pass 1 F2, D-128 Q18).</b> A D-128 reminder or inquiry leaves the Signal Acknowledged and
@@ -1223,13 +1233,13 @@ public sealed partial class SignalWriter
 
     /// <summary>
     /// Task 153 (D-134): the one enabled user a personal To Do's Assigned To names (<see cref="PersonalToDoAssignee"/>, through the scoped
-    /// <see cref="AssignedAccessStore"/>), or null for no single user. A read fault propagates (the caller must not fall back).
+    /// <see cref="ContactUserRepresentation"/>), or null for no single user. A read fault propagates (the caller must not fall back).
     /// </summary>
     internal async Task<Guid?> PersonalToDoAssigneeAsync(Guid todoId, CancellationToken ct = default)
     {
         await using var scope = _scopes.CreateAsyncScope();
         return await PersonalToDoAssignee.ResolveAsync(
-            _sysadminClient, scope.ServiceProvider.GetRequiredService<AssignedAccessStore>(), todoId, ct).ConfigureAwait(false);
+            _sysadminClient, scope.ServiceProvider.GetRequiredService<ContactUserRepresentation>(), todoId, ct).ConfigureAwait(false);
     }
 
     /// <summary>

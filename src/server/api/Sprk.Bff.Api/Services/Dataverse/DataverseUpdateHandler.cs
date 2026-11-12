@@ -94,10 +94,17 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // that person, but the mapping is the playbook's configuration (its author, who may not be the runner), never theirs.
         // Master merge after #2253: so it is asked as WriteIdentity.AppOnly (every set, AccessColumns included) even when the
         // write impersonates the runner; WriteIdentity.Caller is the field-mapping push's only.
+        // #2250 (owner decision, option 2): asked as WriteIdentity.Playbook (every AppOnly set, plus a root's Assigned-To
+        // columns), so a playbook's output mapping never causes an Assigned-To grant.
         if (InheritedAccessPermission.RefuseAppOnlyWrite(
-                entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
+                entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.Playbook) is { } documentRefusal)
         {
-            throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
+            // The writer-only column refusal (EB-D-207) is about an update to an existing row: not the owner constructor, whose
+            // message is about a create's owner. The update's own words, the same as the fixed-after-create refusal below.
+            throw documentRefusal.RefusalCode == RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode
+                ? new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal.RefusalCode,
+                    $"The update was NOT written: {documentRefusal.Reason} ({documentRefusal.RefusalCode}).")
+                : new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
         }
 
         // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths

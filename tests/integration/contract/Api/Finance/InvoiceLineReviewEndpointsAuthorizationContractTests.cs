@@ -24,6 +24,7 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Coding;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
@@ -64,6 +65,20 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
 
     private static string Clean => $"/api/finance/invoices/{InvoiceId}/lines/accept-clean";
 
+    private static string Add => $"/api/finance/invoices/{InvoiceId}/lines";
+
+    /// <summary>A well-formed Add line body (task 164): an Expense line, so no timekeeper resolution.</summary>
+    private static object AddBody(string? reason = "Missing from the bill", string? costType = "expense") => new
+    {
+        requestId = Guid.NewGuid(),
+        costType,
+        date = "2026-10-01",
+        amount = 50m,
+        expenseCode = "E101",
+        description = "Courier",
+        reason,
+    };
+
     /// <summary>One request per route, with a body that is valid for it.</summary>
     public static IEnumerable<object[]> Routes() =>
     [
@@ -71,6 +86,7 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         ["POST", Single(), new { decisionId = Guid.NewGuid(), action = "accept" }],
         ["POST", Multi, new { decisionId = Guid.NewGuid(), action = "accept", lines = new[] { new { lineId = LineId } } }],
         ["POST", Clean, new { decisionId = Guid.NewGuid() }],
+        ["POST", Add, AddBody()],
     ];
 
     public static IEnumerable<object[]> DecideRoutes() => Routes().Skip(1);
@@ -332,6 +348,36 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
         host.Entities.VerifyNoOtherCalls();
     }
 
+    [Theory(DisplayName = "Task 164: Add line refuses a malformed body with 400 and its stable code before any read or the decider lookup")]
+    [InlineData(null, "expense", "ebilling.line.reason_required")]
+    [InlineData("Missing from the bill", "settlement", "ebilling.line_add.invalid")]
+    public async Task AddLine_InvalidRequests_Return400_BeforeAnyRead(string? reason, string? costType, string code)
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+
+        var response = await host.SendAsync(Request("POST", Add, AddBody(reason, costType)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ErrorCode(response)).Should().Be(code);
+        host.Entities.VerifyNoOtherCalls();
+        host.Probe.SystemUserIdCalls.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 164: Add line with an unproven identity is 403 and reads nothing")]
+    public async Task AddLine_WithAnUnprovenIdentity_Returns403_AndReadsNothing()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantAll();
+        host.Probe.CallerSystemUserId = null;
+
+        var response = await host.SendAsync(Request("POST", Add, AddBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["reasonCode"]!.GetValue<string>().Should().Be("ebilling.decider.unresolved");
+        host.Entities.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task Decide_TheDeciderIsTheCallersOwnSystemUser_NeverTheBody()
     {
@@ -498,6 +544,18 @@ public sealed class InvoiceLineReviewEndpointsAuthorizationContractTests
             identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid u, CancellationToken _) => new PersonIdentity(u));
             var recorder = new BillingDecisionRecorder(
                 DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness()).Writer, identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
+            // Task 164: the REAL Add line service. Its rules, resolution and fact load are never reached here (every route test is refused before them).
+            builder.Services.AddScoped(_ => new InvoiceLineAddService(
+                host.Entities.Object,
+                new CodeSetResolver(host.Entities.Object, settings.Object, Mock.Of<ICodeSetSuggestionProvider>(), NullLogger<CodeSetResolver>.Instance),
+                (_, _) => throw new InvalidOperationException("The resolution is not reached by a route test."),
+                (_, _) => throw new InvalidOperationException("The fact load is not reached by a route test."),
+                (_, _) => throw new InvalidOperationException("The evaluation is not reached by a route test."),
+                recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(),
+                (_, _) => throw new InvalidOperationException("The totals step is not reached by a route test."),
+                (_, _) => throw new InvalidOperationException("The Signal write is not reached by a route test."),
+                (_, _, _, _, _) => throw new InvalidOperationException("The Signal close is not reached by a route test."),
+                NullLogger<InvoiceLineAddService>.Instance));
             builder.Services.AddScoped(_ => new InvoiceLineDecisionService(
                 host.Entities.Object, Mock.Of<IInvoiceTotalsService>(), recorder, locks.Object, Mock.Of<IRecordOwnershipResolver>(),
                 host.Probe,

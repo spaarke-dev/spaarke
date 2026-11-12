@@ -39,6 +39,56 @@ public sealed record BillingRuleSkip(Guid PolicyId, string PolicyCode, Guid Poli
 /// </summary>
 public sealed record BillingRuleRefusalScope(Guid PolicyVersionId, RuleType? RuleType, bool AppliesToInvoice, IReadOnlyList<int> LineIndexes);
 
+/// <summary>
+/// ebilling-r1 082c: an applicable Procedure with no version for a subject date (<see cref="ProcedureGap"/>, model 7.1), and the subjects judged on that
+/// date: none of that Procedure's rules ran on them. <paramref name="AppliesToInvoice"/>: the invoice subject is dated on it; otherwise
+/// <paramref name="LineIndexes"/> names the lines. <see cref="object.ToString"/> prints the gap's reader-safe text and the counts only.
+/// </summary>
+public sealed record BillingProcedureGap(ProcedureGap Gap, bool AppliesToInvoice, IReadOnlyList<int> LineIndexes)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Gap = ").Append(Gap).Append(", AppliesToInvoice = ").Append(AppliesToInvoice).Append(", Lines = ").Append(LineIndexes.Count);
+        return true;
+    }
+}
+
+/// <summary>
+/// ebilling-r1 082d (model 7.4): how precedence (step 4) treated one selected, gate-accepted rule version, per subject. <paramref name="Applied"/>:
+/// the subjects it judged (a Split version kept for its code check included). <paramref name="Displaced"/>: the subjects where a higher-ranked valid
+/// version of its Replace key displaced it outright (it never ran there). <paramref name="CapDisplaced"/>: the Split subjects where it kept its code
+/// check and lost its cap. <see cref="object.ToString"/> prints the source and the counts only (no id; 082b K2, 082d K6).
+/// </summary>
+public sealed record BillingRuleApplication(
+    Guid PolicyVersionId, BillingRuleSource Source, IReadOnlyList<BillingSubject> Applied, IReadOnlyList<BillingSubject> Displaced,
+    IReadOnlyList<BillingSubject> CapDisplaced)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Source = ").Append(Source).Append(", Applied = ").Append(Applied.Count).Append(", Displaced = ").Append(Displaced.Count)
+            .Append(", CapDisplaced = ").Append(CapDisplaced.Count);
+        return true;
+    }
+}
+
+/// <summary>
+/// ebilling-r1 082d (model 7.4): the basis of one evaluation, as the evaluator used it: the core-record chain the resolution read, the
+/// <see cref="ProcedureRulesOnDate"/> of every distinct subject date (the C9 memo, in date order: the objects the evaluator judged with, never
+/// re-resolved), and how precedence treated each selected rule version (both streams). The submission persists it as its snapshot
+/// (<c>procedureSnapshot</c> in <c>sprk_findingsjson</c>); 083 cites it and 113 compares with it. INTERNAL: it holds record, row and Procedure
+/// ids and override reasons; a reader-facing output uses <see cref="ProcedureRulesOnDate.ForReaders"/>. <see cref="object.ToString"/> prints the
+/// counts only.
+/// </summary>
+public sealed record BillingProcedureBasis(
+    IReadOnlyList<CoreRecordLink> Chain, IReadOnlyList<ProcedureRulesOnDate> Dates, IReadOnlyList<BillingRuleApplication> Applications)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Chain = ").Append(Chain.Count).Append(", Dates = ").Append(Dates.Count).Append(", Applications = ").Append(Applications.Count);
+        return true;
+    }
+}
+
 /// <summary>The outcome of one evaluation. Deterministic: the same request and facts give equal results in equal order.</summary>
 public sealed record BillingEvaluationResult
 {
@@ -60,6 +110,16 @@ public sealed record BillingEvaluationResult
     /// <summary>Money checks not judged because of the currency (D-20), in evaluation order. Each is logged.</summary>
     public required IReadOnlyList<BillingRuleSkip> Skips { get; init; }
 
+    /// <summary>
+    /// 082c: the Procedure gaps on the subjects' dates, one per (Procedure, date), ordered by date then Procedure. A gapped Procedure judged nothing
+    /// on those subjects, so an invoice with any gap is never a pass: in 082c-1 the submission processor refuses to judge it (interim), and 082c-2
+    /// holds it.
+    /// </summary>
+    public IReadOnlyList<BillingProcedureGap> Gaps { get; init; } = [];
+
+    /// <summary>082d (model 7.4): the basis the submission stores as its snapshot. Null only on a result built elsewhere (a test double).</summary>
+    public BillingProcedureBasis? ProcedureBasis { get; init; }
+
     /// <summary>The fact set the handlers judged.</summary>
     public required BillingFactSet Facts { get; init; }
 }
@@ -79,12 +139,17 @@ public sealed record BillingEvaluationResult
 /// that date (<see cref="BillingRuleCandidate.IsInForceOn"/>, task 076 K3); a draft, a rejected draft or an abandoned edit never
 /// applies. When two versions of one policy are in force on one date (overlapping ranges left by a failed publish), the current
 /// version wins, else the highest version number.</para>
-/// <para><b>Firm over client default (D-39).</b> For one subject, when a firm rule set's version and a client default's version of
-/// the same rule type both apply, only the firm's is evaluated. Only a firm version that both the gate and its handler accept counts
-/// for this: when the firm version cannot be evaluated, the client default still applies (owner, 2026-10-18; 072 review B2), so a
-/// broken firm rule never silently removes a check. "The same rule type" means the same <see cref="BillingRuleDefinition.PrecedenceKey"/>: the
-/// rule type, and for AddedFee the rule type plus its fee kind (owner, 2026-10-21), so a firm late-fee cap leaves the client default's
-/// administrative-fee cap in force.</para>
+/// <para><b>Two streams (082c).</b> The legacy rules (<see cref="BillingLoadedFacts.Rules"/>) are picked per subject date by
+/// <see cref="SelectVersion"/>; the Procedure rules by <see cref="ProcedureResolution.RulesOn"/>, once per distinct subject date, from the one
+/// resolution the loader read (C9). A Procedure rule never goes through the legacy version chain. A version in both streams is a fault (C4).</para>
+/// <para><b>Precedence (082c C5, C6; model 7.3; ontology D-172 Q7, D-205 item 2).</b> Per subject and per
+/// <see cref="BillingRuleDefinition.PrecedenceKey"/> (the rule type; for AddedFee also its fee kind, and for 'other' its fee codes), by
+/// <see cref="BillingRuleCatalogue.PrecedenceOf"/> and <see cref="BillingRuleCandidate.Rank"/>, for legacy and Procedure rules alike (a legacy
+/// Firm rule ranks above a legacy Client default one). Replace (a limit): the versions below the highest VALID rank are displaced; a tie means all
+/// apply. Additive (a checklist): all apply. Split (ExpenseRule): a displaced version keeps its code check and loses its amount-cap findings.
+/// Valid means the gate and the handler accept the version and its consequence was not downgraded: a broken or downgraded specific rule never
+/// removes the general one (owner, 2026-10-18; 072 review B2; D-116). <see cref="BillingRuleCatalogue.PrecedenceOf"/> is called only on a
+/// gate-accepted definition (C7): a stored row of a non-billing type is a gate refusal, and the other rules still run.</para>
 /// <para><b>Refusals (FR-24).</b> A version the gate refuses (logged and metered by the gate) or whose handler refuses it (logged
 /// here as <see cref="OntologyWriterEvents.PolicyVersionInvalid"/> and metered) produces no finding; the other versions still run.
 /// Only <see cref="BillingRuleRefusedException"/> is caught; any other exception is a defect and propagates.</para>
@@ -177,22 +242,94 @@ public sealed class InvoiceComplianceEvaluator
         // Stable order for every pass below: the loader's order is not relied on.
         // D-125: a system rule (SubmissionIntegrity) is never judged from a rule body: 049 creates its findings directly. A stored row of
         // that type that reached the loader is skipped, not refused, so it can neither crash nor hold an evaluation.
-        var candidates = loaded.Rules
+        if (loaded.Rules.FirstOrDefault(c => c.Source != BillingRuleSource.Legacy) is { } stray)
+        {
+            throw new InvalidOperationException(
+                $"BillingLoadedFacts.Rules holds a {stray.Source} rule ({stray.PolicyCode}); Procedure rules come from BillingLoadedFacts.Procedures only.");
+        }
+
+        var legacy = loaded.Rules
             .Where(c => c.CanBeInForce && !IsSystemRule(c))
             .OrderBy(c => c.PolicyCode, StringComparer.Ordinal)
             .ThenBy(c => c.PolicyId)
             .ThenBy(c => c.VersionNumber)
             .ThenBy(c => c.PolicyVersionId)
             .ToList();
-        var byPolicy = candidates.GroupBy(c => c.PolicyId).Select(g => g.ToList()).ToList();
+        var byPolicy = legacy.GroupBy(c => c.PolicyId).Select(g => g.ToList()).ToList();
 
         // 1. The version of each policy that applies to each subject.
         // A3: with no line date and no invoice date, the received date (data, never the clock) is the judging date.
         var invoiceDate = request.InvoiceDate ?? request.ReceivedOn;
         var subjects = new List<(BillingSubject Subject, DateOnly Date)> { (BillingSubject.ForInvoice(), invoiceDate) };
         subjects.AddRange(request.Lines.OrderBy(l => l.Index).Select(l => (BillingSubject.ForLine(l.Index), l.Date ?? invoiceDate)));
+
+        // 082c C9: the Procedure stream, resolved once per distinct subject date from the one resolution the loader read. Its rules are the
+        // resolver's choice for the date: never IsCurrent, IsInForceOn or SelectVersion. A resolution fault on a date propagates.
+        var onDate = subjects.Select(s => s.Date).Distinct().Order().ToDictionary(d => d, d => loaded.Procedures.RulesOn(d));
+        var procedureCandidates = new Dictionary<Guid, BillingRuleCandidate>();
+        BillingRuleCandidate ProcedureCandidateOf(ResolvedRule rule)
+        {
+            var mapped = BillingFactLoader.ProcedureCandidate(rule);
+            if (procedureCandidates.TryGetValue(mapped.PolicyVersionId, out var known))
+            {
+                // One policy version is one candidate, whatever the date (its Procedure, rank and content are fixed per version).
+                return known == mapped
+                    ? known
+                    : throw new ProcedureResolutionFaultException(
+                        $"Policy version {mapped.PolicyVersionId} resolved to two different rules on two dates; the rules that judge the invoice cannot be told.");
+            }
+
+            procedureCandidates[mapped.PolicyVersionId] = mapped;
+            return mapped;
+        }
+
+        // 082c K4, ontology D-205 rule (c): the invoice subject keeps the invoice date for a Procedure's version whenever that Procedure has a
+        // version on it (the 072 rule). A Procedure with NO version on the invoice date (a hole, after its end, or not yet applicable) is judged,
+        // for the invoice subject only, by its version on the LATEST dated line's work date; the invoice-date gap stands only when that date has
+        // none either, or when no line is dated. Legacy selection and line subjects are unchanged. No new RulesOn call: the line date is already
+        // resolved (C9's one resolution per distinct date).
+        var datedLines = request.Lines.Where(l => l.Date is not null).Select(l => l.Date!.Value).ToList();
+        DateOnly? latestWorkDate = datedLines.Count > 0 ? datedLines.Max() : null;
+        // The fallback is narrowed to ontology's three kinds (K2): a ConflictingParents gap or a pin gap on the invoice date stands. The one
+        // definition is ProcedureRulesOnDate.FallbackProcedureIds; the adjustment options use the same.
+        var onLatestWorkDate = latestWorkDate is { } fallbackDate && fallbackDate != invoiceDate ? onDate[fallbackDate] : null;
+        var invoiceFallback = onDate[invoiceDate].FallbackProcedureIds(onLatestWorkDate);
+
+        IEnumerable<ResolvedRule> ProcedureRulesOf(BillingSubject subject, DateOnly date) =>
+            subject.Kind == BillingSubjectKind.Invoice ? onDate[date].RulesWithFallback(onLatestWorkDate) : onDate[date].Rules;
+
         var selectedBySubject = subjects
-            .Select(s => (s.Subject, Versions: byPolicy.Select(versions => SelectVersion(versions, s.Date)).OfType<BillingRuleCandidate>().ToList()))
+            .Select(s => (s.Subject, Versions: byPolicy.Select(versions => SelectVersion(versions, s.Date)).OfType<BillingRuleCandidate>()
+                .Concat(ProcedureRulesOf(s.Subject, s.Date).Select(ProcedureCandidateOf).Where(c => !IsSystemRule(c)))
+                .ToList()))
+            .ToList();
+
+        // 082c C4: the streams are disjoint (the loader checks the whole read too).
+        var legacyVersions = loaded.Rules.Select(c => c.PolicyVersionId).ToHashSet();
+        if (procedureCandidates.Keys.FirstOrDefault(legacyVersions.Contains) is var shared && shared != Guid.Empty)
+        {
+            throw new ProcedureResolutionFaultException(
+                $"Policy version {shared} is both a legacy rule and a Procedure rule; the rules that judge the invoice cannot be told.");
+        }
+
+        var candidates = legacy.Concat(procedureCandidates.Values)
+            .OrderBy(c => c.PolicyCode, StringComparer.Ordinal)
+            .ThenBy(c => c.PolicyId)
+            .ThenBy(c => c.VersionNumber)
+            .ThenBy(c => c.PolicyVersionId)
+            .ToList();
+        var candidateById = candidates.GroupBy(c => c.PolicyVersionId).ToDictionary(g => g.Key, g => g.First());
+
+        // 082c: the gaps on the subjects' dates, with the subjects dated on each (nothing of that Procedure judged them).
+        var gaps = onDate.Values
+            .SelectMany(d => d.Gaps)
+            .OrderBy(g => g.WorkDate)
+            .ThenBy(g => g.ProcedureId)
+            .Select(g => new BillingProcedureGap(
+                g,
+                !invoiceFallback.Contains(g.ProcedureId) && subjects.Any(s => s.Subject.Kind == BillingSubjectKind.Invoice && s.Date == g.WorkDate),
+                subjects.Where(s => s.Subject.LineIndex is not null && s.Date == g.WorkDate).Select(s => s.Subject.LineIndex!.Value).Order().ToList()))
+            .Where(g => g.AppliesToInvoice || g.LineIndexes.Count > 0)
             .ToList();
 
         // 2. The gate, once per distinct selected version, in a stable order (FR-24).
@@ -234,8 +371,8 @@ public sealed class InvoiceComplianceEvaluator
         BillingRuleCandidate Effective(BillingRuleCandidate candidate) =>
             downgraded.TryGetValue(candidate.PolicyVersionId, out var flagged) ? flagged : candidate;
 
-        // 3. Each version's handler, at most once, on the whole fact set, and only when it is needed: a firm version's to decide
-        //    precedence, any other's when it applies. A handler refusal is logged and metered here (FR-24). ApprovedRate on a
+        // 3. Each version's handler, at most once, on the whole fact set, and only when it is needed: to find the top valid rank of a key
+        //    (step 4), or when the version applies. A handler refusal is logged and metered here (FR-24). ApprovedRate on a
         //    currency it cannot judge is not run (D-20, step 5) and still counts as a valid firm rule.
         var currencySkip = CurrencySkipReason(request, loaded.ReliabilityThreshold);
         var judgedByVersion = new Dictionary<Guid, IReadOnlyList<BillingFinding>?>();
@@ -275,65 +412,107 @@ public sealed class InvoiceComplianceEvaluator
             }
         }
 
-        // 4. D-39 precedence per subject, among the versions both the gate and the handler accept (072 review B2, owner 2026-10-18:
-        //    a firm version that cannot be evaluated leaves the client default in force). A downgraded firm version (its stored
-        //    consequence is one its type may not carry, evaluated as Flag) is not a valid firm rule for this purpose either (072 W
-        //    review F1-b, D-116): it still runs, as a Flag, but the client default of its type stays in force beside it, so a
-        //    client Reject is never turned into a Flag by a row written around publish.
+        // 4. Precedence per subject (082c C5, C6; model 7.3; D-172 Q7 and D-205 item 2: legacy rules too), per PrecedenceKey: the rule type,
+        //    and for AddedFee the rule type plus its fee kind (owner, 2026-10-21), and for the kind 'other' the fee-code set (ontology-r1 F3), so
+        //    a late-fee cap never displaces an administrative-fee cap. Only the rank decides (never Scope). A version displaces another only
+        //    when it is VALID: the gate and the handler accept it (072 review B2, owner 2026-10-18: a broken specific rule leaves the general one
+        //    in force) and its consequence was not downgraded (072 W review F1-b, D-116: a row written around publish never turns a general
+        //    Reject into a Flag). C7 (K3): only gate-accepted definitions reach PrecedenceOf; a refused version takes no part here.
         var subjectsByVersion = new Dictionary<Guid, HashSet<BillingSubject>>();
+        var capDisplaced = new Dictionary<Guid, HashSet<BillingSubject>>();
+        var displacedOutright = new Dictionary<Guid, HashSet<BillingSubject>>(); // 082d: for the snapshot only; decides nothing
+        bool Valid(BillingRuleCandidate version) =>
+            !downgraded.ContainsKey(version.PolicyVersionId) && HandlerAccepts(version, accepted[version.PolicyVersionId]);
+        static void Add(Dictionary<Guid, HashSet<BillingSubject>> into, Guid versionId, BillingSubject subject)
+        {
+            if (!into.TryGetValue(versionId, out var set))
+            {
+                into[versionId] = set = [];
+            }
+
+            set.Add(subject);
+        }
+
         foreach (var (subject, versions) in selectedBySubject)
         {
-            // The replacement key is the rule type, and for AddedFee the rule type plus its fee kind (owner, 2026-10-21;
-            // BillingRuleDefinition.PrecedenceKey): a firm late-fee cap displaces the client default's late-fee cap only. For the
-            // kind 'other' the key also carries the fee-code set (ontology-r1 F3): a courier cap never displaces a postage cap.
-            var firmKeys = versions
-                .Where(v => v.Scope == RuleSetScope.Firm
-                            && !downgraded.ContainsKey(v.PolicyVersionId)
-                            && accepted.TryGetValue(v.PolicyVersionId, out var firmDefinition)
-                            && HandlerAccepts(v, firmDefinition))
-                .Select(v => accepted[v.PolicyVersionId].PrecedenceKey)
-                .ToHashSet();
-            foreach (var version in versions)
+            foreach (var key in versions.Where(v => accepted.ContainsKey(v.PolicyVersionId)).GroupBy(v => accepted[v.PolicyVersionId].PrecedenceKey))
             {
-                if (!accepted.TryGetValue(version.PolicyVersionId, out var definition)
-                    || (version.Scope != RuleSetScope.Firm && firmKeys.Contains(definition.PrecedenceKey))
-                    || !HandlerAccepts(version, definition))
+                var precedence = BillingRuleCatalogue.PrecedenceOf(key.Key.RuleType);
+
+                // The highest rank holding a valid version. Ranks are tried from the top, so a version below it is never run when it is
+                // displaced outright (Replace). Under Split only a version that STATES a cap (MaxAmountPerItem) can displace a lower
+                // version's cap (D-205 ruling): a capless higher version leaves the lower cap in force. A deliberate "no cap on this record"
+                // is a rule-level Exclude, or a record rule in the base's slot, never precedence.
+                ProcedureRank? top = null;
+                if (precedence != BillingRulePrecedence.Additive)
                 {
-                    continue;
+                    bool Displacing(BillingRuleCandidate v) =>
+                        (precedence != BillingRulePrecedence.Split || accepted[v.PolicyVersionId].MaxAmountPerItem is not null) && Valid(v);
+                    foreach (var atRank in key.GroupBy(v => v.Rank).OrderByDescending(g => g.Key))
+                    {
+                        if (atRank.Any(Displacing))
+                        {
+                            top = atRank.Key;
+                            break;
+                        }
+                    }
                 }
 
-                if (!subjectsByVersion.TryGetValue(version.PolicyVersionId, out var set))
+                foreach (var version in key)
                 {
-                    subjectsByVersion[version.PolicyVersionId] = set = [];
-                }
+                    // Below the top valid rank: Replace displaces it; Split keeps it for its code check and drops its cap (step 5). A tie
+                    // with the top is not displaced: ties all apply.
+                    var displaced = top is { } t && version.Rank.CompareTo(t) < 0;
+                    if (displaced && precedence == BillingRulePrecedence.Replace)
+                    {
+                        Add(displacedOutright, version.PolicyVersionId, subject);
+                        continue;
+                    }
 
-                set.Add(subject);
+                    if (!HandlerAccepts(version, accepted[version.PolicyVersionId]))
+                    {
+                        continue;
+                    }
+
+                    Add(subjectsByVersion, version.PolicyVersionId, subject);
+                    if (displaced)
+                    {
+                        Add(capDisplaced, version.PolicyVersionId, subject);
+                    }
+                }
             }
         }
 
         // The handler refusals follow the gate's, in the stable candidate order.
         refusals.AddRange(candidates.Where(c => handlerRefusals.ContainsKey(c.PolicyVersionId)).Select(c => handlerRefusals[c.PolicyVersionId]));
 
-        // The precedence keys judged on each subject in this evaluation (step 4's survivors). A refused version's subject is covered, and not
-        // reported as unchecked, when a version of the SAME key judged it (D-39: the client default stays in force). A rate comparison skipped
-        // for the currency (step 5) judged nothing, so it covers nothing.
-        var judgedKeys = new Dictionary<BillingSubject, HashSet<(RuleType, string?, string)>>();
+        // C8 (101 B2a): the Replace keys judged on each subject, at the highest rank that judged them (step 4's survivors). A refused version's
+        // subject counts as covered, and is not reported as unchecked, only when a version of the SAME Replace key judged it at a strictly HIGHER
+        // rank: a limit judged by the rule that would have won anyway. A tie does not cover (ontology D-205: ties all apply, so the refused
+        // version's own limit was a second limit that nobody checked). For an Additive or Split key its own items were not checked, so its subjects
+        // stay unchecked. A rate comparison skipped for the currency (step 5) judged nothing, so it covers nothing.
+        var judgedReplace = new Dictionary<BillingSubject, Dictionary<(RuleType, string?, string), ProcedureRank>>();
         foreach (var (versionId, appliesTo) in subjectsByVersion)
         {
             var judgedDefinition = accepted[versionId];
-            if (IsRateComparison(judgedDefinition.RuleType) && currencySkip is not null)
+            if ((IsRateComparison(judgedDefinition.RuleType) && currencySkip is not null)
+                || BillingRuleCatalogue.PrecedenceOf(judgedDefinition.RuleType) != BillingRulePrecedence.Replace)
             {
                 continue;
             }
 
+            var rank = candidateById[versionId].Rank;
             foreach (var subject in appliesTo)
             {
-                if (!judgedKeys.TryGetValue(subject, out var keys))
+                if (!judgedReplace.TryGetValue(subject, out var keys))
                 {
-                    judgedKeys[subject] = keys = [];
+                    judgedReplace[subject] = keys = [];
                 }
 
-                keys.Add(judgedDefinition.PrecedenceKey);
+                if (!keys.TryGetValue(judgedDefinition.PrecedenceKey, out var known) || known.CompareTo(rank) < 0)
+                {
+                    keys[judgedDefinition.PrecedenceKey] = rank;
+                }
             }
         }
 
@@ -354,11 +533,22 @@ public sealed class InvoiceComplianceEvaluator
 
             var judged = judgedByVersion[candidate.PolicyVersionId]!;
             var kept = judged.Where(f => applies.Contains(f.Subject));
+            if (capDisplaced.TryGetValue(candidate.PolicyVersionId, out var capped))
+            {
+                // C6 Split (ExpenseRule, ontology F3-c, D-205 item 3): on a subject where a higher-ranked valid version of its key that states a
+                // cap applies, a displaced version keeps its code check (the non-reimbursable codes add) and loses its cap (the cap replaces). A
+                // capless higher version displaces nothing (D-205 ruling): a deliberate "no cap on this record" is a rule-level Exclude or a
+                // record rule in the base's slot, not precedence. "Per category" has
+                // no key today: maxAmountPerItem caps every expense line, whatever its code. It becomes per category only if the owner's six-gap
+                // triage adds a per-code cap (D-205 item 3).
+                kept = kept.Where(f => !(f.ReasonCode == BillingReasonCodes.ExpenseAmountOverCap && capped.Contains(f.Subject)));
+            }
             if (definition.RuleType == RuleType.ExpenseRule && currencySkip is not null)
             {
                 // D-20: the cap is a USD amount; the code check does not depend on the currency.
                 kept = kept.Where(f => f.ReasonCode != BillingReasonCodes.ExpenseAmountOverCap);
-                if (definition.MaxAmountPerItem is not null)
+                // A cap displaced on every subject it applies to (C6 Split) is not in force, so it was not skipped either.
+                if (definition.MaxAmountPerItem is not null && !(capDisplaced.TryGetValue(candidate.PolicyVersionId, out var allDisplaced) && applies.All(allDisplaced.Contains)))
                 {
                     Skip(candidate, definition.RuleType, currencySkip, skips);
                 }
@@ -403,10 +593,26 @@ public sealed class InvoiceComplianceEvaluator
             Findings = ordered,
             RulesByVersion = rulesByVersion,
             Refusals = refusals,
-            RefusalScopes = refusals.Select(r => RefusalScopeOf(r, candidates, selectedBySubject, accepted, judgedKeys)).ToList(),
+            RefusalScopes = refusals.Select(r => RefusalScopeOf(r, candidates, selectedBySubject, accepted, judgedReplace)).ToList(),
             Skips = skips,
             Facts = facts,
+            Gaps = gaps,
+            ProcedureBasis = new BillingProcedureBasis(
+                loaded.Procedures.Chain,
+                onDate.OrderBy(d => d.Key).Select(d => d.Value).ToList(),
+                candidates
+                    .Where(c => subjectsByVersion.ContainsKey(c.PolicyVersionId) || displacedOutright.ContainsKey(c.PolicyVersionId))
+                    .Select(c => new BillingRuleApplication(
+                        c.PolicyVersionId, c.Source, SubjectsOf(subjectsByVersion, c.PolicyVersionId), SubjectsOf(displacedOutright, c.PolicyVersionId),
+                        SubjectsOf(capDisplaced, c.PolicyVersionId)))
+                    .ToList()),
         };
+
+        // The invoice first, then by line index (the findings' order).
+        static IReadOnlyList<BillingSubject> SubjectsOf(Dictionary<Guid, HashSet<BillingSubject>> bySubject, Guid versionId) =>
+            bySubject.TryGetValue(versionId, out var set)
+                ? set.OrderBy(s => s.Kind == BillingSubjectKind.Invoice ? 0 : 1).ThenBy(s => s.LineIndex ?? -1).ToList()
+                : [];
     }
 
     /// <summary>
@@ -431,18 +637,21 @@ public sealed class InvoiceComplianceEvaluator
         RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type) && BillingRuleCatalogue.IsSystemType(type);
 
     /// <summary>
-    /// Where a refused version's check did not run (101 B2a, F2). A subject is dropped when a version with the same
-    /// <see cref="BillingRuleDefinition.PrecedenceKey"/> judged it (D-39: a firm version that cannot be evaluated leaves the client default in
-    /// force, so that rule type is still checked there). The key of a handler-refused version is read from its accepted definition. A
-    /// gate-refused version has no definition: a non-AddedFee type keys on the type alone, but an AddedFee one's fee kind and fee codes are in
-    /// the body the gate refused, so its key is unreadable and the scope stays whole (fail closed), as it does for an unreadable rule type.
-    /// A scope left with no subject is kept (not dropped): no lines and not the invoice, so the consumer flags nothing for it.
+    /// Where a refused version's check did not run (101 B2a, F2; 082c C8). A subject is dropped only when a version of the same Replace
+    /// <see cref="BillingRuleDefinition.PrecedenceKey"/> judged it at a strictly higher rank (the limit that would have won anyway was checked; a
+    /// tie does not cover, ties all apply);
+    /// a refused Additive or Split version keeps every subject, since its own items were not checked. The key of a handler-refused version is
+    /// read from its accepted definition. A gate-refused version has no definition: a non-AddedFee type keys on the type alone, but an AddedFee
+    /// one's fee kind and fee codes are in the body the gate refused, so its key is unreadable and the scope stays whole (fail closed), as it does
+    /// for an unreadable rule type. Its class is never asked of it (C7): only a judged, gate-accepted version's key is in
+    /// <paramref name="judgedReplace"/>. A scope left with no subject is kept (not dropped): no lines and not the invoice, so the consumer flags
+    /// nothing for it.
     /// </summary>
     private static BillingRuleRefusalScope RefusalScopeOf(
         BillingRuleRefusal refusal, IReadOnlyList<BillingRuleCandidate> candidates,
         IReadOnlyList<(BillingSubject Subject, List<BillingRuleCandidate> Versions)> selectedBySubject,
         IReadOnlyDictionary<Guid, BillingRuleDefinition> accepted,
-        IReadOnlyDictionary<BillingSubject, HashSet<(RuleType, string?, string)>> judgedKeys)
+        IReadOnlyDictionary<BillingSubject, Dictionary<(RuleType, string?, string), ProcedureRank>> judgedReplace)
     {
         var candidate = candidates.First(c => c.PolicyVersionId == refusal.PolicyVersionId);
         var ruleType = RuleBodySchemaValidator.TryParseRuleType(candidate.RuleType, out var type) ? type : (RuleType?)null;
@@ -452,7 +661,8 @@ public sealed class InvoiceComplianceEvaluator
 
         var subjects = selectedBySubject
             .Where(s => s.Versions.Contains(candidate)
-                        && !(key is { } k && judgedKeys.TryGetValue(s.Subject, out var judged) && judged.Contains(k)))
+                        && !(key is { } k && judgedReplace.TryGetValue(s.Subject, out var judged)
+                             && judged.TryGetValue(k, out var judgedRank) && judgedRank.CompareTo(candidate.Rank) > 0))
             .Select(s => s.Subject)
             .ToList();
         return new BillingRuleRefusalScope(

@@ -181,7 +181,7 @@ const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spe-api-dev-67e2xz.a
 
 ## Token Acquisition (Spaarke Auth v2 — ADR-028)
 
-`SpaarkeAuthProvider.getAccessToken()` uses a simplified two-layer model. Canonical references: [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md), [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
+`SpaarkeAuthProvider.getAccessToken()` uses a simplified two-layer model. Canonical references: [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md).
 
 | Layer | Speed | Behavior |
 |-------|-------|----------|

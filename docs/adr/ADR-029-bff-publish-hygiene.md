@@ -190,7 +190,7 @@ grep -E "RuntimeIdentifier|SelfContained|wwwroot.*js\.map|System\.Security\.Cryp
 | [ADR-001](ADR-001-minimal-api-and-workers.md) | Single BFF runtime — this ADR ratifies that the runtime publishes for a single OS (Linux App Service) |
 | [ADR-007](ADR-007-spe-storage-seam-minimalism.md) | Storage facade decouples Graph SDK surface — relevant because trimming would break Graph SDK reflection; this ADR keeps trimming OFF |
 | [ADR-013](ADR-013-ai-architecture.md) | AI lives in BFF (refined 2026-05-20); this ADR codifies that the unified AI + CRUD BFF package stays bounded |
-| [ADR-028](ADR-028-spaarke-auth-architecture.md) | Identity.Web + IdentityModel + Kiota chain is publish-size and CVE relevant — transitive override pattern in this ADR applies surgically without disturbing the auth chain |
+| [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | Identity.Web + IdentityModel + Kiota chain is publish-size and CVE relevant — transitive override pattern in this ADR applies surgically without disturbing the auth chain |
 | ADR-010 (DI minimalism) | Tangential: DI registration count is a different drift signal; this ADR addresses publish-output drift specifically |
 
 ---

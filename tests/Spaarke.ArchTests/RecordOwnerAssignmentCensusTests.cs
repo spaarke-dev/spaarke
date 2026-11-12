@@ -57,6 +57,12 @@ public class RecordOwnerAssignmentCensusTests
         "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
         // #2084 (owner round 102 item 4): a matter-scoped rule and its versions joined the secure family.
         "sprk_policy", "sprk_policyversion",
+        // ebilling-r1 task 089a (procedure model 5.2): a Procedure assignment and a record-scoped rule set joined the secure
+        // family (a rule set's rules, sprk_policy above, follow it).
+        "sprk_procedureassignment", "sprk_ruleset",
+        // ebilling-r1 task 086 (procedure model 5.2): an invoice's Stored File is its invoice's child (a leaf; SecureChildLineage). The
+        // table also holds Procedure-source and export files, which name no invoice; every create of the table is censused.
+        "sprk_storedfile",
     };
 
     private enum Disposition
@@ -123,31 +129,31 @@ public class RecordOwnerAssignmentCensusTests
     //      Behaviour tests (SecureChildOwnership*Tests, InvoiceReviewWritePathTests, TodoGenerationAssignedToTests) pin
     //      each EXISTING writer's owner; these limits bite only on new code.
     // =============================================================================================
-    /// <summary>The one waiver text for RuleSetService's sprk_policy and sprk_policyversion creates (ebilling-r1).</summary>
+    /// <summary>The one waiver text for RuleSetService's sprk_ruleset, sprk_policy and sprk_policyversion creates (ebilling-r1).</summary>
+    /// <remarks>ebilling-r1 task 089a (procedure model 5.1 / 5.2, ontology O1, F3-e) rewrote it: the scope review it waited on is decided
+    /// (record-scoped rule sets and their rules are secure children; Procedure rule sets are not), so the waiver now covers ONLY rows
+    /// that name no core record, and <see cref="WaivedRuleFamilyWritersNameNoRecordScope"/> fails the build when a waived file gains one.</remarks>
     private const string RuleSetServicePolicyWaiver =
-        "ebilling-r1 RuleSetService (Billing-domain rules; the first version at CreateDraftRuleAsync and the edit-path version at EditAsync "
-        + "included). Billing rules have no matter scope YET; the rule-set scope model is under owner review (2026-10-20, ontology-r1 "
-        + "leads). This waiver ends when that review decides a scope level; the creates must then be routed. Open owner decision: "
-        + "scope model under owner review 2026-10-20 (#2129). "
-        + "When a billing rule gains a matter/project/work-assignment scope, this waiver ends: the policy and policy-version creates must be "
-        + "routed (owner via IRecordOwnershipResolver WITH the scope parent), and SecureChildLineage / FilingParentOf must gain any new "
-        + "filing lookups on sprk_policy (today only sprk_matter). Otherwise a rule scoped under a Secure record lands outside isolation. "
-        + "Today a billing rule hangs off sprk_ruleset and RuleSetService never writes "
-        + "sprk_policy.sprk_matter, so it cannot be filed under a Secure matter; its owner is resolved through "
-        + "IRecordOwnershipResolver.ResolveOwnerAsync with NO parents (the caller's team) and a refusal writes nothing. "
-        + "Condition (1): RuleSetService never writes sprk_matter on sprk_policy, on create or update (RuleSetServiceNoMatterScopeGuardTests "
-        + "and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate fail the build otherwise); if a billing rule ever gains a "
-        + "matter scope, this waiver ends and the creates must be routed. "
-        + "Condition (2): both creates, the first version and the edit-path version, resolve the owner the same way "
-        + "(RuleSetServiceOwnerTests pins the identical no-parent context and the ApplyTo). "
-        + "ebilling-r1 task 081 adds a third sprk_policyversion create, the Procedure copy-forward (PlanCopyForwardAsync): it applies the "
-        + "owner ProcedureService resolved with the same no-parent context and the caller as RequestedBy (ProcedureServiceTests pins it), "
-        + "so the waiver covers it on the same conditions. "
-        + "Condition (3): it covers only Billing-domain rows written by RuleSetService; Ontology-domain policies stay under the authoring "
+        "ebilling-r1 RuleSetService: Procedure rule sets only (and the pre-Procedure ClientDefault / Firm sets), with their Billing-domain "
+        + "policies and policy versions (CreateAsync's upload, CreateDraftRuleAsync's policy and first version, EditAsync's edit-path version, "
+        + "and task 081's Procedure copy-forward version through PlanCopyForwardAsync). None of these rows names a core record: a Procedure "
+        + "rule set hangs off its sprk_procedure, a billing policy off its rule set, a version off its policy, and model 5.2 rules that "
+        + "Procedure rule sets are NOT secure children. Each create's owner is still decided by IRecordOwnershipResolver, through "
+        + "RuleSetService.ContentOwnerContext (ForRow with no parents, EB-D-168a: the restricted-content owner team, or a refusal that "
+        + "writes nothing). "
+        + "Record-scoped rule sets (sprk_scope Record / Firm record, a sprk_matter / sprk_project / sprk_workassignment lookup) and their "
+        + "record rules (BRR- codes) are NOT covered: they are secure children of their core record (SecureChildLineage, "
+        + "OwnershipParentEntities), and every writer of one must route its owner through IRecordOwnershipResolver with that parent "
+        + "(ForRow / ForChild over the row, EB-D-168) and be listed Routed in its own file. "
+        + "Condition (1): no waived rule-set file names a record scope (WaivedRuleFamilyWritersNameNoRecordScope, with must-fire and "
+        + "must-not-fire controls). Condition (2): RuleSetService never writes sprk_matter on sprk_policy, on create or update "
+        + "(RuleSetServiceNoMatterScopeGuardTests and RuleSetServiceOwnerTests.NoWrittenPolicyOrVersionRowCarriesAMatter_OnCreateOrUpdate). "
+        + "Condition (3): every create resolves the owner the same way (RuleSetServiceOwnerTests and ProcedureServiceTests pin the "
+        + "no-parent context and the ApplyTo). Condition (4): Billing-domain rows only; Ontology-domain policies stay under the authoring "
         + "entries. "
-        + "Known limit: a matter set on a Billing policy outside the BFF (form edit) is not seen here; the next edit-path version is "
-        + "re-owned by SecureChildReconciliationJob. "
-        + "Agreed as Pending: ontology-r1 2026-10-20; uac-r2 re-checked 2026-10-20.";
+        + "Known limit: a core lookup set on such a row outside the BFF (form edit) is not seen here; SecureChildReconciliationJob re-owns "
+        + "the row under its new parent. "
+        + "Permanent from 089a (2026-11-03): agreed as Pending with ontology-r1 2026-10-20, decided by model 5.2.";
 
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
@@ -274,12 +280,42 @@ public class RecordOwnerAssignmentCensusTests
             "ebilling-r1 task 095 (review K2): ResolveCommunicationFilingAsync's in-memory probe of a document linked only to the "
             + "communication, handed to the filing walk, which reads its columns; it is never written, so there is no row to own.",
             WaiverKind.Permanent),
-        // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; PENDING the owner's rule-set scope model review,
-        // because matter/project/work-assignment-level billing rules are planned): the billing rule's policy and its versions. The census
-        // keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1 site: CreateDraftRuleAsync's policy) and
-        // sprk_policyversion (2 sites: CreateDraftRuleAsync's first version and EditAsync's edit-path version, created with the caller-chosen id VersionIdFor).
-        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
-        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Pending),
+        // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; task 089a narrowed it to Procedure rule sets and made
+        // it Permanent, model 5.2): the census keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1
+        // site: CreateDraftRuleAsync's policy) and sprk_policyversion (3 sites: CreateDraftRuleAsync's first version, EditAsync's edit-path
+        // version created with the caller-chosen id VersionIdFor, and the copy-forward version). Task 116 retired RuleSetService.CreateAsync
+        // (the uploaded rule set), so RuleSetService.cs creates no sprk_ruleset; a Procedure's set is ProcedureService's UnscannedWriter below.
+        new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        // ebilling-r1 task 086 (procedure model 5.2/9.1): the invoice Stored File joins the secure family as a leaf child of sprk_invoice.
+        new CensusEntry("StoredFileService.cs", "sprk_storedfile", 1, Disposition.Routed,
+            "ebilling-r1 task 086: BuildRow is the one sprk_storedfile create. Its owner is a resolution handed in and written with ApplyTo "
+            + "(a refused owner throws, nothing is written): StageCreateFlipAsync asks the row's own question (OwnerQuestionOf: ForRow over "
+            + "sprk_storedfile and the lookups BuildRow writes) with the caller as RequestedBy and refuses OwnerUnresolved before any stage or "
+            + "write; the Submit Invoice persister passes its one StoredFileOwnerContext resolution (ForRow for sprk_storedfile over the "
+            + "invoice's core record), so the file is owned with its invoice (uac-r2 194b R4b-2: an ordinary answer is the restricted-content team)."),
+        // ebilling-r1 task 089b (procedure model 5.1 / 6.2 / 6.3, EB-D-168): a Procedure assignment or rule Exclude is a secure child of its core record.
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_procedureassignment", 1, Disposition.Routed,
+            "ebilling-r1 task 089b/089c: AssignmentCreateAsync is the one sprk_procedureassignment create (assign, pin, exclude a Procedure; "
+            + "exclude or change a rule). It builds the row, asks the row's own question (RecordOwnershipContext.ForChild: the core record is its "
+            + "one parent, the Procedure, pinned version and excluded rule are citations) with the caller as RequestedBy, refuses before any write "
+            + "when no team is resolved, and writes the answer with ApplyTo (a hard-deny table: an ordinary record's row goes to the "
+            + "restricted-content owner team)."),
+        // ebilling-r1 task 089c (procedure model 5.2 / 6.3, EB-D-168, 089a K1): the change-rule writer of a record's record-scoped set, its
+        // record rule and that rule's versions. Listed Routed, so RuleFamilyWaiverProblems checks the file asks the resolver.
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_ruleset", 1, Disposition.Routed,
+            "ebilling-r1 task 089c: RecordRuleSetCreateAsync is the one record-scoped sprk_ruleset create (a change rule's stage 1). It builds "
+            + "the set with its one core-record lookup and record scope (RecordRuleSet.RequireOneHome), asks the row's own question "
+            + "(ForChild: the core record is its one parent; the firm is no ownership parent) with the caller as RequestedBy, refuses before any "
+            + "write when no team is resolved, and writes the answer with ApplyTo."),
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_policy", 1, Disposition.Routed,
+            "ebilling-r1 task 089c: RecordRuleCreateAsync is the one record-rule sprk_policy create (a change rule's stage 2, after its set "
+            + "exists). It asks the row's own question (ForChild: the record-scoped set is its parent, so the rule follows its record) with the "
+            + "caller as RequestedBy, refuses before any write when no team is resolved, and writes the answer with ApplyTo."),
+        new CensusEntry("ProcedureAssignmentService.cs", "sprk_policyversion", 1, Disposition.Routed,
+            "ebilling-r1 task 089c: RecordRuleVersionCreateAsync is the one record-rule sprk_policyversion create (a change rule's stage 3, "
+            + "after its policy exists). It asks the row's own question (ForChild: the record rule is its parent; the base version it names in "
+            + "sprk_basedonversion is no ownership parent) with the caller as RequestedBy, refuses before any write, and writes it with ApplyTo."),
         // WorkAssignmentEndpoints.cs's sprk_workassignment create is gone: task 166 deleted the caller-less route (S-76,
         // owner round 10 item 1), so its Pending waiver went with it (batch-4 integration).
 
@@ -340,6 +376,10 @@ public class RecordOwnerAssignmentCensusTests
             "transaction CreateRequest of one sprk_billingevent Adjustment line built with a deterministic id",
             "ebilling-r1 task 102: ResolveOwnerAsync ForParents over the invoice's one core record (secure-if-any), applied with "
             + "RecordOwnerResolution.ApplyTo to the row; an unresolved owner refuses before the write, so nothing is created."),
+        new UnscannedWriter("InvoiceLineAddService.cs",
+            "transaction CreateRequest of one sprk_billingevent Fee or Expense line built with a deterministic id (ExtractionProvenance.AddedLineIdFor)",
+            "ebilling-r1 task 164: ResolveOwnerAsync over the row's own question (RecordOwnershipContext.ForChild), applied with "
+            + "RecordOwnerResolution.ApplyTo; an unresolved owner refuses before the write, so nothing is created."),
         new UnscannedWriter("SpendSnapshotService.cs", "keyed UpsertRequest (sprk_spendsnapshot)",
             "Owned by the parent matter/project's team; a refusal skips the snapshot."),
         new UnscannedWriter("ExternalProjectDataEndpoints.cs", "Web API POST to a computed URL (document, event, to-do)",
@@ -417,6 +457,15 @@ public class RecordOwnerAssignmentCensusTests
             + "(Permanent, agreed with ontology): the rule is created as the caller, author-owned, because CheckScopeAsync refuses a "
             + "Secure or Restricted matter scope before the create, so a new rule is never filed under a Secure matter; one whose "
             + "matter turns Secure later is re-owned by SecureChildReconciler and the two-minute SecureChildReconciliationJob."),
+        // ── ebilling-r1 task 089a (model 5.2): sprk_ruleset is a census table, and a Procedure's rule set is built by a helper in
+        // another file (RuleSetService.NewProcedureRuleSet, a two-argument construction) and created through a CreateRequest batch ──
+        new UnscannedWriter("ProcedureService.cs",
+            "CreateRequest batch of a Procedure and its sprk_ruleset (RuleSetService.NewProcedureRuleSet, caller-chosen id)",
+            "CreateAsync asks IRecordOwnershipResolver two questions before anything is written: the Procedure is the caller's "
+            + "business-unit team's (RuleSetService.CallerOwnerContext) and its rule set is a hard-deny row "
+            + "(RuleSetService.ContentOwnerContext, EB-D-168a: the restricted-content owner team); a refusal of either writes nothing. "
+            + "A Procedure rule set names no core record, so it is not a secure child (model 5.2) and falls under the RuleSetService "
+            + "waiver's conditions (WaivedRuleFamilyWritersNameNoRecordScope scans this file too)."),
         // ── spaarke-ontology-platform-r1 task 042b (D-169): the gate Decision Record follows its communication's filing ──────
         new UnscannedWriter("GateDecisionRecordSharing.cs", "AssignRequest re-own of a filed communication's gate Decision Record",
             "Called once per communication re-file from SecureChildReconciler.AfterRefileAsync (after UAC's own steps; 042b round 2). "
@@ -590,6 +639,12 @@ public class RecordOwnerAssignmentCensusTests
             "Project spend snapshots — owned by the project's team."),
         new OwnerWriteEntry("SignalEvaluationService.cs", "UpsertSignalAsync", 1, OwnerWriteKind.Routed,
             "Owned by the matter's team."),
+        new OwnerWriteEntry("ExternalTeamShareSynchronizer.cs", "ReownAsync", 1, OwnerWriteKind.Routed,
+            "uac-r2 task 191c (design v2 §3.8): a row a user flagged sprk_isexternal = true owns is re-owned to the answer of "
+            + "its own I-6 question (ForExistingRowAsync over the row, the flagged owner as the acting user), conditional on the "
+            + "version read with the owner check and read back; never the External Collaborators team, never the Secure team "
+            + "(the secure reconciler's move), never an unfiled communication (146 E1). Off unless "
+            + "ExternalAccess:ExternalTeamShare:ReownWritesEnabled."),
         new OwnerWriteEntry("DataverseObservationMirror.cs", "MirrorAsync", 1, OwnerWriteKind.Routed,
             "ForChild over the mirrored analysis row."),
         new OwnerWriteEntry("GrantExternalAccessEndpoint.cs", "BuildGrantPayload", 1, OwnerWriteKind.Routed,
@@ -2016,6 +2071,37 @@ public class RecordOwnerAssignmentCensusTests
         @"const\s+string\s+(?<name>\w+)\s*=\s*""(?<value>[a-z_]+)""\s*;",
         RegexOptions.Compiled);
 
+    private static readonly Regex TypeDeclaration = new(
+        @"\b(?:class|record|struct|interface)\s+(?<type>[A-Za-z_]\w*)",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// type name → its string consts (ebilling-r1 task 086): each const belongs to the nearest type declared before it in its file.
+    /// Crude like every <see cref="SourceScan"/> rule (a const after a nested type's end is given to the nested type); a type name
+    /// declared in two files keeps the first. Used only to resolve a qualified <c>Type.Name</c>, so a miss falls back as before.
+    /// </summary>
+    private static Dictionary<string, Dictionary<string, string>> TypeScopedConsts(IEnumerable<string> sources)
+    {
+        var byType = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var code in sources)
+        {
+            var types = TypeDeclaration.Matches(code).Select(t => (t.Index, Name: t.Groups["type"].Value)).ToList();
+            var seenHere = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match m in StringConst.Matches(code))
+            {
+                var owner = types.LastOrDefault(t => t.Index < m.Index).Name;
+                if (owner is null || (byType.ContainsKey(owner) && !seenHere.Contains(owner)))
+                    continue; // no type before it, or the type name was already claimed by another file
+                seenHere.Add(owner);
+                if (!byType.TryGetValue(owner, out var consts))
+                    byType[owner] = consts = new Dictionary<string, string>(StringComparer.Ordinal);
+                consts.TryAdd(m.Groups["name"].Value, m.Groups["value"].Value);
+            }
+        }
+
+        return byType;
+    }
+
     // =============================================================================================
 
     [Fact(DisplayName = "Task 146: every server create of a child-record table is in the census, with the expected count")]
@@ -2280,6 +2366,213 @@ public class RecordOwnerAssignmentCensusTests
     }
 
     // =============================================================================================
+    // ebilling-r1 task 089a (model 5.1 / 5.2, ontology O1, F3-e): the rule-set waiver covers no record scope
+    // =============================================================================================
+
+    /// <summary>The rule tables a record-scoped rule set brings into the secure family (the set, its rules, their versions).</summary>
+    private static readonly string[] RuleFamilyTables = { "sprk_ruleset", "sprk_policy", "sprk_policyversion" };
+
+    /// <summary>Unscanned writers of a Procedure rule set, held to the waiver's condition as the waived files are.</summary>
+    private static readonly string[] ProcedureRuleSetUnscannedFiles = { "ProcedureService.cs" };
+
+    /// <summary>
+    /// What makes a rule-set, rule or version row record-scoped (model 6.3): a core-record lookup written on it, a record scope
+    /// (<c>sprk_scope</c> Record 100000002 / Firm record 100000003, or a <c>RuleSetScope</c> or 089c <c>RecordRuleSet.Scope*</c>
+    /// member for one), or a record-rule code or
+    /// key (D-202: <c>BRR-{id:N}</c>, <c>IdOf("ebilling-record-rule-…")</c>). A waived file may hold none of them.
+    /// </summary>
+    private static readonly (string Name, Regex Pattern)[] RecordScopeMarkers =
+    {
+        ("a core-record lookup", new Regex(@"""sprk_(?:matter|project|workassignment)(?:@odata\.bind)?""\s*(?:\]\s*=|,)", RegexOptions.Compiled)),
+        ("a const naming a core-record lookup", new Regex(@"\bconst\s+string\s+\w+\s*=\s*""sprk_(?:matter|project|workassignment)""", RegexOptions.Compiled)),
+        ("a record scope", new Regex(
+            @"\bRuleSetScope\s*\.\s*(?:Record|FirmRecord)\b|\bRecordRuleSet\s*\.\s*Scope(?:Record|FirmRecord)\b|""sprk_scope""\s*\]\s*=\s*new\s+OptionSetValue\(\s*10000000[23]\s*\)|\benum\s+RuleSetScope\b[^}]*\b10000000[23]\b",
+            RegexOptions.Compiled)),
+        ("a record-rule code or key", new Regex(@"""BRR-|ebilling-record-rule-", RegexOptions.Compiled)),
+    };
+
+    /// <summary>
+    /// The problems of the rule-set waiver: a waived rule-table entry (or a listed Procedure rule-set writer) whose file names a record
+    /// scope, and a Routed rule-table entry whose owner file never asks <c>IRecordOwnershipResolver</c>. It sees only the files the
+    /// census lists (Waived, Routed) or <c>unscannedFiles</c> names: a record-rule writer in a file that is in none of them is not
+    /// caught here, so 089c must list its writer Routed or as an unscanned writer (089a review K1). The census itself still fails an
+    /// unlisted create in a scanned file.
+    /// </summary>
+    private static List<string> RuleFamilyWaiverProblems(
+        IEnumerable<CensusEntry> census, IEnumerable<string> unscannedFiles, IReadOnlyDictionary<string, string> files)
+    {
+        var problems = new List<string>();
+        var entries = census.Where(e => RuleFamilyTables.Contains(e.Table, StringComparer.OrdinalIgnoreCase)).ToList();
+
+        var waivedFiles = entries
+            .Where(e => e.Disposition == Disposition.Waived)
+            .Select(e => e.FileName)
+            .Concat(unscannedFiles)
+            .Distinct(StringComparer.Ordinal);
+        foreach (var file in waivedFiles)
+        {
+            var code = CodeOf(files, file);
+            if (code is null)
+            {
+                problems.Add($"{file}: not found (the waiver's condition would be vacuous)");
+                continue;
+            }
+
+            // One problem per marker kind and file, naming every line it is on.
+            foreach (var (name, pattern) in RecordScopeMarkers)
+            {
+                var hits = pattern.Matches(code).Select(m => $"line {SourceScan.LineOf(code, m.Index)}: {m.Value}").ToList();
+                if (hits.Count > 0)
+                {
+                    problems.Add($"{file}: waived rule-set writer names {name} ({string.Join("; ", hits)})");
+                }
+            }
+        }
+
+        foreach (var entry in entries.Where(e => e.Disposition == Disposition.Routed))
+        {
+            var ownerFile = entry.OwnerFile ?? entry.FileName;
+            if (CodeOf(files, ownerFile) is not { } code || !ResolverCall.IsMatch(code))
+            {
+                problems.Add($"{entry.Table} in {entry.FileName}: Routed, but {ownerFile} never asks IRecordOwnershipResolver");
+            }
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "ebilling-r1 089a: the RuleSetService waiver covers Procedure rule sets only; no waived rule-set writer names a record scope")]
+    public void WaivedRuleFamilyWritersNameNoRecordScope()
+    {
+        var files = ServerFiles();
+
+        // Not vacuous: the waived file holds the two rule-table entries (task 116 retired its sprk_ruleset create; a new one fails the
+        // census), and every listed unscanned writer is in UnscannedWriters.
+        Assert.Equal(
+            new[] { "sprk_policy", "sprk_policyversion" },
+            Census.Where(e => e.FileName == "RuleSetService.cs" && e.Disposition == Disposition.Waived)
+                .Select(e => e.Table).OrderBy(t => t, StringComparer.Ordinal).ToArray());
+        Assert.All(ProcedureRuleSetUnscannedFiles, f => Assert.Contains(UnscannedWriters, w => w.FileName == f));
+
+        var problems = RuleFamilyWaiverProblems(Census, ProcedureRuleSetUnscannedFiles, files);
+        Assert.True(
+            problems.Count == 0,
+            "A record-scoped rule set, record rule or its version is secure content of its core record (procedure model 5.2): its "
+            + "writer must route its owner through IRecordOwnershipResolver with that record as the parent (ForRow / ForChild, "
+            + "EB-D-168), in its own file, listed Routed. The RuleSetService waiver covers Procedure rule sets only.\n"
+            + string.Join("\n", problems));
+    }
+
+    private static Dictionary<string, string> SeededRuleFiles() => new(StringComparer.Ordinal)
+    {
+        ["RecordRules.cs"] = SourceScan.CodeText(new[]
+        {
+            "internal sealed class RecordRules",
+            "{",
+            "    void Set(Guid matterId) { var set = new Entity(\"sprk_ruleset\") { [\"sprk_matter\"] = new EntityReference(\"sprk_matter\", matterId),",
+            "        [\"sprk_scope\"] = new OptionSetValue(100000002) }; _entities.Create(set); }",
+            "    void Rule(Guid setId, Guid id) { var p = new Entity(\"sprk_policy\") { [\"sprk_code\"] = $\"BRR-{id:N}\",",
+            "        [\"sprk_ruleset\"] = new EntityReference(\"sprk_ruleset\", setId) }; _entities.Create(p); }",
+            "}",
+        }),
+        ["RoutedRecordRules.cs"] = SourceScan.CodeText(new[]
+        {
+            "internal sealed class RoutedRecordRules",
+            "{",
+            "    async Task Set(Guid matterId) { var set = new Entity(\"sprk_ruleset\") { [\"sprk_matter\"] = new EntityReference(\"sprk_matter\", matterId) };",
+            "        var owner = await _ownership.ResolveOwnerAsync(RecordOwnershipContext.ForRow(set), ct); owner.ApplyTo(set); _entities.Create(set); }",
+            "}",
+        }),
+        ["ProcedureSets.cs"] = SourceScan.CodeText(new[]
+        {
+            "internal sealed class ProcedureSets",
+            "{",
+            "    // a comment naming [\"sprk_matter\"] = is stripped, as in the real scan",
+            "    public enum RuleSetScope { ClientDefault = 100000000, Firm = 100000001 }",
+            "    // 089c: the shared one-home guard and the record-scope read are no record scope of their own (must not fire)",
+            "    void Guard(Entity row) { RecordRuleSet.RequireOneHome(row); if (RecordRuleSet.IsRecordScoped(row)) { return; } }",
+            "    void Set(Guid procedureId) { var set = new Entity(\"sprk_ruleset\") { [\"sprk_procedure\"] = new EntityReference(\"sprk_procedure\", procedureId),",
+            "        [\"sprk_scope\"] = new OptionSetValue(100000001) }; _entities.Create(set); }",
+            "    void Rule(Guid setId) { var p = new Entity(\"sprk_policy\") { [\"sprk_ruleset\"] = new EntityReference(\"sprk_ruleset\", setId) };",
+            "        _entities.Create(p); }",
+            "}",
+        }),
+    };
+
+    private const string SeededWaiver = "seeded: a waiver text long enough for the census's explanation rule, naming nothing in particular.";
+
+    [Fact(DisplayName = "ebilling-r1 089a: control — a waived record-scoped rule-set create and a waived record-rule policy create fire (must fire)")]
+    public void RuleFamilyWaiver_RecordScopedWaivedCreates_Fire()
+    {
+        var census = new[]
+        {
+            new CensusEntry("RecordRules.cs", "sprk_ruleset", 1, Disposition.Waived, SeededWaiver, WaiverKind.Permanent),
+            new CensusEntry("RecordRules.cs", "sprk_policy", 1, Disposition.Waived, SeededWaiver, WaiverKind.Permanent),
+        };
+
+        var problems = RuleFamilyWaiverProblems(census, Array.Empty<string>(), SeededRuleFiles());
+
+        Assert.Contains(problems, p => p.Contains("RecordRules.cs") && p.Contains("a core-record lookup"));
+        Assert.Contains(problems, p => p.Contains("RecordRules.cs") && p.Contains("a record scope"));
+        Assert.Contains(problems, p => p.Contains("RecordRules.cs") && p.Contains("a record-rule code or key"));
+    }
+
+    [Theory(DisplayName = "ebilling-r1 089a: control — each record-scope marker alone fires in a waived file (must fire)")]
+    [InlineData("row[\"sprk_project\"] = new EntityReference(\"sprk_project\", id);", "a core-record lookup")]
+    [InlineData("row[\"sprk_workassignment@odata.bind\"] = $\"/sprk_workassignments({id})\";", "a core-record lookup")]
+    [InlineData("SetLookup(row, \"sprk_matter\", MatterTable, id);", "a core-record lookup")]
+    [InlineData("private const string CoreLookup = \"sprk_workassignment\";", "a const naming a core-record lookup")]
+    [InlineData("row[\"sprk_scope\"] = new OptionSetValue((int)RuleSetScope.FirmRecord);", "a record scope")]
+    [InlineData("row[\"sprk_scope\"] = new OptionSetValue(100000003);", "a record scope")]
+    [InlineData("row[\"sprk_scope\"] = new OptionSetValue(RecordRuleSet.ScopeFirmRecord);", "a record scope")]
+    [InlineData("var scope = RecordRuleSet . ScopeRecord;", "a record scope")]
+    [InlineData("public enum RuleSetScope { ClientDefault = 100000000, Firm = 100000001, Record = 100000002 }", "a record scope")]
+    [InlineData("var id = IdOf($\"ebilling-record-rule-{setId:D}-{baseId:D}\");", "a record-rule code or key")]
+    public void RuleFamilyWaiver_EachMarker_Fires(string planted, string marker)
+    {
+        var files = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Planted.cs"] = SourceScan.CodeText(new[] { "internal sealed class Planted", "{", "    void M() { " + planted + " }", "}" }),
+        };
+        var census = new[] { new CensusEntry("Planted.cs", "sprk_ruleset", 1, Disposition.Waived, SeededWaiver, WaiverKind.Permanent) };
+
+        var problems = RuleFamilyWaiverProblems(census, Array.Empty<string>(), files);
+
+        Assert.Single(problems);
+        Assert.Contains(marker, problems[0]);
+    }
+
+    [Fact(DisplayName = "ebilling-r1 089a: control — a record-scoped create listed Routed without a resolver call fires; a listed unscanned writer is scanned (must fire)")]
+    public void RuleFamilyWaiver_RoutedWithoutResolverOrUnscannedRecordWriter_Fires()
+    {
+        var census = new[] { new CensusEntry("RecordRules.cs", "sprk_ruleset", 1, Disposition.Routed, SeededWaiver) };
+        Assert.Equal(
+            new[] { "sprk_ruleset in RecordRules.cs: Routed, but RecordRules.cs never asks IRecordOwnershipResolver" },
+            RuleFamilyWaiverProblems(census, Array.Empty<string>(), SeededRuleFiles()));
+
+        // An unscanned Procedure rule-set writer that gains a record scope fires although no census entry names it.
+        Assert.NotEmpty(RuleFamilyWaiverProblems(Array.Empty<CensusEntry>(), new[] { "RecordRules.cs" }, SeededRuleFiles()));
+
+        // A listed file that no longer exists is reported, not silently skipped.
+        Assert.Equal(
+            new[] { "Gone.cs: not found (the waiver's condition would be vacuous)" },
+            RuleFamilyWaiverProblems(Array.Empty<CensusEntry>(), new[] { "Gone.cs" }, SeededRuleFiles()));
+    }
+
+    [Fact(DisplayName = "ebilling-r1 089a: control — a waived Procedure rule-set create, a Procedure-scoped policy create and a routed record-scoped create pass (must not fire)")]
+    public void RuleFamilyWaiver_ProcedureCreatesAndRoutedRecordCreates_DoNotFire()
+    {
+        var census = new[]
+        {
+            new CensusEntry("ProcedureSets.cs", "sprk_ruleset", 1, Disposition.Waived, SeededWaiver, WaiverKind.Permanent),
+            new CensusEntry("ProcedureSets.cs", "sprk_policy", 1, Disposition.Waived, SeededWaiver, WaiverKind.Permanent),
+            new CensusEntry("RoutedRecordRules.cs", "sprk_ruleset", 1, Disposition.Routed, SeededWaiver),
+        };
+
+        Assert.Empty(RuleFamilyWaiverProblems(census, new[] { "ProcedureSets.cs" }, SeededRuleFiles()));
+    }
+
+    // =============================================================================================
     // Negative controls
     // =============================================================================================
 
@@ -2311,6 +2604,39 @@ public class RecordOwnerAssignmentCensusTests
         Assert.True(sites.ContainsKey(("Seeded.cs", "sprk_memo")));
         Assert.True(sites.ContainsKey(("Seeded.cs", "sprk_event")));
         Assert.Single(sites[("Seeded.cs", "sprk_todo")]); // the two-argument update is not a create
+    }
+
+    [Fact(DisplayName = "ebilling-r1 086: negative control — a qualified const is resolved in the type it names, not by its last segment")]
+    public void Detector_NegativeControl_QualifiedConstsResolveInTheirType()
+    {
+        // The shape that hid StoredFileService's create: three files declare a const `Entity`; the create names the one of
+        // StoredFileSchema, and the creating file has its own `Entity` const as well.
+        var files = new Dictionary<string, string>
+        {
+            ["A.cs"] = SourceScan.CodeText(new[] { "public sealed class Search", "{", "    public const string Entity = \"entity\";", "}" }),
+            ["Contracts.cs"] = SourceScan.CodeText(new[]
+            {
+                "public static class OtherSchema", "{", "    public const string Entity = \"sprk_document\";", "}",
+                "public static class StoredFileSchema", "{", "    public const string Entity = \"sprk_storedfile\";", "}",
+            }),
+            ["Writer.cs"] = SourceScan.CodeText(new[]
+            {
+                "public sealed class Writer",
+                "{",
+                "    public const string Entity = \"sprk_todo\";",
+                "    public CreateRequest A(Guid id) { var row = new Entity(StoredFileSchema.Entity, id); return new CreateRequest { Target = row }; }",
+                "    public CreateRequest B(Guid id) { var row = new Entity(Unknown.Entity, id); return new CreateRequest { Target = row }; }",
+                "}",
+            }),
+        };
+
+        var sites = ScanSites(files);
+
+        // Every table here is a census child table, so each assertion can fire.
+        Assert.Single(sites[("Writer.cs", "sprk_storedfile")]);           // must fire: A resolved in StoredFileSchema
+        Assert.False(sites.ContainsKey(("Writer.cs", "sprk_document")));   // never OtherSchema.Entity (same name, another type)
+        // A did not take the local const; B (a type no file declares) falls back to it, as before this fix.
+        Assert.Single(sites[("Writer.cs", "sprk_todo")]);
     }
 
     [Fact(DisplayName = "Task 146 b2: negative control — a create-by-upsert or a fresh-id construction is a create; an update is not")]
@@ -2671,6 +2997,15 @@ public class RecordOwnerAssignmentCensusTests
         // names the caller (RequestedBy), which ApplyTo stamps.
         new PersonBearingWriter("RuleSetService.cs", "CallerOwnerContext", "the calling admin (oid) of a Procedure, version or source-document create"),
         new PersonBearingWriter("RuleSetService.cs", "ContentOwnerContext", "the calling admin (oid) of a rule set, policy or policy version create"),
+        // ebilling-r1 task 086: every Stored File records the person who asked (none for a job or a contact uploader, model 5.2 K6).
+        new PersonBearingWriter("StoredFileService.cs", "StageCreateFlipAsync", "the caller (or the app create's requestedBy) as RequestedBy of the file's owner"),
+        // ebilling-r1 task 089b: an override row records the calling billing admin (the owner question's RequestedBy, which ApplyTo stamps).
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "AssignmentCreateAsync", "the calling billing admin (oid) of an assignment, rule Exclude or rule change"),
+        // ebilling-r1 task 089c: a change rule's record-scoped set, record rule and version record the calling billing admin too.
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "RecordRuleSetCreateAsync", "the calling billing admin (oid) of a record's record-scoped set"),
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "RecordRuleCreateAsync", "the calling billing admin (oid) of a record rule"),
+        new PersonBearingWriter("ProcedureAssignmentService.cs", "RecordRuleVersionCreateAsync", "the calling billing admin (oid) of a record rule's version"),
+        new PersonBearingWriter("StoredFileService.cs", "BuildRow", "the person handed in (creatorPersonId), stamped with RecordCreatorPerson"),
     };
 
     /// <summary>
@@ -2684,12 +3019,7 @@ public class RecordOwnerAssignmentCensusTests
             ["sprk_procedure"] = "ebilling-r1 task 081: a Procedure is a billing document filed under no record (model 5.1: owned by the "
                 + "admin's business-unit team, no parents); it records the admin who created it (model 13, O-23)",
             ["sprk_procedureversion"] = "ebilling-r1 task 081: a version of a Procedure, owned and recorded as the Procedure is",
-            ["sprk_ruleset"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a rule set is created app-only for the calling billing admin "
-                + "(RuleSetService's upload, ProcedureService's Procedure create), so it records that person; it is not in the codified "
-                + "Secure Record Owner child set",
-            ["sprk_procedureassignment"] = "ebilling-r1 task 090 (UAC answer to 081 Q5): a Procedure assignment will be created app-only for "
-                + "the calling admin and records that person (080 created the column; no BFF writer creates one yet); it is not in the "
-                + "codified Secure Record Owner child set",
+            // ebilling-r1 task 089a: sprk_ruleset and sprk_procedureassignment left this list; they are codified secure children now.
         };
 
     private static List<string> StampedOutsideCodified(
@@ -3124,6 +3454,11 @@ public class RecordOwnerAssignmentCensusTests
                 globalConsts.TryAdd(m.Groups["name"].Value, m.Groups["value"].Value);
         }
 
+        // ebilling-r1 task 086: a QUALIFIED const (StoredFileSchema.Entity) is resolved in the type it names first. By its last
+        // segment alone it took the first `Entity` const of any file (SemanticSearchRequest's "entity"), so StoredFileService's
+        // sprk_storedfile create was invisible; a same-named local const of the using file must not win either.
+        var typeConsts = TypeScopedConsts(files.Values);
+
         var sites = new Dictionary<(string, string), List<int>>();
         foreach (var (fileName, code) in files)
         {
@@ -3135,7 +3470,10 @@ public class RecordOwnerAssignmentCensusTests
             {
                 if (m.Groups["lit"].Success)
                     return m.Groups["lit"].Value;
-                var name = m.Groups["id"].Value.Split('.').Last();
+                var parts = m.Groups["id"].Value.Split('.');
+                var name = parts[^1];
+                if (parts.Length > 1 && typeConsts.TryGetValue(parts[^2], out var scoped) && scoped.TryGetValue(name, out var qualified))
+                    return qualified;
                 return localConsts.TryGetValue(name, out var v) ? v : globalConsts.GetValueOrDefault(name);
             }
 

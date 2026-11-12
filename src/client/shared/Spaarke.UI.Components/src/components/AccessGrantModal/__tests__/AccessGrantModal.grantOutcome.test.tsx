@@ -1,6 +1,11 @@
 /**
- * AccessGrantModal — grant OUTCOMES from /grant and /invite-and-grant (task 139,
- * unified-access-control-r2; owner Q1: "cap every grant at the grantor's own level").
+ * AccessGrantModal — grant OUTCOMES from /grant (task 139, unified-access-control-r2; owner Q1: "cap every grant at
+ * the grantor's own level"). Task 193 (#2338): every contact goes to /grant, which may answer with a share with the
+ * colleague the contact represents, or refuse because of who the contact represents:
+ *  - the contact is linked to several internal users (409 `sdap.access.grant.contact_represents_several_users`),
+ *  - who it represents could not be read (503 `sdap.access.grant.contact_representation_unreadable`),
+ *  - the one colleague cannot receive a share (the share core's 422s, e.g. `sdap.access.user_share.user_disabled`).
+ * Those are named by the contact, like a `/share-user` refusal is named by the user.
  *
  * The server now caps every manual grant at the caller's own level and says so
  * (`narrowed: true`, additive response field), and refuses with a person-facing
@@ -56,20 +61,13 @@ function fetchWith(grantResponse: (url: string) => Response | null, shares: unkn
     const overridden = grantResponse(url);
     if (overridden) return overridden;
     if (url.includes('/user-shares')) return jsonResponse({ shares });
-    if (url.includes('/invite-and-grant')) {
-      return jsonResponse({
-        contactId: 'contact-1',
-        onboardStatus: 'AlreadyProvisioned',
-        accessRecordId: 'g-1',
-        portalUrl: 'https://portal',
-      });
-    }
+    if (url.includes('/invite-and-grant')) throw new Error('not expected: every contact is granted through /grant');
     if (url.includes('/grant')) return jsonResponse({ accessRecordId: 'g-2', speContainerMembershipGranted: false });
     return jsonResponse({});
   });
 }
 
-function makeProps(authenticatedFetch: jest.Mock, internal = false): IAccessGrantModalProps {
+function makeProps(authenticatedFetch: jest.Mock): IAccessGrantModalProps {
   return {
     open: true,
     onClose: jest.fn(),
@@ -79,7 +77,6 @@ function makeProps(authenticatedFetch: jest.Mock, internal = false): IAccessGran
     fetchCandidates: jest.fn(async () => [CANDIDATE]),
     fetchExistingGrants: jest.fn(async () => []),
     searchContacts: jest.fn(async () => []),
-    isInternalContact: jest.fn(async () => internal),
     canGrantAccess: true,
   };
 }
@@ -100,16 +97,17 @@ async function grantCandidateAt(optionLabel: string): Promise<void> {
   fireEvent.click(screen.getByRole('button', { name: /^Add \(\d+\)$/ }));
 }
 
-describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)', () => {
+describe('AccessGrantModal — /grant outcomes (task 139; task 193)', () => {
+  /** `/grant`'s own answer, not a `/user-shares` read or anything else. */
+  const isGrant = (url: string) => url.endsWith('/api/v1/external-access/grant');
+
   describe('narrowed to the caller’s own level', () => {
-    it('renders the narrowed notice when /invite-and-grant reports narrowed: true', async () => {
+    it('renders the narrowed notice when /grant reports narrowed: true', async () => {
       const fetchMock = fetchWith(url =>
-        url.includes('/invite-and-grant')
+        isGrant(url)
           ? jsonResponse({
-              contactId: 'contact-1',
-              onboardStatus: 'AlreadyProvisioned',
-              accessRecordId: 'g-1',
-              portalUrl: 'https://portal',
+              accessRecordId: 'g-2',
+              speContainerMembershipGranted: false,
               grantedAccessLevel: 100000001,
               narrowed: true,
             })
@@ -122,32 +120,12 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
       expect(await screen.findByText(/narrowed to your own access level/)).toBeInTheDocument();
     });
 
-    it('renders the narrowed notice when /grant (an internal contact) reports narrowed: true', async () => {
+    it('positive twin: narrowed: false renders a plain success, no narrowed notice', async () => {
       const fetchMock = fetchWith(url =>
-        url.includes('/grant') && !url.includes('invite')
+        isGrant(url)
           ? jsonResponse({
               accessRecordId: 'g-2',
               speContainerMembershipGranted: false,
-              grantedAccessLevel: 100000001,
-              narrowed: true,
-            })
-          : null
-      );
-      renderWithTheme(<AccessGrantModal {...makeProps(fetchMock, true)} />);
-
-      await grantCandidateAt('Full Access');
-
-      expect(await screen.findByText(/narrowed to your own access level/)).toBeInTheDocument();
-    });
-
-    it('positive twin: narrowed: false renders a plain success, no narrowed notice', async () => {
-      const fetchMock = fetchWith(url =>
-        url.includes('/invite-and-grant')
-          ? jsonResponse({
-              contactId: 'contact-1',
-              onboardStatus: 'AlreadyProvisioned',
-              accessRecordId: 'g-1',
-              portalUrl: 'https://portal',
               grantedAccessLevel: 100000002,
               narrowed: false,
             })
@@ -184,10 +162,8 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
         'sdap.access.grant.no_access_unverifiable',
         "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was granted. Try again in a moment.",
       ],
-    ])('a %i %s from /invite-and-grant shows its detail, not a generic failure', async (status, reasonCode, detail) => {
-      const fetchMock = fetchWith(url =>
-        url.includes('/invite-and-grant') ? problem(status, reasonCode, detail) : null
-      );
+    ])('a %i %s from /grant shows its detail, not a generic failure', async (status, reasonCode, detail) => {
+      const fetchMock = fetchWith(url => (isGrant(url) ? problem(status, reasonCode, detail) : null));
       renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
 
       await grantCandidateAt('Full Access');
@@ -198,36 +174,62 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
       expect(screen.queryByText(/failed\. Please try again/)).not.toBeInTheDocument();
       expect(screen.queryByText(/You need Write access to this record/)).not.toBeInTheDocument();
     });
+  });
 
-    it('a 409 would_lower_existing from /grant (an internal contact) shows its detail', async () => {
-      const detail =
-        'They already have more access than you can grant. Nothing was changed, so their existing access stays as it is.';
-      const fetchMock = fetchWith(url =>
-        url.includes('/grant') && !url.includes('invite')
-          ? problem(409, 'sdap.access.grant.would_lower_existing', detail)
-          : null
-      );
-      renderWithTheme(<AccessGrantModal {...makeProps(fetchMock, true)} />);
+  // Task 193 (#2338): /grant refuses because of who the contact represents. Each is named by the contact, never the
+  // generic "N failed. Please try again.", and nothing was written.
+  describe('refusals about who the contact represents are named by the contact', () => {
+    it.each([
+      [
+        409,
+        'sdap.access.grant.contact_represents_several_users',
+        'This contact is linked to more than one internal user, so nothing was given. Add the colleague you mean directly.',
+        `Gene Gatekeeper: This contact is linked to more than one internal user, so nothing was given. Add the colleague you mean directly.`,
+      ],
+      [
+        503,
+        'sdap.access.grant.contact_representation_unreadable',
+        'Whether this contact is one of your colleagues could not be checked, so nothing was given. Try again.',
+        `Gene Gatekeeper: Whether this contact is one of your colleagues could not be checked, so nothing was given. Try again.`,
+      ],
+      [
+        422,
+        'sdap.access.user_share.user_disabled',
+        'This user is disabled, so the record was not shared with them.',
+        'Gene Gatekeeper (linked to an internal user): This user is disabled, so the record was not shared with them.',
+      ],
+      [
+        422,
+        'sdap.access.user_share.user_not_a_person',
+        'This is an application, support or delegated-administration account, not a person, so the record was not shared with it.',
+        'Gene Gatekeeper (linked to an internal user): This is an application, support or delegated-administration account, not a person, so the record was not shared with it.',
+      ],
+      [
+        422,
+        'sdap.access.user_share.user_not_internal',
+        'This record is Restricted to internal users, and this user is flagged as external, so it was not shared with them.',
+        'Gene Gatekeeper is linked to a user flagged as external. Restricted records cannot be shared with external users.',
+      ],
+    ])('a %i %s names the contact', async (status, reasonCode, detail, shown) => {
+      const fetchMock = fetchWith(url => (isGrant(url) ? problem(status, reasonCode, detail) : null));
+      renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
 
       await grantCandidateAt('Full Access');
 
-      expect(await screen.findByText(/already have more access than you can grant/)).toBeInTheDocument();
+      expect(await screen.findByText(`Granted access to 0 of 1. ${shown}`)).toBeInTheDocument();
+      expect(screen.queryByText(/failed\. Please try again/)).not.toBeInTheDocument();
     });
 
-    it('a 503 no_access_unverifiable from /grant (an internal contact) shows its detail, not the generic failure', async () => {
-      const detail =
-        "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was granted. Try again in a moment.";
+    it('MUST NOT FIRE: an unrelated 500 from /grant is still the generic failure', async () => {
       const fetchMock = fetchWith(url =>
-        url.includes('/grant') && !url.includes('invite')
-          ? problem(503, 'sdap.access.grant.no_access_unverifiable', detail)
-          : null
+        isGrant(url) ? problem(500, 'sdap.access.contact_grant.grant_failed', 'Something broke.') : null
       );
-      renderWithTheme(<AccessGrantModal {...makeProps(fetchMock, true)} />);
+      renderWithTheme(<AccessGrantModal {...makeProps(fetchMock)} />);
 
       await grantCandidateAt('Full Access');
 
-      expect(await screen.findByText(/No Access list could not be checked/)).toBeInTheDocument();
-      expect(screen.queryByText(/failed\. Please try again/)).not.toBeInTheDocument();
+      expect(await screen.findByText('Granted access to 0 of 1; 1 failed. Please try again.')).toBeInTheDocument();
+      expect(screen.queryByText(/Gene Gatekeeper:/)).not.toBeInTheDocument();
     });
   });
 

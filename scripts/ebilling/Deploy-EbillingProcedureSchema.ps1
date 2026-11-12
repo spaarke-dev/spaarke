@@ -34,7 +34,9 @@
           NOT parental),
           sprk_versionnumber (whole number), alternate key sprk_procedure_versionnumber on (sprk_procedure, sprk_versionnumber),
           sprk_previousversion (-> sprk_procedureversion, RemoveLink), sprk_effectivefrom / sprk_effectiveto (DateOnly),
-          sprk_status (sprk_procedureversionstatus), sprk_notconverted (two options, default No; task 116), sprk_createdbyperson.
+          sprk_status (sprk_procedureversionstatus), sprk_notconverted (two options, default No: the drafted marker, Yes written
+          last; task 116, EB-D-211), sprk_notconvertedlist (memo 100000: the JSON list drafting could not convert; EB-D-211),
+          sprk_createdbyperson. An existing sprk_notconverted whose Description is not the EB-D-211 text gets it (Description only).
       P4  Table sprk_procedureassignment (user-owned, primary sprk_name, audited): one typed lookup per FilingCores table named
           after its table (RemoveLink, all NoCascade), sprk_procedure (-> sprk_procedure, Restrict, optional), sprk_mode (LOCAL choice: Follow
           latest 100000000, Pinned 100000001, Excluded 100000002), sprk_pinnedversion (-> sprk_procedureversion, Restrict),
@@ -49,7 +51,7 @@
       P8  Every FilingCores table: sprk_billingfirm and sprk_billingresponsible (-> sprk_organization, RemoveLink, optional).
       P9  Field security (IsSecured true; Read for every user through the reader profile; Create / Update for the BFF application
           user(s) only through the writer profile) on: sprk_procedure.sprk_area, sprk_proceduretype, sprk_appliesto, sprk_firm,
-          sprk_status; sprk_procedureversion.sprk_effectivefrom, sprk_effectiveto, sprk_status, sprk_notconverted;
+          sprk_status; sprk_procedureversion.sprk_effectivefrom, sprk_effectiveto, sprk_status, sprk_notconverted, sprk_notconvertedlist;
           sprk_policyversion.sprk_procedureversion, sprk_publishstate; sprk_ratecard.sprk_procedureversion; sprk_ruleset.sprk_scope,
           sprk_firm, sprk_procedure and the P5 record lookups (ontology F1-1 added the five on sprk_procedure, sprk_policyversion and
           sprk_ratecard). sprk_createdbyperson is created UNSECURED (task 081 secures it).
@@ -163,6 +165,8 @@ $DryRun = [bool]$WhatIfPreference
 $DevUrl = 'https://spaarkedev1.crm.dynamics.com'
 # `pwsh -File` passes a comma list as ONE string: split it.
 $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# Keeps the ontology writer's business unit's default team out of the reader profile (ebilling-r1; the helper is customer-provisioning-orchestration-r1 task 267's).
+. (Join-Path $PSScriptRoot '../common/OntologyWriterUnit.ps1')
 
 # ---------------------------------------------------------------------------------------------------------------
 # Constants
@@ -631,6 +635,7 @@ function Resolve-Plan([string[]]$CoreTables) {
         @{ Table = $Version; Column = 'sprk_effectiveto'; Type = 'DateTime' }
         @{ Table = $Version; Column = 'sprk_status'; Type = 'Picklist' }
         @{ Table = $Version; Column = 'sprk_notconverted'; Type = 'Boolean' }
+        @{ Table = $Version; Column = 'sprk_notconvertedlist'; Type = 'Memo' }
         @{ Table = $Assignment; Column = 'sprk_name'; Type = 'String' }
         @{ Table = $Assignment; Column = 'sprk_mode'; Type = 'Picklist' }
         @{ Table = $Assignment; Column = 'sprk_reason'; Type = 'Memo' }
@@ -648,6 +653,7 @@ function Resolve-Plan([string[]]$CoreTables) {
         @{ Table = $Version; Column = 'sprk_effectiveto'; Kind = 'DateTime' }
         @{ Table = $Version; Column = 'sprk_status'; Kind = 'Picklist' }
         @{ Table = $Version; Column = 'sprk_notconverted'; Kind = 'Boolean' }
+        @{ Table = $Version; Column = 'sprk_notconvertedlist'; Kind = 'Memo' }
         @{ Table = $PolicyVersion; Column = $Version; Kind = 'Lookup' }
         @{ Table = $PolicyVersion; Column = 'sprk_publishstate'; Kind = 'Picklist' }
         @{ Table = $RateCard; Column = $Version; Kind = 'Lookup' }
@@ -736,8 +742,14 @@ function Get-ProfileByName([string]$Name) {
 # Preconditions of the profile pair. A failure stops the script (escalation) in every mode: nothing is written.
 function Test-ProfilePreconditions {
     $problems = [System.Collections.Generic.List[string]]::new()
-    $defaultTeams = @((Invoke-Dv "teams?`$select=teamid,name&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value |
-            Where-Object { -not $_.businessunitid.isdisabled })
+    $allDefaultTeams = @((Invoke-Dv "teams?`$select=teamid,name,_businessunitid_value&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value)
+    # The ontology writer's business unit's default team (scripts/common/OntologyWriterUnit.ps1) is never added to or expected on the reader profile.
+    $dvHeaders = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+    $split = Split-DvDefaultTeamsByOntologyWriterUnit -Api $State.ApiBase -Headers $dvHeaders -DefaultTeams $allDefaultTeams
+    $writerUnitTeams = @($split.WriterUnitTeams)
+    $defaultTeams = @($split.ReaderTeams | Where-Object { -not $_.businessunitid.isdisabled })
+    $leftOut = if ($writerUnitTeams.Count) { (($writerUnitTeams | ForEach-Object { "'$($_.name)'" }) -join ', ') } else { 'none' }
+    Write-Report 'INFO' "ontology writer business unit: default team left out of the reader profile: $leftOut"
     if ($defaultTeams.Count -eq 0) { $problems.Add('no business-unit default team was read - the query is wrong') }
 
     $readers = Get-ProfileByName $ReaderProfileName
@@ -745,12 +757,15 @@ function Test-ProfilePreconditions {
     elseif ($readers.Count -eq 1) {
         $script:ReaderId = $readers[0].fieldsecurityprofileid
         $onReader = @((Invoke-Dv "fieldsecurityprofiles($($script:ReaderId))/teamprofiles_association?`$select=teamid,name").value | ForEach-Object { $_.teamid.ToString().ToLowerInvariant() })
+        foreach ($w in @(Get-DvOntologyWriterUnitTeamsOnProfile -Api $State.ApiBase -Headers $dvHeaders -ProfileId $script:ReaderId -WriterUnitTeams $writerUnitTeams)) {
+            $problems.Add("the ontology writer business unit's default team '$($w.name)' holds '$ReaderProfileName' - it must hold no field-security profile. Removing it is a team change (the owner's); this script never removes a member from a profile")
+        }
         foreach ($t in $defaultTeams) {
             if ($onReader -contains $t.teamid.ToString().ToLowerInvariant()) { Write-Report 'OK' "reader profile '$ReaderProfileName' is on default team '$($t.name)' (BU '$($t.businessunitid.name)')" }
             else { $problems.Add("default team '$($t.name)' (BU '$($t.businessunitid.name)') is NOT on '$ReaderProfileName': its users would read the P9 columns EMPTY. Adding a team is a team change (the owner's / uac-r2's); this script never adds a member to an existing profile") }
         }
     }
-    elseif ($CreateProfiles) { $script:ProfilesToCreate.Add($ReaderProfileName); Write-Report 'WOULD' "create reader profile '$ReaderProfileName' and add every business unit default team ($($defaultTeams.Count))" }
+    elseif ($CreateProfiles) { $script:ProfilesToCreate.Add($ReaderProfileName); Write-Report 'WOULD' "create reader profile '$ReaderProfileName' and add every business unit default team ($($defaultTeams.Count): $((($defaultTeams | ForEach-Object { "'$($_.name)'" }) -join ', '))); left out (ontology writer business unit): $leftOut" }
     else { $problems.Add("reader profile '$ReaderProfileName' does not exist (uac-r2 creates it). Pass -CreateProfiles to create it here") }
 
     $bffUsers = @()
@@ -850,6 +865,58 @@ function Set-ColumnSecured([string]$Table, [string]$Column, [string]$Kind, [bool
     }
 }
 
+# EB-D-211 (task 116): sprk_procedureversion.sprk_notconverted stays Two Options and means "drafted" (the BFF writes Yes LAST);
+# the JSON list of what drafting could not convert goes into the field-secured memo sprk_notconvertedlist, written before the marker.
+# ListMax matches sprk_ruleset.sprk_notconverted (memo 100000).
+function Get-MarkerColumnTexts {
+    return @{
+        Marker  = 'Drafted marker for this Procedure Version. Yes once BillingRuleDraftJobHandler has finished drafting it: the BFF writes Yes LAST, after the rules and the not-converted list (sprk_notconvertedlist). No means not drafted yet. A redelivered draft job that reads Yes calls no model (task 116, EB-D-211). Default No. Written only by the BFF (field-secured).'
+        List    = 'JSON list of the parts of this version''s document that drafting could not convert into rules (task 116, EB-D-211). Written by the BFF before the drafted marker sprk_notconverted is set to Yes; the rule set detail shows the list of its highest-numbered version. Written only by the BFF (field-secured).'
+        ListMax = 100000
+    }
+}
+
+# Verify comparison for a column's Description: $null when it reads the wanted text, else the problem text.
+function Get-DescriptionProblem([string]$Table, [string]$Column, [string]$Expected, $Attribute) {
+    if (-not $Attribute) { return "$Table.$Column was not found (Description not readable)" }
+    $actual = [string]$Attribute.Description.UserLocalizedLabel.Label
+    if ($actual -ne $Expected) { return "$Table.$Column Description is not the EB-D-211 text (reads '$actual')" }
+    return $null
+}
+
+# Verify comparison for a memo column: $null when it is a memo of the wanted length and Description, else the problem text.
+function Get-MemoProblem([string]$Table, [string]$Column, [int]$MaxLength, [string]$Description, $Attribute) {
+    if (-not $Attribute) { return "$Table.$Column was not found as a memo" }
+    if ([int]$Attribute.MaxLength -ne $MaxLength) { return "$Table.$Column MaxLength is $($Attribute.MaxLength), expected $MaxLength" }
+    return (Get-DescriptionProblem $Table $Column $Description $Attribute)
+}
+
+# Sets the Description of an existing column (no other property). A column that does not exist yet is left to its create, which
+# carries the same text. Same typed GET-then-PUT, and the same one retry with the OptionSet expanded, as Set-ColumnSecured.
+function Set-ColumnDescription([string]$Table, [string]$Column, [string]$Kind, [string]$Text) {
+    $tag = "$Table.$Column"
+    $path = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')/Microsoft.Dynamics.CRM.${Kind}AttributeMetadata"
+    $a = Get-DvOrNull $path -Retries 4
+    if (-not $a) {
+        if ($DryRun) { return }
+        throw "$tag was not found ($Kind); cannot set its Description."
+    }
+    if ([string]$a.Description.UserLocalizedLabel.Label -eq $Text) { $script:Skipped.Add("description $tag"); Write-Host "  skipped  $Column Description (already the EB-D-211 text)" -ForegroundColor Yellow; return }
+    if ($DryRun) { $script:Changed.Add("description $tag"); Write-Host "  WOULD SET $Column Description to the EB-D-211 text" -ForegroundColor Cyan; return }
+    $a.Description = New-Label $Text
+    try {
+        Invoke-WhilePropagating { Invoke-Dv -Path $path -Method PUT -Body $a -ExtraHeaders @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null }
+    }
+    catch {
+        if ($Kind -notin 'Picklist', 'Boolean') { throw }
+        Write-Host "    PUT of $tag refused without its OptionSet ($($_.Exception.Message)); retrying once with `$expand=OptionSet..." -ForegroundColor DarkYellow
+        $a = Get-DvOrNull "${path}?`$expand=OptionSet" -Retries 2
+        $a.Description = New-Label $Text
+        Invoke-WhilePropagating { Invoke-Dv -Path $path -Method PUT -Body $a -ExtraHeaders @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null }
+    }
+    $script:Changed.Add("description $tag"); $script:Wrote = $true; Write-Host "  CHANGED  $Column Description (EB-D-211 drafted marker)" -ForegroundColor Green
+}
+
 function Write-MaskedRecovery([string]$Table, [string]$Column, [string]$Cause) {
     Write-Host ''
     Write-Host "  !!! RECOVERY REQUIRED NOW - $Table.$Column may be field-secured WITHOUT its grants !!!" -ForegroundColor Red
@@ -945,11 +1012,13 @@ function Invoke-ColumnSecurity($spec) {
 
 # Nobody besides the writer profile and System Administrator may create or update a secured column.
 function Test-OtherProfiles {
+    # The writer and the platform System Administrator profile (572329c1-..., fixed in every environment), matched by id (#2725).
+    $excused = @('572329c1-a042-4e22-be47-367c6374ea45', "$($script:WriterId)".ToLowerInvariant()) | Where-Object { $_ }
     foreach ($spec in $script:Secured) {
         $t = $spec.Table; $c = $spec.Column
         if (-not (Get-Attr $t $c 'LogicalName')) { continue }
-        $rows = @((Invoke-Dv "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$t' and attributelogicalname eq '$c'").value)
-        $otherWriters = @($rows | Where-Object { ($_.canupdate -eq 4 -or $_.cancreate -eq 4) -and $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' })
+        $rows = @((Invoke-Dv "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=fieldsecurityprofileid,name)&`$filter=entityname eq '$t' and attributelogicalname eq '$c'").value)
+        $otherWriters = @($rows | Where-Object { ($_.canupdate -eq 4 -or $_.cancreate -eq 4) -and $_.fieldsecurityprofileid.fieldsecurityprofileid.ToString().ToLowerInvariant() -notin $excused })
         foreach ($o in $otherWriters) { Write-Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can also write $t.$c - only the BFF writer profile may" }
         if ($otherWriters.Count -eq 0) { Write-Report 'OK' "no profile besides '$WriterProfileName' and System Administrator can write $t.$c" }
     }
@@ -1209,7 +1278,10 @@ try {
         elseif ($r.Kind -eq 'Lookup') { Set-LookupRequiredLevel $r.Table $r.Column $r.Level }
         else { Set-IntegerRequiredLevel $r.Table $r.Column $r.Level }
     }
-    Add-Column 'sprk_notconverted' (New-TwoOptionDef 'sprk_NotConverted' 'Not Converted' 'Yes when drafting could not convert part of this version''s document into rules. Per-version marker for BillingRuleDraftJobHandler (task 116); the rule set keeps its own. Default No. Written only by the BFF (field-secured).' $false) 'Boolean'
+    $marker = Get-MarkerColumnTexts
+    Add-Column 'sprk_notconverted' (New-TwoOptionDef 'sprk_NotConverted' 'Not Converted' $marker.Marker $false) 'Boolean'
+    Set-ColumnDescription $Version 'sprk_notconverted' 'Boolean' $marker.Marker
+    Add-Column 'sprk_notconvertedlist' (New-MemoDef 'sprk_NotConvertedList' 'Not Converted List' $marker.List $marker.ListMax) 'Memo'
 
     # --- 4. P4 sprk_procedureassignment --------------------------------------------------------------------------------------
     Write-Host "4. P4 table $Assignment (user-owned, audited)" -ForegroundColor Cyan
@@ -1276,7 +1348,7 @@ try {
 
     # --- Publish (only when something changed; entity-scoped, never a tenant-wide publish) -------------------------------------------------
     Write-Host "Publish" -ForegroundColor Cyan
-    $metaChanged = $script:Created.Count -gt 0 -or @($script:Changed | Where-Object { $_ -like 'secure *' -or $_ -like '* auditing' }).Count -gt 0
+    $metaChanged = $script:Created.Count -gt 0 -or @($script:Changed | Where-Object { $_ -like 'secure *' -or $_ -like '* auditing' -or $_ -like 'description *' }).Count -gt 0
     if ($DryRun) { Write-Host "  WhatIf: publish skipped" -ForegroundColor Cyan }
     elseif (-not $metaChanged) { Write-Host "  nothing changed - no publish" -ForegroundColor Yellow }
     else {
@@ -1336,6 +1408,13 @@ try {
         }
         $nc = Get-DvOrNull "EntityDefinitions(LogicalName='$Version')/Attributes(LogicalName='sprk_notconverted')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata?`$select=DefaultValue"
         if (-not $nc -or $nc.DefaultValue -ne $false) { $bad.Add("$Version.sprk_notconverted default is not No") } else { Write-Host "  $Version.sprk_notconverted: two options, default No" }
+        # EB-D-211: the marker carries the drafted-marker Description; the list is a memo of ListMax characters with its own text.
+        $marker = Get-MarkerColumnTexts
+        $prob = Get-DescriptionProblem $Version 'sprk_notconverted' $marker.Marker (Get-Attr $Version 'sprk_notconverted' 'LogicalName,Description')
+        if ($prob) { $bad.Add($prob) } else { Write-Host "  $Version.sprk_notconverted: Description is the EB-D-211 drafted-marker text" }
+        $ml = Get-DvOrNull "EntityDefinitions(LogicalName='$Version')/Attributes(LogicalName='sprk_notconvertedlist')/Microsoft.Dynamics.CRM.MemoAttributeMetadata?`$select=LogicalName,MaxLength,Description"
+        $prob = Get-MemoProblem $Version 'sprk_notconvertedlist' $marker.ListMax $marker.List $ml
+        if ($prob) { $bad.Add($prob) } else { Write-Host "  $Version.sprk_notconvertedlist: memo, MaxLength $($marker.ListMax), EB-D-211 Description" }
 
         # Required levels (ontology F4-2): both alternate key columns SystemRequired.
         foreach ($r in Get-RequiredColumnSpecs) {

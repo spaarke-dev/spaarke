@@ -447,7 +447,12 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
     {
         var caller = Principal("projects", RecordA);
         var none = SecureRootFlags.None;
-        var projectOnly = new ExternalDataService.DocumentRootLinks(RecordA.ToString(), null, null, null, null, null);
+        // Fix round 3c: a document read that selected every live-parent column and found none set (an explicit null each).
+        var projectOnly = new ExternalDataService.DocumentRootLinks(RecordA.ToString(), null, null, null, null, null)
+        {
+            Row = ExternalMultiRootRule.LiveParentSelect("sprk_document").ToDictionary(
+                c => c, _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
+        };
         var withHidden = projectOnly with { RelatedMatter = Hidden.ToString() };
 
         new ExternalDataService.DocumentScopeRead(RecordA, "x", projectOnly).IsReadableUnder(RecordA, caller, none).Should().BeTrue();
@@ -570,7 +575,8 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
                 .Build(),
             new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
             NullLogger<ExternalDataService>.Instance,
-            Data.FilingReader);
+            Data.FilingReader,
+            visibility: Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible);
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {

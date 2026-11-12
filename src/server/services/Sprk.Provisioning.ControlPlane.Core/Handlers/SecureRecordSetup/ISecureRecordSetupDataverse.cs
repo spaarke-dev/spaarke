@@ -132,6 +132,12 @@ public interface ISecureRecordSetupDataverse
     /// <summary>S24: the field-security profiles a systemuser is a direct member of.</summary>
     Task<IReadOnlyList<Guid>> ListUserProfilesAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// S24 (task 267): the field-security profiles a team is a member of — the per-TEAM answer
+    /// (<see cref="ListProfileTeamsAsync"/> answers per profile). The ontology writer unit's default team must be in none.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ListTeamProfilesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken);
+
     /// <summary>S7/S8/T4: the roles a team holds.</summary>
     Task<IReadOnlyList<SecureSetupRole>> ListTeamRolesAsync(SecureRecordSetupTarget target, Guid teamId, CancellationToken cancellationToken);
 

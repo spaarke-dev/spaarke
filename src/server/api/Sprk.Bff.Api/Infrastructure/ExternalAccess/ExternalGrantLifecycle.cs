@@ -121,26 +121,33 @@ internal sealed class ExternalGrantRow
     [JsonPropertyName("@odata.etag")]
     public string? ETag { get; set; }
 
+    // Task 130-0 fix round 3g: every lookup below records whether its column was PRESENT in the row (the setter runs for an
+    // explicit JSON null too, and not for a column the select did not return) - the idiom of TodoRow. An explicit null is
+    // "not filed"; a column the row did not carry was never read, which says nothing about whether it is filed. A consumer
+    // asks KeyLookupsRead / IssuerRead / AllLookupsRead before it acts on a null.
+    private Guid? _contactId, _organizationId, _projectId, _matterId, _workAssignmentId, _grantedBySystemUserId, _grantedByContactId;
+    private bool _contactRead, _organizationRead, _projectRead, _matterRead, _workAssignmentRead, _grantedByRead, _grantedByContactRead;
+
     [JsonPropertyName("_sprk_contact_value")]
-    public Guid? ContactId { get; set; }
+    public Guid? ContactId { get => _contactId; set { _contactId = value; _contactRead = true; } }
 
     [JsonPropertyName("_sprk_organization_value")]
-    public Guid? OrganizationId { get; set; }
+    public Guid? OrganizationId { get => _organizationId; set { _organizationId = value; _organizationRead = true; } }
 
     [JsonPropertyName("_sprk_project_value")]
-    public Guid? ProjectId { get; set; }
+    public Guid? ProjectId { get => _projectId; set { _projectId = value; _projectRead = true; } }
 
     [JsonPropertyName("_sprk_matter_value")]
-    public Guid? MatterId { get; set; }
+    public Guid? MatterId { get => _matterId; set { _matterId = value; _matterRead = true; } }
 
     [JsonPropertyName("_sprk_workassignment_value")]
-    public Guid? WorkAssignmentId { get; set; }
+    public Guid? WorkAssignmentId { get => _workAssignmentId; set { _workAssignmentId = value; _workAssignmentRead = true; } }
 
     /// <summary>
     /// The SYSTEMUSER who issued the grant (<c>sprk_grantedby</c>), when the issuer was an internal user.
     /// </summary>
     [JsonPropertyName("_sprk_grantedby_value")]
-    public Guid? GrantedBySystemUserId { get; set; }
+    public Guid? GrantedBySystemUserId { get => _grantedBySystemUserId; set { _grantedBySystemUserId = value; _grantedByRead = true; } }
 
     /// <summary>
     /// The CONTACT who issued the grant (<c>sprk_grantedbycontact</c>, unified-access-control-r2 task 140) — set only
@@ -148,7 +155,34 @@ internal sealed class ExternalGrantRow
     /// may change or revoke only a row whose value is themselves, so a row anyone else issued is never theirs to alter.
     /// </summary>
     [JsonPropertyName("_sprk_grantedbycontact_value")]
-    public Guid? GrantedByContactId { get; set; }
+    public Guid? GrantedByContactId { get => _grantedByContactId; set { _grantedByContactId = value; _grantedByContactRead = true; } }
+
+    /// <summary>The grantee contact column was in the row (an explicit null counts).</summary>
+    [JsonIgnore]
+    public bool ContactRead => _contactRead;
+
+    /// <summary>The grantee organization column was in the row (an explicit null counts).</summary>
+    [JsonIgnore]
+    public bool OrganizationRead => _organizationRead;
+
+    /// <summary>
+    /// Every column that names the row's logical grant was in the row: the three root lookups, the contact and the
+    /// organization. <see cref="ExternalGrantLifecycle.DeriveKey"/> needs all five, because the key is the first root that is
+    /// filed and then the contact, and a column that was not returned could be the one that is filed.
+    /// </summary>
+    [JsonIgnore]
+    public bool KeyLookupsRead => _projectRead && _matterRead && _workAssignmentRead && _contactRead && _organizationRead;
+
+    /// <summary>
+    /// The issuing-contact column was in the row, which is what "is this row contact-issued" and "did this contact issue it"
+    /// are decided from. (The provenance text <see cref="GrantedByContactProvenance"/> is a plain column, not a lookup.)
+    /// </summary>
+    [JsonIgnore]
+    public bool IssuerRead => _grantedByContactRead;
+
+    /// <summary>All seven lookups were in the row.</summary>
+    [JsonIgnore]
+    public bool AllLookupsRead => KeyLookupsRead && _grantedByRead && _grantedByContactRead;
 
     /// <summary>
     /// The issuing contact's id as TEXT (<c>sprk_grantedbycontactid</c>, session 27 round 50 item 2) — the grant's provenance,
@@ -399,7 +433,7 @@ internal static class ExternalGrantLifecycle
     // outlives the contact — so an internal change takes over a row whose issuing contact was deleted too. ⚠️ DEPLOY ORDER:
     // both columns must exist in the environment BEFORE a BFF carrying this select is deployed — Dataverse answers 400 to a
     // $select naming an unknown attribute (task 140 notes §live gate).
-    private const string RowSelect =
+    internal const string RowSelect =
         "sprk_externalrecordaccessid,sprk_accesslevel,statecode,sprk_expiresdate," +
         "_sprk_contact_value,_sprk_organization_value," +
         "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
@@ -407,7 +441,7 @@ internal static class ExternalGrantLifecycle
 
     // Task 099a: the Current Access listing also shows the grant date. A separate select, so no write-path read gains a
     // column it does not use (and so a write path never depends on parsing one).
-    private const string ListingSelect = RowSelect + ",sprk_granteddate";
+    internal const string ListingSelect = RowSelect + ",sprk_granteddate";
 
     /// <summary>
     /// The <c>@odata.bind</c> navigation property of the contact-typed issuer lookup <c>sprk_grantedbycontact</c>
@@ -433,6 +467,177 @@ internal static class ExternalGrantLifecycle
 
     /// <summary>The LOGICAL name of the systemuser issuer lookup — what an SDK write addresses.</summary>
     internal const string GrantedByAttribute = "sprk_grantedby";
+
+    // ── Task 193 G1 (owner decision (iii), 2026-10-28): the PAIRING column ──────────────────────────────────────────
+    // sprk_pairedsystemuser names the internal user a contact grant was written WITH ("Add person" shares the record with
+    // the colleague and grants the contact that represents them). Field-secured, BFF-written only; created by
+    // scripts/Deploy-ExternalRecordAccessPairedSystemUser.ps1. ⚠️ DEPLOY ORDER: deliberately NOT in RowSelect — a $select
+    // naming a column the environment lacks is a 400 on EVERY grant read. It is read only by ReadPairingsAsync and the
+    // reconciliation job's own scan, both of which treat a missing column as "no pairing possible here" (fail closed).
+
+    /// <summary>The <c>@odata.bind</c> navigation property of <c>sprk_pairedsystemuser</c> (its PascalCase schema name).</summary>
+    internal const string PairedSystemUserNavigationProperty = "sprk_PairedSystemUser";
+
+    /// <summary>The LOGICAL name of the pairing lookup — what an SDK read or write (FetchXML, <c>IGenericEntityService</c>) addresses.</summary>
+    internal const string PairedSystemUserAttribute = "sprk_pairedsystemuser";
+
+    /// <summary>The Web API value property of the pairing lookup.</summary>
+    internal const string PairedSystemUserValueProperty = "_sprk_pairedsystemuser_value";
+
+    /// <summary>
+    /// Which systemuser each ACTIVE row on <paramref name="key"/> is paired with (task 193 G1). A separate, one-column read so
+    /// that no other grant read depends on the column. Never throws (but for cancellation): a 400 — the column is not
+    /// provisioned in this environment (the only cause for this fixed, known-good filter) — is
+    /// <see cref="GrantPairingReadStatus.ColumnMissing"/>; any other fault is <see cref="GrantPairingReadStatus.Unreadable"/>.
+    /// Either way the caller writes no pairing.
+    /// </summary>
+    internal static Task<GrantPairingRead> ReadPairingsAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantKey key, CancellationToken ct)
+        => ReadPairingsByFilterAsync(dataverseClient, key.ToActiveRowsFilter(), top: null, ct);
+
+    /// <summary>
+    /// Task 193 G2: the ACTIVE rows on one record with their pairing — every row (Current Access's <c>pairedWith</c>), or only
+    /// those paired with <paramref name="pairedWith"/> (the share revoke ending that user's paired grant). The same one-column
+    /// read and the same never-throws contract as <see cref="ReadPairingsAsync"/>: a missing column is
+    /// <see cref="GrantPairingReadStatus.ColumnMissing"/>, any other fault <see cref="GrantPairingReadStatus.Unreadable"/>.
+    /// </summary>
+    /// <param name="includeInactive">Task 193 G4a: also the INACTIVE rows (a row still paired after its end is one whose file
+    /// access was not confirmed removed) — the Restricted remover's look for barred users whose pairing is left.</param>
+    internal static Task<GrantPairingRead> ReadPairingsOnRecordAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, Guid? pairedWith, int? top,
+        CancellationToken ct, bool includeInactive = false)
+    {
+        var filter = includeInactive
+            ? $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and {PairedSystemUserValueProperty} ne null"
+            : $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and statecode eq 0";
+        if (pairedWith is { } systemUserId)
+            filter += $" and {PairedSystemUserValueProperty} eq {systemUserId}";
+        return ReadPairingsByFilterAsync(dataverseClient, filter, top, ct);
+    }
+
+    /// <summary>
+    /// Task 193 G4a (A-F3): the rows on one record paired with <paramref name="systemUserId"/>, ACTIVE and INACTIVE, with their
+    /// state — what ending that user's paired grants reads. An inactive row still paired is one whose end did not confirm its
+    /// file access (a confirmed end clears the pairing). The same one-column read and never-throws contract as
+    /// <see cref="ReadPairingsAsync"/>: a missing column is <see cref="GrantPairingReadStatus.ColumnMissing"/>, any other
+    /// fault <see cref="GrantPairingReadStatus.Unreadable"/>.
+    /// </summary>
+    internal static async Task<UserPairingRead> ReadUserPairingsOnRecordAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, Guid systemUserId, int? top,
+        CancellationToken ct)
+    {
+        try
+        {
+            var rows = await dataverseClient.QueryAsync<PairingRow>(
+                EntitySet,
+                filter: $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId} and {PairedSystemUserValueProperty} eq {systemUserId}",
+                select: $"sprk_externalrecordaccessid,statecode,{PairedSystemUserValueProperty}",
+                top: top,
+                cancellationToken: ct).ConfigureAwait(false);
+            if (AbsentPairingFault(rows) is { } absent)
+                return new UserPairingRead(GrantPairingReadStatus.Unreadable, Array.Empty<UserPairedRow>(), absent);
+
+            return new UserPairingRead(GrantPairingReadStatus.Read,
+                rows.Where(r => r.Id != Guid.Empty)
+                    .Select(r => new UserPairedRow(r.Id, r.PairedSystemUserId is { } p && p != Guid.Empty ? p : null, r.StateCode is null or 0))
+                    .ToList(),
+                null);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            return new UserPairingRead(GrantPairingReadStatus.ColumnMissing, Array.Empty<UserPairedRow>(), ex);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            return new UserPairingRead(GrantPairingReadStatus.Unreadable, Array.Empty<UserPairedRow>(), ex);
+        }
+    }
+
+    /// <summary>
+    /// A fault when any returned row did not carry the pairing column: that row's pairing is unknown, not "not paired", so the
+    /// whole read is <see cref="GrantPairingReadStatus.Unreadable"/> (fail closed, master's fix round 3g rule).
+    /// </summary>
+    private static InvalidOperationException? AbsentPairingFault(IEnumerable<PairingRow> rows) =>
+        rows.FirstOrDefault(r => r.Id != Guid.Empty && !r.PairingRead) is { } row
+            ? new InvalidOperationException($"Access record {row.Id} did not carry the pairing column; its pairing cannot be read.")
+            : null;
+
+    private static async Task<GrantPairingRead> ReadPairingsByFilterAsync(
+        DataverseWebApiClient dataverseClient, string filter, int? top, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await dataverseClient.QueryAsync<PairingRow>(
+                EntitySet,
+                filter: filter,
+                select: $"sprk_externalrecordaccessid,{PairedSystemUserValueProperty}",
+                top: top,
+                cancellationToken: ct).ConfigureAwait(false);
+            if (AbsentPairingFault(rows) is { } absent)
+                return new GrantPairingRead(GrantPairingReadStatus.Unreadable, new Dictionary<Guid, Guid?>(), absent);
+
+            var byRow = new Dictionary<Guid, Guid?>();
+            foreach (var row in rows.Where(r => r.Id != Guid.Empty))
+                byRow[row.Id] = row.PairedSystemUserId is { } paired && paired != Guid.Empty ? paired : null;
+            return new GrantPairingRead(GrantPairingReadStatus.Read, byRow, null);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            return new GrantPairingRead(GrantPairingReadStatus.ColumnMissing, new Dictionary<Guid, Guid?>(), ex);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            return new GrantPairingRead(GrantPairingReadStatus.Unreadable, new Dictionary<Guid, Guid?>(), ex);
+        }
+    }
+
+    /// <summary>
+    /// Whether this environment has the pairing column (task 193 G1) — a one-row, one-column read, so the reconciliation
+    /// job's R5 scan never names a column that is not there. Never throws (but for cancellation): a 400 is
+    /// <see cref="GrantPairingReadStatus.ColumnMissing"/>, any other fault <see cref="GrantPairingReadStatus.Unreadable"/>.
+    /// </summary>
+    internal static async Task<(GrantPairingReadStatus Status, Exception? Fault)> ProbePairingColumnAsync(
+        DataverseWebApiClient dataverseClient, CancellationToken ct)
+    {
+        try
+        {
+            await dataverseClient.QueryAsync<PairingRow>(
+                EntitySet,
+                select: $"sprk_externalrecordaccessid,{PairedSystemUserValueProperty}",
+                top: 1,
+                cancellationToken: ct).ConfigureAwait(false);
+            return (GrantPairingReadStatus.Read, null);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            return (GrantPairingReadStatus.ColumnMissing, ex);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            return (GrantPairingReadStatus.Unreadable, ex);
+        }
+    }
+
+    private sealed class PairingRow
+    {
+        // Master's fix round 3g idiom (ExternalGrantRow): an absent lookup column is unreadable, never "not paired". The
+        // setter records that the column was in the row (an explicit null counts); the readers refuse a row without it.
+        private Guid? _pairedSystemUserId;
+
+        [JsonPropertyName("sprk_externalrecordaccessid")]
+        public Guid Id { get; set; }
+
+        [JsonPropertyName(PairedSystemUserValueProperty)]
+        public Guid? PairedSystemUserId { get => _pairedSystemUserId; set { _pairedSystemUserId = value; PairingRead = true; } }
+
+        /// <summary>The pairing column was in the row (an explicit null counts).</summary>
+        [JsonIgnore]
+        public bool PairingRead { get; private set; }
+
+        /// <summary>Only <see cref="ReadUserPairingsOnRecordAsync"/> selects it (task 193 G4a); <c>null</c> elsewhere.</summary>
+        [JsonPropertyName("statecode")]
+        public int? StateCode { get; set; }
+    }
 
     /// <summary>The ONE text form of a contact issuer's id in <see cref="GrantedByContactIdAttribute"/>: lower-case, hyphenated (<c>D</c>).</summary>
     internal static string ContactIssuerProvenance(Guid issuerContactId)
@@ -645,6 +850,12 @@ internal static class ExternalGrantLifecycle
     /// </remarks>
     internal static ExternalGrantKey? DeriveKey(ExternalGrantRow row)
     {
+        // Fix round 3g: a row that did not carry one of the five columns that name its grant has no derivable key, because
+        // which of them is filed is unknown. It is the same null as "no root", and each caller handles it as it handles that
+        // (see the remarks): the revoke paths fail or retry.
+        if (!row.KeyLookupsRead)
+            return null;
+
         ExternalGrantRootType rootType;
         Guid rootId;
 
@@ -1026,6 +1237,17 @@ internal static class ExternalGrantLifecycle
         var held = new List<ExternalGrantRow>();
         foreach (var row in rows.Where(r => (r.AccessLevel ?? 0) >= (int)minimumLevel && mayConfer(r)))
         {
+            // Fix round 3g: whether this row names a firm beside its contact decides whether the firm must be active for the
+            // row to count. A row that did not carry the contact or the organization column cannot be judged either way, so it
+            // is neither counted nor skipped. It is a fault, like any read that could not be completed: the contact-side grant
+            // answers its 503 and the reconciliation job leaves the row it was deciding unchanged.
+            if (!row.ContactRead || !row.OrganizationRead)
+            {
+                throw new InvalidOperationException(
+                    $"Access record {row.Id} did not carry the contact or the organization column; whether it names a firm " +
+                    "cannot be established.");
+            }
+
             if (row.ContactId is not null && row.OrganizationId is { } firm && firm != Guid.Empty
                 && !conferringOrganizationIds.Contains(firm))
             {
@@ -1071,6 +1293,40 @@ internal enum GrantGranteeKind
 
     /// <summary>An organization-wide grant: no ContactId, every active member inherits at check time.</summary>
     Organization,
+}
+
+/// <summary>
+/// How <see cref="ExternalGrantLifecycle.ReadPairingsAsync"/> ended (task 193 G1).
+/// </summary>
+internal enum GrantPairingReadStatus
+{
+    /// <summary>The rows were read; <see cref="GrantPairingRead.ByRow"/> is the answer.</summary>
+    Read,
+
+    /// <summary><c>sprk_pairedsystemuser</c> is not provisioned in this environment (400): no pairing can be written.</summary>
+    ColumnMissing,
+
+    /// <summary>The read failed for another reason: whether a row is paired is not known.</summary>
+    Unreadable,
+}
+
+/// <summary>What <see cref="ExternalGrantLifecycle.ReadPairingsAsync"/> read: row id → paired systemuser (<c>null</c> = unpaired).</summary>
+internal sealed record GrantPairingRead(GrantPairingReadStatus Status, IReadOnlyDictionary<Guid, Guid?> ByRow, Exception? Fault);
+
+/// <summary>One row <see cref="ExternalGrantLifecycle.ReadUserPairingsOnRecordAsync"/> read (task 193 G4a).</summary>
+internal sealed record UserPairedRow(Guid Id, Guid? PairedWith, bool Active);
+
+/// <summary>What <see cref="ExternalGrantLifecycle.ReadUserPairingsOnRecordAsync"/> read (task 193 G4a).</summary>
+internal sealed record UserPairingRead(GrantPairingReadStatus Status, IReadOnlyList<UserPairedRow> Rows, Exception? Fault);
+
+/// <summary>
+/// Task 193 G1: the pairing a contact grant is written with — the internal user it pairs with, and what each active row on
+/// the key already records (so the grant core writes the column only where it differs).
+/// </summary>
+internal sealed record GrantPairing(Guid SystemUserId, IReadOnlyDictionary<Guid, Guid?> CurrentByRow)
+{
+    /// <summary>Whether row <paramref name="rowId"/> must be (re)stamped: it is not already paired with this user.</summary>
+    public bool MustStamp(Guid rowId) => !CurrentByRow.TryGetValue(rowId, out var current) || current != SystemUserId;
 }
 
 /// <summary>

@@ -20,11 +20,12 @@ export const CODE_FILE_FAILED = 'ebilling.export.file_failed';
 export const CODE_TRANSITION_FAILED = 'ebilling.export.transition_failed';
 export const CODE_EBILLING_DISABLED = 'ebilling.disabled';
 
-/** The three per-invoice reasons of a 400 `selection_refused` (task 150, `ApExportCodes.Reason*`). */
+/** The per-invoice reasons of a 400 `selection_refused` (task 150, `ApExportCodes.Reason*`; `invoice_firm_missing`: ebilling-r1 task 095c-4). */
 export const REFUSAL_TEXT: Readonly<Record<string, string>> = {
   invoice_not_approved: 'Not Approved: only an Approved invoice can be exported.',
   invoice_already_exported: 'Already in an export batch.',
   invoice_not_found: 'Not found, or not available to you.',
+  invoice_firm_missing: 'No firm, or waiting for one: a reviewer must add the firm first.',
 };
 
 export function refusalText(reason: string): string {

@@ -731,9 +731,9 @@ Spaarke ships **no Dataverse plugins**, so there is no plugin deployment — man
 
 | ADR | Relevance |
 |-----|-----------|
-| [ADR-006](.claude/adr/ADR-006-pcf-over-webresources.md) | PCF over legacy webresources |
-| [ADR-022](.claude/adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility (CRITICAL) |
-| [ADR-021](.claude/adr/ADR-021-fluent-design-system.md) | Fluent UI v9 design system |
+| [ADR-006](../../adr/ADR-006-pcf-over-webresources.md) | PCF over legacy webresources |
+| [ADR-022](../../adr/ADR-022-pcf-platform-libraries.md) | React 16 compatibility (CRITICAL) |
+| [ADR-021](../../adr/ADR-021-fluent-design-system.md) | Fluent UI v9 design system |
 
 ---
 

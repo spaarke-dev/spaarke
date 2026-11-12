@@ -241,4 +241,4 @@ The `ChatContextMappingService` resolves record context into playbooks and tools
 - [Side Pane Platform Architecture](SIDE-PANE-PLATFORM-ARCHITECTURE.md) — Side pane design
 - [Playbook Architecture](playbook-architecture.md) — JPS playbook system
 - [BFF API Patterns](sdap-bff-api-patterns.md) — API endpoint patterns
-- [Analysis Workspace SprkChat Companion Design](../../projects/ai-sprk-chat-context-awareness-r1/design.md) — Detailed design specification
+- Analysis Workspace SprkChat Companion Design — Detailed design specification

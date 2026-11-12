@@ -102,6 +102,8 @@ public class SystemUserOidLookupDisabledGuardTests
     {
         "ColumnSet", "GetAttributeValue", "GetGuidLike", "GuidOf", "TryGetProperty", "GetProperty", "Contains",
         "ContainsKey", "ExtractAliasedGuid", "JsonPropertyName", "AddColumn", "AddColumns",
+        // Task 267: DataverseWebApiAppUserCreator.OptionalId(row, "…") reads a column off a row it already fetched.
+        "OptionalId",
         // Conditions are matched by their own pattern below.
         "ConditionExpression", "AddCondition",
     };
@@ -599,6 +601,7 @@ public class SystemUserOidLookupDisabledGuardTests
         var columns = new ColumnSet("domainname", "azureactivedirectoryobjectid");
         var oid = row.GetAttributeValue<Guid?>("azureactivedirectoryobjectid");
         var raw = GuidOf(row, "azureactivedirectoryobjectid");
+        var held = OptionalId(existing[0], "azureactivedirectoryobjectid");
         string[] cols = ["systemuserid", "azureactivedirectoryobjectid"];
         // the lookup is "azureactivedirectoryobjectid eq {oid}"
         throw new InvalidOperationException($"GET systemusers(azureactivedirectoryobjectid={objectId:D}) failed");

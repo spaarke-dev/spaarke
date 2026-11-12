@@ -5,6 +5,8 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
@@ -298,19 +300,69 @@ public class GrantorCeilingTests
     }
 
     /// <summary>
-    /// Round 80's bound, the other side: a NARROWED re-add over a lapsed HIGHER grant is still the never-lower refusal (task
-    /// 139) — nothing restored, nothing written. The ceiling bounds the restore; it never becomes a quiet downgrade.
+    /// Owner 2026-11-11 (task 193 B-F5, "expired doesn't block"; narrows round 80 to live grants): a NARROWED re-add over a
+    /// LAPSED higher grant lowers no one's access — the grant gives nothing — so the row is restored at the narrowed level
+    /// with the new date, and the earlier level is kept in the external-access audit (9824). (Before: 409 would_lower.)
     /// </summary>
     [Fact]
-    public async Task Grant_NarrowedReAddOverALapsedHigherGrant_Is409WouldLower_AndWritesNothing()
+    public async Task Grant_NarrowedReAddOverALapsedHigherGrant_IsRestoredAtTheNarrowedLevel_AndTheEarlierLevelIsAudited()
     {
         var existing = _dataverse.Seed(ContactId, null, FullAccess);
         existing.ExpiresDate = Today.AddDays(-1);
+        var audit = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AuditLogCapture();
 
-        var result = await Grant(ContactGrant(ExternalAccessLevel.FullAccess), CollaborateCaller);
+        var result = await Grant(ContactGrant(ExternalAccessLevel.FullAccess), CollaborateCaller, audit.Factory);
+
+        var body = OkBody<GrantAccessResponse>(result);
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
+        body.Narrowed.Should().BeTrue();
+        body.AccessRecordId.Should().Be(existing.Id, "restored in place");
+        existing.AccessLevel.Should().Be(Collaborate);
+        existing.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays));
+        _dataverse.Creates.Should().BeEmpty();
+        var record = audit.Records.Should().ContainSingle(r => r.EventId.Id == 9824).Subject;
+        record.Category.Should().Be(ExternalAccessAudit.Category);
+        record.Message.Should().Contain(existing.Id.ToString()).And.Contain($"level {FullAccess} → {Collaborate}")
+            .And.Contain(Today.AddDays(-1).ToString("yyyy-MM-dd"));
+    }
+
+    /// <summary>
+    /// The must-not-fire twin of B-F5 on a key with BOTH a lapsed and a LIVE higher row: the live one still refuses (round 80
+    /// stands for live access), and nothing is written or audited.
+    /// </summary>
+    [Fact]
+    public async Task Grant_NarrowedReAddWhereALiveHigherGrantStands_Is409_EvenBesideALapsedOne()
+    {
+        var lapsed = _dataverse.Seed(ContactId, null, FullAccess);
+        lapsed.ExpiresDate = Today.AddDays(-1);
+        var live = _dataverse.Seed(ContactId, null, FullAccess);
+        var audit = new Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AuditLogCapture();
+
+        var result = await Grant(ContactGrant(ExternalAccessLevel.FullAccess), CollaborateCaller, audit.Factory);
 
         Problem(result).Should().Be((409, ExternalGrantLifecycle.WouldLowerExistingReasonCode));
         _dataverse.Updates.Should().BeEmpty();
+        lapsed.AccessLevel.Should().Be(FullAccess);
+        live.AccessLevel.Should().Be(FullAccess);
+        audit.Records.Should().NotContain(r => r.EventId.Id == 9824);
+    }
+
+    /// <summary>
+    /// B-F5 fails closed: when the existing grants (and so whether the higher one has lapsed) cannot be read, nothing is
+    /// restored or written — never a restore on a fault.
+    /// </summary>
+    [Fact]
+    public async Task Grant_NarrowedReAdd_WhenTheExistingGrantsCannotBeRead_WritesNothing()
+    {
+        var existing = _dataverse.Seed(ContactId, null, FullAccess);
+        existing.ExpiresDate = Today.AddDays(-1);
+        _dataverse.GrantQueryThrows = new InvalidOperationException("Simulated Dataverse 5xx.");
+
+        var result = await Grant(ContactGrant(ExternalAccessLevel.FullAccess), CollaborateCaller);
+
+        result.Should().NotBeOfType<Ok<GrantAccessResponse>>();
+        _dataverse.Updates.Should().BeEmpty();
+        _dataverse.Creates.Should().BeEmpty();
         existing.AccessLevel.Should().Be(FullAccess);
         existing.ExpiresDate.Should().Be(Today.AddDays(-1));
     }
@@ -394,7 +446,9 @@ public class GrantorCeilingTests
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), callerRights: null);
 
         Problem(result).Should().Be((500, ExternalGrantLifecycle.CallerRightsUnreadableReasonCode));
-        _identities.Reads.Should().BeEmpty("the invitee lookup — the onboarding seam's first step — is never reached");
+        // Task 193: only its read-only email lookup (does the email's contact represent a colleague?) precedes the probe.
+        _identities.Reads.Should().Equal(new[] { "email" },
+            "the invitee lookup — the onboarding seam's first step — is never reached");
         AssertNothingOnboardedOrWritten();
     }
 
@@ -704,8 +758,10 @@ public class GrantorCeilingTests
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
 
         OkBody<InviteAndGrantResponse>(result).ContactId.Should().Be(ContactId);
-        _identities.Reads.Count(r => r == "email").Should().Be(1,
-            "onboarding reuses the resolution the grant checks judged — it does not look the email up a second time");
+        // Task 193 reads the email once, read-only, to decide share-or-grant before the policy; the binder's resolution is
+        // then read once and reused: the checks and onboarding still judge the same contact.
+        _identities.Reads.Count(r => r == "email").Should().Be(2,
+            "task 193's decision lookup, then the ONE resolution the grant checks and onboarding share");
         _dataverse.ActiveRows.Should().ContainSingle().Which.ContactId.Should().Be(ContactId);
     }
 
@@ -776,12 +832,13 @@ public class GrantorCeilingTests
     private AccessibleRecordSetService DenyList() => GrantPolicyTestDoubles.RealDenyList(_participations, _denyReader);
 
     /// <param name="callerRights">The caller's rights the probe reports; <c>null</c> makes the probe THROW.</param>
-    private Task<IResult> Grant(GrantAccessRequest request, AccessRights? callerRights) =>
+    /// <param name="auditLoggers">The request's logger factory (where the external-access audit is written); none when null.</param>
+    private Task<IResult> Grant(GrantAccessRequest request, AccessRights? callerRights, ILoggerFactory? auditLoggers = null) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             request, _dataverse, _participations, DenyList(), new TestInfrastructure.RecordOwnershipResolverDouble(), new TestInfrastructure.TeamPrivilegeCheckerDouble(), new FixedRightsProbe(callerRights),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(),
-            AssignedAccessTestDoubles.InertInvites(), Context(), NullLogger<Program>.Instance, new FixedClock(Today),
-            CancellationToken.None);
+            AssignedAccessTestDoubles.InertInvites(), Context(auditLoggers), NullLogger<Program>.Instance, new FixedClock(Today),
+            CancellationToken.None, AssignedAccessTestDoubles.InertContactShare());
 
     /// <remarks>
     /// The email service is passed as null: every positive case here onboards an EXISTING contact that already has an oid
@@ -797,7 +854,7 @@ public class GrantorCeilingTests
             ciam, emailService: null!, IdentityBindingTestKit.Binder(_identities), InviteOrganizationTestKit.PortalOnly(),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer("acme"),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
-            NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
+            NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None, AssignedAccessTestDoubles.InertContactShare());
         ciam.Attempts.Should().BeEmpty("no case here creates a CIAM account");
         return result;
     }
@@ -821,7 +878,13 @@ public class GrantorCeilingTests
         .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://portal.test" })
         .Build();
 
-    private static HttpContext Context() => new DefaultHttpContext { TraceIdentifier = "trace-139" };
+    private static HttpContext Context(ILoggerFactory? loggers = null)
+    {
+        var context = new DefaultHttpContext { TraceIdentifier = "trace-139" };
+        if (loggers is not null)
+            context.RequestServices = new ServiceCollection().AddSingleton(loggers).BuildServiceProvider();
+        return context;
+    }
 
     private static T OkBody<T>(IResult result) => result.Should().BeOfType<Ok<T>>().Subject.Value!;
 
@@ -907,10 +970,15 @@ public class GrantorCeilingTests
 
         private Guid NextId() => Guid.Parse($"bbbbbbbb-0000-0000-0000-{++_seq:D12}");
 
+        /// <summary>When set, every grant-table query throws it (task 193 B-F5: the existing grants cannot be read).</summary>
+        public Exception? GrantQueryThrows { get; set; }
+
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)
         {
             QueriedSets.Add(entitySetName);
+            if (entitySetName == GrantSet && GrantQueryThrows is { } fault)
+                throw fault;
             object rows = entitySetName switch
             {
                 GrantSet => MatchGrants(filter),

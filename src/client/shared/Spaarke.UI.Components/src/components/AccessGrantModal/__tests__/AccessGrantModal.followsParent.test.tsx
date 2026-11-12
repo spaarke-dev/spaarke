@@ -23,7 +23,6 @@ import type {
   IAccessGrantRecord,
   IFollowsParent,
   IRecordNoAccessEntry,
-  IUserPick,
 } from '../types';
 import type { IAssignedAccessEntry } from '../AccessGrantModal';
 import {
@@ -171,10 +170,8 @@ function makeProps(setup: ISetup = {}): IAccessGrantModalProps {
     ]),
     fetchExistingGrants: jest.fn(async () => [CONTACT_GRANT]),
     searchContacts: jest.fn(async () => []),
-    pickContact: jest.fn(async () => null),
+    pickPerson: jest.fn(async () => null),
     pickOrganization: jest.fn(async () => null),
-    pickUser: jest.fn(async (): Promise<IUserPick | null> => null),
-    isInternalContact: jest.fn(async () => false),
     ...setup.overrides,
   };
 }
@@ -209,9 +206,8 @@ function parentBar(): HTMLElement | null {
 
 /** Every grant affordance (owner round 87: all stay available on a child). */
 function expectEveryGrantAffordance(): void {
-  expect(screen.getByRole('button', { name: 'Add contact' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Add person' })).toBeEnabled();
   expect(screen.getByRole('button', { name: 'Add organization' })).toBeEnabled();
-  expect(screen.getByRole('button', { name: 'Add user' })).toBeEnabled();
   expect(screen.getByRole('checkbox', { name: 'Select Cody Candidate' })).toBeEnabled();
   expect(screen.getAllByRole('combobox').length).toBeGreaterThan(0);
   expect(screen.getByRole('button', { name: /^Add \(/ })).toBeInTheDocument();
@@ -385,7 +381,7 @@ describe('AccessGrantModal — the 409 access_follows_parent is an inline refusa
 
     expect(await screen.findByText(`Granted access to 0 of 1. Cody Candidate: ${SERVER_SENTENCE}`)).toBeInTheDocument();
     expect(screen.queryByText('Write and Share required')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add contact' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Add person' })).toBeEnabled();
   });
 
   it('a refused suggestion Grant or Dismiss shows the sentence inline', async () => {

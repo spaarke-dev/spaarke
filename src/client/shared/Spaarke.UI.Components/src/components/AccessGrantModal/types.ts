@@ -4,13 +4,14 @@
  * Built for teams-app-r1 task 041 (design.md §5.1 / spec FR-11/FR-12). The modal
  * writes the ONE built table, `sprk_externalrecordaccess`, exclusively through the
  * BFF's already-built external-access endpoints (`/api/v1/external-access/grant`,
- * `/invite-and-grant`, `/revoke`) — it never writes to that table directly, and it
+ * `/invite`, `/revoke`) — it never writes to that table directly, and it
  * never re-implements the BFF's grant/invite core. The shared core has NO hard
  * dependency on `Xrm` or any Dataverse-entity-specific field names: the caller
  * (the `TrackingFieldTrio` PCF's `index.ts`, which alone knows the `sprk_project`
  * schema per FR-14's entity-agnostic discipline) supplies the candidate list,
- * existing-grants list, contact search, and internal/external contact
- * classification via callback props.
+ * existing-grants list, contact search and the person picker via callback
+ * props. Whether a contact is an internal colleague is decided by the server
+ * (task 193), never classified here.
  *
  * `AuthenticatedFetchFn` is imported from `@spaarke/auth` — already an existing
  * dependency of `@spaarke/ui-components` (see `services/EmailComposer`,
@@ -76,7 +77,7 @@ export interface IAccessGrantRecord {
    * `'share'` (task 065, FR-29) is an internal system-user POA share, read
    * from `GET /api/v1/external-access/user-shares` — NOT a
    * `sprk_externalrecordaccess` row, so it carries no `accessRecordId`; see
-   * {@link IAccessGrantModalProps.pickUser}. Task 066 (folded into 067 by
+   * {@link IAccessGrantModalProps.pickPerson}. Task 066 (folded into 067 by
    * owner round 59) adds no provenance of its own: a row the record's policy
    * cancels, or a No Access entry walls off, is marked from this value plus
    * the record's state (`noAccess.ts`). */
@@ -93,6 +94,14 @@ export interface IAccessGrantRecord {
    * until the server removes the share (the record's next save, or its 5-minute job). Still revocable here.
    */
   externalNoAccess?: boolean;
+  /**
+   * Unified-access-control-r2 task 193 G2/G3b: the other half of an "Add person" pair — `pairedWith` from the BFF. On a
+   * share row (`/user-shares`) it names the paired workforce-app GRANT (`kind: 'grant'`, its `accessRecordId`); on a grant
+   * row (`/record-grants`, mapped by the host) the SHARE it goes with (`kind: 'share'`, the user's `systemUserId`).
+   * Display only: Current Access shows the two together, and the revoke confirmations say what each removes (removing
+   * the share ends both; removing the grant alone keeps the share). Absent on any other row.
+   */
+  pairedWith?: { id: string; kind: 'grant' | 'share' };
 }
 
 /**
@@ -168,7 +177,7 @@ export interface IOrganizationPick {
  * (already `cleanGuid`-normalized by the navigation adapter). Sent to the BFF
  * as `systemUserId` on `POST /api/v1/external-access/share-user`. The shared
  * modal never reads `systemuser` itself — the host supplies this via the
- * injected {@link IAccessGrantModalProps.pickUser} callback, mirroring
+ * injected {@link IAccessGrantModalProps.pickPerson} callback, mirroring
  * {@link IOrganizationPick} / {@link pickOrganization} (ADR-012). */
 export interface IUserPick {
   id: string;
@@ -178,12 +187,20 @@ export interface IUserPick {
   email?: string;
 }
 
-/** What the modal asks of the "+ User" lookup (task 114). */
-export interface IUserPickOptions {
+/** What the modal asks of the "Add person" lookup (task 193; task 114's user filter). */
+export interface IPersonPickOptions {
+  /** Offer contacts as well as users. `false` on a Restricted record, which admits no contact-based access (task 138):
+   * the lookup then offers users only. */
+  includeContacts: boolean;
   /** Leave out users flagged external (`sprk_isexternal = true`): set on a Restricted record, where they cannot
    * receive a share (owner round 67). Blank counts as internal. */
-  excludeExternal?: boolean;
+  excludeExternal: boolean;
 }
+
+/** The one "Add person" pick (task 193, #2338): a Contact or a system user. The modal never classifies a contact: a
+ * picked contact goes to `/grant`, and the server decides whether that contact represents a colleague (then it shares
+ * with that user) or not (then it grants the contact). A picked user goes to `/share-user`. */
+export type IPersonPick = { kind: 'contact'; contact: IContactSearchResult } | { kind: 'user'; user: IUserPick };
 
 /** The secure-project owner + business-unit alignment read-only display (task
  * 065, design.md §6). Per design §5.1a a secure record is owned by an OWNER
@@ -218,9 +235,9 @@ export type ExternalGrantRootType = 'project' | 'matter' | 'workassignment';
  * The owner's model (unified-access-control-r2 task 138, round 2 item 3,
  * binding) — the server enforces exactly this at read AND write time:
  * - `'restricted'` — no contact-based access at all; internal users are
- *   unaffected. The modal does not offer "+ Contact", "+ Organization" or the
- *   role-based candidates; "+ User" (an internal share), its level dropdown,
- *   Add and Revoke stay available.
+ *   unaffected. The modal does not offer contacts ("Add person" looks up
+ *   users only), "+ Organization" or the role-based candidates; a user share,
+ *   its level dropdown, Add and Revoke stay available.
  * - `'limited'` — contacts get access ONLY through named, direct grants:
  *   organization-wide grants, standing-grant membership and organization
  *   expansion confer nothing. The modal does not offer "+ Organization".
@@ -259,7 +276,7 @@ export interface IAccessGrantModalProps {
    * id). Sent to the BFF as `recordId`. */
   recordId: string;
   /** The polymorphic root type this grant is held at (task 070/071). The modal
-   * sends `{recordType, recordId}` in every grant/invite-and-grant body so the
+   * sends `{recordType, recordId}` in every grant and invite body so the
    * BFF binds the correct typed root lookup. Defaults to `'project'` — the
    * pre-071 baseline — so a caller that has not yet wired the host entity keeps
    * writing project grants unchanged (the BFF also accepts the legacy `projectId`
@@ -291,8 +308,8 @@ export interface IAccessGrantModalProps {
    * the server's fail direction. */
   canGrantAccess?: boolean;
   /** Host-supplied `authenticatedFetch` (ADR-028 function-dependency contract
-   * — never a raw token). Used for the three built BFF calls: `/grant`,
-   * `/invite-and-grant`, `/revoke`. */
+   * — never a raw token). Used for every BFF call the modal makes (`/grant`, `/invite`, `/revoke`, `/share-user`,
+   * `/unshare-user`, `/set-record-share-expiry` and its reads). */
   authenticatedFetch: AuthenticatedFetchFn;
   /** Loads the record's membership candidates (task 021 role-allowlist
    * source). Called once when the modal opens. */
@@ -318,10 +335,9 @@ export interface IAccessGrantModalProps {
   fetchStandingContacts?: () => Promise<IAccessGrantRecord[]>;
   /** Searches Dataverse Contacts by free-text query (named-contact picker).
    * Debounced by the modal; the host implements the actual Contact query
-   * (Xrm.WebApi, host-context). Used ONLY as the fallback inline picker when
-   * {@link pickContact} is not supplied (e.g. an SPA host with no side-pane
-   * lookup); when `pickContact` is provided the modal uses the side-pane
-   * Advanced Lookup instead and this is not called. */
+   * (Xrm.WebApi, host-context). Kept in the props contract, but the modal does
+   * not call it: people are added only through {@link pickPerson} (there is no
+   * inline contact picker). */
   searchContacts: (query: string) => Promise<IContactSearchResult[]>;
   /** Searches `sprk_organization` firms/orgs by free-text query for the in-app
    * "Add organization" inline picker (task 073 UAT #4). Host implements the
@@ -329,45 +345,29 @@ export interface IAccessGrantModalProps {
    * When supplied, section 2 shows an inline org `LookupField` that stacks
    * inside the modal (no side-pane, no modal-hide). Omit → no org picker. */
   searchOrganizations?: (query: string) => Promise<ILookupItem[]>;
-  /** Opens the host's NATIVE Dataverse advanced-lookup side pane for a single
-   * Contact (task 073 UAT v1.0.24 — `Xrm.Utility.lookupObjects`), returning the
-   * pick (or `null` on cancel). This is the PRIMARY "+ Contact" mechanism — same
-   * advanced-find surface the wizards use (search/views/filters/recent). Works
-   * because the modal renders `nonBlocking` (no backdrop covering the lookup
-   * pane). When supplied, the "+ Contact" button opens this; {@link searchContacts}
-   * is only the fallback for hosts (e.g. an SPA) that can't open the native pane.
-   * (Earlier v1.0.23 deprecated this in favor of an in-modal box; v1.0.24
-   * restored it per owner UAT — the native lookup is preferred.) */
-  pickContact?: () => Promise<IContactSearchResult | null>;
+  /** The ONE "Add person" entry (task 193, #2338; it replaced task 073's "+ Contact" and task 065's "+ User"). Opens
+   * the host's NATIVE Dataverse advanced-lookup side pane (`Xrm.Utility.lookupObjects`) over Contact and system user
+   * together, returning the pick (or `null` on cancel). Works because the modal renders `nonBlocking` (no backdrop
+   * covering the lookup pane). The pick is staged into the "Add Access Permissions" list (its own per-row access-level
+   * dropdown); `Add (N)` commits a contact via `POST /api/v1/external-access/grant` (the server decides between a
+   * share and a grant) and a user via `POST /api/v1/external-access/share-user` (an internal Dataverse POA share).
+   * On a Restricted record the modal asks for users only, and none flagged external ({@link IPersonPickOptions}).
+   * Omit → the "Add person" button is hidden, and no person can be added (there is no inline fallback;
+   * {@link searchContacts} is not called). */
+  pickPerson?: (options: IPersonPickOptions) => Promise<IPersonPick | null>;
   /** Opens the host's NATIVE advanced-lookup side pane for a single
    * `sprk_organization` (task 073 UAT v1.0.24) — the PRIMARY "+ Organization"
-   * mechanism, mirroring {@link pickContact}. Omit → the "+ Organization" button
+   * mechanism, mirroring {@link pickPerson}. Omit → the "+ Organization" button
    * is hidden. */
   pickOrganization?: () => Promise<IOrganizationPick | null>;
-  /** Opens the host's NATIVE advanced-lookup side pane for a single
-   * `systemuser` (task 065, FR-29) — the PRIMARY "+ User" mechanism, mirroring
-   * {@link pickContact} / {@link pickOrganization}. The picked user is staged
-   * into the SAME "Add Access Permissions" list (its own per-row access-level
-   * dropdown) and committed by `Add (N)` via `POST
-   * /api/v1/external-access/share-user` — an internal Dataverse POA share, NOT
-   * a `sprk_externalrecordaccess` row (distinct write path from
-   * pickContact/pickOrganization's `/grant` | `/invite-and-grant`). Omit → the
-   * "+ User" button is hidden. */
-  pickUser?: (options?: IUserPickOptions) => Promise<IUserPick | null>;
   /** Opens the Contact record (task 073 UAT v1.0.24 #6) — wired by the host to
    * `Xrm.Navigation.navigateTo` (entityrecord, modal target) so a user with write
    * access to the Contact can view/edit it. When supplied, each contact name in
    * the Available + Current Access lists renders as a link. Omit → names render
    * as plain text. */
   onOpenContact?: (contactId: string) => void;
-  /** Classifies a contact as internal-workforce (has a linked `systemuser`)
-   * vs external. Drives the write route: an external contact with a known
-   * email is granted via the built `/invite-and-grant` (onboard + grant + CIAM
-   * email, atomic); an internal contact is granted via the built `/grant`
-   * only (no CIAM onboarding is appropriate for an internal workforce
-   * person). The server then notifies the internal user in-app (task 181) —
-   * see the modal's own doc comment. */
-  isInternalContact: (contactId: string) => Promise<boolean>;
+  // `isInternalContact` was REMOVED by task 193 (#2338): the modal no longer classifies a contact. Every contact goes to
+  // `/grant`, and the server decides (it shares with the colleague a contact represents, or grants the contact).
   // `onSetStandingGrant` was REMOVED by task 138: the modal has had no
   // standing-grant control since task 073 UAT v1.0.24 #5 (the standing grant is
   // set on the Contact record itself), so the prop was dead wiring.
@@ -384,8 +384,8 @@ export interface IAccessGrantModalProps {
   defaultAccessLevel?: number;
   /** The record's current Access-Permission sharing-gate state (spec FR-14,
    * Option A — task 043; made real by task 138). Governs which grantee kinds
-   * the modal offers: `'restricted'` hides "+ Contact", "+ Organization" and
-   * the candidates (keeping "+ User"); `'limited'` hides "+ Organization";
+   * the modal offers: `'restricted'` hides "+ Organization" and the candidates,
+   * and "Add person" offers users only; `'limited'` hides "+ Organization";
    * `'standard'` (default, when omitted) offers everything. See
    * {@link AccessPermissionState} for the full mapping. */
   accessPermissionState?: AccessPermissionState;

@@ -1,10 +1,14 @@
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Api.Finance;
 
@@ -16,18 +20,15 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Mechanism (D-76).</b> A Dataverse TABLE privilege the CALLER holds, asked of Dataverse as the caller
 /// (<see cref="FinanceAuthorizationCheck.CallerPrivilege"/>, fail closed) by the route's <c>AddFinanceAuthorizationFilter</c>. No
 /// security-role name, no <c>SystemAdmin</c> app role.</para>
-/// <para><b>The marker is Write on <c>sprk_ruleset</c>.</b> The policy tables are shared with the Ontology platform and its
-/// Administrator role holds every privilege on them, so privileges on <c>sprk_policy</c> / <c>sprk_policyversion</c> alone would make
-/// every Ontology Administrator a billing admin (over-granting). <c>sprk_ruleset</c> is billing's own table: the only solution role
-/// with any privilege on it is "Spaarke Billing Administrator" (task 120; D-185: only billing roles read rule sets, so Core and Basic
-/// User hold nothing on it; pinned by <c>RuleSetRolePrivilegeGuardTests</c>), so Create / Write on it names exactly the people given
-/// billing rule administration, and every route requires it. A route that writes policy rows ALSO requires the privilege of the table
-/// it writes, so Dataverse's own rights are never bypassed by the application-identity write that follows. Reads of the proposals
-/// (clause text, rule bodies) are admin-only too, so they require the same Write marker, not Read.</para>
-/// <para><b>Depth (D-108, owner 2026-10-17).</b> Write at ANY depth counts: there is no Org-depth requirement. The check asks whether the
-/// caller holds the privilege, not at what depth. The "Spaarke Billing Administrator" role (task 120) holds the Create / Write markers
-/// at Basic on purpose (uac-r2): the writes run app-only through <see cref="RuleSetService"/>, so a deeper native Write would only let
-/// a billing admin edit rule sets and policies past its invariants. Read is Deep (owner EB-D-162, 2026-10-27; it was Global): the BFF reads these tables app-only, so no route depends on it.</para>
+/// <para><b>The marker is Write on <c>sprk_ruleset</c>.</b> The policy tables are shared with the Ontology platform, so privileges on
+/// <c>sprk_policy</c> / <c>sprk_policyversion</c> alone would not single out billing rule administration. <c>sprk_ruleset</c> is
+/// billing's own table (task 120, D-185; its role grants are pinned by <c>RuleSetRolePrivilegeGuardTests</c>), so Create / Write on it
+/// is the billing-administration marker, and every route requires it. A route that writes policy rows ALSO requires the privilege of
+/// the table it writes, so Dataverse's own rights are never bypassed by the application-identity write that follows. Reads of the
+/// proposals (clause text, rule bodies) are admin-only too, so they require the same Write marker, not Read.</para>
+/// <para><b>Depth (D-108, owner 2026-10-17).</b> Write at ANY depth counts: the check asks whether the caller holds the privilege, not at
+/// what depth. Role depths are set by the provisioning scripts under the recorded owner decisions (D-108, EB-D-162), not here. The writes
+/// run app-only through <see cref="RuleSetService"/>, which enforces the rule-set invariants; no route depends on native depth.</para>
 /// <para>Privilege names are the live ones (spaarkedev1 <c>privilege</c> table, 2026-10-17): <c>sprk_ruleset</c> is lower case;
 /// <c>sprk_Policy</c> and <c>sprk_PolicyVersion</c> are not (as <c>OntologyAdminAuthoringService.AuthoringPrivilegeName</c>).</para>
 /// </remarks>
@@ -49,7 +50,7 @@ public static class BillingAdminAuthorization
     public static FinanceAuthorizationTargets Admin() =>
         FinanceAuthorizationTargets.Authorize(Check(WriteRuleSetPrivilege, "sprk_rulesets"));
 
-    /// <summary>Create a rule set (and its source document).</summary>
+    /// <summary>Create a rule set (089's record-scoped sets; task 116 retired the upload route that also declared it).</summary>
     public static FinanceAuthorizationTargets CreateRuleSet() =>
         FinanceAuthorizationTargets.Authorize(
             Check(CreateRuleSetPrivilege, "sprk_rulesets"),
@@ -69,8 +70,8 @@ public static class BillingAdminAuthorization
             Check(WritePolicyVersionPrivilege, "sprk_policyversions"));
 
     /// <summary>
-    /// Start the rule drafting job (task 075): the job creates policies and versions (as the application) and writes the rule set's
-    /// not-converted list, so the caller must hold Create on both policy tables and Write on the rule set marker.
+    /// Start the rule drafting job (task 075; per Procedure Version since task 116, through <see cref="DraftProcedureVersion"/>): the job
+    /// creates policies and versions (as the application), so the caller must hold Create on both policy tables and Write on the rule set marker.
     /// </summary>
     public static FinanceAuthorizationTargets DraftRules() =>
         FinanceAuthorizationTargets.Authorize(
@@ -123,6 +124,114 @@ public static class BillingAdminAuthorization
     public static FinanceAuthorizationTargets CreateProcedureVersion(EndpointFilterInvocationContext context) =>
         OnProcedure(context, Check(CreatePolicyVersionPrivilege, "sprk_policyversions"));
 
+    /// <summary>
+    /// A new version of a RATE CARD Procedure also copies the previous version's card and rates forward (085, as the application), so the caller
+    /// must hold Create on <c>sprk_ratecard</c> and <c>sprk_ratecardrate</c> as well. Only a Rate card Procedure needs them: a Guideline
+    /// Procedure's copy-forward creates no card. <see cref="CreateProcedureVersion"/> is a synchronous declaration and cannot read the
+    /// Procedure's type, so this filter reads it (app-only), records the type it checked in <see cref="HttpContext.Items"/>
+    /// (<see cref="CheckedProcedureTypeItem"/>; the service refuses 409 <c>procedure.type_changed</c> if the type read there is a Rate card and
+    /// the check covered another) and asks the same table-privilege question as the declaration does
+    /// (<see cref="CallerRecordAccessProbe.CallerPrivilegeAnswerAsync"/>, as the caller). Added AFTER the route's <c>AddFinanceAuthorizationFilter</c>
+    /// and <c>RequireEbillingEnabled</c>; refuses before the service writes anything. Missing privilege is 403
+    /// <c>insufficient_privilege</c>; a fault, an unanswered question or an unreadable Procedure is 403 <c>system_failure</c> (fail closed). An
+    /// unknown Procedure is passed on (the route's Record check has already answered, and the service answers 404).
+    /// </summary>
+    /// <remarks>§11: <i>Existing</i> — <see cref="CreateProcedureVersion"/>. <i>Extension</i> — the privilege-check shape cannot be conditional
+    /// on the Procedure's type, which is a stored value; the question asked is the same one. <i>Cost of doing nothing</i> — a billing admin
+    /// without Create on the rate card tables would create cards through the version copy.</remarks>
+    public static TBuilder RequireRateCardCreateOnARateCardProcedure<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
+        {
+            var http = context.HttpContext;
+            var services = http.RequestServices;
+            if (!http.Request.RouteValues.TryGetValue(ProcedureRouteKey, out var raw) || !Guid.TryParse(raw?.ToString(), out var procedureId))
+            {
+                return await next(context); // the route constraint guarantees a guid
+            }
+
+            ProcedureType checkedType;
+            try
+            {
+                var rows = await services.GetRequiredService<IGenericEntityService>().RetrieveMultipleAsync(new QueryExpression(ProcedureEntity.Entity)
+                {
+                    ColumnSet = new ColumnSet(ProcedureEntity.TypeColumn),
+                    Criteria = { Conditions = { new ConditionExpression(ProcedureEntity.Entity + "id", ConditionOperator.Equal, procedureId) } },
+                    TopCount = 1,
+                }, http.RequestAborted);
+                // A Procedure with no stored type (or none found) is checked as a Guideline: it creates no cards. The service re-reads the
+                // type and refuses 409 if it reads as a Rate card by then.
+                checkedType = rows.Entities.FirstOrDefault()?.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value is { } stored
+                    && Enum.IsDefined(typeof(ProcedureType), stored)
+                    ? (ProcedureType)stored
+                    : ProcedureType.Guideline;
+            }
+            catch (Exception ex)
+            {
+                services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                    "Procedure {ProcedureId}: its type could not be read for the rate card privilege check; denying (fail closed)", procedureId);
+                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            }
+
+            if (checkedType != ProcedureType.RateCard)
+            {
+                http.Items[CheckedProcedureTypeItem] = checkedType;
+                return await next(context);
+            }
+
+            var probe = services.GetService<CallerRecordAccessProbe>();
+            var token = TokenHelper.ExtractBearerTokenOrNull(http);
+            foreach (var privilege in new[] { RateCardImportEndpoints.CreateRateCardPrivilege, RateCardImportEndpoints.CreateRatePrivilege })
+            {
+                CallerPrivilegeAnswer answer;
+                try
+                {
+                    answer = probe is null ? CallerPrivilegeAnswer.Faulted : await probe.CallerPrivilegeAnswerAsync(token, privilege, http.RequestAborted);
+                }
+                catch (Exception ex) when (!http.RequestAborted.IsCancellationRequested)
+                {
+                    services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
+                        "Procedure {ProcedureId}: the rate card privilege {Privilege} could not be checked; denying (fail closed)", procedureId, privilege);
+                    answer = CallerPrivilegeAnswer.Faulted;
+                }
+
+                if (answer == CallerPrivilegeAnswer.Held)
+                {
+                    continue;
+                }
+
+                return ProblemDetailsHelper.Forbidden(
+                    answer == CallerPrivilegeAnswer.NotHeld
+                        ? FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode
+                        : FinanceAuthorizationFilter.SystemFailureReasonCode,
+                    traceId: http.TraceIdentifier);
+            }
+
+            http.Items[CheckedProcedureTypeItem] = checkedType;
+            return await next(context);
+        });
+
+    /// <summary>
+    /// The <see cref="HttpContext.Items"/> key under which <see cref="RequireRateCardCreateOnARateCardProcedure"/> records the Procedure type
+    /// it checked. The version-create handler hands it to the service, which refuses 409 if the Procedure reads as a Rate card by then.
+    /// </summary>
+    internal const string CheckedProcedureTypeItem = "procedure.checkedType";
+
+    /// <summary>
+    /// Start drafting a Procedure Version's rules (task 116, model 5.3): <see cref="DraftRules"/> (the billing-admin marker plus Create on both
+    /// policy tables) AND the caller's own Write on the route's Procedure. An unreadable route id yields no check, which the filter denies.
+    /// Fix round 4 (EB-D-216): no Delete check (round 2's is gone): a redraft deactivates the drafts it supersedes, never deletes them.
+    /// Fix round 5 (EB-D-216a): the redraft takes the drafts it supersedes out of review, so the caller also holds what a reject of them needs:
+    /// <see cref="DecideRule"/>'s privileges here, then, in the handler, Read on the version's rule set and Write on its Procedure (the reject
+    /// route's <c>RequireAccessToTheRuleSet</c> and <see cref="RequireWriteOnTheRuleSetsProcedure"/>, asked through the same calls).
+    /// </summary>
+    public static FinanceAuthorizationTargets DraftProcedureVersion(EndpointFilterInvocationContext context)
+    {
+        var record = FinanceAuthorizationTargets.FromRoute(context, ProcedureRouteKey, ProcedureEntitySet, "write");
+        return record.Checks.Count == 0
+            ? record // no id, no check: the filter denies
+            : FinanceAuthorizationTargets.Authorize(record.Checks.Concat(DraftRules().Checks).Concat(DecideRule().Checks).Distinct().ToArray());
+    }
+
     /// <summary>Publish a version: as <see cref="WriteProcedure"/>, plus Write on both policy tables (it puts policy versions in force).</summary>
     public static FinanceAuthorizationTargets PublishProcedureVersion(EndpointFilterInvocationContext context) =>
         OnProcedure(context, Check(WritePolicyVersionPrivilege, "sprk_policyversions"), Check(WritePolicyPrivilege, "sprk_policies"));
@@ -168,44 +277,57 @@ public static class BillingAdminAuthorization
                 return await next(context); // the route constraint guarantees a guid; the service answers anything else
             }
 
-            Guid? procedureId;
-            try
-            {
-                procedureId = await services.GetRequiredService<RuleSetService>().ProcedureOfRuleSetAsync(ruleSetId, http.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                services.GetService<ILogger<FinanceAuthorizationFilter>>()?.LogError(ex,
-                    "Rule set {RuleSetId}: its Procedure could not be read for the Procedure {Operation} check; denying (fail closed)", ruleSetId, operation);
-                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
-            }
-
-            if (procedureId is not { } id || id == Guid.Empty)
-            {
-                return await next(context);
-            }
-
-            // The caller's own rights on the Procedure, asked of Dataverse as the caller (the Procedure routes' check). Denied only when Dataverse
-            // answered and the right is not held; no answer (a fault, a throttle, no identity) is system_failure, never insufficient_rights.
-            var caller = new InvoiceContextService.InvoiceCaller(
-                CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
             var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
-            var outcome = await CallerReadCheck.CheckAsync(
-                services.GetRequiredService<AuthorizationService>(), caller, ProcedureEntitySet, operation, id, logger,
-                $"Rule set {ruleSetId}: caller {operation} on its Procedure", http.RequestAborted);
-            if (outcome == CallerReadOutcome.Readable)
-            {
-                return await next(context);
-            }
-
-            // uac-r2 re-check round 3 (F1): the detail names the right, so the user sees what is missing; a no-answer carries the generic detail.
-            return outcome == CallerReadOutcome.Refused
-                ? ProblemDetailsHelper.Forbidden(
-                    FinanceAuthorizationFilter.InsufficientRightsReasonCode,
-                    detail: $"You need {(operation == "write" ? "Write" : "Read")} on this rule set's Procedure.",
-                    traceId: http.TraceIdentifier)
-                : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            return await CallerRightsOnTheRuleSetsProcedureRefusalAsync(
+                    http, ruleSetId, operation, services.GetRequiredService<RuleSetService>(), services.GetRequiredService<AuthorizationService>(), logger,
+                    http.RequestAborted)
+                ?? await next(context);
         };
+
+    /// <summary>
+    /// The body of <see cref="RequireWriteOnTheRuleSetsProcedure"/> and <see cref="RequireReadOnTheRuleSetsProcedure"/> for a rule set id the caller
+    /// already has (task 116 fix round 5, EB-D-216a: the Procedure Version drafting route asks it for the version's rule set, which is not a route
+    /// value there). Null: go on (the right is held, or the set has no Procedure). Otherwise the filter's own 403.
+    /// </summary>
+    internal static async Task<IResult?> CallerRightsOnTheRuleSetsProcedureRefusalAsync(
+        HttpContext http, Guid ruleSetId, string operation, RuleSetService ruleSets, AuthorizationService authorization, ILogger logger, CancellationToken ct)
+    {
+        Guid? procedureId;
+        try
+        {
+            procedureId = await ruleSets.ProcedureOfRuleSetAsync(ruleSetId, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Rule set {RuleSetId}: its Procedure could not be read for the Procedure {Operation} check; denying (fail closed)", ruleSetId, operation);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        if (procedureId is not { } id || id == Guid.Empty)
+        {
+            return null;
+        }
+
+        // The caller's own rights on the Procedure, asked of Dataverse as the caller (the Procedure routes' check). Denied only when Dataverse
+        // answered and the right is not held; no answer (a fault, a throttle, no identity) is system_failure, never insufficient_rights.
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+        var outcome = await CallerReadCheck.CheckAsync(
+            authorization, caller, ProcedureEntitySet, operation, id, logger, $"Rule set {ruleSetId}: caller {operation} on its Procedure", ct);
+        if (outcome == CallerReadOutcome.Readable)
+        {
+            return null;
+        }
+
+        // uac-r2 re-check round 3 (F1): the detail names the right, so the user sees what is missing; a no-answer carries the generic detail.
+        return outcome == CallerReadOutcome.Refused
+            ? ProblemDetailsHelper.Forbidden(
+                FinanceAuthorizationFilter.InsufficientRightsReasonCode,
+                detail: $"You need {(operation == "write" ? "Write" : "Read")} on this rule set's Procedure.",
+                traceId: http.TraceIdentifier)
+            : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+    }
 
     private const string RuleSetRouteKey = "ruleSetId";
 

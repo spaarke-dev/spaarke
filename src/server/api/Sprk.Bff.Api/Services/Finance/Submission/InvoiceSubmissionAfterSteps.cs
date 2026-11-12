@@ -331,7 +331,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return done;
         }
 
-        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId)
+        if (submission.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.SubmissionInvoice)?.Id != invoiceId
+            || !InvoiceBlockedHold.IsOwnSubmission(invoiceId, submissionId))
         {
             _logger.LogWarning("Invoice submission {SubmissionId}: it does not link invoice {InvoiceId}; no after-commit step ran", submissionId, invoiceId);
             return Stop(SubmissionAfterStepsStatus.Refused, submissionId, invoiceId, InvoiceLinkMismatchCode);
@@ -759,8 +760,10 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         (await ReadOpenSignalSetWithSubjectsAsync(entities, time, invoiceId, logger, ct).ConfigureAwait(false)).Set;
 
     /// <summary><see cref="ReadOpenSignalSetAsync"/> with the distinct subjects (the invoice and the lines) its Signals are on, which a
-    /// human decision's caller must be able to Write (105, FR-51).</summary>
-    internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects)> ReadOpenSignalSetWithSubjectsAsync(
+    /// human decision's caller must be able to Write (105, FR-51). <c>Open</c> is each Signal with its own subject (task 114b: an Override
+    /// leaves open a Signal whose hold still stands, which needs the Signal's own subject).</summary>
+    internal static async Task<(ResolvedSignalSet Set, IReadOnlyList<(string Entity, Guid Id)> Subjects,
+        IReadOnlyList<(ResolvedSignal Signal, string SubjectEntity, Guid SubjectId)> Open)> ReadOpenSignalSetWithSubjectsAsync(
         IGenericEntityService entities, TimeProvider time, Guid invoiceId, ILogger logger, CancellationToken ct)
     {
         var setReadAt = time.GetUtcNow().UtcDateTime;
@@ -776,7 +779,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         // Ordered by id so the record's hash is stable.
         return (
             new ResolvedSignalSet(setReadAt, open.Select(s => s.Signal).DistinctBy(s => s.Id).OrderBy(s => s.Id).ToList()),
-            open.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList());
+            open.Select(s => (s.SubjectEntity, s.SubjectId)).Distinct().ToList(),
+            open);
     }
 
     /// <summary>
@@ -1286,7 +1290,8 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     // ── System Signals (D-123, D-125) ──
 
     /// <summary>
-    /// The system findings (D-91 mismatch, refused codes, firm-code mismatches, code set needs review, no code set, coding unavailable) as
+    /// The system findings (D-91 mismatch, refused codes, firm-code mismatches, code set needs review, no code set, coding unavailable, and
+    /// task 095c-3's firm missing) as
     /// Signal requests under <c>BILL-SYSTEM-SUBMISSION</c>: read app-only, once per run, and only when there is a system finding. Missing,
     /// ambiguous, disabled, of another rule type, or with no Active version in force on the received date: no system Signal, one Warning
     /// (the policy code only), and the findings stay in the findings JSON. Disabled is the administrator's choice (D-125) and stays a
@@ -1375,6 +1380,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return (null, "without_a_version_in_force");
         }
 
+        // all versions: the system policy belongs to no rule set (D-125), so it has no billing drafts and a redraft never deactivates its versions.
         var versionQuery = new QueryExpression(BillingFactLoader.VersionEntity)
         {
             ColumnSet = new ColumnSet("sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",
@@ -1476,6 +1482,13 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                 ["sentence"] = RecordSentence(p),
             }).ToList(),
         };
+        if (stored.ProcedureSnapshot is { } basis)
+        {
+            // 082d (model 7.4, ontology O2): a bounded summary and the pointer to the submission's snapshot, never the basis. Only a row that stores
+            // a snapshot gets it, so a record rebuilt for a row stored before 082d keeps its facts, and its hash, unchanged.
+            facts[ProcedureSnapshot.DecisionRecordFact] = ProcedureSnapshot.DecisionRecordSummary(basis, submissionId);
+        }
+
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["submissionId"] = submissionId.ToString("D"),
@@ -1543,6 +1556,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
     /// <summary>One stored billing finding (the fields the record needs).</summary>
     internal sealed record StoredFinding(string ReasonCode, Guid PolicyVersionId);
 
+    /// <summary>Task 114: one stored Procedure hold (082c-2), as its pipeline finding carries it: reader members only, never an id.
+    /// <paramref name="Code"/> is a gap or an unresolved reason; the gap carries the name, the first gapped work date and the kind, the
+    /// unresolved one its cause.</summary>
+    internal sealed record StoredProcedureHold(string Code, string? ProcedureName, string? WorkDate, string? GapKind, string? Cause);
+
     /// <summary>
     /// <c>sprk_findingsjson</c> (<see cref="InvoiceSubmissionPersister.BuildFindingsJson"/>) read back: the kind, the decision, the
     /// findings the record needs, the Signal plan, and the pipeline and coding findings the system Signals are mapped from.
@@ -1568,6 +1586,11 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         public IReadOnlyList<int> DecidingIndexes { get; init; } = [];
         public IReadOnlyDictionary<int, StoredFinding> Findings { get; init; } = new Dictionary<int, StoredFinding>();
         public IReadOnlyList<StoredPlanEntry> Plan { get; init; } = [];
+
+        /// <summary>082d: the stored Procedure basis (<see cref="global::Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Read(JsonObject)"/>);
+        /// null on a row stored before it, or a damaged one.</summary>
+        public StoredProcedureSnapshot? ProcedureSnapshot { get; init; }
+
         private JsonArray PipelineFindings { get; init; } = [];
         private JsonArray CodingFindings { get; init; } = [];
         private JsonObject? CodeSet { get; init; }
@@ -1576,9 +1599,37 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
         /// <summary>True when any stored finding maps to a SubmissionIntegrity Signal.</summary>
         public bool HasSystemFindings =>
             PipelineFindings.OfType<JsonObject>().Any(p => Text(p, "reasonCode") is SubmissionReasonCodes.InvoiceNumberMismatch
-                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold)
+                or SubmissionReasonCodes.CodingNoCodeSetHold or SubmissionReasonCodes.CodingUnavailableHold or SubmissionReasonCodes.FirmMissing
+                or SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved)
             || CodingFindings.Count > 0
             || CodeSet?["needsReview"]?.GetValue<bool>() == true;
+
+        /// <summary>
+        /// Task 114: the stored Procedure holds (<see cref="SubmissionReasonCodes.ProcedureGap"/>, <see cref="SubmissionReasonCodes.ProceduresUnresolved"/>)
+        /// the pipeline findings name, in stored order: the reader members the 082c-2 writer stored (the Procedure's name, the first gapped work
+        /// date, the kind or the cause; never an id). A value that is not there reads as null. The Override release records them.
+        /// </summary>
+        internal IReadOnlyList<StoredProcedureHold> ProcedureHolds()
+        {
+            var holds = new List<StoredProcedureHold>();
+            foreach (var pipeline in PipelineFindings.OfType<JsonObject>())
+            {
+                if (Text(pipeline, "reasonCode") is not ({ } code and (SubmissionReasonCodes.ProcedureGap or SubmissionReasonCodes.ProceduresUnresolved)))
+                {
+                    continue;
+                }
+
+                var values = pipeline["values"] as JsonObject;
+                holds.Add(new StoredProcedureHold(
+                    code,
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureNameValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureWorkDateValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureGapKindValue),
+                    values is null ? null : Text(values, SubmissionReasonCodes.ProcedureCauseValue)));
+            }
+
+            return holds;
+        }
 
         /// <summary>The system findings under <paramref name="policy"/> (<see cref="BillingSystemFindings"/>). A value missing on one side of
         /// a comparison is not a finding and is left out.</summary>
@@ -1599,6 +1650,25 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                         break;
                     case SubmissionReasonCodes.CodingUnavailableHold:
                         findings.Add(BillingSystemFindings.CodingUnavailable(policy));
+                        break;
+                    case SubmissionReasonCodes.FirmMissing:
+                        // Task 095c-3 (ontology-r1 D-201): the invoice was submitted without a firm; held until a reviewer adds one.
+                        findings.Add(BillingSystemFindings.FirmMissing(policy));
+                        break;
+                    case SubmissionReasonCodes.ProcedureGap when pipeline["values"] is JsonObject gap
+                        && Text(gap, SubmissionReasonCodes.ProcedureNameValue) is { } procedureName && !string.IsNullOrWhiteSpace(procedureName)
+                        && DateOnly.TryParseExact(Text(gap, SubmissionReasonCodes.ProcedureWorkDateValue), "yyyy-MM-dd",
+                            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var workDate)
+                        && Enum.TryParse<ProcedureGapKind>(Text(gap, SubmissionReasonCodes.ProcedureGapKindValue), out var gapKind)
+                        && Enum.IsDefined(gapKind):
+                        // 082c-2 (brief C11; ontology-r1 D-205 item 6): joins the shared SubmissionIntegrity Signal of (policy, invoice).
+                        findings.Add(BillingSystemFindings.ProcedureGap(policy, procedureName, workDate, gapKind));
+                        break;
+                    case SubmissionReasonCodes.ProceduresUnresolved when pipeline["values"] is JsonObject unresolved
+                        && Text(unresolved, SubmissionReasonCodes.ProcedureCauseValue) is SubmissionReasonCodes.CauseChainUnreadable
+                            or SubmissionReasonCodes.CauseRowsInconsistent:
+                        // 082c-2 (brief C14, C15): the cause is one of the two closed codes; never a message.
+                        findings.Add(BillingSystemFindings.ProceduresUnresolved(policy, Text(unresolved, SubmissionReasonCodes.ProcedureCauseValue)!));
                         break;
                 }
             }
@@ -1688,6 +1758,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
                     CodingFindings = root["codingFindings"] as JsonArray ?? [],
                     CodeSet = root["codeSet"] as JsonObject,
                     InvoiceNumberReadConfidence = root["invoiceNumberReadConfidence"]?.GetValue<decimal>(),
+                    ProcedureSnapshot = global::Sprk.Bff.Api.Services.Finance.Submission.ProcedureSnapshot.Read(root),
                     ResolvedSet = root[ResolvedSetMember] switch
                     {
                         null => null,
