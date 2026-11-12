@@ -116,8 +116,26 @@ export interface VersionRef {
 }
 
 /**
- * One mark on a rule. The array is OPEN: `kind` is Excluded | Changed | Stale | BaseRetired today and task 084e adds Outranked, so a
+ * 084e: one rule that outranks another on the record (`OutrankingRuleView`). `source`: Procedure | Legacy. `level` and `distance` are its rank;
+ * `code` is the reader code.
+ */
+export interface OutrankingRule {
+  policyId: string;
+  policyVersionId: string;
+  code: string;
+  name: string | null;
+  versionNumber: number;
+  source: string;
+  procedureId: string | null;
+  level: string;
+  distance: number;
+}
+
+/**
+ * One mark on a rule. The array is OPEN: `kind` is Excluded | Changed | Stale | BaseRetired, and (task 084e) Outranked | CapOutranked, so a
  * reader renders a kind it does not know (neutral) rather than dropping it. Members a kind does not use are null.
+ * Outranked / CapOutranked carry `text` ("Outranked by X" / "Cap outranked by X"), `note` (when the rule can still run) and `by` (every
+ * outranking rule at the top rank). Neither claims the rule does not run: it stays in force.
  */
 export interface RuleMark {
   kind: string;
@@ -132,6 +150,9 @@ export interface RuleMark {
   currentBase?: VersionRef | null;
   baseCode?: string | null;
   baseParameterSummary?: string | null;
+  text?: string | null;
+  note?: string | null;
+  by?: OutrankingRule[] | null;
 }
 
 export interface RuleProcedure {
