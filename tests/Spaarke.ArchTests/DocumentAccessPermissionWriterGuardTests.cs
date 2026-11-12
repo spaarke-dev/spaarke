@@ -84,8 +84,6 @@ public class DocumentAccessPermissionWriterGuardTests
             "Task 175: work assignments and projects only (FollowParentsAsync throws for any other table)."),
         new Writer("src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs", "ApplyCoreAncestorStampsAsync",
             "Task 173: the communication being associated (CommunicationEntity)."),
-        new Writer("src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EmailDraftToolHandler.cs", "BuildCommunicationItem",
-            "Task 173: the payload of a communication draft."),
         new Writer("src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs", "AddRegardingWriteSet",
             "Task 173: the payload of an event create."),
         new Writer(Resolver, "StampAsync",

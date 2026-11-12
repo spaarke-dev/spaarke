@@ -353,7 +353,6 @@ internal sealed class EmailDraftToolHandler : IToolHandler
             // filed against an invoice would otherwise carry no matter stamp and be invisible to everyone
             // whose access comes from that matter.
             IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps = [];
-            int? inheritedAccessPermission = null;
             Guid? caller = null;
             if (args.RegardingTable is not null && args.RegardingRecordId is { } ancestorTargetId)
             {
@@ -404,8 +403,9 @@ internal sealed class EmailDraftToolHandler : IToolHandler
                 }
 
                 ancestorStamps = ancestors.Stamps;
-                // Task 173 (owner round 81): the Access Permission the draft takes from what it is filed under.
-                inheritedAccessPermission = ancestors.InheritedAccessPermission;
+                // Task 173 (owner round 81) / UAC-r2 191f R1: the Access Permission the draft takes from what it is filed
+                // under is NOT put in the item. A draft that has a filing parent is created by the server create below, whose
+                // step 10 stamps that level; a parentless one keeps the column's default (its own value).
             }
 
             // Task 146 r2 (S1 / G5): a draft FILED under a project, matter or work assignment — its regarding, or the
@@ -423,7 +423,7 @@ internal sealed class EmailDraftToolHandler : IToolHandler
 
             // Build the record ITEM server-side (Communication-service column contract).
             // DRAFT-ONLY: statuscode/statecode are pinned constants — never model-supplied.
-            var item = BuildCommunicationItem(args, context, ancestorStamps, sender, inheritedAccessPermission);
+            var item = BuildCommunicationItem(args, context, ancestorStamps, sender);
 
             // Reuse the task-009 write mapper: metadata-driven lookup navigation-property
             // resolution for the regarding association, OData-annotation smuggling blocked.
@@ -447,6 +447,10 @@ internal sealed class EmailDraftToolHandler : IToolHandler
                 // 2026-10-30): the service decides the owner and asks AppendTo over the item, so the stamped root takes part in
                 // both exactly as before, and its step 10 finds no stamp missing. The sender is a server-set lookup, as before.
                 // A refusal writes nothing; a fault propagates to the catch below. No fallback create (NFR-01).
+                // UAC-r2 191f R1: the item carries no access marker (BuildCommunicationItem). Step 10 of the server create sets
+                // the inherited Access Permission itself (and step 12 refreshes it after the create); with the markers
+                // field-locked, a marker in the caller's item would be refused by the as-the-caller field-security check
+                // (CallerWriteAuthorization.NoFieldSecuredColumnAsync) for every user, internal ones included.
                 var outcome = await _recordCreation.CreateAsync(
                     new Sprk.Bff.Api.Services.RecordCreation.RecordCreationRequest(
                         CommunicationTable, new Sprk.Bff.Api.Services.RecordCreation.RecordCreationPayload.Mapped(mapped.Item!))
@@ -1002,8 +1006,7 @@ internal sealed class EmailDraftToolHandler : IToolHandler
         EmailDraftArgs args,
         ChatInvocationContext context,
         IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps,
-        Guid? sender = null,
-        int? accessPermission = null)
+        Guid? sender = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -1064,12 +1067,8 @@ internal sealed class EmailDraftToolHandler : IToolHandler
                     writer.WriteEndObject();
                 }
 
-                // Task 173 (owner round 81): written only when the regarding gives one — a parentless draft keeps the
-                // column's default (its own value).
-                if (accessPermission is { } level)
-                {
-                    writer.WriteNumber("sprk_accesspermission", level);
-                }
+                // UAC-r2 191f R1: no access marker (sprk_accesspermission, sprk_isinternalonly) is written here. The
+                // markers are field-locked; the inherited Access Permission is the server create's step-10 stamp.
             }
 
             writer.WriteEndObject();
