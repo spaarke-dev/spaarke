@@ -1129,21 +1129,6 @@ public class DriveItemOperations
         _ => false,
     };
 
-    /// <summary>
-    /// Reads the SharePoint Embedded <c>quickXorHash</c> content identity for a persisted drive item
-    /// (app-only), via <c>GET /drives/{driveId}/items/{itemId}?$select=file</c> → <c>file.hashes.quickXorHash</c>.
-    /// This keeps the <c>Microsoft.Graph</c> hash facet inside the ADR-007 Infrastructure boundary — callers
-    /// (the content-dedup detector) receive only the hash string. FR-C3 content-dedup identity.
-    /// </summary>
-    /// <remarks>
-    /// <para><c>quickXorHash</c> is the SPE content identity; <c>sha256Hash</c> is DEPRECATED on SPE and MUST NOT
-    /// be used. <c>crc32</c>/<c>sha1</c> are consumer-OneDrive only.</para>
-    /// <para>Best-effort / non-fatal (NFR-04): returns null when the item is missing, the hash facet is not yet
-    /// populated (large/chunked uploads may lag), or any Graph call fails — the caller treats a null hash as
-    /// "no dedup, proceed". Never throws — except the ownership refusal (404, task 227d), which is raised before
-    /// the try. The content-dedup detector, which never throws (NFR-04), still reads that refusal as "no dedup"; it
-    /// is harmless there because the item it hashes was written through the same guard.</para>
-    /// </remarks>
     // ── Item-level permissions (uac-r2 task 191g) ─────────────────────────────────────────────────────────────────
     // Plumbing only (ADR-007; Task 083 Rule D): the drive and item arrive as parameters, the Graph client is the
     // ownership-guarded app-only client the caller already holds (SpeContainerMembershipService.ForOwnedContainerAsync),
@@ -1175,6 +1160,21 @@ public class DriveItemOperations
         GraphServiceClient graphClient, string driveId, string itemId, string permissionId, CancellationToken ct)
         => graphClient.Drives[driveId].Items[itemId].Permissions[permissionId].DeleteAsync(cancellationToken: ct);
 
+    /// <summary>
+    /// Reads the SharePoint Embedded <c>quickXorHash</c> content identity for a persisted drive item
+    /// (app-only), via <c>GET /drives/{driveId}/items/{itemId}?$select=file</c> → <c>file.hashes.quickXorHash</c>.
+    /// This keeps the <c>Microsoft.Graph</c> hash facet inside the ADR-007 Infrastructure boundary — callers
+    /// (the content-dedup detector) receive only the hash string. FR-C3 content-dedup identity.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>quickXorHash</c> is the SPE content identity; <c>sha256Hash</c> is DEPRECATED on SPE and MUST NOT
+    /// be used. <c>crc32</c>/<c>sha1</c> are consumer-OneDrive only.</para>
+    /// <para>Best-effort / non-fatal (NFR-04): returns null when the item is missing, the hash facet is not yet
+    /// populated (large/chunked uploads may lag), or any Graph call fails — the caller treats a null hash as
+    /// "no dedup, proceed". Never throws — except the ownership refusal (404, task 227d), which is raised before
+    /// the try. The content-dedup detector, which never throws (NFR-04), still reads that refusal as "no dedup"; it
+    /// is harmless there because the item it hashes was written through the same guard.</para>
+    /// </remarks>
     public async Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
     {
         // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
