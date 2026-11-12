@@ -1,8 +1,10 @@
 /**
  * RecordOpener - the one in-app way to open a single record's detail view from somewhere other than a grid row
- * (spaarke-SPA-external-access-platform-r3 task 055; FR-07 deep link, FR-08 notification bell).
+ * (spaarke-SPA-external-access-platform-r3 task 055; FR-07 deep link, FR-08 notification bell). Since R4 task 005 the
+ * view is the record template (`RecordTemplateModal`, the type's `getRecordTemplate` config); an entity with no template
+ * opens nothing (its caller is told the opening ended, through `onTerminal`).
  *
- * The grid opens `RecordDetailModal` itself, with the grid's loaded row ids for "1 of N" browsing (`GridWidgetBody`). A
+ * The grid opens the same modal itself, with the grid's loaded row ids for "1 of N" browsing (`GridWidgetBody`). A
  * notification or a link names ONE record, so this provider owns the same modal for that case: `openRecord(target)` shows it
  * for the record, and closing it returns focus to the control that opened it. It is the seam both the bell and the deep
  * link go through, so a record opens the same way (and is denied the same way) whichever surface asked.
@@ -13,7 +15,9 @@
  * ADR-021: renders no markup of its own beyond the modal; Fluent v9 tokens apply inside it.
  */
 import * as React from 'react';
-import { RecordDetailModal } from './RecordDetailModal';
+import { RecordTemplateModal } from '../record/RecordTemplateModal';
+import { getRecordTemplate } from '../record/recordTemplates';
+import type { RecordTemplateConfig } from '../record/recordTemplate.types';
 import type { RecordTarget } from './record-targets';
 
 export interface OpenRecordOptions {
@@ -38,8 +42,25 @@ export function useOpenRecord(): OpenRecord {
 
 const noopIndexChange = (): void => undefined;
 
-export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [target, setTarget] = React.useState<RecordTarget | null>(null);
+export interface RecordOpenerProviderProps {
+  children: React.ReactNode;
+  /**
+   * The host's in-app navigation (App.tsx hands the router's `navigate`), passed on to the record template for its
+   * "Submit invoice" action (R4 task 007, FR-10). Absent: that action is hidden. This file imports no router.
+   */
+  onNavigate?: (path: string) => void;
+}
+
+export const RecordOpenerProvider: React.FC<RecordOpenerProviderProps> = ({ children, onNavigate }) => {
+  // The last record shown, kept after the modal closes (#2658). A Fluent Dialog unmounted while open, or re-keyed while
+  // open, leaves the page aria-hidden for good. So the modal closes with `open={false}`, `seq` keys each opening and
+  // changes only while closed, and a record opened over an open one replaces it through props (the modal reads by id).
+  const [shown, setShown] = React.useState<{
+    target: RecordTarget;
+    config: RecordTemplateConfig;
+    open: boolean;
+    seq: number;
+  } | null>(null);
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
   const terminalRef = React.useRef<(() => void) | null>(null);
 
@@ -52,21 +73,29 @@ export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const openRecord = React.useCallback<OpenRecord>(
     (next, options) => {
+      const config = getRecordTemplate(next.entityName);
+      // A type with no record view opens nothing; the opening is over, so its caller is told at once.
+      if (!config) {
+        options?.onTerminal?.();
+        return;
+      }
       // A record that is replaced before it settled ends that opening: its caller is told (nothing is pending any more).
       fireTerminal();
       returnFocusRef.current = options?.returnFocusTo ?? null;
       terminalRef.current = options?.onTerminal ?? null;
-      setTarget(next);
+      setShown(prev =>
+        prev?.open ? { ...prev, target: next, config } : { target: next, config, open: true, seq: (prev?.seq ?? 0) + 1 }
+      );
     },
     [fireTerminal]
   );
 
   const handleClose = React.useCallback(() => {
     fireTerminal();
-    setTarget(null);
+    setShown(prev => (prev ? { ...prev, open: false } : prev));
     const el = returnFocusRef.current;
     returnFocusRef.current = null;
-    // After the modal has unmounted, so its own focus handling cannot take focus back.
+    // After the modal has closed, so its own focus handling cannot take focus back.
     if (el) {
       window.setTimeout(() => {
         if (el.isConnected) el.focus();
@@ -77,14 +106,15 @@ export const RecordOpenerProvider: React.FC<{ children: React.ReactNode }> = ({ 
   return (
     <RecordOpenerContext.Provider value={openRecord}>
       {children}
-      {target && (
-        <RecordDetailModal
-          key={`${target.entityName}:${target.recordId}`}
-          open
+      {shown && (
+        <RecordTemplateModal
+          key={shown.seq}
+          open={shown.open}
           onClose={handleClose}
           onSettled={fireTerminal}
-          entityName={target.entityName}
-          recordIds={[target.recordId]}
+          onNavigate={onNavigate}
+          config={shown.config}
+          recordIds={[shown.target.recordId]}
           index={0}
           onIndexChange={noopIndexChange}
         />

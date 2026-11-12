@@ -4,7 +4,7 @@
     <title>CreateInvoiceWizard rewired to the internal entry point</title>
     <phase>2 Submission and extraction (WP2)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Replaces a client-side create with the shared submission component and server routes; the override decision is server-enforced (105).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -127,7 +127,9 @@
     <criterion testable="true">Shared library tests exit 0; the code page builds; no new npm package.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-19, D-19, D-24, ADR-002. Deployment of the code page (scripts/Deploy-WizardCodePages.ps1, web resource sprk_createinvoicewizard) is task 112's. Test deletion: follow docs/adr/ADR-038-testing-strategy.md and list the deleted test in notes.</notes>
+  <notes>Completed: see projects/ebilling-r1/notes/052-createinvoicewizard-rewire.md (deviations, K findings, deleted tests, deploy needs). Browser ui-tests are deferred to the WP4 deploy (112).
+rework: fix-round-1 task 052
+Spec FR-19, D-19, D-24, ADR-002. Deployment of the code page (scripts/Deploy-WizardCodePages.ps1, web resource sprk_createinvoicewizard) is task 112's. Test deletion: follow docs/adr/ADR-038-testing-strategy.md and list the deleted test in notes.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

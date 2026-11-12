@@ -59,6 +59,9 @@ internal static class WorkforceRoleCeilingGate
     internal const string CommunicationTable = "sprk_communication";
     internal const string GrantTable = "sprk_externalrecordaccess";
     internal const string InvoiceSubmissionTable = "sprk_invoicesubmission";
+    internal const string BillingEventTable = "sprk_billingevent";
+    internal const string DecisionRecordTable = "sprk_decisionrecord";
+    internal const string SignalTable = "sprk_signal";
 
     // ── The route map (design note §0, owner round 101; review round 1 F1: every workforce-reachable route) ──────────
     // Each set is derived from what the route reads or writes: a read needs Read on every table whose rows it returns (the
@@ -117,11 +120,14 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateMatterTodo = CreateChildUnder(MatterTable, TodoTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateWorkAssignmentTodo = CreateChildUnder(WorkAssignmentTable, TodoTable);
 
-    /// <summary>Calendar events regarding a root: Read on the root and on <c>sprk_event</c>; the project create is Create + AppendTo.</summary>
+    /// <summary>Calendar events regarding a root: Read on the root and on <c>sprk_event</c>; a create is Create + AppendTo the root
+    /// (the matter and work-assignment creates: spaarke-SPA-external-access-platform-r4 task 002, FR-08).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadProjectEvents = ReadChildrenOf(ProjectTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadMatterEvents = ReadChildrenOf(MatterTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadWorkAssignmentEvents = ReadChildrenOf(WorkAssignmentTable, EventTable);
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateProjectEvent = CreateChildUnder(ProjectTable, EventTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateMatterEvent = CreateChildUnder(MatterTable, EventTable);
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> CreateWorkAssignmentEvent = CreateChildUnder(WorkAssignmentTable, EventTable);
 
     /// <summary><c>PATCH /todos/{id}</c>: Write on the to-do (its root is read only to gate it; nothing of it is returned).</summary>
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> UpdateTodo = Set((TodoTable, AccessRights.Write));
@@ -199,11 +205,32 @@ internal static class WorkforceRoleCeilingGate
     internal static readonly IReadOnlyList<WorkforceCeilingRequirement> SubmitInvoiceToWorkAssignment = SubmitInvoiceTo(WorkAssignmentTable);
 
     /// <summary>
-    /// <c>GET /invoice-submissions/{id}</c> and <c>GET /invoice-submissions</c>: Read on <c>sprk_invoicesubmission</c>. The view
-    /// returns only the ids of the document and the core record, so neither table is read for the caller.
+    /// <c>GET /invoice-submissions/{id}</c> and <c>GET /invoice-submissions</c> since ebilling-r1 task 130-0 fix round 1: Read on
+    /// <c>sprk_invoicesubmission</c> and on <c>sprk_invoice</c>. Both routes read the submission's invoice: its status drives the
+    /// view's warning and replaced-by note, and a submission is shown only when its invoice is visible to the caller.
     /// </summary>
-    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissions = Set(
-        (InvoiceSubmissionTable, AccessRights.Read));
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceSubmissionsWithInvoice = Set(
+        (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /ebilling/invoices/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoice</c> (status, tracking number,
+    /// totals), on <c>sprk_billingevent</c> (the decided and reviewer-added lines and the invoice-level adjustments it returns), on
+    /// <c>sprk_decisionrecord</c> (the reviewer's reason of each decided line) and on <c>sprk_signal</c> (the firm reason of a cited
+    /// rule). Fix round 2 (owner ruling): the policy, version, rule set and Procedure tables are NOT declared; a rule citation is shown
+    /// only as the policy's firm flag publishes it (<c>FirmFindingsProjection</c>).
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadInvoiceOutcome = Set(
+        (InvoiceTable, AccessRights.Read), (BillingEventTable, AccessRights.Read),
+        (DecisionRecordTable, AccessRights.Read), (SignalTable, AccessRights.Read));
+
+    /// <summary>
+    /// <c>GET /ebilling/submissions/{id}/outcome</c> (ebilling-r1 task 130b): Read on <c>sprk_invoicesubmission</c> (status and
+    /// tracking number), and, because an accepted submission's outcome is its invoice's, Read on <c>sprk_invoice</c> and
+    /// <c>sprk_billingevent</c>, <c>sprk_decisionrecord</c> and <c>sprk_signal</c> as <see cref="ReadInvoiceOutcome"/>.
+    /// </summary>
+    internal static readonly IReadOnlyList<WorkforceCeilingRequirement> ReadSubmissionOutcome = Set(
+        (InvoiceSubmissionTable, AccessRights.Read), (InvoiceTable, AccessRights.Read), (BillingEventTable, AccessRights.Read),
+        (DecisionRecordTable, AccessRights.Read), (SignalTable, AccessRights.Read));
 
     /// <summary>
     /// <c>GET /invoice-submissions/firm-records</c>: Read on the three core tables whose ids it returns, and Create on
@@ -285,6 +312,30 @@ internal static class WorkforceRoleCeilingGate
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether the ceiling would let the caller through a route that declares <paramref name="required"/> — the same
+    /// decision <see cref="DenyAsync"/> makes, as a boolean and without logging a refusal. For a list that tells the caller
+    /// whether the matching create route would admit them (<c>canCreate</c>, spaarke-SPA-external-access-platform-r4 task 002,
+    /// FR-06): <see langword="true"/> when the ceiling does not apply (a systemuser, a CIAM partner — nothing is read);
+    /// otherwise only when the role is available and holds every requirement. An unavailable role and an empty set are
+    /// <see langword="false"/> (fail closed). The role read is the one the list route's own ceiling filter has just made
+    /// (cached, <see cref="IDataversePrivilegeChecker.GetWorkforceRoleCeilingAsync"/>).
+    /// </summary>
+    internal static async Task<bool> AdmitsAsync(
+        CallerPrincipal principal,
+        IDataversePrivilegeChecker privileges,
+        IReadOnlyList<WorkforceCeilingRequirement> required,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(required);
+        // An empty set is the callers' deny state (their `_ => Array.Empty<…>()` fallbacks), so it is refused before the
+        // ceiling is read — otherwise a caller the ceiling does not apply to (a systemuser, a CIAM partner) would be admitted.
+        if (required.Count == 0) return false;
+        var ceiling = await CeilingForAsync(principal, privileges, ct).ConfigureAwait(false);
+        return ceiling is null
+               || (ceiling.IsAvailable && required.All(r => ceiling.Holds(r.Table, r.Rights)));
     }
 
     /// <summary>

@@ -17,11 +17,18 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// as a contact grant's level. The share ends at EXACTLY this level: sharing again at another level replaces it, and
 /// replaces any rights outside the three levels (such as a provisioning creator's Share right).
 /// </param>
+/// <param name="ExpiryDate">
+/// Optional (task 193 G4a). The share itself has no end date, so this date never applies to it (the answer then says
+/// <c>expiryNotApplied: true</c>). It dates the colleague's paired WORKFORCE-APP grant (<see cref="WorkforceAppAccess.Until"/>),
+/// as on any grant: omitted, that grant gets today + 90 days (or keeps the date an existing grant carries). A date before
+/// today is refused (400, nothing written).
+/// </param>
 public record ShareRecordWithUserRequest(
     string? RecordType,
     Guid? RecordId,
     Guid? SystemUserId,
-    ExternalAccessLevel? AccessLevel);
+    ExternalAccessLevel? AccessLevel,
+    DateOnly? ExpiryDate = null);
 
 /// <summary>Response for a share whose stored rights were confirmed.</summary>
 /// <param name="SystemUserId">The person the record is shared with.</param>
@@ -45,13 +52,71 @@ public record ShareRecordWithUserRequest(
 /// <c>true</c> when the share gave the user access and they could not be sent the in-app notification (task 181, owner
 /// round 89). The share itself stands. Additive.
 /// </param>
+/// <param name="WorkforceApp">
+/// Task 193 G1 (owner F1-b, 2026-10-28): set whenever the record was SHARED with an internal colleague: whether their
+/// workforce-app access was given too (a contact grant on the contact that represents them, paired with the share), until
+/// when, and — when it was not — why. Absent otherwise. Additive.
+/// </param>
+/// <param name="ExpiryNotApplied">
+/// Task 193 G4a: <c>true</c> when the request carried an <c>ExpiryDate</c>: the SHARE has no end date (the date applied to
+/// the paired workforce-app grant only, see <paramref name="WorkforceApp"/>). Absent when no date was sent. Additive.
+/// </param>
 public record ShareRecordWithUserResponse(
     Guid SystemUserId,
     ExternalAccessLevel? AccessLevel,
     int AccessRightsMask,
     string Outcome,
     bool Narrowed,
-    bool NotificationFailed = false);
+    bool NotificationFailed = false,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    WorkforceAppAccess? WorkforceApp = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? ExpiryNotApplied = null);
+
+/// <summary>
+/// Task 193 G1 (owner F1-b and decision (a), 2026-10-28): what "Add person" did about an internal colleague's WORKFORCE-APP
+/// access. The record is shared with them (model-driven app, no end date); beside the share, the contact that represents
+/// them is granted (workforce app), paired with the share, through the grant core with all its checks.
+/// </summary>
+/// <param name="Visible"><c>true</c> when the paired contact grant is in place: the record shows in their workforce app.</param>
+/// <param name="Reason">Why it is not (<paramref name="Visible"/> <c>false</c>): the grant core's refusal code (for example
+/// <c>sdap.access.grant.record_restricted</c>), or one of <see cref="ContactInternalUserShare"/>'s workforce reason codes. Only
+/// the share was written then. <c>null</c> when visible.</param>
+/// <param name="Until">The date the workforce-app access lasts until — the request's expiry, else today + 90, as any grant
+/// (owner decision (a)). <c>null</c> when not visible.</param>
+/// <param name="AccessRecordId">The paired grant row. <c>null</c> when not visible.</param>
+public record WorkforceAppAccess(bool Visible, string? Reason = null, DateOnly? Until = null, Guid? AccessRecordId = null)
+{
+    /// <summary>Only the share was written; the workforce-app grant was not, for <paramref name="reason"/>.</summary>
+    public static WorkforceAppAccess NotGiven(string reason) => new(false, reason);
+}
+
+/// <summary>
+/// Task 193 G2: the other half of a share and its paired workforce-app grant, on a Current Access row — read from
+/// <c>sprk_pairedsystemuser</c> through the one-column read, and display only (a column that cannot be read pairs nothing).
+/// Ids and kind only: never a name, an email or a user principal name.
+/// </summary>
+/// <param name="Id">The other row: a grant's <c>accessRecordId</c> (<see cref="Kind"/> <c>grant</c>), or a share's
+/// <c>systemUserId</c> (<see cref="Kind"/> <c>share</c>).</param>
+/// <param name="Kind"><see cref="ShareKind"/> or <see cref="GrantKind"/>.</param>
+public record RecordAccessPairing(Guid Id, string Kind)
+{
+    /// <summary>The other row is a system user's share (<c>/user-shares</c>).</summary>
+    public const string ShareKind = "share";
+
+    /// <summary>The other row is an external grant (<c>/record-grants</c>).</summary>
+    public const string GrantKind = "grant";
+}
+
+/// <summary>
+/// Task 193 (#2338): the internal user a record was SHARED with because the contact named as a grantee represents them
+/// (<c>/grant</c>, <c>/invite-and-grant</c>). Answered only after the share was confirmed.
+/// </summary>
+/// <param name="SystemUserId">The person the record is now shared with.</param>
+/// <param name="FullName">
+/// Their name, for display only — read AFTER the share, so <c>null</c> when it could not be read; the share stands either way.
+/// </param>
+public record SharedWithUser(Guid SystemUserId, string? FullName);
 
 /// <summary>Request body for <c>POST /api/v1/external-access/unshare-user</c>.</summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>
@@ -68,9 +133,30 @@ public record UnshareRecordWithUserRequest(
 /// <c>true</c> when the user held a share and it is confirmed gone; <c>false</c> when they held none, in which case
 /// nothing was written. Repeating an unshare is therefore safe.
 /// </param>
+/// <param name="PairedGrantEnded">
+/// Task 193 G2 (kept for compatibility; <paramref name="PairedGrant"/> says more): whether the workforce-app grant PAIRED
+/// with this share (Manage Access's "Add person") was ended too — <c>true</c> only when it was (<c>pairedGrant</c>
+/// <c>ended</c>); <c>false</c> when it was not confirmed ended (<c>endFailed</c>, <c>unconfirmed</c> or
+/// <c>fileAccessUnconfirmed</c>); absent when no grant on the record is paired with this user (<c>none</c>). The share stays
+/// removed either way. Repeating the removal is what ends a grant that was not ended: the reconciliation job's R5 deactivates
+/// an active paired grant whose share is gone only when it runs with writes enabled
+/// (<c>ExternalAccess:Reconciliation:WritesEnabled</c>; report-only by default), and never retries file access.
+/// </param>
+/// <param name="PairedGrant">
+/// Task 193 G4a (B-F1): what happened to the grant paired with this share, set whenever the pairing step ran (the share is
+/// confirmed gone): <c>ended</c> — every paired grant was ended; <c>none</c> — no grant on the record is paired with this
+/// user; <c>endFailed</c> — a paired grant could not be ended and is still active and listed (repeat the removal);
+/// <c>unconfirmed</c> — which grants are paired could not be read, so whether one exists is unknown (repeat the removal);
+/// <c>fileAccessUnconfirmed</c> — the paired grant was ended and is no longer listed, but removing its file access could not
+/// be confirmed (repeat the removal: it retries the file step). Absent when the pairing step did not run. Additive.
+/// </param>
 public record UnshareRecordWithUserResponse(
     Guid SystemUserId,
-    bool Removed);
+    bool Removed,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    bool? PairedGrantEnded = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? PairedGrant = null);
 
 /// <summary>Query string for <c>GET /api/v1/external-access/user-shares?recordType=&amp;recordId=</c>.</summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>
@@ -101,6 +187,10 @@ public record RecordUserSharesResponse(
 /// (<c>sprk_isexternal = true</c>) — Manage Access shows "External user — no access" until the share is removed (the
 /// record's next save or the 5-minute job). Additive: <c>false</c> on every other share.
 /// </param>
+/// <param name="PairedWith">
+/// Task 193 G2: the workforce-app grant PAIRED with this share (kind <c>grant</c>, the grant's <c>accessRecordId</c>), when
+/// one is active on the record; absent otherwise, and when the pairing could not be read.
+/// </param>
 /// <param name="InheritedFrom">
 /// Task 175 (owner round 84; task 067's amendment): the secure matter or project that passed this share on to the record
 /// (task 158's inherited-share provenance, still in force), or <c>null</c> for a direct share. Manage Access shows such a row
@@ -113,4 +203,6 @@ public record RecordUserShare(
     ExternalAccessLevel? AccessLevel,
     DateTimeOffset ModifiedOn,
     bool ExternalNoAccess = false,
-    RecordAccessParent? InheritedFrom = null);
+    RecordAccessParent? InheritedFrom = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    RecordAccessPairing? PairedWith = null);

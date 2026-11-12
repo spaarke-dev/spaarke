@@ -136,7 +136,8 @@ public sealed record DecisionCommitStep(
     IReadOnlyList<DecisionCommitRef> Written,
     IReadOnlyList<DecisionCommitRef> PossiblyWritten,
     string? ReasonCode,
-    string? Detail);
+    string? Detail,
+    string? Warning = null);
 
 /// <summary>What happened to one Signal at step 6.</summary>
 /// <param name="State">Acted, Dismissed, InquirySent (D-119: left open, Acknowledged, linked to the record) or Unchanged.</param>
@@ -317,7 +318,7 @@ public sealed class DecisionCommitService
     private readonly IGenericEntityService _entities;
     private readonly CallerRecordAccessProbe _probe;
     private readonly IIdentityNormalizationService _identity;
-    private readonly AssignedAccessStore _links;
+    private readonly ContactUserRepresentation _people;
     private readonly ITenantCache _ledger;
     private readonly DecisionCommitFollowUps _followUps;
     private readonly IScheduledJobLease _lease;
@@ -334,7 +335,7 @@ public sealed class DecisionCommitService
         IGenericEntityService entities,
         CallerRecordAccessProbe probe,
         IIdentityNormalizationService identity,
-        AssignedAccessStore links,
+        ContactUserRepresentation people,
         ITenantCache ledger,
         DecisionCommitFollowUps followUps,
         IScheduledJobLease lease,
@@ -350,7 +351,7 @@ public sealed class DecisionCommitService
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
-        _links = links ?? throw new ArgumentNullException(nameof(links));
+        _people = people ?? throw new ArgumentNullException(nameof(people));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _followUps = followUps ?? throw new ArgumentNullException(nameof(followUps));
         _lease = lease ?? throw new ArgumentNullException(nameof(lease));
@@ -1183,6 +1184,9 @@ public sealed class DecisionCommitService
                 warnings.Add(warning);
         }
 
+        // A step that finished (Done) with a warning of its own: the budget inquiry sent but its .eml was not archived (D-216).
+        warnings.AddRange(executed.Where(e => !string.IsNullOrEmpty(e.Warning)).Select(e => e.Warning!));
+
         warnings.AddRange(await _followUps.AfterRecordedAsync(p.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], writeCt).ConfigureAwait(false));
         progress.FollowUpsRan = true;
 
@@ -1828,7 +1832,7 @@ public sealed class DecisionCommitService
     {
         try
         {
-            return (await PersonalToDoAssignee.ResolveAsync(_entities, _links, todoId, ct).ConfigureAwait(false), false);
+            return (await PersonalToDoAssignee.ResolveAsync(_entities, _people, todoId, ct).ConfigureAwait(false), false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1945,7 +1949,8 @@ public sealed class DecisionCommitService
             outcome.Written.Select(w => new DecisionCommitRef(w.Entity, w.Id)).ToList(),
             outcome.PossiblyWritten.Select(w => new DecisionCommitRef(w.Entity, w.Id)).ToList(),
             outcome.ReasonCode,
-            outcome.Detail);
+            outcome.Detail,
+            outcome.Warning);
 
     private static IReadOnlyList<DecisionRecordStep> ProjectedSteps(Prepared p) =>
         p.Offered.Select(o => new DecisionRecordStep(

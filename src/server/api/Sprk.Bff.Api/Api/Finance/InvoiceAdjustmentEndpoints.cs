@@ -143,6 +143,7 @@ public static class InvoiceAdjustmentEndpoints
         AdjustmentStatus.InvalidRequest or AdjustmentStatus.NegativeTotal => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, code, detail),
         AdjustmentStatus.InvoiceNotFound or AdjustmentStatus.AdjustmentNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         AdjustmentStatus.NotInReview or AdjustmentStatus.TotalsRefused or AdjustmentStatus.IdReused or AdjustmentStatus.Busy or AdjustmentStatus.Changed
+            or AdjustmentStatus.FirmMissing
             => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, code, detail),
         AdjustmentStatus.OwnerUnresolved => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status500InternalServerError, code, detail),
         _ => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status503ServiceUnavailable, code, detail),

@@ -38,6 +38,7 @@ public class FinanceTelemetry : IDisposable
 
     // Billing compliance (ebilling-r1 task 072, review B3)
     private readonly Counter<long> _billingSecureRootWalkFaults;
+    private readonly Counter<long> _rerunRefusals;
 
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Finance";
@@ -107,6 +108,11 @@ public class FinanceTelemetry : IDisposable
             name: "finance.billing.secure_root_walk.faults",
             unit: "{fault}",
             description: "Billing evaluations whose secure-root walk (D-112) faulted, so every Duplicate prior's detail was withheld");
+
+        _rerunRefusals = _meter.CreateCounter<long>(
+            name: "finance.ebilling.rerun.refused",
+            unit: "{rerun}",
+            description: "Set-firm re-runs refused permanently (the invoice stays held until an operator acts), tagged with the refusal code");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -240,6 +246,13 @@ public class FinanceTelemetry : IDisposable
     /// a walker defect, not a data state.
     /// </summary>
     public void RecordBillingSecureRootWalkFault() => _billingSecureRootWalkFaults.Add(1);
+
+    /// <summary>
+    /// ebilling-r1 task 095d-2b-1 (uac-r2 K2b): a Set-firm re-run job ended Refused (permanent). The invoice keeps its rerun-pending marker,
+    /// so it stays held and withheld from partners; this count makes a stuck invoice visible without a log query (alert on a non-zero rate;
+    /// the dead-lettered message names the submission). Tagged with the stable refusal code only (ADR-015: no id, no row text).
+    /// </summary>
+    public void RecordRerunRefused(string code) => _rerunRefusals.Add(1, new KeyValuePair<string, object?>("code", code));
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Distributed Tracing

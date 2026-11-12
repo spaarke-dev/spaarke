@@ -9,7 +9,7 @@
  *     clears. The items that were new stay highlighted while the list is open. A failed read is shown as a failure, never as
  *     an empty list, and never reaches `/seen` (see `useNotificationFeed`).
  *   - Items are listed newest first. A click opens that record's detail view through the shared opener
- *     (`RecordOpener`): the same `RecordDetailModal` a grid row opens, so a record the caller can no longer see shows its
+ *     (`RecordOpener`): the same record template (`RecordTemplateModal`) a grid row opens, so a record the caller can no longer see shows its
  *     existing denied state. An item whose record type or id is not one the detail view can open is shown but is not a link.
  *   - The feed carries no message body, so none is shown: a message item reads "{sender} sent a message on {record}".
  *

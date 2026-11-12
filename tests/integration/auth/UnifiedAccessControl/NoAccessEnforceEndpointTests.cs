@@ -188,6 +188,42 @@ public class NoAccessEnforceEndpointTests : IClassFixture<NoAccessEnforceTestFix
         body.TryGetProperty("traceId", out _).Should().BeTrue();
     }
 
+    /// <summary>
+    /// Field-mapping task 049: while another holder has the record's removal lease (another enforcement, <c>/unshare-user</c>,
+    /// the Restricted remover, or a create's queued Assigned-To grant), the enforce route removes nothing and answers
+    /// ProblemDetails with a message that says to try again — never a bare 500 — without naming a particular holder.
+    /// </summary>
+    [Fact]
+    public async Task Enforce_WhileTheRecordsRemovalLeaseIsHeld_RemovesNothing_AndSaysAnotherAccessChangeIsUnderWay()
+    {
+        var entry = ActiveEntryTheCallerCanWrite();
+        var lease = _fixture.Services.GetRequiredService<Spaarke.Scheduling.IScheduledJobLease>();
+        var lockId = NoAccessShareEnforcer.RecordLockId(Project, SecureProject);
+        var held = await lease.TryAcquireAsync(lockId, null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        held.Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted);
+
+        try
+        {
+            var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(Route, new { entryId = entry });
+
+            response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+            var body = await BodyOf(response);
+            body.GetProperty("reasonCode").GetString().Should().Be(NoAccessEnforceEndpoint.IncompleteReasonCode);
+            body.GetProperty("detail").GetString().Should()
+                .Contain("another access change is under way on this record").And.Contain("Try again")
+                .And.NotContain("No Access enforcement", "the lease is shared; the message names no particular holder");
+            body.TryGetProperty("traceId", out _).Should().BeTrue();
+            body.GetProperty("report").GetProperty("failures").EnumerateArray().Should().ContainSingle()
+                .Which.GetProperty("kind").GetString().Should().Be("record-busy");
+            H.Shares.MaskOf(Project, SecureProject, DataversePrincipalRef.User(Walled)).Should().Be(CollaborateMask);
+        }
+        finally
+        {
+            await lease.ReleaseAsync(lockId, held.Token!, CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task Enforce_WhenItWouldRemoveTheLastPersonWhoCanOpenTheSecureRecord_Is409NamingTheRecord()
     {
@@ -228,6 +264,12 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
 {
     internal Harness Harness { get; private set; } = new();
 
+    /// <summary>
+    /// Task 193 G2b: the grant world the enforcer's paired-grant end reads — the PRODUCTION grant revoke over an empty grant
+    /// table, so no grant is paired with anyone (the host's Web API client double answers no grant read).
+    /// </summary>
+    internal AssignedAccessTestDoubles.Harness Grants { get; private set; } = new();
+
     /// <summary>Whether the caller holds the entry table's Write privilege — Write on every row of the organization-owned table.</summary>
     public bool CallerHoldsEntryWritePrivilege { get; set; }
 
@@ -238,6 +280,7 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
     public void Reset()
     {
         Harness = new Harness();
+        Grants = new AssignedAccessTestDoubles.Harness();
         CallerHoldsEntryWritePrivilege = false;
         ProbedPrivileges.Clear();
         ProbedTargets.Clear();
@@ -269,6 +312,8 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
             services.AddScoped<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(_ => Harness.Shares);
             services.RemoveAll<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
             services.AddScoped(_ => Harness.Cache.Mock.Object);
+            services.RemoveAll<ExternalGrantRevocationService>();
+            services.AddScoped(_ => Grants.PairedGrantRevokeFor("sprk_project", Guid.Empty));
         });
     }
 

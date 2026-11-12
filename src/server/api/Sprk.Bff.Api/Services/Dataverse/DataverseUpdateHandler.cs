@@ -94,15 +94,42 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // that person, but the mapping is the playbook's configuration (its author, who may not be the runner), never theirs.
         // Master merge after #2253: so it is asked as WriteIdentity.AppOnly (every set, AccessColumns included) even when the
         // write impersonates the runner; WriteIdentity.Caller is the field-mapping push's only.
+        // #2250 (owner decision, option 2): asked as WriteIdentity.Playbook (every AppOnly set, plus a root's Assigned-To
+        // columns), so a playbook's output mapping never causes an Assigned-To grant.
         if (InheritedAccessPermission.RefuseAppOnlyWrite(
-                entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.AppOnly) is { } documentRefusal)
+                entityLogicalName, fields.Keys, InheritedAccessPermission.WriteIdentity.Playbook) is { } documentRefusal)
         {
-            throw new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
+            // The writer-only column refusal (EB-D-207) is about an update to an existing row: not the owner constructor, whose
+            // message is about a create's owner. The update's own words, the same as the fixed-after-create refusal below.
+            throw documentRefusal.RefusalCode == RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode
+                ? new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal.RefusalCode,
+                    $"The update was NOT written: {documentRefusal.Reason} ({documentRefusal.RefusalCode}).")
+                : new RecordOwnerUnresolvedException(entityLogicalName, documentRefusal);
+        }
+
+        // The core record pair (sprk_corerecordtype + sprk_corerecordid) is fixed after create on BFF update paths
+        // (RecordTableRule.FixedAfterCreateColumns): a playbook's output mapping is a configuration payload for any table, so it
+        // is asked on its shape alone, before any read or write. On a Signal the refusal above answers first.
+        if (RecordTableRules.RefuseFixedAfterCreateColumns(entityLogicalName, fields.Keys) is { } fixedRefusal)
+        {
+            // Not the owner constructor: its message is about a create's owner. The update's own words, the same as the chat tool's.
+            throw new RecordOwnerUnresolvedException(entityLogicalName, fixedRefusal.RefusalCode!,
+                $"The update was NOT written: {fixedRefusal.Reason} ({fixedRefusal.RefusalCode}).");
+        }
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter, the list the general create refuses). A
+        // playbook's output mapping is refused whole for them, app-only or as the run's user, before any row is read or written.
+        if (RecordTableRules.RefuseWriterOnlyTableUpdate(entityLogicalName) is { } writerOnly)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, writerOnly.RefusalCode!, writerOnly.Reason!);
         }
 
         // ebilling-r1 DEF-022 (#2056): an invoice or invoice line names exactly one core record, a line regards its invoice's,
         // and an invoice re-file keeps its lines (D-96). Decided on the stored lookups overlaid with this write, before it.
         // #2257 (master merge): a person's write answers "not found" as "could not be read" (the guard reads as the app).
+        // Task 045b: asked BEFORE the pair planner below, so a family row's refusal keeps its own code; the planner never writes
+        // a lookup this guard decides on (it writes the pair and its display columns only), so the decision is the same.
         if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
                     entityLogicalName, recordId, fields, _genericEntityService, ct,
                     writeIsImpersonated: impersonateSystemUserId is not null)
@@ -111,6 +138,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             // Code only: the guard read as the app, so its reason can name records the caller has not read.
             throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, familyCode);
         }
+
+        // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
+        // planner, with this handler's own app-only reader) BEFORE the filing gate below and the write, so they see the pair as it
+        // will be written. It adds no check (UAC-r2, 2026-11-07). The caller's dictionary is not changed; a failed read refuses.
+        fields = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
+                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
+                movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
+            .ConfigureAwait(false);
 
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).
@@ -232,8 +267,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     /// The write. An invoice or line is written UPDATE-ONLY (If-Match: *): the guard at the top of <see cref="UpdateAsync"/>
     /// checked that the row exists, and a row deleted since must not be re-created by the upsert (ebilling-r1 #2081). It is
     /// refused like the guard, nothing created. #2257 (master merge): every write runs as <paramref name="impersonateSystemUserId"/>
-    /// when the run has one (a person's run writes AS that person) and app-only otherwise; a person's "not found" is answered as
-    /// "could not be read", so it never tells them whether the id names a row they cannot read.
+    /// when the run has one (a person's run writes AS that person) and app-only otherwise. Every other table is written
+    /// update-only as well: an unknown id is refused, nothing is written, and a person's answer uses the "not found or could
+    /// not be read" wording (<see cref="RecordNotFoundRefusal"/>).
     /// </summary>
     private async Task PatchAsync(
         string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct, Guid? impersonateSystemUserId)
@@ -250,8 +286,42 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             return;
         }
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(entityLogicalName, recordId, fields, ct, impersonateSystemUserId);
+        // Every other table is written UPDATE-ONLY too: this handler updates an existing record and never creates one. An id
+        // that names no row writes nothing and is refused (RecordMissing, the code the re-file path gives a missing row).
+        try
+        {
+            await _fieldMappingService.UpdateExistingRecordFieldsAsync(entityLogicalName, recordId, fields, impersonateSystemUserId, ct);
+        }
+        catch (KeyNotFoundException)
+        {
+            throw RecordNotFoundRefusal(entityLogicalName, impersonateSystemUserId, CarriesLookupBind(fields.Keys));
+        }
     }
+
+    /// <summary>
+    /// The refusal for an update that found no row (the update-only write got a 404; nothing was written). Dataverse also
+    /// answers 404 when a row named by an <c>@odata.bind</c> lookup does not exist, so a payload that carries a bind says
+    /// "the record, or a record this update refers to" (<paramref name="refersToOtherRecord"/>, from <see cref="CarriesLookupBind"/>).
+    /// A write made AS a person says "not found or could not be read", as the invoice path does for one
+    /// (<c>notFoundAsReadFailed</c>).
+    /// </summary>
+    internal static RecordOwnerUnresolvedException RecordNotFoundRefusal(
+        string entityLogicalName, Guid? impersonateSystemUserId, bool refersToOtherRecord = false) =>
+        new(entityLogicalName, RecordOwnerRefusal.RecordMissing,
+            $"The {RecordNotFoundPhrase(impersonateSystemUserId is not null, refersToOtherRecord)}; nothing was updated ({RecordOwnerRefusal.RecordMissing}).");
+
+    /// <summary>
+    /// The not-found answer after "the", in lower case so each path adds its own lead and tail: "record was not found"
+    /// (app-only) or "record was not found or could not be read" (a person); a bind in the payload makes the subject
+    /// "record, or a record this update refers to,".
+    /// </summary>
+    internal static string RecordNotFoundPhrase(bool personWording, bool refersToOtherRecord) =>
+        (refersToOtherRecord ? "record, or a record this update refers to, was not found" : "record was not found")
+        + (personWording ? " or could not be read" : string.Empty);
+
+    /// <summary>True when a payload carries an <c>{navigation}@odata.bind</c> key, so a 404 may name a row it refers to.</summary>
+    internal static bool CarriesLookupBind(IEnumerable<string> payloadKeys) =>
+        payloadKeys.Any(k => k.EndsWith("@odata.bind", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Update record with optimistic concurrency control.

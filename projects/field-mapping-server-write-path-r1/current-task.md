@@ -1,78 +1,53 @@
 # Current Task — field-mapping-server-write-path-r1
 
-> **Last updated**: 2026-11-03 (main session checkpoint). Recovery: read Quick Recovery first.
-> **Done on master**: 001–006, 010–016, 017, 018, 037, 039, 038, 070, 071, 072, 073, 074. The work branch was merged to master as #2435 (6b0c1e2fed); later doc commits are on the work branch.
-> **Live on dev:** BFF 5796774091 since 2026-11-03T13:29Z (R3; carries 039, #2514, #2519, #2520; 019 live A/B ran on 3740e1a105). 017 (b083d62183, #2486) first went live 2026-10-31T19:52:25Z (UAC-r2 deploy; gate PASS: 23 req, 0 5xx, 0 OWNERSHIP-REFUSED, the reconciler wrote nothing). TrackingFieldTrio 1.0.55. SpaarkeMaster 1.2.4.0 is published but not imported. Check that the BU→Matter index map is gone after the model1-prod upgrade or the next provisioning run (H6).
+> **Last updated**: 2026-11-10 (context-handoff, desktop session `field-mapping-r1`). Recovery: read Quick Recovery first.
+> **Done on master**: 001–006, 010–018, 030, 034, 037–040, 042c, 043, 044, 046, 046b, 046c (repo), 048, 049, 049b, 049c, 052a, 070–075, 076c, 060, 045a, 021, 045c, 032b-1, 032b-1b, 045b, 022, 054a piece 2 (inert). Latest: #2659 (534a0e36b4, 2026-11-10).
+> **W3 direction:** named exceptions plus guards, no core redesign in R1.
 
 ## Quick Recovery
 
 | Field | Value |
 |---|---|
-| **Active** | **Task 041 (FR-40, #2502), step 2–5 with the Opus implementer `fm-041` on branch `task/fm-041`** (cut from c0b543aedc). Rigor FULL, opus/high, prescriptive. Session 5c is the only field-mapping session; pid 53128 (pre-crash, no window) is still alive, and the owner can say "kill it".
-- Step 0 done: master merged into the work branch (9935ef2dcf); no open PR touches 041's files.
-- Step 1 done: the read-only dev count is in `notes/task-041-notes.md` (c0b543aedc). No BU names a non-files index, so there is no escalation. 77 old document stamps (knowledge-index-v2 ×76, file-index ×1) are left alone.
-- AC9 rulings to fm-041: (1) ChatCreate + SearchIndexDefaultTests: only the applied-value, Warning→Information and BU-bind fragments change; (2) RelocatedFileIndexingTests Issue1510: only the `ResolveAsync` Verify line is deleted; (3) §14.4 row 10 (moving the constants) is skipped because AC9 pins SearchIndexDropGuardTests. All three are listed in the notes as "AC9 exceptions" / "Prescribed steps not done" for UAC-r2.
-- **041 state:** rounds 1 and 2 are merged and pushed (f6124e8fab, then fde1b0aa5b with the decisions entry). Verified: sln 0/0, ArchTests 1911/1911, affected suites green. The Opus review plus the scoped Sonnet re-check have no F-class finding open. UAC-r2's verdict is **PASS WITH NOTES** (decisions.md 2026-11-03). fm-041 is on round 3 (UAC-r2 NOTE 1: restore the document trigger-2 Repair test as owner-only). Next: merge round 3, verify, then **open the PR from the work branch** (it holds 041 only). Cite ADR-008 path A; release notes (index-file ignores `searchIndexName`; old chunks are left; drop log at Information until 035); Placement Justification; 041's publish delta −6 KB. After merge, close #2206, #2413, #2502 and DI-012; mark TASK-INDEX ✅ and the POML completed.
-- **020 state:** `task/fm-020` e4ef0e5ad6 is pushed and NOT merged into the work branch. A clean merge was made and then backed out so the 041 PR stays 041-only; the local ref `hold/fm-020-merge` points at it. Redo the merge after the 041 PR is open. All ACs pass per fm-020. Filed DI-015 #2540 (ribbon-only tables). **F-1, to fix in 020's scope after 041 merges:** a Matter create through the route can write `sprk_issecure` (and maybe the access-inheritance column). The refusal at `SecureRootInheritance.PlanCreateAsync:1083` only covers Inherits tables. Live, only field security stops it. Plan: merge 020 after 041, resume fm-020 to refuse it the way Project does (in the service, ADR-008 path A), and check whether chat or Office Matter creates share the gap. Ping UAC-r2 before merge (refusal-code change). Then one Opus review, then the live check on dev (needs an R3 BFF deploy). Open for 022: the secure-toggle branching (see the task-020 notes).
-- **019 ✅ (2026-11-03):** the negative check passed as the test user. Check C passed: the owner supplied the name and parent; event `6d1563bb` stays. The chat tool row was re-seeded. **042a ✅** (#2521). |
-| **Next Action** | 1. When fm-041 reports: merge `task/fm-041` into the work branch `--no-ff`, verify the build and filtered tests, and run ONE adversarial-reviewer pass (opus). Fix every F-class finding.
-2. Send the diff to UAC-r2 for its scoped check (AC17: only routing removed, no trim moved). Record its verdict line.
-3. Open the PR (cite ADR-008 path A; release note: index-file ignores `searchIndexName`). After merge: close #2206, #2413, #2502 and DI-012 (AC15). TASK-INDEX ✅.
-4. Then 042b (sequential: both edit `RecordCreationService*.cs`; UAC-r2 does a full review). 020 depends only on 019 and may start beside 041.
-5. Then W3: 021–029 (wait on 041), plus 030–034. Task 043 (#2524, N:N link) goes through the scope path.
-6. Fix the stale wording in POMLs 020–034 and 052, and the 028 test path, as each task starts. |
-| **Phase branches** | 2d-1 798936c47e (step 10 pre-create; new codes stamp_underivable 400 / stamp_unavailable 503; Office map rows added as generic 500; system principal still stamped post-create = known limit). 2d-2 e106b19d7c (task/contact/account Child + MappingExclusion; owner + row byte-identical vs today). 017a f758480f3c (ebilling OK, no findings). 017b 43b48f3249 (route, decision parity, R3-1, 037 K2 = copy after merge, #1608, documents, invoice-family protection from guard, sprk_servicerequest; NFR-07 table all same; 401 stays 401; traceId kept). 017c 9cc37b415a (chat refuses invoicesubmission/approval/correction; escalated 3 items, resolved 2026-10-30). R3-2 = K2 known limit. |
-| **Open PRs** | #2387 (075, HOLD, ships with 040). |
-| **Issues** | #2444, #2413, #2429 (provisioning; I review), #2469 (flaky ISS-005), #1948 (lint-staged uses the shared stash; 017b re-found it). |
-| **Waiting on** | - fm-041 (implementer).
-- Owner: the Family 1.0.56 look, 005 `-Apply`, the 076 narrower-user pass, and "kill it" for pid 53128.
-- Rows to delete later: see `notes/task-019-notes.md` (the check-C event is the owner's and stays).
-- #2518 (ontology writer identity not provisioned): ontology's to own. |
-| **Owner to do** | 076 live check (owner + narrower user). Leftover locked worktrees agent-aec6d06ca99a5a9f6 (075) and agent-a7ed21b81867c4e2e (039, merged; locked by its agent process): end of project, via Remove-WorktreeSafe after unlock. |
+| **Session** | Desktop session **`field-mapping-r1`**, worktree `C:\code_files\spaarke-wt-field-mapping-server-write-path-r1`. |
+| **Work branch** | `work/field-mapping-server-write-path-r1`. 4605e234c8 (054a piece 2) is pushed. Local HEAD is **092bd621cf**, the `--no-ff` merge of `task/fm-054a-6` (fix round 2, the missing-column fail-safe: `DirectMessageRecipient.WriteThreadFilingAsync` is the one filing write; if a stamp column is missing it retries with the thread lookup alone and logs Error 5405 naming the schema script). UAC-r2 APPROVED the range `47c6a26627..8a4b9be3d8` (2026-11-10; keep "schema script, then BFF" in the PR text; send them the PR link and number). Verified 2026-11-10 and pushed: BFF build 0 warnings; filtered run (the 054 set + `verify-suites.sh` set, excluding `Api.Office.`) 8830 passed / 0 failed / 2 skipped; ArchTests 8/8. An accidental near-full run (only `Api.Office.` excluded, 40,144 tests) showed 125 failures outside the filtered set, test names not captured. Master's `tier2-master/full-unit-tests` is failing since 2026-11-08 (#2060); compare against its shard log before the master PR, not by re-running unfiltered. Everything on the work branch through c9a62c4a62 is on master via #2659 (534a0e36b4). |
+| **Active task** | **054a.** Piece 2 (the `sprk_directrecipient` column + BFF stamp) is MERGED. The column is live on spaarkedev1 (`scripts/Set-DirectRecipientSchema.ps1`; navigation `sprk_DirectRecipient`, read `_sprk_directrecipient_value`). The stamp is in `Services/Communication/Access/DirectMessageRecipient.cs`. It is written in the update that files a message into a Direct thread (thread lookup + recipient + sender if missing), with its own strict, Read-bit participant read (a deliberate duplicate; it converges after 198, DI-025 #2652). Exactly 2 distinct, enabled, non-application systemusers, one of them the sender; otherwise no stamp (fail closed). Opus adversarial pass done → fix round 1 → C1 DI wiring test (`tests/Spaarke.ArchTests/DirectMessageRecipientDiWiringTests.cs`). UAC-r2 APPROVED. |
+| **Piece 2b (on the work branch, pushed)** | **Owner chose (a) on 2026-11-10** (`notes/decisions.md`). Merged `--no-ff` as **a215006537** (task branch `task/fm-054a-7`: a5cacab398 feature, 82da70c50d fix round 1, 6ea305809e fix round 2, 0ebd43f6a5 test assertion, 9d2fdfbeab F-2b-1). An outbound Direct send whose To/Cc/Bcc normalize to exactly one internal, enabled, non-application, non-self systemuser goes through `FindOrCreateDirectThreadAsync`. It is joined only if `DirectMessageRecipient.ReadStrictPairShapeAsync` finds a strict pair of exactly {sender, recipient}: Direct, no typed regarding, Open, and ONE share row (a systemuser with Read), else `extra_principal`. The routed join re-decides from its own thread read before any write; a refusal or a read fault before the write falls back to today's resolver path once (5412). Two adversarial passes (Opus + security Opus) plus a Sonnet re-check. UAC-r2 APPROVED a9794dbaad..0ebd43f6a5 with F-2b-1 (fixed in 9d2fdfbeab). Verified at a215006537: sln 0 warnings, ArchTests 2128/2128, verify-suites 7388 passed / 0 failed, Communication filter 2535 / 0 failed, publish delta +9,349 B (39.33 MB, 191 = 191 files) vs c9a62c4a62, no vulnerable packages. Limits L6–L10 in `notes/task-054-notes.md`; L7 + L10 are fixed by UAC-r2's 198b (its FindExistingAsync calls our shape rule). **Deploy check (owner go in THIS session):** one real send on dev confirming a new FindOrCreate thread shows exactly one share row; otherwise routing never fires (fail-safe). Tell UAC-r2 when 2b is on master. |
+| **Was: owner decision** | **Resolver-CREATE gap:** in today's shipped flows NO Direct message gets a recipient. A UI send without a `ThreadId` creates a fresh resolver thread, owned by the app user and shared with no one (`ThreadResolver.cs` ~:181-190; `CommunicationService.cs` ~:938; `MessagingChannelSender.cs` ~:72-84). `startDirectThread` has no caller, and inbound never joins a pair thread. Options asked of the owner: (a) **route outbound Direct CREATE through `FindOrCreateDirectThreadAsync(sender, recipient)`**, recipient = the request's single internal addressee resolved on the server (recommended; UAC-r2 reviews; conditions: ids only, exactly one internal, enabled, non-application user, else refuse; inbound stays fail-closed); or (b) defer and stay fail-closed. Piece 2 is inert until then. |
+| **Master PR (owner go 2026-11-10)** | **#2659 MERGED 2026-11-10 as 534a0e36b4** (merge commit; owner go on auto-merge, PR was already clean so merged directly; UAC-r2 told, they now merge master into 198, open its PR and run merge-tree on `SecureChildShareSynchronizer.cs`). Was open from snapshot `work/field-mapping-server-write-path-r1-054a`, head **c9a62c4a62** (Auto-fix ON). Review/CI round on it: a8c2ee086d (Codex: 045a step 4½ only on `RegardingPairTables`; matter keeps its standalone type + number; thread replied + resolved), dab7477be8 (client-lint justified catch), 0719a7512e (targeting-list comment + Last Reviewed stamps), c9a62c4a62 (master 26d135bc8f merged). Verified: ArchTests 2127/2127, filtered BFF 11,222 / 0 failed. UAC-r2 APPROVED 9a6192e88f..c9a62c4a62 (no findings); 198 pre-checked clean onto c9a62c4a62 and master 26d135bc8f. Auto-merge needs the owner's go + green required checks; tell UAC-r2 when it lands (they then merge master into 198 and open its PR). Tier-2 at 9a6192e88f: unit shards clean except the (fixed) guard; Format/Markdown-link failures are repo-wide, not ours. Verified at df99e65ad1: sln 0/0, ArchTests 2114/2114, filtered BFF 9224 passed / 0 failed. Work branch: master a0e1b4ab7c merged (4f6ca6d4ad); 2800860348 (022 test helper → `tests/integration/Shared/Dataverse`, fixes the sln build); df99e65ad1 = merge of `task/fm-045b-3` (UAC-r2's F-045b-1: rule 3's display read as the write's person, cleared with no person; EventId 45_201 → 45201). UAC-r2 APPROVED the fix AND the combined diff. Publish delta +50,096 B (39.31 MB), no vulnerable packages. PR body draft: scratchpad `pr-body.md` (placeholders for SHA/test counts). Auto-merge HELD until the PR's Tier-2 full-unit shards compare clean against master (master `rest` shard: 1 known failure, `RateCardImportServiceTests`); master requires Router AND Client lint. Send UAC-r2 the PR link and number; they go second with 198. |
+| **Next action** | 1. (Done: #2659 merged; 2b merged + pushed at a215006537.) 2. The next PR to master carries piece 2b (UAC-r2 waits on it for 198b). Clean up agent worktree adb785206289cba75 too. 3. 054b: field security for `sprk_sentby`, `sprk_directrecipient`, `sprk_communicationthread` and the thread flags (live step, owner go), plus guards or tests for the run-as-user writers listed in the 054 notes. 4. 022b. 5. The next PR to master (row below). 6. Clean up agent worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` from this session (a60710f842ad3a380, a892fa0f61f363b8a, a7bc7a1ae62bf9182, a7ccd21116f208fba, a29908ac16736e9d9, a3b16bcb87c4c3752, afafde0bff35cd782) with `scripts/worktree/Remove-WorktreeSafe.ps1`. |
+| **Next PR to master** | The bundle above. Before it: `scripts/verify-suites.sh`; `scripts/publish-delta.ps1` against a fresh master; send UAC-r2 the combined diff; open the PR from a snapshot branch `work/field-mapping-server-write-path-r1-<tag>` with auto-merge. PR text: ADR-008 path A; 032b-1's push side effect; Office Assigned To targeting; 022's create strip + push gate; the one-line ontology-owned change in `DecisionActionExecutors.cs`; 054a piece 2 (inert until the routing decision). **Deploy prerequisite in the PR text:** run `scripts/Set-DirectRecipientSchema.ps1 -Apply` in an environment BEFORE a BFF built from this branch deploys there (only spaarkedev1 has the column). UAC-r2 holds the 198 PR until this branch is on master (198 is review-complete at 28208ed81b and merge-tree clean against 47c6a26627). Whoever merges second of 022 and UAC-r2's 198 runs merge-tree on `SecureChildShareSynchronizer.cs` and rebuilds. |
 
-## How wave-2 agents are run (lessons)
+## Binding deploy order (agreed with UAC-r2 2026-11-09/10; each live step needs the owner's go in its own session)
 
-- `isolation: worktree` cuts from **origin/master**. Every brief starts with `git switch -c task/fm-NNN <tip>`.
-- Launch adversarial-reviewer passes from the main session (one Opus per change set; a scoped Sonnet re-check per fix
-  round). Resume an implementer with SendMessage for its fix rounds.
-- **After ANY master merge, run the full ArchTests AND the related suites.** Rebuild ArchTests first; a stale DLL gives
-  false failures.
-- **Never run the unfiltered `Sprk.Bff.Api.Tests`** in an agent (the host reaches ~8 GB). Use the filtered set in
-  `projects/field-mapping-server-write-path-r1/scripts/verify-suites.sh <repo> <log-dir>`. Publish-size delta + CVE:
-  `scripts/publish-delta.ps1 -wt <worktree> -MasterSha <sha> -BranchSha <sha>` (same folder).
-- Call `Remove-WorktreeSafe.ps1` through PowerShell, and first `cd` every shell OUT of the worktree: a Bash shell whose cwd is the worktree holds its root, so git deletes every file, then fails "Permission denied" on the root (0 files left). Then `find <path> -depth -type d -empty -delete` + `git worktree prune`.
-- CI: the required checks are `Router` + `Client lint (type-aware ratchet)`. Router reports only after the slow Tier 2
-  unit shards finish (~25 min). The Tier 2 ADR job may be CANCELLED by its 5-min timeout after passing (#2224); read
-  the log before merging.
+1. 054a piece-2 BFF stamp, together with piece 2b (outbound Direct pair routing), ahead of the 198 deploy (UAC-r2, 2026-11-10).
+2. 054b field security live.
+3. 054c: dry run, owner go, apply (backfill only where the thread has exactly 2 enabled users, one of them `sprk_sentby`; every other row goes to a manual-review list).
+4. 198 deploy.
 
-## Open items for the owner
+Also: 198 Part A (the Direct role) before 054a piece 3, and piece 3 never in an environment without the 198 job. **Assign invariant:** a message moves to the Direct team only with a valid stamped pair; otherwise its owner is unchanged (piece 3 and the unfile path, with must-fire tests). Details: `notes/task-054-notes.md`.
 
-**Owner answers 2026-10-27:** group 3 (016 Repair) waits on UAC-r2's build review. #2137 approved → implementer on
-`fix/fm-2137-timing-equalise` (review before merge). #2224 approved → PR #2328 (auto-merge). Leftover folders: clean
-up at project end. 4a–4d: owner asked UAC-r2 for its recommendation (sent 2026-10-27; owner: no per-BU search except Secure Records). 5b drop HIPC DEV 2; 5c/5d done (read-only, see task-006 notes and item 6). Owner stated policy for 4b/4c: a mapping copy is not
-user-scoped (not yet applied; it reverses 014's AppendTo/field-security checks on mapped values and needs UAC-r2).
-Dev reads: 0 of 64 matters have an empty `sprk_issecure`; 40 active Copy rules (4 Manual Refresh, 16 One-time,
-20 empty); documents point at several indexes (537 none, 76 knowledge-index-v2, 1 spaarke-file-index).
+## Known limits carried
 
-1. **016 Repair questions:** cross-BU re-own (skip for now); whether Repair re-owns roots; SYSTEM/INTEGRATION-owned
-   unfiled rows.
-2. ~~017 decisions~~: all decided 2026-10-22/23 (decisions.md).
-3. **Live smoke of #2191 on dev** (Office Project-from-Matter quick-create, mapped values, a secured column stays empty).
-4. **005 `-Apply` on dev**, then `-Verify`.
-5. **014:** confirm the 403 for a mapped filing lookup that fails field security. **015:** index precedence notes.
-6. ~~#2137~~ (PR #2331); ~~HIPC DEV 2~~ (owner: out of scope); **model1-prod** map check after the next managed release (checked 2026-10-27: still there, expected); ~~prod null `sprk_issecure`~~ (2026-10-27: prod has 0 matters/projects/WAs, flag defaults to No) before a
-   prod #2191 deploy.
-7. **#2224:** OK to raise the Tier 2 ADR job timeout.
+- **022:** K2 (the isolation owner is the single Secure team) and K3 (the Project wizard's follow-on Event/WA creates map in the browser; tasks 023/024). K1 and K4 were resolved in round 6; K4 is filed as DI-024 #2648.
+- **054a:** the thread's owner controls which pair the thread yields (L3); 054b's run-as-user writer list (`ChildRecordEndpoints.cs` ~:817, `OwnedChildWrite.cs` ~:1559, `DataverseCreateRecordHandler.cs` ~:489, `EmailDraftToolHandler.cs` ~:478, `InquiryDispositionService.cs` ~:485).
 
-## Cross-project obligations
+## Other lanes
 
-- **UAC-r2:** reviews 018b and 017 on condition (b); holds #2190 and #2169; batches deploy candidates for R3.
-- **ebilling-r1:** #1911 + reconcile before 017. Task 096 removes the Office Invoice leg. 016/040 call
-  `CheckGenericUpdateAsync` once #1911 lands (016 has a `TODO(#1911)` seam).
-- **R3:** deploys master to dev only on a batched candidate from UAC-r2, with the owner's go in R3's session.
-- **ontology-r1:** 033 needs a design-note review first. 033 also carries the app-only metadata reader and the IsSecured
-  skip; 052 is hard-blocked on 033.
+- **054a piece 1** (the Direct team lookup and settings): FINAL on `task/fm-054a-2` (ac6f1743b3), merged by UAC-r2 into 198, NOT on our work branch. **Piece 3** (the owner move): built against UAC-r2's contract in the 054 notes; blocked on the routing decision.
+- **054b / 054c:** live runs need the owner's go.
+- **022b:** Restricted mapping source; document access permission set in the create. UAC-r2 reviews.
+- **045d:** Q8 (invoice family re-derive); proposal in `notes/task-045c-notes.md`.
+- **052b:** scheduled repair job, contact owner rule, chat contact create.
+- **032b-2/032b-3:** on the current `work/ebilling-r1` tip; two adversarial passes; the diff goes to ebilling-r1.
+- **021:** deploy by UAC-r2 with the owner's go after master. **076:** re-run check (c) after UAC-r2 deploys 076c.
+- **Later:** 023–029, 035, 036, 050/051, 053, 061–063, 090.
 
-## Next tasks
+## Open owner items
 
-019 once 017 lands. 017 once unblocked. Then 033 (before 052), 040 (needs 005, 019), 050 (needs 019).
+- (Decided 2026-11-10: route via the pair thread; piece 2b.)
+- sync-mode -Apply on dev; deleting snapshot branches `…-049c` and `…-030b`; the 054b and 054c live runs.
+
+## Coordination
+
+- Peers: `uac-r2` (desktop), `provisioning-r1`, `ontology-r1`, word-add-in, ebilling-r1 (now the Desktop session `ebilling-r1`, since 2026-11-10). Access-defect details go to uac-r2 by message only. UAC-r2 task 198 (`task/uac-198-direct-share-side`) is the share side of 054. It fixes the zero-mask and soft-read defects in `DirectThreadAccessService.cs` (their file; we don't edit it).
+- Nightly quality alerts open on master: #1906 (client-tests), #2060 (full-unit-tests). The `Api.Office.` contract classes crash the test host when run together, on base too; exclude them from combined runs.

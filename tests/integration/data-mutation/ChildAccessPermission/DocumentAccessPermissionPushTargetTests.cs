@@ -41,10 +41,10 @@ public class DocumentAccessPermissionPushTargetTests
 
         (updated, failed, skipped).Should().Be((1, 0, 0));
         errors.Should().BeEmpty();
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             "sprk_document", Child,
             It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_documentdescription")),
-            It.IsAny<CancellationToken>(), Caller), Times.Once);
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
         results.Should().ContainSingle(r => r.TargetField == target)
             .Which.Should().Match<FieldMappingResultDto>(r =>
                 r.Status == FieldMappingStatus.Skipped && r.ErrorMessage!.Contains("set by Spaarke"));
@@ -75,9 +75,9 @@ public class DocumentAccessPermissionPushTargetTests
             table, Rule("sprk_accesspermission", "sprk_accesspermission", "OptionSet"));
 
         (updated, failed).Should().Be((1, 0));
-        _writes.Verify(w => w.UpdateRecordFieldsAsync(
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
             table, Child, It.Is<Dictionary<string, object?>>(f => f.ContainsKey("sprk_accesspermission")),
-            It.IsAny<CancellationToken>(), Caller), Times.Once);
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
         results.Should().ContainSingle().Which.Status.Should().Be(FieldMappingStatus.Mapped);
     }
 
@@ -87,6 +87,7 @@ public class DocumentAccessPermissionPushTargetTests
     private Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> Push(
         string table, params FieldMappingRuleDto[] rules) =>
         FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object,
             new StampWorld().Restamper,
             rules,

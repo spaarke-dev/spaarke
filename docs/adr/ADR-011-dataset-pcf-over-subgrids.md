@@ -237,7 +237,7 @@ All exceptions require **explicit approval** from tech lead with documented rati
 
 ## AI-Directed Coding Guidance
 
-- **Form-embedded list UI** (bound to a Dataverse form): implement/extend the Dataset PCF under `src/client/pcf/UniversalDatasetGrid/`.
+- **Form-embedded list UI** (bound to a Dataverse form): build the Dataset PCF on the DataGrid framework (`src/client/shared/Spaarke.UI.Components/src/components/DataGrid/`; `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`). The former `UniversalDatasetGrid` control was deleted 2026-06-05 (`c1c428e92b`).
 - **Standalone list/search dialog** (opened via button, not form-bound): implement as a React Code Page under `src/client/code-pages/` — do NOT use Dataset PCF for this (see ADR-006).
 - Reuse shared components from `src/client/shared/Spaarke.UI.Components/` rather than duplicating UI primitives.
 - Avoid adding new native subgrids or bespoke JS webresources; if you must, document an explicit exception and plan the PCF replacement.

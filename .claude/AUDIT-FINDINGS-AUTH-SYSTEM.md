@@ -71,7 +71,7 @@ Inventory of 17 distinct consumer surfaces. **Snapshot-prone (12)**:
 |---|---|---|
 | SprkChat hooks (3 of them) | [SprkChat/hooks/](../src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/) | Receives `accessToken` prop, captures in closure for async fetch |
 | SpaarkeAi App.tsx | [App.tsx:76-90](../src/solutions/SpaarkeAi/src/App.tsx#L76-L90) | One-shot `useEffect` snapshots token at mount |
-| PlaybookBuilder Code Page | [aiPlaybookService.ts:279](../src/client/code-pages/PlaybookBuilder/src/services/aiPlaybookService.ts#L279) | Raw fetch + `Bearer ${accessToken}` |
+| PlaybookBuilder Code Page | aiPlaybookService.ts:279 | Raw fetch + `Bearer ${accessToken}` |
 | DocumentRelationshipViewer | [VisualizationApiService.ts:40](../src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts#L40) | Direct header assignment |
 | Office Add-in SseClient | [SseClient.ts:78](../src/client/office-addins/shared/taskpane/services/SseClient.ts#L78) | EventSource cannot auto-retry on 401 |
 | Office Add-in SaveFlow | [useSaveFlow.ts:526,864](../src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts#L526) | Raw fetch from hook closure |
@@ -113,7 +113,7 @@ Inventory of 17 distinct consumer surfaces. **Snapshot-prone (12)**:
 - **Action**: Replace `token: string` API surfaces with function-based contracts (`getAccessToken: () => Promise<string>`, `authenticatedFetch`). Make `token: string` impossible to pass around.
 
 **H-2. BridgeStrategy and XrmStrategy skip JWT `exp` validation**
-- Both assume a 55-min token lifetime ([BridgeStrategy.ts:14](../src/client/shared/Spaarke.Auth/src/strategies/BridgeStrategy.ts#L14), [XrmStrategy.ts:85](../src/client/shared/Spaarke.Auth/src/strategies/XrmStrategy.ts#L85)). If the publisher's token has a shorter actual lifetime (e.g. policy-driven 30min), expired tokens are returned as valid. Saved by the 401 retry path, but adds an unnecessary failed-call round-trip.
+- Both assume a 55-min token lifetime (BridgeStrategy.ts:14, XrmStrategy.ts:85). If the publisher's token has a shorter actual lifetime (e.g. policy-driven 30min), expired tokens are returned as valid. Saved by the 401 retry path, but adds an unnecessary failed-call round-trip.
 - **Action**: Decode `exp` claim in both strategies, reject if past expiry minus 5min buffer (same convention as `CacheStrategy`).
 
 **H-3. Proactive refresh disabled by default**
@@ -129,7 +129,7 @@ Inventory of 17 distinct consumer surfaces. **Snapshot-prone (12)**:
 - **Action**: Stop snapshotting. Provider exposes functions; UI components call them per-request.
 
 **H-6. Office Add-ins use a parallel auth stack**
-- Office Add-ins use [authConfig.ts](../src/client/office-addins/shared/auth/authConfig.ts) (direct MSAL.js, NAA broker) — not `@spaarke/auth`. Two auth implementations to maintain, two sets of bugs to fix.
+- Office Add-ins use authConfig.ts (direct MSAL.js, NAA broker) — not `@spaarke/auth`. Two auth implementations to maintain, two sets of bugs to fix.
 - **Action**: Unify on `@spaarke/auth`. Add NAA as a 7th strategy (or alternative `MsalNaaStrategy`) so Office Add-ins use the same cascade.
 
 ### 🟡 MEDIUM — Operational / Hygiene
@@ -472,7 +472,7 @@ Workstreams A and B can run in parallel after A1-A2 land. Workstream C is indepe
 | # | Task | Hours |
 |---|---|---|
 | B1 | **SpaarkeAi** (~10 files): `App.tsx`, `AiSessionProvider`, `ThreePaneShell`, `ConversationPane`, `WelcomePanel`, `ChatHistoryPanel`, `WorkspaceLandingWidget`, `ChatPanel`, `FeedbackButtons`. Stop snapshotting; use `useAuth()`. `SprkChat` API change: drop `accessToken`, require `authenticatedFetch` + `getAccessToken`. `useSseStream` calls `getAccessToken()` per-stream-open. | 5 |
-| B2 | **Other Code Pages**: PlaybookBuilder ([aiPlaybookService.ts:279](../src/client/code-pages/PlaybookBuilder/src/services/aiPlaybookService.ts#L279)), DocumentRelationshipViewer ([VisualizationApiService.ts:40](../src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts#L40)), AnalysisWorkspace (mixed paths). Same pattern. | 4 |
+| B2 | **Other Code Pages**: PlaybookBuilder (aiPlaybookService.ts:279), DocumentRelationshipViewer ([VisualizationApiService.ts:40](../src/client/code-pages/DocumentRelationshipViewer/src/services/VisualizationApiService.ts#L40)), AnalysisWorkspace (mixed paths). Same pattern. | 4 |
 | B3 | **PCFs** verification: confirm UniversalDatasetGrid, UniversalQuickCreate, SpeDocumentViewer, all others use `authenticatedFetch`. Rebuild + redeploy each (INV-8). | 2 |
 | B4 | **Office Add-ins**: register `OfficeNaaStrategy` with `@spaarke/auth`. Fix `SseClient.ts:78` and `useSaveFlow.ts:526,864` (raw Bearer snapshots). Existing `ApiClient` per-request pattern stays correct. | 4 |
 | B5 | **Shared components**: update `bffDataServiceAdapter` example/docs to function-based. Delete duplicate `buildBffApiUrl` from `src/client/pcf/shared/utils/environmentVariables.ts:265-280`; import from `@spaarke/auth`. | 1 |

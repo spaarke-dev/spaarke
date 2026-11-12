@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
@@ -135,7 +136,7 @@ public sealed partial class DecisionCommitServiceTests
 
         public int WhoAmICalls;
         public Mock<IOrganizationServiceAsync2> Org { get; } = new();
-        public Mock<IGenericEntityService> Entities { get; } = new();
+        public Mock<IGenericEntityService> Entities { get; } = new Mock<IGenericEntityService>().WithNoStoredCorePair();
         public Mock<IDataverseUserClient> User { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; }
 
@@ -582,7 +583,7 @@ public sealed partial class DecisionCommitServiceTests
 
             var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), Entities.Object, RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, ProbeOverride ?? Probe.Object, Identity.Object, AssignedAccessTestDoubles.Representation(Links), LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -1358,6 +1359,8 @@ public sealed partial class DecisionCommitServiceTests
     [InlineData("reject-invoice")]
     [InlineData("return-to-firm")]
     [InlineData("override-submission")]
+    [InlineData("assign-firm")] // 095d-1b
+    [InlineData("add-line")] // 164a-2 (EB-D-198): BillingActions only
     [InlineData("accept-line")]
     public async Task ABillingCode_IsRefusedByTheCommitRoute_NothingWritten_Ebilling074(string code)
     {

@@ -211,26 +211,6 @@ public partial class BillingFactLoaderTests
     }
 
     [Fact]
-    public async Task APublishedProceduresRuleSet_IsNotEvaluatedHere_UntilTheResolverReadsProcedureVersions_Task081()
-    {
-        // ebilling-r1 task 081: this set-level reader cannot honour a Procedure Version's window, Applies to or dropped rules, so a
-        // Procedure's set (sprk_procedure set) is skipped whatever its scope; an ordinary set beside it still loads.
-        const string body = """{"type":"TimeIncrement","incrementHours":0.5}""";
-        Policy(RuleSet(RuleSetScope.ClientDefault), "CD", RuleType.TimeIncrement, body);
-        var procedureDefault = RuleSet(RuleSetScope.ClientDefault);
-        _world.Set("sprk_ruleset", procedureDefault, "sprk_procedure", Ref("sprk_procedure", Guid.NewGuid()));
-        Policy(procedureDefault, "PROC-ALL", RuleType.TimeIncrement, body);
-        var procedureFirm = RuleSet(RuleSetScope.Firm, FirmId);
-        _world.Set("sprk_ruleset", procedureFirm, "sprk_procedure", Ref("sprk_procedure", Guid.NewGuid()));
-        Policy(procedureFirm, "PROC-FIRM", RuleType.TimeIncrement, body);
-
-        var loaded = await Loader().LoadAsync(Request(null), CancellationToken.None);
-
-        loaded.Rules.Select(r => r.PolicyCode).Should().Equal("CD");
-        AssertWroteNothing();
-    }
-
-    [Fact]
     public async Task DraftAndRejectedVersionsWithNoEndDate_AreNotReturned_SupersededAndCurrentAre_K3()
     {
         const string body = """{"type":"TimeIncrement","incrementHours":0.5}""";
@@ -489,9 +469,14 @@ public partial class BillingFactLoaderTests
     {
         var rule = new BillingRuleCandidate
         {
-            PolicyId = Guid.NewGuid(), PolicyCode = "D", PolicyVersionId = Guid.NewGuid(), RuleSetId = Guid.NewGuid(),
-            Scope = RuleSetScope.ClientDefault, RuleType = ((int)RuleType.Duplicate).ToString(System.Globalization.CultureInfo.InvariantCulture),
-            RuleBody = body, IsCurrent = true,
+            PolicyId = Guid.NewGuid(),
+            PolicyCode = "D",
+            PolicyVersionId = Guid.NewGuid(),
+            RuleSetId = Guid.NewGuid(),
+            Scope = RuleSetScope.ClientDefault,
+            RuleType = ((int)RuleType.Duplicate).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            RuleBody = body,
+            IsCurrent = true,
         };
 
         BillingFactLoader.ComparesLines([rule]).Should().Be(expected);

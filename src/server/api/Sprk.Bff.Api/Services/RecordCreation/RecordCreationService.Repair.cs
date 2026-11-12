@@ -56,6 +56,15 @@ internal sealed partial class RecordCreationService
     private static readonly IReadOnlySet<string> AppendOnlyTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord" };
 
+    /// <summary>
+    /// DEF-061 fix round 1: <c>sprk_procedureversion</c> is in the registry only for its writer-only publish stamp
+    /// (<see cref="RecordTableRule.WriterOnlyColumns"/>). A Procedure Version is created, owned and changed by <c>ProcedureService</c>, so
+    /// registering it must not make Repair read, map into or re-own it: it stays exactly what it was before the entry, a table this service
+    /// does not create (<see cref="RecordRepairReason.TableUnsupported"/>, neutral wording; not "append-only", which it is not).
+    /// </summary>
+    private static readonly IReadOnlySet<string> NotCreatedHereTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_procedureversion" };
+
     /// <summary>Repair's warning for a mapping source it could not read — neutral: no caller is addressed (K4).</summary>
     internal const string RepairSourceUnreadableWarning =
         "The related record could not be read, so no fields were copied from it.";
@@ -86,7 +95,7 @@ internal sealed partial class RecordCreationService
         }
 
         var rule = TableRules(table);
-        if (rule is null)
+        if (rule is null || NotCreatedHereTables.Contains(table))
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the table is not one this service creates; not repaired", table, id);
             return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.TableUnsupported);
@@ -115,9 +124,30 @@ internal sealed partial class RecordCreationService
         var report = new List<RecordRepairField>();
         var warnings = new List<string>();
 
+        // FR-41 (#2483, task 042b): the I-1 stamp is planned ONCE, before the owner. The owner question asks over the row as it
+        // ends (042b F1, owner decision A': a held stamp that disagrees is replaced); the stamp step adds the fill-only part of
+        // the same plan. A fault keeps the owner (RepairOwnerAsync) and adds no stamp.
+        (IReadOnlyDictionary<string, object>? Plan, bool Faulted) stamp = (null, false);
+        if (CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
+        {
+            try
+            {
+                stamp = (await _restamper.PlanStampOfRowAsync(table, row, ct).ConfigureAwait(false), false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[RECORD-REPAIR] the core-ancestor stamp of {Table} {Id} could not be planned; none added", table, row.Id);
+                stamp = (null, true);
+            }
+        }
+
         // Review F1-b: the owner (and what the row's filing resolves to) is decided BEFORE the mapping, which it may block.
         var ownerParents = new List<RecordOwnershipParent>();
-        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, ct).ConfigureAwait(false);
+        var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, stamp, ct).ConfigureAwait(false);
         if (owner.MappingBlocked is { } blocked)
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: nothing was mapped ({Reason})", table, id, blocked);
@@ -129,7 +159,7 @@ internal sealed partial class RecordCreationService
         }
 
         // No search-index step (task 041, FR-40): the index follows the content type, so Repair writes neither column.
-        await RepairStampAsync(table, row, patch, report, ct).ConfigureAwait(false);
+        RepairStamp(table, row, stamp, patch, report);
 
         RecordRepairOutcome Outcome(RecordRepairStatus status, string? reason) => new()
         {
@@ -227,7 +257,10 @@ internal sealed partial class RecordCreationService
     /// filed-under parent; the record-type catalog read app-only), the profile, the source read app-only
     /// (<see cref="MappingSourceReader.System"/>, no probe), then <see cref="CreateTimeFieldMapping.ApplyFillOnly"/> — the
     /// create's own fill decision — over a copy of the row. A mapped value that would file the row under a record (a filing
-    /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row.
+    /// or ownership-parent lookup, or an I-1 stamp column) is not written: Repair never re-files a row. Task 052a: both
+    /// tables' column metadata is read app-only first — the source's field-secured columns are never read for mapping nor
+    /// copied, a mapped value its column cannot take is not written, Money columns get a Money (#2124), and metadata that
+    /// cannot be read maps nothing.
     /// </summary>
     private async Task RepairMappingAsync(
         string table, RecordTableRule rule, Entity row, IReadOnlyList<RecordOwnershipParent> ownerParents,
@@ -303,8 +336,23 @@ internal sealed partial class RecordCreationService
                 return;
             }
 
+            // Task 052a: both tables' column metadata, read app-only before anything is read from the source (owner decision
+            // 2026-10-21, option 1; UAC-r2 condition 1: metadata that cannot be read, or does not say, maps nothing).
+            if (await SourceColumnsRepairMayCopyAsync(table, row.Id, source.EntityLogicalName,
+                    CreateTimeFieldMapping.CollectSourceColumns(rules), ct).ConfigureAwait(false) is not { } copyable)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceMetadataUnavailable));
+                return;
+            }
+
+            if (await ColumnMetadataForRepairAsync(table, row.Id, ct).ConfigureAwait(false) is not { } targetColumns)
+            {
+                report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingTargetMetadataUnavailable));
+                return;
+            }
+
             // The source's own secure status (review F1-e (ii)) is read in the same one read as its mapped columns.
-            var sourceColumns = SourceColumnsRepairMayCopy(source.EntityLogicalName, CreateTimeFieldMapping.CollectSourceColumns(rules))
+            var sourceColumns = copyable
                 .Concat(SourceGateColumns(source.EntityLogicalName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -341,10 +389,14 @@ internal sealed partial class RecordCreationService
             if (rule.SearchIndexed)
                 protectedColumns.UnionWith([SearchIndexColumns.LookupColumn, SearchIndexColumns.LegacyTextColumn]);
 
+            // Task 052a: only the columns Repair may copy reach the engine — a gate column (the owner, the secure flag) is read to
+            // decide the gate, never copied unless a rule names it and it is not field-secured. #2124: the row's Money columns,
+            // so a Default or an expression into one is written as a Money.
+            var copySource = CopyableSource(source.EntityLogicalName, read.Record, copyable);
             var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             CreateTimeFieldMapping.ApplyFillOnly(
-                rules, target, read.Record, protectedColumns, warnings, _logger,
-                moneyAttributes: null, mappedColumns: written);
+                rules, target, copySource, protectedColumns, warnings, _logger,
+                moneyAttributes: MoneyColumns(targetColumns), mappedColumns: written);
 
             var columns = rules
                 .Select(r => r.TargetField?.Trim())
@@ -387,7 +439,17 @@ internal sealed partial class RecordCreationService
                         continue;
                     }
 
-                    patch[column] = value;
+                    var (unfit, columnValue) = TargetColumnValue(targetColumns, column, value);
+                    if (unfit is not null || columnValue is null)
+                    {
+                        // Task 052a (task 016 K-1; review F1): a value Dataverse would refuse is left out, so it cannot fail the
+                        // whole update.
+                        report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, column,
+                            unfit ?? RecordRepairReason.MappedValueTypeMismatch));
+                        continue;
+                    }
+
+                    patch[column] = columnValue;
                     mappedHere.Add(column);
                     report.Add(RecordRepairField.Repaired(RecordRepairPart.Mapping, column));
                 }
@@ -431,17 +493,95 @@ internal sealed partial class RecordCreationService
             : null;
 
     /// <summary>
-    /// The mapped source columns Repair may copy (owner decision 2026-10-21, field security option 1). Today: all of them,
-    /// unchanged.
+    /// The mapped source columns Repair may read and copy (owner decision 2026-10-21, field security option 1; task 052a): Repair
+    /// runs as the system principal, with no caller to mask the source against (#2188), so it leaves out every column of
+    /// <paramref name="sourceTable"/> its metadata states is field-secured. A column the table does not have is left out too
+    /// (nothing to read or copy). <c>null</c> — map nothing for the row (UAC-r2 condition 1, fail closed) — when the metadata
+    /// cannot be read, comes back empty, or does not say whether a mapped column is secured.
     /// </summary>
-    // TODO(task 033): drop every column of sourceTable whose IsSecured is true, read through task 033's app-only metadata
-    // reader. Fail closed: when that metadata is unavailable (a fault, or IsSecured unknown) map nothing for the row, with
-    // reason record_repair.mapping_source_metadata_unavailable. Task 052 stays blocked until this lands.
-    private static IEnumerable<string> SourceColumnsRepairMayCopy(string sourceTable, IEnumerable<string> mappedSourceColumns)
+    /// <remarks>Task 032b-1: a wrapper over <see cref="MappingColumnMetadata.CopyableSourceColumns"/> (the shared gate) that keeps
+    /// Repair's log lines.</remarks>
+    private async Task<IReadOnlyList<string>?> SourceColumnsRepairMayCopyAsync(
+        string table, Guid rowId, string sourceTable, IEnumerable<string> mappedSourceColumns, CancellationToken ct)
     {
-        _ = sourceTable;
-        return mappedSourceColumns;
+        if (await ColumnMetadataForRepairAsync(sourceTable, rowId, ct).ConfigureAwait(false) is not { } columns)
+            return null;
+
+        var answer = MappingColumnMetadata.CopyableSourceColumns(columns, mappedSourceColumns);
+        if (answer.Copyable is not { } copyable)
+        {
+            _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the metadata of the mapping source column {Source}.{Column} does not " +
+                               "say whether it is field-secured; nothing was mapped", table, rowId, sourceTable, answer.UnknownColumn);
+            return null;
+        }
+
+        if (answer.Secured.Count > 0)
+        {
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the field-secured source column(s) {Columns} of {Source} are not " +
+                                   "copied", table, rowId, string.Join(", ", answer.Secured), sourceTable);
+        }
+
+        return copyable;
     }
+
+    /// <summary>
+    /// <paramref name="table"/>'s column metadata, read app-only (<see cref="IGenericEntityService.GetColumnMetadataAsync"/>,
+    /// task 052a), or <c>null</c> when it faulted or came back empty (an empty answer cannot be told from a failed read).
+    /// Cancellation is rethrown. Task 032b-1: a wrapper over <see cref="MappingColumnMetadata.ReadAsync"/> (the shared gate)
+    /// that keeps Repair's log lines.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, ColumnMetadata>?> ColumnMetadataForRepairAsync(
+        string table, Guid rowId, CancellationToken ct)
+    {
+        var read = await MappingColumnMetadata.ReadAsync(_entities, table, ct).ConfigureAwait(false);
+        if (read.Columns is { } columns)
+            return columns;
+
+        if (read.Fault is { } fault)
+        {
+            _logger.LogWarning(fault, "[RECORD-REPAIR] the column metadata of {Table} could not be read while repairing {Id}; nothing " +
+                                      "was mapped", table, rowId);
+        }
+        else
+        {
+            _logger.LogWarning("[RECORD-REPAIR] the column metadata of {Table} came back empty while repairing {Id}; nothing was " +
+                               "mapped", table, rowId);
+        }
+
+        return null;
+    }
+
+    /// <summary>The engine's source: the read row's <paramref name="copyable"/> columns only, with their labels.</summary>
+    private static Entity CopyableSource(string sourceTable, Entity read, IReadOnlyCollection<string> copyable)
+    {
+        var source = new Entity(sourceTable, read.Id);
+        foreach (var column in copyable)
+        {
+            if (read.Attributes.TryGetValue(column, out var value))
+                source[column] = value;
+            if (read.FormattedValues.TryGetValue(column, out var label))
+                source.FormattedValues[column] = label;
+        }
+
+        return source;
+    }
+
+    /// <summary>The Money columns of a table (#2124: a Default or an expression into one is written as a <see cref="Money"/>).</summary>
+    private static IReadOnlySet<string> MoneyColumns(IReadOnlyDictionary<string, ColumnMetadata> columns) =>
+        columns.Values
+            .Where(c => string.Equals(c.AttributeType, nameof(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Money), StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.LogicalName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The mapped <paramref name="value"/> as the SDK writes it to <paramref name="column"/> of the row's table, or why it is not
+    /// written (task 052a; review F1, K4) — each a refusal the SDK would otherwise give for the WHOLE update, and with it the
+    /// row's owner repair, on every pass. Task 032b-1: the check is the shared <see cref="MappedTargetFit.Check"/>, moved there
+    /// unchanged; its refusals are listed on it.
+    /// </summary>
+    private static (string? Refusal, object? Value) TargetColumnValue(
+        IReadOnlyDictionary<string, ColumnMetadata> columns, string column, object value) =>
+        MappedTargetFit.Check(columns, column, value);
 
     /// <summary>A secure root's security business unit (provisioning's; it decides where the record's access lives).</summary>
     private const string SecurityBusinessUnitColumn = "sprk_securitybu";
@@ -459,9 +599,11 @@ internal sealed partial class RecordCreationService
     /// (<see cref="MembershipOptionsDefaults.CanonicalAccessConferringRegistry"/>) and the bound one
     /// (<see cref="MembershipOptions.AccessConferringRoles"/>, which <c>AssignedAccessMaterializer.RegistryFor</c> reads), so
     /// neither can be widened past the other. A fault reading the bound registry propagates to the mapping step, which then
-    /// maps nothing (fail closed).
+    /// maps nothing (fail closed). Task 032b-1: the table's display copies
+    /// (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>) are never filled either
+    /// (<see cref="RecordRepairReason.MappedValueIsDisplayCopy"/>). Internal so a seam test can ask it directly.
     /// </summary>
-    private IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table)
+    internal IReadOnlyDictionary<string, string> ColumnsRepairNeverMaps(string table)
     {
         // A column → reason map of what is NOT written (never a payload): built from column lists.
         var columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -489,67 +631,39 @@ internal sealed partial class RecordCreationService
 
         foreach (var field in conferring.Select(c => c?.Field?.Trim()).Where(f => !string.IsNullOrEmpty(f)))
             columns.TryAdd(field!, RecordRepairReason.MappedValueAssignsAccess);
+
+        // Task 032b-1: a display copy (an invoice's attorney columns) is set at create only; Repair never re-fills it.
+        if (MembershipOptionsDefaults.DisplayCopyColumns.TryGetValue(table, out var displayCopies))
+        {
+            foreach (var column in displayCopies)
+                columns.TryAdd(column, RecordRepairReason.MappedValueIsDisplayCopy);
+        }
+
         return columns;
     }
 
-    /// <summary>The source columns Repair reads to tell whether it may copy from it (review F1-e (ii)).</summary>
-    private static IEnumerable<string> SourceGateColumns(string sourceTable) =>
-        SecureChildLineage.IsRoot(sourceTable) ? [OwnerColumn, AccessFollowsParent.SecureFlagColumn] : [OwnerColumn];
+    /// <summary>The source columns Repair reads to tell whether it may copy from it (review F1-e (ii)): the shared
+    /// <see cref="MappingSourceCopyGate.SourceGateColumns"/> (task 032b-1).</summary>
+    private static IEnumerable<string> SourceGateColumns(string sourceTable) => MappingSourceCopyGate.SourceGateColumns(sourceTable);
 
     /// <summary>
     /// Review F1-e (ii), belt and braces over the owner gate: whether the source's data may be copied into the row. Not when
     /// the source is a secure-flagged root whose flag is not an explicit <c>false</c> (empty reads as flagged), or is owned
     /// by the Secure Record owner team, unless the row is owned by that Secure team. Anything that cannot be told — an
     /// owner that did not come back, a fault deciding the team, or (review pass 3) a Secure Record owner team that is
-    /// missing or ambiguous when a team owns the source — is secure (fail closed).
+    /// missing or ambiguous when a team owns the source — is secure (fail closed). Task 032b-1: the decision is the shared
+    /// <see cref="MappingSourceCopyGate.DecideAsync"/>; this wrapper keeps Repair's log lines and maps
+    /// <see cref="MappingSourceCopyVerdict.Allowed"/> to <c>true</c> and every other answer to <c>false</c>.
     /// </summary>
     private async Task<bool> SourceMayBeCopiedAsync(string table, Entity row, MappingSource source, Entity read, CancellationToken ct)
     {
+        MappingSourceCopyDecision decision;
         try
         {
-            var flagged = SecureChildLineage.IsRoot(source.EntityLogicalName)
-                && read.GetAttributeValue<bool?>(AccessFollowsParent.SecureFlagColumn) != false;
-            var sourceOwner = read.GetAttributeValue<EntityReference>(OwnerColumn);
-            if (sourceOwner is null || sourceOwner.Id == Guid.Empty)
-            {
-                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the owner of the mapping source {Source} {SourceId} did not come " +
-                                   "back; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
-                return false;
-            }
-
+            // Read inside the guard, as before the move: an owner value of the wrong type is "could not be told" (fail closed).
             var rowOwner = row.GetAttributeValue<EntityReference>(OwnerColumn);
-            var sourceTeamOwned = string.Equals(sourceOwner.LogicalName, "team", StringComparison.OrdinalIgnoreCase);
-            var rowTeamOwned = rowOwner is { LogicalName: "team" } && rowOwner.Id != Guid.Empty;
-            Guid? secureTeam = null;
-            if (sourceTeamOwned || (flagged && rowTeamOwned))
-            {
-                // Review pass 3: a Secure Record owner team that is missing or ambiguous cannot tell a Secure-team owner
-                // from any other, so the source's owner cannot be told: fail closed.
-                var resolved = await _shares.SecureOwnerTeamAsync(ct).ConfigureAwait(false);
-                if (resolved.TeamId is not { } known || known == Guid.Empty)
-                {
-                    _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the Secure Record owner team is {State}, so whether the mapping " +
-                                       "source {Source} {SourceId} is secure cannot be told; nothing was mapped", table, row.Id,
-                        resolved.Refusal is null ? "missing" : "ambiguous", source.EntityLogicalName, source.RecordId);
-                    return false;
-                }
-
-                secureTeam = known;
-            }
-
-            var sourceSecureTeam = sourceTeamOwned && sourceOwner.Id == secureTeam;
-            if (!flagged && !sourceSecureTeam)
-                return true;
-
-            var isolated = rowTeamOwned
-                && (sourceSecureTeam ? rowOwner!.Id == sourceOwner.Id : rowOwner!.Id == secureTeam);
-            if (!isolated)
-            {
-                _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the mapping source {Source} {SourceId} is secure and the row " +
-                                       "is not isolated; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
-            }
-
-            return isolated;
+            decision = await MappingSourceCopyGate.DecideAsync(source.EntityLogicalName, read, rowOwner, _shares.SecureOwnerTeamAsync, ct)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -557,9 +671,32 @@ internal sealed partial class RecordCreationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[RECORD-REPAIR] {Table} {Id}: whether the mapping source {Source} {SourceId} is secure could " +
-                                   "not be told; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
-            return false;
+            decision = MappingSourceCopyDecision.Unknown(MappingSourceCopyGate.ReasonFault, ex);
+        }
+
+        switch (decision)
+        {
+            case { Verdict: MappingSourceCopyVerdict.Allowed }:
+                return true;
+            case { Verdict: MappingSourceCopyVerdict.Secure }:
+                _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the mapping source {Source} {SourceId} is secure and the row " +
+                                       "is not isolated; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
+                return false;
+            case { Reason: MappingSourceCopyGate.ReasonSourceOwnerMissing }:
+                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the owner of the mapping source {Source} {SourceId} did not come " +
+                                   "back; nothing was mapped", table, row.Id, source.EntityLogicalName, source.RecordId);
+                return false;
+            case { Reason: MappingSourceCopyGate.ReasonSecureTeamMissing or MappingSourceCopyGate.ReasonSecureTeamAmbiguous }:
+                _logger.LogWarning("[RECORD-REPAIR] {Table} {Id}: the Secure Record owner team is {State}, so whether the mapping " +
+                                   "source {Source} {SourceId} is secure cannot be told; nothing was mapped", table, row.Id,
+                    decision.Reason == MappingSourceCopyGate.ReasonSecureTeamMissing ? "missing" : "ambiguous",
+                    source.EntityLogicalName, source.RecordId);
+                return false;
+            default:
+                _logger.LogWarning(decision.Fault, "[RECORD-REPAIR] {Table} {Id}: whether the mapping source {Source} {SourceId} is " +
+                                                   "secure could not be told; nothing was mapped", table, row.Id,
+                    source.EntityLogicalName, source.RecordId);
+                return false;
         }
     }
 
@@ -611,32 +748,24 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Step 10 (I-1) for an existing row: the stamp columns it is MISSING, from its source's current root
-    /// (<see cref="CoreAncestorRestamper.PlanMissingStampAsync"/>). A held stamp — stale or not — and the row's children are
+    /// (<see cref="CoreAncestorRestamper.MissingOf"/> of <see cref="CoreAncestorRestamper.PlanStampOfRowAsync"/>), as planned once before the owner (FR-41, task 042b:
+    /// <paramref name="stamp"/>; no second derivation). A held stamp — stale or not — and the row's children are
     /// <see cref="CoreAncestorStampReconciliationJob"/>'s.
     /// </summary>
-    private async Task RepairStampAsync(
-        string table, Entity row, Dictionary<string, object> patch, List<RecordRepairField> report, CancellationToken ct)
+    private static void RepairStamp(
+        string table, Entity row, (IReadOnlyDictionary<string, object>? Plan, bool Faulted) stamp, Dictionary<string, object> patch,
+        List<RecordRepairField> report)
     {
         if (!CoreAncestorResolver.StampSourceColumns.ContainsKey(table))
             return;
 
-        Dictionary<string, object>? missing;
-        try
+        if (stamp.Faulted)
         {
-            missing = await _restamper.PlanMissingStampAsync(table, row, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[RECORD-REPAIR] the core-ancestor stamp of {Table} {Id} could not be planned; none added", table, row.Id);
             report.Add(RecordRepairField.Skipped(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampUnavailable));
             return;
         }
 
-        if (missing is null)
+        if (CoreAncestorRestamper.MissingOf(row, stamp.Plan) is not { } missing)
         {
             report.Add(RecordRepairField.Present(RecordRepairPart.CoreAncestorStamp, null, RecordRepairReason.StampNothingMissing));
             return;
@@ -838,6 +967,32 @@ internal static class RecordRepairReason
     internal const string MappingNoValue = "record_repair.mapping_no_value";
     internal const string MappedValueWouldRefile = "record_repair.mapped_value_would_refile";
 
+    /// <summary>Task 052a (owner decision 2026-10-21, UAC-r2 condition 1): the mapping source's column metadata could not be
+    /// read, or does not say whether a mapped source column is field-secured — nothing is mapped (fail closed).</summary>
+    internal const string MappingSourceMetadataUnavailable = "record_repair.mapping_source_metadata_unavailable";
+
+    /// <summary>Task 052a: the row's own column metadata could not be read, so no mapped value can be checked against its
+    /// column (update validity, length, Money) — nothing is mapped (fail closed).</summary>
+    internal const string MappingTargetMetadataUnavailable = "record_repair.mapping_target_metadata_unavailable";
+
+    /// <summary>Task 052a: the mapped column does not exist on the row's table, or an update may not set it.</summary>
+    internal const string MappedColumnNotUpdatable = "record_repair.mapped_column_not_updatable";
+
+    /// <summary>Task 052a: the mapped text is longer than its column takes.</summary>
+    internal const string MappedValueTooLong = "record_repair.mapped_value_too_long";
+
+    /// <summary>Task 052a: the mapped value is not of a kind its column takes (the create path's <c>Fits</c>).</summary>
+    internal const string MappedValueTypeMismatch = "record_repair.mapped_value_type_mismatch";
+
+    /// <summary>Task 052a review F1: the mapped number is outside its column's range (or the range is not stated).</summary>
+    internal const string MappedValueOutOfRange = "record_repair.mapped_value_out_of_range";
+
+    /// <summary>Task 052a review F1: the mapped lookup points at a table its column does not take (or no targets are stated).</summary>
+    internal const string MappedLookupTableNotAccepted = "record_repair.mapped_lookup_table_not_accepted";
+
+    /// <summary>Task 052a review F1: the mapped option is not one of its column's choices (or no choices are stated).</summary>
+    internal const string MappedOptionNotAccepted = "record_repair.mapped_option_not_accepted";
+
     /// <summary>UAC-r2 condition (b) F1-1: a column that decides access (the secure flag, the access record, the access
     /// inheritance, the security unit, the container) — never filled by Repair's mapping, on any table.</summary>
     internal const string MappedValueConfersAccess = "record_repair.mapped_value_confers_access";
@@ -849,6 +1004,10 @@ internal static class RecordRepairReason
     /// <summary>UAC-r2 condition (b) F1-1: the ADR-024 regarding pair — filling it would change what the row is filed under
     /// (its stamp source), so Repair's mapping never fills it.</summary>
     internal const string MappedValueWouldRefilePair = "record_repair.mapped_value_would_refile_pair";
+
+    /// <summary>Task 032b-1: a display copy (<see cref="MembershipOptionsDefaults.DisplayCopyColumns"/>, e.g. an invoice's
+    /// attorney columns) — set only when the row is created, never re-filled by Repair's mapping.</summary>
+    internal const string MappedValueIsDisplayCopy = "record_repair.mapped_value_display_copy";
 
     internal const string OwnerUnknown = "record_repair.owner_unknown";
     internal const string OwnerTeamOwned = "record_repair.owner_team_owned";

@@ -4,7 +4,7 @@
     <title>Firm clause: GetFirmClauseAsync re-keyed to the invoice's snapshot, firm-facing name; 130-135 POML constraint lines</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-E; must land before 130</phase>
     <gate>082 merged (resolver and snapshot); before 130 starts</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a .cs method that decides which clause text a firm sees (D-66, D-79); firm-facing output must stay fail-closed.</rigor-reason>
     <model-tier>sonnet</model-tier>

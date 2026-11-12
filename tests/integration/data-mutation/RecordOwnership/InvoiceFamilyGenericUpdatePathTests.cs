@@ -96,14 +96,12 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <summary>Neither the upsert nor the update-only write was sent: nothing was created or changed.</summary>
     private void NothingWritten() => Sent().Should().BeEmpty();
 
-    /// <summary>One write of the row. An invoice or line goes UPDATE-ONLY (If-Match: *, #2081); any other table keeps the upsert.</summary>
+    /// <summary>One write of the row, UPDATE-ONLY (If-Match: *): an invoice or line (#2081) and every other table alike.</summary>
     private void WrittenOnce(string table, Guid id)
     {
         var sent = Sent().Where(w => w.Table == table && w.Id == id).ToList();
         sent.Should().ContainSingle();
-        sent[0].Method.Should().Be(InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table)
-            ? nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync)
-            : nameof(IFieldMappingDataverseService.UpdateRecordFieldsAsync));
+        sent[0].Method.Should().Be(nameof(IFieldMappingDataverseService.UpdateExistingRecordFieldsAsync));
         Sent().Should().ContainSingle("only that one write");
     }
 
@@ -219,13 +217,18 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private static readonly FieldMappingRuleDto ProjectRule = new()
     {
-        SourceField = "sprk_project", TargetField = "sprk_project", SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+        SourceField = "sprk_project",
+        TargetField = "sprk_project",
+        SourceFieldType = "Lookup",
+        TargetFieldType = "Lookup",
+        Priority = 1,
     };
 
     [Fact]
     public async Task FieldMappingPush_AnInvoiceGivenASecondCoreRecord_IsRefusedByCodeOnly_AndNothingIsWritten()
     {
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, new StampWorld().Restamper, [ProjectRule],
             new Dictionary<string, object?> { ["sprk_project"] = Project },
             "sprk_invoice", [Invoice], Caller, NullLogger.Instance, CancellationToken.None,
@@ -249,11 +252,15 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         var world = new StampWorld().Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", Matter)]);
         var rule = new FieldMappingRuleDto
         {
-            SourceField = "sprk_regardingmatter", TargetField = "sprk_regardingmatter",
-            SourceFieldType = "Lookup", TargetFieldType = "Lookup", Priority = 1,
+            SourceField = "sprk_regardingmatter",
+            TargetField = "sprk_regardingmatter",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+            Priority = 1,
         };
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, world.Restamper, [rule], new Dictionary<string, object?> { ["sprk_regardingmatter"] = Matter },
             "sprk_event", [Event], Caller, NullLogger.Instance, CancellationToken.None,
             appOnlyEntities: new Mock<IGenericEntityService>(MockBehavior.Strict).Object);

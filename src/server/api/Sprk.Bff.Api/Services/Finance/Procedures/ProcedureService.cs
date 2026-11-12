@@ -45,10 +45,32 @@ public static class ProcedureEntity
     public const string VersionEffectiveToColumn = "sprk_effectiveto";
     public const string VersionStatusColumn = "sprk_status";
 
+    /// <summary>
+    /// DEF-061: when the version was published (Date and Time, user local, optional, no default). Written only by
+    /// <c>ProcedureService.PublishVersionAsync</c>, in the write that makes the version Active, and never moved afterwards. Empty on a Draft
+    /// and on a version published before the column existed. <c>ProcedureResolver</c> reads "has this version opened a window" from it.
+    /// </summary>
+    public const string VersionPublishedOnColumn = "sprk_publishedon";
+
     public const int VersionStatusDraft = 100000000;
     public const int VersionStatusActive = 100000001;
     public const int VersionStatusSuperseded = 100000002;
     public const int VersionStatusRetired = 100000003;
+
+    /// <summary>
+    /// The ONE definition of "this version was published, so it was in force" (ontology-r1 D-203 (5a), (9), DEF-061 fix round 1), asked by
+    /// <c>ProcedureVersionRow.OpenedAWindow</c> (which also needs an effective-from) and by <c>ProcedureService.ScopeLockedAsync</c>, so the
+    /// resolver and the scope lock cannot drift. Status is evidence: publish is the only path to Active and Superseded only comes from Active,
+    /// so an Active or Superseded version was published whether or not it carries the stamp. The stamp (<see cref="VersionPublishedOnColumn"/>)
+    /// closes the one gap status leaves: a Retired version that WAS published, as opposed to a Draft retired unpublished. A Draft never counts,
+    /// stamp or not. For a Retired version with no stamp (retired before the column existed, and not backfilled) the earlier evidence
+    /// remains: at least one Published policy version under it (<paramref name="hasPublishedRules"/>); its known limits (a version published
+    /// with no rule, or a rate-card-only one) apply to those rows only.
+    /// </summary>
+    internal static bool VersionWasPublished(int status, bool hasPublishStamp, bool hasPublishedRules) =>
+        status is VersionStatusActive or VersionStatusSuperseded
+        || (hasPublishStamp && status != VersionStatusDraft)
+        || (status == VersionStatusRetired && hasPublishedRules);
 
     // sprk_storedfile (088)
     public const string StoredFileProcedureVersionColumn = "sprk_procedureversion";
@@ -157,6 +179,7 @@ public class ProcedureService
     internal const string CodeVersionOverlap = "procedure.version_overlap";
     internal const string CodeRetired = "procedure.retired";
     internal const string CodeDraftExists = "procedure.draft_exists";
+    internal const string CodeTypeChanged = "procedure.type_changed";
     internal const string CodeVersionNotDraft = "procedure.version_not_draft";
     internal const string CodeVersionNotEditable = "procedure.version_not_editable";
     internal const string CodePublishInvalid = "procedure.publish_invalid";
@@ -189,8 +212,11 @@ public class ProcedureService
     {
         ProcedureEntity.VersionProcedureColumn, ProcedureEntity.VersionNumberColumn, ProcedureEntity.VersionPreviousColumn,
         ProcedureEntity.VersionEffectiveFromColumn, ProcedureEntity.VersionEffectiveToColumn, ProcedureEntity.VersionStatusColumn,
-        RuleSetService.RowVersionColumn,
+        ProcedureEntity.VersionPublishedOnColumn, RuleSetService.RowVersionColumn,
     };
+
+    /// <summary>The clock the publish stamp reads (DEF-061); a test sets it.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
     private readonly IGenericEntityService _entities;
     private readonly RuleSetService _ruleSets;
@@ -466,9 +492,12 @@ public class ProcedureService
     /// Creates the next version as a Draft (number assigned here; previous version = the latest that left Draft) and, in the same transaction,
     /// copies that version's published rules as Draft policy versions of the same policies under it (model 7.2, <see cref="RuleSetService.PlanCopyForwardAsync"/>).
     /// One Draft at a time (409 <c>procedure.draft_exists</c>). A clash on the (Procedure, version number) key retries once, then 409.
+    /// <paramref name="checkedType"/> is the Procedure type the caller's privilege check covered (the route's
+    /// <c>RequireRateCardCreateOnARateCardProcedure</c>): a Procedure that reads as a Rate card now, when the check covered another type, is
+    /// refused 409 <c>procedure.type_changed</c> before anything is written, on every attempt including the retry.
     /// </summary>
     public virtual async Task<RuleSetOutcome<ProcedureVersionCreated>> CreateVersionAsync(
-        Guid procedureId, DateOnly? effectiveFrom, DateOnly? effectiveTo, Guid? callerObjectId, CancellationToken ct)
+        Guid procedureId, DateOnly? effectiveFrom, DateOnly? effectiveTo, Guid? callerObjectId, ProcedureType checkedType, CancellationToken ct)
     {
         if (effectiveFrom is { } from && effectiveTo is { } to && to <= from)
         {
@@ -486,6 +515,14 @@ public class ProcedureService
             if (IsRetired(procedure))
             {
                 return Refused<ProcedureVersionCreated>(StatusCodes.Status409Conflict, CodeRetired, "A retired Procedure cannot get a new version.");
+            }
+
+            // The privilege check covered checkedType; a Rate card Procedure's copy-forward creates cards, which that check may not have asked for.
+            var isRateCard = procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.TypeColumn)?.Value == (int)ProcedureType.RateCard;
+            if (isRateCard && checkedType != ProcedureType.RateCard)
+            {
+                return Refused<ProcedureVersionCreated>(StatusCodes.Status409Conflict, CodeTypeChanged,
+                    "The Procedure's type changed while the version was being created; nothing was created. Try again.");
             }
 
             var versions = await LoadVersionsAsync(procedureId, ct);
@@ -549,6 +586,28 @@ public class ProcedureService
 
                 requests.AddRange(plan.Creates);
                 copied = plan.Copied;
+
+                // 085 (model 7.2): a Rate card Procedure's next version starts with a copy of the previous version's Published card and its
+                // active rates, as a Draft, in the same transaction. The card is reusable, not a core record's child: its own owner question,
+                // with no parents.
+                if (isRateCard)
+                {
+                    var cardOwner = await _ownership.ResolveOwnerAsync(RateCardImportService.CardOwnerContext(callerObjectId), ct);
+                    if (!cardOwner.IsOwned)
+                    {
+                        return RuleSetOutcome<ProcedureVersionCreated>.OwnerRefused(cardOwner);
+                    }
+
+                    var cards = await RateCardImportService.PlanCopyForwardAsync(
+                        _entities, previous.Id, versionId, cardOwner, MaxPerTransaction - requests.Count - 1, ct);
+                    if (cards.Truncated)
+                    {
+                        return Refused<ProcedureVersionCreated>(StatusCodes.Status422UnprocessableEntity, CodeTooManyRules,
+                            "The Procedure's rate card has more rates than can be copied in one pass.");
+                    }
+
+                    requests.AddRange(cards.Creates);
+                }
             }
 
             if (Touch(procedure) is not { } touch)
@@ -666,7 +725,8 @@ public class ProcedureService
     /// <summary>
     /// Publishes a Draft version from <paramref name="effectiveFrom"/> (or its own effective-from), in ONE transaction (I-P1): the version goes
     /// Active; the previous Active version gets <c>to</c> = that date and goes Superseded; the version's Accepted rules are marked Published and
-    /// each policy's <c>sprk_currentversion</c> moves to its newest published version (model 7.2). Refused, with nothing written, without one
+    /// each policy's <c>sprk_currentversion</c> moves to its newest published version (model 7.2). The same write stamps
+    /// <c>sprk_publishedon</c> with the server's UTC now (DEF-061); this is the only writer of it. Refused, with nothing written, without one
     /// Servable Procedure-source Stored File (400 <c>file</c>), without an effective-from (400), with a Proposed rule (400), or when the dates
     /// overlap another version in force (409 <c>procedure.version_overlap</c>). No invoice is re-checked (model 8.2).
     /// </summary>
@@ -754,6 +814,14 @@ public class ProcedureService
             [ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive),
             [ProcedureEntity.VersionEffectiveFromColumn] = ToDate(start),
         };
+        // DEF-061: the publish stamp, in the write that makes the version Active (the only writer). Only a Draft reaches this point (an
+        // Active, Superseded or Retired version was refused 409 above, and nothing returns a version to Draft), so a re-publish cannot
+        // move a stamp; a Draft that somehow already carries one (written outside the BFF) keeps it.
+        if (version.Row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionPublishedOnColumn) is null)
+        {
+            versionFields[ProcedureEntity.VersionPublishedOnColumn] = Clock.GetUtcNow().UtcDateTime;
+        }
+
         var requests = new List<OrganizationRequest>();
         if (ConditionalUpdate(ProcedureEntity.VersionEntity, version.Row, versionFields) is not { } versionUpdate)
         {
@@ -921,9 +989,9 @@ public class ProcedureService
         if (!IsRetired(procedure))
         {
             if (ConditionalUpdate(ProcedureEntity.Entity, procedure, new Dictionary<string, object>
-                {
-                    [ProcedureEntity.StatusColumn] = new OptionSetValue(ProcedureEntity.StatusRetired),
-                }) is not { } retire)
+            {
+                [ProcedureEntity.StatusColumn] = new OptionSetValue(ProcedureEntity.StatusRetired),
+            }) is not { } retire)
             {
                 return WriteFailed<ProcedureRetired>("The Procedure could not be retired. Reload it and try again.");
             }
@@ -1059,6 +1127,100 @@ public class ProcedureService
         return (procedure, versions, version, null);
     }
 
+    /// <summary>
+    /// Task 116: the target of the version-file route. The version must be one of <paramref name="procedureId"/>'s (else the unknown-id 404
+    /// <c>procedure.version_not_found</c>), the Procedure not Retired (409 <c>procedure.retired</c>), and the version a Draft (409
+    /// <c>procedure_version.not_draft</c>; a missing status is not a Draft, fail closed). Reads only.
+    /// </summary>
+    public virtual async Task<RuleSetOutcome<ProcedureVersionView>> GetDraftVersionForFileAsync(Guid procedureId, Guid versionId, CancellationToken ct)
+    {
+        var (_, _, version, refusal) = await LoadForVersionAsync<ProcedureVersionView>(procedureId, versionId, ct);
+        if (refusal is not null)
+        {
+            return refusal;
+        }
+
+        if (version!.Row.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft)
+        {
+            return Refused<ProcedureVersionView>(StatusCodes.Status409Conflict, RuleSetService.CodeVersionNotDraft, "A file can be stored only on a Draft version.");
+        }
+
+        return RuleSetOutcome<ProcedureVersionView>.Done(version.View);
+    }
+
+    /// <summary>
+    /// Task 116 fix round 1 (owner ruling 2026-11-10, "reset and allow redraft"): re-reads the version and answers whether it is still a Draft
+    /// (a missing status is not). When it is a Draft that a drafting run has marked drafted, the marker <c>sprk_notconverted</c> is set No. A
+    /// version that is not drafted is not written. A fault throws (the caller refuses the upload). The version-file route calls it before the
+    /// new file is staged.
+    /// <para>Fix round 2: this first reset writes ONLY the marker. The list stays until <see cref="RecheckDraftAfterNewFileAsync(Guid,
+    /// CancellationToken)"/> has seen the version still a Draft once the new file is Servable, so a publish that lands between the two keeps
+    /// its version's list. A list under No is never shown (the rule set read shows it only for a drafted version).</para>
+    /// <para>Fix round 3: the marker is written only when the list names no file (the earlier bare list, or no list). A version whose list is
+    /// an envelope is not written: its drafted state is already stale once the envelope's file is no longer the one Servable source file, and
+    /// an upload that never lands leaves it drafted, list shown, as before the request.</para>
+    /// </summary>
+    public virtual Task<bool> ResetDraftedStateIfDraftAsync(Guid versionId, CancellationToken ct) =>
+        ResetDraftedStateIfDraftAsync(_entities, versionId, _logger, ct);
+
+    /// <inheritdoc cref="ResetDraftedStateIfDraftAsync(Guid, CancellationToken)"/>
+    /// <remarks>Static over the entity seam, as <see cref="RecheckDraftAfterNewFileAsync(IGenericEntityService, Guid, ILogger, CancellationToken)"/>.</remarks>
+    internal static Task<bool> ResetDraftedStateIfDraftAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct) =>
+        ResetDraftedStateAsync(entities, versionId, logger, clearList: false, ct);
+
+    /// <summary>
+    /// Task 116 fix round 2: the re-check once the new file is Servable (<see cref="Files.StoredFileService.ReplaceForCallerAsync"/>'s
+    /// <c>parentStillAccepts</c>). Re-reads the version and answers whether it is still a Draft (a missing status is not; nothing is written
+    /// then). For a Draft: the marker No if a run marked it meanwhile, THEN the list cleared, written as
+    /// <see cref="RuleSetService.ClearedNotConverted"/> (an envelope that names no file, so a run that lands its marker after this clear
+    /// leaves a version that reads as not drafted). Nothing is written for a version with neither. A fault throws (the replace withdraws the
+    /// new file).
+    /// </summary>
+    public virtual Task<bool> RecheckDraftAfterNewFileAsync(Guid versionId, CancellationToken ct) =>
+        RecheckDraftAfterNewFileAsync(_entities, versionId, _logger, ct);
+
+    /// <inheritdoc cref="RecheckDraftAfterNewFileAsync(Guid, CancellationToken)"/>
+    /// <remarks>Static over the entity seam so the rate-card import's replace (<see cref="RateCardImportService"/>) re-checks through the same
+    /// method without holding this service.</remarks>
+    internal static Task<bool> RecheckDraftAfterNewFileAsync(IGenericEntityService entities, Guid versionId, ILogger logger, CancellationToken ct) =>
+        ResetDraftedStateAsync(entities, versionId, logger, clearList: true, ct);
+
+    private static async Task<bool> ResetDraftedStateAsync(IGenericEntityService entities, Guid versionId, ILogger logger, bool clearList, CancellationToken ct)
+    {
+        var query = new QueryExpression(ProcedureEntity.VersionEntity)
+        {
+            ColumnSet = new ColumnSet(ProcedureEntity.VersionStatusColumn, RuleSetService.VersionDraftedColumn, RuleSetService.VersionNotConvertedListColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_procedureversionid", ConditionOperator.Equal, versionId);
+        var version = (await entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(v => v.Id == versionId);
+        if (version?.GetAttributeValue<OptionSetValue>(ProcedureEntity.VersionStatusColumn)?.Value != ProcedureEntity.VersionStatusDraft)
+        {
+            return false;
+        }
+
+        // Fix round 3: the first reset (clearList false) writes the marker only for a list that names no file (the earlier bare list, or no
+        // list); an envelope's file id already makes "drafted" stale once its file is replaced, so a first reset whose upload never lands
+        // leaves an envelope version as it was. The re-check (clearList true) runs once the new file is Servable and writes No as before.
+        if (version.GetAttributeValue<bool?>(RuleSetService.VersionDraftedColumn) == true
+            && (clearList || !RuleSetService.ParseStoredNotConverted(version.GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn)).IsEnvelope))
+        {
+            await entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, versionId, new Dictionary<string, object> { [RuleSetService.VersionDraftedColumn] = false }, ct);
+            logger.LogInformation("Procedure Version {ProcedureVersionId}: drafted marker reset for a new source file", versionId);
+        }
+
+        if (clearList && version.GetAttributeValue<string>(RuleSetService.VersionNotConvertedListColumn) is { Length: > 0 } list
+            && !string.Equals(list, RuleSetService.ClearedNotConverted, StringComparison.Ordinal))
+        {
+            await entities.UpdateAsync(
+                ProcedureEntity.VersionEntity, versionId,
+                new Dictionary<string, object> { [RuleSetService.VersionNotConvertedListColumn] = RuleSetService.ClearedNotConverted }, ct);
+        }
+
+        return true;
+    }
+
     private async Task<int> CountServableSourceFilesAsync(Guid versionId, CancellationToken ct)
     {
         var query = new QueryExpression(ProcedureEntity.StoredFileEntity) { ColumnSet = new ColumnSet(ProcedureEntity.StoredFileProcedureVersionColumn), TopCount = 2 };
@@ -1071,17 +1233,26 @@ public class ProcedureService
     }
 
     /// <summary>
-    /// I-P4: whether a version has been in force, which locks Applies to and Firm. Active and Superseded versions were; a Retired one was when
-    /// it put a rule in force (its publish marked policy versions under it Published), and a Draft retired without publishing never was.
-    /// Known limit: a version published with no rule and then retired does not lock (it governed nothing, so nothing depends on its scope).
+    /// I-P4: whether a version has been in force, which locks Applies to and Firm. It is the resolver's own question, so both ask
+    /// <see cref="ProcedureEntity.VersionWasPublished"/> (DEF-061 fix round 1): Active and Superseded versions were, a Retired one was when it
+    /// carries the publish stamp (this includes a rate-card-only version, or one published with no rule), and a Draft never was.
+    /// Known limits, for a Retired version published BEFORE the stamp existed and not backfilled (the backfill leaves Retired rows alone): it
+    /// is read from the earlier evidence, a Published policy version under it (its publish marked them Published). A version published with
+    /// no rule and then retired does not lock (it governed nothing, so nothing depends on its scope), and a rate-card-only one (085) retired
+    /// without being superseded reads as never opened, so it does not lock the scope either; that fails open. A Published card is not used as
+    /// evidence: a card can be Published while its version is still a Draft, so a Draft retired without ever being published would then lock
+    /// the scope (ontology-r1 ruling (c), 085 fix round 2).
     /// </summary>
     private async Task<bool> ScopeLockedAsync(IReadOnlyList<VersionRow> versions, CancellationToken ct)
     {
-        if (versions.Any(v => v.Status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded))
+        static bool Stamped(VersionRow v) => v.Row.GetAttributeValue<DateTime?>(ProcedureEntity.VersionPublishedOnColumn) is not null;
+
+        if (versions.Any(v => ProcedureEntity.VersionWasPublished(v.Status, Stamped(v), hasPublishedRules: false)))
         {
             return true;
         }
 
+        // Only a Retired version with no stamp is left undecided: it needs the policy-version evidence.
         var retired = versions.Where(v => v.Status == ProcedureEntity.VersionStatusRetired).Select(v => (object)v.Id).ToArray();
         if (retired.Length == 0)
         {
@@ -1091,8 +1262,10 @@ public class ProcedureService
         var query = new QueryExpression(RuleSetService.VersionEntity) { ColumnSet = new ColumnSet(RuleSetService.ProcedureVersionColumn), TopCount = 1 };
         query.Criteria.AddCondition(RuleSetService.ProcedureVersionColumn, ConditionOperator.In, retired);
         query.Criteria.AddCondition(RuleSetService.PublishStateColumn, ConditionOperator.Equal, RuleSetService.PublishStatePublished);
-        return (await _entities.RetrieveMultipleAsync(query, ct)).Entities.Any(r =>
-            r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id is { } id && retired.Contains(id));
+        var withPublishedRules = (await _entities.RetrieveMultipleAsync(query, ct)).Entities
+            .Select(r => r.GetAttributeValue<EntityReference>(RuleSetService.ProcedureVersionColumn)?.Id)
+            .OfType<Guid>().ToHashSet();
+        return versions.Any(v => ProcedureEntity.VersionWasPublished(v.Status, Stamped(v), withPublishedRules.Contains(v.Id)));
     }
 
     private async Task<bool> VersionNumberTakenAsync(Guid procedureId, int number, CancellationToken ct)

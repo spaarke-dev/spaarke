@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** (Amended) |
 | Date | 2025-10-03 |
-| Updated | 2026-07-12 |
+| Updated | 2026-11-10 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 5 - Universal Dataset PCF |
 
@@ -15,7 +15,7 @@
 **AI-Optimized Versions** (load these for efficient context):
 - [ADR-012 Concise](../../.claude/adr/ADR-012-shared-components.md) - ~150 lines, decision + constraints + service architecture
 - [PCF Constraints](../../.claude/constraints/pcf.md) - MUST/MUST NOT rules for PCF development
-- [React Hooks Pattern](../../.claude/patterns/pcf/react-hooks.md) - Shared hooks examples
+- React Hooks Pattern - Shared hooks examples
 
 **When to load this full ADR**: Component examples, directory structure, governance model, service portability details
 
@@ -97,7 +97,7 @@ This amendment is **not** a license to proliferate visualization libraries. It d
 
 ### When a NEW governed sibling package is justified (vs extending an existing one)
 
-Adding a shared package (beyond `@spaarke/ui-components`, `@spaarke/visuals`, `@spaarke/auth`, and the domain component libraries) is a **high bar** and requires an ADR amendment. **All three** of the following MUST hold; if any fails, extend an existing package instead:
+Adding a shared package (beyond those listed in the [2026-11-10 census](#amendment-2026-11-10-enumerated-shared-package-census)) is a **high bar** and requires an ADR amendment. **All three** of the following MUST hold; if any fails, extend an existing package instead:
 
 1. **Distinct contract** — a cohesive capability whose contract materially differs from existing packages' (e.g. data-agnostic presentational viz vs abstracted-I/O UX services vs auth). "It's a different feature area" is **not** sufficient; the *contract* must differ.
 2. **Quarantine-worthy dependency** — it pulls a heavyweight or specialized dependency that existing-package consumers should not inherit transitively.
@@ -114,6 +114,49 @@ Absent all three, apply the root [CLAUDE.md §11](../../CLAUDE.md) three-questio
 | Heavy deps | Lexical (RichTextEditor), etc. | `@fluentui/react-charting` (quarantined here) |
 | `@types/react` | `19` (Code-Page-first; PCF uses deep imports + boundary casts) | **`18`** (subset-safe for both R16 PCF and R19 Code Pages) |
 | React peer range | `>=16.14.0` | `^16.14.0 \|\| ^17 \|\| ^18 \|\| ^19` |
+
+---
+
+## Amendment (2026-11-10): Enumerated Shared-Package Census
+
+> **Path B amendment** per [CLAUDE.md §6.5](../../CLAUDE.md). The census table itself lives in the concise companion ([.claude/adr/ADR-012-shared-components.md § Enumerated Shared-Package Census](../../.claude/adr/ADR-012-shared-components.md#amendment-2026-11-10-enumerated-shared-package-census)). It is kept in one place so the two files cannot drift, and the census test reads it from there.
+
+### Context
+
+The 2026-07-12 amendment listed the sanctioned packages as `@spaarke/ui-components`, `@spaarke/visuals`, `@spaarke/auth` "plus the domain component libraries (`@spaarke/events-components`, etc.)". By November 2026, `src/client/shared/` held 15 packages, and the "etc." covered 11 of them. Nine were named by no ADR, and none of the nine had been checked against the three-test bar above. The bar existed but nothing applied it.
+
+In this codebase the risk is **over-promotion**: feature areas becoming their own shared packages (several "Pattern D dual-use" component libraries). The opposite risk, missed reuse, is already covered by the root CLAUDE.md §11 justification gate.
+
+### Decision
+
+1. The open-ended wording is withdrawn. The census table is the complete list of shared packages.
+2. **Sanctioned** (6): an ADR defines the package's contract.
+   - `@spaarke/ui-components`, `@spaarke/visuals` and `@spaarke/events-components`: this ADR.
+   - `@spaarke/auth`: ADR-028.
+   - `@spaarke/notifications`: ADR-047.
+   - `@spaarke/ai-widgets`: ADR-030 and ADR-031.
+3. **Grandfathered — under review** (9): `@spaarke/sdap-client`, `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`, `@spaarke/compose-components`, `@spaarke/document-operations`, `@spaarke/ai-outputs`, `@spaarke/ai-context`, `@spaarke/legal-workspace`.
+   - They may be used and extended.
+   - Each one is later either sanctioned by a further amendment or consolidated into a sanctioned package.
+   - This list is a ratchet baseline. It may shrink, and nothing is added to it.
+4. A new shared package needs, in one PR: an amendment that passes the three tests, a census-table row, and a Sanctioned entry in the census test.
+
+### Enforcement
+
+`tests/Spaarke.ArchTests/SharedPackageCensusTests.cs` (CLAUDE.md §16 enforcement ladder, ArchTest rung). It fails in five cases:
+
+- A `src/client/shared/*/package.json` is missing from the census.
+- A census entry has no package on disk.
+- The package name on disk differs from the name in the census.
+- The ADR census table and the test census disagree on a package, its folder or its status.
+- A Sanctioned entry cites an ADR that does not name the package outside the census table.
+
+Each detector has negative and positive controls, and the maintenance procedure is in the test file.
+
+### Consequences
+
+- Adding a shared package is now a visible, owner-approved decision, not a side effect of a feature project.
+- The nine grandfathered packages are an explicit review backlog. Resolving them is out of scope for this amendment.
 
 ---
 
@@ -431,3 +474,4 @@ Use as a **pass/fail** review gate for PRs that add or change shared components.
 | 2026-03-10 | 1.3 | Updated component inventory to v2.0.0. Added PCF deep import pattern. Added callback-based props constraint. | Spaarke Engineering |
 | 2026-03-19 | 2.0 | **Major revision**: Replaced rigid "zero service dependencies / callback-based only" constraint with **service portability tiers** and `IDataService` abstraction pattern. Added domain wizard components (CreateMatter, CreateProject, etc.) to shared library inventory as extraction targets. Added IDataService, IUploadService, INavigationService interface definitions. Updated React version to 19 per ADR-021. Added Power Pages SPA as consumer. Added adapter pattern examples (Xrm, BFF, mock). Updated compliance checklist for service architecture. | Spaarke Engineering |
 | 2026-07-12 | 2.1 | **Amendment (path B, CLAUDE.md §6.5)**: Sanctioned `@spaarke/visuals` as a governed presentational sibling package (data-viz primitives; `@fluentui/react-charting` quarantine; `@types/react@18` pin for cross-surface JSX safety). Restated the anti-fragmentation boundary (no ad-hoc per-project viz libs; data binding + drill-through stay host-side) and defined the 3-test bar for justifying any new governed sibling package. Introduced by `visual-host-version-update`. | Spaarke Engineering |
+| 2026-11-10 | 2.2 | **Amendment (path B, CLAUDE.md §6.5)**: Enumerated shared-package census. Replaced the open-ended "domain component libraries (… etc.)" with a closed list of all 15 `src/client/shared/*` packages: 6 Sanctioned (ADR-backed contract) and 9 Grandfathered — under review (pre-date the census, never assessed against the three-test bar). Enforced by `tests/Spaarke.ArchTests/SharedPackageCensusTests.cs`. | Spaarke Engineering |

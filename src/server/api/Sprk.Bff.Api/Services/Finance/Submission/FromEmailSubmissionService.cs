@@ -168,7 +168,8 @@ internal sealed class FromEmailSubmissionService
             correctedInvoice = correction.Invoice;
         }
 
-        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503) ──
+        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). No firm (095c-2): nothing to check here; the
+        //       phase gate for it is step 6b, after the replay of K ──
         if (await CheckFirmAsync(input, ct) is { } firmRefusal)
         {
             return firmRefusal;
@@ -212,6 +213,14 @@ internal sealed class FromEmailSubmissionService
         {
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.SubmissionAlreadyEnded,
                 "This email was already submitted as an invoice too many times. Nothing was saved.");
+        }
+
+        // ── 6b. Task 095c-2 review F1: no firm is accepted only in phase P2. The gate sits AFTER the replay, so a retry of a no-firm
+        //        submission that an instance in P2 accepted is answered with that row (the allocator's contract: a redelivery landing on a stale
+        //        P1 instance returns the row, it does not refuse it). It is still before step 7, so a refusal has saved and filed nothing. ──
+        if (input.FirmId is null && await CheckNoFirmPhaseAsync(ct) is { } phaseRefusal)
+        {
+            return phaseRefusal;
         }
 
         // ── 7. The communication, if the email was already captured, must not be filed under another core record (409) ──
@@ -321,7 +330,8 @@ internal sealed class FromEmailSubmissionService
             case FromEmailSubmitOutcome.Refused when result.ErrorCode is not null:
                 // The operation put the sentence in the detail of a refusal after its step A; the route adds filingKept.
                 return FromEmailSubmissionOutcome.Refused(result.Status, result.ErrorCode, result.Detail ?? "The invoice was not submitted.")
-                    with { FilingKept = result.Filed };
+                    with
+                { FilingKept = result.Filed };
 
             default:
                 return NotQueued();
@@ -332,14 +342,25 @@ internal sealed class FromEmailSubmissionService
     // The firm
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). A no-firm request (null or absent) has no firm to check, so
+    /// it passes here; <see cref="CheckNoFirmPhaseAsync"/> gates it after the replay of K. The empty id is the 400 <c>firm_invalid</c>. A
+    /// Correction's firm is compared with the replaced invoice's later (<see cref="InvoiceSubmissionService.CorrectionKeepsFirm"/>).
+    /// </summary>
     private async Task<FromEmailSubmissionOutcome?> CheckFirmAsync(FromEmailSubmissionInput input, CancellationToken ct)
     {
-        if (input.FirmId == Guid.Empty)
+        if (input.FirmId is not { } firmId)
+        {
+            // No firm: no firm to check. The phase gate is CheckNoFirmPhaseAsync, run after the replay of K (review F1).
+            return null;
+        }
+
+        if (firmId == Guid.Empty)
         {
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
         }
 
-        switch (await _submissions.IsActiveFirmForFromEmailAsync(input.FirmId, ct))
+        switch (await _submissions.IsActiveFirmForFromEmailAsync(firmId, ct))
         {
             case null:
                 return FirmUnverifiable();
@@ -348,13 +369,29 @@ internal sealed class FromEmailSubmissionService
                     "The firm was not found or is not active.");
         }
 
-        return await _submissions.CheckFirmLinkAsync(input.CoreRecord, input.FirmId, ct) switch
+        return await _submissions.CheckFirmLinkAsync(input.CoreRecord, firmId, ct) switch
         {
             InvoiceFirmLink.Linked => null,
             InvoiceFirmLink.NotLinked => FromEmailSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
                 "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."),
             _ => FirmUnverifiable(),
         };
+    }
+
+    /// <summary>
+    /// Task 095c-2 (owner 2026-11-03; review F1 moved it after the replay of K): a no-firm request is accepted only once this environment's
+    /// tracking-scope key is Active (phase P2, notes/095c section 8.2). In P0 and P1 it is the 400 <c>firm_invalid</c> "A firm is required."
+    /// that the empty id gets. It runs before the communication read and the save, so a refusal has written and filed nothing.
+    /// </summary>
+    private async Task<FromEmailSubmissionOutcome?> CheckNoFirmPhaseAsync(CancellationToken ct)
+    {
+        if (await _submissions.CanSubmitWithoutFirmAsync(ct))
+        {
+            return null;
+        }
+
+        _logger.LogInformation("From-email submission with no firm refused before any write: the tracking-scope key is not Active yet (400)");
+        return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
     }
 
     /// <summary>A firm or firm-link read fault. Contract section 6 lists one code for a transient Dataverse fault on this route,
@@ -537,7 +574,8 @@ internal sealed class FromEmailSubmissionService
             _logger.LogInformation("From-email submission refused: communication {CommunicationId} is filed under another core record", communicationId);
             return FromEmailSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
                 "The email is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved.")
-                with { FiledUnder = await FiledUnderCandidateAsync(communicationId, others, ct) };
+                with
+            { FiledUnder = await FiledUnderCandidateAsync(communicationId, others, ct) };
         }
 
         return null;

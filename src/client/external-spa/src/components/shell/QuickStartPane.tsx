@@ -122,8 +122,11 @@ export interface QuickStartPaneProps {
 export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget }) => {
   const s = useStyles();
   const [moreOpen, setMoreOpen] = React.useState(false);
-  // The request type of the intake wizard that is open (mounted only while open, so each launch starts fresh).
-  const [wizardType, setWizardType] = React.useState<number | null>(null);
+  // The request type of the intake wizard last launched. It stays set after the wizard closes: the wizard closes with
+  // `open={false}`, never unmounted while open, which would leave the page aria-hidden (#2658). `seq` keys each launch,
+  // so each one starts fresh; it changes only while the wizard is closed.
+  const [wizard, setWizard] = React.useState<{ type: number; open: boolean; seq: number } | null>(null);
+  const closeWizard = React.useCallback(() => setWizard(w => (w ? { ...w, open: false } : w)), []);
 
   // Entitled = the caller may start this intake (legal-front-door + the server's intakeRequestTypes; not the plane).
   const entitledActions = React.useMemo(
@@ -136,13 +139,14 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
 
   const launch = React.useCallback((action: QuickStartActionDef) => {
     if (getIntakeWizard(action.requestType)) {
-      setWizardType(action.requestType);
+      const type = action.requestType;
+      setWizard(w => (w?.open ? w : { type, open: true, seq: (w?.seq ?? 0) + 1 }));
     } else {
       setMoreOpen(true);
     }
   }, []);
 
-  const ActiveWizard = wizardType === null ? undefined : getIntakeWizard(wizardType)?.Wizard;
+  const ActiveWizard = wizard === null ? undefined : getIntakeWizard(wizard.type)?.Wizard;
   const openServiceRequests = React.useCallback(() => onOpenWidget(SERVICE_REQUESTS_WIDGET_ID), [onOpenWidget]);
 
   const rowCards: ActionCardConfig[] = React.useMemo(() => {
@@ -223,8 +227,13 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
         </div>
       </FormModal>
 
-      {ActiveWizard && (
-        <ActiveWizard open onClose={() => setWizardType(null)} onOpenServiceRequests={openServiceRequests} />
+      {wizard && ActiveWizard && (
+        <ActiveWizard
+          key={wizard.seq}
+          open={wizard.open}
+          onClose={closeWizard}
+          onOpenServiceRequests={openServiceRequests}
+        />
       )}
     </div>
   );

@@ -1,0 +1,888 @@
+{
+ "schema": "ebilling-eval/1",
+ "kind": "production-key",
+ "id": "RS-03-PK",
+ "rule_set_id": "RS-03",
+ "meta": {
+  "generator_id": "production_key.py",
+  "label_method": "generator",
+  "note": "Predicted production findings; basis proxy marks rows that depend on AI output."
+ },
+ "production_rules": {
+  "RS-03-R01": [
+   {
+    "type": "ApprovedRate",
+    "tolerancePercent": 0
+   }
+  ],
+  "RS-03-R02": [
+   {
+    "type": "TimeIncrement",
+    "incrementHours": 0.1
+   }
+  ],
+  "RS-03-R03": [
+   {
+    "type": "DailyHoursCap",
+    "maxHoursPerDay": 8
+   }
+  ],
+  "RS-03-R04": {
+   "rules": [
+    {
+     "type": "NonBillableActivity",
+     "codes": [
+      "A105"
+     ]
+    }
+   ],
+   "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+  },
+  "RS-03-R05": [
+   {
+    "type": "ExpenseRule",
+    "nonReimbursableCodes": [
+     "E103",
+     "E106"
+    ]
+   }
+  ],
+  "RS-03-R06": {
+   "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+  },
+  "RS-03-R07": [
+   {
+    "type": "AiObservation",
+    "observation": "blockBilling",
+    "minConfidence": 0.7
+   }
+  ],
+  "RS-03-R08": {
+   "not_expressible": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+  }
+ },
+ "production_consequences": {
+  "RS-03-R01": "SuggestAdjustment",
+  "RS-03-R02": "Flag",
+  "RS-03-R03": "Flag",
+  "RS-03-R04": "SuggestAdjustment",
+  "RS-03-R05": "Flag",
+  "RS-03-R07": "Flag"
+ },
+ "invoices": [
+  {
+   "id": "F-0015",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R07",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R07",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0039",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R02",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R02",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0057",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-03-R05",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-03-R05",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0063",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R02",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R06",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+    },
+    {
+     "rule_id": "RS-03-R07",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-03-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R02",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R07",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0087",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0117",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      8
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0159",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0171",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      1
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0183",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R03",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      16
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      13
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    },
+    {
+     "rule_id": "RS-03-R05",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      22
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R06",
+     "rule_type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      20
+     ],
+     "consequence": "Reduce",
+     "status": "not_expressible",
+     "reason": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+    },
+    {
+     "rule_id": "RS-03-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      9
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R03",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R05",
+     "type": "ExpenseRule",
+     "scope": "line",
+     "line_refs": [
+      22
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0195",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      3
+     ],
+     "basis": "exact"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0201",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Disallow",
+     "status": "reproduced",
+     "basis": "proxy"
+    },
+    {
+     "rule_id": "RS-03-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      5
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R04",
+     "type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0231",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    },
+    {
+     "rule_id": "RS-03-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0255",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R04",
+     "rule_type": "NonBillableActivity",
+     "scope": "line",
+     "line_refs": [
+      7
+     ],
+     "consequence": "Disallow",
+     "status": "not_expressible",
+     "reason": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+    }
+   ],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0279",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R08",
+     "rule_type": "RequiredData",
+     "scope": "invoice",
+     "line_refs": [],
+     "consequence": "Reject",
+     "status": "not_expressible",
+     "reason": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+    }
+   ],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0297",
+   "clean": false,
+   "set_f_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "rule_type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "rule_type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "consequence": "Reduce",
+     "status": "reproduced",
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R03",
+     "rule_type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      6
+     ],
+     "consequence": "Reduce",
+     "status": "moved",
+     "production_line_refs": [
+      4
+     ],
+     "reason": "production reports a timekeeper-day on the group's first line"
+    },
+    {
+     "rule_id": "RS-03-R07",
+     "rule_type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "consequence": "Flag",
+     "status": "reproduced",
+     "basis": "proxy"
+    }
+   ],
+   "production_findings": [
+    {
+     "rule_id": "RS-03-R01",
+     "type": "ApprovedRate",
+     "scope": "line",
+     "line_refs": [
+      13
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R02",
+     "type": "TimeIncrement",
+     "scope": "line",
+     "line_refs": [
+      10
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R03",
+     "type": "DailyHoursCap",
+     "scope": "line",
+     "line_refs": [
+      4
+     ],
+     "basis": "exact"
+    },
+    {
+     "rule_id": "RS-03-R07",
+     "type": "AiObservation",
+     "scope": "line",
+     "line_refs": [
+      2
+     ],
+     "basis": "proxy"
+    }
+   ],
+   "production_only": []
+  },
+  {
+   "id": "F-0309",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0321",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0339",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0417",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  },
+  {
+   "id": "F-0513",
+   "clean": true,
+   "set_f_findings": [],
+   "production_findings": [],
+   "production_only": []
+  }
+ ]
+}

@@ -213,9 +213,10 @@ public sealed class EventRoutesLiveTests
 
             // 9. External events — the production ExternalDataService (sprk_eventname / statuscode, project team owner).
             var external = new ExternalDataService(new HttpClient(), factory.LiveConfiguration, credential,
-                factory.Services.GetRequiredService<ILogger<ExternalDataService>>());
+                factory.Services.GetRequiredService<ILogger<ExternalDataService>>(),
+                identity: factory.Services.GetRequiredService<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>()); // uac-r2 191h: the operator is internal (its stored flag), so its lists are not narrowed
             var projectTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId);
-            var ext = await external.CreateEventAsync(projectId,
+            var ext = await external.CreateEventAsync(ExternalDataService.TodoRootKind.Project, projectId,
                 new CreateExternalEventRequest { SprkName = "zz-097-test external create", SprkDuedate = "2026-10-21" }, projectTeam,
                 OperatorAsCreator(operatorId)); // R3 task 030 (FR-25): every external create carries its creator stamp
             createdEvents.Add(Guid.Parse(ext.SprkEventid));
@@ -399,8 +400,9 @@ public sealed class EventRoutesLiveTests
 
             // f. External create with the shape earlier SPA builds sent (toISOString of the picked day's UTC midnight).
             var external = new ExternalDataService(new HttpClient(), factory.LiveConfiguration, credential,
-                factory.Services.GetRequiredService<ILogger<ExternalDataService>>());
-            var ext = await external.CreateEventAsync(projectId,
+                factory.Services.GetRequiredService<ILogger<ExternalDataService>>(),
+                identity: factory.Services.GetRequiredService<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>()); // uac-r2 191h: the operator is internal (its stored flag), so its lists are not narrowed
+            var ext = await external.CreateEventAsync(ExternalDataService.TodoRootKind.Project, projectId,
                 new CreateExternalEventRequest { SprkName = "zz-098-test external legacy date", SprkDuedate = "2026-10-21T00:00:00.000Z" },
                 await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId),
                 OperatorAsCreator(operatorId)); // R3 task 030 (FR-25)
@@ -587,7 +589,8 @@ public sealed class EventRoutesLiveTests
 
             // ── The external app's path (production ExternalDataService) ──────────────────────────────────────
             var external = new ExternalDataService(new HttpClient(), liveConfiguration, credential,
-                Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalDataService>.Instance);
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalDataService>.Instance,
+                identity: InternalOperatorIdentity()); // uac-r2 191h: the operator reads as an internal systemuser, so its list is not narrowed
             var projectTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId);
             var operatorId = (await dv.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
 
@@ -759,14 +762,27 @@ public sealed class EventRoutesLiveTests
     /// create stamps <c>sprk_createdbyperson</c> — a real systemuser the bind resolves.</summary>
     private static CallerPrincipal OperatorAsCreator(Guid operatorId) => new()
     {
-        Plane = CallerPrincipalPlane.Workforce, SystemUserId = operatorId, ContactId = Guid.Empty,
+        Plane = CallerPrincipalPlane.Workforce,
+        SystemUserId = operatorId,
+        ContactId = Guid.Empty,
         ProjectAccess = Array.Empty<CallerProjectAccess>(),
     };
 
     /// <summary>R3 task 039: the operator as a READER of <paramref name="projectId"/> (the external event list takes the caller).</summary>
+    /// <summary>uac-r2 task 191h: an identity resolver that reads every systemuser as internal (the live operator), so the SPA lists
+    /// this leg reads through are not narrowed by the external visibility predicate.</summary>
+    private static Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver InternalOperatorIdentity()
+    {
+        var identity = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>();
+        identity.Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        return identity.Object;
+    }
+
     private static CallerPrincipal OperatorReading(Guid operatorId, Guid projectId) => new()
     {
-        Plane = CallerPrincipalPlane.Workforce, SystemUserId = operatorId, ContactId = Guid.Empty,
+        Plane = CallerPrincipalPlane.Workforce,
+        SystemUserId = operatorId,
+        ContactId = Guid.Empty,
         ProjectAccess = new[] { CallerProjectAccess.FromLevel(projectId, ExternalAccessLevel.ViewOnly) },
     };
 
@@ -1074,7 +1090,8 @@ public sealed class EventRoutesLiveTests
             return collection;
         }
 
-        internal HttpClient MetadataClient => _metadata;    }
+        internal HttpClient MetadataClient => _metadata;
+    }
 
     /// <summary>
     /// The production probe with ONE step substituted: the OBO exchange (substitution 2). WhoAmI and

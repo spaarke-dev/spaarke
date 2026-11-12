@@ -90,7 +90,9 @@ public sealed class SpeAdminConfigSecretNameTests : IClassFixture<AdminSurfaceHo
 
         var response = await client.PostAsJsonAsync("/api/spe/configs", new
         {
-            name = "no-secret", owningAppId = Guid.NewGuid().ToString(), containerTypeId = Guid.NewGuid().ToString(),
+            name = "no-secret",
+            owningAppId = Guid.NewGuid().ToString(),
+            containerTypeId = Guid.NewGuid().ToString(),
             businessUnitId = UnitA,
         });
 

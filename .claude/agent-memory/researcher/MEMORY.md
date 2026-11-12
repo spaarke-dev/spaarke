@@ -19,6 +19,7 @@
 - [Power Pages vs Entra External ID (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice
 
 ## Word add-in / Office / Teams
+- [NAA web/new Outlook fallback + redirect (2026-11-03)](naa-web-newoutlook-fallback-redirect-2026-11-03.md) — createNestable falls back to std PCA w/ SAME config; brk-multihub redirectUri = AADSTS7000471; use https redirect; isSetSupported gate; WebView2 cookies
 - [TAC INVALID_PRIVILEGE (2026-10-29)](teams-admin-center-invalid-privilege-2026-10-29.md) — undocumented code = "no admin role" page; licence/propagation community-only; New-TeamsApp/Graph alternatives
 - [Teams upload icon error + disabled Add (2026-10-29)](teams-app-upload-icon-invalid-and-add-disabled-2026-10-29.md) — "too small" undocumented; Add disabled = Available-to/org-wide custom setting
 - [NAA pre-auth of Teams/broker IDs (2026-10-29)](naa-preauthorized-teams-clients-2026-10-29.md) — not needed (docs explicit); IDs are Teams-SSO only; broker undocumented
@@ -137,8 +138,10 @@
 - [Lavern Precedent Board](lavern-precedent-board.md) — promotion/decay
 
 ## Meta
-- [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention
-- [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked
+- [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
+- [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked, whole op fails (documented); Archive 'internal use only'; PUT+MergeLabels
+- [Defender for Storage overwrite->rescan (2026-11-05)](defender-storage-overwrite-rescan-2026-11-05.md) — Put Blob/PutBlockList overwrite triggers an on-upload scan (documented); tag fate on overwrite, identical-bytes skip and cap behaviour undocumented; not scanned at cap/filter/error
 - [Dataverse duplicate detection API (2026-10-15)](dataverse-duplicate-detection-api-default-2026-10-15.md) — suppressed by default
 - [xms_edov claim (2026-10-23)](entra-xms-edov-claim-2026-10-23.md) — needs email claim; absent vs false undocumented
 - [A9 dev Entra setup (2026-10-19)](entra-multitenant-api-a9-dev-setup-2026-10-19.md) — v2 token delta; AzureAd:Audience risk
+- [Law-dept benchmarks + OCG provisions (2026-11-03)](law-dept-benchmarks-ocg-2026-11-03.md) — ACC 2025 medians by revenue band; RRR rates; CNA/Allianz/PSU/DE OCG text; all use 0.1-hr increments

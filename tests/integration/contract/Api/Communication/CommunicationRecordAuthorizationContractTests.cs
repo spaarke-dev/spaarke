@@ -240,6 +240,8 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
     [InlineData("non-existent")]
     [InlineData("regarding names another record")]
     [InlineData("no Write")]
+    [InlineData("regarding column not returned")]
+    [InlineData("regarding column explicit null")]
     public async Task ConfirmAffinity_EveryDeny_IsTheZeroSignalsNoOp_AndAffinityIsNeverWritten(string reason)
     {
         var id = Guid.NewGuid();
@@ -261,6 +263,20 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
                 VisibleCommunication(id, regardingMatter: target);
                 AppOnlyCommunication(id, from: "client@outside.com");
                 _host.Probe.Grant(CommunicationSet, id, AccessRights.Read);
+                break;
+            case "regarding column not returned":
+                // Fix round 3e: a column the read did not return is unreadable, never "filed to the target".
+                _host.Query.Visible(CommunicationSet, id, JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["sprk_communicationid"] = id.ToString(),
+                }));
+                AppOnlyCommunication(id, from: "client@outside.com");
+                _host.Probe.Grant(CommunicationSet, id, AccessRights.Read | AccessRights.Write);
+                break;
+            case "regarding column explicit null":
+                VisibleCommunication(id); // every selected regarding lookup comes back as an explicit null: not filed to the target
+                AppOnlyCommunication(id, from: "client@outside.com");
+                _host.Probe.Grant(CommunicationSet, id, AccessRights.Read | AccessRights.Write);
                 break;
         }
 
@@ -525,12 +541,12 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         (await response.Content.ReadAsStringAsync()).Should().Contain(reviewLogId.ToString());
-        _host.FieldMapping.Verify(f => f.UpdateRecordFieldsAsync(
+        _host.FieldMapping.Verify(f => f.UpdateExistingRecordFieldsAsync(
                 "sprk_matter",
                 matter,
                 It.Is<Dictionary<string, object?>>(d => d.Count == 1 && Equals(d["sprk_description"], expectedValue)),
-                It.IsAny<CancellationToken>(),
-                CallerSystemUserId),
+                CallerSystemUserId,
+                It.IsAny<CancellationToken>()),
             Times.Once);
         _host.Entities.Verify(e => e.CreateAsync(It.Is<DataverseEntity>(x => x.LogicalName == "sprk_emailreviewlog"), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -615,13 +631,13 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         (await response.Content.ReadAsStringAsync()).Should().Contain(taskId.ToString());
-        _host.FieldMapping.Verify(f => f.UpdateRecordFieldsAsync(
+        _host.FieldMapping.Verify(f => f.UpdateExistingRecordFieldsAsync(
                 "sprk_event",
                 taskId,
                 // Task 066 (D-28): the soft-cancel writes statuscode = Cancelled WITH its statecode (Inactive); never the deprecated column.
                 It.Is<Dictionary<string, object?>>(d => d.Count == 2 && Equals(d["statuscode"], 659490004) && Equals(d["statecode"], 1)),
-                It.IsAny<CancellationToken>(),
-                CallerSystemUserId),
+                CallerSystemUserId,
+                It.IsAny<CancellationToken>()),
             Times.Once);
         _host.Entities.Verify(e => e.CreateAsync(
                 It.Is<DataverseEntity>(x => x.LogicalName == "sprk_emailreviewlog"
@@ -852,9 +868,16 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
     // regarding record (CommunicationService.ApplyTargetThreadAsync), so the route asks AppendTo on THAT record, read as
     // the caller, in the priority order the send uses.
 
+    private static IEnumerable<string> ThreadRegardingColumns() => RegardingFieldMap.All
+        .Where(x => x.RegardingField != "sprk_regardingreportcard")
+        .Select(x => $"_{x.RegardingField}_value");
+
     private void VisibleThreadAnchoredTo(Guid thread, params (string Column, Guid RecordId)[] regarding)
     {
         var columns = new Dictionary<string, object?> { ["sprk_communicationthreadid"] = thread.ToString() };
+        // Fix round 3e: a Web API row lists an unset lookup as an explicit null, so the double returns every selected regarding column.
+        foreach (var column in ThreadRegardingColumns())
+            columns[column] = null;
         foreach (var (column, recordId) in regarding)
         {
             columns[$"_{column}_value"] = recordId.ToString();
@@ -911,6 +934,86 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
         AssertNothingSent();
+    }
+
+    // ── Fix round 3e: a regarding column the read did not return is UNKNOWN, so the send is refused (never "no regarding") ─────
+
+    [Fact]
+    public async Task Send_IntoAThreadWhoseRegardingColumnWasNotReturned_Is403_AndNothingIsSent()
+    {
+        var thread = Guid.NewGuid();
+        var columns = new Dictionary<string, object?> { ["sprk_communicationthreadid"] = thread.ToString() };
+        foreach (var column in ThreadRegardingColumns().Where(c => c != "_sprk_regardingmatter_value"))
+            columns[column] = null; // every column but one is returned as an explicit null
+        _host.Query.Visible(ThreadSet, thread, JsonSerializer.Serialize(columns));
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_IntoAThread_ReadsEveryRegardingColumn()
+    {
+        var thread = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread);
+
+        await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send", SendBody(type: "Message", threadId: thread)));
+
+        var read = _host.Query.Calls.Where(c => c.Set == ThreadSet && (c.OData ?? string.Empty).Contains("_sprk_regarding")).ToList();
+        read.Should().ContainSingle("the thread's anchor is read once, by one select");
+        read[0].OData.Should().NotBeNull();
+        var select = read[0].OData!.Split("$select=")[1].Split('&')[0].Split(',');
+        select.Should().Contain(ThreadRegardingColumns());
+    }
+
+    [Fact]
+    public async Task Send_InheritingFromACommunicationWhoseRegardingColumnWasNotReturned_Is403_AndNothingIsSent()
+    {
+        var thread = Guid.NewGuid();
+        var source = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread);
+        var columns = new Dictionary<string, object?>
+        {
+            ["sprk_communicationid"] = source.ToString(),
+            ["sprk_isinternalonly"] = false,
+            ["sprk_privilegeclassification"] = 100000000,
+        };
+        // The source is filed to a matter the caller may not attach to; the column naming it is the one the read did not return.
+        foreach (var (_, field) in RegardingFieldMap.All.Where(x => x.RegardingField != "sprk_regardingmatter"))
+            columns[$"_{field}_value"] = null;
+        _host.Query.Visible(CommunicationSet, source, JsonSerializer.Serialize(columns));
+        AppOnlyCommunication(source);
+        _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
+
+        var response = await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, inheritFrom: source)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, CommunicationRecordAuthorizationFilter.SendDenyReasonCode);
+        AssertNothingSent();
+    }
+
+    [Fact]
+    public async Task Send_InheritingFromACommunication_ReadsEveryRegardingColumn()
+    {
+        var thread = Guid.NewGuid();
+        var source = Guid.NewGuid();
+        VisibleThreadAnchoredTo(thread);
+        VisibleCommunication(source);
+        AppOnlyCommunication(source);
+
+        await _host.SendAsync(Request(HttpMethod.Post, "/api/communications/send",
+            SendBody(type: "Message", threadId: thread, inheritFrom: source)));
+
+        var read = _host.Query.Calls.Where(c => c.Set == CommunicationSet && (c.OData ?? string.Empty).Contains("_sprk_regarding")).ToList();
+        read.Should().NotBeEmpty();
+        var select = read[0].OData!.Split("$select=")[1].Split('&')[0].Split(',');
+        select.Should().Contain(RegardingFieldMap.All.Select(x => $"_{x.RegardingField}_value"));
     }
 
     [Fact]
@@ -1037,7 +1140,7 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
         var thread = Guid.NewGuid();
         var source = Guid.NewGuid();
         var matter = Guid.NewGuid();
-        _host.Query.Visible(ThreadSet, thread);
+        VisibleThreadAnchoredTo(thread);
         VisibleCommunication(source, regardingMatter: matter);
         AppOnlyCommunication(source);
         _host.Probe.Grant(MatterSet, matter, AccessRights.Read | AccessRights.AppendTo);
@@ -1614,6 +1717,9 @@ public class CommunicationRecordAuthorizationContractTests : IClassFixture<Commu
             ["sprk_isinternalonly"] = internalOnly,
             ["sprk_privilegeclassification"] = 100000000,
         };
+        // Fix round 3e: every selected regarding lookup is returned, an unset one as an explicit null.
+        foreach (var (_, field) in RegardingFieldMap.All)
+            columns[$"_{field}_value"] = null;
         if (regardingMatter is { } matter)
         {
             columns["_sprk_regardingmatter_value"] = matter.ToString();

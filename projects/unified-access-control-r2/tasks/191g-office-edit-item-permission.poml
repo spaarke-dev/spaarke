@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191g" project="unified-access-control-r2">
+  <metadata>
+    <title>T191g: Office edit for a flagged user is an item-level permission on the one file, never a container role (#2201, Q2 = b)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>blocked: 191b merged, and the owner's go for the live test</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Grants SharePoint Embedded permissions to external users; today's path exposes a whole secure container (#2201).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New SPE grant shape with a JIT lifecycle, removal on several conditions, and a live test that may change the approach.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits OfficeEditAccessService, SpeContainerMembershipService and SpeContainerMembershipSync only; no other 191 task touches them.</parallel-reason>
+    <deps>191b</deps>
+    <tags>bff-api, security, access-control, spe, graph, testing</tags>
+    <estimated-effort>2-3 days plus the live test</estimated-effort>
+  </metadata>
+
+  <prompt>Implement owner decision Q2 = (b): a flagged-external caller never gets a role on a secure container. When the caller has Write on the secure record, the record is not Restricted and the document is externally visible, the BFF grants a write permission on that one file just in time, records it, and the existing sync removes it when Write goes, in the same lifecycle as round 70's JIT writer grants. A live test with the BFF identity comes first.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in SharePoint Embedded permissions through Microsoft Graph and the round-70 JIT writer model.</role>
+  <goal>`OfficeEditAccessService` never calls the container grant for a flagged caller and instead makes, reads back and records an item-level write permission; `SpeContainerMembershipSync` removes item grants on the round-70 conditions plus "document hidden", and removes any container role a flagged user holds on a secure container. All of it sits behind a setting until the owner's go.</goal>
+
+  <context>
+    <background>Design §3.12 and AC-8; §4.1 Q2. Spike S4 (Appendix A.4) was blocked: the az CLI Graph token got 403 on the container; the test needs the BFF's managed identity (App Service console) or a delegated sign-in through an app registered on the container type. Docs say item sharing does not grant container access and app-only invites work for existing guests with sendInvitation false.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Documents/OfficeEditAccessService.cs (flag read :121-136; Write probe :110; container grant path)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs (JitWriterMarkerPrefix :612; GrantMarkedWriterAsync: add an item-grant primitive and its marker)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SpeContainerMembershipSync.cs (RemoveRevokedJitGrantsAsync :286; flagged-user container role removal)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Documents/OfficeEditAccessServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Access/SpeContainerMembershipSyncTests.cs</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-191g-office-item-permission.md (live-test plan, results, undo)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191b" status="pending">ExternalVisibility for the "document is visible" condition and removal.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">App-only Graph through the BFF's managed identity; no new app registration, permission or consent without an owner go.</constraint>
+    <constraint source="project">A caller whose stored sprk_isexternal is true or unreadable never receives a container role (fail closed).</constraint>
+    <constraint source="project">Item grant only when all hold: Write on the secure record asked as the caller; the record not Restricted (effective, Q4 = a); ExternalVisibility says the document is visible. Otherwise view-only through the broker.</constraint>
+    <constraint source="project">No invitation mail; the permission targets the caller's existing identity only.</constraint>
+    <constraint source="project">Removal on: Write positively gone, holder disabled, document hidden. An unknown answer keeps the grant for one run and reports it (round 70 rule).</constraint>
+    <constraint source="project">A grant that cannot be made, read back or recorded answers 503 edit_access_unavailable; never a URL that cannot work.</constraint>
+    <constraint source="project">Internal callers keep today's container JIT writer unchanged (must-not-fire).</constraint>
+    <constraint source="project">The item-grant path sits behind a setting, default off, until the owner's go.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="marked JIT grant and its removal pass" location="src/server/api/Sprk.Bff.Api/Services/Access/SpeContainerMembershipSync.cs">Grants are recorded with a marker; the sync removes only marked grants and only on a positive answer.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Write the live-test plan in the task note: test file and sibling file on one secure container on dev, the flagged test user, the Graph calls through the BFF identity, the checks (Office web edit works on the file; the sibling is refused; removal takes access away) and the undo.</step>
+    <step order="2">STOP for the owner's go on the live test (escalation trigger 1). Run it only after the go; record results with ids only; undo.</step>
+    <step order="3">If the test passes: implement the item-grant primitive and marker, the OfficeEditAccessService branch for flagged callers, and the removal pass. If any check fails: STOP (escalation trigger 2).</step>
+    <step order="4">Tests (must-fire perturbation-checked): no container role for a flagged or unreadable-flag caller; item grant on the three conditions; no item grant without Write, on Restricted, on a hidden document; removal on each condition; unknown keeps the grant once; internal caller unchanged; setting off grants nothing.</step>
+    <step order="5">Build, targeted tests, full ArchTests, publish-size delta. PR with two adversarial passes (security).</step>
+    <step order="6">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="7">Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE / OWNER GO: the item-permission live test with the BFF's managed identity on dev (design §3.19 step 1) is a live action. Ask for a separate owner go in the uac-r2 session when it is due; do not run it otherwise.</trigger>
+    <trigger>If the live test fails any check (app-only item permission refused under the restrictive sharing model, Office edit does not work through it, a sibling file is reachable, or removal does not take access away), STOP and return to the owner; view-only is the fallback on record, not a choice this task makes.</trigger>
+    <trigger>LIVE / OWNER GO: turning on the item-grant setting after deploy (design §3.19 step 8) needs its own owner go.</trigger>
+    <trigger>If the grant needs a new Graph permission, app registration or tenant sharing-policy change, STOP and escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>OfficeEditAccessService (container JIT writer), SpeContainerMembershipService.GrantMarkedWriterAsync, the sync's JIT removal pass.</existing>
+    <extension>One more grant shape and marker in the same service and the same removal pass; no new job or endpoint.</extension>
+    <cost-of-doing-nothing>A flagged user with Write on a secure record becomes a writer on the whole container and opens its internal-only files outside every check (#2201).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Documents/OfficeEditAccessService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SpeContainerMembershipSync.cs</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-191g-office-item-permission.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Live test (after the owner's go): with the BFF identity, an item-level write permission on one file of a secure container lets the flagged test user edit that file in Office web, a sibling file stays refused, and removing the permission takes access away; undone afterwards.</criterion>
+    <criterion testable="true">A flagged caller with Write on a secure, non-Restricted record opening a visible document gets an item permission on that file only, read back and recorded; never a container role.</criterion>
+    <criterion testable="true">Negative: no item grant without Write, on a Restricted record, on a hidden document, or for an unreadable flag; the caller gets view-only.</criterion>
+    <criterion testable="true">The sync removes the item permission when Write is positively gone, the holder is disabled or the document becomes hidden; an unknown answer keeps it for one run and reports it.</criterion>
+    <criterion testable="true">The sync removes any container role a flagged user holds on a secure container.</criterion>
+    <criterion testable="true">Negative (must-not-fire): an internal caller with Write still gets the container JIT writer.</criterion>
+    <criterion testable="true">A grant that cannot be made, read back or recorded answers 503 edit_access_unavailable.</criterion>
+    <criterion testable="true">BFF 0 errors; targeted tests and full ArchTests green; publish-size delta recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Closes #2201 when merged and turned on.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

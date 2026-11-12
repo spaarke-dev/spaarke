@@ -92,6 +92,12 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     private readonly Dictionary<(string Source, string Target), FieldMappingProfileEntity> _profiles = new();
     private readonly Dictionary<(string Table, Guid Id), Entity> _sources = new();
     private readonly List<(string Table, Guid Id, string[] Columns)> _sourceReads = [];
+
+    /// <summary>Task 022 fix round 2: the ordinary user who owns every scripted source unless a row names its own owner.</summary>
+    private static readonly Guid SourceOwner = Guid.Parse("a0140000-0000-4000-8000-0000000000d1");
+
+    /// <summary>Task 022 fix round 2: sources whose owner does not come back in the read (the gate cannot tell them).</summary>
+    private readonly HashSet<Guid> _sourcesWithNoOwner = [];
     private readonly HashSet<Guid> _readable = [];
     private readonly Dictionary<Guid, AccessRights> _rights = [];
     private readonly ReadProbe _probe;
@@ -102,6 +108,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         .SecureRoot("sprk_matter", SecureMatter);
     private readonly RecordingPublisher _publisher = new();
     private Exception? _profileFault;
+
+    /// <summary>Task 049c: the app-only reads' and the owner resolver's round trips (delayed doubles); zero, as before.</summary>
+    private TimeSpan _appOnlyDelay;
+    private TimeSpan _ownerDelay;
     private Func<string, RecordTableRule?> _tableRules = RecordTableRules.Find;
     private Func<SecureRootFilingGate> _rootFiling = SecureRootFilingGateFixtures.NothingSecure;
 
@@ -143,17 +153,17 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         _appOnly
             .Setup(a => a.GetFieldMappingProfileWithRulesAsync(It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns((string source, string target, bool _, CancellationToken _) =>
+            .Returns((string source, string target, bool _, CancellationToken _) => AppOnlyRoundTrip(() =>
             {
                 _journal.Add("profile");
                 if (_profileFault is { } fault)
                     throw fault;
                 return Task.FromResult(_profiles.GetValueOrDefault((source, target)));
-            });
+            }));
 
         _sourceReader
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => AppOnlyRoundTrip(() =>
             {
                 // Task 039 (FR-38): step 8 now runs on event / work assignment / invoice too and reads the owning team's business
                 // unit (and that unit's index defaults) through the same app reader. Those two reads are not mapping-source reads:
@@ -180,8 +190,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 var read = new Entity(table, id);
                 foreach (var column in columns.Where(row.Attributes.ContainsKey))
                     read[column] = row[column];
+
+                // Task 022 fix round 2: the mapping-source gate's columns, as the world holds them, unless the row names its
+                // own: an ordinary user owns every scripted source, and a root's secure flag is the world's (SecureMatter).
+                if (columns.Contains("ownerid") && !row.Attributes.ContainsKey("ownerid") && !_sourcesWithNoOwner.Contains(id))
+                    read["ownerid"] = new EntityReference("systemuser", SourceOwner);
+                if (columns.Contains(AccessFollowsParent.SecureFlagColumn) && !row.Attributes.ContainsKey(AccessFollowsParent.SecureFlagColumn))
+                    read[AccessFollowsParent.SecureFlagColumn] = id == SecureMatter;
                 return Task.FromResult(read);
-            });
+            }));
 
         // The target tables' columns as their metadata declares them (read as the caller).
         _user.Columns["sprk_event"] = new()
@@ -269,6 +286,26 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StringOf(fields, "sprk_location").Should().Be("Courtroom 4");
         outcome.MappingWarnings.Should().BeEmpty();
         _scripted.Posts.Should().BeEmpty("the row is never created as the caller");
+    }
+
+    /// <summary>
+    /// Task 049 (NFR-02 Part C): a mapped row's step 5 checks the caller's own values, then the merged row — each pass read
+    /// the table's privilege names again. Step 5 now reads each table-metadata path once, and still asks every access
+    /// question (AppendTo on the matter, once per pass) of Dataverse: no access answer is kept (ADR-009).
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AMappedRow_ReadsEachTableMetadataOnce_ButAsksEveryAccessQuestion()
+    {
+        MatterToEventProfile();
+
+        var outcome = await Service().CreateAsync(EventUnder(OrdinaryMatter), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        _user.Paths.Count(p => p == "EntityDefinitions(LogicalName='sprk_event')?$select=LogicalName,Privileges")
+            .Should().Be(1, "step 5's passes read the table's privilege names once");
+        _user.Paths.Count(p => p.Contains("RetrievePrincipalAccess", StringComparison.Ordinal)
+                               && p.Contains(OrdinaryMatter.ToString("D"), StringComparison.Ordinal))
+            .Should().BeGreaterThan(1, "AppendTo on the matter is asked in each pass, never remembered");
     }
 
     [Fact]
@@ -538,34 +575,6 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     [Fact]
-    public async Task CreateAsync_ACitationLookupMarkedServerSet_IsNotAFilingLookup_AndPassesTheGuard()
-    {
-        // A Signal CITES its rule (RecordOwnershipResolver.IsCitation): the owner decision files nothing under it, so it is
-        // no filing lookup, server-set or not (must not fire).
-        var policy = Guid.NewGuid();
-        var item = new DataverseWriteItemMapper.MappedItem(
-            JsonSerializer.Serialize(new Dictionary<string, object?>
-            {
-                ["sprk_name"] = "Spend over budget",
-                ["sprk_Policy@odata.bind"] = $"/sprk_policies({policy:D})",
-            }),
-            ["sprk_name", "sprk_policy"])
-        {
-            Lookups = [new DataverseWriteItemMapper.MappedLookup("sprk_policy", "sprk_policy", "sprk_policies", policy)],
-        };
-        var request = new RecordCreationRequest("sprk_signal", new RecordCreationPayload.Mapped(item))
-        {
-            CorrelationId = FixedCorrelation,
-            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_policy" },
-        };
-
-        var outcome = await Service().CreateAsync(request, AsCaller(), CancellationToken.None);
-
-        outcome.Refusal?.Code.Should().NotBe(RecordCreationRefusal.ServerSetFilingLookupCode);
-        _journal.Should().Contain("user:check", "the create went past the guard to step 5's checks");
-    }
-
-    [Fact]
     public async Task CreateAsync_AWorkAssignmentsAssignedToMarkedServerSet_IsNotAFilingLookup_AndCostsNoAppendTo()
     {
         // A person is no ownership parent: a server-set sprk_assignedto stays exempt from AppendTo (must not fire).
@@ -742,7 +751,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         StringOf(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({Assignee:D})", "a readable lookup is copied");
         outcome.MappingWarnings.Should().BeEmpty("a hidden column looks exactly like an empty one: a Copy skips it silently");
         _callerRead.Paths.Should().Equal($"sprk_matters({OrdinaryMatter:D})");
-        _journal.Should().ContainInOrder("probe", "source-read", "user:source-read", "user:columns", "owner", "create");
+        _journal.Should().ContainInOrder("probe", "source-read", "user:source-read", "owner", "create");
+        // Task 049c: the target columns' read is independent of the source and is asked beside it, so it is no longer pinned
+        // after the mask; it still precedes the owner and the write.
+        _journal.Should().ContainInOrder("user:columns", "owner", "create");
     }
 
     [Theory]
@@ -785,7 +797,7 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     }
 
     [Fact]
-    public async Task CreateAsync_ADefaultOnlyProfile_ReadsNoSource_SoMakesNoCallerRead_AndStillAppliesItsDefaults()
+    public async Task CreateAsync_ADefaultOnlyProfile_ReadsOnlyTheSourcesGateColumns_SoMakesNoCallerRead_AndStillAppliesItsDefaults()
     {
         Profile("sprk_matter", "sprk_event", Rule(null, "sprk_location", Text, Default, "Room 1"));
 
@@ -793,8 +805,9 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_location").Should().Be("Room 1");
-        _sourceReads.Should().BeEmpty();
-        _callerRead.Paths.Should().BeEmpty("nothing was read app-only, so there is nothing to mask");
+        // Task 022 fix round 2: the mapping-source rule reads whether the source is secure (its owner and flag), nothing else.
+        _sourceReads.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo("ownerid", AccessFollowsParent.SecureFlagColumn);
+        _callerRead.Paths.Should().BeEmpty("no mapped source column was read app-only, so there is nothing to mask");
         outcome.MappingWarnings.Should().BeEmpty();
     }
 
@@ -931,10 +944,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         Profile("sprk_matter", "sprk_event",
             Rule(null, RecordCreatorPerson.Column, Text, Default, "someone"), // a protected target: skipped
             Rule("sprk_matterdescription", "sprk_eventcode", Text), // not valid for create: dropped
-            Rule("sprk_matterdescription", "sprk_description", Memo));
+            Rule("sprk_matterdescription", "sprk_description", Memo),
+            Rule("sprk_assignedtointernal", "sprk_assignedto", Lookup));
+
+        // Task 049c: step 3's merge no longer re-reads the relationships and entity sets step 2 read (one create's metadata
+        // reads are asked once within steps 2 and 3), so the fault is put on the one read step 3 still makes after the rule was
+        // skipped and the value dropped: the entity set of the mapped lookup's table, which step 2 never read.
         _user.ThrowOn = path => _sourceReads.Count > 0
-                                && (path.Contains("ManyToOneRelationships", StringComparison.Ordinal)
-                                    || path.Contains("EntitySetName", StringComparison.Ordinal))
+                                && path.Contains("EntitySetName", StringComparison.Ordinal)
+                                && path.Contains("'contact'", StringComparison.Ordinal)
             ? new TimeoutException("metadata read timed out at 10.0.0.9")
             : null;
 
@@ -1121,15 +1139,15 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
     private static FieldMappingRuleEntity Rule(
         string? sourceField, string targetField, int targetFieldType, int mappingType = Copy, string? defaultValue = null) => new()
-    {
-        Name = $"{sourceField ?? "default"} to {targetField.Trim()}",
-        SourceField = sourceField ?? string.Empty,
-        TargetField = targetField,
-        TargetFieldType = targetFieldType,
-        MappingType = mappingType,
-        DefaultValue = defaultValue,
-        IsActive = true,
-    };
+        {
+            Name = $"{sourceField ?? "default"} to {targetField.Trim()}",
+            SourceField = sourceField ?? string.Empty,
+            TargetField = targetField,
+            TargetFieldType = targetFieldType,
+            MappingType = mappingType,
+            DefaultValue = defaultValue,
+            IsActive = true,
+        };
 
     private RecordCreationService Service()
     {
@@ -1150,8 +1168,12 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         var shares = SecureChildShareWorld.SynchronizerOver(() => _shareWorld, new FakeRecordShareTable());
 
+        IRecordOwnershipResolver resolver = new JournalingResolver(_world.Resolver(null), _journal, _ownerDelay);
+        if (_forcedOwnerTeam is { } forced)
+            resolver = new ForcedOwnerResolver(resolver, forced); // task 022 fix round 2: a seeded owner answer
+
         return new RecordCreationService(
-            new JournalingResolver(_world.Resolver(null), _journal), _appOnly.Object, _sourceReader.Object,
+            resolver, _appOnly.Object, _sourceReader.Object,
             _rootFiling(), restamper, shares,
             _scopes ?? new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _publisher,
             _logger ?? NullLogger<RecordCreationService>.Instance)
@@ -1307,7 +1329,60 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         [GeneratedRegex(@"LogicalName eq '(?<c>[a-z0-9_]+)'")]
         private static partial Regex AttributeNamed();
 
-        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+        /// <summary>
+        /// Task 049c: a read's round trip, by its (unescaped) path — a delayed double for the timing tests. None (the default)
+        /// or zero answers at once, as before; otherwise the read waits this long, concurrently with other reads, and is then
+        /// answered one at a time (the scripted world behind it is not thread-safe).
+        /// </summary>
+        public Func<string, TimeSpan>? DelayOf { get; set; }
+
+        private readonly SemaphoreSlim _answering = new(1, 1);
+
+        /// <summary>
+        /// Task 049c (fix round 1): an ordering hook, awaited before a read is answered (with the read's own token): a gate
+        /// double, so a test can hold one read until another is in flight, or see that a read was cancelled.
+        /// </summary>
+        public Func<string, CancellationToken, Task>? BeforeAnswer { get; set; }
+
+        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
+            BeforeAnswer is { } gate
+                ? GatedGetAsync(gate, relativePath, cancellationToken)
+                : DelayOf?.Invoke(Uri.UnescapeDataString(relativePath)) is { } delay && delay > TimeSpan.Zero
+                    ? DelayedGetAsync(relativePath, delay, cancellationToken)
+                    : AnswerGetAsync(relativePath, cancellationToken);
+
+        private async Task<DataverseUserResponse> GatedGetAsync(
+            Func<string, CancellationToken, Task> gate, string relativePath, CancellationToken cancellationToken)
+        {
+            await gate(Uri.UnescapeDataString(relativePath), cancellationToken).ConfigureAwait(false);
+            await _answering.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                lock (journal)
+                    return AnswerGetAsync(relativePath, cancellationToken).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                _answering.Release();
+            }
+        }
+
+        private async Task<DataverseUserResponse> DelayedGetAsync(string relativePath, TimeSpan delay, CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            await _answering.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                lock (journal)
+                    return AnswerGetAsync(relativePath, cancellationToken).GetAwaiter().GetResult();
+            }
+            finally
+            {
+                _answering.Release();
+            }
+        }
+
+        private Task<DataverseUserResponse> AnswerGetAsync(string relativePath, CancellationToken cancellationToken)
         {
             var path = Uri.UnescapeDataString(relativePath);
             journal.Add(KindOf(path));
@@ -1366,28 +1441,73 @@ public sealed partial class RecordCreationServiceMappingSeamTests
     {
         public List<(string? Token, string EntitySet, Guid Id)> Asked { get; } = [];
 
+        /// <summary>Task 049c: the probe's round trip (a delayed double); zero answers at once, as before.</summary>
+        public TimeSpan Delay { get; set; }
+
+        /// <summary>Task 049c (fix round 2): an ordering hook, awaited before the probe answers (with the probe's own token): a
+        /// gate double, so a test can hold the probe in flight and see whether it was cancelled. Set, it replaces <see cref="Delay"/>.</summary>
+        public Func<Guid, CancellationToken, Task>? BeforeAnswer { get; set; }
+
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
-            journal.Add("probe");
-            Asked.Add((callerBearerToken, entitySet, recordId));
-            return Task.FromResult(rightsOn(recordId));
+            return BeforeAnswer is { } gate ? GatedAsync(gate)
+                : Delay > TimeSpan.Zero ? DelayedAsync()
+                : Task.FromResult(Answer());
+
+            async Task<AccessRights> GatedAsync(Func<Guid, CancellationToken, Task> hold)
+            {
+                await hold(recordId, ct).ConfigureAwait(false);
+                return Answer();
+            }
+
+            AccessRights Answer()
+            {
+                lock (journal)
+                {
+                    journal.Add("probe");
+                    Asked.Add((callerBearerToken, entitySet, recordId));
+                }
+
+                return rightsOn(recordId);
+            }
+
+            async Task<AccessRights> DelayedAsync()
+            {
+                await Task.Delay(Delay, ct).ConfigureAwait(false);
+                return Answer();
+            }
         }
     }
 
     /// <summary>The REAL resolver, journaled.</summary>
-    private sealed class JournalingResolver(IRecordOwnershipResolver inner, List<string> journal) : IRecordOwnershipResolver
+    private sealed class JournalingResolver(IRecordOwnershipResolver inner, List<string> journal, TimeSpan delay = default)
+        : IRecordOwnershipResolver
     {
         public Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)
         {
-            journal.Add("owner");
+            lock (journal)
+                journal.Add("owner");
             return inner.ResolveOwningTeamAsync(context, ct);
         }
 
         public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
         {
-            journal.Add("owner");
-            return inner.ResolveOwnerAsync(context, ct);
+            return delay > TimeSpan.Zero ? DelayedAsync() : Answer();
+
+            Task<RecordOwnerResolution> Answer()
+            {
+                lock (journal)
+                    journal.Add("owner");
+                return inner.ResolveOwnerAsync(context, ct);
+            }
+
+            // Task 049c: the resolver's reads as one round trip (a delayed double); zero answers at once, as before.
+            async Task<RecordOwnerResolution> DelayedAsync()
+            {
+                await Task.Delay(delay, ct).ConfigureAwait(false);
+                return await Answer().ConfigureAwait(false);
+            }
         }
 
         public Task<RecordOwnerResolution> ReparentAsync(

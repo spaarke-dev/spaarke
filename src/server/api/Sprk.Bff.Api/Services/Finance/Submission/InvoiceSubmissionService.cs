@@ -15,7 +15,9 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Files;
+using Sprk.Bff.Api.Services.Finance.Resolution;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Services.Signals.Billing;
 
 namespace Sprk.Bff.Api.Services.Finance.Submission;
 
@@ -105,6 +107,17 @@ public class InvoiceSubmissionService
     /// peer edge <c>SecureChildLineage</c> lists for it (sprk_invoicesubmission is not an ownership parent) reaches no other root.
     /// </summary>
     internal const string ResubmissionOfColumn = "sprk_resubmissionof";
+
+    /// <summary>
+    /// ebilling-r1 task 095a (owner choice B, 2026-11-03): <c>sprk_invoicesubmission.sprk_sourceemaildocument</c>, the <c>.eml</c> Document a
+    /// from-email attempt was read from, so "was this email already submitted" is one indexed query. A PLAIN REFERENCE, written once at the
+    /// create by <see cref="SubmitInvoiceFromEmailOperation"/> from the same id the stage records as the Stored Files' <c>sprk_sourcedocument</c>.
+    /// It is NOT <c>sprk_document</c> (which a from-email row leaves empty, 092), not a filing, not a regarding and not an ownership parent
+    /// (<see cref="RecordOwnershipResolver.IsCitation"/>); it is deliberately absent from <see cref="ViewColumns"/> and
+    /// <see cref="InvoiceSubmissionView"/>, so no route that answers a view (external or internal) can carry it, and
+    /// <c>ExternalInvoiceVisibility</c> never reads it (guarded by SubmissionSourceEmailLinkNotFilingGuardTests).
+    /// </summary>
+    internal const string SourceEmailDocumentColumn = "sprk_sourceemaildocument";
 
     /// <summary>
     /// ebilling-r1 task 097b: what the Correction guard reads of the old invoice (app-only, after the caller's own Write passed): its firm,
@@ -283,6 +296,72 @@ public class InvoiceSubmissionService
         return await WriteAsync(request, number, file, decision.Row!, decision.ResolverFields!, ct);
     }
 
+    /// <summary>
+    /// ebilling-r1 082c-3 (brief 082c section 3(c), section 7 R4 item 4): the advisory pre-check the external (SPA) route runs on a RECEIVED
+    /// submission. It asks the Procedure resolver, for <paramref name="core"/> and <paramref name="firmId"/> and TODAY (UTC, as the processor's
+    /// received date), whether an applicable Procedure has no version on the date: the same fact the hold is made of
+    /// (<see cref="SubmissionHoldWarning.Precheck"/>). Returns the provisional warning (<see cref="SubmissionHoldWarning.ForPrecheck"/>), or null.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail quiet (uac-r2 (d)).</b> A fault of any kind (a read, an inconsistent resolution) means no warning and is never a distinct
+    /// answer: the 202 is unchanged. The log carries the fault's type name only, never its message (C16).</para>
+    /// <para><b>Authorization (uac-r2 (a), (b)).</b> Called by the route only after the submission's own authorization passed, with the core
+    /// record and firm the route's filter decided; this method reads app-only and takes nothing from the request.</para>
+    /// </remarks>
+    public virtual async Task<SubmissionHoldWarning?> PrecheckHoldWarningAsync(InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(core);
+
+        // F1: the pre-check runs after the submission is saved and queued, so a slow read must not hold the 202 (a client timeout would
+        // resubmit a duplicate). The 202 waits at most PrecheckTimeLimit: the wait itself is bounded (WaitAsync), because the budget token only
+        // takes effect between the loader's requests (the Dataverse SDK's channel call takes no token, so one stalled SOAP request would
+        // otherwise hold the 202). On a timeout the read is abandoned: it is cancelled so it stops at its next check, its fault (if any) is
+        // observed so it never reaches UnobservedTaskException, and the timeout is a fault like any other (fail quiet, below).
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(PrecheckTimeLimit);
+        try
+        {
+            var read = ReadProcedureResolutionAsync(InvoiceSubmissionProcessor.ToResolutionCore(core), firmId, budget.Token);
+            ProcedureResolution resolution;
+            try
+            {
+                resolution = await read.WaitAsync(PrecheckTimeLimit, ct).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                budget.Cancel();
+                _ = read.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                throw;
+            }
+
+            return SubmissionHoldWarning.Precheck(resolution, DateOnly.FromDateTime(DateTime.UtcNow));
+        }
+        catch (Exception ex) when (IsCallerCancellation(ex, ct))
+        {
+            // The caller's own token (a real client abort), not the budget's: it propagates.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Invoice submission: the billing-terms pre-check could not run; no warning is shown ({Fault})", ex.GetType().Name);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// F1: the most time the advisory pre-check's Dataverse reads may take before the 202 goes out without a warning. A fixed constant, not a
+    /// new option or configuration surface (notes 082c-3 "F1").
+    /// </summary>
+    internal static readonly TimeSpan PrecheckTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>The budget <see cref="PrecheckHoldWarningAsync"/> applies (a seam so a test need not wait <see cref="PrecheckTimeout"/>).</summary>
+    protected internal virtual TimeSpan PrecheckTimeLimit => PrecheckTimeout;
+
+    /// <summary>The pre-check's one read: the Procedure resolution the loader reads for an invoice of this firm on this record (a seam for tests).</summary>
+    protected internal virtual Task<ProcedureResolution> ReadProcedureResolutionAsync(CoreRecordReference core, Guid firmId, CancellationToken ct) =>
+        ProcedureResolver.ReadAsync(_entities, _logger, core, firmId, ct);
+
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Submit an existing document (ebilling-r1 task 050a, D-134: the review-confirm route)
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -417,8 +496,11 @@ public class InvoiceSubmissionService
     private static readonly string[] ExistingDocumentColumns =
         ["sprk_invoice", "sprk_graphdriveid", "sprk_graphitemid", InvoiceReviewService.DocInvoiceReviewStatus, .. FilingChainColumns];
 
-    /// <summary>Task 094: the source document as steps 3 and 5 read it: the filing chain and its own Restricted state.</summary>
-    private static readonly string[] SourceCheckColumns = [.. FilingChainColumns, DocumentAccessPermission];
+    /// <summary>
+    /// Task 094: the source document as steps 3 and 5 read it: the filing chain and its own Restricted state. Task 118b review 2 (F1): and the
+    /// size it records, which the intake sums over its supporting documents before downloading any (<see cref="SourceFilingCheck.RecordedFileBytes"/>).
+    /// </summary>
+    private static readonly string[] SourceCheckColumns = [.. FilingChainColumns, DocumentAccessPermission, SourceDocumentFileRead.FileSizeColumn];
 
     /// <summary>
     /// The existing-document entry (D-134): a reviewer confirms that a document already stored (an email attachment) is an invoice. It runs the
@@ -536,7 +618,7 @@ public class InvoiceSubmissionService
         }
 
         // ── 4-reader. Task 191: the invoice reader, read-only, before a Correction's checks, step A and the create. This route stages no
-        //        file, so there is no store check beside it. ──
+        //        invoice file, so there is no store check beside it (task 118b-2: supporting documents check the store at 4a-supporting). ──
         if (ReaderNotConfiguredRefusal() is { } readerRefusal)
         {
             _logger.LogInformation("Invoice submission: the confirm of document {DocumentId} refused (422), the invoice reader is not configured", documentId);
@@ -557,9 +639,33 @@ public class InvoiceSubmissionService
             resubmissionOf = target;
         }
 
+        // ── 4a-supporting. Task 118b-2: the supporting documents, read-only, after every other read-only refusal and before step A, so
+        //        a refusal here never leaves a filing behind: the file store (as the from-email route checks it), then each document's
+        //        file through the ONE shared read. Their copies are staged after step A (4c). A request without supporting documents
+        //        reads only whether this attempt's id already holds staged parts (a stage left by a request with another set). ──
+        var supportingIds = request.SupportingDocumentIds.Distinct().Order().ToList();
+        var supportingFiles = new List<(Guid DocumentId, SourceDocumentFile File)>(supportingIds.Count);
+        if (await CheckSupportingDocumentsAsync(request, submissionId, documentId, supportingIds, supportingFiles, ct) is { } supportingRefusal)
+        {
+            return supportingRefusal;
+        }
+
         // ── 4b. Step A (fix round F1-b): the route's filing of an unfiled source communication, as the caller - only now, after every
         //        read-only refusal above, so a refused submission never leaves a filing behind. Its refusal throws (the route answers). ──
         var filed = request.FileSourceBeforeWrite is { } fileSource && await fileSource(ct);
+
+        // ── 4c. Task 118b-2: each supporting document's copy staged under its part id of THIS attempt, with that document's own source
+        //        (the document, its communication, its version, its SHA-256); the first part lists the parts. As the from-email parts: no
+        //        compensation (the ids are deterministic; a concurrent request of the same attempt stages the same blobs). Other bytes or
+        //        another set under the ids is 409 (StoredFileBlobs.SameSource). The persister writes their rows in the commit. ──
+        if (supportingFiles.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await StageSupportingDocumentsAsync(submissionId, supportingFiles) is { } stageRefusal)
+            {
+                return AfterFiling(stageRefusal, filed);
+            }
+        }
 
         // ── 5. The submission, then its job ──
         var row = decision.Row!;
@@ -671,9 +777,26 @@ public class InvoiceSubmissionService
         InvoiceSubmissionRequest request, string number, InvoiceSubmissionView earlier, Guid documentId, Guid jobId,
         Func<CancellationToken, Task<bool>>? fileSource, CancellationToken ct)
     {
+        // Task 118b-1: the supporting set joins the "same details?" comparison (never the submission id, D-134): the earlier attempt's set
+        // is read from its part stages (ReadAttemptSupportingDocumentsAsync). A different set is "other details" (409 below); after a Failed
+        // attempt the request never reaches here (step 2 makes a new attempt).
+        IReadOnlyList<Guid> earlierSupporting;
+        try
+        {
+            earlierSupporting = await ReadAttemptSupportingDocumentsAsync(earlier.SubmissionId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: its supporting documents could not be read ({Fault}); refused (503)",
+                earlier.SubmissionId, ex.GetType().Name);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "The earlier submission of this document could not be checked right now. Nothing was saved; try again shortly.");
+        }
+
         // Task 094: an undone submission (9.1 step 5) has its firm invoice number cleared, so for a terminal one an empty number matches.
         var ended = earlier.Status is nameof(InvoiceSubmissionStatus.Failed) or nameof(InvoiceSubmissionStatus.Rejected);
-        var same = earlier.FirmId == request.FirmId
+        var same = SameSupportingDocuments(earlierSupporting, request.SupportingDocumentIds)
+            && earlier.FirmId == request.FirmId
             && earlier.CoreRecord == request.CoreRecord
             && earlier.DocumentId == documentId
             && (string.Equals(earlier.FirmInvoiceNumber?.Trim(), number, StringComparison.OrdinalIgnoreCase)
@@ -720,8 +843,336 @@ public class InvoiceSubmissionService
     /// <see cref="InvoiceSubmissionPersister.InvoiceIdFor"/> (the guard records only a submission whose id derives its invoice).
     /// </summary>
     internal static bool SameCorrectionTarget(Guid? earlierResubmissionOf, Guid? requestInvoiceId) => earlierResubmissionOf is { } earlier
-        ? requestInvoiceId is { } invoice && InvoiceSubmissionPersister.InvoiceIdFor(earlier) == invoice
+        ? requestInvoiceId is { } invoice && InvoiceBlockedHold.IsOwnSubmission(invoice, earlier)
         : requestInvoiceId is null;
+
+    /// <summary>
+    /// Task 118b-1: whether an earlier attempt's supporting documents are the request's: the same set (both de-duplicated and compared in
+    /// sorted order). Two empty sets are the same, so a request without supporting documents compares exactly as before 118b.
+    /// </summary>
+    internal static bool SameSupportingDocuments(IReadOnlyList<Guid> earlier, IReadOnlyList<Guid> requested) =>
+        earlier.Distinct().Order().SequenceEqual(requested.Distinct().Order());
+
+    /// <summary>
+    /// Task 118b: the supporting documents attempt <paramref name="submissionId"/> was created with, de-duplicated and sorted. They are read
+    /// from its part stages (<see cref="InvoiceSubmissionPersister.ReadDocumentPartStagesAsync"/>: <c>document-part-{i}</c>, the first part
+    /// listing the parts, each part's own source document), the reader the persister commits them with. No first part is the empty set (an
+    /// attempt without supporting documents, or one made before 118b). A store that cannot hold a stage of this environment (not configured,
+    /// or its segment not this environment's: <see cref="StoredFileService.CanStageAsync"/>) has none either. Parts that do not read back as
+    /// the first one listed them, and any fault, throw: the caller answers 503, never "no supporting documents".
+    /// </summary>
+    internal virtual async Task<IReadOnlyList<Guid>> ReadAttemptSupportingDocumentsAsync(Guid submissionId, CancellationToken ct)
+    {
+        if (!await _files.CanStageAsync(ct).ConfigureAwait(false))
+        {
+            return [];
+        }
+
+        var parts = await InvoiceSubmissionPersister.ReadDocumentPartStagesAsync(_files, submissionId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"The staged supporting documents of submission {submissionId} do not read back as their first part lists them.");
+        return parts.Select(p => p.SourceDocumentId!.Value).Order().ToList();
+    }
+
+    /// <summary>
+    /// Task 118b-2, step 4a-supporting of <see cref="SubmitExistingDocumentAsync"/> (a NEW attempt <paramref name="submissionId"/>): read-only.
+    /// Null when the attempt may go on; <paramref name="files"/> then holds each supporting document's file, in <paramref name="supportingIds"/>
+    /// order (sorted), for 4c.
+    /// <list type="bullet">
+    /// <item>No supporting documents: this attempt's id must hold no staged part. One there (whether or not its parts read back) was left by a
+    /// request of this attempt that named ANOTHER set and created no row; committing it would add files this request did not name, so it is 409
+    /// <see cref="InvoiceSubmissionErrors.DocumentAlreadySubmitted"/> (other details; known limit K2: it stays until the stage is removed).
+    /// A read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>.</item>
+    /// <item>With supporting documents: the file store first (as the from-email route: a fault is 503 <see cref="InvoiceSubmissionErrors.Failed"/>,
+    /// not configured 422 <see cref="InvoiceSubmissionErrors.StorageNotConfigured"/>), then (review F1-a) each document's filing and isolation
+    /// as the invoice document's are judged (<see cref="CheckSupportingFilingAsync"/>), then each document's file through the ONE shared read
+    /// (<see cref="InvoiceSubmissionRequest.ReadSupportingDocument"/>, review F1-b: with <see cref="MaxFileBytes"/>; over it is 413
+    /// <see cref="InvoiceSubmissionErrors.TooLarge"/>). Review 2, F1: the files together may hold at most <see cref="SupportingBudgetBytes"/>
+    /// (the upload route's request cap): the rows' recorded sizes are summed first (the filing check's own retrieves) and over the budget is
+    /// 413 before anything is downloaded; each read is then given the lesser of the per-file limit and what is left of the budget, and the
+    /// bytes actually read are totalled (over it is 413 <see cref="InvoiceSubmissionErrors.TooLarge"/> in its own words; a file that brings
+    /// the total to exactly the budget is read). Gone, no file or an email archive, storage that cannot be verified, or
+    /// a document no longer linked to the route's communication is a permanent 422 <see cref="SubmissionReasonCodes.DocumentUnavailable"/>;
+    /// no stream or a read fault is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>. The answers name no document.</item>
+    /// </list>
+    /// </summary>
+    private async Task<InvoiceSubmissionOutcome?> CheckSupportingDocumentsAsync(
+        InvoiceSubmissionRequest request, Guid submissionId, Guid documentId, IReadOnlyList<Guid> supportingIds,
+        List<(Guid DocumentId, SourceDocumentFile File)> files, CancellationToken ct)
+    {
+        if (supportingIds.Count == 0)
+        {
+            // Any first part is a leftover of another set, whether or not its parts read back (a request that stopped between two
+            // stages leaves part 1 alone): never a 503 the client would retry for ever.
+            IReadOnlyList<StagedSource>? leftover;
+            try
+            {
+                leftover = await _files.CanStageAsync(ct).ConfigureAwait(false)
+                    ? await InvoiceSubmissionPersister.ReadDocumentPartStagesAsync(_files, submissionId, ct).ConfigureAwait(false)
+                    : [];
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: its staged supporting documents could not be read ({Fault}); refused (503)",
+                    submissionId, ex.GetType().Name);
+                return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The document could not be checked right now. Nothing was saved; try again shortly.");
+            }
+
+            if (leftover is not { Count: 0 })
+            {
+                _logger.LogInformation("Invoice submission {SubmissionId}: document {DocumentId} has supporting documents staged by another request; refused (409)",
+                    submissionId, documentId);
+                return DocumentAlreadySubmitted();
+            }
+
+            return null;
+        }
+
+        var read = request.ReadSupportingDocument
+            ?? throw new ArgumentException("A new attempt with supporting documents needs ReadSupportingDocument.", nameof(request));
+
+        bool storeReady;
+        try
+        {
+            storeReady = await _files.CanStageAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the file store's environment could not be confirmed ({Fault})", submissionId, ex.GetType().Name);
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+                "The invoice could not be submitted right now. Nothing was saved; try again shortly.");
+        }
+
+        if (!storeReady)
+        {
+            return InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, InvoiceSubmissionErrors.StorageNotConfigured,
+                "Invoice file storage is not configured, so the supporting documents cannot be stored. Nothing was saved.");
+        }
+
+        // Task 118b review (F1-a): each supporting document is judged as the invoice document is (step 3) and as the commit gate judges every
+        // source again: filed under the core record only, isolated nowhere else. All of them first (cheap, read-only), so no file is
+        // downloaded for a request that is going to be refused. The same retrieves give each row's recorded size (review 2, F1).
+        var recordedTotal = 0L;
+        foreach (var supportingId in supportingIds)
+        {
+            var (filingRefusal, recordedBytes) = await CheckSupportingFilingAsync(request.CoreRecord, submissionId, supportingId, ct).ConfigureAwait(false);
+            if (filingRefusal is not null)
+            {
+                return filingRefusal;
+            }
+
+            var recorded = recordedBytes ?? 0;
+            recordedTotal = recorded > long.MaxValue - recordedTotal ? long.MaxValue : recordedTotal + recorded;
+        }
+
+        // Task 118b review 2 (F1): the recorded sizes already add up to more than the whole request may hold in memory: refused before
+        // anything is downloaded. (A row with no recorded size adds nothing here; the loop below counts what is actually read.)
+        if (recordedTotal > SupportingBudgetBytes)
+        {
+            _logger.LogInformation("Invoice submission {SubmissionId}: the supporting documents' recorded sizes exceed the {BudgetMb} MB total; refused (413)",
+                submissionId, SupportingBudgetBytes / BytesPerMb);
+            return SupportingTotalTooLarge();
+        }
+
+        // Task 118b review 2 (F1): a running total of the bytes read, against the per-request budget. Each read is bounded by what is left
+        // of it (and by the per-file limit), so the intake never holds more than the budget, however many documents are named.
+        var totalRead = 0L;
+        foreach (var supportingId in supportingIds)
+        {
+            SourceDocumentFile file;
+            var remaining = SupportingBudgetBytes - totalRead;
+            try
+            {
+                // Task 118b review (F1-b): the same per-file limit the upload enforces, never more than the budget has left (review 2, F1).
+                file = await read(supportingId, Math.Min(MaxFileBytes, remaining), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} could not be read ({Fault}); refused (503)",
+                    submissionId, supportingId, ex.GetType().Name);
+                return SupportingUnavailable();
+            }
+
+            switch (file.Outcome)
+            {
+                case SourceDocumentFileOutcome.Read when file.Content is not null && file.CommunicationId == request.SourceCommunicationId:
+                    totalRead += file.Content.LongLength;
+                    files.Add((supportingId, file));
+                    continue;
+                case SourceDocumentFileOutcome.NotDownloaded:
+                    _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} could not be downloaded; refused (503)",
+                        submissionId, supportingId);
+                    return SupportingUnavailable();
+                case SourceDocumentFileOutcome.TooLarge when remaining < MaxFileBytes:
+                    // The limit that stopped the read was what was left of the total (review 2, F1), not the per-file limit.
+                    _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} would take the supporting documents past the {BudgetMb} MB total; refused (413)",
+                        submissionId, supportingId, SupportingBudgetBytes / BytesPerMb);
+                    return SupportingTotalTooLarge();
+                case SourceDocumentFileOutcome.TooLarge:
+                    _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} is over the {MaxMb} MB file limit; refused (413)",
+                        submissionId, supportingId, _ebilling.CurrentValue.MaxSubmissionFileSizeMb);
+                    return InvoiceSubmissionOutcome.Refused(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+                        $"A supporting document may be at most {_ebilling.CurrentValue.MaxSubmissionFileSizeMb} MB. Nothing was saved.");
+                default:
+                    _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} cannot be copied ({Outcome}); refused (422)",
+                        submissionId, supportingId, file.Outcome);
+                    return SupportingNotCopyable();
+            }
+        }
+
+        return null;
+
+        static InvoiceSubmissionOutcome SupportingUnavailable() =>
+            InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "A supporting document could not be read right now. Nothing was saved; try again shortly.");
+    }
+
+    private const long BytesPerMb = 1024 * 1024;
+
+    /// <summary>
+    /// Task 118b review 2 (F1): the most bytes the supporting documents may add up to in one request: the upload route's whole-request body
+    /// cap (<see cref="Sprk.Bff.Api.Api.Finance.InvoiceSubmissionHttp.MaxRequestBodyBytes"/>), so the from-document route never holds more in
+    /// memory than an upload may carry. The intake keeps every supporting copy in memory between the reads (before step A) and the stages
+    /// (after it); without this total, 49 files at the per-file limit would be up to 49 times it.
+    /// </summary>
+    internal const long SupportingBudgetBytes = Sprk.Bff.Api.Api.Finance.InvoiceSubmissionHttp.MaxRequestBodyBytes;
+
+    /// <summary>413 <see cref="InvoiceSubmissionErrors.TooLarge"/>, in its own words: the supporting documents TOGETHER pass <see cref="SupportingBudgetBytes"/> (no document is named).</summary>
+    private static InvoiceSubmissionOutcome SupportingTotalTooLarge() =>
+        InvoiceSubmissionOutcome.Refused(StatusCodes.Status413PayloadTooLarge, InvoiceSubmissionErrors.TooLarge,
+            $"The supporting documents together are too large (at most {SupportingBudgetBytes / BytesPerMb} MB in all). Nothing was saved.");
+
+    /// <summary>The 422 every "this supporting document cannot be copied" refusal answers (no document is named).</summary>
+    private static InvoiceSubmissionOutcome SupportingNotCopyable() =>
+        InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity, SubmissionReasonCodes.DocumentUnavailable,
+            "A supporting document has no file that can be copied, or no longer belongs to this communication. Nothing was saved.");
+
+    /// <summary>
+    /// Task 118b review (F1-a): whether supporting document <paramref name="supportingId"/> may be copied under <paramref name="core"/>: the
+    /// invoice document's check (<see cref="CheckExistingDocumentAsync"/>, step 3) through the function the commit gate re-runs for every
+    /// source (<see cref="CheckSourceFilingAsync"/>: the D-140 filing chain, then isolation). Null when allowed (an UNFILED document is
+    /// allowed, as the invoice document is). Mapped as the invoice document is: filed or isolated under another record, or a filing that
+    /// cannot be placed, is 409 <see cref="InvoiceSubmissionErrors.DocumentCoreRecordMismatch"/>; isolation that cannot be read, or any
+    /// fault, is 503 <see cref="InvoiceSubmissionErrors.CoreRecordUnavailable"/>; a document that no longer exists is 422
+    /// <see cref="SubmissionReasonCodes.DocumentUnavailable"/> (as the shared read answers it). The answers name no document or record.
+    /// Allowed also returns the size the row records (review 2, F1: <see cref="SourceFilingCheck.RecordedFileBytes"/>; null when empty).
+    /// </summary>
+    private async Task<(InvoiceSubmissionOutcome? Refusal, long? RecordedBytes)> CheckSupportingFilingAsync(
+        InvoiceCoreRecord core, Guid submissionId, Guid supportingId, CancellationToken ct)
+    {
+        SourceFilingCheck check;
+        try
+        {
+            check = await CheckSourceFilingAsync(_entities, _isolation, supportingId, core, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the filing of supporting document {SupportingId} could not be checked ({Fault}); refused (503)",
+                submissionId, supportingId, ex.GetType().Name);
+            return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                "A supporting document could not be checked right now. Nothing was saved; try again shortly."), null);
+        }
+
+        switch (check.Verdict)
+        {
+            case SourceFilingVerdict.Allowed:
+                return (null, check.RecordedFileBytes);
+            case SourceFilingVerdict.Gone:
+                _logger.LogWarning("Invoice submission {SubmissionId}: supporting document {SupportingId} no longer exists; refused (422)", submissionId, supportingId);
+                return (SupportingNotCopyable(), null);
+            case SourceFilingVerdict.Unavailable:
+                _logger.LogWarning("Invoice submission {SubmissionId}: the isolation of supporting document {SupportingId} could not be read ({Detail}); refused (503)",
+                    submissionId, supportingId, check.Detail);
+                return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "Who may see a supporting document could not be checked right now. Nothing was saved; try again shortly."), null);
+            default:
+                _logger.LogInformation("Invoice submission {SubmissionId}: supporting document {SupportingId} is filed or restricted elsewhere ({Detail}); refused (409)",
+                    submissionId, supportingId, check.Detail);
+                return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status409Conflict, InvoiceSubmissionErrors.DocumentCoreRecordMismatch,
+                    "A supporting document is filed under a different record than the one named, so it cannot be submitted for this record. Nothing was saved."), null);
+        }
+    }
+
+    /// <summary>
+    /// Task 118b-2, 4c of <see cref="SubmitExistingDocumentAsync"/>: each supporting document's copy staged under
+    /// <see cref="InvoiceSubmissionPersister.DocumentPartFileId"/> (part 1 to N in <paramref name="files"/> order), purpose Supporting, parent
+    /// the invoice the job will create, Firm-visible No, with that document's own source (the document, its communication, its version, the
+    /// SHA-256 of the bytes read) and its extension; part 1's manifest lists every part (<see cref="StagedSourceManifest"/>, the from-email
+    /// Invoice part's mechanism). Writes on <see cref="CancellationToken.None"/> (a write that started finishes). Null when every part is
+    /// staged (a retry's identical stage is reused); else the refusal: other bytes or another set under the ids is 409
+    /// <see cref="InvoiceSubmissionErrors.DocumentAlreadySubmitted"/>, the store not configured 422, anything else 503 (a retry completes it).
+    /// </summary>
+    private async Task<InvoiceSubmissionOutcome?> StageSupportingDocumentsAsync(
+        Guid submissionId, IReadOnlyList<(Guid DocumentId, SourceDocumentFile File)> files)
+    {
+        for (var index = 0; index < files.Count; index++)
+        {
+            var (supportingId, file) = files[index];
+            var number = index + 1;
+            var (spec, manifest) = DocumentPartSpecOf(submissionId, number, files.Count, supportingId, file);
+
+            StageResult stage;
+            try
+            {
+                await using var content = new MemoryStream(file.Content!, writable: false);
+                stage = await _files.StageAsync(spec, content, manifest, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Invoice submission {SubmissionId}: supporting part {Number} could not be staged", submissionId, number);
+                return NotStaged();
+            }
+
+            if (!stage.IsStaged)
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the file store refused supporting part {Number} ({Code})", submissionId, number, stage.RefusalCode);
+                return stage.RefusalCode switch
+                {
+                    StoredFileRefusal.NotConfigured => InvoiceSubmissionOutcome.Refused(StatusCodes.Status422UnprocessableEntity,
+                        InvoiceSubmissionErrors.StorageNotConfigured,
+                        "Invoice file storage is not configured, so the supporting documents cannot be stored. Nothing was saved."),
+                    // Other bytes, or another set, are staged under this attempt's ids: a request of this attempt named other documents.
+                    StoredFileRefusal.ContentConflict => DocumentAlreadySubmitted(),
+                    _ => NotStaged(),
+                };
+            }
+        }
+
+        return null;
+
+        static InvoiceSubmissionOutcome NotStaged() =>
+            InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.Failed,
+                "The supporting documents could not be stored right now. Nothing was saved; try again shortly.");
+    }
+
+    /// <summary>
+    /// Task 118b-2: the spec and manifest of supporting part <paramref name="number"/> of <paramref name="count"/>, the copy of
+    /// <paramref name="documentId"/> as <paramref name="file"/> read it (see <see cref="StageSupportingDocumentsAsync"/>). The stage's name
+    /// is the part id and the source's extension (never the source's name; the persister names the row); the content type is the
+    /// document's own when it fits, else <c>application/octet-stream</c>.
+    /// </summary>
+    internal static (StoredFileRowSpec Spec, StagedSourceManifest Manifest) DocumentPartSpecOf(
+        Guid submissionId, int number, int count, Guid documentId, SourceDocumentFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var extension = Path.GetExtension(file.FileName);
+        var safeExtension = !string.IsNullOrEmpty(extension) && StoredFileService.IsExtension(extension) ? extension.ToLowerInvariant() : null;
+        var spec = new StoredFileRowSpec
+        {
+            FileId = InvoiceSubmissionPersister.DocumentPartFileId(submissionId, number),
+            Purpose = StoredFilePurpose.InvoiceSupportingFile,
+            Parent = new StoredFileParent(StoredFileParentKind.Invoice, InvoiceSubmissionPersister.InvoiceIdFor(submissionId)),
+            Name = InvoiceSubmissionPersister.DocumentPartIdentity(number) + (safeExtension ?? string.Empty),
+            ContentType = file.MimeType is { Length: <= StoredFileSchema.ContentTypeMaxLength } mimeType ? mimeType : "application/octet-stream",
+            FirmVisible = false,
+            SourceDocumentId = documentId,
+            SourceCommunicationId = file.CommunicationId,
+            SourceVersion = file.Version,
+            SourceSha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(file.Content ?? [])),
+            SubmissionId = submissionId,
+        };
+        return (spec, new StagedSourceManifest(number == 1 ? Enumerable.Range(1, count).ToList() : [], safeExtension));
+    }
 
     /// <summary>
     /// Null when the document can be submitted; otherwise the refusal. A read fault is 503 (never "not found"). A document filed under a core
@@ -941,12 +1392,12 @@ public class InvoiceSubmissionService
         }
 
         if (Services.Office.ReconciledEmailFiling.FilingColumns.Any(column => communication.Attributes.TryGetValue(column, out var value) && value switch
-            {
-                null => false,
-                string text => !string.IsNullOrWhiteSpace(text),
-                EntityReference reference => reference.Id != Guid.Empty,
-                _ => true,
-            })
+        {
+            null => false,
+            string text => !string.IsNullOrWhiteSpace(text),
+            EntityReference reference => reference.Id != Guid.Empty,
+            _ => true,
+        })
             || CoreRecordsOf(communication, CommunicationCoreColumns, CommunicationEntity).Count > 0)
         {
             return true;
@@ -1012,7 +1463,8 @@ public class InvoiceSubmissionService
         var isolated = await isolation.CheckAsync(documentId, core, ct).ConfigureAwait(false);
         return isolated.Verdict switch
         {
-            ExistingDocumentIsolationVerdict.Allowed => new SourceFilingCheck(SourceFilingVerdict.Allowed, null, isolated.Roots, flags),
+            ExistingDocumentIsolationVerdict.Allowed => new SourceFilingCheck(
+                SourceFilingVerdict.Allowed, null, isolated.Roots, flags, SourceDocumentFileRead.RecordedSizeOf(document)),
             ExistingDocumentIsolationVerdict.Unavailable => new SourceFilingCheck(SourceFilingVerdict.Unavailable, isolated.Detail),
             _ => new SourceFilingCheck(SourceFilingVerdict.Mismatch, $"{isolated.Verdict}: {isolated.Detail}"),
         };
@@ -1113,11 +1565,22 @@ public class InvoiceSubmissionService
     /// order: the firm is active, the core record's fields derive (013), the firm is one of the record's assigned law firms (D-106 / D-110), and
     /// an owner team resolves. Reads only; nothing is written.
     /// </summary>
+    /// <remarks>Task 095c-2: a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null) reaches here only from
+    /// <see cref="DecideForFromEmailAsync"/> (<paramref name="noFirmAllowed"/>; <see cref="ValidateFields"/> refuses it on every other entry).
+    /// It has no firm to check, so the active-firm and firm-link checks are skipped; the record's fields and the owner are decided as for any
+    /// submission. Any other caller with a null firm is a defect and throws before anything is read.</remarks>
     private async Task<IntakeDecision> DecideAsync(
-        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null)
+        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null,
+        bool noFirmAllowed = false)
     {
         var core = request.CoreRecord;
-        switch (await IsActiveFirmAsync(request.FirmId, ct))
+        if (request.FirmId is null && !noFirmAllowed)
+        {
+            throw new InvalidOperationException("Only the from-email intake submits without a firm (ValidateFields refuses it on every other entry).");
+        }
+
+        // Task 095c-2: no firm (from-email only, above): nothing to check here.
+        switch (request.FirmId is { } firmToCheck ? await IsActiveFirmAsync(firmToCheck, ct) : true)
         {
             case null:
                 return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
@@ -1146,19 +1609,23 @@ public class InvoiceSubmissionService
         // before the owner is resolved and long before any write; the same codes whichever route called. The order matters: the link reader
         // cannot tell a record that is not returned (deleted, not found) from a fault, so both come back unreadable, and asking it first would
         // answer a deleted record 503 "try again shortly". The detail names no firm and no record.
-        switch (await CheckFirmLinkAsync(core, request.FirmId, ct))
+        // Task 095c-2: a request with no firm (from-email only, above) has no link to check, so this step is skipped for it.
+        if (request.FirmId is { } firmToLink)
         {
-            case InvoiceFirmLink.Linked:
-                break;
-            case InvoiceFirmLink.NotLinked:
-                _logger.LogInformation(
-                    "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
-                    request.FirmId, core.EntityLogicalName, core.RecordId, request.Channel);
-                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
-                    "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."));
-            default:
-                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
-                    "The firm could not be checked right now. Try again shortly."));
+            switch (await CheckFirmLinkAsync(core, firmToLink, ct))
+            {
+                case InvoiceFirmLink.Linked:
+                    break;
+                case InvoiceFirmLink.NotLinked:
+                    _logger.LogInformation(
+                        "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
+                        firmToLink, core.EntityLogicalName, core.RecordId, request.Channel);
+                    return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
+                        "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."));
+                default:
+                    return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+                        "The firm could not be checked right now. Try again shortly."));
+            }
         }
 
         // UAC 194b R3b-2: the submission's question is built from the row as written so far (RecordOwnershipContext.ForChild: its core
@@ -1184,6 +1651,9 @@ public class InvoiceSubmissionService
     /// the firm active, the core record's fields, the firm link D-106, the owner), with the submission's creator person the caller's own
     /// <paramref name="callerSystemUserId"/> (OP-5; every generation, whoever made an earlier one). Reads only. The answer: a refusal, or the
     /// submission row (core lookup, owner and creator person set) and its resolver fields.
+    /// <para>Task 095c-2: the one entry that accepts a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null): the firm checks
+    /// are skipped and the record and owner are decided as usual. Whether a no-firm submission may be numbered at all (the tracking-scope phase)
+    /// is the from-email route's check before anything is saved (<see cref="CanSubmitWithoutFirmAsync"/>), and the allocator's on create.</para>
     /// </summary>
     internal async Task<(InvoiceSubmissionOutcome? Refusal, Entity? Row, InvoiceFamilyResolverFields? ResolverFields)> DecideForFromEmailAsync(
         InvoiceSubmissionRequest request, Guid callerSystemUserId, CancellationToken ct)
@@ -1194,14 +1664,21 @@ public class InvoiceSubmissionService
             throw new ArgumentException("A from-email submission is internal and names its caller's systemuser.", nameof(request));
         }
 
-        if (ValidateFields(request) is { } invalid)
+        if (ValidateFields(request, noFirmAllowed: true) is { } invalid)
         {
             return (invalid, null, null);
         }
 
-        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId);
+        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId, noFirmAllowed: true);
         return (decision.Refusal, decision.Row, decision.ResolverFields);
     }
+
+    /// <summary>
+    /// Task 095c-2: whether a submission with no firm may be taken now: only once this environment's tracking-scope key is Active (phase P2,
+    /// <see cref="ITrackingNumberAllocator.NumbersSubmissionsWithoutFirmAsync"/>). The from-email route asks it before it saves or files
+    /// anything, and answers 400 <see cref="InvoiceSubmissionErrors.FirmInvalid"/> "A firm is required." while it is false (P0, P1).
+    /// </summary>
+    internal virtual Task<bool> CanSubmitWithoutFirmAsync(CancellationToken ct) => _allocator.NumbersSubmissionsWithoutFirmAsync(ct);
 
     // ── ebilling-r1 task 097b: a Correction (model 9.1 "Existing invoice", EB-D-179) ──
 
@@ -1213,7 +1690,8 @@ public class InvoiceSubmissionService
     /// </summary>
     /// <remarks>
     /// <para><b>Order</b> (each a 409 <see cref="InvoiceSubmissionErrors.CorrectionNotAllowed"/> with its <c>reason</c>): the invoice's firm
-    /// (<see cref="FromEmailCorrectionReasons.DifferentFirm"/>); its one core record (<see cref="FromEmailCorrectionReasons.DifferentCoreRecord"/>;
+    /// (<see cref="FromEmailCorrectionReasons.DifferentFirm"/>; compared by <see cref="CorrectionKeepsFirm"/>, task 095c-2, so a no-firm
+    /// invoice is corrected only without a firm); its one core record (<see cref="FromEmailCorrectionReasons.DifferentCoreRecord"/>;
     /// an invoice that names none or several is refused the same way, fail closed); its status: only In Review (statecode Active) may be
     /// corrected, so Approved, Sent to AP, Paid and every inactive status, including one this lifecycle does not know, are
     /// <see cref="FromEmailCorrectionReasons.InvoiceStatus"/> with <c>invoiceStatus</c> (the status name; absent for an unknown value);
@@ -1227,24 +1705,18 @@ public class InvoiceSubmissionService
     /// record or number. The answer's <c>ResubmissionOf</c> is the submission to record in <see cref="ResubmissionOfColumn"/>.</para>
     /// </remarks>
     internal virtual Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> CheckCorrectionAsync(
-        InvoiceCoreRecord core, Guid firmId, string firmInvoiceNumber, Entity invoice, CancellationToken ct) =>
+        InvoiceCoreRecord core, Guid? firmId, string firmInvoiceNumber, Entity invoice, CancellationToken ct) =>
         JudgeCorrectionAsync(core, firmId, firmInvoiceNumber, invoice, readSubmission: null, ct);
 
     /// <summary>
     /// The invoice's OWN submission (EB-D-179 item 1): the one whose <see cref="InvoiceColumn"/> is <paramref name="invoiceId"/> AND whose id
     /// derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>); null when there is none. One read, shared by the
     /// intake's guard and by the correction prefill (task 097e), so the two cannot find different submissions. Throws on a read fault.
+    /// Task 165c: the selection is <see cref="InvoiceBlockedHold.ReadOwnSubmissionAsync"/>, the one own-submission rule (no TopCount there
+    /// either, so another row pointing at the invoice cannot crowd the own submission out).
     /// </summary>
-    internal async Task<Entity?> ReadOwnSubmissionAsync(Guid invoiceId, CancellationToken ct)
-    {
-        // No TopCount: a cap could leave the invoice's own submission out when other rows also point at the invoice.
-        var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(CorrectionSubmissionColumns) };
-        query.Criteria.AddCondition(InvoiceColumn, ConditionOperator.Equal, invoiceId);
-        var found = await _entities.RetrieveMultipleAsync(query, ct);
-        // Only the submission the invoice was created from: its id derives the invoice's (the job's InvoiceIdFor). A row that merely points
-        // at the invoice is not its submission.
-        return found.Entities.SingleOrDefault(s => InvoiceSubmissionPersister.InvoiceIdFor(s.Id) == invoiceId);
-    }
+    internal Task<Entity?> ReadOwnSubmissionAsync(Guid invoiceId, CancellationToken ct) =>
+        InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, CorrectionSubmissionColumns, ct);
 
     /// <summary>The invoice's own submission as <see cref="ReadOwnSubmissionAsync"/> read it (<see cref="Row"/> null: it has none).</summary>
     internal sealed record OwnSubmissionRead(Entity? Row);
@@ -1255,15 +1727,39 @@ public class InvoiceSubmissionService
     /// numbers) and hands the SAME row here, so the answer it gives is the intake's, by the same code, over the same row.
     /// </summary>
     internal async Task<(InvoiceSubmissionOutcome? Refusal, Guid? ResubmissionOf)> JudgeCorrectionAsync(
-        InvoiceCoreRecord core, Guid firmId, string firmInvoiceNumber, Entity invoice, OwnSubmissionRead? readSubmission, CancellationToken ct)
+        InvoiceCoreRecord core, Guid? firmId, string firmInvoiceNumber, Entity invoice, OwnSubmissionRead? readSubmission, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(core);
         ArgumentNullException.ThrowIfNull(invoice);
 
-        if (invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id is not { } invoiceFirm || invoiceFirm != firmId)
+        if (!CorrectionKeepsFirm(invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id, firmId))
         {
             return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentFirm,
                 "The invoice to correct is from another firm, so this submission cannot replace it. Nothing was saved."), null);
+        }
+
+        // Task 095c-5 review K1: a held invoice is treated as one with no firm, whatever its firm column says now (the column is writable),
+        // so a request that names a firm never matches it. The hold is read app-only (_entities), never from the caller's row; a read
+        // fault is the same 503 as the submission read below.
+        if (firmId is not null)
+        {
+            bool held;
+            try
+            {
+                held = await InvoiceFirmHold.IsHeldAsync(_entities, invoice.Id, ct);
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                _logger.LogWarning(ex, "Invoice correction refused: the firm hold of invoice {InvoiceId} could not be read", invoice.Id);
+                return (InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.CoreRecordUnavailable,
+                    "The invoice to correct could not be checked right now. Nothing was saved; try again shortly."), null);
+            }
+
+            if (held)
+            {
+                return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentFirm,
+                    "The invoice to correct is from another firm, so this submission cannot replace it. Nothing was saved."), null);
+            }
         }
 
         if (!IsCore(EligibleApproverResolver.SingleCoreOf(FinanceBaseValues.InvoiceEntity, invoice), core))
@@ -1308,7 +1804,7 @@ public class InvoiceSubmissionService
         // The earlier submission is the peer the new one will name (ResubmissionOfColumn): it must be of the same firm and core record, so the
         // lineage edge adds no other root.
         var earlier = ToView(submission);
-        if (earlier.FirmId != firmId)
+        if (!CorrectionKeepsFirm(earlier.FirmId, firmId))
         {
             return (CorrectionRefused(invoice.Id, FromEmailCorrectionReasons.DifferentFirm,
                 "The invoice to correct is from another firm, so this submission cannot replace it. Nothing was saved."), null);
@@ -1354,7 +1850,7 @@ public class InvoiceSubmissionService
     /// when the submission could not be read (the route answers 503; a fault is never a guess).
     /// </summary>
     internal async Task<CorrectionPrefillJudgement?> JudgeCorrectionPrefillAsync(
-        Entity invoice, InvoiceCoreRecord core, Guid firmId, CancellationToken ct)
+        Entity invoice, InvoiceCoreRecord core, Guid? firmId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(invoice);
         ArgumentNullException.ThrowIfNull(core);
@@ -1377,6 +1873,11 @@ public class InvoiceSubmissionService
             return new CorrectionPrefillJudgement(submission, true, null);
         }
 
+        if (refusal.StatusCode == StatusCodes.Status503ServiceUnavailable)
+        {
+            return null; // a read fault (the route answers 503), never reported as a reason
+        }
+
         var reason = refusal.Extensions is { } extensions && extensions.TryGetValue("reason", out var value) ? value as string : null;
         if (reason is not (FromEmailCorrectionReasons.InvoiceStatus or FromEmailCorrectionReasons.NoSubmission or FromEmailCorrectionReasons.SubmissionInProgress))
         {
@@ -1386,6 +1887,15 @@ public class InvoiceSubmissionService
 
         return new CorrectionPrefillJudgement(submission, false, reason);
     }
+
+    /// <summary>
+    /// Task 095c-2 (owner 2026-11-03): a correction keeps the replaced invoice's firm. A firm matches only the same firm; a no-firm original
+    /// (a from-email submission taken without one) is corrected only by a request that also has no firm, and a request with a firm never
+    /// matches it (nor a firm original a request without one). The empty id never matches anything. This is the one place a null firm is
+    /// compared with a null firm, and it is an equality of two absent firms, not a match of a firm.
+    /// </summary>
+    internal static bool CorrectionKeepsFirm(Guid? original, Guid? requested) =>
+        original != Guid.Empty && requested != Guid.Empty && original == requested;
 
     private static bool IsCore((string Entity, Guid Id)? found, InvoiceCoreRecord core) =>
         found is { } single && string.Equals(single.Entity, core.EntityLogicalName, StringComparison.Ordinal) && single.Id == core.RecordId;
@@ -1429,7 +1939,10 @@ public class InvoiceSubmissionService
     }
 
     /// <summary>The checks of the request's own fields every entry runs first: the number (D-91), its length, the PO, the firm and record ids.</summary>
-    private static InvoiceSubmissionOutcome? ValidateFields(InvoiceSubmissionRequest request)
+    /// <param name="request">The request.</param>
+    /// <param name="noFirmAllowed">Task 095c-2: true only for <see cref="DecideForFromEmailAsync"/>, where a null firm means "no firm". Every
+    /// other entry refuses a null firm as it refuses the empty id. The empty id is refused on every entry.</param>
+    private static InvoiceSubmissionOutcome? ValidateFields(InvoiceSubmissionRequest request, bool noFirmAllowed = false)
     {
         // D-91 first: the number is required, so a request without one never costs an upload.
         var number = request.FirmInvoiceNumber?.Trim();
@@ -1451,7 +1964,7 @@ public class InvoiceSubmissionService
                 $"The PO number may be at most {MaxPoNumberLength} characters.");
         }
 
-        if (request.FirmId == Guid.Empty)
+        if (request.FirmId == Guid.Empty || (request.FirmId is null && !noFirmAllowed))
         {
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
         }
@@ -1781,6 +2294,7 @@ public class InvoiceSubmissionService
         {
             try
             {
+                // Read-time pin only: this intake's submission id is new, so no other run can reuse the blob (nothing to pin to beyond the read).
                 await _files.DeleteStagedAsync(stagedSpec, CancellationToken.None);
             }
             catch (Exception ex)
@@ -1839,7 +2353,11 @@ public class InvoiceSubmissionService
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(firmIds);
-        if (firmIds.Count == 0)
+
+        // A blank firm id names no firm: it never reaches the In condition (hygiene; nothing is known to produce one), so the set
+        // is the caller's real firms only and an empty one reads nothing.
+        var firms = firmIds.Where(id => id != Guid.Empty).Distinct().ToArray();
+        if (firms.Length == 0)
         {
             return Array.Empty<InvoiceSubmissionView>();
         }
@@ -1853,7 +2371,7 @@ public class InvoiceSubmissionService
             foreach (var chunk in ids.Where(id => id != Guid.Empty).Distinct().Chunk(MaxInValues))
             {
                 var query = new QueryExpression(SubmissionEntity) { ColumnSet = new ColumnSet(ViewColumns), TopCount = MaxListSize };
-                query.Criteria.AddCondition(TrackingNumberAllocator.FirmColumn, ConditionOperator.In, firmIds.Cast<object>().ToArray());
+                query.Criteria.AddCondition(TrackingNumberAllocator.FirmColumn, ConditionOperator.In, firms.Cast<object>().ToArray());
                 query.Criteria.AddCondition(column, ConditionOperator.In, chunk.Cast<object>().ToArray());
                 query.AddOrder("createdon", OrderType.Descending);
 
@@ -1886,7 +2404,8 @@ public class InvoiceSubmissionService
     /// ebilling-r1 task 097f (EB-D-180): <paramref name="views"/> as a status route answers them, with the read-time note on each Accepted
     /// submission whose invoice is Superseded (<see cref="SupersededSubmissionNote.ApplyAsync"/>). Not part of <see cref="GetAsync"/> or
     /// <see cref="ListAsync"/>: the service's other callers (the intake's replays, the visibility decisions) must see the stored view. Never
-    /// throws for a read fault; the answer is then the one the views had.
+    /// throws for a read fault; the answer is then the one the views had, without a hold <see cref="InvoiceSubmissionView.Warning"/>: 082c-2 fix
+    /// round 2 (F2) - the warning is kept only while the view's invoice is In Review, so a status route never shows a hold that has ended.
     /// </summary>
     internal Task<IReadOnlyList<InvoiceSubmissionView>> WithReplacementNoteAsync(
         IReadOnlyList<InvoiceSubmissionView> views, ReplacementReadGate mayRead, CancellationToken ct) =>
@@ -1932,6 +2451,10 @@ public class InvoiceSubmissionService
             },
             ReceivedOn = row.GetAttributeValue<DateTime?>("sprk_receivedon"),
             OutcomeReasonCode = row.GetAttributeValue<string>("sprk_outcomereasoncode"),
+
+            // 082c-2 (brief 3(c)): derived from the reason code with fixed text; no stored text is read. The reason code outlives the hold, so the
+            // status routes keep it only while the invoice is In Review (fix round 2, F2: SupersededSubmissionNote.ApplyAsync, via WithReplacementNoteAsync).
+            Warning = SubmissionHoldWarning.For(row.GetAttributeValue<string>("sprk_outcomereasoncode")),
             DocumentId = row.GetAttributeValue<EntityReference>("sprk_document")?.Id,
             ChannelValue = channel,
             FirmId = row.GetAttributeValue<EntityReference>(TrackingNumberAllocator.FirmColumn)?.Id,

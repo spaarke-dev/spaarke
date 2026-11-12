@@ -66,11 +66,20 @@ internal sealed record RecordCreationRefusal
     /// <summary>The payload is not a Dataverse Web API payload this service accepts.</summary>
     internal const string InvalidPayloadCode = "record_creation.invalid_payload";
 
-    /// <summary>The table has no entry in <see cref="RecordTableRules"/>: this service does not create it.</summary>
+    /// <summary>The table has no entry in <see cref="RecordTableRules"/>, or its entry is
+    /// <see cref="RecordTableRule.GenericCreateRefused"/> (task 042c fix round 4; ebilling-r1 task 164a-1): this service does not
+    /// create it.</summary>
     internal const string TableUnsupportedCode = "record_creation.table_unsupported";
 
     /// <summary>A check before the create faulted (an exception or timeout): nothing was created (NFR-01).</summary>
     internal const string CheckFailedCode = "record_creation.check_failed";
+
+    /// <summary>
+    /// Task 022 fix round 3: a value mapped from a secure source files the row, and the row's owner is not that source's secure
+    /// owner, so the value cannot be removed and the create is refused (400). The same request is refused again: create the row
+    /// as secure, or file it differently.
+    /// </summary>
+    internal const string MappingSourceSecureFilingCode = "record_creation.mapping_source_secure_filing";
 
     /// <summary>The owner decision faulted: nothing was created (UAC-r2 condition (b), "faulted → 503 owner_unavailable").</summary>
     internal const string OwnerUnavailableCode = "record_creation.owner_unavailable";

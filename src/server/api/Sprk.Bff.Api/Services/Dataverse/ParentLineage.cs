@@ -738,7 +738,8 @@ internal static class InheritedAccessPermission
         /// seam without an impersonated user, a playbook's output mapping, Repair, the profile output mapper. Every refusal.
         /// Also every playbook write (the Update Record node, a playbook's output mapping) WHATEVER identity the run writes as
         /// (#2257): a person-started run writes AS that person, but its payload is built by configuration or a model, not by
-        /// the runner, so it is asked every refusal too.
+        /// the runner, so it is asked every refusal too. Since #2250 those two playbook writers ask as <see cref="Playbook"/>:
+        /// this identity's refusals plus a root's Assigned-To columns.
         /// </summary>
         AppOnly,
 
@@ -752,7 +753,42 @@ internal static class InheritedAccessPermission
         /// enforced by ArchTest <c>RefuseAppOnlyWriteCallerIdentityGuardTests</c>).
         /// </summary>
         Caller,
+
+        /// <summary>
+        /// #2250 (owner decision, option 2): a playbook write — the Update Record node (a
+        /// <c>UpdateRecordPayloadSource.Configuration</c> payload, and a <c>ConfirmedProposal</c> no person confirmed, which is
+        /// written app-only and so is model-built) and a playbook's output mapping
+        /// (<see cref="DataverseUpdateHandler"/>) — whatever identity the run writes as. Every <see cref="AppOnly"/> refusal,
+        /// plus a grant root's Assigned-To columns (<see cref="IsAssignedToGrantColumn"/>): a playbook is configuration, so it
+        /// never causes an Assigned-To access grant. The other app-only writers (the create-time mapping, Repair) keep
+        /// <see cref="AppOnly"/>, so the live field-mapping rules that set Assigned To from the parent keep working.
+        /// </summary>
+        Playbook,
     }
+
+    /// <summary>
+    /// #2250: the reason code when a playbook write (<see cref="WriteIdentity.Playbook"/>) names an Assigned-To column of a
+    /// project, matter or work assignment (<see cref="IsAssignedToGrantColumn"/>; <see cref="RefuseAppOnlyWrite"/>).
+    /// </summary>
+    internal const string PlaybookAssignedToWriteReasonCode = "sdap.access.assigned_to_playbook_refused";
+
+    /// <summary>
+    /// #2250: the prefix of the Assigned-To columns. Every column the Assigned-To registry names for a root
+    /// (<c>MembershipOptionsDefaults.CanonicalAccessConferringRegistry</c>, which the materializer's bound registry is seeded
+    /// from) carries it: the registry reproduces the retired <c>sprk_assigned</c> naming convention.
+    /// </summary>
+    internal const string AssignedToColumnPrefix = "sprk_assigned";
+
+    /// <summary>
+    /// #2250: whether <paramref name="column"/> (a normalized logical name, <see cref="SecureRootInheritance.NormalizeColumn"/>)
+    /// of <paramref name="table"/> is an Assigned-To column that drives an access grant: an <see cref="AssignedToColumnPrefix"/>
+    /// column of one of the three roots the materializer grants on
+    /// (<see cref="Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.TryParseRootLogicalName"/>). A child's
+    /// Assigned To (an event, a to-do, an invoice, an analysis) confers no grant (owner answer A6), so it is not one.
+    /// </summary>
+    internal static bool IsAssignedToGrantColumn(string? table, string column) =>
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.TryParseRootLogicalName(table, out _)
+        && column.StartsWith(AssignedToColumnPrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// #2253 fix round 2: the Dataverse platform tables whose rows grant or scope access, refused whole to an app-only generic
@@ -992,9 +1028,48 @@ internal static class InheritedAccessPermission
     /// <c>EarlierInvoiceReadability.ReferencesOf</c>), so the number decides no access today; it stays refused, as its only
     /// writer is typed. Their writers are typed: the persister links the invoice (<c>BuildSubmissionUpdate</c>) and the
     /// allocator assigns the number; no playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</para>
+    /// <para>ebilling-r1 task 095c: also its tracking scope <c>sprk_trackingscope</c> (<c>TrackingNumberAllocator.ScopeColumn</c>), the
+    /// firm id or <c>none</c> that the scope key pairs with the tracking number. It decides no access (no external gate reads it:
+    /// <c>SubmissionTrackingScopeNotAccessGuardTests</c>), but it decides which sequence a number belongs to, so re-pointed it would let a
+    /// later submission take a number the row already holds in its real scope. Its only writer is typed: the allocator writes it at
+    /// create, and the schema script backfills it once; no generic writer sets it.</para>
+    /// <para>ebilling-r1 task 095d-1a: also its sequence <c>sprk_submissionsequence</c> (<c>TrackingNumberAllocator.SequenceColumn</c>) and the
+    /// none-scope sequence a renumber gives up <c>sprk_previoussequence</c> (<c>TrackingNumberAllocator.PreviousSequenceColumn</c>). They decide
+    /// no access; they decide which tracking numbers are taken, so a generic write could make a number be issued twice. Their only writer is the
+    /// allocator (at create and at the renumber). Task 095d-1b (uac-r2, binding): also the firm invoice number <c>sprk_firminvoicenumber</c>
+    /// (<c>TrackingNumberAllocator.FirmInvoiceNumberColumn</c>), the allocator's at create; it decides no access, but it is the stem of every
+    /// tracking number of the row. Its only other writer is typed: <c>SubmissionCommitGate</c>'s undo clears it (095d-1a). The renumber of
+    /// Set firm (<c>InvoiceAssignFirmService</c> through <c>TrackingNumberAllocator.RenumberSubmissionAsync</c>) is the second typed writer
+    /// of the firm, the scope, the sequence, the previous sequence and the tracking number.</para>
+    /// <para>ebilling-r1 task 095c-4 (uac-r2 2026-11-03): also its outcome reason <c>sprk_outcomereasoncode</c>
+    /// (<c>InvoiceSubmissionPersister.SubmissionReasonCode</c>). It decides no access, but it stores the holds that keep an invoice from
+    /// approval and AP export: <c>ebilling.submission.firm_missing</c> (<c>InvoiceFirmHold</c>) and the FR-20 Blocked hold. Cleared by a
+    /// generic write, an invoice with no firm could be approved. Its writers are typed: the persister and the after-steps (the pipeline),
+    /// the commit gate's undo, the job's failure writes and the blocked-submission decision (<c>SubmissionOverrideService</c>).</para>
     /// <para>No vendor org scopes a Duplicate any more (#2294 removed the number lookup), so neither
-    /// <c>sprk_invoice.sprk_vendororg</c> nor the submission's decides a Duplicate's detail; <c>sprk_invoice.sprk_vendororg</c> is
-    /// not listed.</para></item>
+    /// <c>sprk_invoice.sprk_vendororg</c> nor the submission's decides a Duplicate's detail.</para></item>
+    /// <item>ebilling-r1 task 095c-4 review fix and task 095c-5 (uac-r2 2026-11-04). <c>sprk_invoice</c>: its firm hold <c>sprk_firmhold</c>
+    /// (<c>InvoiceFirmHold.InvoiceHoldColumn</c>, field-secured) and its firm <c>sprk_vendororg</c>
+    /// (<c>InvoiceSubmissionPersister.InvoiceVendorOrg</c>). Neither decides access, but both decide whether the invoice can be approved,
+    /// returned, corrected and exported: cleared by a generic write, the hold would no longer keep a no-firm invoice from approval; a firm
+    /// set by one would be a firm no pipeline resolved. Their writers are typed: the persister writes both in the invoice's create (the
+    /// firm, or the hold when there is none), and Set firm (task 095d-1b, <c>InvoiceAssignFirmService</c>) sets the firm and replaces the hold with the rerun-pending marker (EB-D-185)
+    /// in its one renumber transaction. No
+    /// playbook output mapping, Update Record node, field-mapping rule or Repair writes either.</item>
+    /// <item>ebilling-r1 082c-2 fix round 1 (uac-r2 review F4). <c>sprk_invoice.sprk_reviewdetail</c> (<c>InvoiceReviewDetail.Column</c>):
+    /// the partner-readable label of which kind of review a held invoice is in, DERIVED from its open hold reasons (ontology D-205). It
+    /// decides no access and no hold (approval reads the stored submission state), but a generic write would show a label no hold backs, or
+    /// leave one on a closed invoice. Its writers are typed (<c>InvoiceReviewDetailWritersGuardTests</c>); the record-creation mapping
+    /// refuses it as well (<c>RecordTableRules.MappingProtectedColumns</c>).</item>
+    /// <item>ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1). <c>sprk_invoice</c>: its billed total <c>sprk_totalamount</c>
+    /// (<c>InvoiceReviewService.InvTotalAmount</c>) and its five derived totals, <c>sprk_feestotal</c>, <c>sprk_expensestotal</c>,
+    /// <c>sprk_lineadjustmentstotal</c>, <c>sprk_invoiceadjustmentstotal</c> and <c>sprk_approvedtotal</c> (<c>InvoiceTotalsService</c>). They decide
+    /// no access, but the approval, the AP export and the derived Threshold read them. They are field-secured so that only the BFF application
+    /// user writes them; that user is a member of the Writers profile, so field security does not stop its generic writers, and this refusal does.
+    /// Their writers are typed: <c>InvoiceTotalsService</c> (the derived totals), the submission persister (the create) and
+    /// <c>InvoiceCorrectionService</c> (the header correction), none of which asks this refusal
+    /// (<c>InvoiceMoneyColumnsAppOnlyWriteGuardTests</c>). The record-creation mapping refuses them as well
+    /// (<c>RecordTableRules.MappingProtectedColumns</c>).</item>
     /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A same-invoice repeat Duplicate about a line is judged by the
     /// line's current invoice, the event's invoice (read as the caller), so the column is read. It is not refused because
     /// the supported detach / move / re-attach sequence (<see cref="InvoiceFamilyCoreRecordGuard.DetachMoveReattachHint"/>, D-96)
@@ -1017,10 +1092,25 @@ internal static class InheritedAccessPermission
     /// mapping, a Duplicate would be judged against another invoice. All six are the Signal's typed-writer-only columns: they are
     /// written once, at create, by the Signal writer (<c>SignalWriter.WriteAsync</c>; the subject lookup and the pair through
     /// <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>) through the ontology writer's dedicated client
-    /// (<c>OntologyWriterDataverseClient</c>), and never updated; the closure and commit updates write neither, the core-ancestor
-    /// restamper moves only the stamp lookups, and no generic path writes a Signal (it is never mapped:
-    /// <c>RecordTableRules</c>, <c>OntologyContentIsNotMapped</c>). Its lane and its other subject lookups are not listed yet
-    /// (<c>AccessTableReaderScanTests</c>).</item>
+    /// (<c>OntologyWriterDataverseClient</c>), and never updated; the closure and commit updates write neither, and the core-ancestor
+    /// restamper moves only the stamp lookups. Generic BFF update paths can write a Signal's other columns; the core record
+    /// pair is fixed after create on them (<see cref="RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns"/>). A
+    /// Signal is excluded from field mapping (<c>RecordTableRules</c>, <c>OntologyContentIsNotMapped</c>). Its lane and its
+    /// other subject lookups are not listed yet (<c>AccessTableReaderScanTests</c>).</item>
+    /// <item>ebilling-r1 task 095d-1c (uac-r2 final review F4-1). <c>sprk_invoicesubmission</c>: the stored findings
+    /// (<c>sprk_findingsjson</c>, <see cref="Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson"/>).
+    /// They decide no access, but since 1c their <c>assignFirm</c> member decides the immutable Decision Record's decider, note and date
+    /// (<c>InvoiceAssignFirmService.BuildDecision</c>), so only its typed writers may change it. The typed writers are the
+    /// submission persister, <c>InvoiceCorrectionReevaluation</c>, <c>SubmissionOverrideService</c>, Set firm
+    /// (<c>InvoiceAssignFirmService</c>) and the re-run after it (<c>InvoiceSubmissionRerun</c>, which changes only <c>assignFirm.rulesRerun</c>
+    /// in that member) and Add line (<c>InvoiceLineAddService</c>, which adds the <c>addLine</c> member and patches the findings and plan); they go
+    /// through <c>IGenericEntityService</c>, not these paths. Where the column is otherwise
+    /// held: app-only generic writes (an Update Record node, an output mapping, Repair) are refused here. A person-run write is blocked by
+    /// field security (only the "Spaarke BFF-Managed Field Writers" profile holds update on the column), except for System Administrators,
+    /// a platform rule that holds for every secured column. A create-time or repair field-mapping rule is skipped by
+    /// <c>RecordTableRule.MappingProtectedColumns</c>. A field-mapping PUSH to existing rows asks this as
+    /// <see cref="WriteIdentity.Caller"/> (which skips access columns) and does not read <c>MappingProtectedColumns</c>, so it relies on
+    /// field security alone (see notes 095c §16.9 fix round 2).</item>
     /// </list>
     /// Data, not branching: a table with no entry has no such column.
     /// </summary>
@@ -1116,8 +1206,33 @@ internal static class InheritedAccessPermission
                     .Select(l => l.Column)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmColumn)
                     .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionInvoice)
-                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn),
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.TrackingNumberColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn)
+                    // allocator-owned; SubmissionCommitGate undo clears it (095d-1a)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn)
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode)
+                    // 095d-1c F4-1: the stored findings hold the assignFirm member that BuildDecision turns into the immutable Decision Record.
+                    .Append(Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson),
                 StringComparer.OrdinalIgnoreCase),
+            [Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn,
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.InvoiceVendorOrg,
+                // ebilling-r1 082c-2 fix round 1 (uac-r2, F4): the review detail is DERIVED from the open hold reasons (D-205) by its typed writers.
+                Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column,
+                // ebilling-r1 task 166 fix round (EB-D-200, adversarial review F1): the billed total and the five derived totals are field-secured
+                // so that only the BFF application user writes them, but that user is a Writers member, so field security does not stop its generic
+                // writers (an output mapping, an Update Record node, Repair). This refusal does. Their writers are typed (InvoiceTotalsService,
+                // InvoiceSubmissionPersister, InvoiceCorrectionService); see InvoiceMoneyColumnsAppOnlyWriteGuardTests.
+                Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal,
+                Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal,
+            },
             [Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.SignalTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 Sprk.Bff.Api.Services.Signals.SignalCoreRecordAccess.CoreRecordTypeColumn,
@@ -1185,11 +1300,14 @@ internal static class InheritedAccessPermission
     /// <para><b>Identity</b> (<paramref name="identity"/>, K2): <see cref="WriteIdentity.Caller"/> (the field-mapping push,
     /// which runs as its caller) asks the table-name check and only the refusals it asked before #2251 (the document codes,
     /// the owner, the creator); the three #2251-and-later sets are left to that person's own Dataverse privileges and field
-    /// security.</para>
+    /// security. <see cref="WriteIdentity.Playbook"/> (#2250: the Update Record node and a playbook's output mapping) asks every
+    /// <see cref="WriteIdentity.AppOnly"/> refusal and, last, a grant root's Assigned-To columns
+    /// (<see cref="IsAssignedToGrantColumn"/>, refused with <see cref="PlaybookAssignedToWriteReasonCode"/>).</para>
     /// <para><b>Precedence</b> (the first match decides the code): a table that is not an identifier; then an access table;
     /// then, on a document, its Access Permission or own-narrowing record, then its D7 links, then its BFF-owned columns;
-    /// then a secure root's columns; then a non-root table's access columns; then, on every table, the owner, then the
-    /// creator.</para>
+    /// then a secure root's columns; then a non-root table's access columns; then, on every table and for every identity, a
+    /// writer-only column (<c>RecordTableRule.WriterOnlyColumns</c>, task 165d); then, on every table, the owner, then the
+    /// creator; then, for a playbook write, a root's Assigned-To columns.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     /// <param name="table">The table the write names (trimmed here).</param>
@@ -1209,7 +1327,8 @@ internal static class InheritedAccessPermission
                 "the table named is not a Dataverse table name, so nothing was written");
         }
 
-        var appOnly = identity == WriteIdentity.AppOnly;
+        // #2250: a playbook write is app-only for every set below, and is asked the Assigned-To columns too (last).
+        var appOnly = identity != WriteIdentity.Caller;
         var narrows = RecordsOwnNarrowing(trimmed);
         var links = string.Equals(trimmed, Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.DocumentTable, StringComparison.OrdinalIgnoreCase);
 
@@ -1256,9 +1375,40 @@ internal static class InheritedAccessPermission
         if (appOnly && AccessColumns.TryGetValue(trimmed, out var accessColumns)
             && columns.FirstOrDefault(accessColumns.Contains) is { } accessColumn)
         {
+            // ebilling-r1 task 095c: the tracking scope decides no access (it is listed because its only writer is typed); say so.
+            // Task 095c-4: the outcome reason holds the invoice (firm_missing, Blocked); it decides no access either.
+            // Task 095c-5: on an invoice, the firm hold and the firm hold it from approval and export; neither decides access.
+            var isInvoice = string.Equals(trimmed, Sprk.Bff.Api.Services.Finance.FinanceBaseValues.InvoiceEntity, StringComparison.OrdinalIgnoreCase);
+            // 095d-1a: the sequence and the previous sequence are the allocator's too, and decide no access.
+            // 095d-1b: so is the firm invoice number (set by the allocator; an undone submission clears it).
+            // 095d-1c F4-1: the stored findings decide a Decision Record's decider, note and date; they decide no access.
+            var decides = !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionFindingsJson, StringComparison.OrdinalIgnoreCase)
+                ? "it decides no access; only typed writers write it: the submission persister, InvoiceCorrectionReevaluation, SubmissionOverrideService, Set firm (InvoiceAssignFirmService), its re-run (InvoiceSubmissionRerun) and Add line (InvoiceLineAddService)"
+                : !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.FirmInvoiceNumberColumn, StringComparison.OrdinalIgnoreCase)
+                ? "it decides no access; only the tracking number allocator sets it"
+                : !isInvoice && (string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.ScopeColumn, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.SequenceColumn, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.TrackingNumberAllocator.PreviousSequenceColumn, StringComparison.OrdinalIgnoreCase))
+                ? "it decides no access; only the tracking number allocator writes it"
+                : !isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceSubmissionPersister.SubmissionReasonCode, StringComparison.OrdinalIgnoreCase)
+                    ? "it decides no access, but it holds the invoice from approval and export; only the submission pipeline writes it"
+                    : isInvoice && string.Equals(accessColumn, Sprk.Bff.Api.Services.Finance.Submission.InvoiceReviewDetail.Column, StringComparison.OrdinalIgnoreCase)
+                        ? "it decides no access; it says why the invoice is held for review, and only its typed writers derive it"
+                    : isInvoice && IsInvoiceMoneyColumn(accessColumn)
+                        ? "it decides no access; it is an invoice amount, and only typed writers derive it"
+                    : isInvoice
+                        ? "it decides no access, but it decides whether the invoice can be approved and exported; only the submission pipeline writes it"
+                        : "it decides who may see what";
             return RecordOwnerResolution.Refused(AppOnlyAccessColumnWriteReasonCode,
-                $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke (it decides who may see what), so it was " +
-                "not written");
+                $"{accessColumn} of a {trimmed.ToLowerInvariant()} is set by Spaarke ({decides}), so it was not written");
+        }
+
+        // ebilling-r1 task 165d (EB-D-207; uac-r2 U1-U2, approved 2026-11-07): a column only the table's typed writer sets
+        // (RecordTableRule.WriterOnlyColumns: the invoice's AP export claim). Refused for EVERY identity, the field-mapping push included,
+        // and not through AccessColumns (it decides no access). Declared in RecordTableRules; its code extends the changed_only_by_its_writer marker.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyColumns(trimmed, columns) is { } writerOnlyColumn)
+        {
+            return writerOnlyColumn;
         }
 
         // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).
@@ -1268,12 +1418,34 @@ internal static class InheritedAccessPermission
                 $"{owner} of a record is set by Spaarke (it decides who may see the record), so it was not written");
         }
 
-        var creator = columns.FirstOrDefault(CreatorColumns.Contains);
-        return creator is null
-            ? null
-            : RecordOwnerResolution.Refused(AppOnlyCreatorWriteReasonCode,
+        if (columns.FirstOrDefault(CreatorColumns.Contains) is { } creator)
+        {
+            return RecordOwnerResolution.Refused(AppOnlyCreatorWriteReasonCode,
                 $"{creator} of a record is set by Spaarke (it records who created the record), so it was not written");
+        }
+
+        // #2250 (owner decision, option 2): a playbook never writes a root's Assigned-To columns. The materializer would grant
+        // the assignee access with no grantor anyone checked; a person's own Assigned-To write goes through the form, the
+        // field-mapping push, the create or a confirmed proposal, none of which asks as WriteIdentity.Playbook.
+        if (identity == WriteIdentity.Playbook && columns.FirstOrDefault(c => IsAssignedToGrantColumn(trimmed, c)) is { } assigned)
+        {
+            return RecordOwnerResolution.Refused(PlaybookAssignedToWriteReasonCode,
+                $"{assigned} of a {trimmed.ToLowerInvariant()} gives the person it names access to the record, and a playbook " +
+                "does not give access, so it was not written");
+        }
+
+        return null;
     }
+
+    /// <summary>Whether <paramref name="column"/> is one of the six <c>sprk_invoice</c> amount columns the typed finance writers own (task 166,
+    /// EB-D-200): the billed total and the fees, expenses, line-adjustments, invoice-adjustments and approved totals.</summary>
+    private static bool IsInvoiceMoneyColumn(string column) =>
+        string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceReviewService.InvTotalAmount, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceFeesTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceExpensesTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceLineAdjustmentsTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceInvoiceAdjustmentsTotal, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(column, Sprk.Bff.Api.Services.Finance.InvoiceTotalsService.InvoiceApprovedTotal, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>What to hold and what to write on one row of a <see cref="RecordTables"/> table (task 189).</summary>
     internal sealed record DocumentDecision

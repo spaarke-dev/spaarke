@@ -6,7 +6,7 @@ The Model Context Protocol (MCP) is a protocol for exposing tools and other cont
 ## Setup
 
 1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and optionally [docker](https://www.docker.com/products/docker-desktop/)
-1. Ensure you have your Azure AI Foundry Hub and Agent setup done, see [here](../README.md), and add the project connection string and model deployment name to a .env file (or copy the .env.example), with the following names:
+1. Ensure you have your Azure AI Foundry Hub and Agent setup done, see here, and add the project connection string and model deployment name to a .env file (or copy the .env.example), with the following names:
     - AZURE_AI_AGENT_PROJECT_CONNECTION_STRING
     - AZURE_AI_AGENT_MODEL_DEPLOYMENT_NAME
 1. If you want to run the Stdio Server sample: Create a Personal Access Token for Github that has read access to the repositories that you want to interact with, see [the documentation](https://github.com/modelcontextprotocol/servers/tree/main/src/github) on how to create one.

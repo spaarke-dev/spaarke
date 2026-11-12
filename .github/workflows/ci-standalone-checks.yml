@@ -35,6 +35,8 @@ name: CI Standalone Checks
 #                                                                 policy lint and apply order),
 #                                                                 Invoke-OntologyStampBackfill.ps1 and the
 #                                                                 Deploy-Release.ps1 worklist-configuration phase.
+#                                                                 Set-FeatureRolePrivileges.ps1 (the role-privilege
+#                                                                 apply script: dry run, -Apply, -Remove, exit codes).
 #   owner-teams-script-tests (new)                                 Pester controls for Set-CustomerOwnerTeams.ps1 (the
 #                                                                 Secure Record unit refusal, the owner-decision
 #                                                                 dry-run exit code).
@@ -476,6 +478,8 @@ jobs:
   # classes (cone mode takes directories, not files) is checked out too: Apply-DoLanePolicies.Tests.ps1 pins the script's team rule to their source text (task 171, D-197).
   # Pester pinned to 5.7.1 (2026-10-29), the same pin as owner-teams-script-tests: under Pester 6.x a container can fail
   # with "Export-ModuleMember ... can only be called from inside a module" (seen in uac-r2's 194b review).
+  # Set-FeatureRolePrivileges.Tests.ps1 (field-mapping-server-write-path-r1 task 046b) runs scripts/Set-FeatureRolePrivileges.ps1 whole in a child
+  # pwsh against a test double of az and Invoke-RestMethod (tests/scripts/Set-FeatureRolePrivileges.Harness.ps1): no network, no token.
   # --------------------------------------------------------------------------
   ontology-script-tests:
     name: Ontology script tests (Pester)
@@ -496,12 +500,13 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Apply-DoLanePolicies.Tests.ps1, tests/scripts/Seed-BillingSystemPolicy.Tests.ps1, tests/scripts/Invoke-OntologyStampBackfill.Tests.ps1, tests/scripts/Deploy-Release.OntologyConfig.Tests.ps1, tests/scripts/Deploy-EbillingInvoiceReviewDetailColumn.Tests.ps1, tests/scripts/Set-FeatureRolePrivileges.Tests.ps1, tests/scripts/Set-BffDecisionRecordReaderRole.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
-  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 (unified-access-control-r2
-  # task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
+  # owner-teams-script-tests: the Pester controls for scripts/Set-CustomerOwnerTeams.ps1 and (task 191d)
+  # scripts/Set-ExternalCollaboratorRole.ps1 and (task 191f) scripts/Set-AccessMarkerFieldSecurity.ps1 over the
+  # field-security engine (unified-access-control-r2 task 194b R4b-4): no business unit named -SecureBusinessUnitName refuses (Secure Record is never accepted as a
   # customer unit), Secure Record is refused by its name, and a dry run whose drift is an owner decision exits 1.
   # The script runs over a mocked Invoke-RestMethod and az (any write fails the test) and reads the checked-in
   # config/*-owner-role.json; nothing talks to Dataverse. Pester is pinned to 5.7.1: under 6.x a container can fail
@@ -525,7 +530,7 @@ jobs:
         run: |
           Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Import-Module Pester -RequiredVersion 5.7.1
-          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 -Output Detailed -PassThru
+          $r = Invoke-Pester -Path tests/scripts/Set-CustomerOwnerTeams.Tests.ps1, tests/scripts/Set-ExternalCollaboratorRole.Tests.ps1, tests/scripts/Set-AccessMarkerFieldSecurity.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------
@@ -565,9 +570,11 @@ jobs:
       - name: Remove-WorktreeSafe (Pester)
         shell: pwsh
         run: |
-          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
-          Import-Module Pester -MinimumVersion 5.5.0
-          $r = Invoke-Pester -Path tests/scripts/Remove-WorktreeSafe.Tests.ps1 -Output Detailed -PassThru
+          # Pinned like the other Pester jobs, so a new Pester major cannot silently change this job. (-MinimumVersion
+          # installed the newest; Pester 6.2.0 fails these files at load on at least one dev machine.)
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -RequiredVersion 5.7.1
+          $r = Invoke-Pester -Path tests/scripts/Remove-WorktreeSafe.Tests.ps1, tests/scripts/Clean-AgentWorktrees.Tests.ps1 -Output Detailed -PassThru
           if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
 
   # --------------------------------------------------------------------------

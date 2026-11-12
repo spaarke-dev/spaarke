@@ -174,6 +174,39 @@ public sealed partial class TopicRegistryWorkProductPersister : IWorkProductReco
         var mapping = await ResolveTargetMappingAsync(topic, entry.Key, hostContext, cancellationToken)
             .ConfigureAwait(false);
 
+        // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): a registry
+        // row that names one as its target is refused as a bad mapping, before anything is written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseFixedAfterCreateColumns(
+                mapping.HostEntity, [mapping.TargetField]) is { } refusal)
+        {
+            throw new InvalidOperationException(
+                $"Work-product persistence for output '{entry.Key}': registry row for topic '{topic}' targets " +
+                $"{mapping.HostEntity}.{mapping.TargetField}, which is not written: {refusal.Reason} ({refusal.RefusalCode}). " +
+                "Fix the registry row.");
+        }
+
+        // ebilling-r1 task 165d fix round (EB-D-207; the configuration-built payload rule, #2257): the target column comes from a registry
+        // row (configuration), not reviewed code, so it is asked the writer-only column refusal as the Update Record node and the output
+        // mapping are: a row that targets a column only its typed writer sets (the invoice's AP export claim) is refused as a bad mapping.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyColumns(
+                mapping.HostEntity, [mapping.TargetField]) is { } writerOnlyColumn)
+        {
+            throw new InvalidOperationException(
+                $"Work-product persistence for output '{entry.Key}': registry row for topic '{topic}' targets " +
+                $"{mapping.HostEntity}.{mapping.TargetField}, which is not written: {writerOnlyColumn.Reason} ({writerOnlyColumn.RefusalCode}). " +
+                "Fix the registry row.");
+        }
+
+        // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
+        // changed only by their writers (RecordTableRule.CreatedOnlyByItsWriter). A registry row that targets one is refused as a
+        // bad mapping, as above, before anything is written.
+        if (Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.RefuseWriterOnlyTableUpdate(mapping.HostEntity) is { } writerOnly)
+        {
+            throw new InvalidOperationException(
+                $"Work-product persistence for output '{entry.Key}': registry row for topic '{topic}' targets " +
+                $"{mapping.HostEntity}.{mapping.TargetField}, which is not written: {writerOnly.Reason} Fix the registry row.");
+        }
+
         // ── 2. Derive the envelope VERBATIM from the stored ledger entry (ADR-040: the
         // ledger SessionOutput is the source the persisted envelope derives from).
         var envelopeJson = JsonSerializer.Serialize(

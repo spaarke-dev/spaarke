@@ -108,7 +108,8 @@ public sealed class BootedApp : IDisposable
                     options.Ssl = false;
                     options.Protocol = StackExchange.Redis.RedisProtocol.Resp2;
                     return StackExchange.Redis.ConnectionMultiplexer.Connect(options);
-                });
+                }
+            );
         }
 
         try
@@ -308,6 +309,11 @@ public sealed class BootedApp : IDisposable
                 ["PublicConfig:MsalClientId"] = "00000000-0000-0000-0000-0000000000a3",
                 ["PublicConfig:TenantId"] = "00000000-0000-0000-0000-0000000000a2",
                 ["Onboarding:HmacSigningKey"] = "archtests-hmac-signing-key",
+                // The system sender: CommunicationOptionsValidator fails the options outside Development/Testing without it, which
+                // faults any resolution of ApprovedSenderValidator (and so CommunicationService) in the Production boot.
+                ["Communication:DefaultMailbox"] = "system@archtests.example",
+                ["Communication:ApprovedSenders:0:Email"] = "system@archtests.example",
+                ["Communication:ApprovedSenders:0:IsDefault"] = "true",
                 ["APPLICATIONINSIGHTS_CONNECTION_STRING"] =
                     "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=http://127.0.0.1:9/;LiveEndpoint=http://127.0.0.1:9/",
             };
@@ -444,20 +450,20 @@ internal sealed class HandshakeOnlyRedis : IDisposable
                 return Simple("$-1");
             case "SUBSCRIBE":
             case "PSUBSCRIBE":
-            {
-                subscribed = true;
-                var kind = Encoding.ASCII.GetBytes(name.ToLowerInvariant());
-                var reply = new List<byte>();
-                for (var i = 1; i < command.Count; i++)
                 {
-                    reply.AddRange("*3\r\n"u8.ToArray());
-                    reply.AddRange(Bulk(kind));
-                    reply.AddRange(Bulk(command[i]));
-                    reply.AddRange(Simple($":{i}"));
-                }
+                    subscribed = true;
+                    var kind = Encoding.ASCII.GetBytes(name.ToLowerInvariant());
+                    var reply = new List<byte>();
+                    for (var i = 1; i < command.Count; i++)
+                    {
+                        reply.AddRange("*3\r\n"u8.ToArray());
+                        reply.AddRange(Bulk(kind));
+                        reply.AddRange(Bulk(command[i]));
+                        reply.AddRange(Simple($":{i}"));
+                    }
 
-                return reply.ToArray();
-            }
+                    return reply.ToArray();
+                }
 
             case "CLUSTER":
                 return Simple("-ERR This instance has cluster support disabled");

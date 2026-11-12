@@ -37,7 +37,7 @@ export interface ProposalsGridProps {
   proposals: readonly ProposalView[];
   selectedPolicyId: string | null;
   onSelect: (policyId: string) => void;
-  /** Shown instead of the grid when there are no rules; the page says what to do next (draft rules). */
+  /** Shown instead of the grid when there are no rules; the page says why. */
   emptyMessage: React.ReactNode;
 }
 

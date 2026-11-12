@@ -215,7 +215,11 @@ public class DuplicateHandlerTests
     {
         var earlier = Prior("INV-099.1", "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
         {
-            Date = LineDate, TimekeeperName = "Jane Doe", TimekeeperId = Matched().TimekeeperId, Hours = 1.5m, Narrative = "draft motion",
+            Date = LineDate,
+            TimekeeperName = "Jane Doe",
+            TimekeeperId = Matched().TimekeeperId,
+            Hours = 1.5m,
+            Narrative = "draft motion",
         });
         var facts = WithPriors(Facts(Entry(0)), earlier);
 
@@ -232,7 +236,11 @@ public class DuplicateHandlerTests
     {
         var earlier = Prior("INV-099.1", "INV-099", 1, status, new BillingPriorLine
         {
-            Date = LineDate, TimekeeperId = Matched().TimekeeperId, TimekeeperName = "Jane Doe", Hours = 1.5m, Narrative = "Draft motion",
+            Date = LineDate,
+            TimekeeperId = Matched().TimekeeperId,
+            TimekeeperName = "Jane Doe",
+            Hours = 1.5m,
+            Narrative = "Draft motion",
         });
 
         Run(LinesOnly, WithPriors(Facts(Entry(0)), earlier)).Should().BeEmpty();
@@ -243,7 +251,11 @@ public class DuplicateHandlerTests
     {
         var earlier = Prior("INV-099.1", "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
         {
-            Date = LineDate, TimekeeperId = Matched().TimekeeperId, TimekeeperName = "Jane Doe", Hours = 1.5m, Narrative = "Draft motion",
+            Date = LineDate,
+            TimekeeperId = Matched().TimekeeperId,
+            TimekeeperName = "Jane Doe",
+            Hours = 1.5m,
+            Narrative = "Draft motion",
         });
         var facts = WithPriors(Facts(Entry(0), Entry(1)), earlier);
 
@@ -299,8 +311,13 @@ public class DuplicateHandlerTests
     private static BillingPriorSubmission WalledLinePrior(IReadOnlySet<Guid>? roots) =>
         Prior(PriorTracking, "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
         {
-            Date = LineDate, TimekeeperId = Matched().TimekeeperId, TimekeeperName = "Jane Doe", Hours = 1.5m, Narrative = PriorNarrative,
-        }) with { SecureRoots = roots };
+            Date = LineDate,
+            TimekeeperId = Matched().TimekeeperId,
+            TimekeeperName = "Jane Doe",
+            Hours = 1.5m,
+            Narrative = PriorNarrative,
+        }) with
+        { SecureRoots = roots };
 
     private static BillingLineFacts MatchingLine() => Entry(0, narrative: PriorNarrative);
 
@@ -479,7 +496,11 @@ public class DuplicateHandlerTests
     {
         var earlier = WithEarlierInvoice(Prior("INV-099.1", "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
         {
-            Date = LineDate, TimekeeperName = "Jane Doe", TimekeeperId = Matched().TimekeeperId, Hours = 1.5m, Narrative = "draft motion",
+            Date = LineDate,
+            TimekeeperName = "Jane Doe",
+            TimekeeperId = Matched().TimekeeperId,
+            Hours = 1.5m,
+            Narrative = "draft motion",
         }));
 
         var finding = Run(LinesOnly, WithPriors(Facts(Entry(0)), earlier)).Should().ContainSingle().Subject;
@@ -523,7 +544,11 @@ public class DuplicateHandlerTests
     {
         var earlier = Prior("INV-099.1", "INV-099", 1, BillingPriorStatus.Active, new BillingPriorLine
         {
-            Date = LineDate, TimekeeperName = "Jane Doe", TimekeeperId = Matched().TimekeeperId, Hours = 1.5m, Narrative = "draft motion",
+            Date = LineDate,
+            TimekeeperName = "Jane Doe",
+            TimekeeperId = Matched().TimekeeperId,
+            Hours = 1.5m,
+            Narrative = "draft motion",
         });
         var invoiceLevel = Run(InvoiceNumberOnly, Header(Prior("INV-100.1", "INV-100", 1))).Should().ContainSingle().Subject;
         var lineLevel = Run(LinesOnly, WithPriors(Facts(Entry(0)), earlier)).Should().ContainSingle().Subject;

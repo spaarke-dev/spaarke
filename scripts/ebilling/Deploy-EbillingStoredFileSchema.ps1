@@ -122,6 +122,8 @@ $DryRun = [bool]$WhatIfPreference
 $DevUrl = 'https://spaarkedev1.crm.dynamics.com'
 # `pwsh -File` passes a comma list as ONE string: split it.
 $BffApplicationIds = @($BffApplicationIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+# Keeps the ontology writer's business unit's default team out of the reader profile (ebilling-r1; the helper is customer-provisioning-orchestration-r1 task 267's).
+. (Join-Path $PSScriptRoot '../common/OntologyWriterUnit.ps1')
 
 # ---------------------------------------------------------------------------------------------------------------
 # Constants
@@ -526,8 +528,14 @@ function Get-ProfileMembers {
 # Preconditions of the profile pair. A failure stops the script (escalation) in every mode: nothing is written.
 function Test-ProfilePreconditions {
     $problems = [System.Collections.Generic.List[string]]::new()
-    $defaultTeams = @((Invoke-Dv "teams?`$select=teamid,name&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value |
-            Where-Object { -not $_.businessunitid.isdisabled })
+    $allDefaultTeams = @((Invoke-Dv "teams?`$select=teamid,name,_businessunitid_value&`$filter=isdefault eq true&`$expand=businessunitid(`$select=name,isdisabled)").value)
+    # The ontology writer's business unit's default team (scripts/common/OntologyWriterUnit.ps1) is never expected on the reader profile, and is a problem when it holds it.
+    $dvHeaders = @{ Authorization = "Bearer $(Get-DataverseToken)"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0' }
+    $split = Split-DvDefaultTeamsByOntologyWriterUnit -Api $State.ApiBase -Headers $dvHeaders -DefaultTeams $allDefaultTeams
+    $writerUnitTeams = @($split.WriterUnitTeams)
+    $defaultTeams = @($split.ReaderTeams | Where-Object { -not $_.businessunitid.isdisabled })
+    $leftOut = if ($writerUnitTeams.Count) { (($writerUnitTeams | ForEach-Object { "'$($_.name)'" }) -join ', ') } else { 'none' }
+    Write-Report 'INFO' "ontology writer business unit: default team left out of the reader profile: $leftOut"
     if ($defaultTeams.Count -eq 0) { $problems.Add('no business-unit default team was read - the query is wrong') }
 
     $readers = Get-ProfileByName $ReaderProfileName
@@ -535,6 +543,9 @@ function Test-ProfilePreconditions {
     elseif ($readers.Count -eq 1) {
         $script:ReaderId = $readers[0].fieldsecurityprofileid
         $onReader = @((Invoke-Dv "fieldsecurityprofiles($($script:ReaderId))/teamprofiles_association?`$select=teamid,name").value | ForEach-Object { $_.teamid.ToString().ToLowerInvariant() })
+        foreach ($w in @(Get-DvOntologyWriterUnitTeamsOnProfile -Api $State.ApiBase -Headers $dvHeaders -ProfileId $script:ReaderId -WriterUnitTeams $writerUnitTeams)) {
+            $problems.Add("the ontology writer business unit's default team '$($w.name)' holds '$ReaderProfileName' - it must hold no field-security profile. Removing it is a team change (the owner's); this script never removes a member from a profile")
+        }
         # The reader profile is checked against an EXPLICIT, named set of business units (-ReaderBusinessUnits), never "every default team":
         # a field-security reader row grants COLUMN read, not ROW read, so the profile must never be the boundary for flagged-external
         # users. UAC task 191 adds an "External Collaborators" business unit whose default team must NEVER get this profile; a check
@@ -722,15 +733,17 @@ function Invoke-ColumnSecurity($spec) {
 # Nobody besides the writer profile and System Administrator may create or update a secured column, and nobody besides them may
 # READ a server-only one.
 function Test-OtherProfiles {
+    # The writer and the platform System Administrator profile (572329c1-..., fixed in every environment), matched by id (#2725).
+    $excused = @('572329c1-a042-4e22-be47-367c6374ea45', "$($script:WriterId)".ToLowerInvariant()) | Where-Object { $_ }
     foreach ($spec in $script:Secured) {
         $t = $spec.Table; $c = $spec.Column
         if (-not (Get-Attr $t $c 'LogicalName')) { continue }
-        $rows = @((Invoke-Dv "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$t' and attributelogicalname eq '$c'").value)
-        $otherWriters = @($rows | Where-Object { ($_.canupdate -eq 4 -or $_.cancreate -eq 4) -and $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' })
+        $rows = @((Invoke-Dv "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=fieldsecurityprofileid,name)&`$filter=entityname eq '$t' and attributelogicalname eq '$c'").value)
+        $otherWriters = @($rows | Where-Object { ($_.canupdate -eq 4 -or $_.cancreate -eq 4) -and $_.fieldsecurityprofileid.fieldsecurityprofileid.ToString().ToLowerInvariant() -notin $excused })
         foreach ($o in $otherWriters) { Write-Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can also write $t.$c - only the BFF writer profile may" }
         $otherReaders = @()
         if (-not $spec.Reader) {
-            $otherReaders = @($rows | Where-Object { $_.canread -eq 4 -and $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' })
+            $otherReaders = @($rows | Where-Object { $_.canread -eq 4 -and $_.fieldsecurityprofileid.fieldsecurityprofileid.ToString().ToLowerInvariant() -notin $excused })
             foreach ($o in $otherReaders) { Write-Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can read server-only $t.$c - only the BFF writer profile may" }
         }
         if ($otherWriters.Count -eq 0 -and $otherReaders.Count -eq 0) { Write-Report 'OK' "no profile besides '$WriterProfileName' and System Administrator can write$(if (-not $spec.Reader) { ' or read' }) $t.$c" }

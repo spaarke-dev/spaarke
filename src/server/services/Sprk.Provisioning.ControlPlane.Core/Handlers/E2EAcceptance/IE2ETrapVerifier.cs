@@ -107,6 +107,17 @@ public interface IE2ETrapVerifier
 /// GUID). T7 passes only when both slots carry it as <c>ExternalAccess__CustomerBusinessUnitId</c> (H4b writes it). OPTIONAL
 /// TRAILING FIELD; blank or unparseable → T7 Failed (the run carries no H10 customer business unit).
 /// </param>
+/// <param name="OntologyWriterClientId">
+/// Task 266 (#2605): the stamp's ontology writer managed identity's client id (H2a output,
+/// <c>InterStepState.OntologyWriterClientId</c>). T7 passes only when both slots carry it as
+/// <c>Ontology__Writer__ManagedIdentityClientId</c> (H4b writes it) and it is not the stamp identity's
+/// <see cref="UamiClientId"/>. OPTIONAL TRAILING FIELD; blank or unparseable → T7 Failed.
+/// </param>
+/// <param name="OntologyWriterObjectId">
+/// Task 266 (#2605): the writer identity's principal (service principal object) id (H2a output,
+/// <c>InterStepState.OntologyWriterObjectId</c>). T3 passes only when it holds NO Microsoft Graph app role. OPTIONAL
+/// TRAILING FIELD; blank or unparseable → T3 Failed.
+/// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,
     string RunId,
@@ -124,7 +135,9 @@ public sealed record TrapVerificationRequest(
     string ExchangeScopeGroupId = "",
     IReadOnlyList<string>? CustomerWorkforceTenantIds = null,
     string TenancyModel = "",
-    string CustomerBusinessUnitId = "");
+    string CustomerBusinessUnitId = "",
+    string OntologyWriterClientId = "",
+    string OntologyWriterObjectId = "");
 
 /// <summary>
 /// The 7 §4B silent-fail traps, enumerated (matches design.md §4B; T7 added by task 238).

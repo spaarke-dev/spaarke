@@ -73,6 +73,8 @@ public static class PerEnvSourceCatalog
         Output("from-h2a-output:content_safety_endpoint", HandlerIds.H2a, nameof(InterStepState.ContentSafetyEndpoint), r => r.InterStepState.ContentSafetyEndpoint),
         // T186 follow-up: SessionFileStore:BlobEndpoint — the stamp's chat session-file store; container defaults to ai-chunks.
         Output("from-h2a-output:storage_blob_endpoint", HandlerIds.H2a, nameof(InterStepState.StorageBlobEndpoint), r => r.InterStepState.StorageBlobEndpoint),
+        // Task 266 (#2605): Ontology__Writer__ManagedIdentityClientId — the BFF Signal / Decision Record writer's own UAMI.
+        Output("from-h2a-output:ontology_writer_client_id", HandlerIds.H2a, nameof(InterStepState.OntologyWriterClientId), r => r.InterStepState.OntologyWriterClientId),
         // T258 (204e-F6): the stamp BFF's own public URL, PublicConfig__BffUrl — derived from H2a's App Service name
         // with the one derivation H9 records as BffApiUrl (StampBffUrl), so H4b needs nothing from H9 (which runs after it).
         new("from-h2a-output:bff_url", "bff_url", HandlerIds.H2a,

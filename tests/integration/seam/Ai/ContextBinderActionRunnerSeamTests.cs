@@ -430,7 +430,8 @@ public sealed class ContextBinderActionRunnerSeamTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
+            UploadedFiles: files)
+        { OwnerOid = TestSessionOwner.Oid };
     }
 
     private sealed class Harness

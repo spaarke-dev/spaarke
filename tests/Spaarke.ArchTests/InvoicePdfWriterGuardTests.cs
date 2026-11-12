@@ -44,11 +44,19 @@ public class InvoicePdfWriterGuardTests
         [$"{Service}::BuildRow"] =
             "The ONE Stored File row constructor (a create: purpose, parent, source, SHA, owner, Not yet servable). Its callers are pinned.",
         [$"{Service}::FlipToServableAsync"] = "Status only (Servable), conditioned on the row version: never a purpose or a parent.",
-        [$"{Service}::WithdrawForUndoAsync"] = "Status only (Removed; the submission undo), conditioned on the row version.",
+        [$"{Service}::WithdrawRowsAsync"] =
+            "Status only (Removed), conditioned on the row version: the one withdraw, behind WithdrawForUndoAsync (the submission undo) " +
+            "and ReplaceForCallerAsync (task 116: a Procedure Version's earlier source file, or the new one when that withdraw fails).",
         ["Sprk.Bff.Api.Services.Finance.Submission.SubmissionCommitGate::CompensateAsync"] =
             "Seen for its DeleteRequests of the invoice's Stored File rows (the undo) next to its update of the SUBMISSION row; it " +
             "never creates or updates a Stored File.",
+        [AssignFirmRename] =
+            "Name only (task 095d-1b, ontology-r1 16.7): Set firm renames the invoice's files to the new tracking number inside its one " +
+            "renumber transaction; it writes sprk_name and nothing else, so no purpose, parent or source is written " +
+            "(AssignFirmsStoredFileRename_WritesTheNameOnly).",
     };
+
+    private const string AssignFirmRename = "Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService::StoredFileRename";
 
     /// <summary>The members that may call <see cref="StoredFileService.BuildRow"/>, each with the reason.</summary>
     private static readonly IReadOnlyDictionary<string, string> ApprovedRowCallers = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -77,6 +85,36 @@ public class InvoicePdfWriterGuardTests
         Assert.True(problems.Count == 0,
             "A Stored File with purpose InvoicePdf is created only in the commit that creates its invoice (task 094; task 098 reads a " +
             "sourceless InvoicePdf as the upload's own PDF):\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "095d-1b: Set firm's one Stored File writer loads no column but sprk_name (must not fire on a purpose, parent or status), and the scan would see one")]
+    public void AssignFirmsStoredFileRename_WritesTheNameOnly()
+    {
+        // The strings the approved rename loads: the table and its name column, nothing else (a column constant is inlined as an ldstr).
+        var service = typeof(Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService);
+        var loads = IlCallScan.StringLoads(IlCallScan.WithNested(service))
+            .Where(s => ExternalDocumentNarrowingGuardTests.SourceKey(s.Caller, s.CallerMethod) == AssignFirmRename)
+            .Select(s => s.Value)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(new[] { StoredFileSchema.Name, StoredFileSchema.Entity }, loads.Order(StringComparer.Ordinal).ToArray());
+
+        // And it really writes the name only: built for a file, the update's one attribute is sprk_name.
+        var (request, mapping) = Sprk.Bff.Api.Services.Finance.InvoiceAssignFirmService.StoredFileRename(Guid.NewGuid(), "INV-7.3.pdf", "INV-7.1.pdf");
+        Assert.Equal(StoredFileSchema.Entity, request.Target.LogicalName);
+        Assert.Equal(new[] { StoredFileSchema.Name }, request.Target.Attributes.Keys.ToArray());
+        Assert.Equal(("INV-7.3.pdf", "INV-7.1.pdf"), (mapping.From, mapping.To));
+
+        // Must fire: the same string rule sees a writer that also sets the purpose and the parent (the control's planted row).
+        var planted = IlCallScan.StringLoads([typeof(InvoicePdfGuardControl)])
+            .Where(s => s.CallerMethod.Name == nameof(InvoicePdfGuardControl.CreatesAnInvoicePdfOutsideTheCommit))
+            .Select(s => s.Value)
+            .ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("sprk_purpose", planted);
+        Assert.Contains("sprk_invoice", planted);
+
+        // Non-vacuity: the writer scan sees the rename as a Stored File writer, so its approved entry is load-bearing, and sees no other
+        // Set-firm member writing a Stored File (the apply's builder only calls the rename).
+        Assert.Equal(new[] { AssignFirmRename }, Writers([service]).ToArray());
     }
 
     [Fact(DisplayName = "Task 094 InvoicePdf guard control: a row built outside the commit, a BuildRow call from another member and an update attaching a row onto an invoice fire; a read and another table's write do not")]

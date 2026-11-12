@@ -25,23 +25,23 @@ In this step you will upload sample documents which will be used by your declara
 ### Step 1: Create a SharePoint site
 Go to [https://m365.cloud.microsoft/apps/](https://m365.cloud.microsoft/apps/) and find "SharePoint" app under "Apps"
 
-![The UI of Microsoft 365 with the waffle menu expanded and the SharePoint workload highlighted.](../../assets/images/extend-m365-copilot-05/upload-docs-01.png)
+*(image not included in this snapshot: The UI of Microsoft 365 with the waffle menu expanded and the SharePoint workload highlighted.)*
 
 Then click "Create Site" 1️⃣ and choose a "Team site" 2️⃣.
 
-![The UI to create a new SharePoint Online site, with 'Team Site' template suggested.](../../assets/images/extend-m365-copilot-05/upload-docs-02.png)
+*(image not included in this snapshot: The UI to create a new SharePoint Online site, with 'Team Site' template suggested.)*
 
 Select the Standard team site template; you will be shown a preview of the site. Click "Use Template" to continue.
 
-![The UI to select the 'Standard' site template for the target site.](../../assets/images/extend-m365-copilot-05/upload-docs-03.png)
+*(image not included in this snapshot: The UI to select the 'Standard' site template for the target site.)*
 
 Give your site a name such as "Trey Research legal documents" 1️⃣ and click "Next" 2️⃣.
 
-![The UI to provide name, description, and other details for the target site to create.](../../assets/images/extend-m365-copilot-05/upload-docs-05.png)
+*(image not included in this snapshot: The UI to provide name, description, and other details for the target site to create.)*
 
 Then select your privacy settings and language, and click "Create Site"
 
-![The UI to select the privacy settings and the language for the target site.](../../assets/images/extend-m365-copilot-05/upload-docs-06.png)
+*(image not included in this snapshot: The UI to select the privacy settings and the language for the target site.)*
 
 After a few moments, you will be presented with a new SharePoint site. 
 
@@ -51,17 +51,17 @@ After a few moments, you will be presented with a new SharePoint site.
 
 In the Documents web part, select "See all" to view the document library page.
 
-![The home page of the site with the Documents web part and the 'See all' link highlighted.](../../assets/images/extend-m365-copilot-05/upload-docs-07.png)
+*(image not included in this snapshot: The home page of the site with the Documents web part and the 'See all' link highlighted.)*
 
 Next, click the "Upload" 1️⃣ toolbar button and select "Files" 2️⃣.
 
-![The command bar of the document library with the 'Upload' menu expanded and the 'Files' option selected.](../../assets/images/extend-m365-copilot-05/upload-docs-08.png)
+*(image not included in this snapshot: The command bar of the document library with the 'Upload' menu expanded and the 'Files' option selected.)*
 
 Navigate to your working folder; you will find a directory called **sampleDocs** within. Highlight all the sample documents 1️⃣ and click "Open" 2️⃣.
 
 Make note of the site url, which will resemble "https://&lt;your-tenant&gt;.sharepoint.com/sites/TreyResearchlegaldocuments", as you will need it in the next exercise.
 
-![The file system browsing dialog to select the files to upload.](../../assets/images/extend-m365-copilot-05/upload-docs-09.png)
+*(image not included in this snapshot: The file system browsing dialog to select the files to upload.)*
 
 <cc-end-step lab="e3" exercise="1" step="2" />
 
@@ -297,7 +297,7 @@ You should be automatically redirected to a browser tab where the "Trey Genie lo
 
 
 
-![navigation in copilot to find the agent](../../assets/images/extend-m365-copilot-03/test-nav-copilot-agent.png)
+*(image not included in this snapshot: navigation in copilot to find the agent)*
 
 
 
@@ -314,7 +314,7 @@ You should see a list of your projects from the API plugin 2️⃣, enhanced wit
 
 > If you see a message to connect to the your service to process query, select "Always allow" to proceed.
 
-![The output of the declarative agent with information about projects the user is working on, reference documents from the SharePoint site, and the motto 'Always be Billing!'](../../assets/images/extend-m365-copilot-03/first-prompt.png)
+*(image not included in this snapshot: The output of the declarative agent with information about projects the user is working on, reference documents from the SharePoint site, and the motto 'Always be Billing!')*
 
 !!! note
     If the SharePoint documents aren't referenced, perhaps there is an issue accessing the files. Has there been time for Search to index the site? Does the end user have permission to the site? Has an administrator excluded the site from Search? Try doing a Search (outside of Copilot) such as 
@@ -329,12 +329,12 @@ Let's also see how the API is getting called. Try to send another prompt:
 
 See below how it brought back my information (Avery Howard is logged in user as we have not yet implemented Auth, coming up in later labs), and my projects.
 
-![List my info and response](../../assets/images/extend-m365-copilot-03/my-info.png)
+*(image not included in this snapshot: List my info and response)*
 
 
 If you go back to your VS Code project under "Terminal", you will also see how the agent called the API as shown below:
 
-![Terminal showing API getting called for api/me ](../../assets/images/extend-m365-copilot-03/api-called.png)
+*(image not included in this snapshot: Terminal showing API getting called for api/me )*
 
 <cc-end-step lab="e3" exercise="3" step="2" />
 

@@ -185,6 +185,28 @@ public sealed class InterStepState
     public string? StorageBlobEndpoint { get; set; }
 
     /// <summary>
+    /// Client id of the stamp's ontology writer UAMI (H2a output — ARM output <c>ontologyWriterIdentityClientId</c>,
+    /// task 266 / #2605). The BFF's Signal and Decision Record writers authenticate only as this identity
+    /// (<c>Ontology__Writer__ManagedIdentityClientId</c>, written by H4b); H10 creates its Dataverse application user
+    /// and H7b S24 gives that user exactly the writer grants. Never the stamp UAMI (<see cref="MiClientId"/>).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 266).</remarks>
+    [JsonPropertyName("ontologyWriterClientId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? OntologyWriterClientId { get; set; }
+
+    /// <summary>
+    /// Principal (object) id of the ontology writer UAMI (H2a output — ARM output <c>ontologyWriterIdentityObjectId</c>,
+    /// task 266). H10 writes it as the writer application user's <c>azureactivedirectoryobjectid</c> (auth-v4 §10.4).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 266).</remarks>
+    [JsonPropertyName("ontologyWriterObjectId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? OntologyWriterObjectId { get; set; }
+
+    /// <summary>
     /// The AI Search indexes H2b built AND verified present on the stamp's own search service, in canonical-catalog
     /// order (H2b output — <c>ICanonicalIndexCatalog.CanonicalIndexNames</c>, the set its verifier checked). H4b sets
     /// it as the BFF's <c>AiSearch__AllowedIndexes__N</c> on both slots: customer environments have no
@@ -236,6 +258,30 @@ public sealed class InterStepState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [ProducedBy(HandlerIds.H10)]
     public string? CustomerBusinessUnitId { get; set; }
+
+    /// <summary>
+    /// Task 266 (#2605): the Dataverse <c>systemuser</c> id of the ontology writer UAMI's application user, which H10
+    /// found (by applicationid) or created with NO security role — since task 267 IN its own business unit
+    /// (<see cref="OntologyWriterBusinessUnitId"/>). H7b S24 gives it exactly the writer role and the writer field-security
+    /// profiles. Canonical lowercase GUID (ADR-044).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 266).</remarks>
+    [JsonPropertyName("ontologyWriterSystemUserId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H10)]
+    public string? OntologyWriterSystemUserId { get; set; }
+
+    /// <summary>
+    /// Task 267 (#2618): the Dataverse <c>businessunit</c> id of the ontology writer's own unit ("Spaarke Ontology Writer"),
+    /// which H10 found or created directly under the root, holding the writer's application user only. H7b S24 checks it
+    /// by id (direct child of the root, neither the customer's nor the Secure Record unit, no other user) and assigns the
+    /// writer the copy of "Spaarke Ontology Service" in it. Canonical lowercase GUID (ADR-044).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 267). A run whose H10 completed before task 267 lacks it: H7b refuses.</remarks>
+    [JsonPropertyName("ontologyWriterBusinessUnitId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H10)]
+    public string? OntologyWriterBusinessUnitId { get; set; }
 
     /// <summary>Correlation ID for the SPE consent flow (design intent: H0.5 output). No handler writes it today.</summary>
     [JsonPropertyName("speConsentCorrelationId")]

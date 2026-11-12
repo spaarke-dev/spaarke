@@ -7,7 +7,10 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Models;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Billing;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance.Resolution;
@@ -27,8 +30,8 @@ public sealed class InvoiceResolutionServiceTests
 {
     private static readonly Guid Firm = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid OtherFirm = Guid.Parse("22222222-2222-2222-2222-222222222222");
-    private static readonly Guid MatterId = Guid.Parse("cccccccc-0000-0000-0000-000000000001");
-    private static readonly Guid OtherMatterId = Guid.Parse("cccccccc-0000-0000-0000-000000000002");
+    private static readonly Guid RateCardProcedure = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid DefaultVersion = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
     private static readonly DateOnly Day = new(2026, 6, 15);
     private const int Partner = 1;
     private const int Published = 659490000;
@@ -44,6 +47,13 @@ public sealed class InvoiceResolutionServiceTests
     private List<List<Entity>> _rosterPages = [[]];
     private List<List<Entity>> _ratePages = [[]];
 
+    // 085: the Procedure world the resolver reads (one All-records Rate card Procedure with one version in force from 2026-01-01).
+    private List<Entity> _procedures = [ProcedureRow(RateCardProcedure, ProcedureAppliesTo.AllRecords)];
+    private List<Entity> _procedureVersions = [VersionRow(DefaultVersion, RateCardProcedure, 1, ProcedureEntity.VersionStatusActive, new DateTime(2026, 1, 1))];
+
+    /// <summary>The entities the Procedure resolver read, in order (kept apart from <see cref="_calls"/>: the roster and rate reads).</summary>
+    private readonly List<string> _procedureReads = [];
+
     public InvoiceResolutionServiceTests()
     {
         _settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new EbillingSettings());
@@ -52,11 +62,23 @@ public sealed class InvoiceResolutionServiceTests
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns<QueryExpression, CancellationToken>((query, _) =>
             {
-                _calls.Add(Call.Of(query));
+                var isProcedureRead = query.EntityName is "sprk_procedure" or "sprk_procedureversion" or "sprk_ruleset" or "sprk_policy" or "sprk_policyversion";
+                if (isProcedureRead)
+                {
+                    _procedureReads.Add(query.EntityName);
+                }
+                else
+                {
+                    _calls.Add(Call.Of(query));
+                }
+
                 var pages = query.EntityName switch
                 {
                     "sprk_timekeeper" => _rosterPages,
                     "sprk_ratecardrate" => _ratePages,
+                    "sprk_procedure" => [_procedures],
+                    "sprk_procedureversion" => [_procedureVersions],
+                    "sprk_ruleset" or "sprk_policy" or "sprk_policyversion" => [[]],
                     _ => throw new InvalidOperationException($"Unexpected query on {query.EntityName}"),
                 };
                 var index = Math.Max(0, query.PageInfo.PageNumber - 1);
@@ -114,6 +136,34 @@ public sealed class InvoiceResolutionServiceTests
 
     private static AliasedValue Card(string column, object value) => new("sprk_ratecard", column, value);
 
+    private static Entity ProcedureRow(Guid id, ProcedureAppliesTo appliesTo, Guid? firm = null, string name = "Acme rates")
+    {
+        var row = new Entity("sprk_procedure", id)
+        {
+            ["sprk_name"] = name,
+            ["sprk_area"] = new OptionSetValue(RuleDomains.PolicyDomainBilling),
+            ["sprk_status"] = new OptionSetValue(ProcedureEntity.StatusActive),
+            ["sprk_appliesto"] = new OptionSetValue((int)appliesTo),
+        };
+        if (firm is { } f) row["sprk_firm"] = new EntityReference("sprk_organization", f);
+        return row;
+    }
+
+    private static Entity VersionRow(Guid id, Guid procedure, int number, int status, DateTime from, DateTime? to = null)
+    {
+        var row = new Entity("sprk_procedureversion", id)
+        {
+            ["sprk_procedure"] = new EntityReference("sprk_procedure", procedure),
+            ["sprk_versionnumber"] = number,
+            ["sprk_status"] = new OptionSetValue(status),
+            ["sprk_effectivefrom"] = from,
+        };
+        if (to is { } t) row["sprk_effectiveto"] = t;
+        // DEF-061: a published (Active or Superseded) version carries the server's publish stamp.
+        if (status is ProcedureEntity.VersionStatusActive or ProcedureEntity.VersionStatusSuperseded) row[ProcedureEntity.VersionPublishedOnColumn] = from;
+        return row;
+    }
+
     private static Entity Rate(
         decimal approved,
         Guid? timekeeper = null,
@@ -121,8 +171,7 @@ public sealed class InvoiceResolutionServiceTests
         Guid? firm = null,
         int cardStatus = Published,
         int cardState = 0,
-        string? scopeColumn = null,
-        Guid? scopeId = null,
+        Guid? version = null,
         Guid? cardId = null,
         int rateState = 0,
         DateTime? rateFrom = null,
@@ -137,25 +186,25 @@ public sealed class InvoiceResolutionServiceTests
             ["card.sprk_firm"] = Card("sprk_firm", new EntityReference("sprk_organization", firm ?? Firm)),
             ["card.statuscode"] = Card("statuscode", new OptionSetValue(cardStatus)),
             ["card.statecode"] = Card("statecode", new OptionSetValue(cardState)),
+            ["card.sprk_procedureversion"] = Card("sprk_procedureversion", new EntityReference("sprk_procedureversion", version ?? DefaultVersion)),
         };
         if (timekeeper is { } tk) row["sprk_timekeeper"] = new EntityReference("sprk_timekeeper", tk);
         if (classification is { } c) row["sprk_classification"] = new OptionSetValue(c);
         if (rateFrom is { } from) row["sprk_effectivefrom"] = from;
         if (rateTo is { } to) row["sprk_effectiveto"] = to;
-        if (scopeColumn is not null) row[$"card.{scopeColumn}"] = Card(scopeColumn, new EntityReference("sprk_matter", scopeId!.Value));
         return row;
     }
 
     private static InvoiceResolutionLine Fee(
         string? name, DateOnly? date, decimal? hours, decimal? rate, decimal? amount, decimal analyzer = 0.95m, decimal? self = null) => new()
-    {
-        LineType = InvoiceLineType.Fee,
-        Date = new ResolutionField<DateOnly?>(date, analyzer),
-        TimekeeperAsBilled = new ResolutionField<string?>(name, analyzer, self),
-        Hours = new ResolutionField<decimal?>(hours, analyzer, self),
-        Rate = new ResolutionField<decimal?>(rate, analyzer, self),
-        Amount = new ResolutionField<decimal?>(amount, analyzer, self),
-    };
+        {
+            LineType = InvoiceLineType.Fee,
+            Date = new ResolutionField<DateOnly?>(date, analyzer),
+            TimekeeperAsBilled = new ResolutionField<string?>(name, analyzer, self),
+            Hours = new ResolutionField<decimal?>(hours, analyzer, self),
+            Rate = new ResolutionField<decimal?>(rate, analyzer, self),
+            Amount = new ResolutionField<decimal?>(amount, analyzer, self),
+        };
 
     private static InvoiceResolutionLine Expense(decimal? quantity, decimal? unitCost, decimal? amount, decimal analyzer = 0.95m) => new()
     {
@@ -176,19 +225,19 @@ public sealed class InvoiceResolutionServiceTests
         InvoiceResolutionHeader? header = null,
         decimal analyzer = 0.95m,
         decimal? adjustments = null) => new()
-    {
-        FirmId = Firm,
-        CoreRecord = core,
-        Lines = lines,
-        TimekeeperSummaryNames = summary ?? [],
-        Header = header ?? new InvoiceResolutionHeader
         {
-            FeesTotal = new ResolutionField<decimal?>(fees, analyzer),
-            ExpensesTotal = new ResolutionField<decimal?>(expenses, analyzer),
-            AdjustmentsTotal = new ResolutionField<decimal?>(adjustments, analyzer),
-            TotalDue = new ResolutionField<decimal?>(totalDue, analyzer),
-        },
-    };
+            FirmId = Firm,
+            CoreRecord = core,
+            Lines = lines,
+            TimekeeperSummaryNames = summary ?? [],
+            Header = header ?? new InvoiceResolutionHeader
+            {
+                FeesTotal = new ResolutionField<decimal?>(fees, analyzer),
+                ExpensesTotal = new ResolutionField<decimal?>(expenses, analyzer),
+                AdjustmentsTotal = new ResolutionField<decimal?>(adjustments, analyzer),
+                TotalDue = new ResolutionField<decimal?>(totalDue, analyzer),
+            },
+        };
 
     /// <summary>A clean one-line invoice: Jane Doe, 2 h at 500, 1000 due, every header total extracted.</summary>
     private InvoiceResolutionInput CleanInvoice(CoreRecordReference? core = null)
@@ -448,7 +497,7 @@ public sealed class InvoiceResolutionServiceTests
     [Fact]
     public async Task Resolve_IsDeterministic()
     {
-        var input = CleanInvoice(new CoreRecordReference(CoreRecordKind.Matter, MatterId));
+        var input = CleanInvoice();
 
         var first = await CreateService().ResolveAsync(input);
         var second = await CreateService().ResolveAsync(input);
@@ -537,12 +586,11 @@ public sealed class InvoiceResolutionServiceTests
     // ── Rates ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task TheRateQuery_AsksForThePublishedCardsOfTheFirm_InForceAcrossTheLineDates_FirmWideOrOfTheCoreRecord()
+    public async Task TheRateQuery_AsksForThePublishedCardsOfTheFirm_OfTheChosenVersions_InForceAcrossTheLineDates()
     {
         GivenRoster(Person("Jane Doe"));
         var input = Invoice(
-            [Fee("Jane Doe", Day, 1m, 100m, 100m), Fee("Jane Doe", Day.AddDays(20), 1m, 100m, 100m), Fee("Jane Doe", Day.AddDays(-5), 1m, 100m, 100m)],
-            core: new CoreRecordReference(CoreRecordKind.Matter, MatterId));
+            [Fee("Jane Doe", Day, 1m, 100m, 100m), Fee("Jane Doe", Day.AddDays(20), 1m, 100m, 100m), Fee("Jane Doe", Day.AddDays(-5), 1m, 100m, 100m)]);
 
         await CreateService().ResolveAsync(input);
 
@@ -551,10 +599,9 @@ public sealed class InvoiceResolutionServiceTests
         var link = call.LinkConditions;
         link.Should().Contain(c => c.Attribute == "sprk_firm" && c.Values.SequenceEqual(new object[] { Firm }));
         link.Should().Contain(c => c.Attribute == "statuscode" && c.Values.SequenceEqual(new object[] { Published }));
-        link.Should().Contain(c => c.Attribute == "sprk_matter" && c.Operator == ConditionOperator.Equal && c.Values.SequenceEqual(new object[] { MatterId }));
-        link.Where(c => c.Operator == ConditionOperator.Null).Select(c => c.Attribute).Should()
-            .Contain(["sprk_matter", "sprk_project", "sprk_workassignment"], "a firm-wide card has no scope");
-        link.Should().NotContain(c => c.Attribute == "sprk_project" && c.Operator == ConditionOperator.Equal);
+        var versions = link.Single(c => c.Attribute == "sprk_procedureversion");
+        versions.Operator.Should().Be(ConditionOperator.In);
+        versions.Values.Should().BeEquivalentTo(new object[] { DefaultVersion }, "only the versions the resolver chose are asked for");
 
         // Date overlap on the card and on the rate: from <= latest line date, to >= earliest line date.
         var latest = Day.AddDays(20).ToDateTime(TimeOnly.MinValue);
@@ -568,29 +615,133 @@ public sealed class InvoiceResolutionServiceTests
         call.Conditions.Should().Contain(c => c.Attribute == "statecode" && c.Values.SequenceEqual(new object[] { 0 }));
     }
 
-    [Fact]
-    public async Task WithNoCoreRecord_TheRateQueryAsksForFirmWideCardsOnly()
+    [Fact(DisplayName = "085 negative: no card core-record lookup or scope column is read or filtered on (D-120)")]
+    public async Task TheRateQuery_NeverReadsOrFiltersOnACardCoreRecordLookupOrScope()
     {
         GivenRoster(Person("Jane Doe"));
 
         await CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 1m, 100m, 100m)]));
 
-        var link = _calls.Single(c => c.Entity == "sprk_ratecardrate").LinkConditions;
-        link.Where(c => c.Operator == ConditionOperator.Equal).Select(c => c.Attribute).Should()
-            .NotIntersectWith(["sprk_matter", "sprk_project", "sprk_workassignment"]);
+        var call = _calls.Single(c => c.Entity == "sprk_ratecardrate");
+        string[] retired = ["sprk_matter", "sprk_project", "sprk_workassignment", "sprk_scope"];
+        call.LinkColumns.Should().NotIntersectWith(retired).And.Contain("sprk_procedureversion");
+        call.LinkConditions.Select(c => c.Attribute).Should().NotIntersectWith(retired);
+        call.Conditions.Select(c => c.Attribute).Should().NotIntersectWith(retired);
     }
 
     [Fact]
-    public async Task TheRateQuery_UsesTheColumnOfTheCoreRecordsKind()
+    public async Task TheProcedureResolver_IsReadOncePerInvoice_AndNoRateIsReadWhenNoVersionIsChosen()
     {
         GivenRoster(Person("Jane Doe"));
-        var workAssignmentId = Guid.NewGuid();
+        _procedures = [];
 
-        await CreateService().ResolveAsync(Invoice(
-            [Fee("Jane Doe", Day, 1m, 100m, 100m)], core: new CoreRecordReference(CoreRecordKind.WorkAssignment, workAssignmentId)));
+        var result = await CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 2m, 500m, 1000m)]));
 
-        _calls.Single(c => c.Entity == "sprk_ratecardrate").LinkConditions.Should()
-            .Contain(c => c.Attribute == "sprk_workassignment" && c.Operator == ConditionOperator.Equal && c.Values.SequenceEqual(new object[] { workAssignmentId }));
+        _procedureReads.Count(e => e == "sprk_procedure").Should().Be(1);
+        _calls.Select(c => c.Entity).Should().Equal("sprk_timekeeper");
+        result.Lines[0].Rate.Status.Should().Be(RateResolutionStatus.NotFound);
+        result.Lines[0].Rate.Reason.Should().Be(RateNotFoundReason.NoRateInForce);
+    }
+
+    [Fact(DisplayName = "085: work dated in v1's window uses v1's card, in v2's window v2's card")]
+    public async Task WorkInTheWindowOfEachVersion_UsesThatVersionsCard()
+    {
+        var v2 = Guid.NewGuid();
+        _procedureVersions =
+        [
+            VersionRow(DefaultVersion, RateCardProcedure, 1, ProcedureEntity.VersionStatusSuperseded, new DateTime(2026, 1, 1), new DateTime(2026, 7, 1)),
+            VersionRow(v2, RateCardProcedure, 2, ProcedureEntity.VersionStatusActive, new DateTime(2026, 7, 1)),
+        ];
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(300m, classification: Partner, version: DefaultVersion), Rate(350m, classification: Partner, version: v2));
+
+        var result = await CreateService().ResolveAsync(Invoice(
+            [Fee("Jane Doe", new DateOnly(2026, 6, 30), 1m, 300m, 300m), Fee("Jane Doe", new DateOnly(2026, 7, 1), 1m, 350m, 350m)]));
+
+        result.Lines.Select(l => l.Rate.ApprovedRate).Should().Equal(300m, 350m);
+        _procedureReads.Count(e => e == "sprk_procedure").Should().Be(1, "one resolver read, then RulesOn per distinct date in memory");
+        var versions = _calls.Single(c => c.Entity == "sprk_ratecardrate").LinkConditions.Single(c => c.Attribute == "sprk_procedureversion");
+        versions.Values.Should().BeEquivalentTo(new object[] { DefaultVersion, v2 });
+    }
+
+    [Fact(DisplayName = "085 must-fire: a rate row of a version the resolver did not choose, returned anyway, is never used")]
+    public async Task ARateRowOfAVersionTheResolverDidNotChoose_ReturnedAnyway_IsNeverUsed()
+    {
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(999m, classification: Partner, version: Guid.NewGuid()));
+
+        var result = await CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 2m, 500m, 1000m)]));
+
+        result.Lines[0].Rate.Status.Should().Be(RateResolutionStatus.NotFound);
+    }
+
+    [Fact(DisplayName = "085: a date in a gap between versions has no card to judge it")]
+    public async Task ADateInAGapBetweenVersions_UsesNoCard()
+    {
+        _procedureVersions =
+        [
+            VersionRow(DefaultVersion, RateCardProcedure, 1, ProcedureEntity.VersionStatusSuperseded, new DateTime(2026, 1, 1), new DateTime(2026, 6, 1)),
+            VersionRow(Guid.NewGuid(), RateCardProcedure, 2, ProcedureEntity.VersionStatusActive, new DateTime(2026, 8, 1)),
+        ];
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(300m, classification: Partner));
+
+        var result = await CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 1m, 300m, 300m)]));
+
+        result.Lines[0].Rate.Status.Should().Be(RateResolutionStatus.NotFound);
+    }
+
+    [Fact(DisplayName = "085: a firm Procedure's card beats an all-records Procedure's card, and the result carries the rank")]
+    public async Task AFirmProceduresCard_BeatsAnAllRecordsProceduresCard_AndTheResultNamesTheRank()
+    {
+        var firmProcedure = Guid.NewGuid();
+        var firmVersion = Guid.NewGuid();
+        _procedures = [ProcedureRow(RateCardProcedure, ProcedureAppliesTo.AllRecords), ProcedureRow(firmProcedure, ProcedureAppliesTo.Firm, Firm, "Firm rates")];
+        _procedureVersions =
+        [
+            VersionRow(DefaultVersion, RateCardProcedure, 1, ProcedureEntity.VersionStatusActive, new DateTime(2026, 1, 1)),
+            VersionRow(firmVersion, firmProcedure, 1, ProcedureEntity.VersionStatusActive, new DateTime(2026, 1, 1)),
+        ];
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(400m, classification: Partner, version: DefaultVersion), Rate(450m, classification: Partner, version: firmVersion));
+
+        var result = await CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 2m, 450m, 900m)]));
+
+        result.Lines[0].Rate.ApprovedRate.Should().Be(450m);
+        result.Lines[0].Rate.Rank.Should().Be(new ProcedureRank(ProcedureLevel.Firm, 0, true));
+    }
+
+    [Fact(DisplayName = "085: a Procedure of another firm is not resolved for this invoice, so its card is never used")]
+    public async Task AProcedureOfAnotherFirm_IsNotResolved_SoItsCardIsNeverUsed()
+    {
+        var otherProcedure = Guid.NewGuid();
+        var otherVersion = Guid.NewGuid();
+        _procedures = [ProcedureRow(otherProcedure, ProcedureAppliesTo.AllRecords, OtherFirm)];
+        _procedureVersions = [VersionRow(otherVersion, otherProcedure, 1, ProcedureEntity.VersionStatusActive, new DateTime(2026, 1, 1))];
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(400m, classification: Partner, version: otherVersion));
+
+        var result = await CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 2m, 400m, 800m)]));
+
+        result.Lines[0].Rate.Status.Should().Be(RateResolutionStatus.NotFound);
+    }
+
+    [Fact(DisplayName = "085: a resolver fault propagates, so no rate is judged on a partial set")]
+    public async Task AProcedureResolutionFault_Propagates_AndNoRateIsRead()
+    {
+        // Two versions of one Procedure in force on the same date (I-P1): the resolver refuses to choose.
+        _procedureVersions =
+        [
+            VersionRow(DefaultVersion, RateCardProcedure, 1, ProcedureEntity.VersionStatusActive, new DateTime(2026, 1, 1)),
+            VersionRow(Guid.NewGuid(), RateCardProcedure, 2, ProcedureEntity.VersionStatusActive, new DateTime(2026, 3, 1)),
+        ];
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(400m, classification: Partner));
+
+        var act = () => CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 2m, 400m, 800m)]));
+
+        await act.Should().ThrowAsync<ProcedureResolutionFaultException>();
+        _calls.Should().NotContain(c => c.Entity == "sprk_ratecardrate");
     }
 
     [Fact]
@@ -618,23 +769,6 @@ public sealed class InvoiceResolutionServiceTests
         var result = await CreateService().ResolveAsync(Invoice([Fee("Jane Doe", Day, 2m, 500m, 1000m)]));
 
         result.Lines[0].Rate.Status.Should().Be(RateResolutionStatus.NotFound);
-    }
-
-    [Fact]
-    public async Task ACardScopedToAnotherMatter_IsNotUsed_AndOneScopedToThisMatterOverridesTheFirmCard()
-    {
-        var timekeeperId = Guid.NewGuid();
-        GivenRoster(Person("Jane Doe", id: timekeeperId));
-        GivenRates(
-            Rate(400m, classification: Partner),
-            Rate(999m, timekeeper: timekeeperId, scopeColumn: "sprk_matter", scopeId: OtherMatterId),
-            Rate(450m, classification: Partner, scopeColumn: "sprk_matter", scopeId: MatterId));
-
-        var result = await CreateService().ResolveAsync(Invoice(
-            [Fee("Jane Doe", Day, 2m, 450m, 900m)], core: new CoreRecordReference(CoreRecordKind.Matter, MatterId)));
-
-        result.Lines[0].Rate.ApprovedRate.Should().Be(450m);
-        result.Lines[0].Rate.Scope.Should().Be(RateCardScope.CoreRecord);
     }
 
     [Fact]
@@ -802,6 +936,38 @@ public sealed class InvoiceResolutionServiceTests
         _calls.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "095c-3: an input with NO firm (null) reads no roster and no rates, matches no one (not even by AI), and still resolves the arithmetic")]
+    public async Task AnInputWithNullFirm_ReadsNoRosterOrRate_LeavesEveryFeeLineUnmatched_AndStillChecksTheArithmetic()
+    {
+        GivenRoster(Person("Jane Doe"));
+        GivenRates(Rate(500m, classification: Partner));
+        var input = Invoice(
+            [Fee("Jane Doe", Day, 2m, 500m, 1000m), Expense(1m, 10m, 10m)], fees: 1000m, expenses: 10m, adjustments: 0m, totalDue: 1010m)
+            with
+        { FirmId = null };
+
+        var result = await CreateService().ResolveAsync(input);
+
+        _calls.Should().BeEmpty("no firm: no roster and no rate card can be chosen, so none is read");
+        _procedureReads.Should().BeEmpty("no firm: no Procedure is resolved either");
+        _embedded.Should().BeEmpty("no AI-assisted match without a roster");
+        var fee = result.Lines[0];
+        fee.Timekeeper!.IsMatched.Should().BeFalse();
+        fee.Timekeeper.Reason.Should().Be(TimekeeperUnmatchedReason.None, "the match was not established (not 'not on the roster')");
+        fee.Rate.Status.Should().Be(RateResolutionStatus.NotFound);
+        fee.Rate.Reason.Should().Be(RateNotFoundReason.TimekeeperUnmatched);
+        fee.Fields[ResolutionFieldNames.TimekeeperAsBilled].Reference.Should().Be(ReferenceOutcome.Missing);
+        result.Lines[1].Rate.Status.Should().Be(RateResolutionStatus.NotApplicable, "an expense line is unchanged");
+        result.ArithmeticChecks.Should().NotBeEmpty().And.OnlyContain(c => c.Passed, "the arithmetic does not depend on the firm");
+
+        // Must-not-fire control: the same invoice with the firm matches and finds the rate.
+        _calls.Clear();
+        var withFirm = await CreateService().ResolveAsync(input with { FirmId = Firm });
+        withFirm.Lines[0].Timekeeper!.IsMatched.Should().BeTrue();
+        withFirm.Lines[0].Rate.Status.Should().Be(RateResolutionStatus.Found);
+        _calls.Select(c => c.Entity).Should().Equal("sprk_timekeeper", "sprk_ratecardrate");
+    }
+
     [Fact]
     public async Task TheLog_CarriesCountsOnly_NeverNamesOrAmounts()
     {
@@ -827,7 +993,8 @@ public sealed class InvoiceResolutionServiceTests
         int PageSize,
         IReadOnlyList<Condition> Conditions,
         string? LinkEntity,
-        IReadOnlyList<Condition> LinkConditions)
+        IReadOnlyList<Condition> LinkConditions,
+        IReadOnlyList<string> LinkColumns)
     {
         public static Call Of(QueryExpression query) => new(
             query.EntityName,
@@ -836,7 +1003,8 @@ public sealed class InvoiceResolutionServiceTests
             query.PageInfo.Count,
             Flatten(query.Criteria).ToList(),
             query.LinkEntities.SingleOrDefault()?.LinkToEntityName,
-            query.LinkEntities.SingleOrDefault() is { } link ? Flatten(link.LinkCriteria).ToList() : []);
+            query.LinkEntities.SingleOrDefault() is { } link ? Flatten(link.LinkCriteria).ToList() : [],
+            query.LinkEntities.SingleOrDefault()?.Columns.Columns.ToList() ?? []);
 
         private static IEnumerable<Condition> Flatten(FilterExpression filter)
         {

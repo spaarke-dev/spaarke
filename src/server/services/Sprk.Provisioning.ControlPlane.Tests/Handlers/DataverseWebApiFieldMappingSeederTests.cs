@@ -134,6 +134,43 @@ public sealed class DataverseWebApiFieldMappingSeederTests
         bindEl.GetString().Should().StartWith("/sprk_fieldmappingprofiles(");
     }
 
+    // ---------- sync mode: written explicitly, class-aware (task 040, DI-003 / #2181) ----------
+
+    [Fact]
+    public async Task SeedAsync_EveryRuleCarriesItsProfilesExplicitSyncMode_OneTimeForAssignedTo_ManualRefreshForPlainData()
+    {
+        var fake = new FakeDataverseHandler
+        {
+            OnGetRecordType = req => RecordTypeResponse(req),
+            OnGetProfile = _ => JsonResponse(HttpStatusCode.OK, EmptyValueJson()),
+            OnGetRule = _ => JsonResponse(HttpStatusCode.OK, EmptyValueJson()),
+            OnPostProfile = _ => JsonResponse(HttpStatusCode.Created, "{\"sprk_fieldmappingprofileid\":\"20000000-0000-0000-0000-000000000001\"}"),
+            OnPostRule = _ => JsonResponse(HttpStatusCode.Created, "{\"sprk_fieldmappingruleid\":\"30000000-0000-0000-0000-000000000001\"}"),
+        };
+        var seeder = BuildSeeder(fake);
+
+        await seeder.SeedAsync(BuildInput(), CancellationToken.None);
+
+        var rulePosts = fake.Requests.Where(r => r.Method == HttpMethod.Post && r.Uri.AbsolutePath.Contains("sprk_fieldmappingrules")).ToList();
+        rulePosts.Should().HaveCount(20);
+        var byProfile = rulePosts
+            .Select(post => JsonDocument.Parse(post.Body!).RootElement)
+            .GroupBy(body => ProfileOf(body.GetProperty("sprk_name").GetString()!))
+            .ToDictionary(g => g.Key, g => g.Select(body =>
+            {
+                body.TryGetProperty("sprk_syncmode", out var syncMode).Should().BeTrue("a seeded rule never leaves the sync mode to the column's default");
+                return syncMode.GetInt32();
+            }).Distinct().ToArray());
+
+        // The class of each profile's targets is the BFF registry's (pinned by the ArchTest FieldMappingSeederSyncModeClassTests).
+        byProfile["Matter to Event (Attorney Matrix)"].Should().Equal(DataverseWebApiFieldMappingSeeder.SyncModeOneTime);
+        byProfile["Matter to Invoice (Attorney Matrix)"].Should().Equal(DataverseWebApiFieldMappingSeeder.SyncModeOneTime);
+        byProfile["Matter to Report Card (Attorney Matrix)"].Should().Equal(DataverseWebApiFieldMappingSeeder.SyncModeManualRefresh);
+    }
+
+    /// <summary>"a -> b (Matter to Event (Attorney Matrix))" names the profile after its first " (".</summary>
+    private static string ProfileOf(string ruleName) => ruleName[(ruleName.IndexOf(" (", StringComparison.Ordinal) + 2)..^1];
+
     // ---------- T3 idempotency: everything already exists ----------
 
     [Fact]

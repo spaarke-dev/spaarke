@@ -19,9 +19,13 @@ public interface IInvoiceSubmissionProcessor
     /// <exception cref="InvoiceAiException">Retryable: the read service failed (<c>invoice.read.service_failed</c>) or line coding's
     /// AI call failed. The job retries, then marks the submission Failed with <see cref="InvoiceAiException.ReasonCode"/>.</exception>
     /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
-    /// <remarks>Any other exception (a Dataverse fault in a reference read, a document download fault) is transient and propagates.</remarks>
+    /// <remarks>Any other exception (a Dataverse fault in a reference read, a document download fault) is transient and propagates.
+    /// 082c-2 (brief C14): <paramref name="finalDelivery"/> is the job's <c>IsFinalDelivery</c>. A Procedure resolution fault
+    /// (<c>ProcedureResolutionFaultException</c>, <c>CoreRecordChainUnreadableException</c>) propagates on any earlier delivery (the job
+    /// retries; nothing is persisted) and is held on the final one (a <see cref="SubmissionReasonCodes.ProceduresUnresolved"/> outcome).</remarks>
     Task<SubmissionEvaluationOutcome> EvaluateAsync(
         Entity submission,
         Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument,
+        bool finalDelivery,
         CancellationToken ct = default);
 }

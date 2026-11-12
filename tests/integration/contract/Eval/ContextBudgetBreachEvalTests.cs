@@ -255,7 +255,8 @@ public class ContextBudgetBreachEvalTests
                 CreatedAt: default,
                 LastActivity: default,
                 Messages: Array.Empty<ChatMessage>())
-            { OwnerOid = TestSessionOwner.Oid,
+            {
+                OwnerOid = TestSessionOwner.Oid,
                 Outputs = (outputs ?? Array.Empty<SessionOutput>()).ToList(),
             }));
 

@@ -491,8 +491,9 @@ public sealed class DoLanePolicySeamTests : IClassFixture<SignalWriterSeamTests.
             return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
         });
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore>(
-            services, _ => new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore());
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation>(
+            services, _ => Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.Representation(
+                new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore()));
         var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<
             Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(
             Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));
@@ -501,7 +502,7 @@ public sealed class DoLanePolicySeamTests : IClassFixture<SignalWriterSeamTests.
 
         var schema = new RuleBodySchemaValidator();
         var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
-        return new SignalEvaluator(validator, sysadmin, writer, NullLogger<SignalEvaluator>.Instance);
+        return new SignalEvaluator(validator, sysadmin, writer, writerClient, NullLogger<SignalEvaluator>.Instance);
     }
 
     /// <summary>The ids a FetchXML filter selects, paged. <paramref name="conditions"/> is the body of an AND filter.</summary>

@@ -17,6 +17,7 @@ using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Tests.Finance.Files;
+using Sprk.Bff.Api.Tests.Services.Finance.Submission;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Jobs.Handlers;
@@ -123,10 +124,15 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         public Func<Entity, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>>, Task<SubmissionEvaluationOutcome>>? Script { get; set; }
         public List<Entity> Calls { get; } = [];
 
+        /// <summary>082c-2: the <c>finalDelivery</c> each call was given (the handler threads <c>job.IsFinalDelivery</c>).</summary>
+        public List<bool> FinalDeliveries { get; } = [];
+
         public Task<SubmissionEvaluationOutcome> EvaluateAsync(
-            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, CancellationToken ct = default)
+            Entity submission, Func<SubmissionSnapshot, CancellationToken, Task<InvoiceReadRequest>> loadDocument, bool finalDelivery,
+            CancellationToken ct = default)
         {
             Calls.Add(submission);
+            FinalDeliveries.Add(finalDelivery);
             return (Script ?? throw new InvalidOperationException("EvaluateAsync was not scripted")).Invoke(submission, loadDocument);
         }
     }
@@ -307,6 +313,9 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         public Locks Locks { get; } = new();
         public RecordingLog Log { get; } = new();
 
+        /// <summary>Task 095b: the submitter's bell (the REAL notifier and notification writer over a Dataverse double); what it holds is what the person was told.</summary>
+        public SubmissionBellWorld Bell { get; } = new(SubmissionId);
+
         /// <summary>Every submission update, in order.</summary>
         public List<Dictionary<string, object>> Writes { get; } = [];
         public List<string> Events { get; } = [];
@@ -444,12 +453,28 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
                 Persister,
                 After,
                 sink.Object,
+                Bell.Build(),
                 Locks,
                 Mock.Of<IOptionsMonitor<EbillingOptions>>(m => m.CurrentValue == new EbillingOptions { Enabled = Enabled }),
                 Files.Service,
                 Gate,
-                Log);
+                Log)
+            {
+                // 092 review F1: the scan wait is recorded, never slept.
+                ScanDelay = (delay, _) =>
+                {
+                    ScanWaits.Add(delay);
+                    OnScanWait?.Invoke(ScanWaits.Count);
+                    return Task.CompletedTask;
+                },
+            };
         }
+
+        /// <summary>092 review F1: every wait between scan reads, across every delivery built from this rig.</summary>
+        public List<TimeSpan> ScanWaits { get; } = [];
+
+        /// <summary>Runs after the n-th wait (1-based), before the next read: where a test lets the scan catch up.</summary>
+        public Action<int>? OnScanWait { get; set; }
 
         /// <summary>Scripts the happy path of every component: Accepted outcome, Committed, Completed.</summary>
         public Rig HappyPath()
@@ -551,6 +576,18 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         outcome.Status.Should().Be(JobStatus.Failed);
         rig.Locks.Held.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c-2 C14: the handler threads job.IsFinalDelivery to the processor (false on an earlier delivery, true on the final one)")]
+    public async Task FinalDelivery_IsThreadedToTheProcessor()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Processor.Script = (_, _) => throw new InvalidOperationException("boom");
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        await rig.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        rig.Processor.FinalDeliveries.Should().Equal(false, true);
     }
 
     [Fact(DisplayName = "049 E 0b: a delivery that cannot take the lock returns Failure and touches nothing (not even a Failed status)")]
@@ -815,7 +852,8 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         {
             [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
             {
-                ["policyCode"] = "BILL-W", ["code"] = "dataverse_access_denied",
+                ["policyCode"] = "BILL-W",
+                ["code"] = "dataverse_access_denied",
                 ["subject"] = new System.Text.Json.Nodes.JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
             }),
         }.ToJsonString();
@@ -1201,6 +1239,26 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.Persister.Calls.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "DEF-044 F1 must-fire (handler discard path): a run that fails after a NEWER run reused its staged copy (lock expiry, new ETag) keeps the blob: the discard is pinned to the ETag this run staged")]
+    public async Task Source_NoCommit_NewerRunReusedTheCopy_DiscardKeepsIt()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Processor.Script = async (row, load) =>
+        {
+            await load(DocumentSnapshot(row), CancellationToken.None);
+            // The newer run's reuse: the same bytes rewritten, so the blob has a new ETag (no row yet).
+            var name = StoredFileBlobName.Build(
+                rig.Files.TenantId, new StoredFileParent(StoredFileParentKind.Invoice, InvoiceId), StoredFileIds.ForSourceVersion(SubmissionId, rig.DocumentVersion));
+            rig.Files.Gateway.Overwrite(StoredFileSchema.ContainerOf(StoredFilePurpose.InvoicePdf), name, rig.Bytes, rig.Files.Gateway.Now.AddMinutes(1));
+            return Outcome(SubmissionEvaluationKind.Failed, "ebilling.submission.processing_failed") with { Submission = DocumentSnapshot(row) };
+        };
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        StagedCopy(rig, rig.DocumentVersion).Should().Equal(rig.Bytes, "the newer run's blob is not this run's to delete");
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "094 (9.1 step 4): SourceChanged with the SAME bytes at a new version: the new version is staged and the commit is tried once more with it")]
     public async Task SourceChanged_SameBytes_RestagesAndPersistsOnce()
     {
@@ -1371,8 +1429,71 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Failed);
+        outcome.ErrorMessage.Should().Be(SubmissionReasonCodes.FileScanTimeout);
+        rig.ScanWaits.Should().Equal(InvoiceSubmissionProcessingJobHandler.ScanWaits, "the delivery waited its whole budget before handing back");
         rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
         rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 review F1 must-fire: a scan still Pending on every one of the MaxDeliveryCount deliveries waits ~4 minutes on EACH, and only the final delivery fails it with file_scan_timeout")]
+    public async Task Upload_PendingOnEveryDelivery_WaitsEachDelivery_ThenFailsFileScanTimeout()
+    {
+        var rig = new Rig().HappyPath();
+        rig.StageUpload([1, 2, 3], scanned: false);
+        LoadsTheUpload(rig);
+        SubmissionReasonCodes.FileScanTimeout.Should().Be("ebilling.submission.file_scan_timeout");
+        InvoiceSubmissionProcessingJobHandler.ScanWaitBudget.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMinutes(3))
+            .And.BeLessThan(TimeSpan.FromMinutes(5), "inside the message-lock renewal and the submission lock, with room for the run");
+
+        var outcomes = new List<JobStatus>();
+        for (var delivery = 1; delivery <= JobContract.MaxDeliveryCount; delivery++)
+        {
+            var before = rig.ScanWaits.Count;
+            var outcome = await rig.Build().ProcessAsync(Job(deliveryCount: delivery), CancellationToken.None);
+            outcomes.Add(outcome.Status);
+            outcome.ErrorMessage.Should().Be(SubmissionReasonCodes.FileScanTimeout);
+            TimeSpan.FromTicks(rig.ScanWaits.Skip(before).Sum(w => w.Ticks)).Should().Be(InvoiceSubmissionProcessingJobHandler.ScanWaitBudget,
+                $"delivery {delivery} waited for the scan instead of handing the message straight back");
+        }
+
+        outcomes.Should().Equal(JobStatus.Failed, JobStatus.Failed, JobStatus.Failed, JobStatus.Failed, JobStatus.Poisoned);
+        rig.StatusWrites.Where(w => w.Status == Failed).Should().Equal([(Failed, SubmissionReasonCodes.FileScanTimeout)],
+            "only the final delivery fails it, with the scan code (not processing_failed)");
+        rig.StatusWrites.Last().Should().Be((Failed, (string?)SubmissionReasonCodes.FileScanTimeout));
+        rig.Persister.Calls.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "092 review F1: a scan verdict that arrives during the delivery's wait is read on that delivery (no redelivery)")]
+    public async Task Upload_ScanArrivesDuringTheWait_IsReadOnTheSameDelivery()
+    {
+        var rig = new Rig().HappyPath();
+        var blob = rig.StageUpload([0x25, 0x50, 0x44, 0x46, 9], scanned: false);
+        var request = LoadsTheUpload(rig);
+        rig.OnScanWait = n =>
+        {
+            if (n == 3)
+            {
+                rig.Files.Gateway.Get(blob.Container, blob.BlobPath)!.Tags =
+                    new Dictionary<string, string>(StoredFileRig.CleanTags(rig.Files.Gateway.Now.AddMinutes(1)), StringComparer.Ordinal);
+            }
+        };
+
+        var outcome = await rig.Build().ProcessAsync(Job(deliveryCount: 1), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.ScanWaits.Should().Equal(InvoiceSubmissionProcessingJobHandler.ScanWaits.Take(3), "it stopped waiting as soon as the verdict was there");
+        request()!.Content.ToArray().Should().Equal(0x25, 0x50, 0x44, 0x46, 9);
+    }
+
+    [Fact(DisplayName = "092 review F1 must-not-fire: an upload already scanned clean is read at once (no wait)")]
+    public async Task Upload_AlreadyScanned_DoesNotWait()
+    {
+        var rig = new Rig().HappyPath();
+        rig.StageUpload([1, 2, 3]);
+        LoadsTheUpload(rig);
+
+        (await rig.Build().ProcessAsync(Job(), CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+        rig.ScanWaits.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "092 must-fire: an upload scanned Malicious is Failed file_malicious and Poisoned; nothing persisted")]
@@ -1831,6 +1952,30 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
         rig.StatusWrites.Should().NotContain(w => w.Status == Failed);
     }
 
+    [Theory(DisplayName = "095c-4: a ReEvaluate for a firm change is logged and retried as a firm change (ebilling.submission.firm_changed), not as a core record change")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReEvaluate_ForAFirmChange_HasItsOwnWordingAndReason(bool firm)
+    {
+        var rig = new Rig().HappyPath();
+        var reason = firm ? SubmissionReasonCodes.FirmChanged : SubmissionReasonCodes.CoreRecordChanged;
+        rig.Persister.Script.Clear();
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.ReEvaluate, null, reason, SubmissionRow(Processing))));
+        rig.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.ReEvaluate, null, reason, SubmissionRow(Processing))));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        outcome.ErrorMessage.Should().Be(reason);
+        var reEvaluations = rig.Log.Entries.Where(e => e.Message.Contains("re-evaluat", StringComparison.OrdinalIgnoreCase)).Select(e => e.Message).ToList();
+        reEvaluations.Should().NotBeEmpty();
+        reEvaluations.Should().OnlyContain(m => m.Contains(firm ? "firm" : "core record"));
+        if (firm)
+        {
+            reEvaluations.Should().NotContain(m => m.Contains("core record"), "a firm change is not worded as a core record change");
+        }
+    }
+
     [Fact(DisplayName = "049 E 4: a ReEvaluate whose second pass is a document-level rejection ends as that rejection")]
     public async Task ReEvaluate_ThenUnreadable_IsRejected()
     {
@@ -1946,5 +2091,179 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         faulting.Log.Entries.Where(e => e.Level == LogLevel.Error).Select(e => e.Message).Should()
             .OnlyContain(m => m.Contains(SubmissionId.ToString()) && !m.Contains("INV-100"), "a fault is logged by its type and our code, not its message");
+    }
+
+    // ── 095b: the submitter's bell (owner 2026-11-03). Exactly once = only the delivery that wrote the final status calls the notifier ──
+
+    [Fact(DisplayName = "095b: Accepted - the after-steps wrote the terminal status, so the submitter is told once, linking to the invoice")]
+    public async Task Completed_TellsTheSubmitterOnce_LinkingToTheInvoice()
+    {
+        var rig = new Rig().HappyPath();
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 accepted");
+        SubmissionBellWorld.ActionUrl(bell).Should().Contain($"etn=sprk_invoice&id={InvoiceId:D}");
+    }
+
+    // Review F4 (POML 095b acceptance: "refused: one notification, with the outcome sentence and no invoice link"). The after-steps result carries an invoice
+    // (the rule refusal leaves one behind), and the handler must still not pass it on: the link opens the submission, where the reason is.
+    [Fact(DisplayName = "095b F4: a rule refusal (Rejected terminal) tells the submitter once and links to the SUBMISSION, not the invoice the result carries")]
+    public async Task CompletedRejected_TellsTheSubmitterOnce_LinkingToTheSubmission()
+    {
+        var rig = new Rig().HappyPath();
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed) with { TerminalStatus = InvoiceSubmissionStatus.Rejected });
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 refused");
+        AfterResult(SubmissionAfterStepsStatus.Completed).InvoiceId.Should().Be(InvoiceId, "control: the after-steps result does carry the invoice, so the link below is a choice of the handler");
+        SubmissionBellWorld.ActionUrl(bell).Should().Be($"/main.aspx?etn=sprk_invoicesubmission&id={SubmissionId:D}&pagetype=entityrecord")
+            .And.NotContain(InvoiceId.ToString("D"));
+    }
+
+    [Fact(DisplayName = "095b F4: a held (Blocked) internal submission is told as held for review and links to the SUBMISSION")]
+    public async Task CompletedBlocked_IsHeldForReview_LinkingToTheSubmission()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Bell.Submission["sprk_outcomereasoncode"] = SubmissionReasonCodes.Blocked;
+        rig.After.Run = _ => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed) with { TerminalStatus = InvoiceSubmissionStatus.Rejected });
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 held for review");
+        SubmissionBellWorld.ActionUrl(bell).Should().Contain($"etn=sprk_invoicesubmission&id={SubmissionId:D}").And.NotContain(InvoiceId.ToString("D"));
+    }
+
+    [Fact(DisplayName = "095b: a document that could not be read (Rejected by the handler, no invoice) tells the submitter once, with no invoice link")]
+    public async Task RejectedUnreadable_TellsTheSubmitterOnce_WithoutAnInvoiceLink()
+    {
+        var rig = new Rig().HappyPath();
+        rig.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.RejectedUnreadable, "invoice.read.unreadable"));
+
+        await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        var bell = rig.Bell.Created.Should().ContainSingle().Subject;
+        bell.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 refused");
+        SubmissionBellWorld.ActionUrl(bell).Should().Contain("etn=sprk_invoicesubmission").And.NotContain("etn=sprk_invoice&");
+    }
+
+    [Fact(DisplayName = "095b: Failed (written by the handler) tells the submitter once; a Failed submission with no person tells nobody")]
+    public async Task Failed_TellsTheSubmitterOnce_AndNobodyWhenThereIsNoPerson()
+    {
+        var failing = new Rig().HappyPath();
+        failing.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "ai.invoice.disabled"));
+        var anonymous = new Rig().HappyPath();
+        anonymous.Bell.Submission.Attributes.Remove("sprk_createdbyperson");
+        anonymous.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "ai.invoice.disabled"));
+
+        await failing.Build().ProcessAsync(Job(), CancellationToken.None);
+        await anonymous.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        failing.Bell.Created.Should().ContainSingle().Subject.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 could not be processed");
+        anonymous.Bell.Created.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095b: a transient fault tells nobody until the final delivery; then the submission is Failed and the submitter is told once")]
+    public async Task FinalDeliveryFailure_TellsTheSubmitter_EarlierDeliveriesDoNot()
+    {
+        var early = new Rig().HappyPath();
+        early.Processor.Script = (_, _) => throw new TimeoutException();
+        var last = new Rig().HappyPath();
+        last.Processor.Script = (_, _) => throw new TimeoutException();
+
+        await early.Build().ProcessAsync(Job(), CancellationToken.None);
+        await last.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        early.Bell.Created.Should().BeEmpty("the broker redelivers; the submission is not final");
+        last.StatusWrites.Should().Contain(w => w.Status == Failed);
+        last.Bell.Created.Should().ContainSingle();
+    }
+
+    [Theory(DisplayName = "095b: a job redelivered after the final status (a replay, or a dead-letter after Failed) tells nobody a second time")]
+    [InlineData(Accepted)]
+    [InlineData(Rejected)]
+    [InlineData(Failed)]
+    public async Task RedeliveryAfterTheFinalStatus_NeverNotifies(int status)
+    {
+        var rig = new Rig { Row = SubmissionRow(status, status == Failed ? null : InvoiceId) }.HappyPath();
+
+        var first = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+        var replay = await rig.Build().ProcessAsync(FinalJob(), CancellationToken.None);
+
+        first.Status.Should().Be(JobStatus.Completed);
+        replay.Status.Should().Be(JobStatus.Completed);
+        rig.Bell.Created.Should().BeEmpty("only the delivery that wrote the final status tells the submitter");
+    }
+
+    [Fact(DisplayName = "095b: after-steps that found the submission already final (AlreadyTerminal, written by someone else) tell nobody")]
+    public async Task CompletedAlreadyTerminal_TellsNobody()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Completed) with { AlreadyTerminal = true });
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        rig.Bell.Created.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095b: the commit gate's Failed (an undone commit) tells the submitter once; its later compensation does not")]
+    public async Task GateUndo_TellsOnce_TheCompensationDoesNot()
+    {
+        var undone = new Rig().HappyPath();
+        undone.Persister.Script.Clear();
+        undone.Persister.Script.Add(_ => Task.FromResult(Persist(SubmissionPersistStatus.Undone, null, SubmissionReasonCodes.FileUnservable) with { UndoHeld = true }));
+        var row = SubmissionRow(Failed);
+        row[InvoiceSubmissionPersister.SubmissionReasonCode] = SubmissionReasonCodes.FileUnservable;
+        var compensation = new Rig { Row = row }.HappyPath();
+        compensation.Gate.Compensate = () => Task.FromResult(true);
+
+        await undone.Build().ProcessAsync(Job(), CancellationToken.None);
+        await compensation.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        undone.Bell.Created.Should().ContainSingle().Subject.GetAttributeValue<string>("title").Should().Be("Invoice INV-100 could not be processed");
+        compensation.Bell.Created.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095b: a linked submission left Processing (the after-steps Refused) is not final and tells nobody")]
+    public async Task LeftProcessing_TellsNobody()
+    {
+        var rig = new Rig { Row = SubmissionRow(Processing, InvoiceId) }.HappyPath();
+        rig.After.Resume = () => Task.FromResult(AfterResult(SubmissionAfterStepsStatus.Refused, SubmissionReasonCodes.StoredStateMismatch));
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        rig.Bell.Created.Should().BeEmpty();
+    }
+
+    // Seeded proof (task 095b): replace NotifyAsync's catch with a rethrow and both rows fail - the Accepted job would not complete and the Failed one would not Poison.
+    [Theory(DisplayName = "095b: NotificationService throws -> the submission still reaches its final status and the job completes exactly as before")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NotificationFault_NeverChangesTheOutcome(bool accepted)
+    {
+        var rig = new Rig().HappyPath();
+        rig.Bell.CreateFault = new InvalidOperationException("appnotification refused");
+        if (!accepted)
+        {
+            rig.Processor.Script = (_, _) => Task.FromResult(Outcome(SubmissionEvaluationKind.Failed, "ai.invoice.disabled"));
+        }
+
+        var outcome = await rig.Build().ProcessAsync(Job(), CancellationToken.None);
+
+        outcome.Status.Should().Be(accepted ? JobStatus.Completed : JobStatus.Poisoned);
+        if (!accepted)
+        {
+            rig.StatusWrites.Should().Contain((Failed, "ai.invoice.disabled"), "the Failed status was written before, and regardless of, the notification");
+        }
+
+        rig.Bell.Created.Should().BeEmpty();
+        rig.Bell.Log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Event == SubmissionOutcomeNotifierEvents.BellNotCreated);
     }
 }

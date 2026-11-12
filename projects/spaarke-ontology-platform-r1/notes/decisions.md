@@ -164,7 +164,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-157 | **073 deferred out of R1 (owner, 2026-10-17).** Memo as a second classifier source is DI-108 #2051, with the five open decisions and recommendations. Email classification meets the R1 bar. | 2026-10-17 |
 | D-158 | **045 keeps the confirming user (`sprk_confirmedby`, a systemuser) as "decided by" (owner, 2026-10-17)**, not `sprk_assignedtointernal` (a contact, null without one). | 2026-10-17 |
 | D-159 | **049 applied, including the Ontology Administrator's Signal Write (owner Q6, 2026-10-17: "ok but not critical path").** Live 03:17–03:24Z: Console User loses Signal Write and DR Create, Ontology Administrator loses DR Create and Signal Write; `-Verify` with no waiver PASS. Repo half PR #2050. `security-roles.md` §17. | 2026-10-17 |
-| D-160 | **Ontology Administrator keeps `prvAssignsprk_Signal` and `prvDeletesprk_Signal` (Deep) for now (owner, 2026-10-17, relayed by uac-r2; confirmation asked directly): "not a risk (we can remove later)".** No live change, no PR; the role-ledger guard is not extended to forbid them. Open path: remove later with the 049 pattern (root-only `RemovePrivilegeRole`, read-back, guard + script entry). No shipped flow assigns or deletes a Signal as the caller (2026-10-17). | 2026-10-17 |
+| D-160 | **Ontology Administrator keeps `prvAssignsprk_Signal` and `prvDeletesprk_Signal` (Deep) for now (owner, 2026-10-17, relayed by uac-r2; confirmation asked directly): "not a risk (we can remove later)".** No live change, no PR; the role-ledger guard is not extended to forbid them. Open path: remove later with the 049 pattern (root-only `RemovePrivilegeRole`, read-back, guard + script entry). No shipped flow assigns or deletes a Signal as the caller (2026-10-17). **Reaffirmed 2026-11-05 (owner, relayed by uac-r2 on fm task 046):** Ontology Administrator keeps its Signal and BudgetRevision Create/Write/Delete/Assign and is the **designated cleanup role** — the only person role with those rights, held by a few named admins, with Dataverse auditing on for the three tables; fm 046's guard pins it as the only one. Console User's Append/AppendTo on Signal/DR stay. Nothing removed, so nothing to supersede. Ontology read dev auditing (2026-11-05): org and all three tables on, ownerid/owningbusinessunit/statecode/statuscode audited; every custom lookup column (Signal 17, DR 20, BudgetRevision 3) has column auditing off, so a cleanup edit to e.g. `sprk_matter` records no old/new value. Recommended to uac-r2: enable column auditing on the key lookups in the solution (schema change; owner go). | 2026-10-17 |
 | D-161 | **101(c) re-signed at its real scope: option A (owner, 2026-10-17).** The dry-run oracle accepted as the ADR-028 tension covers existence, the values of allow-listed related-table filter columns, and derived spend/budget Threshold sums (102a reviews), limited to holders of `prvCreatesprk_PolicyVersion`. The allow-list stays as it is; POL-COMMIT-BUDGET is unaffected. spec §6. | 2026-10-17 |
 | D-162 | **D-160 confirmed by the owner directly (2026-10-17: "yes confirm").** The Ontology Administrator keeps `prvAssignsprk_Signal` and `prvDeletesprk_Signal`. | 2026-10-17 |
 | D-163 | **POL-MATTER-NOBUDGET turned on in dev (owner, 2026-10-17: "let's turn it on; in dev we'll do a bulk update to close the signals").** `sprk_enabled` = Yes on `00000000-0000-4000-8000-000000006301` at ~14:36Z (read back; unscoped, current version `…6311`). It raises from the next evaluation; the owner bulk-closes the dev Signals. | 2026-10-17 |
@@ -426,3 +426,347 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Context:** ebilling 105 (`SubmissionOverrideService.RecloseAsync`). When an override or return was recorded but some Signal closes did not finish, a repeat finishes them in the original decider's name. A repeat by someone without Write on the Signal subjects cannot finish them.
 - **Decision (owner: agreed):** that repeat answers **200 `alreadyDecided`**, not 403 or 503. The decision stands, so a 403 would misreport it; the denial is permanent for that caller, so a 503 would invite repeats that never succeed. The open Signals stay open until the original decider repeats. A read fault during the repeat still answers 503 (F2). Recorded as a known limit in ebilling's `105-override-server.md` §9.
 - **Also agreed:** #2455, the adjustment and override services take the invoice's single core record (`SingleCoreOf`) and refuse zero or several before any write.
+
+## D-201 — "Reviewer sets the firm" is a new billing action code, `assign-firm`; no schema (ontology position, 2026-11-03)
+
+- **Context:** ebilling 095c makes the firm optional on Submit Invoice from Outlook. A no-firm invoice is held In Review with a firm_missing finding until a reviewer sets the firm (095d). ebilling asked which decision kind records that.
+- **Position:** a new code in `DecisionActionCatalog.DeclaredBilling`, `assign-firm` ("Set firm"), class Judgement, subject the invoice, recorded through `BillingDecisionRecorder.RecordAsync`. The code is free text in `sprk_actioncode` (max 100), so no choice value or column is added. Update the exact-set test `Billing_C2_TheBillingEntrysSubjects_...` to map it to the invoice.
+- **Parameters:** `firm` (Lookup, required; it is in Values, so the content hash covers it) and `note` (TextArea, optional).
+- **Facts:** the previous tracking number, the new one, the hold's Signal id, and the D-122 read time and policy code. The new number is not hashed, so it is allocated once, stored before the record and reused on retry.
+- **Decision id:** namespaced per verb, like override and return: `IdOf("ebilling-assign-firm-{submissionId}")`. Reusing the override's id would be refused as another code under the same id.
+- **Signals:** firm_missing is a system finding under `BILL-SYSTEM-SUBMISSION` (SubmissionIntegrity), like the invoice-number mismatch. No new policy row. The decision resolves the firm_missing Signal(s) only, not every Signal on the invoice as override and return do. They are closed as Acted and linked to the record.
+- **Not ontology's call:** what setting the firm opens to the firm's external users is for uac-r2. Findings that need a firm are re-evaluated after the firm is set; they are new Signals, not part of this decision.
+- **Clarified 2026-11-04 (ebilling 095d asked whether option 2, reserve → record → apply, satisfies this).** "Stored before the record and reused on retry" means the record names the number that is persisted and never a second allocation. It does **not** mean record-before-effect. Billing decisions already apply first and then record: approval runs transition → portion → record → Signals → link, line decisions write the lines and then record (074 K-3). The concurrency-safe apply transaction therefore satisfies this decision, provided that:
+  1. every permanent refusal is checked before it;
+  2. the same transaction stores the decision (firm, note, previous and new number, the firm_missing Signal set and read time) so that a repeat rebuilds the identical record without reallocating;
+  3. a failure after the apply answers 503 incomplete and leaves the firm_missing Signal open, so the gap stays visible;
+  4. Signals close only after the record.
+
+  Ontology prefers option 1 over option 2. Option 2 can leave an append-only record, and possibly an Acted Signal, for a firm assignment that was never applied, plus a scope that does not match the firm.
+  uac-r2 (2026-11-04) accepts option 1's window, in which the firm sees the submission before the record exists. They add a fifth condition: the census or schema check reports "applied, no record yet" rows with their age, INFO inside a set window and FAIL after it. **The owner chose option 1** (2026-11-04, in uac-r2's session, relayed by uac-r2 `-20`). The owner also wants an ontology K-3 review of the 095d diff before merge. AI re-run rule (owner): re-run the AI only where a rule's outcome can change with it.
+- **Amended 2026-11-04 (095d-1 facts, ebilling §16.5 at `0a37980d9d`).**
+  - **The Signal is shared.** `BillingFindingSignalMapper.MapGroup` writes one SubmissionIntegrity Signal per (policy, invoice) group, so firm_missing shares it with the invoice-number mismatch and the coding notes. The hold also lifts only after the 095d-2 re-run clears all three markers.
+  - **So the assign-firm decision closes no Signal.** Its `ResolvedSignalIds` is empty. Its facts name the group's Signal id and say that the firm_missing reason was cleared by the decision. An append-only record must not claim to resolve a Signal that may stay open for other notes.
+  - **The 095d-2 re-run re-maps the group.**
+    - If reasons remain, ~~the same Signal stays open with its title recomputed~~ the Signal is Superseded and a new episode opens when the reason set changed (2026-11-05 095d-2 Q2 below).
+    - If none remain, the Signal closes as `ConditionCleared`, with the record's id in the close facts for audit.
+  - **The earlier "closed as Acted and linked to the record" no longer applies to the shared Signal.** Condition 4 holds: nothing closes before the record.
+  - **Stored-file renames go inside the apply transaction.** `sprk_storedfile.sprk_name` is a Dataverse column, and `StoredFileBlobName.Build` uses ids only (`StoredFileContracts.cs:298-305`). This replaces ontology's earlier "rename after the record" addition, and the `files` failedStep and its census row are not needed.
+- **K-3 review of 095d-1c (2026-11-05; `origin/task/ebilling-095d-1c`, `637da3e730..3380f6cd1c`; service, endpoint, census and test diffs read): PASS.**
+  - **The number is allocated once.** The record is built only from the stored member the committed apply wrote, and only when its number equals the committed one; otherwise it fails closed.
+    - A repeat never applies (its builder throws), and the stored number must equal the allocator's AlreadyRenumbered one.
+    - `BuildDecision` reads the stored member only, DecidedOn included. So every call has the same id, hash and facts, and the writer's key lookup makes the write exactly-once.
+    - A repeat by another reviewer records the first reviewer's decider and note; this is tested.
+  - **Conditions 1-5 hold.**
+    - After the apply, every failure is 503 `incomplete` with failedStep `record` or `filing`.
+    - No Signal closes: `ResolvedSignalIds` is null, the set is in the facts, and `firmMissingCleared` is true.
+    - Census check (f) reports INFO inside its window, FAIL in -Verify after it, and FAIL for an unreadable member. Its key is pinned to `BillingDecisionKey.IdOf`, and it matches `reviewId` the same way the writer's own lookup does.
+  - **Accepted as built:**
+    - If the caller's token is cancelled after the apply, the call ends with neither 503 nor 200. Check (f) lists the row and a repeat finishes it.
+    - A permanent filing mismatch stays 503 `filing`, logged at Error with Permanent=true. It is for an operator to fix, not for a retry.
+  - **Carried to 095d-2:** the ConditionCleared close carries the record id, only once every reason has cleared; the `sprk_reviewdetail` writer list follows D-205.
+- **Ruling 2026-11-05 (ebilling 114 asked; Override close vs a hold that remains): ontology's call, ebilling's fix.** A human decision closes as Acted, and names in its record's resolved set, only Signals whose hold the decision released. A Signal whose hold is still in `InvoiceOpenHolds.ReasonsAfterAsync` stays open: the shared SubmissionIntegrity Signal while firm_missing remains (it closes `ConditionCleared` through the 095d-2 re-run, as above), and a Procedure Signal of another linked submission that this Override did not release. Before 114 the Override closed every open Signal on the invoice; 114 widens that, because Internal gap + firm_missing is now overridable (was refused, C22).
+  - **Fix shape:** filter the set before `BuildDecision` and before the set is stored. Today `ReasonsAfterAsync` (`SubmissionOverrideService.cs` ~:858) runs after `BuildDecision` (~:834), so the order must change. The record's facts may name the left-open Signal and why. No firm hold left → the shared Signal closes Acted as before (must-not-fire).
+  - **Known limit:** a set stored by a pre-fix attempt is replayed verbatim on retry; dev-only, in-flight rows.
+  - Requested in 114's scope before the master PR; otherwise a filed issue that blocks 114's master PR.
+  - **Scope (2026-11-05, ebilling 114b asked): a Return is outside the release filter.** Returned to Firm is terminal (`InvoiceLifecycleService` ~:105); the review ends and no hold can be lifted later, so nothing would ever close a left-open Signal. As with an automatic rejection (ebilling D-122), the Return's record resolves every open Signal on the invoice, closed Acted, the shared SubmissionIntegrity Signal included. The filter applies only to decisions after which the invoice stays in review (Override). Review detail on Return follows D-205 (moving out of In Review recomputes it in the same transaction). 114b's order fix (authorise over the unfiltered set, then filter) accepted: stricter, fails closed.
+- **095d-2 rulings (2026-11-05, ebilling brief `095d2-brief.md` §4 at `ac9bcad04a`).**
+  - **Q1, the record id on the ConditionCleared close: link it with `SignalWriter.LinkConditionClearedRecordAsync` (D-145b extended to this one Decide-lane close).** Conditions:
+    - link only when the re-run started by the assign-firm decision is the run that finds no reason left, so the Set firm cleared the last one; a Signal that survives and is cleared later by another path is not linked to the assign-firm record;
+    - `resolvedBy` = the assign-firm decider (as D-145b names the person whose change satisfied the item), and `expectedPriorRecordId` = null;
+    - the record's `ResolvedSignalIds` stays empty (D-201 amendment), so the link is the Signal pointing to the record, never the record claiming the Signal;
+    - the method's doc comment changes from "Do-lane" to name both uses, and the writer test covers a Decide-lane link plus its ForeignLink and NotApplicable outcomes.
+    - Not a log line only (the closed sets would show no decision), not a new writer parameter.
+  - **Q2, "the same Signal stays open with its title recomputed" is withdrawn.** It assumed the writer could rewrite an open row's title; it refreshes only `sprk_lastevaluated` (`SignalWriter.cs` ~:340-352). A changed reason set closes the Signal Superseded (record-free, R16) and opens episode n+1, as ontology's own version change and ebilling 101's corrections re-evaluation do. Conditions:
+    - supersede only when the reason set actually changed, never on every run;
+    - the new episode starts its own first-detected date (the Worklist age restarts; accepted);
+    - a stored Override or Return set that names the superseded Signal is never a failure (`HumanDecisionSignalClose` ~:104), so a retry does not loop on 503. Which outcome follows the commit route's rule (`SignalWriter.CloseActedByDecisionAsync`): a Superseded close made BEFORE the stored set was read is `LeftAsIs`; a record-free Superseded close made at or after that read is re-closed Acted with the decision's record, so the Signal and the record agree (text aligned to the writer 2026-11-06, ebilling 095d-2b-2; both cases pinned by ebilling's tests);
+    - the 114b filter matches on policy + subject and so carries over to the new episode.
+  - **ebilling EB-D-185, EB-D-186, EB-D-187 (owner 2026-11-05, relayed by ebilling; first relayed as D-148/149/150, renumbered by ebilling for an ID clash; ontology notes, no change to the rulings above).**
+    - **EB-D-185, no substantive invoice decision without a firm.** While an invoice has no firm, is held for its firm, or its post-Set-firm re-run is pending, line decisions (single and batch), every Override and approve refuse 409 and write nothing (`ebilling.line_decision.firm_missing`, `ebilling.override.firm_missing`, `ebilling.approve.firm_missing`). Return stays open. Slice 095d-0. **Amended by EB-D-190 (owner 2026-11-05, relayed; ebilling `92d0421725`):** a whole-invoice Reject is refused the same way (409, nothing written); only Return and Set firm stay available.
+      - The 114b no-firm Override case can no longer occur; the D-201 filter stays (two linked submissions and other Procedure Signals still need it). Ontology asks that 114b's firm_missing test now assert the 409 with no Decision Record written and no Signal closed, rather than be deleted.
+      - DI-139 (c): for such an invoice the modal's only useful actions are Set firm (or Open Invoice Review) and Return.
+    - **EB-D-186 (reopened 2026-11-05: 095d-2a found stored rows lack AI-read facts; owner chooses A store at intake or C re-read on Set firm):** the re-run does not re-read the document; the rules re-run and lines whose code set changes are re-coded. A line Signal whose reason set changes follows Q2 (Superseded + episode n+1).
+    - **EB-D-187:** a new hold or a would-be auto-reject holds the invoice for review; `rulesRerun` is `pending` or `completed`. A Signal it raises goes through `SignalWriter` like any other (D-13 key, D-12 lifecycle).
+    - **EB-D-188, Add line (owner 2026-11-05, relayed):** a reviewer-added line through a BFF route from Invoice Review, only In Review with a firm; rules and coding run on it; a reason is required; a Decision Record names who added it and why (no Signal resolved, so `ResolvedSignalIds` empty). A rule Signal it raises goes through `SignalWriter` with the D-13 key. Ontology asks: invoice-level rules that read totals re-run too; the line is written by the app identity (lines stay read-only to person roles, D-90); EB-D-186 option C would feed the Q2 supersede path. **ebilling confirmed all three 2026-11-05** as binding acceptance criteria for the Add line slice (unchanged reason set: only `sprk_lastevaluated` refreshes). **Task 164 answers (2026-11-06):** Q3 new billing code `add-line` OK (Tier2b, Judgement, Reversible, RecordOfTruthImpact, subject = the new line): added to the `DecisionRecordWriter` line literal (~:1256) and `Billing_C2` in one commit; `BillingActions` only, the commit route refuses it (test); line creation idempotent on the decision id so a retry returns the first line and record (test); no Excludes. Q7: no unused pure function for the hold-clear link; R1 Add line cannot clear the last hold reason (EB-D-185/190), so a must-not-fire test instead, with O3 triggered if a later path can clear a hold. EB-D-192 noted (approved = billed + accepted added lines − adjustments; reviewer-typed codes; firm sees the line after the decision).
+
+## D-202 — Record-rule policy code: `BRR-{recordRulePolicyId:N}` (ontology position, 2026-11-03)
+
+- **Context:** ebilling 089 creates record rules (EB-D-148; component model §3 "record rule"). A record rule is its own `sprk_policy`, so its code starts a new D-13 key (`{policycode}|{type}|{id}|{episode}`). ebilling suggested `{baseCode}-R-{first 8 hex of the record id}`.
+- **Facts (dev, 2026-11-03):** `sprk_policy.sprk_policycode` and `sprk_signal.sprk_policycode` are both 50 characters, and SignalWriter refuses longer codes (`PolicyCodeTooLong`). `sprk_signal.sprk_dedupekey` is 400. The alternate key `sprk_policycodekey` on `sprk_policy.sprk_policycode` is Active and in SpaarkeMaster `Entity.xml`. Base billing codes are `BRD-{ruleSetId:N}-{nnn}` (RuleSetService.DraftCodePrefix), which is 40 characters.
+- **Position:** a record rule's code is **`BRR-` + the record-rule policy's own id in 32-hex `N` form**: 36 characters, uppercase prefix, lowercase hex. The policy id is deterministic, `IdOf("ebilling-record-rule-{recordRuleSetId:D}-{basePolicyId:D}")`, so a retry produces the same id and code.
+  - **Not derived from the base code:** `{40-char base}-R-{8 hex}` is 51 characters, over the limit.
+  - **Not truncated:** 8 hex characters is 32 bits, and a collision would be a hard refusal.
+  - **The link to the base rule** is `sprk_basedonversion`, not the code.
+- **Uniqueness:** Dataverse enforces it through `sprk_policycodekey`, across all domains and inactive rows. When a create hits the duplicate key, the writer reads the existing row. It is a retry only when that row's rule set and `sprk_basedonversion` policy match; otherwise refuse. A record rule removed and then needed again reuses its policy (a new version or reactivation), never a second row.
+- **Catalogue:** none. The `sprk_policy` row is the catalogue entry (billing domain). The code is copied to `sprk_signal.sprk_policycode` by SignalWriter; it is not free text like `sprk_actioncode`.
+
+## D-203 — Resolver points D-177 leaves open: Follow-vs-Pin, a pin before its window, Superseded versions, the record rule's Exclude (ontology position, 2026-11-04)
+
+- **Context:** ebilling 082b (`ProcedureResolver`, `task/ebilling-082b` `0735a566e5..0e264aaa04`) asked before 082c wires it in. Binding text: D-177(1)–(3), (8); model v5.9 §6.2, §6.4–6.5, §7.1–7.2; D-175 (2) and F2-d.
+- **(1) Follow at one distance-1 parent and Pin at the other, choosing different versions for the date: a blocking `ConflictingParents` gap**, the same as two different pins. D-177(3) gives two distance-1 parents no precedence over each other (parent order is never precedence). The only tie-break the owner set is Exclude wins. Both rows are deliberate manual assignments, so letting the Pin win would be a new precedence rule. The gap is not a dead end: a distance-0 assignment on the record lifts it (nearer wins, §6.5), and an Override can release the invoice (v5.9 §15(iii)). "Different" means the two sources give different outcomes for the date: different versions, or one gives a version and the other none. When both give the same version there is no gap.
+- **(2) A work date before the pinned Procedure Version: the pin governs, using the earliest Published policy version under the pinned version (the resolver's choice).** It is neither (a) a gap nor (b) a fall-back to the unpinned choice. The model says a pinned version applies "whatever the date" (§6.2, §7.2 twice). (b) would let another version govern a record a person pinned. (a) would hold invoices the pin was meant to settle. **Order:** F2-d's applicability test comes first. Work dated before the Procedure's first Active version is "not applicable", pin or not, because a pin cannot make a Procedure reach work from before it existed. A pinned version that is Retired is still a gap (§7.1).
+- **(3) "In force" includes Superseded Procedure Versions: agreed.** It follows model §3.1: a Superseded version stays in force for its own window, and only its `to` date changed. It also follows F2-d, where a gap is a hole between versions. The §7.1 pseudo-code's "Active" would turn every older work date into a gap. A Retired (withdrawn) version stays excluded, so its window is a gap.
+- **(4) A record rule's Exclude of its base does not remove the base before the record rule's own effective-from: agreed.** It follows the owner's decision that a record rule applies only from its effective-from (relayed by ebilling `-c7`, 2026-11-04). It also follows D-175(2): no line is left judged by neither rule. That owner decision also closes ontology's deviation-4 point on 089c K1, where a record rule copied from v2 judged lines dated in v1's window. **Scope:** only the Exclude paired with a record rule is date-limited. A plain rule-level Exclude still removes the base on every date.
+- **Tests asked of 082b/082c:** Follow-vs-Pin gap in both parent orders; Follow and Pin agreeing → no gap; pin before window → earliest policy version of the pinned version; pin plus a date before the Procedure's first Active version → not applicable; Superseded in force for its window, Retired → gap; a record-rule Exclude before effective-from keeps the base (must-fire), and a plain Exclude removes it on an earlier date (must-not-fire).
+- **Added 2026-11-04 (three findings from ebilling's 082b adversarial review):**
+  - **(5) Retiring a Procedure's first or only version is a gap, not "before the first version": agreed.** I-P5 is the specific text: work in a withdrawn version's window "has no version in force, which is a gap". F2-d's "not applicable before" date is the earliest from-date over Active, Superseded and Retired versions. The "at least one Active version" applicability test must widen the same way; otherwise a Procedure whose only version is Retired drops out silently.
+    - **Must not fire:** retiring the whole Procedure is its normal end of life (I-P5: its policies are switched Off). Its work dates are not applicable, and they raise no gap.
+    - **A Draft retired without ever being Active must not count.** It never governed anything, and F2-d says a Draft-only Procedure is not Active. The preferred fix is for 081 to refuse retiring a never-Active version, so the case cannot arise. Failing that, it stays a fail-closed known limit, releasable by Override.
+  - **(6) A removed change that is made again: fits, as an "episode" rule, not "highest-numbered version only".** The removal ends the change for invoices checked from then on (§6.3), on every work date. The new change applies from its own effective-from (the owner's ruling). D-202 says the same policy is reused, so the policy's versions span several episodes.
+    - Only the versions published since the last removal count. Before the first of them, the base rule runs.
+    - **An edit inside one episode** adds a version with a later from-date (RuleSetService edit = in force from now). The earlier version still governs its own dates within that episode. Counting only the highest-numbered version would hand those dates back to the base rule while the change is still in place.
+    - Tests:
+      - removal then re-change → base rule before the new version's from-date;
+      - edit within one episode → v2 still applies on dates between v2 and v3.
+  - **(7) `sprk_enabled` is required but not sufficient: agreed.** Selection is still Published-under-the-date's-Procedure-Version (D-177(1)). A rule that a newer Procedure Version drops stays enabled (D-177(14)) and drops out by the second condition, so nothing may infer "dropped" from Off.
+    - The enabled filter is what switches off a record rule on removal (D-177(14)).
+    - It also stops a policy switched Off by a Procedure retire.
+    - It never decides version selection.
+- **Added 2026-11-04 (ebilling 082b fix round, `35eb5310ec`):**
+  - **(8) Episode boundary:** `createdon` of the current Exclude row is accepted, with three conditions:
+    - compare with ≥;
+    - add a same-second test, so a version written in the Exclude row's own transaction counts;
+    - add a source-scan guard that no writer sets `overriddencreatedon` on `sprk_policyversion` or `sprk_procedureassignment` (a backdated create would move the boundary).
+    - Residual known limit: a removal and a re-change of the same rule inside one second.
+    - A sturdier marker (a lookup from the Exclude row to the episode's first version) is a schema change and needs the owner, so it is not asked for in R1.
+  - **(9) A Draft retired without ever being Active (081 cannot refuse it; retire is the only discard).** Preferred fix, with no schema: a Retired Procedure Version counts toward the "not applicable before" date only if it has a Published policy version or a published rate card, because a version that was never Active has neither. If that proves unreliable, the fail-closed known limit stands, releasable by Override.
+  - **(10)** The model §7.1 sentence is ebilling's file. ebilling edits it, citing D-203(5a) and (9).
+  - Follow-vs-Pin where one side gives no version reports `ConflictingParents`, as (1) intended.
+- **Added 2026-11-04 (082b round 2, `a01b5b1d96` and `4029ae571a`):**
+  - **(11) Known limit, accepted:** a version published with zero Accepted rules and then retired opens no window. This is the only Active version without a Published policy version (081 `PublishVersionAsync`).
+    - It matters only at the leading edge. A hole between versions in force, or a date after an end with no successor, is still a gap.
+    - There it fails open on the hold alone. The version judged nothing while it was Active, so no rule is skipped.
+    - Telling it apart from a discarded Draft would need a schema marker, which is not asked for.
+  - The published-rate-card half of (9) waits for 085, where the resolver first reads rate cards (ebilling acceptance criterion).
+  - Model §7.1 text checked, with three wording fixes sent to ebilling:
+    - the pseudo-code still selects "the Active Procedure Version" (it should be Active or Superseded, per (3));
+    - the gap definition still says "between Active versions";
+    - "whether an Override may release it is open" is stale (§15(iii) answered it).
+
+## D-204 — Signals and Decision Records are created only by their ontology writers; generic creates of them are refused (ontology position, 2026-11-04)
+
+- **Rule:** `sprk_signal`, `sprk_decisionrecord` and `sprk_budgetrevision` are written only by their ontology writers. Every generic create path refuses the whole table, for the caller and the system principal, before anything is read or written (registry flag `CreatedOnlyByItsWriter`; the pattern of ebilling's `ServerWrittenInvoiceFamilyTables`).
+- **Why:** one server-side owner per invariant (CLAUDE.md §17); the rows are append-only evidence (D-2).
+- **Readers:** ontology readers list by the core pair (context) and the `sprk_regarding*` stamp (filing), never by typed `sprk_matter` (task 145, `notes/task-145-matter-readers.md`). If a legitimate generic creator is ever added, it must write the typed lineage column the way the writers do (`LineageColumnByCoreEntity`).
+- **Owner of the change:** field-mapping (task 042c); ontology and uac-r2 reviewed it. Review detail is kept out of this public file.
+
+## D-205 — ebilling 082c brief: ontology rulings on C1, decision (a), the C6 legacy precedence, ExpenseRule split, (b) and (d) (ontology position, 2026-11-04)
+
+- **Context:** ebilling `projects/ebilling-r1/notes/082c-brief.md` at `26fcfe7ba9`. Criteria only; no code yet. Ontology owner-reviews 082c-1.
+- **C1, accepted as a literal deviation.**
+  - Procedure sets go through the resolver. The legacy read keeps `sprk_procedure IS NULL` as a partition, because Procedure sets are written with ClientDefault or Firm scope.
+  - The MUST-DO's intent ("never skipped") holds: C2/C3 must-fire, C4 disjoint streams throw.
+  - The partition is removed with the legacy read at 075 copy-forward. Name it there.
+- **Decision (a): keep legacy sets loading beside the resolver.** Agreed. Dropping them would be a silent pass on every dev invoice.
+- **C6 for legacy sets: apply `PrecedenceOf` (limits replace, checklists add).** Do not keep the evaluator's "all replace" between legacy sets. The owner decided exactly this for firm vs client default (D-172 Q7, 2026-10-20: "for checklist types the general and specific items BOTH apply"; carried into the rank model by D-177(12)). Today's evaluator (:82-87, D-39 all-replace) never implemented it, so C6 closes that drift rather than making a new choice.
+  - Because it is stricter (possible new RequiredData / NonBillableActivity / ApprovedTimekeeper findings while the owner is in UAT), ebilling first counts the dev legacy sets where a Firm set and a ClientDefault set share an Additive precedence key.
+  - That count goes in the deploy notice. The owner hears about it before the deploy, not after.
+- **C6 ExpenseRule split: agreed.** A displaced version keeps its non-reimbursable code check (adds) and loses only its `ExpenseAmountOverCap` findings (cap replaces). "Per category" (D-172 round 3) has no key today: ExpenseRule has no category, and `maxAmountPerItem` caps every expense line. It becomes per category only if the owner's six-gap triage adds a per-code cap (gap "per-code cap", 22 findings).
+- **(b) A linked project with an empty pair: census as a rollout gate, no runtime fault. Agreed**, on two conditions:
+  - the census is re-runnable (a `-Verify` or the existing stamp/census report), not a one-off;
+  - a create-path test proves a new project under a matter always gets its pair, so the count cannot grow after rollout.
+- **(d) One gap finding code with a closed-map kind token: agreed.** An unmapped kind must throw at build time (like `RuleDomains.DomainOf`), never emit a blank or free-text token.
+- **Signal side (ontology's part of C11):** the ProcedureGap blocking finding maps under `BILL-SYSTEM-SUBMISSION`, so it joins the shared SubmissionIntegrity Signal per (policy, invoice) (D-201 amendment).
+  - A re-check that clears the gap re-maps the group: the title is recomputed, or the Signal closes `ConditionCleared` when no reason remains.
+  - A 114 Override release closes it through the billing decision path with a Decision Record.
+  - Add the `BillingFindingSignalMapper` order entry and a test that a gap plus firm_missing share one Signal and that clearing one keeps it open.
+- **Accepted as written:** C14 (the transient-fault ruling, D-203 follow-up), C21 (D-203(11)), C22 (082c reaches master only with ebilling 114), C11's "gap wins over a 073 rejection on SPA" (held, never passed, never auto-rejected on unchecked lines).
+- **D-204 follow-ups (2026-11-04/05, owner, relayed via field-mapping):** the same table-level refusal now also covers generic **updates and deletes** of the three tables, on every generic path (field-mapping 042c and 048; ontology reviewed both PASS). The decision path is unaffected: the writers use no generic path. Live on dev since `0f53e053bf`. uac-r2's secure-lineage change for these tables (master `909754869f`) passed ontology's gate on 2026-11-05. A new core type needs its catalog row and a code change before its Signals and Decision Records take part in secure lineage (uac-r2 K2). Review detail is kept out of this public file.
+- **082c-1 owner review (2026-11-04, `origin/task/ebilling-082c-1` at `a680dacf0d`; source diff read in full): PASS, with one change.**
+  - **Must change (Q1):** under Split (ExpenseRule), a higher-ranked valid version displaces a lower version's cap only when it **states a cap** (`MaxAmountPerItem` non-null).
+    - A codes-only higher version leaves the lower cap in force.
+    - The reasons: "limits replace" means a specific limit replaces the general one, and a type or part not covered at the specific level falls through (D-171(2), D-172 Q7 and round 3). Displacing a cap with no cap is fail-open.
+    - A deliberate "no cap here" is a rule-level Exclude (or a record rule in the base's slot), not precedence.
+    - Tests: a capless higher version keeps the lower cap (must-fire), and a capped higher version still displaces it.
+  - **Q2:** AiObservation is Additive (owner, D-172 round 3). D-205's list named only the types likely to raise rejections. Counting it on its own line in the overlap script is right.
+  - Accepted as built:
+    - the partition (C1), disjoint streams checked twice (C4), legacy ranks (C5);
+    - rank-only precedence with the valid-top rule (C6/C7), and C8 coverage by rank;
+    - one `RulesOn` per distinct date (C9), Duplicate priors from either stream (C10), the adjustment list without precedence;
+    - the 082c-1 interim throw on a gap (never a pass; removed by 082c-2), and `PrintMembers` on `BillingProcedureGap`.
+  - Dev legacy overlap count is 0 (dev has no rule sets), so no outcome changes on dev.
+- **082c-1 contract points from ebilling's adversarial pass (2026-11-04):**
+  - **C8 at a tie: covered only by a STRICTLY higher rank.** Ties all apply (model 7.3), so a refused tie-mate's limit is in force and was never run. C8 is amended to "a higher rank". This is fail-closed, because more lines are marked not checked.
+  - **K4, invoice date after a Procedure's end (option c, ontology's):**
+    - For each Procedure, the invoice subject keeps the invoice date for version choice (the 072 rule, unchanged when a version is in force).
+    - When that Procedure has no version on the invoice date (a gap or not applicable), the invoice subject takes that Procedure's version on the latest dated line's work date.
+    - The invoice-date result (gap → hold) stands only when that date has no version either, or there are no dated lines.
+    - Reason: F2-d (owner) holds only *work* dated after an end. The invoice date is not work, and a hold on every late invoice for in-window work would be a false hold.
+    - Rejected: (a), which holds those invoices; and (b), which moves every invoice-level version choice to the latest work date, a wider semantic change that would need the owner.
+    - Legacy selection is unchanged.
+  - The D-205 Additive list is completed with AiObservation (D-172 round 3).
+- **082c-2 `sprk_reviewdetail` lifecycle (ontology view, 2026-11-04, brief `cf3589b286`).** The schema needs the owner's go, which ebilling has asked for.
+  - **One writer, by derivation, not set/clear.** The value is a pure function of the invoice's open hold reasons, in a fixed priority:
+    - firm_missing first (Procedures cannot resolve without the firm);
+    - then procedures_unresolved;
+    - then ProcedureGap.
+  - Every path that changes a hold reason, or moves the invoice out of In Review, recomputes the value in its own transaction. Clearing one reason must never blank the value while another remains. The D-201 amendment makes this concrete: after Set firm the hold lifts only when the 095d-2 re-run clears every marker.
+  - **Writers:**
+    - the submission persister;
+    - the re-check that clears a gap or unresolved (082c-2, 101 correction re-evaluation, ebilling-r2's explicit re-check);
+    - the 095d-1 Set firm apply;
+    - the 095d-2 re-run (the SubmissionIntegrity group re-map);
+    - the 114 Override release;
+    - every exit from In Review, which sets blank: reject, return to firm, cancel, and Superseded by a correction, including the 089e chain close.
+  - Invariant check: non-blank ⇒ statuscode In Review, in the ArchTest-named writer list and the census or `-Verify`.
+- **082c-1 fix range re-check (2026-11-04, `a680dacf0d..6a12553fce`): PASS**, with one wording or state point.
+  - Accepted:
+    - Q1: `Displacing` requires a stated cap under Split;
+    - C8: strictly higher rank;
+    - K4 (c): the per-Procedure invoice fallback, and the invoice gap suppressed for fallback Procedures;
+    - F2: correction gaps compared per subject;
+    - record-rule codes print as "record rule".
+  - **Point:** the correction result with a new gap (`ebilling.correction.procedure_gap`) tells the user the correction "cannot be applied", but logs "saved, but … its rules were not re-run". One of the two is wrong. ebilling makes the text match the stored state and proves with a test that approval stays refused after this outcome (C12).
+- **082c-1 cleared (2026-11-04, `6a12553fce..88b16f8729`): PASS.**
+  - The correction text matches the saved state, and the approval-refused test closes C12.
+  - The rule (c) fallback is narrowed to hole, after-end and not-applicable, through one helper shared by the evaluator, the invoice-gap suppression and the adjustment list.
+  - A Follow-vs-Pin disagreement on the invoice date only is a known limit.
+  - ebilling merges 082c-1 into work and starts 082c-2.
+- **082 C19 chain close (2026-11-05; `origin/task/ebilling-082-c19` `52622ea05c..d4e755317f`; service, resolver and notes read): readings 1 and 2 confirmed, reading 3 changed.**
+  - **Test applied:** the close may close a base finding only on an invoice where the resolver, after the change, no longer runs that exact base rule.
+  - **(1) A d2 grandchild is not closed (D-172, direct association only).** Its chain never reaches the record, so the change does not decide the rule there. This corrects ontology's brief, which had asked for d2 to be closed.
+  - **(2) "Nearer" means the resolver's nearer rule-level row.** A child with only a Procedure-level Pin is closed. Version selection and rule-level override are separate axes, and the close matches the exact base policy row through the resolver's own `RuleOverrideDeciders` and `IsRuleOverrideFor`, so the two cannot drift. Ontology asked for a must-not-fire test: a child pinned to a version whose rule is a different policy row keeps that rule's findings. Making a Pin block rule-level overrides would be a resolver change, for the owner.
+  - **(3) d0 still closes when only the d1 read fails** (a fault, the bound of 100 children, or an unexpected row).
+    - The answer is then `closeComplete=false`, and the Warning names the child count.
+    - A d0 fault still closes nothing.
+    - All-or-nothing across d0 and d1 would turn the bound into a permanent regression from 089e, because nothing else closes Billing findings.
+  - Known limits accepted: a record rule without its Exclude, the record rule's date window, the pair fragment. The fix range for (3) and the test for (2) get a scoped re-check.
+  - **Owner ruling (2026-11-05, relayed by ebilling): the effective date wins in the Superseded close, at d0 and d1.** This was a pre-existing 089e finding.
+    - A base finding closes only when every line's date, as the evaluator determines it, is on or after the new record-rule version's `sprk_inforcefrom`. A line dated earlier, or with no determinable date, keeps the finding open.
+    - It is ontology's rule applied to dates and matches D-203(4).
+    - The re-check covers four points. The filter must use the evaluator's own per-line date and the same comparison as `RecordRuleVersionOn` (no one-day mismatch). It must say whether line-level findings are judged by the invoice or by their own line (either is acceptable). The "record rule's date window" known limit is retired.
+  - **C19 fix round 1 re-check (`d4e755317f..7c5b2c1739`): PASS.**
+    - **Dates.** A line's date is taken exactly as `BillingFactLoader` takes it; a Fee or Expense line with no date uses the invoice date, and adjustment lines are skipped.
+    - **Comparison.** `ProcedureResolution.InForceOn` is the one comparison, shared by the resolver and the close, and `sprk_inforcefrom` is one clock instant dated by its UTC day. Tests and seeds cover the in-force day.
+    - **Invoice-level filter.** The invoice's own date is part of the test, so a zero-line invoice is never closed by default.
+    - **Faults.** A fault on the record's own invoices closes nothing. A fault on the side of the records directly under it drops only their invoices; the answer is `closeComplete=false`, and the bound is logged at Warning.
+    - **Audit of each close: known limit, agreed.** A rule change is a configuration change, not a human resolution, so no Decision Record is owed under D-2.
+      - **Amended 2026-11-05: ontology withdrew the "version on the row" condition.** `SignalWriter.CloseAsync` writes only status, resolution and the dates. Every system close except a Do-lane ConditionCleared is record-free (D-145b), and ontology's own Superseded-on-version-change stores no successor either.
+      - The audit is joined from three places: the Signal (resolution and dates), the record-rule version row (`sprk_inforcefrom`, `sprk_basedonversion`) and the change's completion log (`c704a9f2dc`: AssignmentId, RecordRuleVersionId and ClosedSignalIds; ontology asked for the ID list to be bounded).
+      - **No Superseded link in 095d-2.** A successor link on `sprk_signal` would change the shared `SignalWriter` contract, so it needs an ontology design decision on request, not a billing task.
+    - Dev census: at most 4 direct children per parent.
+- **082c-2 review (2026-11-05; `origin/task/ebilling-082c-2` at `60fecb03e7`, base `c61f510080`): two fix-now findings, the rest PASS.**
+  - **F1: Set firm blanks the review detail while the firm hold still refuses approval.**
+    - The Set firm writer derives from the Procedure reasons only. The apply keeps the stored `pipelineFindings[].reasonCode = firm_missing` marker, so `InvoiceFirmHold.IsHeld` stays true until 095d-2 (D-201 amendment).
+    - Its tests seed `{"code":"firm_missing"}`, a shape no reader reads.
+    - Fix: one shared open-hold helper (firm plus Procedure reasons, as the supersede undo already does) used by every writer and by approval. Re-test with fixtures in the production shape.
+  - **F2 (§0.3): the gap headline "No procedure associated with this invoice" asserts the opposite of the predicate.** A gap means a Procedure is associated but no version is in force on a work date. The headline must say only what the resolver found.
+  - **PASS:**
+    - one SubmissionIntegrity Signal for a gap plus firm_missing, retitled on a partial clear; the mapper order matches the review-detail priority;
+    - the gap-kind and cause maps are closed, every enum value is covered, and an unmapped one throws;
+    - the writers that blank on exit and the supersede undo.
+  - **Known limits accepted:**
+    - The census is re-runnable and the reconciliation pass counts it every run. It can still grow (a subgrid "Add existing", a refused filing), so it is run before each rollout.
+    - The review-detail label is a derived display value, not a hold: the next writer re-derives it and approval never reads it. -Verify does not check the value inside In Review (known limit, agreed).
+  - **Fix round 3 re-check (2026-11-05; `7a955cc983..0999003007`): F1 and F2 PASS. ebilling's own adversarial pass on the range is still running.**
+    - F1 helper: `InvoiceOpenHolds.ReasonsOf` / `ReasonsAsync` unite the firm hold (no firm, the invoice's own hold, a stored reason, or a `pipelineFindings` marker on ANY linked submission) with the Procedure reasons. The invoice's own hold is read app-only.
+    - F1 callers:
+      - Set firm derives from the state the write leaves: firm set, own hold cleared, the stored reason and the rewritten findings, plus the invoice's other linked submissions.
+      - The undo calls `ReasonsAsync`.
+      - The XML doc names the helper as the only derivation for future writers (re-check, 095d-2, 114).
+    - Approval is not routed through the helper (three codes, two DTO members). The agreement pin `InvoiceOpenHoldsTests` covers 8 stored states over the real `ApprovalWorld`. In each, the helper's detail and held answer equal approval's outcome and the GET's `Held || FirmNeeded`. Ontology accepts the pin in place of shared routing.
+    - Fixtures: production `pipelineFindings[].reasonCode`, including `ApprovalWorld.HoldForFirm`'s default.
+      - Must fire: after Set firm the detail is WaitingForFirm and approval refuses with FirmMissing.
+      - Must not fire: with the markers cleared the detail is blank, gap or unresolved.
+      - Another linked submission's hold is read.
+      - Seed proofs are listed.
+    - Unreadable findings give 659490001, never blank. Approval refuses that state with the firm code (095c-4 checks the firm first), so label and code name different reasons but agree that it is held. Accepted: the label is honest, since nothing readable names the firm.
+    - F2: the headline is "No billing terms in force for some work dates"; no copy of the old string remains in `src/` or `tests/`.
+    - The K note is in ebilling's `082-procedure-resolver.md`.
+    - Not reviewed by ontology (uac-r2 owns them): U1–U3, and P0 `9ad335b8f3`.
+
+## D-206 — Dataverse auditing on every Spaarke table and substantive column (owner, 2026-11-05)
+
+- **Owner (this session):** "track changes / auditing needs to be on for every table and every substantive decision related field"; exclusions only where they would not help find an issue and why, especially an invoice issue.
+- **Dev before (read 2026-11-06 ~01:45Z):** org audit on, user-access audit on, retention forever. 161 `sprk_` tables: 22 N:N intersect, 48 audited, 91 not; 570 changeable columns off (incl. 17 on `sprk_signal`, 20 on `sprk_decisionrecord`, 3 on `sprk_budgetrevision`, 18 on `sprk_invoice`, 15 on `sprk_billingevent`, 11 on `sprk_invoicesubmission`).
+- **Scope applied on dev (from 03:00Z):** 89 tables and 510 columns turned on; entity-scoped PublishXml in batches of 10.
+  - **Excluded:** `sprk_aichatmessage`, `sprk_aichatsummary` (Assistant conversations, no invoice or decision data); N:N intersect tables (not separately auditable; associate/disassociate is audited on the parents).
+  - **Not excluded:** job/run/outbox tables (they record invoice AI runs and emails); `sprk_signal.sprk_lastevaluated`; no churn exclusion (no lease/heartbeat tables in Dataverse; 24 h churn low).
+  - **Field-secured columns untouched** (102; 59 off stay off, 43 on stay on) pending the owner: uac-r2 and ebilling ask `sprk_invoicesubmission.sprk_findingsjson` column auditing OFF (EB-D-189 will put timekeeper names and AI-quoted text there; audit keeps every past copy), `sprk_invoice.sprk_firmhold` only once field-profile masking is shown. Facts: both columns and both tables are already audited on dev; no Spaarke role holds `prvReadRecordAuditHistory`/`prvReadAuditSummary` (only System Administrator and Microsoft service roles), so audit history shows secured values to no one who cannot already read them; masking cannot be tested until a non-admin role gets audit history. **Owner ruled 2026-11-06 (in uac-r2's session, relayed): `sprk_findingsjson` stays audited, no purge.** Rule (uac-r2 decisions.md): change history stays System Administrator only; before any non-admin role gets `prvReadRecordAuditHistory` or `prvReadAuditSummary`, test field-security masking in audit history. **Owner 2026-11-06 (this session): the 59 secured columns still off are audited too** ("yes change history audit should be tracked for these"); the 03:00Z dev pass covers 89 tables and 569 columns.
+- **Solution:** SpaarkeMaster `Entity.xml` mirrors dev in its own PR, listing the exceptions; customer-provisioning H6 already sets org `isauditenabled` and retention forever (`isuseraccessauditenabled` proposed to the owner by customer-provisioning).
+- **Rule for new columns:** create with `IsAuditEnabled` = true (ebilling `95590650bd`).
+
+## D-207 — Billing Work Items: decided only in Invoice Review; the Console opens it and adds an Invoice decisions card (owner, 2026-11-06; ebilling EB-D-194, relayed)
+
+- **Owner (in ebilling's session, relayed):** one owner per decision, never both surfaces. Invoice review and approval decisions (line accept/reduce/disallow, Add line, Override, approve, Reject, Return, Set firm, corrections) are made ONLY in the Invoice Review page; budget and spend decisions ONLY in the Console's Decisions. Both write the same Decision Records. Billing Work Items stay in the Worklist (owner, this session, 2026-11-05) and open the Invoice Review page as a pop-up on their invoice (`lineId` optional; the Worklist refreshes on close; no postMessage). The Console Decision modal does not rebuild billing actions. New: a Console **Invoice decisions** filter card. Resolves DI-139 / #2572 (option (a) as a pop-up; options 1-3 withdrawn).
+- **Facts:** dev has 40 open billing Work Items (35 invoice-line, 5 invoice, Decide lane). Person roles hold only Read on `sprk_billingevent` (D-90, by design), so the Console's rights probe would answer a misleading 403; no role change. `WorklistItem` carries no subject type or invoice id, so the route must supply them.
+- **Ontology scope (two tasks):**
+  1. **BFF:** (a) `POST /api/v1/signals/{id}/decision` refuses a Signal whose subject is `sprk_invoice` or `sprk_billingevent` with one distinct code before any read-for-write or write (replaces today's 403 `SubjectWriteMissing` for these); (b) `GET /api/v1/signals/worklist` adds an `invoiceReview` member (`invoiceId`, optional `lineId`) to billing items, a line resolved to its parent invoice in one batched read; nothing else changes for other items.
+  2. **Console (shared Worklist + host):** the Decide lane's cards gain **Invoice decisions** (items with `invoiceReview`), after All; the work-type buckets exclude those items so the counts still sum (W-8). Activating such an item opens `sprk_invoicereviewpage` as a dialog (`Xrm.Navigation.navigateTo`, `data=invoiceId%3D…%26lineId%3D…`) and refreshes on close; it never opens the Decision wizard. Reuse `MetricCard`/`MetricCardRow` and the existing lane filter (D-24); no new card component. Ships after ebilling deploys the page to dev (ebilling 112); 1(a) can ship before.
+
+## D-208 — "Finding" is the user word for a billing Work Item (owner, 2026-11-06)
+
+- **Owner (this session, 2026-11-06):** "yes 'Finding' is acceptable", answering whether ebilling's word may name a billing Work Item for users.
+- **Meaning:** a **Finding** is a Work Item produced by an invoice review about an invoice or an invoice line (subject `sprk_invoice` / `sprk_billingevent`). It is a qualified name, not a new layer: still one Work Item per open Signal, decided only in Invoice Review (D-207), and its decision writes a Decision Record.
+- **Where:** Invoice Review, billing contexts in the Console (the Invoice decisions card keeps its owner-chosen label) and Copilot's billing link-outs. Everywhere else, and generically, the row is a **Work Item**.
+- **Not:** an entity or code name (same rule as Work Item, §3.1). The pipeline's stored results (`pipelineFindings`, `sprk_findingsjson`) are the engineering source of a Finding.
+- **Recorded in** `ontology-component-model.md` §3. Told ebilling and spaarkeai-mcp-bff-api-r1.
+
+## D-209 — Playbook: one concept, several formats (owner, 2026-11-06; relayed from spaarke-legal-ai-accelerator-r1)
+
+- **Owner (relayed):** a JPS playbook and a Copilot/Microsoft legal playbook are "conceptually the same; the difference is in the format, which is not differentiating in their purpose to our solution."
+- **Concept:** the artifact that describes how a legal procedure or protocol is carried out (positions, steps, model wording, fallbacks, escalation); not limited to contracts or document review.
+- **Formats:** JPS playbook (`sprk_analysisplaybook`, JSON, executed) · legal playbook (Markdown master, read by Copilot/Cowork Agent Skills) · contract-review playbook (Microsoft's four-column subtype).
+- **Writing rule:** qualify by format where the format matters. **Changed text:** the §3 Internal Standard row no longer says a reviewer's handbook is "not a JPS AI playbook". **Unchanged:** §4.11 (a Policy is a predicate, never a playbook's control flow); a one-line note says that section means the JPS format.
+- **Recorded in** `ontology-component-model.md` §3. Told legal-ai-accelerator and spaarkeai-mcp-bff-api-r1.
+
+## D-210 — The Signal core-record pair is not field-secured (owner, 2026-11-06; relayed from field-mapping-server-write-path-r1)
+
+- **Ruling (relayed):** `sprk_signal.sprk_corerecordtype` and `sprk_corerecordid` get no field security. Readability of a Signal stays decided by the core record's own row security.
+- **Write integrity** of the pair (the 042c rule: a half pair is never written on any path) rests on role privileges, the writers' server-side refusal, column auditing (D-206) and field-mapping 052's report, which also flags a pair changed after create.
+- **Readers:** Signal access fails closed whenever the server cannot confirm the pair (field-mapping 044 fix round, reviewed by ontology and uac-r2).
+- **Recorded in** this file. Told field-mapping and uac-r2. Detail of the review is kept out of this public file.
+
+## D-211 — Reviewer-added invoice lines count toward budget spend (owner, 2026-11-07; ebilling EB-D-205, relayed)
+
+- **Ruling (relayed):** the derived spend and budget Thresholds read the invoice approved total (ebilling-r1 D-130), and that total now includes reviewer-added lines (EB-D-199/EB-D-205). An added line counts its amount while undecided or Accepted, its approved amount when Reduced, and nothing when Disallowed. Pending spend moves when a line is added; counted spend moves once the invoice is in a counted status.
+- **Code:** no evaluator change. `FinanceBaseValues` doc comments updated by ebilling (164a, with ontology's OK). Reviewed by ontology (164a: no F findings).
+
+## D-212 — Work Item privilege flag is derived from communication classification (owner, 2026-11-08; relayed from spaarkeai-mcp-bff-api-r1)
+
+- **Ruling (relayed), FR-04 "option A widened":** a Work Item is privilege-flagged when its subject (when the subject is a communication) or any witness or evidence communication has `sprk_privilegeclassification` Privileged or Potentially Privileged. The read is made as the caller and fails closed: unreadable, faulted or uninterpretable sources flag the item. None or null does not flag. `sprk_signal.sprk_privilegeflagged` is not a source (DI-64). Privilege still never gates a read (2026-07-16).
+- **Code:** mcp-bff task 018, `Services/Signals/WorkItemPrivilege.cs` (`SourcesOf`, `FlaggedAsync`). Reviewed by ontology: no F findings.
+- **Ontology follow-up:** DI-143 (#2630) reuses that helper for the Decision Record snapshot once 018 is on master.
+- **Known limits accepted with the ruling:** the AI's own flag (stored in association provenance) is not a source; field security on the classification column would read as not flagged; an untyped non-communication subject is over-flagged.
+
+## D-213 — A published rate card is not evidence that its Procedure Version opened a window (ontology ruling, 2026-11-08; ebilling 085)
+
+- **Ruling (ontology, on D-203 (5a)/(9)):** a Retired Procedure Version opened a window only when it has a Published policy version (as before). Rate cards are not evidence: import accepts only a Draft version and card publish does not check version status, so a card can be Published under a version that was never published. ebilling's 085 fix-1 rule (F1-b, "Retired + Published card = opened") is withdrawn, in both the resolver and the scope lock.
+- **Known limit (extended):** a rate-card-only version that was in force and then Retired without a successor reads as never opened (work in its window is not applicable). Proper fix, offered to ebilling as a follow-up on its own table (schema, owner approval): stamp the version at publish and test that stamp.
+- **Rejected:** making card publish wait for version publish (an in-force window with no approved rate; existing data stays ambiguous); publishing cards inside version publish (a half-done follow-on step).
+
+## D-214 — A decision on a worklist row may close the row's other items through add-on options (owner, 2026-11-08)
+
+- **Owner confirmation:** while testing Create budget on a matter, the owner also closed that row's other open items (including 17 billing "Submission integrity" items) through the decision panel's add-on option, and called it "a good feature; no changes necessary". No change to the commit route's row-level resolution.
+- **Note:** D-207 (held PRs #2580/#2579) still moves billing items out of the Console decision route into Invoice Review once ebilling 112 is on dev; until then a row decision can close billing items with the row.
+
+## D-215 — Gate Decision Records of Direct messages follow the message's participants (owner, 2026-11-09, asked directly; uac-r2 task 198 Part E)
+
+- **Context:** the owner approved Direct 1:1 messages being owned by a dedicated Direct-message owner team (fm 054a) and ruled that participants keep their message shares after filing (except secure targets, and Restricted targets for external users). Under D-169 as built, a team-owned message's gate Decision Records got no participant share, and filing revoked every share.
+- **Ruling (1):** a gate Decision Record of a message owned by the Direct-message owner team is shared Read with the message's internal participants who can read the message now. It is never more visible than its message; an unknown or unreadable case grants nothing. Every other team-owned communication keeps D-169's behaviour.
+- **Ruling (2), amends D-169 for Direct messages only:** on filing to an ordinary record the record is re-owned to the record's team as before and keeps Read for those participants (recomputed, not carried over). A secure target stays with the Secure mirror. External users never get a Decision Record share (D-169 internal only).
+- **Added with uac-r2 (ontology agreed):** unfiling a message back to Direct re-owns its gate Decision Records to the Direct-message owner team, recomputes the participant shares and revokes every other share, so the record team keeps no access the message no longer gives.
+- **Revoke side:** no path removes an internal participant's Read on a Direct message (uac-r2, 198 design), so no revoke-side mirror is built. If uac-r2's rework adds one, it adds the mirror.
+- **Implementation:** uac-r2 (198 Part E) edits `Services/Signals/GateDecisionRecordSharing.cs` after fm 054a's recipient column lands; ontology reviews the diff, plus one independent review, before merge. D-123's secure wall is unchanged.
+
+## D-216 — The budget inquiry email is filed under both the inquiry and the matter, and archived as a Document (owner, 2026-11-09, asked directly; UAT of 161 on REAL-2026-123456.02)
+
+- **Finding (owner UAT):** Revise budget worked; the inquiry email was sent and the `sprk_servicerequest` was created under the matter. But the `sprk_communication` has only `sprk_regardingservicerequest` set (`sprk_regardingmatter` empty), so it does not show on the matter, and no .eml Document was archived. Cause: `BudgetInquiryExecutor.Build` puts the service request first, `CommunicationService.MapAssociationFieldsAsync` maps only `associations[0]`, and the executor never sets `ArchiveToSpe` (default false; the email composer defaults it to true).
+- **Ruling:** the inquiry email is filed under BOTH the inquiry (service request) and the matter, and the sent email is archived as an .eml Document like a composer send. Chosen over "matter only" (which would move reply linking to the matter).
+- **Implementation (to come, ours):** the matter association also sets its own lookup at create, before the core-ancestor stamp so the inherited Access Permission takes both parents in; opt-in for this sender only; `ArchiveToSpe = true`. Access questions (two core lookups on one communication; external visibility through the matter; a secure matter) go to uac-r2 before the build. Regression test plus an independent review; dev deploy needs the owner's go.
+- **Internal-only (owner, 2026-11-10, relayed by uac-r2, then confirmed directly in this session: "Budget inquiry are internal only"):** "Budget inquiry can be internal only" (option a). The inquiry email and the replies resolved to an inquiry service request are created with `sprk_isinternalonly = true` in the same create, so filing them under the matter does not make them visible to the matter's external grantees. Scope stays inquiry service requests only (anything wider goes back to uac-r2 and the owner). The matter is read from the service request presence-aware and fails closed (absent, unread or faulted read: fail or retry, never service-request-only); an explicit null stays as today. The email joins the matter's thread at send (the thread sweep skips rows with two typed lookups).
+
+## D-217 — Every outgoing email filed to a record is saved as an .eml Document and shows in that record's Messages (owner, 2026-11-10, asked directly; UAT of 176)
+
+- **Owner ruling:** "emails (which are communication records) should be saved as Documents (as .eml) AND show in the Messages". Scope is the `sprk_communication` table, never the out-of-the-box Dataverse `email` activity.
+- **Finding (dev, 2026-11-10):** archival is opt-in per request (`SendCommunicationRequest.ArchiveToSpe`, default false). Only the email composer (default on) and the budget inquiry (176) ask, so no outgoing email has been archived since 2026-11-03: Assign Task notices, decision messages, Messages replies, AI disposition, AP export, the Outlook add-in and registration emails never are. No archival error was logged. Separately, a record's Messages list (`GET /api/communications/by-regarding`, `CommunicationThreadReadService.ReadByRegardingAsync`) finds messages only through threads ANCHORED to the record; a thread carries one anchor, so an email filed under two records (the budget inquiry: inquiry + matter) shows only under its anchor. 176 met "filed under both" on the email row but not in the matter's Messages.
+- **Ruling (implementation, task 177):** (1) The BFF owns the archive rule (ADR-002: one server-side owner): every outgoing send that creates a `sprk_communication` filed to at least one regarding record is archived as an .eml, whatever the request flag says. The sender account's `ArchiveOutgoingOptIn` admin switch is kept. Record-less sends (registration, mailbox verification) keep the opt-in flag. (2) A record's Messages list also shows messages whose OWN typed regarding lookup is that record, grouped under their thread, even when the thread is anchored elsewhere; only those messages, not the rest of that thread. Same impersonation, Open-only rule for external callers and access filter as today.
+- **Accepted consequence:** each archived .eml queues document analysis, so Assign Task notices also add a Document and an analysis run on their matter (the owner was told; ask again if this proves noisy).
+
+## D-218 — The outgoing .eml is linked to its record, so it shows in that record's Documents (owner, 2026-11-10, asked directly; follows D-217)
+
+- **Owner ruling:** "Yes, link it". The question was whether the .eml saved for an outgoing email should be linked to its record so it appears in that record's Documents, not only through its email.
+- **Finding:** task 177's archive (`ArchiveToSpeAsync`) sets only `sprk_relatedcommunication`, so the .eml never shows in a record's Documents. The implementer stopped there (uac-r2 condition C3: link only through an existing shared path). That shared path is `Spaarke.Dataverse.DocumentAssociationMap.TryApply(CreateDocumentRequest, …)`, used by the Outlook add-in save (`OfficeDocumentPersistence`) and the upload finalizer. It stages ONE association per create, on the same direct columns the add-in writes (matter, project, invoice, work assignment, event, To Do, contact).
+- **Ruling (task 177, part A3):** the outgoing .eml is created with one record link through `DocumentAssociationMap.TryApply`, chosen from the communication as written: its primary regarding when that type has a document column, otherwise the first typed regarding lookup that has one (so the budget inquiry's .eml, filed to a service request and a matter, links to the matter). The link is written in the same create as `sprk_relatedcommunication` (uac-r2 C1). The container, owner and the one-document-per-email rule are unchanged. A communication filed only to a type with no document column (for example a service request alone) keeps today's behaviour: no record link, still reachable through its email. The inbound archive is unchanged.
+- **Implementation path (uac-r2, 2026-11-10, Option A):** the archive writes a raw `sprk_document` (generic create), which `TryApply(CreateDocumentRequest…)` cannot reach, and no shared path gives a document an inherited Access Permission at create (task 189 fence). So: a narrow raw-row companion of `DocumentAssociationMap` stages the link (the map alone chooses field and target); the inherited Access Permission follows immediately after the create through `CoreAncestorRestamper.RefreshInheritedAccessPermissionAsync` (as `RecordCreationService` does); a failed restamp is logged and repaired by `ChildAccessPermissionReconciler`, never failing the archive. The link lives inside `ArchiveToSpeAsync`, so on-demand re-archive of an outgoing email links too (outbound only). Owner unchanged (task 146 content owner).

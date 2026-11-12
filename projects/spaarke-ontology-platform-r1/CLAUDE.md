@@ -39,7 +39,10 @@ grouping Work Items** (D-34/D-36) — "row" is layout, not vocabulary. **"Flag" 
 - One Decision Record per human resolution, written **last** by the single BFF commit route (FR-18, D-17); append-only
   **by privilege** — no human or Spaarke role may Write/Delete it (verify with the union-of-roles check, NFR-11).
 - Signals and Decision Records group under the **core record** via `CoreAncestorResolver` — never a parallel
-  derivation; the model stays **extensible** to new core types without code changes (D-34, D-36, D-37).
+  derivation; grouping stays **extensible** to new core types without code changes (D-34, D-36, D-37). Exception
+  (D-204, 2026-11-04): secure lineage reads the core pair against a **closed** core-table set, so a new core type
+  needs its catalog row **and** a code change to that set. Until then its Signals are held: visible, never
+  suppression-stamped, shares narrow only.
 - Signals/Decision Records on **Secure** records are secure children (D-33, task 039); no-core items are owner-only
   (D-35, D-39); **no skips** (D-38). Signals are read only through the BFF read route (FR-24).
 - Dedupe key is **episode-scoped**; re-raise rules per D-13/D-32; suppression 3 dismissals / 30 days per (policy,
@@ -162,6 +165,10 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
   live seam tests run with `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`.
 
 ## 6. Gotchas — do not re-learn
+- **(2026-11-09) Dataverse MCP `read_query` returns datetimes in LOCAL time (UTC-5), unlabelled.** A Signal shown `21:30:03` was raised by the 02:30Z nightly. Add 5 h before comparing with App Insights or calling a time "Z". For telemetry older than today use Log Analytics `spe-logs-dev-67e2xz` (`AppRequests`/`AppDependencies`, sampled at 25%), not the App Insights query.
+- **(2026-11-04) Commits in this worktree:** lint-staged needs prettier on PATH: `export PATH="/c/code_files/spaarke-wt-spaarke-ontology-platform-r1/node_modules/.bin:$PATH"` (never a junction). Integration tests under `tests/integration/auth/**` compile into `tests/unit/Sprk.Bff.Api.Tests`; filter there. `ontology-script-tests` CI is pinned to Pester 5.7.1 (#2428).
+- **(2026-11-08) Public repo:** private access-control detail (core-pair/lineage mechanics, misuse steps, per-identity privilege tables, environment identity ids) never goes on any branch, issue or PR; pass it by message. Older occurrences: DI-145 #2639.
+- **(2026-11-08) Peers that moved to Claude Desktop require approvals typed in THEIR session** (ebilling's standing rule): an owner go relayed by us does not count there.
 - **(2026-10-23) Office add-in jest fails locally with `Cannot read properties of null (reading 'useContext')` when `src/client/shared/Spaarke.UI.Components/node_modules` exists:** two copies of React load. CI never installs that package. Rename the folder temporarily, then run `npx jest <path>` from `src/client/office-addins` (word-add-in's method). `office-addins-tests.yml` does not watch `Spaarke.UI.Components/**`, so a shared EmailComposer change needs this local run.
 - **(2026-10-19) `IDX10214` / `IDX40001` errors in App Insights are noise, not failures.** The external SPA's once-a-minute `GET /api/v1/external/notifications` poll (and other `/api/v1/external/*` calls) presents a CIAM token; the `ExternalCollaboration` policy tries every scheme, so the default scheme logs IDX40001 (issuer) and WorkforceHome logs IDX10214 (audience) before the Ciam scheme accepts it (the requests return 200/204). Verified by R3 on 283466d40. Don't chase them when smoking a deploy; filter them out.
 - **(2026-10-16) PR CI into the docs branch does not run the full ArchTests suite; only the docs->master PR does.** #2031 was blocked by `InboundBodyDtoMappingGuardTests` (104 moved a response record next to a cache helper that takes it as a parameter). Lanes that touch the BFF run `dotnet test tests/Spaarke.ArchTests` (full, ~2 min) before pushing; the main session runs it before a docs->master PR.

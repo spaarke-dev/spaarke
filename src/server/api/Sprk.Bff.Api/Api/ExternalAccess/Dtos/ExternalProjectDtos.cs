@@ -26,12 +26,14 @@ public sealed class ExternalCollectionResponse<T>
     public bool Truncated { get; init; }
 
     /// <summary>
-    /// Whether the caller may create a child of this list's kind (a to-do; an event on a project) under the record the
-    /// list is scoped to: the answer that record's create route would give. Written ONLY for a caller whose access
-    /// Dataverse decides (<c>CallerPrincipal.DataverseConfirmsWrites</c>, unified-access-control-r2 task 036 fix round 1,
-    /// F4): their <c>/me</c> level reflects only what they may SEE, so the client asks the record instead. Omitted
-    /// (<c>null</c>) for every other caller and on every other list, so those responses are byte-for-byte what they were;
-    /// a client reads a missing field as "not said" and keeps its access-level rule. The route still decides every create.
+    /// Whether the caller may create a child of this list's kind (a to-do, an event, a message) under the record the list
+    /// is scoped to: the answer that record's create route would give (its workforce ceiling, then its Create check,
+    /// confirmed against Dataverse for a caller whose access Dataverse decides). First written by unified-access-control-r2
+    /// task 036 fix round 1 (F4) for Dataverse-decided callers only; since spaarke-SPA-external-access-platform-r4 task 002
+    /// (FR-06) the to-do, event and message lists of a project, matter or work assignment (and the message lists of an
+    /// invoice and a service request) write it for EVERY caller, because <c>/me</c> carries no per-record right on a matter
+    /// or work assignment. An unanswered Dataverse question is <c>false</c>. Omitted (<c>null</c>) on every other list.
+    /// A UI affordance only: the route still decides every create.
     /// </summary>
     [JsonPropertyName("canCreate")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -141,6 +143,15 @@ public sealed class ExternalDocumentDto
     /// </summary>
     [JsonPropertyName("hasFile")]
     public bool HasFile { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// Task 130-0 fix round 2 (K1): null means the links were not read, and the route hides the row (fail closed by type); a row with
+    /// no invoice link carries an empty list.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid>? InvoiceLinks { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +251,15 @@ public sealed class ExternalTodoDto
     /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// Task 130-0 fix round 2 (K1): null means the links were not read, and the route hides the row (fail closed by type); a row with
+    /// no invoice link carries an empty list.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid>? InvoiceLinks { get; init; }
 }
 
 /// <summary>
@@ -434,6 +454,15 @@ public sealed class ExternalEventDto
     /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
     [JsonPropertyName("_sprk_createdbycontact_value")]
     public string? SprkCreatedbycontactValue { get; init; }
+
+    /// <summary>
+    /// ebilling-r1 task 130-0 fix round 1: the invoices this row links to (<c>InvoiceLinks</c>), so the route can hide a row whose
+    /// invoice the caller may not see. Server-side only: internal and <see cref="JsonIgnoreAttribute"/>, never on the wire.
+    /// Task 130-0 fix round 2 (K1): null means the links were not read, and the route hides the row (fail closed by type); a row with
+    /// no invoice link carries an empty list.
+    /// </summary>
+    [JsonIgnore]
+    internal IReadOnlyList<Guid>? InvoiceLinks { get; init; }
 }
 
 public sealed class CreateExternalEventRequest

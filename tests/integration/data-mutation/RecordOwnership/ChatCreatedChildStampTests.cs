@@ -105,9 +105,11 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task ChatCreate_AStampedEvent_IsOwnedAsTodaysCoreOwnsIt_TheStampChangesNoOwner()
     {
-        // Correction item 4: the old chat create wrote no I-1 stamp into its item; step 10 adds it to the create BODY only, so
-        // the owner question (step 7, over the item) is unchanged. Task 017 (2d-5): the old core is deleted; its owner and
-        // creator are pinned (OwnedCreateEventUnderAnEvent), and it wrote NO stamp — the chat create through the service does.
+        // Correction item 4: the old chat create wrote no I-1 stamp into its item. Task 042b (FR-41, #2483): step 6½ now derives
+        // the stamp BEFORE the owner and step 7 asks over the item plus the derived root, under its own column; under an
+        // ORDINARY matter the event ranks above the matter in the lineage order, so the owner is still the filed-under event's
+        // team, as the old core gave it. Task 017 (2d-5): the old core is deleted; its owner and creator are pinned
+        // (OwnedCreateEventUnderAnEvent), and it wrote NO stamp — the chat create through the service does.
         var stamps = TheEventUnderTheRestrictedOrdinaryMatter();
 
         var viaChat = await Chat(ChatHandlerOver(stamps), "sprk_event", Lookup("sprk_regardingevent", "sprk_event", Event));
@@ -124,6 +126,79 @@ public sealed partial class SecureChildOwnershipAiToolTests
             "the caller's own bind (a mapped body value)");
         chats.Should().ContainKey("sprk_RegardingMatter@odata.bind")
             .WhoseValue.Should().Be($"/sprk_matters({OrdinaryMatter:D})", "the service writes the stamp the old core did not");
+    }
+
+    /// <summary>
+    /// Task 042b (FR-41, #2483 / DI-009): the chat twin of the route's A1. An event filed under a TEAM-OWNED event of the Secure
+    /// matter is owned by the Secure team at create, with the matter's sharee mirror, because step 7 asks over the event and
+    /// the root step 6½ derived (before 042b: the event's ordinary team, and no mirror until the reconciler moved it).
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_AnEventUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
+    {
+        var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
+
+        var result = await Chat(ChatHandlerOver(stamps), "sprk_event", Lookup("sprk_regardingevent", "sprk_event", Event));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam, "#2483 closed on the chat create too");
+        fields["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({SecureMatter:D})");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee sees the chat-created event at create");
+        _user.Posts.Should().BeEmpty("never created as the caller");
+    }
+
+    /// <summary>
+    /// Task 042b fix round 1 (F1 (a), owner decision A'): the chat twin of the route's sent-ordinary-stamp case. The chat item
+    /// names the team-owned event of the Secure matter AND an ordinary matter as its stamp; the restamp will replace the stamp
+    /// with the Secure matter, so step 7 asks over that and the event is owned by the Secure team, with the mirror at create.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_ASentOrdinaryStampUnderATeamOwnedEventOfASecureMatter_IsOwnedByTheSecureTeam_WithTheShareeMirrorAtCreate()
+    {
+        var stamps = TheTeamOwnedEventIsFiledUnderTheSecureMatter();
+        TheCreatedRowIsRestampedInTheShareWorldToo(stamps);
+
+        var result = await Chat(ChatHandlerOver(stamps), "sprk_event",
+            Lookup("sprk_regardingevent", "sprk_event", Event), Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var (_, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam, "step 7 asks over the stamp the row ends with (042b F1)");
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({OrdinaryMatter:D})",
+            "the bind is fill-only: the item's value is created as sent");
+        stamps.RowOf("sprk_event", id).GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(SecureMatter,
+            "step 12's restamp replaces it");
+        _shareTable.MaskOf("sprk_event", id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the Secure matter's sharee sees the chat-created event at create");
+        _user.Posts.Should().BeEmpty("never created as the caller");
+    }
+
+    /// <summary>
+    /// Task 042b fix round 2 (item 2): I-16 before the create follows the PLANNED root, not a stamp the caller sent that
+    /// disagrees. The event the new event is filed under is under the ordinary matter (Standard); the item also names the
+    /// Secure matter (Restricted) as its stamp, which the step-12 restamp replaces. Before the fix step 10 read the sent stamp
+    /// and set Restricted (the strongest of the two); now it reads the row as it ends and sets Standard.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_ASentStampThatDisagrees_DoesNotSetI16FromTheSentRoot_ButFromThePlannedOne()
+    {
+        TheEventIsFiledUnderTheOrdinaryMatter();
+        var stamps = new StampWorld().Row("sprk_matter", OrdinaryMatter).Row("sprk_matter", SecureMatter)
+            .Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)])
+            .Set("sprk_matter", OrdinaryMatter, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Standard))
+            .Set("sprk_matter", SecureMatter, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+
+        var result = await Chat(ChatHandlerOver(stamps), "sprk_event",
+            Lookup("sprk_regardingevent", "sprk_event", Event), Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Bind(fields, "sprk_RegardingMatter@odata.bind").Should().Be($"/sprk_matters({SecureMatter:D})",
+            "the bind is fill-only: the sent stamp is created as sent (the restamp replaces it)");
+        fields.Should().ContainKey(InheritedAccessPermission.Column).WhoseValue.Should().Be(InheritedAccessPermission.Standard,
+            "I-16 is read from the row as it ends (the ordinary matter), never from the sent Secure matter");
     }
 
     [Fact]
@@ -415,10 +490,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         public List<Guid> Sent { get; } = new();
 
-        public override Task<Guid?> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
+        public override Task<InquirySendResult> SendAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
         {
             Sent.Add(serviceRequestId);
-            return Task.FromResult<Guid?>(Guid.NewGuid());
+            return Task.FromResult(new InquirySendResult(Guid.NewGuid()));
         }
     }
 

@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191c" project="unified-access-control-r2">
+  <metadata>
+    <title>T191c: the External team share: grant every visible ordinary row to the External Collaborators team, withdraw it when hidden (#2179)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>blocked: 191b and 191d merged</gate>
+    <status>completed (PR open, not merged; writes ship off; turning them on is 191i)</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes POA shares on every lineage row and revokes flagged users' shares; security and tenant isolation.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Extends the share synchronizer and its jobs with a new principal, inline hooks and a reverse walk; fail-closed under partial reads.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SecureChildShareSynchronizer, the two reconciliation jobs, RecordOwnershipResolver and DirectMessageParticipantShares, which no other 191 task touches, but which 193 and 194 also edit; rebase on whichever merges first. Runs beside 191e, 191g and 191h.</parallel-reason>
+    <deps>191b, 191d</deps>
+    <tags>bff-api, security, access-control, tenant-isolation, dataverse, background-jobs, testing</tags>
+    <estimated-effort>4-5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add an External-team mode to the share synchronizer: share every lineage row that is not secure and that ExternalVisibility says is visible with the External Collaborators BU's default team (Read + AppendTo), withdraw it when the row becomes hidden or secure, filter every per-user writer by the predicate for flagged principals, and re-own rows flagged users own.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the UAC share synchronizer, the recent-changes reconciliation jobs and RecordOwnershipResolver.</role>
+  <goal>The team share is granted, revoked and swept by the existing jobs and inline hooks; per-user writers bar hidden rows for flagged users; flagged users never keep ownership of a lineage row; all writes sit behind a setting that is off by default.</goal>
+
+  <context>
+    <background>Design §3.4 (team share), §3.5 (secure records), §3.7 (transitions and windows), §3.8 (fail closed), §3.14 (migration), §4.1 (Q3 = Read + AppendTo, Q5 = whole environment, Q7 = re-own and customer-BU ownership).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs (external-team mode; flagged-principal filter in the secure mirror, :148/:161)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareReconciliationJob.cs (2-min host)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs (recent-changes reverse walk: communication or thread to documents and records about it)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/RestrictedExternalShareRemover.cs (L1: revoke the team share on the root and descendants)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs (AfterRefileAsync L1)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/ChildAccessPermissionReconciler.cs and src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (189's two writers, L1)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationInternalOnlyFloor.cs (LowerWhenSafeAsync :131, L1 regrant)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/DirectMessageParticipantShares.cs and src/server/api/Sprk.Bff.Api/Services/Signals/GateDecisionRecordSharing.cs (predicate for flagged principals)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (UnfiledOwnership :194-210: a flagged acting user gets the customer BU's team)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs (the one share seam)</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/SecureChildShareMirrorTests.cs, tests/unit/domain/Dataverse/RecordOwnershipResolverTests.cs, tests/integration/data-mutation/ExternalAccess/DirectMessageParticipantSharesTests.cs</file>
+      <file role="new">tests/integration/data-mutation/ExternalAccess/ExternalTeamShareTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/ExternalShareGrantAllowListTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191b" status="pending">ExternalVisibility and the registry markers.</dependency>
+      <dependency task="191d" status="pending">The BU and role names in config (the team id is read at run time from the BU).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002">No plugins; inline L1 hooks and the existing scheduled jobs only.</constraint>
+    <constraint source="ADR-036">No new job or BackgroundService; extend SecureChildShareReconciliationJob and SecureChildReconciliationJob.</constraint>
+    <constraint source="project">Team share mask exactly Read + AppendTo (Q3 = a). Never Write, Share, Assign or Delete for the team.</constraint>
+    <constraint source="project">Scope (Q5 = a): every registry and root row in the environment that is not Secure-team-owned; never a row of a table outside the registry.</constraint>
+    <constraint source="project">The job only ever writes POA rows whose principal is the External team or a flagged-external systemuser; internal users' shares are never touched.</constraint>
+    <constraint source="project">Fail closed: Undecided never grants and revokes an existing team or flagged-user share; carried and retried; ids and counts logged.</constraint>
+    <constraint source="project">Writes behind a setting (for example ExternalAccess:ExternalTeamShare:WritesEnabled), default false; the report-only run lists planned grants and revokes per table.</constraint>
+    <constraint source="project">Q4 = a: a flagged user never receives a share on a Restricted row by any writer (I-14 unchanged).</constraint>
+    <constraint source="project">Measure POA with mask &gt; 0 only (spike F2: a revoke leaves a mask-0 row).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="secure-child mirror" location="src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs">Read the difference, write only the difference, read back, carry incomplete rows.</pattern>
+      <pattern name="setting-gated writes with report-only first" location="src/server/api/Sprk.Bff.Api/Services/ExternalAccess/AssignedAccessReconciliationJob.cs">Writes off by default; the report lists planned changes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add the External-team mode: for each candidate row decide with ExternalVisibility; grant Read + AppendTo to the External BU's default team on Visible, revoke on Hidden, Undecided or Secure.</step>
+    <step order="2">L1 hooks: the Restricted remover, AfterRefileAsync, 189's two writers, LowerWhenSafeAsync, Make Secure and Unsecure, and BFF creates of lineage rows call the mode for the affected rows.</step>
+    <step order="3">Recent-changes: a modified communication or thread walks down to derived documents and to records regarding it; a modified root walks to its descendants. Catch-up sweep at instance start and hourly (r1c cursor rules).</step>
+    <step order="4">Per-user writers (secure mirror, Direct-message shares, gate decision records, the Assigned-To materializer) ask the predicate before granting a flagged principal; existing flagged-user shares on hidden rows are revoked whatever made them.</step>
+    <step order="5">Ownership: a lineage row owned by a flagged user is re-owned through RecordOwnershipResolver to its I-6 team and read back; an unfiled create by a flagged acting user gets the customer BU's default team (ExternalAccess:CustomerBusinessUnitId). The External BU's default team never owns a row.</step>
+    <step order="6">ArchTest: callers of Grant*/Modify* on lineage tables are an allow-list, each calling ExternalVisibility for flagged principals or the External team.</step>
+    <step order="7">Tests (each must-fire perturbation-checked): grant on visible, revoke on each hidden kind, revoke on Undecided, revoke on Secure, regrant when a row stops being hidden, internal users' shares untouched, the setting off writes nothing, Restricted never shared to a flagged user, re-own of a flagged-owned row, unfiled create ownership.</step>
+    <step order="8">Build, targeted tests, full ArchTests, both integration suites in full, publish-size delta against a fresh master build. Open a PR; one adversarial pass per security round (two in total for this tag set).</step>
+    <step order="9">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="10">Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE / OWNER GO: deploying the BFF carrying this task (via R3) is step 5 of the design's §3.19; it ships with the write setting off and needs the owner's deploy go.</trigger>
+    <trigger>LIVE / OWNER GO: turning the team-share writes on (step 6) and the re-own of flagged-owned rows (step 7) each need an owner go in the uac-r2 session; run them in 191i, never in this task.</trigger>
+    <trigger>If the report-only run on dev plans to revoke any internal user's share, or to grant a Restricted or secure row to the External team, STOP and escalate.</trigger>
+    <trigger>If the reverse walk cannot meet the ≤ 2 min + run window the owner accepted (Q4, round 114), STOP and escalate rather than widening it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SecureChildShareSynchronizer (secure children), RestrictedExternalShareRemover, the two reconciliation jobs.</existing>
+    <extension>Extended with one more principal and the predicate; same POA seam, same jobs, no new job or registration.</extension>
+    <cost-of-doing-nothing>After the move into the External BU, flagged users would see nothing but their per-user roots; without the revoke side, internal-only rows stay shared.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs</output>
+    <output type="test">tests/integration/data-mutation/ExternalAccess/ExternalTeamShareTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/ExternalShareGrantAllowListTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a visible ordinary row, the job grants the External team exactly Read + AppendTo and reads it back.</criterion>
+    <criterion testable="true">Given a row that is Restricted (own or effective), internal-only, derived from or about a hidden row, or Undecided, the team share is absent after the run; an existing one is revoked.</criterion>
+    <criterion testable="true">Given a row that stops being hidden, the team share is regranted on the next run, or inline when the change came through the BFF.</criterion>
+    <criterion testable="true">Negative: a Secure-team-owned row is never shared with the External team.</criterion>
+    <criterion testable="true">Negative: an internal user's share on any row is never modified (must-not-fire).</criterion>
+    <criterion testable="true">Negative: no writer grants a flagged user a share on a Restricted row (I-14) or on a row the predicate hides.</criterion>
+    <criterion testable="true">With the write setting off, the job writes nothing and reports planned grants and revokes per table.</criterion>
+    <criterion testable="true">A lineage row owned by a flagged user is re-owned to its I-6 team; an unfiled create by a flagged acting user is owned by the customer BU's default team, never the External team.</criterion>
+    <criterion testable="true">ArchTest allow-list green with must-fire and must-not-fire controls.</criterion>
+    <criterion testable="true">BFF 0 errors; targeted tests, full ArchTests and both integration suites green; publish-size delta recorded.</criterion>
+    <criterion testable="true">Test scope: the transitions in design §3.7 and the faults in §3.8; the placement job and Office are other tasks.</criterion>
+  </acceptance-criteria>
+
+  <notes>POA volume on dev is about 1,100 rows (spike S3: 12.7 grants per second). Done 2026-11-11 on task/uac-191c: deviations, review dispositions, known limits and the 191i owner-go list are in notes/task-191c-external-team-share-job.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -29,8 +29,10 @@ namespace Sprk.Bff.Api.Tests.Services.Finance;
 /// </summary>
 public sealed class InvoiceReviewReadServiceTests
 {
-    private static readonly Guid InvoiceId = Guid.Parse("10000000-0000-4000-8000-0000000000a1");
     private static readonly Guid SubmissionId = Guid.Parse("10000000-0000-4000-8000-0000000000b1");
+
+    // Task 165a: the invoice's id derives from its own submission's (the review reads only that submission).
+    private static readonly Guid InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(SubmissionId);
     private static readonly Guid FirmId = Guid.Parse("10000000-0000-4000-8000-0000000000f1");
     private static readonly Guid MatterId = Guid.Parse("10000000-0000-4000-8000-0000000000c1");
     private static readonly Guid PolicyId = Guid.Parse("10000000-0000-4000-8000-0000000000d1");
@@ -104,7 +106,7 @@ public sealed class InvoiceReviewReadServiceTests
                     return query.EntityName switch
                     {
                         "sprk_invoice" => new EntityCollection(Invoice is null ? [] : [Invoice]),
-                        "sprk_billingevent" => new EntityCollection(Lines.ToList()),
+                        "sprk_billingevent" => new EntityCollection(Lines.Select(l => Requested(l, query.ColumnSet)).ToList()), // 164a fix round K2: as returned
                         "sprk_invoicesubmission" => new EntityCollection(Submission is null ? [] : [Requested(Submission, query.ColumnSet)]),
                         "sprk_decisionrecord" => new EntityCollection(History.ToList()),
                         "sprk_timekeeper" => new EntityCollection(Roster.ToList()),
@@ -172,6 +174,7 @@ public sealed class InvoiceReviewReadServiceTests
         {
             var line = new Entity("sprk_billingevent", LineId(sequence))
             {
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
                 ["sprk_name"] = $"Line {sequence}",
                 ["sprk_linesequence"] = sequence,
                 ["sprk_costtype"] = new OptionSetValue((int)InvoiceLineCostType.Fee),
@@ -211,10 +214,20 @@ public sealed class InvoiceReviewReadServiceTests
         var line = LineId(1);
         var finding = new JsonObject
         {
-            ["index"] = 0, ["ruleType"] = "RateCard", ["policyId"] = PolicyId.ToString("D"), ["policyCode"] = "BILL-RATE",
-            ["policyVersionId"] = VersionId.ToString("D"), ["clause"] = "Schedule A, section 2", ["clauseLocation"] = "page 4",
-            ["subject"] = "Line", ["line"] = 0, ["reasonCode"] = "rate.above_card", ["detailWithheld"] = withheld,
-            ["consequence"] = "Reject", ["rejects"] = true, ["heldBecause"] = null,
+            ["index"] = 0,
+            ["ruleType"] = "RateCard",
+            ["policyId"] = PolicyId.ToString("D"),
+            ["policyCode"] = "BILL-RATE",
+            ["policyVersionId"] = VersionId.ToString("D"),
+            ["clause"] = "Schedule A, section 2",
+            ["clauseLocation"] = "page 4",
+            ["subject"] = "Line",
+            ["line"] = 0,
+            ["reasonCode"] = "rate.above_card",
+            ["detailWithheld"] = withheld,
+            ["consequence"] = "Reject",
+            ["rejects"] = true,
+            ["heldBecause"] = null,
         };
         if (!withheld)
         {
@@ -224,34 +237,62 @@ public sealed class InvoiceReviewReadServiceTests
 
         var second = new JsonObject
         {
-            ["index"] = 1, ["ruleType"] = "RateCard", ["policyId"] = PolicyId.ToString("D"), ["policyCode"] = "BILL-RATE",
-            ["policyVersionId"] = VersionId.ToString("D"), ["clause"] = "Schedule A, section 3", ["clauseLocation"] = null,
-            ["subject"] = "Line", ["line"] = 0, ["reasonCode"] = "rate.increase_unapproved", ["detailWithheld"] = withheld,
-            ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+            ["index"] = 1,
+            ["ruleType"] = "RateCard",
+            ["policyId"] = PolicyId.ToString("D"),
+            ["policyCode"] = "BILL-RATE",
+            ["policyVersionId"] = VersionId.ToString("D"),
+            ["clause"] = "Schedule A, section 3",
+            ["clauseLocation"] = null,
+            ["subject"] = "Line",
+            ["line"] = 0,
+            ["reasonCode"] = "rate.increase_unapproved",
+            ["detailWithheld"] = withheld,
+            ["consequence"] = "Flag",
+            ["rejects"] = false,
+            ["heldBecause"] = null,
         };
         var invoiceFinding = new JsonObject
         {
-            ["index"] = 2, ["ruleType"] = "Staffing", ["policyId"] = Guid.NewGuid().ToString("D"), ["policyCode"] = "BILL-STAFF",
-            ["policyVersionId"] = Guid.NewGuid().ToString("D"), ["clause"] = "Guideline 7", ["clauseLocation"] = null,
-            ["subject"] = "Invoice", ["line"] = null, ["reasonCode"] = "staffing.too_many", ["detailWithheld"] = false,
-            ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+            ["index"] = 2,
+            ["ruleType"] = "Staffing",
+            ["policyId"] = Guid.NewGuid().ToString("D"),
+            ["policyCode"] = "BILL-STAFF",
+            ["policyVersionId"] = Guid.NewGuid().ToString("D"),
+            ["clause"] = "Guideline 7",
+            ["clauseLocation"] = null,
+            ["subject"] = "Invoice",
+            ["line"] = null,
+            ["reasonCode"] = "staffing.too_many",
+            ["detailWithheld"] = false,
+            ["consequence"] = "Flag",
+            ["rejects"] = false,
+            ["heldBecause"] = null,
         };
         var root = new JsonObject
         {
-            ["schema"] = 1, ["kind"] = "Accepted", ["reasonCode"] = null,
+            ["schema"] = 1,
+            ["kind"] = "Accepted",
+            ["reasonCode"] = null,
             ["decision"] = new JsonObject { ["outcome"] = "Rejected" },
             ["findings"] = new JsonArray(finding, second, invoiceFinding),
             ["pipelineFindings"] = new JsonArray(new JsonObject { ["reasonCode"] = "invoice_number_mismatch", ["values"] = new JsonObject { ["read"] = "x" } }),
             ["signalPlan"] = new JsonArray(
                 new JsonObject
                 {
-                    ["policyCode"] = "BILL-RATE", ["subjectId"] = line.ToString("D"), ["severity"] = 100000002,
-                    ["sentence"] = "The rate is above the agreed card.", ["reasonCodes"] = new JsonArray("rate.above_card", "rate.increase_unapproved"),
+                    ["policyCode"] = "BILL-RATE",
+                    ["subjectId"] = line.ToString("D"),
+                    ["severity"] = 100000002,
+                    ["sentence"] = "The rate is above the agreed card.",
+                    ["reasonCodes"] = new JsonArray("rate.above_card", "rate.increase_unapproved"),
                 },
                 new JsonObject
                 {
-                    ["policyCode"] = "BILL-STAFF", ["subjectId"] = InvoiceId.ToString("D"), ["severity"] = 100000001,
-                    ["sentence"] = "Too many timekeepers.", ["reasonCodes"] = new JsonArray("staffing.too_many"),
+                    ["policyCode"] = "BILL-STAFF",
+                    ["subjectId"] = InvoiceId.ToString("D"),
+                    ["severity"] = 100000001,
+                    ["sentence"] = "Too many timekeepers.",
+                    ["reasonCodes"] = new JsonArray("staffing.too_many"),
                 }),
         };
         return root.ToJsonString();
@@ -310,6 +351,55 @@ public sealed class InvoiceReviewReadServiceTests
 
     // -- ebilling-r1 task 092 (model 9.2): the invoice PDF the review page loads is the invoice's Servable Stored File --
 
+    [Fact(DisplayName = "095d-2a-1 (X2) must-not-fire: the Invoice Review response never carries the stored re-run facts (a summary-only timekeeper name, an observation quote) from the findings provenance")]
+    public async Task TheReviewResponse_NeverCarriesTheStoredRerunFacts()
+    {
+        const string NameSentinel = "NAMESENTINEL Quartermaine";
+        const string QuoteSentinel = "QUOTESENTINEL attention";
+        var findings = JsonNode.Parse(FindingsJson())!.AsObject();
+        findings[ExtractionProvenance.Member] = new JsonObject
+        {
+            [ExtractionProvenance.AnalyzerIdMember] = "prebuilt-invoice-spaarke",
+            [ExtractionProvenance.ApiVersionMember] = "2025-05-01",
+            [ExtractionProvenance.SectionTotalsMember] = new JsonObject { ["FeesTotal"] = new JsonObject { ["value"] = 777.125, ["confidence"] = 0.9 } },
+            [ExtractionProvenance.TimekeeperSummaryMember] = new JsonArray(NameSentinel),
+            [ExtractionProvenance.ObservationsMember] = new JsonArray(new JsonObject { ["line"] = 0, ["type"] = "BlockBilling", ["quotedText"] = QuoteSentinel }),
+            [ExtractionProvenance.LineCountMember] = 1,
+        };
+        var w = new World { Submission = SubmissionRow(findings.ToJsonString()) };
+        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: Extraction);
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review.Should().NotBeNull();
+        review!.Lines.Single().Findings.Should().NotBeEmpty("the setup: the stored findings are read and returned");
+        var json = JsonSerializer.Serialize(review);
+        json.Should().NotContain("NAMESENTINEL").And.NotContain("QUOTESENTINEL").And.NotContain("777.125");
+    }
+
+    [Fact(DisplayName = "082d (model 7.4, R3; uac-r2 snapshot design) negative: the review projection of a submission that stores the Procedure basis holds no override reason, Procedure name, Procedure id, Procedure Version id, row id or chain record id")]
+    public async Task TheReviewResponse_NeverCarriesTheProcedureBasis()
+    {
+        // The basis is the persister's real snapshot of a real evaluation (a Procedure followed on a PARENT with a reason, an excluded Procedure and
+        // an excluded rule, each with a reason); it is planted beside the reader members this test's fixture already stores.
+        var stored = JsonNode.Parse(await Submission.ProcedureSnapshotFixture.FindingsJsonAsync())!.AsObject();
+        var findings = JsonNode.Parse(FindingsJson())!.AsObject();
+        findings[ProcedureSnapshot.Member] = stored[ProcedureSnapshot.Member]!.DeepClone();
+        findings.ToJsonString().Should().Contain(Submission.ProcedureSnapshotFixture.FollowReason, "control: the stored copy holds the basis");
+        var w = new World { Submission = SubmissionRow(findings.ToJsonString()) };
+        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: Extraction);
+
+        var review = await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None);
+
+        review.Should().NotBeNull();
+        review!.Lines.Single().Findings.Should().NotBeEmpty("the setup: the stored findings are read and returned");
+        var json = JsonSerializer.Serialize(review);
+        foreach (var secret in Submission.ProcedureSnapshotFixture.Secrets())
+        {
+            json.Should().NotContainEquivalentOf(secret);
+        }
+    }
+
     [Fact(DisplayName = "092: the review carries the id of the invoice's Servable Invoice PDF Stored File, asked by invoice, purpose and status, newest first")]
     public async Task InvoicePdfFileId_IsTheServableInvoicePdf()
     {
@@ -366,6 +456,45 @@ public sealed class InvoiceReviewReadServiceTests
 
         line.Status.Should().Be("Pending");
         line.StatusLabel.Should().Be("Processing");
+    }
+
+    [Theory(DisplayName = "164a-2 (EB-D-193): ReviewLineDto.ReviewerAdded is true only for provenance.source = reviewer; absent, another source, damaged or empty give false")]
+    [InlineData("""{"provenance":{"source":"reviewer","decisionId":"0d0d0d0d-0000-4000-8000-000000000001"}}""", true)]
+    [InlineData("""{"provenance":{"source":"reviewer","decisionId":"0d0d0d0d-0000-4000-8000-000000000001"},"fields":{"Hours":{"confidence":0.9}}}""", true)]
+    [InlineData("""{"provenance":{"source":"reviewer"}}""", false)]
+    [InlineData("""{"provenance":{"source":"reviewer","decisionId":"0d0d0d0d-0000-4000-8000-000000000002"}}""", false)] // F1: another decision than the row's id
+    [InlineData("""{"provenance":{"analyzerId":"sprk_invoice_v1","apiVersion":"2026-06-01-preview","actionCode":"INVOICE-LINE-CODE","actionVersion":1}}""", false)]
+    [InlineData("""{"provenance":{"source":"Reviewer"}}""", false)]
+    [InlineData("""{"provenance":{"source":"extraction"}}""", false)]
+    [InlineData("""{"provenance":{"source":true}}""", false)]
+    [InlineData("""{"source":"reviewer"}""", false)]
+    [InlineData("""{"fields":{}}""", false)]
+    [InlineData("not json", false)]
+    [InlineData(null, false)]
+    public async Task TheLineCarriesTheReviewerAddedMarker(string? extraction, bool expected)
+    {
+        var w = new World();
+        // F1: the row Add line created has the id derived from its decision (0d0d0d0d-...-001 in the markers above).
+        w.AddLine(1, InvoiceLineStatus.Flagged, extraction: extraction).Id = ExtractionProvenance.AddedLineIdFor(InvoiceId, Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001"));
+
+        var line = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines.Single();
+
+        line.ReviewerAdded.Should().Be(expected);
+    }
+
+    [Fact(DisplayName = "164a-2 (EB-D-193): in one review, only the reviewer-added line is marked; an intake line beside it is not")]
+    public async Task OnlyTheReviewerAddedLineIsMarked()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Clean, extraction: Extraction);
+        var decision = Guid.Parse("0d0d0d0d-0000-4000-8000-000000000001");
+        w.AddLine(2, InvoiceLineStatus.Flagged, extraction: ExtractionProvenance.ForReviewerAddedLine(decision)).Id = ExtractionProvenance.AddedLineIdFor(InvoiceId, decision);
+        // F1 must-fire: an intake line (3) copying the same valid-looking marker is not marked.
+        w.AddLine(3, InvoiceLineStatus.Flagged, extraction: ExtractionProvenance.ForReviewerAddedLine(decision));
+
+        var lines = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!.Lines;
+
+        lines.Select(l => (l.Sequence, l.ReviewerAdded)).Should().Equal((1, false), (2, true), (3, false));
     }
 
     [Fact(DisplayName = "100: per-field page, box and confidence come back; a field below the reliability threshold is marked low-confidence; codes show as billed and resolved")]
@@ -535,6 +664,27 @@ public sealed class InvoiceReviewReadServiceTests
         review.Submission.PipelineFindings.Should().ContainSingle().Which.ReasonCode.Should().Be("invoice_number_mismatch");
     }
 
+    [Fact(DisplayName = "165a F1 must-fire: a submission linked to the invoice that is not its own (its id does not derive the invoice's) is not shown")]
+    public async Task AnotherSubmission_IsNotShown()
+    {
+        var w = new World();
+        w.AddLine(1, InvoiceLineStatus.Flagged);
+        // The same stored copy, on a submission whose id is another invoice's.
+        var other = new Entity("sprk_invoicesubmission", Guid.Parse("10000000-0000-4000-8000-0000000000b2"));
+        foreach (var attribute in SubmissionRow(FindingsJson()).Attributes)
+        {
+            other[attribute.Key] = attribute.Value;
+        }
+
+        w.Submission = other;
+
+        var review = (await w.Service().GetAsync(InvoiceId, Caller, CancellationToken.None))!;
+
+        review.Submission.Should().BeNull();
+        review.InvoiceFindings.Should().BeEmpty();
+        review.Lines.Single().LineFindings.Should().BeEmpty();
+    }
+
     [Fact(DisplayName = "100: a withheld group returns no values read and no suggestion (D-112)")]
     public async Task WithheldGroup_ReturnsNoDetail()
     {
@@ -683,7 +833,12 @@ public sealed class InvoiceReviewReadServiceTests
 
     private static JsonObject Value(string name, string? value, string? field = null) => new()
     {
-        ["name"] = name, ["value"] = value, ["line"] = 0, ["field"] = field, ["confidence"] = field is null ? null : 0.97, ["belowReliabilityThreshold"] = false,
+        ["name"] = name,
+        ["value"] = value,
+        ["line"] = 0,
+        ["field"] = field,
+        ["confidence"] = field is null ? null : 0.97,
+        ["belowReliabilityThreshold"] = false,
     };
 
     /// <summary>A stored finding as 049 writes DuplicateHandler's: the line's values, the current invoice number, then (when visible at write
@@ -693,10 +848,20 @@ public sealed class InvoiceReviewReadServiceTests
     {
         var finding = new JsonObject
         {
-            ["index"] = index, ["ruleType"] = ruleType, ["policyId"] = PolicyId.ToString("D"), ["policyCode"] = policy,
-            ["policyVersionId"] = VersionId.ToString("D"), ["clause"] = "Guideline 9", ["clauseLocation"] = null,
-            ["subject"] = line is null ? "Invoice" : "Line", ["line"] = line, ["reasonCode"] = reason, ["detailWithheld"] = withheld,
-            ["consequence"] = "Flag", ["rejects"] = false, ["heldBecause"] = null,
+            ["index"] = index,
+            ["ruleType"] = ruleType,
+            ["policyId"] = PolicyId.ToString("D"),
+            ["policyCode"] = policy,
+            ["policyVersionId"] = VersionId.ToString("D"),
+            ["clause"] = "Guideline 9",
+            ["clauseLocation"] = null,
+            ["subject"] = line is null ? "Invoice" : "Line",
+            ["line"] = line,
+            ["reasonCode"] = reason,
+            ["detailWithheld"] = withheld,
+            ["consequence"] = "Flag",
+            ["rejects"] = false,
+            ["heldBecause"] = null,
         };
         if (withheld)
         {
@@ -713,14 +878,21 @@ public sealed class InvoiceReviewReadServiceTests
 
     private static JsonObject Plan(string policy, Guid subjectId, string sentence, params string[] reasons) => new()
     {
-        ["policyCode"] = policy, ["subjectId"] = subjectId.ToString("D"), ["severity"] = 100000001, ["sentence"] = sentence,
+        ["policyCode"] = policy,
+        ["subjectId"] = subjectId.ToString("D"),
+        ["severity"] = 100000001,
+        ["sentence"] = sentence,
         ["reasonCodes"] = new JsonArray(reasons.Select(r => (JsonNode)JsonValue.Create(r)!).ToArray()),
     };
 
     private static string Stored(JsonObject[] findings, JsonObject[] plan) => new JsonObject
     {
-        ["schema"] = 1, ["kind"] = "Accepted", ["reasonCode"] = null, ["decision"] = new JsonObject { ["outcome"] = "Accepted" },
-        ["findings"] = new JsonArray(findings.Cast<JsonNode>().ToArray()), ["pipelineFindings"] = new JsonArray(),
+        ["schema"] = 1,
+        ["kind"] = "Accepted",
+        ["reasonCode"] = null,
+        ["decision"] = new JsonObject { ["outcome"] = "Accepted" },
+        ["findings"] = new JsonArray(findings.Cast<JsonNode>().ToArray()),
+        ["pipelineFindings"] = new JsonArray(),
         ["signalPlan"] = new JsonArray(plan.Cast<JsonNode>().ToArray()),
     }.ToJsonString();
 

@@ -90,6 +90,8 @@ The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant
 
 NOT all filters call `AuthorizeAsync` (corrected 2026-08-20). The `oid` → `AuthorizationContext`/`OperationAccessPolicy` → `AuthorizationService.AuthorizeAsync()` → 403-with-deny-code pattern is followed by 4 filters (`DocumentAuthorizationFilter:79`, `EntityAccessFilter:154`, `FinanceAuthorizationFilter` — for its document checks; since unified-access-control-r2 task 130 its matter/project/vendor-organization checks use the entity-generic `AuthorizationService.GetCallerRecordAccessAsync` + `OperationAccessPolicy.HasRequiredRights`, invoice confirm also asks the caller's Create privilege on `sprk_invoice` through `CallerRecordAccessProbe` (OBO), and each finance/scorecard route declares exactly which id it authorizes, `OfficeDocumentAccessFilter:132`); 3 more route through `IAiAuthorizationService.AuthorizeAsync` instead (`AiAuthorizationFilter:83`, `AnalysisAuthorizationFilter:140`, `VisualizationAuthorizationFilter:106`). The remaining filters apply domain-specific checks (job ownership, webhook signatures, rate limits, tenant scoping, caller-principal resolution, record∈accessible-set, etc.) without going through `AuthorizationService`.
 
+**Who is calling — distinct helpers, one ratchet (task 082 closed by owner round 59; recorded at 090).** The BFF's caller-identity helpers answer different questions and are not merged: `Infrastructure/Authentication/CallerResolution.cs` gives the caller's Entra `oid` for authorization (`ResolveObjectId`, null means 401) and an opaque key that may use `sub` only for cache, partition and idempotency keys (`ResolveOpaqueCallerKey`); `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs` resolves the collaboration principal (plane, contact, record scope) for `/api/v1/external`; `Spaarke.Core/Auth/CallerIdentity.cs` classifies the caller kind (user, app-only, or undetermined). No second census was built: `tests/Spaarke.ArchTests/CallerIdentityGuardTests.cs` (PR #840) is the ratchet — Rule 1 fails a new direct identity-claim read outside its allowlist, Rule 2 fails an ownership predicate gated on a `Guid.TryParse` — and its allowlist says adding another resolver is a coordination event.
+
 ---
 
 ## Fail-Closed Scenarios
@@ -118,6 +120,47 @@ Actual level → effective-rights mapping per `ExternalCallerContext.ToAccessRig
 | View Only | Read | n/a — NOT IMPLEMENTED (broker-only) |
 | Collaborate | Read + Create + Write | n/a — NOT IMPLEMENTED (broker-only) |
 | Full Access | Read + Create + Write + Delete | n/a — NOT IMPLEMENTED (broker-only) |
+
+---
+
+## Parents and Children — How Inheritance Works (FR-26/FR-27; task 058, recorded at 090)
+
+**Two kinds of record.** `Services/Dataverse/CoreAncestorResolver.cs` holds the taxonomy, pinned literally by test on both
+sides (`Taxonomy_MatchesTheTypeScriptSide`; TypeScript `CORE_RECORD_ENTITIES` / `CHILD_RECORD_ENTITIES` in
+`src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts`):
+
+| Kind | Tables | How access is reached |
+|---|---|---|
+| **Core** (4) | `sprk_project`, `sprk_matter`, `sprk_workassignment`, `sprk_servicerequest` | Directly: grants, shares, ownership, membership terms. A core record never inherits through the stamp |
+| **Child** (7) | `sprk_invoice`, `sprk_communication`, `sprk_document`, `sprk_event`, `sprk_todo`, `sprk_analysis`, `sprk_memo` | From its core ancestor, in one hop, through the stamp below |
+
+Tables in neither set (`sprk_budget`, `sprk_organization`, `contact`, `account`, `sprk_reportcard`) are deliberately
+unclassified: they confer access through other terms, never through core-ancestor inheritance.
+
+**The core-ancestor stamp.** A child row carries its ultimate core ancestor in one of four lookups
+(`sprk_regardingproject`, `sprk_regardingmatter`, `sprk_regardingworkassignment`, `sprk_regardingservicerequest`;
+`CoreAncestorResolver.CoreAncestorLookups` — the only access-conferring ancestor lookups; not every child carries all four,
+for example `sprk_invoice` carries only the work-assignment one). The evaluator's child term is a set test,
+`child.sprk_regarding{core} ∈ {accessible core ids}`, with no Dataverse round trip, so the stamp is written when the child is
+saved: by the client in `PolymorphicResolverService.deriveCoreAncestorStamps` and by server writers through
+`CoreAncestorResolver`, its C# mirror. A child filed under another child (a to-do under a communication under a matter)
+copies its intermediate's root, which keeps every chain one hop (ADR-034's cap holds unamended).
+
+**Keeping the copy fresh.** `CoreAncestorRestamper` re-stamps the children on every BFF re-file path;
+`CoreAncestorStampReconciliationJob` repairs copies left stale by writes outside the BFF within one 5-minute cycle; and
+`RecordContainerResolver` checks a child's copy against its intermediate's live root before trusting it
+(`container_ancestor_stale`). Rows written before the stamp existed are filled by `scripts/Backfill-CoreAncestorStamps.ps1`
+(task 053); `scripts/Lock-CoreAncestorStampColumnsOnForms.ps1` makes the stamp columns read-only on forms. External reads also
+check each row's live parents, not only its copied stamp (task 187).
+
+> **A matter does not inherit from its project (or the reverse).** Both are core records. Selecting a core record as the
+> target stamps only that record (`CoreAncestorResolver`, rule (1)), so a grant or share on a project never reaches a matter
+> through the stamp, and inverting it would hand every project holder every matter beneath it. A person who needs both gets
+> a grant or share on each core record. What a work assignment or project filed under a matter or project does take from
+> its parents is the Secure / Access Permission floor in the next section, not their grants.
+
+The No Access list follows the same split: a record object is enforced on the three roots only, and a child is walled by
+walling its root (`src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md`, example 2).
 
 ---
 
@@ -280,7 +323,7 @@ A person who is not yet a colleague in the system is refused, never created, onb
 
 ## Known Gap — Attestation (FR-32)
 
-UAC does not yet answer "who could see record X on date D" in-product. The access-event log, evaluator replay and attestation seam (spec FR-32; tasks 087–089) are deferred to [#1303](https://github.com/spaarke-dev/spaarke/issues/1303). `sprk_accessevent` and `scripts/Deploy-AccessEventEntity.ps1` are superseded: the table was never deployed, and the script refuses to run without `-Force`.
+UAC does not yet answer "who could see record X on date D" in-product. **FR-32 point-in-time replay is unmet in UAC-r2** (success criterion 9): the access-event log, evaluator replay and attestation seam (spec FR-32; tasks 087–089) are deferred to [#1303](https://github.com/spaarke-dev/spaarke/issues/1303), which also absorbed #1304 (task 089). `sprk_accessevent` and `scripts/Deploy-AccessEventEntity.ps1` are superseded: the table was never deployed, and the script refuses to run without `-Force`.
 
 **Interim answer:** a manual review of the Dataverse audit log. It records:
 - grant-row changes on `sprk_externalrecordaccess`;

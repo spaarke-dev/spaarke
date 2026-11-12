@@ -12,9 +12,16 @@ namespace Spaarke.ArchTests;
 /// <c>sprk_procedureassignment</c>. <c>sprk_procedureversion.sprk_procedure</c> is an alternate-key column and cannot be field-secured, so a
 /// holder could re-parent or create versions directly in Dataverse, outside I-P1 (no overlap) and I-P5 (billing admin + Write).</item>
 /// <item><b>Until uac-r2 task 191</b> (uac-r2 2026-10-21, round 113 item 3): no role holds ANY privilege on <c>sprk_procedure</c>,
-/// <c>sprk_procedureversion</c> or <c>sprk_procedureassignment</c>. Flagged-external systemusers hold the same roles as internal users
-/// through their business unit's default team, so any grant would reach them; Procedures are internal-only. Task 191 replaces this rule
-/// (delete <see cref="UntilTask191"/> and its control then, with uac-r2's agreement).</item>
+/// <c>sprk_procedureversion</c> or <c>sprk_procedureassignment</c>; Procedures are internal-only. Task 191 replaces this rule
+/// (delete <see cref="UntilTask191"/> and its control then, with uac-r2's agreement). <b>One exception</b> (<see cref="AllowedBeforeTask191"/>,
+/// ebilling-r1 task 089e, owner 2026-11-04: "Add to role file + apply on dev"): "Spaarke Billing Administrator" holds Read on
+/// <c>sprk_procedure</c> at Deep, so a billing admin can remove and preview a Procedure override (the routes ask the caller's own Read on that
+/// Procedure). The guard requires that no team holds this role (uac-r2 K-1, its deploy script's <c>-Verify</c>). Any other role, privilege
+/// or depth on the Procedure tables is still reported.</item>
+/// <item><b>Until uac-r2 task 191, the Stored File too</b> (ebilling-r1 task 086; ontology-r1 088 gate K-d): no role holds ANY privilege on
+/// <c>sprk_storedfile</c>. Its rows are written and served only by the BFF (StoredFileService); the one grant is the Secure Record Owner
+/// role's Read at Basic (config/secure-record-owner-role.json, applied by script, held only by the Secure Record Owners team), which is
+/// not a source role file.</item>
 /// </list>
 /// </summary>
 /// <remarks>
@@ -28,11 +35,22 @@ public class ProcedureRolePrivilegeGuardTests
     /// <summary>The temporary uac-r2 rule (see the class summary). Set to false only when uac-r2 task 191 lands, with uac-r2's agreement.</summary>
     private const bool UntilTask191 = true;
 
+    /// <summary>
+    /// The one grant the until-191 rule allows (ebilling-r1 task 089e; class summary): (role name, privilege, depth), all exact (the privilege
+    /// name case-insensitive, as the scan).
+    /// </summary>
+    private static readonly (string Role, string Privilege, string Level)[] AllowedBeforeTask191 =
+    {
+        // uac-r2 agreed 2026-11-04
+        ("Spaarke Billing Administrator", "prvReadsprk_procedure", "Deep"),
+    };
+
     private static readonly Regex CreateOrWriteOnVersionOrAssignment = new(
         "^prv(Create|Write)(sprk_procedureversion|sprk_procedureassignment)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
+    // ebilling-r1 task 086: sprk_storedfile joins the until-191 tables (class summary).
     private static readonly Regex AnyOnProcedureTables = new(
-        "^prv(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)(sprk_procedure|sprk_procedureversion|sprk_procedureassignment)$",
+        "^prv(Create|Read|Write|Delete|Append|AppendTo|Assign|Share)(sprk_procedure|sprk_procedureversion|sprk_procedureassignment|sprk_storedfile)$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     [Fact(DisplayName = "081: no Spaarke role grants a privilege on the Procedure tables (Create/Write on versions and assignments never; any, until uac-r2 191)")]
@@ -54,7 +72,8 @@ public class ProcedureRolePrivilegeGuardTests
         Assert.True(violations.Count == 0,
             "A Spaarke role grants a privilege on a Procedure table. Procedures are written only by the BFF (ebilling-r1 081; ontology-r1 080 "
             + "review: sprk_procedureversion.sprk_procedure cannot be field-secured), and until uac-r2 task 191 no role may hold any privilege "
-            + "on them (flagged-external users hold the same roles). Remove the grant or agree it with uac-r2:\n  " + string.Join("\n  ", violations));
+            + "on them or on sprk_storedfile (ebilling-r1 086; flagged-external users hold the same roles). Remove the grant or agree it "
+            + "with uac-r2:\n  " + string.Join("\n  ", violations));
     }
 
     [Fact(DisplayName = "081 must-fire: Create/Write on a version or an assignment, and (until 191) any privilege on the three tables, are reported")]
@@ -67,17 +86,41 @@ public class ProcedureRolePrivilegeGuardTests
                 <RolePrivilege name="prvWritesprk_procedureassignment" level="Basic" />
                 <RolePrivilege name="prvReadsprk_procedure" level="Global" />
                 <RolePrivilege name="prvAppendTosprk_procedureversion" level="Deep" />
+                <RolePrivilege name="prvReadsprk_StoredFile" level="Basic" />
               </RolePrivileges>
             </Role>
             """;
 
         var found = Violations(role);
 
-        Assert.Equal(4, found.Count);
+        Assert.Equal(5, found.Count);
+        // ebilling-r1 task 086: a Read on the Stored File through a source role (one a flagged-external user can hold) is reported.
+        Assert.Contains(found, f => f.Contains("prvReadsprk_StoredFile", StringComparison.Ordinal) && f.Contains("191", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvCreatesprk_ProcedureVersion", StringComparison.Ordinal) && f.Contains("never", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvWritesprk_procedureassignment", StringComparison.Ordinal) && f.Contains("never", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvReadsprk_procedure", StringComparison.Ordinal) && f.Contains("191", StringComparison.Ordinal));
         Assert.Contains(found, f => f.Contains("prvAppendTosprk_procedureversion", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "089e: the Billing Administrator's Read on sprk_procedure at Deep is the one allowed grant; another depth, privilege or role is reported")]
+    public void GuardAllowsOnlyTheBillingAdministratorsProcedureReadAtDeep()
+    {
+        static string Role(string name, params (string Privilege, string Level)[] privileges) =>
+            new XElement("Role", new XAttribute("name", name),
+                new XElement("RolePrivileges", privileges.Select(p =>
+                    new XElement("RolePrivilege", new XAttribute("name", p.Privilege), new XAttribute("level", p.Level))))).ToString();
+
+        // must-not-fire
+        Assert.Empty(Violations(Role("Spaarke Billing Administrator", ("prvReadsprk_procedure", "Deep"))));
+
+        // must-fire: another depth, another privilege on the Procedure tables, another role, a look-alike role name
+        Assert.Single(Violations(Role("Spaarke Billing Administrator", ("prvReadsprk_procedure", "Global"))));
+        Assert.Single(Violations(Role("Spaarke Billing Administrator", ("prvReadsprk_procedure", "Basic"))));
+        Assert.Single(Violations(Role("Spaarke Billing Administrator", ("prvWritesprk_procedure", "Basic"))));
+        Assert.Single(Violations(Role("Spaarke Billing Administrator", ("prvReadsprk_procedureversion", "Deep"))));
+        Assert.Single(Violations(Role("Spaarke Billing Administrator", ("prvReadsprk_storedfile", "Deep"))));
+        Assert.Single(Violations(Role("Spaarke Core User", ("prvReadsprk_procedure", "Deep"))));
+        Assert.Single(Violations(Role("Spaarke Billing Administrator Copy", ("prvReadsprk_procedure", "Deep"))));
     }
 
     [Fact(DisplayName = "081 must-not-fire: other tables, look-alike names and comments are not reported")]
@@ -92,6 +135,7 @@ public class ProcedureRolePrivilegeGuardTests
                 <RolePrivilege name="xprvWritesprk_procedure" level="Deep" />
                 <RolePrivilege name="prvWritesprk_policyversion" level="Deep" />
                 <RolePrivilege name="prvReadsprk_proceduresource" level="Deep" />
+                <RolePrivilege name="prvReadsprk_storedfileversion" level="Deep" />
               </RolePrivileges>
             </Role>
             """;
@@ -143,7 +187,8 @@ public class ProcedureRolePrivilegeGuardTests
             {
                 found.Add($"{roleName}: {name} ({level}) — never (the version's Procedure link cannot be field-secured)");
             }
-            else if (UntilTask191 && AnyOnProcedureTables.IsMatch(name))
+            else if (UntilTask191 && AnyOnProcedureTables.IsMatch(name)
+                && !AllowedBeforeTask191.Any(a => a.Role == roleName && string.Equals(a.Privilege, name, StringComparison.OrdinalIgnoreCase) && a.Level == level))
             {
                 found.Add($"{roleName}: {name} ({level}) — not until uac-r2 task 191");
             }

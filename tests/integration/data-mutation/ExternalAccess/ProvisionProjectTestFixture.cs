@@ -818,6 +818,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     internal Func<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>? RelocatorOverride { get; set; }
 
+    /// <summary>
+    /// Task 193 G2b: the grant revoke the secure-root inheritance is given, so a test can watch the grant PAIRED with an
+    /// inherited share end when the share is removed. <c>null</c> (the default): none, the share alone is removed.
+    /// </summary>
+    internal Func<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>? PairedGrantsOverride { get; set; }
+
     /// <summary>Owner decision 2026-10-29: every conditional (If-Match) root write, as sent: entity set, id, ETag.</summary>
     public ConcurrentBag<(string EntitySet, Guid Id, string ETag)> ConditionalRootWrites { get; } = new();
 
@@ -831,6 +837,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     public void Reset()
     {
         RelocatorOverride = null;
+        PairedGrantsOverride = null;
         ConditionalRootWrites.Clear();
         BeforeConditionalRootWrite = null;
         _records.Clear();
@@ -1016,7 +1023,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                 sp.GetRequiredService<ILogger<SecureRootInheritance>>(),
                 // Batch-4 integration: provisioning's owner-change eviction and Make Secure file relocation, as in the host.
                 sp.GetService<Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator>(),
-                sp.GetRequiredService<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>()));
+                sp.GetRequiredService<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>(),
+                // Task 193 G2b: the grant revoke the test supplies (read when the scope builds the service); none by default.
+                pairedGrants: PairedGrantsOverride?.Invoke()));
 
             var client = new Mock<DataverseWebApiClient>(
                 ClientConfig(), NullLogger<DataverseWebApiClient>.Instance,

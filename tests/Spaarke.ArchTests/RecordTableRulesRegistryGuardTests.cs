@@ -86,4 +86,41 @@ public class RecordTableRulesRegistryGuardTests
 
         Assert.Empty(TablesWithoutAnEntry(["sprk_todo", "sprk_event", "SPRK_Matter"], registered.Contains));
     }
+
+    // ── Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): a table only its writer creates is on no fixed
+    //    create accept-list (the service would refuse it there; RecordTableRule.CreatedOnlyByItsWriter). ─────────────────────
+    //    ebilling-r1 task 164a-1 (uac-r2 Q6): nor is a table whose generic create alone is refused (an invoice line); the
+    //    detector reads RecordTableRule.GenericCreateRefused, which covers both.
+
+    /// <summary>The detector: each create table <paramref name="writerOnly"/> names.</summary>
+    private static IReadOnlyList<string> WriterOnlyTablesIn(IEnumerable<string> createTables, Func<string, bool> writerOnly) =>
+        createTables.Where(writerOnly).ToList();
+
+    private static bool IsWriterOnly(string table) => RecordTableRules.Find(table) is { GenericCreateRefused: true };
+
+    [Fact]
+    public void NoCreateTable_IsOneOnlyItsWriterCreates()
+    {
+        var found = WriterOnlyTablesIn(CreateTables(), IsWriterOnly);
+
+        Assert.True(RecordTableRules.All.Count(r => r.CreatedOnlyByItsWriter) == 3,
+            "Expected the three ontology writer tables to be flagged; the guard would check nothing.");
+        Assert.True(found.Count == 0,
+            "These create tables are created only by their writers (RecordTableRule.CreatedOnlyByItsWriter, owner decision " +
+            "D-204; an invoice line: RecordTableRule.GenericCreateOnlyRefused, ebilling-r1 task 164a-1), so no fixed create " +
+            "accept-list may name them: " + string.Join(", ", found));
+    }
+
+    [Fact]
+    public void WriterOnlyGuard_MustFire_ACreateListNamingAWriterOnlyTable_IsReported()
+    {
+        Assert.Equal(["sprk_signal", "SPRK_BudgetRevision", "sprk_billingevent"],
+            WriterOnlyTablesIn(CreateTables().Append("sprk_signal").Append("SPRK_BudgetRevision").Append("sprk_billingevent"), IsWriterOnly));
+    }
+
+    [Fact]
+    public void WriterOnlyGuard_MustNotFire_OrdinaryCreateTables_ReportNothing()
+    {
+        Assert.Empty(WriterOnlyTablesIn(["sprk_todo", "sprk_event", "sprk_budget", "sprk_servicerequest"], IsWriterOnly));
+    }
 }

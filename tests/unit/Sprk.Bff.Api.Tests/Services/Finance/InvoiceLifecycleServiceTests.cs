@@ -9,6 +9,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Finance;
@@ -28,7 +29,7 @@ public sealed class InvoiceLifecycleServiceTests
     private readonly Mock<IFieldMappingDataverseService> _records = new();
 
     private InvoiceLifecycleService CreateService() =>
-        new(_records.Object, new Mock<ILogger<InvoiceLifecycleService>>().Object);
+        new(_records.Object, new Mock<ILogger<InvoiceLifecycleService>>().Object) { ReviewDetailProbe = ReviewDetailColumnProbe.Fixed(present: true) };
 
     private static Dictionary<string, object?> Row(InvoiceLifecycleStatus status, long version) => new()
     {
@@ -83,7 +84,9 @@ public sealed class InvoiceLifecycleServiceTests
         result.Requested.Should().Be(to);
         result.Reason.Should().BeNull();
         written.Should().NotBeNull();
-        written!.Keys.Should().BeEquivalentTo("statuscode", "statecode");
+        // 082c-2 (uac-r2 (b)): every move out of In Review (and onwards) blanks the review detail in the same write.
+        written!.Keys.Should().BeEquivalentTo("statuscode", "statecode", InvoiceReviewDetail.Column);
+        written[InvoiceReviewDetail.Column].Should().BeNull();
         written["statuscode"].Should().Be(InvoiceStatusCodes.StatusCodeOf(to));
         written["statecode"].Should().Be(expectedStateCode);
     }
@@ -514,7 +517,8 @@ public sealed class InvoiceLifecycleServiceTests
         request.Target.LogicalName.Should().Be("sprk_invoice");
         request.Target.Id.Should().Be(InvoiceId);
         request.Target.RowVersion.Should().Be("42");
-        request.Target.Attributes.Keys.Should().BeEquivalentTo("statecode", "statuscode");
+        request.Target.Attributes.Keys.Should().BeEquivalentTo("statecode", "statuscode", InvoiceReviewDetail.Column);
+        request.Target[InvoiceReviewDetail.Column].Should().BeNull("082c-2: Superseded closes the invoice, so its review detail goes blank in the same request");
         request.Target.GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(1, "Superseded is Inactive");
         request.Target.GetAttributeValue<OptionSetValue>("statuscode").Value.Should().Be(659490005);
     }

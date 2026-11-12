@@ -1763,7 +1763,7 @@ public partial class SignalWriterTests
             .WriteAsync(DoRequest("sprk_todo", TodoId));
         Guid? signalOwner = signal.IsSkipped ? null : writerOrg.Rows[signal.SignalId].GetAttributeValue<EntityReference>("ownerid").Id;
 
-        var assignee = filed ? null : await PersonalToDoAssignee.ResolveAsync(sysadmin, links, TodoId, CancellationToken.None);
+        var assignee = filed ? null : await PersonalToDoAssignee.ResolveAsync(sysadmin, AssignedAccessTestDoubles.Representation(links), TodoId, CancellationToken.None);
         var recordWriter = new DecisionRecordWriter(
             new OntologyWriterDataverseClient(() => new FakeOrganizationService(), NullLogger<OntologyWriterDataverseClient>.Instance),
             resolver,
@@ -1774,7 +1774,8 @@ public partial class SignalWriterTests
         var review = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
             filed ? new DecisionRecordCore("sprk_matter", MatterId, Guid.NewGuid()) : null,
             new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef("sprk_todo", TodoId), TestInfrastructure.OwnershipDirectory.CallerUserId,
-            null, [], [], null, [], new Dictionary<string, object?>(), null, null, null) with { AssigneeSystemUserId = assignee };
+            null, [], [], null, [], new Dictionary<string, object?>(), null, null, null) with
+        { AssigneeSystemUserId = assignee };
         Guid? recordOwner;
         try
         {
@@ -2238,13 +2239,14 @@ public partial class SignalWriterTests
             ownership ?? new FakeOwnershipResolver(), Scopes(links), clock, logger ?? NullLogger<SignalWriter>.Instance);
 
     /// <summary>Task 143: the scope the writer resolves its two SCOPED services from, as the host registers them — the D-134
-    /// link read (<see cref="AssignedAccessStore"/>; default: nobody linked) and, when a test re-owns, uac-r2's reconciler.</summary>
+    /// read of who the Assigned To represents (<see cref="ContactUserRepresentation"/> over the link store; default: nobody
+    /// linked) and, when a test re-owns, uac-r2's reconciler.</summary>
     internal static IServiceScopeFactory Scopes(
         AssignedAccessTestDoubles.FakeAssignedAccessStore? links = null, Func<IServiceProvider, Sprk.Bff.Api.Services.Access.SecureChildReconciler>? reconciler = null)
     {
         var services = new ServiceCollection();
         var store = links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore();
-        services.AddScoped<AssignedAccessStore>(_ => store);
+        services.AddScoped(_ => AssignedAccessTestDoubles.Representation(store));
         if (reconciler is not null) services.AddScoped(reconciler);
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }

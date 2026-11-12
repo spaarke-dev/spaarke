@@ -81,7 +81,12 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         { "GET", $"/projects/{Project}/events", None, "sprk_event", AccessRights.Read },
         { "POST", $"/projects/{Project}/events", Json, "sprk_project", AccessRights.AppendTo },
         { "GET", $"/matters/{Matter}/events", None, "sprk_event", AccessRights.Read },
+        // R4 task 002: the matter / work-assignment event creates carry the project create's pair (child Create, root AppendTo)
+        { "POST", $"/matters/{Matter}/events", Json, "sprk_event", AccessRights.Create },
+        { "POST", $"/matters/{Matter}/events", Json, "sprk_matter", AccessRights.AppendTo },
         { "GET", $"/workassignments/{WorkAssignment}/events", None, "sprk_workassignment", AccessRights.Read },
+        { "POST", $"/workassignments/{WorkAssignment}/events", Json, "sprk_event", AccessRights.Create },
+        { "POST", $"/workassignments/{WorkAssignment}/events", Json, "sprk_workassignment", AccessRights.AppendTo },
         // Delete own
         { "DELETE", $"/documents/{Item}", None, "sprk_document", AccessRights.Delete },
         { "DELETE", $"/todos/{Item}", None, "sprk_todo", AccessRights.Delete },
@@ -113,10 +118,23 @@ public sealed class WorkforceCeilingRouteFamilyTests : IClassFixture<ExternalDel
         { "POST", $"/workassignments/{WorkAssignment}/invoice-submissions", File, "sprk_workassignment", AccessRights.AppendTo },
         { "GET", $"/invoice-submissions/{Item}", None, "sprk_invoicesubmission", AccessRights.Read },
         { "GET", "/invoice-submissions", None, "sprk_invoicesubmission", AccessRights.Read },
+        // ebilling-r1 task 130-0 fix round 1: both submission reads read the submission's invoice, so they declare Read on it too
+        { "GET", $"/invoice-submissions/{Item}", None, "sprk_invoice", AccessRights.Read },
+        { "GET", "/invoice-submissions", None, "sprk_invoice", AccessRights.Read },
         { "GET", "/invoice-submissions/firm-records", None, "sprk_matter", AccessRights.Read },
         { "GET", "/invoice-submissions/firm-records", None, "sprk_project", AccessRights.Read },
         { "GET", "/invoice-submissions/firm-records", None, "sprk_workassignment", AccessRights.Read },
         { "GET", "/invoice-submissions/firm-records", None, "sprk_invoicesubmission", AccessRights.Create },
+        // Firm outcomes (ebilling-r1 task 130b): each table the outcome returns (fix round 2 adds the Decision Record and Signal tables)
+        { "GET", $"/ebilling/invoices/{Invoice}/outcome", None, "sprk_invoice", AccessRights.Read },
+        { "GET", $"/ebilling/invoices/{Invoice}/outcome", None, "sprk_billingevent", AccessRights.Read },
+        { "GET", $"/ebilling/invoices/{Invoice}/outcome", None, "sprk_decisionrecord", AccessRights.Read },
+        { "GET", $"/ebilling/invoices/{Invoice}/outcome", None, "sprk_signal", AccessRights.Read },
+        { "GET", $"/ebilling/submissions/{Item}/outcome", None, "sprk_invoicesubmission", AccessRights.Read },
+        { "GET", $"/ebilling/submissions/{Item}/outcome", None, "sprk_invoice", AccessRights.Read },
+        { "GET", $"/ebilling/submissions/{Item}/outcome", None, "sprk_billingevent", AccessRights.Read },
+        { "GET", $"/ebilling/submissions/{Item}/outcome", None, "sprk_decisionrecord", AccessRights.Read },
+        { "GET", $"/ebilling/submissions/{Item}/outcome", None, "sprk_signal", AccessRights.Read },
     };
 
     /// <summary>Each distinct route once.</summary>

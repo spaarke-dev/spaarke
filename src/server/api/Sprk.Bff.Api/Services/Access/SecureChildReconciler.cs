@@ -440,9 +440,20 @@ public sealed class SecureChildReconciler
     /// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), the same derivation their writers use.</summary>
     private readonly CoreAncestorResolver? _coreAncestors;
 
-    /// <summary>UAC task 194b fix round (F1-c): the To Do assignee links, so a no-core Signal's or Decision Record's question
-    /// asks the To Do job's own predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
-    private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? _links;
+    /// <summary>UAC task 194b fix round (F1-c): the To Do assignee rule's contact → user read (uac-r2 task 193:
+    /// <c>ContactUserRepresentation</c>), so a no-core Signal's or Decision Record's question asks the To Do job's own
+    /// predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
+    private readonly Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? _people;
+
+    /// <summary>uac-r2 task 198 Part D: the one share seam the Restricted filing bar reads and revokes through
+    /// (<see cref="RestrictedFilingShareBar"/>). Optional so the test compositions keep compiling; the host registers it
+    /// unconditionally. Without it the bar removes nothing (logged).</summary>
+    private readonly IDataverseRecordShareService? _recordShares;
+
+    /// <summary>uac-r2 task 198 Part C: fm 054a's Direct-message owner team lookup, for the re-grant after a re-file
+    /// (<see cref="DirectMessageParticipantShares"/>). Optional so the test compositions keep compiling; the host registers it
+    /// (<c>CommunicationModule</c>). Without it the step decides nothing and the share job re-grants.</summary>
+    private readonly Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? _directMessageOwnerTeam;
 
     /// <param name="accessCacheInvalidator">Batch-4 integration, 148 × 132. Every child OWNER change this pass makes
     /// (provisioning's child pass, the unsecure's Step 3.5 and completion branch, a re-file, <c>SecureChildReconciliationJob</c>)
@@ -463,9 +474,11 @@ public sealed class SecureChildReconciler
     /// question names the same stamps its writer did (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>). Optional so the
     /// test compositions keep compiling; the host registers it unconditionally (<c>AddCoreAncestorResolver</c>). Without it such
     /// a row with a core record is not decided (fail closed).</param>
-    /// <param name="links">UAC task 194b fix round (F1-c): the To Do assignee links, so whether the To Do job keeps a no-core
-    /// row is asked with that job's own predicate. Optional so the test compositions keep compiling; the host registers it
-    /// (<c>AddScoped&lt;AssignedAccessStore&gt;</c>). Without it a no-core row about a To Do is not decided (fail closed).</param>
+    /// <param name="people">UAC task 194b fix round (F1-c): the To Do assignee rule's contact → user read, so whether the To Do
+    /// job keeps a no-core row is asked with that job's own predicate (uac-r2 task 193: the same
+    /// <c>ContactUserRepresentation</c> the job reads through). Optional so the test compositions keep compiling; the host
+    /// registers it (<c>AddScoped&lt;ContactUserRepresentation&gt;</c>). Without it a no-core row about a To Do is not decided
+    /// (fail closed).</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -479,11 +492,15 @@ public sealed class SecureChildReconciler
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         DocumentContainerRelocator? relocator = null,
         CoreAncestorResolver? coreAncestors = null,
-        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null)
+        Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? people = null,
+        IDataverseRecordShareService? recordShares = null,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
+        _recordShares = recordShares;
+        _directMessageOwnerTeam = directMessageOwnerTeam;
         _relocator = relocator;
         _coreAncestors = coreAncestors;
-        _links = links;
+        _people = people;
         _threads = threads;
         _ownerPrivileges = ownerPrivileges;
         _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
@@ -577,7 +594,42 @@ public sealed class SecureChildReconciler
                 "the record's related records could not be read");
         }
 
-        return await pass.RunAsync().ConfigureAwait(false);
+        var report = await pass.RunAsync().ConfigureAwait(false);
+
+        // Task 191c (L1): a Make Secure / Unsecure transition brings the External Collaborators team's shares on the root and its
+        // family into line now (a record that became Secure loses them at once). The sweep is left to the two-minute pass, which
+        // covers the same rows. Best effort; only with that engine's writes on.
+        if (mode == SecureChildReconcileMode.Apply && trigger != SecureChildPassTrigger.Sweep)
+            await SyncExternalTeamFamilyAsync(rootTable, rootId, "secure-transition", ct).ConfigureAwait(false);
+
+        return report;
+    }
+
+    /// <summary>
+    /// Task 191c (L1): the External Collaborators team's shares on a row and everything filed under it, now. Never throws
+    /// (cancellation included, so the caller's next step runs): a fault is logged and the two-minute share job re-decides the same rows. Nothing when the engine is
+    /// not composed or its writes are off.
+    /// </summary>
+    private async Task SyncExternalTeamFamilyAsync(string table, Guid id, string trigger, CancellationToken ct)
+    {
+        var engine = _shares.ExternalTeam;
+        if (engine is null || !engine.WritesEnabled)
+            return;
+
+        try
+        {
+            var result = await engine.SyncFamilyAsync(table, id, trigger, ct, ExternalTeamShareSynchronizer.MaxInlineFamilyRows).ConfigureAwait(false);
+            if (result.Status is ExternalTeamShareStatus.Failed or ExternalTeamShareStatus.Incomplete)
+            {
+                _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares are " +
+                    "{Status} ({Detail}); the two-minute share job finishes them.", table, id, trigger, result.Status, result.Detail);
+            }
+        }
+        catch (Exception ex) // never throws, not even for cancellation: the caller's next step (the gate) must run (F4)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares could " +
+                "not be updated; the two-minute share job finishes them.", table, id, trigger);
+        }
     }
 
     /// <summary>
@@ -1320,23 +1372,97 @@ public sealed class SecureChildReconciler
             }
         }
 
-        // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision Records
-        // still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
+        // Task 191c (L1): the re-filed row and everything filed under it get the External Collaborators team's shares the
+        // predicate answers for their new place, now. Before the communication steps (whose gate step stays last); what they
+        // change afterwards (a Direct-message owner) the two-minute share job re-decides. Never thrown.
+        await SyncExternalTeamFamilyAsync(childLogicalName.Trim().ToLowerInvariant(), childId, "refile", ct).ConfigureAwait(false);
+
         if (string.Equals(childLogicalName.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {
+            // 198 pass 2 item 6 (ontology R-b): the two UAC steps run in a try whose finally is the gate step, so a caller's real
+            // cancellation (or anything else that escapes them) can never skip the D-169/D-215 re-own. The gate step stays LAST.
             try
             {
-                await _gateDecisionRecords.ReownAfterFilingAsync(childId).ConfigureAwait(false);
+                // uac-r2 task 198 Part D (owner 2026-11-09): filed under a Restricted record, every user flagged external loses
+                // their shares on the message and its content rows. Every communication; after the mirror, so a Secure target's
+                // shares are the synchronizer's first. Never thrown; nothing granted.
+                try
+                {
+                    // R3 (finding 3): an incomplete outcome is not retried here. The access-permission job bars every Restricted
+                    // communication it examines (this one is listed as changed; after a restart its sweep finds it).
+                    var bar = await RestrictedFilingBar().AfterFilingAsync(childId, ct).ConfigureAwait(false);
+                    if (!bar.Complete)
+                    {
+                        _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but the Restricted filing bar did not " +
+                            "finish (Restricted {Restricted}); the access-permission job bars it again.",
+                            CommunicationTable, childId, bar.TargetRestricted);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but the Restricted filing bar faulted; no " +
+                        "share was removed by it.", CommunicationTable, childId);
+                }
+
+                // uac-r2 task 198 Part C: a message the re-file returned to the Direct-message owner team (unfiled, from an ordinary
+                // or a secure record) is read by exactly its thread's participants — they are granted (the Restricted bar applied),
+                // and every other user's direct share on it (the anchor record's grantees) is revoked and read back. Any other
+                // message is left as it is. What this cannot finish, the two-minute share job finishes. Never thrown. Without the
+                // lookup (a test composition) the step does not run; the host always registers it.
+                if (_directMessageOwnerTeam is not null)
+                    await DirectParticipantsAfterRefileAsync(childId, ct).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            finally
             {
-                _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its gate Decision Records were not re-owned.",
-                    CommunicationTable, childId);
+                // Ontology task 042b (D-169, uac-r2 choice A): after UAC's own steps, on EVERY communication re-file, its gate Decision
+                // Records still owned by a user are re-owned to the resolver's team (a Secure answer is left to this engine). Never thrown.
+                // Ontology D-215 (task 198 Part E): LAST, after the Restricted bar and the Direct participant step, because a Direct
+                // message's gate records take the participants who read the message NOW (a secure exit back to Direct revokes their message
+                // shares, and the participant step grants them again before this step reads them). It runs on CancellationToken.None and
+                // catches everything, so it never replaces an exception the steps above let escape.
+                try
+                {
+                    await _gateDecisionRecords.ReownAfterFilingAsync(childId).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its gate Decision Records were not re-owned.",
+                        CommunicationTable, childId);
+                }
             }
         }
 
         return report;
     }
+
+    /// <summary>uac-r2 task 198 Part C: the Direct participant step of a re-filed communication. Never throws (cancellation aside).</summary>
+    private async Task DirectParticipantsAfterRefileAsync(Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            var outcome = await DirectParticipantShares().AfterRefileAsync(communicationId, ct).ConfigureAwait(false);
+            if (!outcome.Complete)
+            {
+                _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed; its Direct participant shares are not yet " +
+                    "complete ({Detail}); the share reconciliation job retries it.", CommunicationTable, communicationId,
+                    outcome.Detail ?? outcome.Status.ToString());
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} was re-filed, but its Direct participant step faulted; the " +
+                "share reconciliation job retries it.", CommunicationTable, communicationId);
+        }
+    }
+
+    /// <summary>uac-r2 task 198 Part C: the Direct participant shares over this reconciler's reads, probe, user reader and share seam.</summary>
+    private DirectMessageParticipantShares DirectParticipantShares() =>
+        new(_dataverse, _recordShares, _directMessageOwnerTeam, _configuration,
+            _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _webApi, _logger);
+
+    /// <summary>uac-r2 task 198 Part D: the Restricted filing bar over this reconciler's reads, probe and share seam.</summary>
+    private RestrictedFilingShareBar RestrictedFilingBar() =>
+        new(_dataverse, _coreAncestors is { } resolver ? resolver.ProbeColumnsAsync : null, _recordShares, _webApi, _logger);
 
     /// <summary>
     /// #2159 slice 2 — the F3 release of one document's file (the re-filed document, or one filed under the re-filed row):
@@ -1688,7 +1814,7 @@ public sealed class SecureChildReconciler
         // per pass.
         private ExistingRowReads? _reads;
 
-        private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._links);
+        private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._people);
 
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,
@@ -1753,9 +1879,14 @@ public sealed class SecureChildReconciler
                     var lookups = _ordinary is null
                         ? table.Lookups
                         : table.Lookups.Concat(OrdinaryOnlyServiceRequestLookups(table.LogicalName));
+                    // A Signal or Decision Record whose core record pair names a root of this level is filed under it too
+                    // (SecureChildLineage.CorePairMatches): its question asks that core first (ForExistingRowAsync), and no
+                    // lookup may name it once its subject was re-filed (D-123). The ordinary pass also matches a service-request
+                    // root (F4-b): its question takes a service-request core as the row's primary parent too.
                     var pairs = lookups
                         .Where(l => idsByTable.ContainsKey(l.Value))
-                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Id: id)))
+                        .SelectMany(l => idsByTable[l.Value].Select(id => (Column: l.Key, Value: (object)id)))
+                        .Concat(SecureChildLineage.CorePairMatches(table.LogicalName, frontier, alsoServiceRequests: _ordinary is not null))
                         .ToArray();
 
                     foreach (var chunk in pairs.Chunk(SecureChildShareSynchronizer.DescendantConditionsPerQuery))
@@ -1763,7 +1894,7 @@ public sealed class SecureChildReconciler
                         var query = new QueryExpression(table.LogicalName) { ColumnSet = new ColumnSet(true), NoLock = true };
                         var anyParent = new FilterExpression(LogicalOperator.Or);
                         foreach (var column in chunk.GroupBy(p => p.Column, StringComparer.OrdinalIgnoreCase))
-                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => (object)p.Id).ToArray());
+                            anyParent.AddCondition(column.Key, ConditionOperator.In, column.Select(p => p.Value).ToArray());
                         query.Criteria.AddFilter(anyParent);
 
                         foreach (var entity in await ReadAllPagesAsync(table.LogicalName, query).ConfigureAwait(false))
@@ -2452,7 +2583,12 @@ public sealed class SecureChildReconciler
                 synced.Sum(r => r.SharesGranted),
                 synced.Sum(r => r.SharesChanged),
                 synced.Sum(r => r.SharesRevoked),
-                open.Select(r => r.Detail).FirstOrDefault(d => d is not null));
+                open.Select(r => r.Detail).FirstOrDefault(d => d is not null))
+            {
+                HardDenyWiderThanRead = synced.Sum(r => r.HardDenyWiderThanRead),
+                HardDenyUnchecked = synced.Sum(r => r.HardDenyUnchecked),
+                HardDenyNarrowFailed = synced.Sum(r => r.HardDenyNarrowFailed),
+            };
         }
 
         /// <summary>

@@ -695,30 +695,30 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
 
     private static object ToResult(
         RunReport own, ProvisioningTargets targets, SweepState sweep, string status, string mode, bool writesEnabled) => new
-    {
-        status,
-        mode,
-        writesEnabled,
-        environment = own.Environment,
-        readability = own.Readability,
-        systemUsers = own.SystemUsersResult(),
-        flags = own.FlagsResult(),
-        removalSweep = sweep.Result(),
-        provisioningTargets = new
         {
-            configured = targets.Configured,
-            registryReadFailed = targets.RegistryFailed,
-            environments = targets.Environments.Select(t => new
+            status,
+            mode,
+            writesEnabled,
+            environment = own.Environment,
+            readability = own.Readability,
+            systemUsers = own.SystemUsersResult(),
+            flags = own.FlagsResult(),
+            removalSweep = sweep.Result(),
+            provisioningTargets = new
             {
-                environment = t.Environment,
-                status = t.Status,
-                readability = t.Readability,
-                fault = t.Fault,
-                systemUsers = t.SystemUsersResult(),
-                flags = t.FlagsResult(),
-            }).ToArray(),
-        },
-    };
+                configured = targets.Configured,
+                registryReadFailed = targets.RegistryFailed,
+                environments = targets.Environments.Select(t => new
+                {
+                    environment = t.Environment,
+                    status = t.Status,
+                    readability = t.Readability,
+                    fault = t.Fault,
+                    systemUsers = t.SystemUsersResult(),
+                    flags = t.FlagsResult(),
+                }).ToArray(),
+            },
+        };
 
     private static string? Normalised(string? url) => string.IsNullOrWhiteSpace(url) ? null : url.Trim().TrimEnd('/');
 

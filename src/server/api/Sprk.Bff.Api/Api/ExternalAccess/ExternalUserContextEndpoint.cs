@@ -18,6 +18,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// Follows ADR-001: Minimal API — no controllers.
 /// Follows ADR-008: authorization applied at the route group (policy plus principal filter), not per handler.
 /// Follows ADR-028: one collaboration group serves both planes; this handler does not branch on plane.
+/// </summary>
 public static class ExternalUserContextEndpoint
 {
     /// <summary>

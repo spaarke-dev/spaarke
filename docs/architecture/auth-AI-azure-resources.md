@@ -347,7 +347,7 @@ Current production index with 3072-dim vectors and document visualization suppor
 - **Entity types supported**: matter, project, invoice, account, contact
 - **Semantic Search API**: `/api/ai/search` endpoint with hybrid RRF, vector-only, and keyword-only modes
 
-**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/spaarke-knowledge-index-v2.json)
+**Index Definition**: [`infrastructure/ai-search/spaarke-knowledge-index-v2.json`](../../infrastructure/ai-search/_archive/spaarke-knowledge-index-v2.json)
 
 ### RAG knowledge-index placement
 
@@ -569,7 +569,7 @@ The RAG Pipeline (Phase 1 Complete) adds file indexing capabilities:
 - [../guides/ai-document-summary.md](../guides/ai-document-summary.md) - AI feature documentation
 - [../guides/RAG-ARCHITECTURE.md](../guides/RAG-ARCHITECTURE.md) - RAG architecture and file indexing pipeline
 - [../guides/RAG-CONFIGURATION.md](../guides/RAG-CONFIGURATION.md) - RAG configuration reference
-- [../../reference/adr/ADR-013-ai-architecture.md](../../reference/adr/ADR-013-ai-architecture.md) - AI architecture decisions
+- [../../reference/adr/ADR-013-ai-architecture.md](../adr/ADR-013-ai-architecture.md) - AI architecture decisions
 
 ---
 

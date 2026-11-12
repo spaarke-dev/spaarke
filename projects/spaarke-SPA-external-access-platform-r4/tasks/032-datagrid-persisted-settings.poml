@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>DataGrid opt-in persisted widths/sort + Reset columns; SPA localStorage (FR-19, #2489)</title>
+    <phase>3 Grids, information, messages</phase>
+    <gate>after 028; the option API is agreed with the dataset-grid framework owners first</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared DataGrid (.tsx) used by many surfaces, plus SPA wiring</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Opt-in props on an existing component with a fixed contract; no default-behaviour change</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>028</deps>
+    <tags>frontend, fluent-ui, react, typescript, unit-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the shared DataGrid optional, opt-in props to start from and report column widths and sort, and have the external SPA persist them per browser in localStorage keyed by grid configuration id, with a "Reset columns" command that restores the defaults.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent UI v9 DataGrid and shared-library (ADR-012) developer.</role>
+  <goal>In the SPA, a user's column widths and sort survive a reload per grid; "Reset columns" restores the defaults; storage failure falls back silently; every other DataGrid consumer renders and behaves exactly as before.</goal>
+
+  <context>
+    <background>Spec FR-19, design §7 (#2489, owner 2026-10-31: per browser first; cross-device is out of scope). Today the shared grid sorts natively and uncontrolled (`DataGrid.tsx:7`, column `compare` at `:1155-1175`, header sort no-op `:1188-1192`) and resizes natively with initial-only `columnSizingOptions` (`DataGrid.tsx:8`, `:1281-1306`, `:1552-1558`). Nothing is persisted. SPA grids mount through `GridWidgetBody.tsx:136-143` (`&lt;ExternalDataGrid configId=…&gt;`), and after task 023 DocumentLibrary may too. `ExternalDataGrid.tsx` forwards all props but its text is pinned by `ExternalSpaGridViewSelectorGuardTests`: do not edit it. Grid hosts elsewhere (LegalWorkspace, SpaarkeAi, Calendar widget) use the same component.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.persistedSettings.test.tsx</file>
+      <file role="modify">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="new">src/client/external-spa/src/services/gridSettingsStore.ts</file>
+      <file role="new">src/client/external-spa/tests/GridSettings.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/widgets/ExternalDataGrid.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">P2 deployed (phase-deploy convention); DocumentLibrary on the shared grid</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012, spec FR-19">Every new DataGrid prop is optional; when none is passed the grid's rendering, sort and resize behaviour are byte-for-byte as today (a test proves it). The props carry plain data and callbacks: no storage, no Xrm, no entity literals inside the shared lib. Types are exported from the DataGrid index.</constraint>
+    <constraint source="spec FR-19">Storage lives in the SPA only: `localStorage`, key derived from the grid configuration id (one entry per grid, versioned), every read and write wrapped in try/catch; unreadable, missing or malformed data means defaults, with no error shown and nothing thrown.</constraint>
+    <constraint source="spec FR-19">"Reset columns" clears that grid's entry and returns the grid to its configured widths and sort without a page reload. It is visible on every SPA grid that persists settings, has a tooltip equal to its aria-label, and uses an icon from task 001's icon map constant (add none outside it).</constraint>
+    <constraint source="ExternalSpaGridViewSelectorGuardTests">`ExternalDataGrid.tsx` is not edited; the new props reach the grid through it as ordinary props.</constraint>
+    <constraint source="project">Agree the prop names and shape with the dataset-grid framework owners before merging (spec Dependencies); record who agreed and when in the notes.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-051-infinite-scroll-lists.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Optional host hooks on DataGrid" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx">existing optional props (`onRecordsLoaded`, `pageSize`, `showViewSelector`) — documented JSDoc, absent = unchanged</pattern>
+      <pattern name="Existing DataGrid tests" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx">how the grid is rendered under test with a mock IDataverseClient</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Draft the prop shape (e.g. initial column widths + an on-change callback; initial sort + an on-change callback; a reset signal) and get the framework owners' agreement; record it.</step>
+    <step order="2">Implement the props in DataGrid.tsx using Fluent v9 DataGrid's controlled/initial sort and column-resize hooks; keep defaults untouched when the props are absent.</step>
+    <step order="3">Shared-lib tests: absent props → unchanged; initial widths and sort applied; callbacks fire on resize and sort; reset restores the configured values.</step>
+    <step order="4">Write `gridSettingsStore.ts` (load/save/clear by config id, try/catch, schema-versioned) and wire it in `GridWidgetBody.tsx` and DocumentLibrary's grid; add the "Reset columns" command.</step>
+    <step order="5">SPA tests: widths and sort survive a remount; Reset restores defaults; `localStorage` throwing on get/set → defaults, no error; malformed JSON → defaults.</step>
+    <step order="6">Run the shared-lib DataGrid tests, the SPA tests, the SPA build and `dotnet test tests/Spaarke.ArchTests --filter ExternalSpaGridViewSelectorGuardTests`.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and the framework owners' agreement in projects/spaarke-SPA-external-access-platform-r4/notes/task-032-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the framework owners do not agree the prop shape, or ask for a server or cross-device store, STOP and escalate; cross-device settings are out of scope.</trigger>
+    <trigger>If any existing DataGrid test or consumer changes behaviour with the props absent, STOP and fix the default path before anything else.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DataGrid sort and resize (DataGrid.tsx:1155-1192, :1281-1306, :1552) with no persistence; no grid-settings store exists in the SPA (grep `localStorage` under src/client/external-spa/src/widgets: none).</existing>
+    <extension>Yes — optional props on the existing DataGrid (no new grid component), and a small SPA-side store because storage policy is host-specific (ADR-012 keeps storage out of the shared lib).</extension>
+    <cost-of-doing-nothing>Every reload resets the user's column widths and sort on every external grid (#2489).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Settings survive reload">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>On the Matters tab, widen a column and sort by another</step>
+        <step>Reload the page</step>
+        <step>Verify the width and sort are kept; switch tabs and back</step>
+        <step>Click "Reset columns"; verify defaults return</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>Settings persist per grid; Reset restores defaults; no console errors</expected>
+    </test>
+    <test name="Storage blocked">
+      <steps><step>Block site data in the browser; reload</step></steps>
+      <expected>Grids load with defaults and no error</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark and high-contrast</step><step>Verify the Reset columns command and grid header adapt</step></steps>
+      <expected>Semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run shared-lib and SPA tests and the SPA build</tool>
+    <tool name="dotnet">Run the external-SPA grid guard arch test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</output>
+    <output type="code">src/client/external-spa/src/services/gridSettingsStore.ts</output>
+    <output type="code">src/client/external-spa/src/widgets/GridWidgetBody.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.persistedSettings.test.tsx</output>
+    <output type="test">src/client/external-spa/tests/GridSettings.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-032-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">In the SPA, column widths and sort survive a reload, per grid configuration id.</criterion>
+    <criterion testable="true">"Reset columns" restores the configured widths and sort without a reload and clears that grid's stored entry.</criterion>
+    <criterion testable="true">With `localStorage` unavailable, throwing, or holding malformed data, the grid uses its defaults and no error is shown or thrown.</criterion>
+    <criterion testable="true">With none of the new props passed, DataGrid behaves exactly as before (test), and the existing DataGrid tests pass unchanged.</criterion>
+    <criterion testable="true">The new prop types are exported; the shared lib contains no storage call.</criterion>
+    <criterion testable="true">`ExternalDataGrid.tsx` is unchanged and the grid guard arch test passes.</criterion>
+    <criterion testable="true">The framework owners' agreement is recorded.</criterion>
+    <criterion testable="true">Shared-lib tests, SPA tests and the SPA build pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-19, #2489. Group C runs in parallel with 031 and 034 (no shared files). 033 follows and touches DataGrid.tsx again.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

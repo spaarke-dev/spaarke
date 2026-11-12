@@ -64,7 +64,7 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md`. Design
 
 **ADR tensions approved for this project** (root §6.5):
 - Path B, applied: ADR-003 (task 030); ADR-028 A2, Dataverse's answer replaces the ADR-034 derivation (031); ADR-034 per-surface allow-list (040) and A4, Assigned-To as removable Collaborate grants (round 11).
-- Path B, **approved, not yet merged:** 036's ADR-034 amendment (system-user ACCESS on SPA/Teams = Dataverse's answer; round 75). The ADR text merges with or before 036's PR.
+- Path B, **merged:** 036's ADR-034 Amendment A2 (system-user ACCESS on SPA/Teams = Dataverse's answer; round 75), in #2078 (`4f5f22694c`) with 036's code.
 - Path B: the AI tools' "User-OBO ONLY" rule yields to the G5 pattern and the inline re-stamp (rounds 7, 8, 13).
 - Path A: 143 reuses `IScheduledJobLease` as the per-record mutex (ADR-036 A1-7 / ADR-052 §5; round 10 item 6).
 - The 1-hop cap needs no exception (the ancestor stamp makes every chain one hop).
@@ -135,7 +135,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - **Access changes take effect in minutes:** immediately on save, plus the "Update Access" ribbon, with background jobs ≤5 min as the safety net (R3/R4). The MDA Share/Unshare mirror to children is ≤2 min (round 11).
 - **Child inheritance:**
   - a child under two secure roots gets the INTERSECTION of their sharees (round 11);
-  - invoices follow their matter (round 10 item 11);
+  - invoices follow their ONE core record: matter, project or work assignment (ebilling D-28; refines round 10 item 11's "follow their matter", 2026-11-08);
   - communications inherit the parent's access permission (round 2 Q6).
   - To Do, Event, Communication and Document show their parent's `sprk_accesspermission`, written once in the shared stamp path and kept in step by the reconcile; a parentless child keeps its own value, recorded only, no new enforcement (round 81; owner may revisit).
 - **A child's access always follows its parent, both ways, locked while it has a parent** (round 84; replaces round 6 item 4's "no unsecure cascade"): a filed work assignment / project takes the parent's `sprk_issecure` and `sprk_accesspermission`; To Do / Event / Communication / Document take `sprk_accesspermission`; most restrictive across parents; enforcement uses the parent-derived value (computed from the filing chain, fail closed) until the stored flag catches up; a parentless record keeps its own. **Refined by round 87 (2026-10-09): the parent sets a FLOOR, not an equality.** A child inherits the parent's values; a user may set a child STRICTER by hand (same permissions as today; removing the extra strictness needs F3) but never looser than the parent; when the parent loosens, only INHERITED values follow it down, and values set on the child stay; a re-file never loosens; the lock covers Secure + Access Permission only (people grants and shares stay).

@@ -193,8 +193,15 @@ public class RecordTableRulesTests
     {
         // Task 014 (ebilling-r1's review of 013, item 3): InvoiceFamilyCoreRecordGuard.CoreRecordLookups on work/ebilling-r1
         // (TypedMatterProjectPlusRegardingWorkAssignment) — a row names exactly ONE core record, the caller's.
-        RecordTableRules.Get(table).MappingProtectedColumns
-            .Should().BeEquivalentTo("sprk_matter", "sprk_project", "sprk_regardingworkassignment");
+        // ebilling-r1 082c-2 (uac-r2 2026-11-04): sprk_invoice also protects its review detail, which only typed BFF writers derive.
+        string[] expected = table == "sprk_invoice"
+            ? ["sprk_matter", "sprk_project", "sprk_regardingworkassignment", "sprk_reviewdetail",
+                // ebilling-r1 task 166 fix round (EB-D-200): the billed total and the five derived totals, written only by typed finance writers.
+                "sprk_totalamount", "sprk_feestotal", "sprk_expensestotal", "sprk_lineadjustmentstotal", "sprk_invoiceadjustmentstotal", "sprk_approvedtotal",
+                // ebilling-r1 task 165d (EB-D-207): the AP export claim, set and cleared only by AP export.
+                "sprk_billingexport"]
+            : ["sprk_matter", "sprk_project", "sprk_regardingworkassignment"];
+        RecordTableRules.Get(table).MappingProtectedColumns.Should().BeEquivalentTo(expected);
         RecordTableRules.Get(table).MappingProtectedColumns.Contains("SPRK_Matter").Should().BeTrue("case-insensitive, as every list");
     }
 
@@ -218,7 +225,9 @@ public class RecordTableRulesTests
                 // #2515: the event's platform number (EVT-{SEQNUM:6}).
                 "sprk_event",
                 // Task 017 (coordinator item 8): the other four invoice-family tables protect their core lookups too.
-                "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection");
+                "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_externalidentifier", "sprk_invoicecorrection",
+                // ebilling-r1 DEF-061: the Procedure Version's publish stamp, written only by ProcedureService.
+                "sprk_procedureversion");
     }
 
     // ── Task 017 (coordinator item 8): every invoice-family table's core lookups are mapping-protected ───────────────
@@ -286,6 +295,41 @@ public class RecordTableRulesTests
 
         rule.MappingApplies.Should().BeFalse("§0.3 binds their content (ontology-r1)");
         rule.MappingExclusion!.Name.Should().Be("OntologyContentIsNotMapped");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    [InlineData("sprk_budgetrevision")]
+    public void CreatedOnlyByItsWriter_OntologyWriterTables_AreFlagged(string table)
+    {
+        // Task 042c fix round 4 (owner decision 2026-11-04, ontology D-204): created only by their writers; the service refuses them.
+        RecordTableRules.Get(table).CreatedOnlyByItsWriter.Should().BeTrue();
+    }
+
+    [Fact]
+    public void CreatedOnlyByItsWriter_IsTheThreeOntologyWriterTablesOnly()
+    {
+        RecordTableRules.All.Where(r => r.CreatedOnlyByItsWriter).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision");
+    }
+
+    [Fact]
+    public void GenericCreateRefused_IsTheWriterOnlyTables_PlusTheInvoiceLine_WhoseCreateAloneIsRefused()
+    {
+        // ebilling-r1 task 164a-1 (uac-r2 Q6): an invoice line's generic create is refused; its update and delete are not.
+        // ebilling-r1 DEF-061: and a Procedure Version, which only ProcedureService creates (registered for its writer-only publish stamp).
+        RecordTableRules.All.Where(r => r.GenericCreateOnlyRefused).Select(r => r.Table).Should().Equal("sprk_billingevent", "sprk_procedureversion");
+        RecordTableRules.All.Where(r => r.GenericCreateRefused).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord", "sprk_budgetrevision", "sprk_billingevent", "sprk_procedureversion");
+
+        var line = RecordTableRules.Get("sprk_billingevent");
+        line.CreatedOnlyByItsWriter.Should().BeFalse("the update and delete refusals read this flag alone");
+        RecordTableRules.RefuseWriterOnlyTableUpdate("sprk_billingevent").Should().BeNull("D-96 updates a line generically");
+        RecordTableRules.RefuseWriterOnlyTableDelete("sprk_billingevent").Should().BeNull("delete is unchanged");
+        // The rest of the line's entry is as before.
+        line.PreWriteRules.Should().NotBeEmpty();
+        line.MappingApplies.Should().BeTrue();
     }
 
     [Theory]
@@ -655,4 +699,59 @@ public class RecordTableRulesTests
         RecordTableRules.CopiedDefaultsFor(RecordTableRules.Find(table), Row([ContactIn("sprk_assignedtointernal", Internal)]))
             .Should().BeEmpty();
     }
+
+    // ── The core record pair is fixed after create on BFF update paths (update only) ─────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public void FixedAfterCreateColumns_ASignalAndADecisionRecord_HoldTheCoreRecordPair_AndNotTheCreateRefusal(string table)
+    {
+        var rule = RecordTableRules.Get(table);
+        rule.FixedAfterCreateColumns.Should().BeEquivalentTo("sprk_corerecordtype", "sprk_corerecordid");
+        rule.TableServerOwnedColumns.Should().NotContain(rule.FixedAfterCreateColumns, "the create still takes the pair");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_corerecordid")]
+    [InlineData("sprk_signal", "sprk_corerecordtype")]
+    [InlineData(" SPRK_Signal ", "SPRK_CoreRecordId")]
+    [InlineData("sprk_decisionrecord", "sprk_CoreRecordType@odata.bind")]
+    [InlineData("sprk_decisionrecord", "_sprk_corerecordtype_value")]
+    [InlineData("sprk_decisionrecord", " Sprk_CoreRecordId ")]
+    public void RefuseFixedAfterCreateColumns_ACorePairKeyInAnyForm_IsRefused(string table, string key)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, ["sprk_name", key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
+        refusal.Reason.Should().EndWith("cannot be changed").And.NotContain("not written");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_corerecordtype @odata.bind")]
+    [InlineData("sprk_decisionrecord", "Sprk_CoreRecordType  @odata.bind")]
+    public void RefuseFixedAfterCreateColumns_ABindKeyWithASpaceBeforeTheAt_NamesItsColumn(string table, string key)
+    {
+        var refusal = RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]);
+
+        refusal.Should().NotBeNull();
+        refusal!.RefusalCode.Should().Be(RecordTableRules.FixedAfterCreateReasonCode);
+        refusal.Reason.Should().StartWith("sprk_corerecordtype of a ");
+    }
+
+    [Theory]
+    [InlineData("sprk_signal", "sprk_name")]
+    [InlineData("sprk_decisionrecord", "sprk_regardingrecordid")]
+    [InlineData("sprk_todo", "sprk_corerecordid")]
+    [InlineData("sprk_matter", "sprk_corerecordtype")]
+    [InlineData("not_registered", "sprk_corerecordid")]
+    [InlineData(null, "sprk_corerecordid")]
+    public void RefuseFixedAfterCreateColumns_AnotherColumn_OrAnotherTable_IsNotRefused(string? table, string key) =>
+        RecordTableRules.RefuseFixedAfterCreateColumns(table, [key]).Should().BeNull();
+
+    [Fact]
+    public void FixedAfterCreateColumns_NoOtherTable_DeclaresAny() =>
+        RecordTableRules.All.Where(r => r.FixedAfterCreateColumns.Count > 0).Select(r => r.Table)
+            .Should().BeEquivalentTo("sprk_signal", "sprk_decisionrecord");
 }

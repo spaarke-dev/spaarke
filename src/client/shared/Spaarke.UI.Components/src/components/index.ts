@@ -197,6 +197,11 @@ export * from './PolymorphicPicker';
 // (record-header-and-notepad-r1 FR-01, task 002)
 export * from './HeaderToolbar';
 
+// RecordCommandBar - Record-level action bar (hide-don't-disable descriptors,
+// overflow menu) composing HeaderToolbar, plus the RECORD_ACTION_ICONS map
+// (spaarke-SPA-external-access-platform-r4 FR-04/FR-05, task 001)
+export * from './RecordCommandBar';
+
 // RecordHeader - Card chrome (RecordHeaderShell), grid primitive (FieldGrid),
 // and four field renderers (TextField, LookupField, OptionSetField, TextareaField)
 // (record-header-and-notepad-r1 FR-02/03/04, tasks 003–008)
@@ -316,7 +321,7 @@ export * from './StatusBadge';
 // TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
 // directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);
 // writes sprk_externalrecordaccess exclusively through the built BFF endpoints
-// (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
+// (/grant, /invite, /revoke) — context-agnostic (ADR-012), no Xrm
 // dependency in the shared core.
 export * from './AccessGrantModal';
 

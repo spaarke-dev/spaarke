@@ -64,7 +64,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
 
     private static int Mask(string rightsCsv) => RecordShareLevels.MaskForRightsCsv(rightsCsv);
 
-    private static int MirrorOf(string rightsCsv) => RecordShareLevels.ChildMirrorMask(Mask(rightsCsv));
+    private static int MirrorOf(string rightsCsv) => RecordShareLevels.InheritedRootMirrorMask(Mask(rightsCsv));
 
     private static async Task<JsonElement> JsonOf(HttpResponseMessage response)
     {
@@ -1148,6 +1148,53 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         }
 
         ShouldBeUntouched(workAssignment, "an unread intermediate is never a reason to write");
+    }
+
+    /// <summary>
+    /// ebilling-r1 082a (uac-r2 round 2 review U2): a pair id that is not a record id is UNKNOWN, never "files under nothing" — through
+    /// the record walk's public entry point (<see cref="SecureRootInheritance.ReadSecureParentsAsync"/>, which calls the private
+    /// <c>NameParentsAsync</c>), so the pair rule keeps its fail-closed answer after the extraction. Billing's <c>CoreRecordChain</c>
+    /// has the same case under <c>Services/Signals/Billing</c>; the access suite pins it for the access caller too.
+    /// </summary>
+    [Theory]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData("0d1b8f4e-5c0a-4b6e-9f3a-2c7d1e9a4b10-extra")]
+    public async Task AProjectWhosePairIdIsNotARecordId_IsUnverifiable_ThroughTheRecordWalk(string pairId)
+    {
+        var project = Guid.NewGuid();
+        _fixture.SeedProject(project);
+        World.Set("sprk_project", project, "sprk_regardingrecordid", pairId);
+        World.Set("sprk_project", project, "sprk_regardingrecordtype", new EntityReference("sprk_recordtype_ref", RecordTypeRef(_fixture, "sprk_matter")));
+        var dataverse = SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object;
+
+        var answer = await SecureRootInheritance.ReadSecureParentsAsync(
+            dataverse, NullLogger.Instance, "sprk_project", project, CancellationToken.None);
+
+        answer.IsKnown.Should().BeFalse("a pair id that is not a record id is never 'filed under nothing'");
+        answer.Unverifiable.Should().Contain("record identifier");
+        answer.HasSecureParent.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// ebilling-r1 082a (uac-r2 round 2 review U2): the extracted pair rule itself (<see cref="SecureRootInheritance.NamePairParentAsync"/>,
+    /// the entry point billing reuses) answers Unknown for a pair id that is not a record id, on a table whose pair files on its own
+    /// and on one whose pair does not; the answer never depends on the pair's type.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_project", "not-a-guid")]
+    [InlineData("sprk_project", "00000000-0000-0000-0000-000000000000")]
+    [InlineData("sprk_workassignment", "not-a-guid")]
+    [InlineData("sprk_workassignment", "00000000-0000-0000-0000-000000000000")]
+    public async Task NamePairParentAsync_APairIdThatIsNotARecordId_IsUnknown(string table, string pairId)
+    {
+        var dataverse = SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object;
+
+        var answer = await SecureRootInheritance.NamePairParentAsync(
+            dataverse, NullLogger.Instance, table, pairId, RecordTypeRef(_fixture, "sprk_matter"),
+            new System.Collections.Concurrent.ConcurrentDictionary<Guid, string?>(), CancellationToken.None);
+
+        answer.Should().BeOfType<PairParentAnswer.Unknown>().Which.Reason.Should().Contain("record identifier");
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────

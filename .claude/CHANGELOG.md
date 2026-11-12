@@ -7,6 +7,37 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-10 — C# formatting is blocking for changed files; the commit hook formats in seconds
+
+Master had 2,569 whitespace violations in 230 files because commits skipped the pre-commit hook (`--no-verify`, approved in several projects because the hook's full `dotnet format` took 16–45 s and was SIGKILLed under load), and the only CI check was the advisory Tier 2 `format` job, red for weeks. PR #2663.
+
+- **`.lintstagedrc.mjs`**: the C# step is `dotnet format whitespace <repo> --folder --include <staged>` (~2 s, no MSBuild workspace, same changes as the workspace mode).
+- **`scripts/quality/check-changed-cs-format.sh`** (new) and Tier 1 job **`format-changed-cs`** (blocking, owner-approved §6.5 path-A exception): checks only the `*.cs` under `src/` and `tests/` that a PR changes; under a minute, in parallel with `arch-tests`.
+- **`.claude/skills/ci-cd`**, **`push-to-github`**: tier tables and the failure row updated.
+
+###### 2026-11-09 — The Stop quality gate now blocks
+
+`scripts/quality/task-quality-gate.sh` never stopped Claude: it exited `1` (Claude Code only blocks a Stop on exit `2`, reading stderr), its error trap exited `0` mid-run, and its report went to stdout. Found while evaluating an external quality-recommendations document.
+
+- **`scripts/quality/task-quality-gate.sh`** (rewritten): exit `2` with the report on stderr on definite code failures only — compiler errors in any project owning a changed `.cs` file (was: BFF only), TypeScript errors located in a changed file (new `tsc --noEmit` gate), failing `Spaarke.ArchTests`, a new `projects/x-*` folder. Timeouts, file locks, restore errors and missing tools are warnings. Loop guard: with `stop_hook_active` it never blocks again and shows the user a `systemMessage` instead. Includes untracked files. Drops the CLI `-warnaserror`: `Directory.Build.props` owns the warning policy, including the sanctioned `WarningsNotAsErrors` CS0618 sites, and CI tier1 `compile` omits the flag for the same reason. No bare `python3` (WindowsApps stub hazard). The error trap logs and continues instead of exiting `0`.
+- **`.claude/settings.json`**: Stop hook `timeout: 420` (the gate's own budget stops starting new checks at 240 s).
+- **Root `CLAUDE.md` §16**: states the blocking behaviour (+104 bytes, line count unchanged at 218 — owner OK requested in the PR).
+- **`docs/procedures/testing-and-code-quality.md`**: the hooks table said `TaskCompleted` (not a real event, FAILURE-MODES G-1); now `Stop`, with the blocking contract.
+- **Lint steps never worked (same day, both hooks)**: every `--format compact` ESLint call exited 2 because the compact formatter left ESLint core in v9, and `timeout N dotnet format` never finished (it loads the MSBuild workspace) and left its BuildHost child running — 97 orphaned BuildHosts (~650 MB) were found and killed. ESLint now runs once per config folder with that package's own eslint and the default `stylish` output; C# uses `dotnet format whitespace --folder` (seconds, no workspace; ENDOFLINE ignored because `.gitattributes` normalises line endings) in the Stop gate only — `post-edit-lint.sh` no longer lints `.cs`, since nothing fits its 4 s budget. On timeout both hooks kill the whole Windows process tree (`taskkill /T`), not just the direct child.
+
+---
+###### 2026-11-05 — Finished sub-agent worktrees are cleaned up (FAILURE-MODES G-25); Stop/PostToolUse hooks run from the repo root
+
+On 2026-11-04, 123 sub-agent copies under the main checkout's `.claude\worktrees` hung VS Code and Claude sessions opened there.
+
+- **`scripts/worktree/Clean-AgentWorktrees.ps1`** (new): removes a copy only when it is unlocked, idle ≥ 12 h, clean, and its commits are on another branch (`-Project` = merged into `work/<slug>`), through `Remove-WorktreeSafe.ps1` one path per call; removes empty unregistered folders; lists everything else for a human. Pester: `tests/scripts/Clean-AgentWorktrees.Tests.ps1` (CI `agent-guard-tests`).
+- **`devops-project-archive`**: Step 5.5 removes the project's finished agent copies. The project worktree is still kept.
+- **`.claude/settings.json`**: the `post-edit-lint.sh` and `task-quality-gate.sh` hooks now `cd "${CLAUDE_PROJECT_DIR}"` first. They used repo-relative paths, so they failed (`No such file or directory`, exit 127) whenever a session's working directory was not the repo root.
+- **Test fix**: `tests/scripts/Remove-WorktreeSafe.Tests.ps1` "validates every path first" passed two paths through `pwsh -File`, which binds one string `"a,b"`, so it tested a single missing path. It now uses `-Command` and asserts the refusal names the real path.
+- **`.claude/FAILURE-MODES.md`**: G-25.
+- **Follow-up fix (same day)**: idle time now uses the newest reflog *entry's* timestamp, not the `logs/HEAD` file time. `git gc` rewrites every reflog file in the repo, so after a gc every copy looked active and nothing was removed (44 kept, 0 removed on the first real run; 21 removable after the fix).
+
+---
 ###### 2026-11-03 — Skill authoring standard: 500-line cap, conditional branches in `references/`, length guard
 
 Our template said "under 200 lines, cap 400", but 25 skills were over 400 and nothing enforced it. A whole SKILL.md loads on every invocation: provision-environment alone was 229 KB (~57k tokens). Checked against Anthropic's skill-authoring guidance (keep SKILL.md under 500 lines; progressive disclosure; a contents list atop long reference files, which Claude may only preview; match freedom to the task; checklists with validate → fix → re-validate loops).

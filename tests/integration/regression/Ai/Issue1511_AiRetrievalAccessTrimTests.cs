@@ -64,7 +64,7 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             .ReturnsAsync(false);
         var accessor = new HttpContextAccessor { HttpContext = TestHttpContexts.Authenticated(CallerOid) };
         _trim = new RetrievalAccessTrim(
-            accessor, _userClient, _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing,
+            accessor, _userClient, _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible,
             NullLogger<RetrievalAccessTrim>.Instance);
     }
 
@@ -181,8 +181,14 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             PlaybookId = Guid.NewGuid(),
             Node = new PlaybookNodeDto
             {
-                Id = Guid.NewGuid(), PlaybookId = Guid.NewGuid(), ActionId = Guid.NewGuid(), ToolIds = new[] { toolId },
-                Name = "Node", ExecutionOrder = 1, OutputVariable = "out", IsActive = true,
+                Id = Guid.NewGuid(),
+                PlaybookId = Guid.NewGuid(),
+                ActionId = Guid.NewGuid(),
+                ToolIds = new[] { toolId },
+                Name = "Node",
+                ExecutionOrder = 1,
+                OutputVariable = "out",
+                IsActive = true,
                 ConfigJson = "{\"knowledgeRetrieval\":{\"includeDocumentContext\":true}}",
             },
             Action = new AnalysisAction { Id = Guid.NewGuid(), Name = "Review", SystemPrompt = "Review the document." },
@@ -449,7 +455,8 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
                 },
                 ["scope"] = new Azure.Search.Documents.Models.SearchDocument
                 {
-                    ["entityType"] = "matter", ["entityId"] = matter.ToString(),
+                    ["entityType"] = "matter",
+                    ["entityId"] = matter.ToString(),
                 },
             }, 0.9, null);
 
@@ -487,12 +494,15 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
                 ["evidence"] = evidence
                     .Select(e => (object)new Azure.Search.Documents.Models.SearchDocument
                     {
-                        ["refType"] = e.RefType, ["ref"] = e.Ref, ["quote"] = value,
+                        ["refType"] = e.RefType,
+                        ["ref"] = e.Ref,
+                        ["quote"] = value,
                     })
                     .ToArray(),
                 ["scope"] = new Azure.Search.Documents.Models.SearchDocument
                 {
-                    ["entityType"] = "matter", ["entityId"] = matter.ToString(),
+                    ["entityType"] = "matter",
+                    ["entityId"] = matter.ToString(),
                 },
             };
             return Azure.Search.Documents.Models.SearchModelFactory.SearchResult(doc, 0.9, null);
@@ -538,7 +548,8 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             },
             ["scope"] = new Azure.Search.Documents.Models.SearchDocument
             {
-                ["entityType"] = "matter", ["entityId"] = readableMatter.ToString(),
+                ["entityType"] = "matter",
+                ["entityId"] = readableMatter.ToString(),
             },
         };
 
@@ -579,7 +590,8 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             ["evidence"] = supporting
                 .Select(m => (object)new Azure.Search.Documents.Models.SearchDocument
                 {
-                    ["refType"] = "supporting-matter", ["ref"] = $"matter://{m:D}",
+                    ["refType"] = "supporting-matter",
+                    ["ref"] = $"matter://{m:D}",
                 })
                 .ToArray(),
         };
@@ -677,9 +689,15 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
         PlaybookId = Guid.NewGuid(),
         Node = new PlaybookNodeDto
         {
-            Id = Guid.NewGuid(), PlaybookId = Guid.NewGuid(), ActionId = Guid.NewGuid(),
+            Id = Guid.NewGuid(),
+            PlaybookId = Guid.NewGuid(),
+            ActionId = Guid.NewGuid(),
             ToolIds = toolId is { } t ? new[] { t } : Array.Empty<Guid>(),
-            Name = "Node", ExecutionOrder = 1, OutputVariable = "out", IsActive = true, ConfigJson = configJson,
+            Name = "Node",
+            ExecutionOrder = 1,
+            OutputVariable = "out",
+            IsActive = true,
+            ConfigJson = configJson,
         },
         Action = new AnalysisAction { Id = Guid.NewGuid(), Name = "Review", SystemPrompt = "Review the document." },
         ExecutorType = type,

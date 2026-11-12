@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="175" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Console: an "Invoice decisions" card in the Decide lane; billing Work Items open Invoice Review as a pop-up (D-207)</title>
+    <phase>11 UAT</phase>
+    <gate>build now against the 174 contract; DEPLOY only after ebilling task 112 has `sprk_invoicereviewpage` on dev and 174 is live</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes .ts/.tsx in the shared Worklist and the Console host (SpaarkeAi hot path).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Pure data change to an existing filter plus one launch path; named files and contract.</model-tier-reason>
+    <effort>high</effort>
+    <deps>174 (contract only; build in parallel)</deps>
+    <tags>spaarke-ai,react,worklist,testing</tags>
+    <estimated-effort>4 hours</estimated-effort>
+    <parallel-group>P-207</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Owner ruling D-207: billing Work Items (Signals about an invoice or an invoice line) are decided only in eBilling's Invoice Review page. They stay in the Console Worklist; activating one opens that page as a pop-up on its invoice, focused on the line when there is one, and the Worklist refreshes when the pop-up closes. The owner also asked for an "Invoice decisions" filter card. Task 174 adds `invoiceReview: { invoiceId: string; lineId: string | null }` to billing items in `GET /api/v1/signals/worklist`; every other item omits it.</prompt>
+  <role>SPAARKE front-end engineer (shared Worklist, Console host).</role>
+  <goal>(1) `WorklistItem` gains optional `invoiceReview?: { invoiceId: string; lineId?: string | null } | null`. (2) In `laneCountFilters.ts`, the Decide lane gets a bucket `invoiceDecisions` labelled "Invoice decisions", placed right after All, holding the items that have `invoiceReview`; the work-type buckets and Other EXCLUDE those items, so the non-All buckets still partition the lane (W-8) and the counts sum to All. The card shows only when it holds an item (like Other). Do lane unchanged. (3) Activating an item with `invoiceReview` opens `Xrm.Navigation.navigateTo({ pageType: 'webresource', webResourceName: 'sprk_invoicereviewpage', data: 'invoiceId=' + invoiceId + (lineId ? '&amp;lineId=' + lineId : '') }, { target: 2, position: 1, width: { value: 90, unit: '%' }, height: { value: 90, unit: '%' } })` (the encoded form is `invoiceId%3D…%26lineId%3D…`), and when the returned promise settles (closed or rejected) the Worklist refetches. It never opens the Decision wizard for such an item. Items without `invoiceReview` behave exactly as today.</goal>
+
+  <constraints>
+    <constraint source="D-24">Reuse `MetricCard`/`MetricCardRow` and the existing lane filter functions; no new card component, no `StatTiles`.</constraint>
+    <constraint source="D-207">No postMessage listener. No billing actions in the Decision wizard. If `Xrm.Navigation` is unavailable, show the host's existing error toast/message "Invoice Review could not be opened" and do not open the wizard.</constraint>
+    <constraint source="ADR-050 / MODAL-DECISION-CRITERIA">Read `docs/standards/MODAL-DECISION-CRITERIA.md` and `.claude/patterns/ui/record-modal-selection.md`; follow the existing code-page-in-dialog launch used elsewhere in the Console (find it, copy it) rather than inventing one.</constraint>
+    <constraint source="CLAUDE.md">Use `python`, never `python3`. No --no-verify, no git stash. No deploys. `npm install --legacy-peer-deps --no-audit --no-fund` in `src/solutions/*`. Run the package tests and the SpaarkeAi build.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">`bucketLaneItems` for Decide: two billing items + three matter items of mixed work types give All=5, Invoice decisions=2, and the work-type buckets sum to 3; the non-All buckets sum to All. Negative: no billing items → no Invoice decisions bucket. Do lane: unchanged.</criterion>
+    <criterion testable="true">Selecting Invoice decisions filters to exactly the billing items; choosing it again returns to All; a selection on an emptied Invoice decisions resolves to All.</criterion>
+    <criterion testable="true">Activating a line item calls navigateTo with `webResourceName: 'sprk_invoicereviewpage'`, data carrying that invoice id and line id, target 2; an invoice item omits lineId; the Decision wizard launcher is never called (spy). After the promise resolves, and after it rejects, the Worklist refetch runs once.</criterion>
+    <criterion testable="true">A matter item still opens the Decision wizard exactly as before (existing tests green).</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/decisions.md (D-207, D-24)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Worklist/types.ts and laneCountFilters.ts (task 052 reference)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorklistWorkspaceWidget.tsx (the host that opens items)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionWizardLauncher.ts and DecisionWizardHost.tsx</file>
+      <file>ebilling's launch contract: work/ebilling-r1 `src/solutions/InvoiceReview/src/services/launch.ts` (invoiceId; lineId being added)</file>
+    </files>
+  </knowledge>
+</task>

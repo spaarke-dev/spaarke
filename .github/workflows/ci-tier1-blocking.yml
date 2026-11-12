@@ -21,10 +21,15 @@
 #      workflow changing. Added 2026-10-06 by ontology task 081 round 7 as an
 #      owner-approved CLAUDE.md §6.5 PATH-A EXCEPTION to "do not extend without
 #      spec amendment" (FR-A02), scoped to this one job: see the job's comment.
+#   7. format-changed-cs      — `dotnet format whitespace --folder` over the C# files
+#      the change touches (src/, tests/), BLOCKING, <1 min, parallel. Added
+#      2026-11-10 (PR #2663) as an owner-approved §6.5 PATH-A EXCEPTION, scoped to
+#      this one job: see the job's comment.
 #
 # NOT IN TIER 1 (live in ci-tier2-advisory.yml or nightly-health.yml):
-#   format, lint, markdown link validator, dependency audit, Trivy,
-#   full unit/integration test suite.
+#   whole-solution format (Tier 2 keeps it as an advisory backstop; changed C#
+#   files are format-checked by job 7), lint, markdown link validator,
+#   dependency audit, Trivy, full unit/integration test suite.
 #
 # INPUTS (from ci-router.yml `classify` job)
 #   bff_changed       — true if src/server/api/Sprk.Bff.Api/** or shared server changed
@@ -391,7 +396,10 @@ jobs:
     # 5 -> 10 (2026-10-22, GATE REPAIR; #2009): at 1355 tests the job measures 3m50s-4m10s when it
     # passes (build ~1m40s + test ~2m), and slower runners crossed 5m and read `cancelled` on master
     # (runs 39702128977, 39710479837, 39777076810) and on PR #2233 twice. Same headroom rule as #813.
-    timeout-minutes: 10
+    # 10 -> 20 (2026-11-12, GATE REPAIR; #2527): at 2,507 tests successful runs take 6-10 min (05:51-06:01Z and
+    # 07:27-07:37Z on 2026-11-12 both 9m53s), and two runs that day were cancelled at 10 min, which turns Router red.
+    # Revisit at ~5,000 tests or a run over 14 minutes.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -1007,3 +1015,68 @@ jobs:
       - name: getXrm capability guard (0 violations, 0 blind spots, every fixture fires)
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx jest --ci src/utils/__tests__/xrmCapabilityUsage.guard.test.ts
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 7 — format-changed-cs (BLOCKING)
+  #
+  # §6.5 PATH-A EXCEPTION (owner-approved 2026-11-10, PR #2663): the header's
+  # "do not extend without spec amendment" (ci-cd-unit-test-remediation-r1
+  # FR-A02) and its "format is not in Tier 1" are waived for THIS ONE JOB.
+  # Reason: the advisory Tier 2 `Format (dotnet format)` check let master reach
+  # 2,569 whitespace violations in 230 files (red for weeks, so it signalled
+  # nothing), because commits skipped the pre-commit hook with --no-verify.
+  # The owner's condition was no meaningful CI delay; measured, this job adds
+  # none to a PR's wait:
+  #   - it checks ONLY the C# files the change touches (src/ and tests/), so no
+  #     one fails for code they did not change;
+  #   - `dotnet format whitespace --folder` needs no restore or MSBuild
+  #     workspace: ~2 s of checking after checkout (~20 s) and .NET setup (~6 s);
+  #   - it runs in parallel with arch-tests (~7 min), the slowest Tier 1 job.
+  #
+  # BLOCKING: no continue-on-error; a failure fails `CI / Router` the same way
+  # compile / arch-tests do (no router change). The logic lives in
+  # scripts/quality/check-changed-cs-format.sh so a developer runs the same
+  # check locally. Base of the diff: a PR's merge commit's first parent (the
+  # base tip it merges into, hence fetch-depth 2); a merge-queue group's
+  # base_sha; a push's `before`. No base (new branch, manual run): every C#
+  # file under src/ and tests/ is checked.
+  # ──────────────────────────────────────────────────────────────────────────
+  format-changed-cs:
+    name: Format (changed C# files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5   # hang guard; measured well under 1 min
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+
+      - name: Resolve the diff base
+        id: base
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request) base=$(git rev-parse HEAD^1) ;;
+            merge_group)  base="$MERGE_GROUP_BASE" ;;
+            push)         base="$PUSH_BEFORE" ;;
+            *)            base="" ;;
+          esac
+          if [[ -n "$base" && ! "$base" =~ ^0+$ ]] && ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$base"
+          fi
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+          echo "Diff base for $EVENT: ${base:-<none: check all C# files>}"
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Changed C# files are whitespace-formatted
+        shell: bash
+        run: bash scripts/quality/check-changed-cs-format.sh "${{ steps.base.outputs.sha }}" HEAD

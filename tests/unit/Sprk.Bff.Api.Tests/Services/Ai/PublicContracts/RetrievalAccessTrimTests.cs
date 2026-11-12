@@ -38,7 +38,7 @@ public sealed class RetrievalAccessTrimTests
         var client = new ReadableDocumentsUserClient(readable);
         var internalCaller = new NarrowingWorld(external: false);
         return (new RetrievalAccessTrim(
-            accessor, client, internalCaller.Caller.Object, internalCaller.Identity.Object, DocumentNarrowingReads.NeverCalled,
+            accessor, client, internalCaller.Caller.Object, internalCaller.Identity.Object, DocumentNarrowingReads.NeverCalled, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws,
             NullLogger<RetrievalAccessTrim>.Instance), client);
     }
 
@@ -165,7 +165,11 @@ public sealed class RetrievalAccessTrimTests
 
         public RetrievalAccessTrim Trim() => new(
             new HttpContextAccessor { HttpContext = TestHttpContexts.Authenticated(CallerOid) },
-            User, Caller.Object, Identity.Object, AppOnly.Narrowing, new ListLogger(Logs));
+            User, Caller.Object, Identity.Object, AppOnly.Narrowing, Visibility, new ListLogger(Logs));
+
+        /// <summary>Task 191h: THE external visibility predicate seam (all visible unless a test sets the real predicate).</summary>
+        public Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility Visibility { get; set; } =
+            Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible;
 
         /// <summary>A document the app-only world hides for <paramref name="hiddenBy"/>.</summary>
         public Guid HiddenDocument(HiddenBy hiddenBy)
@@ -409,5 +413,99 @@ public sealed class RetrievalAccessTrimTests
         result.Rows.Select(r => r.Name).Should().Equal("matter");
         world.Caller.Verify(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()), Times.Never);
         world.AppOnly.Calls.Should().Be(0);
+    }
+
+    // ── uac-r2 task 191h (#2369 part 2): THE external visibility predicate on an external caller's document keys ──────────
+
+    /// <summary>
+    /// Documents task 188's narrowing SHOWS (Standard, no related communication) but THE predicate hides: one associated with an
+    /// invoice the (a′) rule hides, and one filed under a Restricted matter; plus a plain document both show.
+    /// </summary>
+    private static (Guid InvoiceDocument, Guid RestrictedRootDocument, Guid Plain, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld Leak)
+        SeedPredicateOnlyHiddenDocuments(NarrowingWorld world)
+    {
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+        var invoice = leak.World.Add("sprk_invoice", ("sprk_matter", leak.Matter));
+        leak.World.InvoiceReasons[invoice] = Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceHiddenReason.SourceHidden;
+
+        var invoiceDocument = world.AppOnly.Document(Guid.NewGuid());
+        leak.World.Document(matter: leak.Matter, id: invoiceDocument);
+        leak.World.Entity("sprk_document", invoiceDocument)["sprk_invoice"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_invoice", invoice);
+
+        var restrictedRootDocument = world.AppOnly.Document(Guid.NewGuid());
+        leak.World.Document(matter: leak.RestrictedMatter, id: restrictedRootDocument);
+
+        var plain = world.AppOnly.Document(Guid.NewGuid());
+        leak.World.Document(matter: leak.Matter, id: plain);
+        return (invoiceDocument, restrictedRootDocument, plain, leak);
+    }
+
+    [Theory(DisplayName = "191h trim must fire (#2369 part 2): an external caller gets no chunk of an invoice's associated document the (a') rule hides, nor of a document under a Restricted matter; the 188 narrowing alone keeps them")]
+    [InlineData(KeyKind.DocumentId)]
+    [InlineData(KeyKind.DriveItem)]
+    public async Task Task191h_AnExternalCaller_GetsNoChunkOfADocumentThePredicateHides_TheControlKeepsIt(KeyKind kind)
+    {
+        var world = new NarrowingWorld(external: true);
+        var (invoiceDocument, restrictedRootDocument, plain, leak) = SeedPredicateOnlyHiddenDocuments(world);
+        var chunks = new[]
+        {
+            new Chunk("invoice-document", world.Readable(invoiceDocument, kind)),
+            new Chunk("restricted-root-document", world.Readable(restrictedRootDocument, kind)),
+            new Chunk("plain", world.Readable(plain, kind)),
+        };
+
+        // Control (perturbation): the 188 narrowing alone keeps all three.
+        (await TrimAsync(world, chunks)).Rows.Should().HaveCount(3);
+
+        var asked = new List<IReadOnlyCollection<(string Table, Guid Id)>>();
+        world.Visibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Recording(asked, leak.Seam);
+        var result = await TrimAsync(world, chunks);
+
+        result.Rows.Select(r => r.Name).Should().Equal(new[] { "plain" },
+            because: "THE predicate hides an invoice's document whose invoice (a') hides, and a document under a Restricted root");
+        result.Outcome.Should().Be(RetrievalTrimOutcome.Evaluated);
+        asked.Should().ContainSingle("ONE predicate call per page").Which.Should().HaveCount(3);
+        world.Logs.Should().Contain(l => l.Contains("by the predicate alone: 2"));
+        world.Logs.Should().NotContain(l => l.Contains(invoiceDocument.ToString("D")) || l.Contains(plain.ToString("D")),
+            because: "ADR-015: counts and reason codes only");
+    }
+
+    [Theory(DisplayName = "191h trim must fire: a predicate that faults or throws withholds every document key; parent records stay")]
+    [InlineData("faulted")]
+    [InlineData("throws")]
+    public async Task Task191h_APredicateFault_WithholdsTheDocumentKeys_ParentRecordsStay(string fault)
+    {
+        var world = new NarrowingWorld(external: true);
+        var visible = world.VisibleDocument();
+        var matter = Guid.NewGuid();
+        world.User.Allow("sprk_matters", matter.ToString("D"));
+        world.Visibility = fault == "faulted"
+            ? Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Faulted
+            : Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        var result = await TrimAsync(world,
+            new Chunk("document", world.Readable(visible, KeyKind.DocumentId)),
+            new Chunk("matter", RetrievalRecordKey.ParentRecord("matter", matter.ToString())!));
+
+        result.Rows.Select(r => r.Name).Should().Equal(new[] { "matter" });
+        result.Outcome.Should().Be(RetrievalTrimOutcome.Evaluated);
+        world.Logs.Should().Contain(l => l.Contains("withholding all"));
+    }
+
+    [Theory(DisplayName = "191h trim must not fire: an internal systemuser's documents are unchanged and the predicate is never asked")]
+    [InlineData(KeyKind.DocumentId)]
+    [InlineData(KeyKind.DriveItem)]
+    public async Task Task191h_AnInternalUser_IsUnchanged_AndThePredicateIsNotAsked(KeyKind kind)
+    {
+        var world = new NarrowingWorld(external: false);
+        var (invoiceDocument, restrictedRootDocument, plain, _) = SeedPredicateOnlyHiddenDocuments(world);
+        world.Visibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        var result = await TrimAsync(world,
+            new Chunk("invoice-document", world.Readable(invoiceDocument, kind)),
+            new Chunk("restricted-root-document", world.Readable(restrictedRootDocument, kind)),
+            new Chunk("plain", world.Readable(plain, kind)));
+
+        result.Rows.Select(r => r.Name).Should().Equal("invoice-document", "restricted-root-document", "plain");
     }
 }

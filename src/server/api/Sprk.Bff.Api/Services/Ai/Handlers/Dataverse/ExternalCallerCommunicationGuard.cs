@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Identity;
@@ -31,8 +32,14 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// <c>describe</c> included): its links are read as the user
 /// (<see cref="ReadSourceDocumentIdsAsync"/>), the documents are decided by the hide-only overload
 /// (<see cref="AppOnlyDocumentNarrowingExtensions.HiddenDocumentIdsAsync"/>). A row with no source document is unaffected.</para>
-/// <para><b>Who is external.</b> Decided only when the request touches the communication family, <c>sprk_document</c> or a
-/// document-derived table,
+/// <para><b>Every lineage table (uac-r2 task 191h, #2189).</b> On top of the rules above, every row of a root or lineage-child
+/// table (<see cref="IsVisibilityGuarded"/>) an external caller's tool call returns is asked of THE external visibility predicate
+/// (<see cref="AppOnlyExternalVisibility"/>, task 191b's <c>ExternalVisibility</c> over the app-only readers) by id, and only a
+/// Visible row is kept (<see cref="NotVisibleRowsAsync"/>). The predicate holds the 065 rule, task 188's document rule, ebilling
+/// (a′), the effective Restricted bar and the taint closure over the registry, so the document and derived-row checks above
+/// are subsumed by it; they stay until the owner rules on the stricter document result (191h notes).</para>
+/// <para><b>Who is external.</b> Decided only when the request touches the communication family, <c>sprk_document</c>, a
+/// document-derived table, an invoice-family table or a lineage table (<see cref="IsVisibilityGuarded"/>),
 /// so other requests are byte-identical. The request principal → <see cref="ICallerSystemUserResolver"/> →
 /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>. A caller with no principal, no oid or no active systemuser
 /// is EXTERNAL (fail closed); a caller whose lookup FAILED (a swallowed Dataverse or cache fault) makes the tool call fail
@@ -80,13 +87,9 @@ internal static class ExternalCallerCommunicationGuard
     /// <c>CommunicationEnrichmentService</c>) and <c>sprk_affinity</c> (sender addresses, subject keywords and participant
     /// sets learned from filed email — <c>AffinityStore</c>).
     /// </summary>
-    internal static readonly IReadOnlySet<string> RefusedContentTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "sprk_emailartifact",
-        "sprk_attachmentartifact",
-        "sprk_emailreviewlog",
-        "sprk_affinity",
-    };
+    /// <remarks>Task 191b: derived from the lineage registry's <see cref="ExternalMarkerKind.Never"/> markers
+    /// (<see cref="SecureChildLineage.NeverExternalTables"/>), never listed here again; the set is unchanged (pinned by a test).</remarks>
+    internal static readonly IReadOnlySet<string> RefusedContentTables = SecureChildLineage.NeverExternalTables;
 
     /// <summary>Log event name for every guard decision (entity + reason code only, ADR-015).</summary>
     internal const string LogEvent = "sdap.ai.tool.external_communication_guard";
@@ -116,6 +119,61 @@ internal static class ExternalCallerCommunicationGuard
     internal static bool IsDocumentTable(string? logicalName) =>
         string.Equals(logicalName, DocumentTable, StringComparison.OrdinalIgnoreCase);
 
+    // ── uac-r2 task 191h: THE external visibility predicate over every lineage table (#2189, #2179 design §3.3) ──────
+
+    /// <summary>
+    /// uac-r2 task 191h: true for a table THE external visibility predicate decides (<see cref="AppOnlyExternalVisibility"/>):
+    /// one of the three roots or a lineage child (<see cref="SecureChildLineage"/>, the one registry; every child declares its
+    /// external marker). For an external caller, every row of such a table that a tool returns is asked, after the read, by id;
+    /// only a Visible row is kept. This is the derived-row filter of #2189: a to-do, event, memo, signal, decision record or
+    /// analysis is hidden with the communication, document or Restricted root it is filed under or about (an analysis linked
+    /// only through <c>sprk_regardingcommunication</c> included), whatever the table, with no per-table list here.
+    /// </summary>
+    internal static bool IsVisibilityGuarded(string? logicalName) =>
+        SecureChildLineage.IsChild(logicalName) || SecureChildLineage.IsRoot(logicalName);
+
+    /// <summary>
+    /// uac-r2 task 191h: the rows of <paramref name="rows"/> (table, id) THE external visibility predicate does NOT show
+    /// (Hidden or Undecided; a row with no usable id is not asked and counts as not shown), decided app-only by id in ONE call.
+    /// A decision that could not be made for every row (<see cref="ExternalRowVisibility.Faulted"/>) THROWS, so the tool call
+    /// fails with no data, as a failed document narrowing does. Rows of a table <see cref="IsVisibilityGuarded"/> does not cover
+    /// are not asked and never returned. Cancellation propagates.
+    /// </summary>
+    internal static async Task<IReadOnlySet<(string Table, Guid Id)>> NotVisibleRowsAsync(
+        AppOnlyExternalVisibility visibility, IEnumerable<(string Table, Guid Id)> rows, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(visibility);
+        ArgumentNullException.ThrowIfNull(rows);
+        var guarded = rows
+            .Where(r => IsVisibilityGuarded(r.Table))
+            .Select(r => (Table: r.Table.ToLowerInvariant(), r.Id))
+            .Distinct()
+            .ToList();
+        var asked = guarded.Where(r => r.Id != Guid.Empty).ToList();
+        var notVisible = new HashSet<(string Table, Guid Id)>(guarded.Where(r => r.Id == Guid.Empty));
+        if (asked.Count == 0)
+            return notVisible;
+
+        var answer = await visibility(asked, ct).ConfigureAwait(false);
+        if (answer.Faulted)
+        {
+            throw new InvalidOperationException(
+                "The external visibility of the returned rows could not be decided; no rows are returned (fail closed).");
+        }
+
+        notVisible.UnionWith(asked.Where(r => !answer.IsVisible(r.Table, r.Id)));
+        return notVisible;
+    }
+
+    /// <summary>uac-r2 task 191h: <see cref="NotVisibleRowsAsync"/> for the rows of ONE table, as their ids.</summary>
+    internal static async Task<IReadOnlySet<Guid>> NotVisibleIdsAsync(
+        AppOnlyExternalVisibility visibility, string logicalName, IEnumerable<Guid> rowIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(rowIds);
+        var notVisible = await NotVisibleRowsAsync(visibility, rowIds.Select(id => (logicalName, id)), ct).ConfigureAwait(false);
+        return notVisible.Select(r => r.Id).ToHashSet();
+    }
+
     // ── Task 188 round 3 slice C: rows that DERIVE from a document ────────────────────────────────────────────────
 
     /// <summary>The analysis table: an AI analysis of ONE source document (<c>sprk_documentid</c>, NOT NULL).</summary>
@@ -138,14 +196,39 @@ internal static class ExternalCallerCommunicationGuard
     /// document (<c>sprk_regardingdocument</c>, task 188 round 4b: an analysis ABOUT a document); an output follows its
     /// analysis. Entity sets and lookups as read live (<c>SecureChildLineage</c>: note <c>sprk_analysises</c>).
     /// </summary>
+    /// <remarks>Task 191b: derived from the lineage registry (<see cref="SecureChildLineage.DocumentTextTables"/>, the
+    /// <see cref="ExternalMarker.CarriesDocumentText"/> markers), never listed here again. A table's links are its lookups that
+    /// target <c>sprk_document</c>, in the registry's declaration order; a table with none is read through its one lookup to
+    /// another such table (<see cref="DerivedTable.Via"/>). The result is unchanged (pinned by a test).</remarks>
     private static readonly IReadOnlyDictionary<string, DerivedTable> DocumentDerivedTables =
-        new Dictionary<string, DerivedTable>(StringComparer.OrdinalIgnoreCase)
-        {
-            [AnalysisTable] = new("sprk_analysises", "sprk_analysisid",
-                new[] { "_sprk_documentid_value", "_sprk_outputfileid_value", "_sprk_regardingdocument_value" }, Via: null),
-            [AnalysisOutputTable] = new("sprk_analysisoutputs", "sprk_analysisoutputid",
-                new[] { "_sprk_analysisid_value" }, Via: AnalysisTable),
-        };
+        SecureChildLineage.DocumentTextTables.Values.ToDictionary(t => t.LogicalName, DerivedTableOf, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Task 191b: one registry table's <see cref="DerivedTable"/> (see <see cref="DocumentDerivedTables"/>).</summary>
+    private static DerivedTable DerivedTableOf(SecureChildLineage.Table table)
+    {
+        var documentLinks = table.LookupOrder
+            .Where(column => string.Equals(table.Lookups[column], DocumentTable, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (documentLinks.Length > 0)
+            return new(table.EntitySet, table.IdColumn, documentLinks.Select(ValueColumn).ToArray(), Via: null);
+
+        var via = table.LookupOrder
+            .Where(column => SecureChildLineage.DocumentTextTables.ContainsKey(table.Lookups[column]))
+            .ToArray();
+        return via.Length == 1
+            ? new(table.EntitySet, table.IdColumn, [ValueColumn(via[0])], Via: table.Lookups[via[0]])
+            : throw new InvalidOperationException(
+                $"Document-text table {table.LogicalName} names no document and not exactly one document-text table to read through.");
+    }
+
+    /// <summary>A lookup column's OData value property (<c>_{column}_value</c>).</summary>
+    private static string ValueColumn(string column) => $"_{column}_value";
+
+    /// <summary>Task 191b: the derived tables as (entity set, id column, link values, via), for the test that pins the
+    /// derivation to the list it replaced.</summary>
+    internal static IReadOnlyDictionary<string, (string EntitySet, string IdColumn, IReadOnlyList<string> LinkValues, string? Via)>
+        DocumentDerivedTablesForTest => DocumentDerivedTables.ToDictionary(
+            kv => kv.Key, kv => (kv.Value.EntitySet, kv.Value.IdColumn, kv.Value.LinkValues, kv.Value.Via), StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// True for a table whose rows derive from a document (<see cref="AnalysisTable"/>, <see cref="AnalysisOutputTable"/>):
@@ -237,14 +320,16 @@ internal static class ExternalCallerCommunicationGuard
 
     private static bool IsUsableId(Guid id) => id != Guid.Empty && id != ExternalDocumentNarrowing.UnreadableLink;
 
-    /// <summary>A lookup value of one OData row: <c>null</c> when absent or null (not set); the sentinel when present but not a
-    /// usable GUID.</summary>
+    /// <summary>A lookup value of one OData row: <c>null</c> for an explicit JSON null (not set); the sentinel when the column is
+    /// ABSENT (it was not read; fix round 3d) or present but not a usable GUID.</summary>
     private static Guid? LinkOf(Dictionary<string, JsonElement> row, string column) =>
-        !row.TryGetValue(column, out var v) || v.ValueKind == JsonValueKind.Null
-            ? null
-            : v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
-                ? id
-                : ExternalDocumentNarrowing.UnreadableLink;
+        !row.TryGetValue(column, out var v)
+            ? ExternalDocumentNarrowing.UnreadableLink
+            : v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+                ? null
+                : v.ValueKind == JsonValueKind.String && Guid.TryParse(v.GetString(), out var id) && id != Guid.Empty
+                    ? id
+                    : ExternalDocumentNarrowing.UnreadableLink;
 
     /// <summary>
     /// The log reason of the derived rows a handler hid (ADR-015: codes and counts only): <c>source_document_hidden</c> for a
