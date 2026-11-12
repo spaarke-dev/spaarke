@@ -38,6 +38,8 @@ export interface IAccessNote {
 
 export interface IAccessNotesBellProps {
   notes: readonly IAccessNote[];
+  /** The modal's access data is still loading: the notes are not known yet, so the bell says so (never "no notes"). */
+  loading?: boolean;
 }
 
 const useStyles = makeStyles({
@@ -62,15 +64,15 @@ const useStyles = makeStyles({
   },
 });
 
-/** The accessible name of the bell, with the count (e.g. "Access notes (2)"). */
-export function accessNotesLabel(count: number): string {
+/** The accessible name of the bell, with the count (e.g. "Access notes (2)"), or "Access notes (loading)". */
+export function accessNotesLabel(count: number | 'loading'): string {
   return `Access notes (${count})`;
 }
 
-export const AccessNotesBell: React.FC<IAccessNotesBellProps> = ({ notes }) => {
+export const AccessNotesBell: React.FC<IAccessNotesBellProps> = ({ notes, loading = false }) => {
   const styles = useStyles();
-  const count = notes.length;
-  const label = accessNotesLabel(count);
+  const count = loading ? 0 : notes.length;
+  const label = accessNotesLabel(loading ? 'loading' : count);
   return (
     <span className={styles.trigger}>
       <Popover withArrow positioning="below-end" trapFocus>
@@ -86,7 +88,9 @@ export const AccessNotesBell: React.FC<IAccessNotesBellProps> = ({ notes }) => {
         </PopoverTrigger>
         <PopoverSurface className={styles.surface} aria-label="Access notes" data-testid="access-notes-popover">
           <Text className={styles.heading}>Access notes</Text>
-          {count === 0 ? (
+          {loading ? (
+            <Text>Loading the notes about this record&apos;s access…</Text>
+          ) : count === 0 ? (
             <Text>There are no notes about this record&apos;s access.</Text>
           ) : (
             notes.map(note => (

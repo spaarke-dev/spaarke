@@ -58,4 +58,9 @@ export {
   EMAIL_MEMBERS_EMPTY_MESSAGE,
   EMAIL_MEMBERS_FAILED_MESSAGE,
 } from './emailMembers';
-export type { EmailMembersResolution, IEmailMembersSources, IEmailMembersRootSources } from './emailMembers';
+export type {
+  EmailMembersResolution,
+  EmailReader,
+  IEmailMembersSources,
+  IEmailMembersRootSources,
+} from './emailMembers';

@@ -20,7 +20,10 @@
  * FAIL VISIBLE, NEVER SILENTLY NARROWER. The grants and shares reads are gated server-side on Write + Share, and any read
  * can fail. A failed source never breaks the button: the result carries whatever the other sources gave, plus a notice
  * naming what could not be read, which the host shows in the dialog. `empty` (the "no members" state) is returned only
- * when every source and check succeeded and produced nobody; `failed` only when every source failed.
+ * when every source and check succeeded and produced nobody; `failed` only when every source failed. The notice tells
+ * apart "someone may be missing" (a source, an email, a capped list) from "someone listed may be walled off" (the No
+ * Access check could not be completed, so people were kept). An email row the caller cannot read is reported, never
+ * taken for "no email" ({@link EmailReader}).
  *
  * Pure orchestration: every Dataverse and BFF read is injected by the host (ADR-012: the shared code knows no table or
  * column names), so the rules are pinned by tests without rendering.
@@ -57,10 +60,12 @@ export interface IEmailMembersRootSources {
   authenticatedFetch: AuthenticatedFetchFn;
   /** The record's grants — the host's `fetchExistingGrants`. Rejects on failure. */
   readGrants: () => Promise<IAccessGrantRecord[] | IExistingGrantsRead>;
-  /** Contact id → primary email, for the given contacts. Rejects on failure (never a silent empty map). */
-  readContactEmails: (contactIds: string[]) => Promise<ReadonlyMap<string, string>>;
-  /** System user id → primary email, for the given users. Rejects on failure. */
-  readUserEmails: (systemUserIds: string[]) => Promise<ReadonlyMap<string, string>>;
+  /** System user id → primary email, for the given users ({@link EmailReader}). */
+  readUserEmails: EmailReader;
+  /** Whether the caller may manage this record's access (the host's gate). The grants and shares reads are gated
+   * server-side on the same rights, so when they fail for a caller who may not, the notice says the caller cannot see
+   * who else has access rather than that a read failed. Default `true`. Wording only: the reads are always tried. */
+  callerManagesAccess?: boolean;
   /** Which of the contacts belong to which of the walled organizations — the host's Current Access read. */
   readContactOrganizationMemberships?: (
     contactIds: string[],
@@ -71,9 +76,20 @@ export interface IEmailMembersRootSources {
   isSecureRecord: boolean;
 }
 
+/**
+ * Row id → primary email, for the given rows. The map holds EVERY row the read returned, with `''` for a row that has
+ * no email; an id missing from the map is a row the caller could not read (a host-context read leaves out rows the
+ * caller's Dataverse privileges do not reach), which is reported, never taken for "no email". Rejects on failure.
+ */
+export type EmailReader = (ids: string[]) => Promise<ReadonlyMap<string, string>>;
+
 export interface IEmailMembersSources {
   /** The record's role contacts (with emails) — the host's `fetchCandidates` read. */
   readRoleContacts: () => Promise<IAccessGrantCandidate[]>;
+  /** Contact id → primary email ({@link EmailReader}), for granted contacts and for role contacts that came without an
+   * email (to tell "no email" from "row not readable"). Without it a role contact's email is taken as given, and a
+   * granted contact's email cannot be read (reported). */
+  readContactEmails?: EmailReader;
   /** Present only when the record is a grant root; otherwise only the role contacts apply (and no note is shown). */
   root?: IEmailMembersRootSources;
 }
@@ -122,7 +138,10 @@ interface IMember {
 /** Resolves the "Email members" recipients. Never rejects. */
 export async function resolveEmailMembersRecipients(sources: IEmailMembersSources): Promise<EmailMembersResolution> {
   const root = sources.root;
+  // Two kinds of note, worded apart: someone may be MISSING from the list, or someone listed may be WALLED OFF (the No
+  // Access check could not be completed, so people were kept rather than silently dropped).
   const notes: string[] = [];
+  const unchecked: string[] = [];
 
   const [roles, grants, shares, noAccess] = await Promise.all([
     settle(sources.readRoleContacts),
@@ -146,8 +165,13 @@ export async function resolveEmailMembersRecipients(sources: IEmailMembersSource
   if (sourcesOk.every(ok => !ok)) return { kind: 'failed' };
 
   if (!roles.ok) notes.push("the record's assigned people could not be read");
-  if (grants && !grants.ok) notes.push('the people granted access could not be read');
-  if (shares && !shares.ok) notes.push('the users the record is shared with could not be read');
+  if (root?.callerManagesAccess === false && grants?.ok !== true && shares?.ok !== true) {
+    // The grants and shares reads are for people who manage the record's access; for anyone else they are refused.
+    notes.push('you cannot see who else has access to this record (only people who manage its access can)');
+  } else {
+    if (grants && !grants.ok) notes.push('the people granted access could not be read');
+    if (shares && !shares.ok) notes.push('the users the record is shared with could not be read');
+  }
 
   // The record's grants (a capped read says so — NFR-03).
   let grantList: IAccessGrantRecord[] = [];
@@ -166,9 +190,9 @@ export async function resolveEmailMembersRecipients(sources: IEmailMembersSource
     const section = noAccess?.ok ? parseNoAccessResponse(noAccess.value, root.recordId) : ({ kind: 'error' } as const);
     if (section.kind === 'list') {
       vetoIndex = buildVetoIndex(section.entries);
-      if (section.truncated) notes.push('only part of the No Access list could be checked');
+      if (section.truncated) unchecked.push('only part of the No Access list could be checked');
     } else {
-      notes.push('the No Access list could not be checked');
+      unchecked.push('the No Access list could not be checked');
     }
     policy = effectiveAccessState(
       root.accessPermissionState,
@@ -228,54 +252,78 @@ export async function resolveEmailMembersRecipients(sources: IEmailMembersSource
           if (orgName) contactWalledOrgs.set(cleanGuid(m.contactId), orgName);
         }
       } else {
-        notes.push('whether anyone belongs to a walled-off organization could not be checked');
+        unchecked.push('whether anyone belongs to a walled-off organization could not be checked');
       }
     }
   }
 
   // Left out: walled off by the No Access list, or cancelled by the record's policy (never role contacts — the owner's
   // list names them whatever their grants say; they are still left out when walled off).
+  const walled = members.filter(m => vetoFor(m.row, m.kind, vetoIndex, contactWalledOrgs));
   const kept = members.filter(m => {
-    if (vetoFor(m.row, m.kind, vetoIndex, contactWalledOrgs)) return false;
+    if (walled.includes(m)) return false;
     if (m.source === 'role') return true;
     return !(policy && suppressionFor(m.kind, policy.state, policy.isSecure));
   });
 
-  // Emails the sources did not carry: granted contacts (the grants read names no email) and shared users. A role
-  // contact's email came with its read; one without an email is not looked up again.
+  // Emails the sources did not carry: granted contacts (the grants read names no email), shared users, and role
+  // contacts that came without one (when the host gives a contact reader, so "no email" and "not readable" differ).
+  // Walled-off people are read too: their addresses are kept off the list whichever way they would arrive (a walled
+  // contact's paired user share, say), since the No Access rules match people by id and the list is by email.
+  const lookedUp = [...kept, ...walled];
+  const needsLookup = (m: IMember): boolean =>
+    !hasEmail(m.row.email) && (m.source !== 'role' || sources.readContactEmails !== undefined);
   const contactEmails = await readEmails(
-    kept.filter(m => m.source === 'grant' && !hasEmail(m.row.email)).map(m => m.row.contactId),
-    root?.readContactEmails
+    lookedUp.filter(m => m.source !== 'share' && needsLookup(m)).map(m => m.row.contactId),
+    sources.readContactEmails
   );
   const userEmails = await readEmails(
-    kept.filter(m => m.source === 'share').map(m => m.row.contactId),
+    lookedUp.filter(m => m.source === 'share' && needsLookup(m)).map(m => m.row.contactId),
     root?.readUserEmails
   );
-  if (!contactEmails.ok || !userEmails.ok) notes.push('some email addresses could not be read');
+  /** The member's email; `null` when it should have been read and was not (the read failed or left the row out). */
+  const emailOf = (m: IMember): string | undefined | null => {
+    if (hasEmail(m.row.email)) return m.row.email.trim();
+    if (!needsLookup(m)) return undefined;
+    const map = (m.source === 'share' ? userEmails : contactEmails).map;
+    const id = cleanGuid(m.row.contactId);
+    if (!map.has(id)) return null;
+    return map.get(id)?.trim() || undefined;
+  };
+
+  const walledEmails = new Set<string>();
+  let walledUnread = false;
+  for (const m of walled) {
+    const email = emailOf(m);
+    if (email === null) walledUnread = true;
+    else if (email) walledEmails.add(email.toLowerCase());
+  }
+  if (walledUnread) unchecked.push('some email addresses of people on the No Access list could not be read');
 
   const seen = new Set<string>();
   const recipients: string[] = [];
+  let unread = false;
   for (const m of kept) {
-    const email = (
-      hasEmail(m.row.email)
-        ? m.row.email
-        : (m.source === 'share' ? userEmails : contactEmails).map.get(cleanGuid(m.row.contactId))
-    )?.trim();
+    const email = emailOf(m);
+    if (email === null) unread = true;
     if (!email) continue;
     const key = email.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key) || walledEmails.has(key)) continue;
     seen.add(key);
     recipients.push(email);
   }
+  if (unread) notes.push('some email addresses could not be read');
 
-  if (recipients.length === 0 && notes.length === 0) return { kind: 'empty' };
+  if (recipients.length === 0 && notes.length === 0 && unchecked.length === 0) return { kind: 'empty' };
+  const parts: string[] = [];
+  if (notes.length > 0) parts.push(`Some people may be missing from the recipients: ${notes.join('; ')}.`);
+  if (unchecked.length > 0) {
+    parts.push(`Someone listed may be walled off from this record: ${unchecked.join('; ')}.`);
+  }
   return {
     kind: 'recipients',
     recipients,
-    notice:
-      notes.length === 0
-        ? null
-        : `Some people may be missing from the recipients: ${notes.join('; ')}. Check the list before sending.`,
+    notice: parts.length === 0 ? null : `${parts.join(' ')} Check the list before sending.`,
   };
 }
 
@@ -283,17 +331,13 @@ function hasEmail(email: string | undefined): email is string {
   return typeof email === 'string' && email.trim().length > 0;
 }
 
-/** Reads emails for the ids (canonical keys). No ids needs no read; a missing reader with ids is a failure. */
-async function readEmails(
-  ids: string[],
-  reader: ((ids: string[]) => Promise<ReadonlyMap<string, string>>) | undefined
-): Promise<{ ok: boolean; map: Map<string, string> }> {
+/** Reads emails for the ids (canonical keys; see {@link EmailReader}). No ids needs no read. A missing reader or a failed
+ * read gives an empty map, so every id reads as "not read". */
+async function readEmails(ids: string[], reader: EmailReader | undefined): Promise<{ map: Map<string, string> }> {
   const unique = Array.from(new Set(ids.map(cleanGuid)));
   const map = new Map<string, string>();
-  if (unique.length === 0) return { ok: true, map };
-  if (!reader) return { ok: false, map };
+  if (unique.length === 0 || !reader) return { map };
   const read = await settle(() => reader(unique));
-  if (!read.ok) return { ok: false, map };
-  for (const [id, email] of read.value) map.set(cleanGuid(id), email);
-  return { ok: true, map };
+  if (read.ok) for (const [id, email] of read.value) map.set(cleanGuid(id), email);
+  return { map };
 }

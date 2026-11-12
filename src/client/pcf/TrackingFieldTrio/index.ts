@@ -508,6 +508,19 @@ const CANDIDATE_ROLE_FIELDS: readonly { attr: string; role: string }[] = [
   { attr: 'sprk_assignedtointernal', role: 'Assigned To (Internal)' },
 ];
 
+// Task 196 (review finding): a host table that carries only SOME of the role fields. `$select` of a column the table
+// lacks is a Dataverse 400, which made every To Do read "no members". Tables not listed carry all of
+// CANDIDATE_ROLE_FIELDS (project, matter, work assignment, event).
+const ROLE_FIELD_SUBSET_BY_ENTITY: Readonly<Record<string, readonly string[]>> = {
+  sprk_todo: ['sprk_assignedtoexternal', 'sprk_assignedtointernal'],
+};
+
+/** The role fields the host table carries. */
+function roleFieldsFor(entity: string): readonly { attr: string; role: string }[] {
+  const subset = ROLE_FIELD_SUBSET_BY_ENTITY[entity];
+  return subset ? CANDIDATE_ROLE_FIELDS.filter(f => subset.includes(f.attr)) : CANDIDATE_ROLE_FIELDS;
+}
+
 /** One comparable spelling for a Dataverse record id: lowercase, no braces, no surrounding space.
  *
  * Exists because the PCF host and the BFF do not agree on GUID formatting — `Xrm`'s `getId()` yields
@@ -1198,7 +1211,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // navigation-property name. The `_X_value` form is stable and carries the contact's display name via
     // the FormattedValue annotation — no nav-property-casing dependency. Emails (which drive the
     // external-vs-internal grant routing) are batch-fetched separately below.
-    const valueFields = CANDIDATE_ROLE_FIELDS.map(f => `_${f.attr}_value`).join(',');
+    const roleFields = roleFieldsFor(this.getHostEntity());
+    const valueFields = roleFields.map(f => `_${f.attr}_value`).join(',');
     let record: Record<string, unknown>;
     try {
       record = (await this.context.webAPI.retrieveRecord(
@@ -1216,7 +1230,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
     const seen = new Set<string>();
     const byId = new Map<string, { role: string; fullName: string }>();
-    for (const field of CANDIDATE_ROLE_FIELDS) {
+    for (const field of roleFields) {
       const contactId = record[`_${field.attr}_value`] as string | undefined;
       if (contactId && !seen.has(contactId)) {
         seen.add(contactId);
@@ -1233,7 +1247,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return [...byId.entries()].map(([contactId, meta]) => ({
       contactId,
       fullName: meta.fullName,
-      email: emailById.get(cleanGuid(contactId)),
+      // '' is a contact read with no email (see readPrimaryEmails); a candidate has no email then.
+      email: emailById.get(cleanGuid(contactId)) || undefined,
       role: meta.role,
     }));
   };
@@ -1261,7 +1276,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
   /** One host-context email read for a set of rows, asked in chunks so a long list cannot exceed the URL limit. Only
    * canonical GUIDs enter the OData filter: anything else is refused (rejects) rather than dropped. Keys are the row ids
-   * as Dataverse returns them (lower-case, no braces). */
+   * as Dataverse returns them (lower-case, no braces). Every returned row is in the map, with '' when it has no email:
+   * a row the caller's privileges do not reach is simply not returned, and the "Email members" resolver reports an id
+   * missing from the map as "could not be read" rather than as "no email" (task 196 review). */
   private readPrimaryEmails = async (
     entity: 'contact' | 'systemuser',
     idColumn: 'contactid' | 'systemuserid',
@@ -1289,7 +1306,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         const row = e as unknown as Record<string, unknown>;
         const id = row[idColumn];
         const email = row[emailColumn];
-        if (typeof id === 'string' && typeof email === 'string' && email) map.set(cleanGuid(id), email);
+        if (typeof id === 'string') map.set(cleanGuid(id), typeof email === 'string' ? email : '');
       }
     }
     return map;
@@ -1606,22 +1623,24 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
   /** Resolves the "Email members" recipients for the bound record (task 196). On a grant root every source applies and
    * each read REJECTS on failure, so a failure is reported, never mistaken for "no members". On any other host (a To Do
-   * or Event form, a harness) only the role contacts apply, read as the modal reads them. */
+   * or Event form) only the role contacts apply, read the same strict way. */
   private resolveEmailMembers = (): Promise<EmailMembersResolution> => {
     const recordId = this.getRecordId();
     const root = GRANT_ROOT_BY_ENTITY[this.getHostEntity()];
+    const readRoleContacts = (): Promise<IAccessGrantCandidate[]> => this.readRoleCandidates(true);
     if (!recordId || !root) {
-      return resolveEmailMembersRecipients({ readRoleContacts: this.fetchCandidates });
+      return resolveEmailMembersRecipients({ readRoleContacts, readContactEmails: this.readContactEmails });
     }
     return resolveEmailMembersRecipients({
-      readRoleContacts: () => this.readRoleCandidates(true),
+      readRoleContacts,
+      readContactEmails: this.readContactEmails,
       root: {
         recordType: root.recordType,
         recordId,
         authenticatedFetch: this.authenticatedFetchGated,
         readGrants: this.fetchExistingGrants,
-        readContactEmails: this.readContactEmails,
         readUserEmails: this.readUserEmails,
+        callerManagesAccess: this.canGrantAccessValue,
         readContactOrganizationMemberships: this.fetchContactOrganizationMemberships,
         accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
         isSecureRecord: this.isSecureValue === true,

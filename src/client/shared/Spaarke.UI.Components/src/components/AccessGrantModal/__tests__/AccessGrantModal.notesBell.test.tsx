@@ -134,8 +134,22 @@ describe('AccessGrantModal — the notes bell (task 196)', () => {
     await loaded();
 
     const note = accessNote(await openAccessNotes(), 'Minimum access from the parent')!;
-    fireEvent.click(within(note).getByRole('button', { name: 'Acme v. Beta' }));
+    // findByRole: the popover's focus trap settles asynchronously, so wait for the link to be in the accessibility tree.
+    fireEvent.click(await within(note).findByRole('button', { name: 'Acme v. Beta' }));
     expect(onOpenParent).toHaveBeenCalledWith(PARENT_MATTER);
+  });
+
+  it('while the access data loads, the bell says it is loading (never "no notes")', async () => {
+    // A grants read that has not answered yet keeps the modal loading.
+    const pending = new Promise<never>(() => {});
+    renderModal(makeProps({ overrides: { ...THREE_NOTES, fetchExistingGrants: jest.fn(() => pending) } }));
+
+    const bell = await screen.findByRole('button', { name: 'Access notes (loading)' });
+    expect(screen.queryByTestId('access-notes-count')).not.toBeInTheDocument();
+    fireEvent.click(bell);
+    const popover = await screen.findByTestId('access-notes-popover');
+    expect(popover).toHaveTextContent("Loading the notes about this record's access…");
+    expect(popover).not.toHaveTextContent("There are no notes about this record's access.");
   });
 
   it('a Standard record with no parent and no secure owner counts none, and the popover says so', async () => {

@@ -9,9 +9,10 @@ export function accessNotesBell(): HTMLElement {
   return screen.getByRole('button', { name: /^Access notes \(\d+\)$/ });
 }
 
-/** Opens the bell and returns the popover. */
+/** Opens the bell once the access data has loaded (the bell reads "Access notes (loading)" until then) and returns the
+ * popover. */
 export async function openAccessNotes(): Promise<HTMLElement> {
-  fireEvent.click(accessNotesBell());
+  fireEvent.click(await screen.findByRole('button', { name: /^Access notes \(\d+\)$/ }));
   return screen.findByTestId('access-notes-popover');
 }
 

@@ -82,6 +82,7 @@ function rootSources(opts: { grantsFail?: boolean; everythingFails?: boolean } =
   };
   return {
     readRoleContacts: opts.everythingFails ? fail : async () => [candidate('rita@example.com')],
+    readContactEmails: async () => new Map([[GRANTEE_ID, 'gary@example.com']]),
     root: {
       recordType: 'project',
       recordId: RECORD_ID,
@@ -103,7 +104,6 @@ function rootSources(opts: { grantsFail?: boolean; everythingFails?: boolean } =
         opts.grantsFail || opts.everythingFails
           ? fail
           : async () => [{ accessRecordId: 'g1', contactId: GRANTEE_ID, fullName: 'Gary Grantee', accessLevel: 1 }],
-      readContactEmails: async () => new Map([[GRANTEE_ID, 'gary@example.com']]),
       readUserEmails: async () => new Map([[USER_ID, 'uma@spaarke.example']]),
       accessPermissionState: 'standard',
       isSecureRecord: false,

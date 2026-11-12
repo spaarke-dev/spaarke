@@ -3304,7 +3304,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // mounted — staged picks survive.
         yieldToSidePane={picking}
         // Task 196: the informational notes, behind a bell beside maximize and close.
-        headerActions={canGrantAccess ? <AccessNotesBell notes={accessNotes} /> : undefined}
+        headerActions={canGrantAccess ? <AccessNotesBell notes={accessNotes} loading={loading} /> : undefined}
         footerStart={
           <Button appearance="secondary" onClick={handleCancelAttempt}>
             Cancel
