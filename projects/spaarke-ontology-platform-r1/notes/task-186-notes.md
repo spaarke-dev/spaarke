@@ -1,6 +1,6 @@
 # Task 186 — Send Email dialog: templates, AI drafting, attachments (D-219 Q3)
 
-PR [#2744](https://github.com/spaarke-dev/spaarke/pull/2744) to master (branch `fix/send-email-dialog-templates-ai`, worktree `C:/wt186`).
+PR [#2744](https://github.com/spaarke-dev/spaarke/pull/2744) squash-merged to master as `76b2930961` (owner: merge on green) (branch `fix/send-email-dialog-templates-ai`, worktree `C:/wt186`).
 
 ## Deviations from the POML
 - **Three handlers, not two.** `EmailComposer` shows the template picker only with BOTH `onListEmailTemplates` and `onRenderEmailTemplate` (`EmailComposer.tsx:776`), so `onRenderEmailTemplate` is passed too.
@@ -33,3 +33,7 @@ PR [#2744](https://github.com/spaarke-dev/spaarke/pull/2744) to master (branch `
 
 ## Review (Step 9.5)
 Main-session review of the diff: one memoized handler instance per host; no change to `SendEmailDialog.tsx` (uac-r2 #2739 touches it). No F-class finding open.
+
+Owner D-220: Daily Briefing stays without these; the Office add-in gets them after coordination (task 189).
+
+rework: none task 186

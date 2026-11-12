@@ -4,7 +4,7 @@
     <title>Send Email dialog: turn on templates and AI drafting (and confirm attachments) in every host (D-219 Q3)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,6 +96,7 @@
     <criterion testable="true">All existing tests in the touched folders pass; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
   <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <completion>Done 2026-11-12: PR #2744 merged to master (76b2930961). Two hosts wired (+ onRenderEmailTemplate and onUploadLocalAttachment); remaining hosts = task 188 / D-220. Notes: notes/task-186-notes.md. rework: none task 186</completion>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
