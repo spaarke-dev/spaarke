@@ -159,20 +159,79 @@ public sealed class ExternalListVisibilityTests
         {
             "faulted" => _data.NewService(visibility: ExternalVisibilitySeams.Faulted),
             "throws" => _data.NewService(visibility: ExternalVisibilitySeams.Throws),
-            _ => new ExternalDataService(
-                new HttpClient(_data),
-                new ConfigurationBuilder()
-                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
-                    .Build(),
-                new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
-                NullLogger<ExternalDataService>.Instance,
-                _data.FilingReader),
+            _ => NoSeam(),
         };
 
         var (ids, truncated) = await ListAsync(service, table, Contact());
 
         ids.Should().BeEmpty();
         truncated.Should().BeTrue();
+    }
+
+    /// <summary>The service as a composition without the seam builds it (the optional parameter left out).</summary>
+    private ExternalDataService NoSeam() => new(
+        new HttpClient(_data),
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+            .Build(),
+        new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
+        NullLogger<ExternalDataService>.Instance,
+        _data.FilingReader);
+
+    private static ExternalDataService.DeletableKind KindOf(string table) =>
+        table == "sprk_todo" ? ExternalDataService.DeletableKind.Todo : ExternalDataService.DeletableKind.Event;
+
+    [Theory(DisplayName = "191h fix round 1 (F1) write gate must fire: a to-do or event the lists hide is Withheld for an external contact (the route's same 403); the plain row is Readable")]
+    [MemberData(nameof(Tables))]
+    public async Task TheWriteGate_WithholdsARowTheListsHide(string table)
+    {
+        var (aboutTheEmail, underRestricted, plain) = Seed(table);
+        var undecided = Guid.NewGuid(); // not in the predicate's world: Undecided, the same answer as Hidden
+        var service = _data.NewService(visibility: _leak.Seam);
+
+        (await service.CheckExternalVisibilityAsync(KindOf(table), Guid.Parse(aboutTheEmail), Contact()))
+            .Should().Be(ExternalDataService.LiveParentDecision.Withheld);
+        (await service.CheckExternalVisibilityAsync(KindOf(table), Guid.Parse(underRestricted), Contact()))
+            .Should().Be(ExternalDataService.LiveParentDecision.Withheld);
+        (await service.CheckExternalVisibilityAsync(KindOf(table), undecided, Contact()))
+            .Should().Be(ExternalDataService.LiveParentDecision.Withheld, "Undecided and Hidden are one answer (NFR-01)");
+        (await service.CheckExternalVisibilityAsync(KindOf(table), Guid.Parse(plain), Contact()))
+            .Should().Be(ExternalDataService.LiveParentDecision.Readable, "control: a row the predicate shows may be written");
+        (await _data.NewService(identity: Identity(external: true), visibility: _leak.Seam)
+                .CheckExternalVisibilityAsync(KindOf(table), Guid.Parse(aboutTheEmail), SystemUserCaller()))
+            .Should().Be(ExternalDataService.LiveParentDecision.Withheld, "a systemuser flagged external is gated like a contact");
+    }
+
+    [Theory(DisplayName = "191h fix round 1 (F1) write gate must not fire: an internal systemuser is Readable and the predicate is never asked")]
+    [MemberData(nameof(Tables))]
+    public async Task TheWriteGate_LeavesAnInternalSystemUserAlone(string table)
+    {
+        var (aboutTheEmail, _, _) = Seed(table);
+
+        (await _data.NewService(identity: Identity(external: false), visibility: ExternalVisibilitySeams.Throws)
+                .CheckExternalVisibilityAsync(KindOf(table), Guid.Parse(aboutTheEmail), SystemUserCaller()))
+            .Should().Be(ExternalDataService.LiveParentDecision.Readable);
+    }
+
+    [Theory(DisplayName = "191h fix round 1 (F1) write gate must fire: a predicate that faults, throws, or is not configured is Unavailable (the route's 503, nothing written)")]
+    [InlineData("sprk_todo", "faulted")]
+    [InlineData("sprk_todo", "throws")]
+    [InlineData("sprk_todo", "none")]
+    [InlineData("sprk_event", "faulted")]
+    [InlineData("sprk_event", "throws")]
+    [InlineData("sprk_event", "none")]
+    public async Task TheWriteGate_FailsClosed(string table, string fault)
+    {
+        var (_, _, plain) = Seed(table);
+        var service = fault switch
+        {
+            "faulted" => _data.NewService(visibility: ExternalVisibilitySeams.Faulted),
+            "throws" => _data.NewService(visibility: ExternalVisibilitySeams.Throws),
+            _ => NoSeam(),
+        };
+
+        (await service.CheckExternalVisibilityAsync(KindOf(table), Guid.Parse(plain), Contact()))
+            .Should().Be(ExternalDataService.LiveParentDecision.Unavailable);
     }
 
     /// <summary>

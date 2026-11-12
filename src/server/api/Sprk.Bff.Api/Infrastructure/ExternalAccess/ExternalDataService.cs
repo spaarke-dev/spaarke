@@ -2251,6 +2251,64 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// uac-r2 task 191h fix round 1 (adversarial pass 2, F1): the single-row form of <see cref="HideExternallyHiddenRowsAsync{T}"/>
+    /// for the routes that CHANGE one to-do or event (the to-do PATCH and the to-do / event delete-own routes): "a caller cannot
+    /// change what it cannot see" (ebilling-r1 task 130-0), so a row the lists hide is not written either. An internal systemuser is
+    /// <see cref="LiveParentDecision.Readable"/> and nothing is asked. For every other caller: Visible is
+    /// <see cref="LiveParentDecision.Readable"/>; Hidden and Undecided are ONE answer, <see cref="LiveParentDecision.Withheld"/>
+    /// (the route's same 403, so hidden never reads differently from absent, NFR-01); no seam, a seam that throws, or a faulted
+    /// decision that did not show the row is <see cref="LiveParentDecision.Unavailable"/> (the route's 503, nothing written).
+    /// </summary>
+    /// <remarks><c>virtual</c> per ADR-038 section 4 (substitution seam), as <see cref="CheckLiveParentsAsync"/>.</remarks>
+    public virtual async Task<LiveParentDecision> CheckExternalVisibilityAsync(
+        DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        var table = kind switch
+        {
+            DeletableKind.Todo => TodoTable,
+            DeletableKind.Event => EventTable,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "The external visibility write check covers to-dos and events."),
+        };
+
+        if (await IsInternalSystemUserAsync(caller, ct))
+            return LiveParentDecision.Readable;
+        if (id == Guid.Empty)
+            return LiveParentDecision.Withheld;
+        if (_visibility is null)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Kind} write: no external visibility predicate is configured; nothing written (fail closed).", kind);
+            return LiveParentDecision.Unavailable;
+        }
+
+        ExternalRowVisibility answer;
+        try
+        {
+            answer = await _visibility(new[] { (table, id) }, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "[EXT-VISIBILITY] {Kind} write: the external visibility decision failed ({ErrorType}); nothing written (fail closed).",
+                kind, ex.GetType().Name);
+            return LiveParentDecision.Unavailable;
+        }
+
+        if (answer.IsVisible(table, id))
+            return LiveParentDecision.Readable;
+
+        _logger.LogInformation(
+            "[EXT-VISIBILITY] {Kind} write refused by the external visibility predicate (faulted={Faulted}; {Reasons}).",
+            kind, answer.Faulted, answer.Summary(new[] { (table, id) }));
+        return answer.Faulted ? LiveParentDecision.Unavailable : LiveParentDecision.Withheld;
+    }
+
+    /// <summary>
     /// Task 188 (main-session decision 2026-10-20): the assistant's <c>dataverse.*</c> tools' document narrowing
     /// (<see cref="AppOnlyDocumentNarrowing"/>). The documents are re-read BY ID and decided APP-ONLY through the same reader as
     /// the external plane, so a column field security masks for the user can never read as "no link". The tool has already

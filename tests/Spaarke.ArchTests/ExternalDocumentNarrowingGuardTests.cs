@@ -334,6 +334,9 @@ public class ExternalDocumentNarrowingGuardTests
         "Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim::TrimByRecordAsync",
         "Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService::GetTodosAsync",
         "Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService::GetEventsAsync",
+        // Fix round 1 (F1): the single to-do / event writes (PATCH, delete-own) refuse a row the lists hide.
+        "Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints::UpdateTodo",
+        "Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints::AuthorizeDeleteOwnAsync",
     };
 
     [Fact(DisplayName = "uac-r2 191h: every lineage surface reaches THE external visibility predicate, and so does every use of IsVisibilityGuarded")]

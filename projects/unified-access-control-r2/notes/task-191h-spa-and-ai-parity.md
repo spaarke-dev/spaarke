@@ -44,16 +44,37 @@
 
 ## 3. Known limits (K-class; none holds a confirmed defect on a real path)
 
-- **K1** The SPA document list and single-document routes, the SPA single to-do/event routes, the external modules for
-  other tables and the internal-plane routes still use task 188 alone; the brief scoped 191h to the lists, the tools and the
-  trim.
+- **K1** The SPA document list and single-document routes, the external modules for other tables and the internal-plane
+  routes still use task 188 alone; the brief scoped 191h to the to-do and event lists, the tools and the trim.
 - **K2** `grid_overview` (#2125) is out of scope.
 - **K3** `ExternalDataService` is listed in K7 as an allowed consumer under its existing "reader" entry; the entry's
   reason was updated, not split.
 - **K4** `.claude/constraints/auth.md` ("External document narrowing — D7") should name the new seam; `.claude/` is
   main-session only.
-- **K5** An external caller's SPA PATCH of a to-do that the list now hides is not re-checked against the predicate here
-  (the single-record route keeps its current rule; see K1).
+- **K5** There is no single-record GET for a to-do or event; their writes (PATCH, delete-own) are gated since fix round 1.
+- **K6** (review) The AI tools now classify the caller for root tables too; if that lookup faults, an internal caller's
+  `read_query` / `search_data` / `describe` on a matter or project fails where it used to succeed (fault only).
+- **K7** (review) During an externality-lookup fault the trim applies the predicate as well as 188, so an internal user
+  briefly loses the no-root documents (document keys only).
+- **K8** (review) `describe` answers a generic error, not `RecordNotVisible`, when the predicate faults after the user's own
+  read returned the record (non-deterministic; 188's posture). Hidden and missing still answer alike.
+- **K9** (review) The `read_query` rows-left-out note now appears on every external root-table query (deviation 2).
+- **K10** (review) The K7 ArchTest is structural ("reaches the seam"); behaviour is pinned by the unit tests over the real
+  predicate. Drive-item keys keep 188's "any document row on the item" rule.
+
+## 3a. Fix round 1 (two adversarial passes, Opus)
+
+- **F1 (pass 2), fixed.** The to-do PATCH and the to-do / event delete-own routes wrote a row the lists now hide, and a 204
+  told hidden apart from absent. New `ExternalDataService.CheckExternalVisibilityAsync` (single-row form of the list rule:
+  internal systemuser not asked; Hidden and Undecided = the route's same 403; no seam, a throw or a fault = the 503, nothing
+  written), called in `UpdateTodo` after the live-parent check and in `AuthorizeDeleteOwnAsync` step (3b). Tests: the gate over
+  the real predicate (`ExternalListVisibilityTests`), the PATCH route (`ExternalTodoScopeTests`, 403 body equals a missing
+  to-do's) and delete-own (`ExternalDeleteOwnTests`); perturbation-checked (14 must-fire tests fail without it). The K7
+  ArchTest lists both route methods as visibility surfaces.
+- **F3 (both passes), fixed.** `EventRoutesLiveTests` built `ExternalDataService` with no identity resolver, so the internal
+  operator would have been narrowed to nothing on a live run. The legs now pass the identity resolver (the factory's, or a
+  stub reading the operator as internal).
+- **Perturbation (first build).** Disabling each surface's drop made 21 must-fire tests fail across all five surfaces.
 
 ## 4. Dev document count (spaarkedev1, read-only, 2026-11-12; counts only)
 
@@ -80,4 +101,4 @@ a real external caller is expected to be nil; the count is the upper bound the p
 
 1. Documents stricter than 188 alone (NoRoot, Restricted root, taint) on the AI tools and the trim: keep (as built), or
    relax NoRoot documents back to 188's answer?
-2. Extend the predicate to the SPA document routes and single-record routes (K1, K5) in a follow-up?
+2. Extend the predicate to the SPA document routes and the other external modules (K1) in a follow-up?
