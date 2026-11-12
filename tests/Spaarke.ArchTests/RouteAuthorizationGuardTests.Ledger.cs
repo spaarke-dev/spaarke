@@ -384,6 +384,15 @@ public partial class RouteAuthorizationGuardTests
             + ".../overrides/{overrideId}/removal-preview (record filter, Admin()) and DELETE .../overrides/{overrideId} (record filter, "
             + "Admin() plus Write on sprk_policy); both removal routes then carry RequireReadOnTheOverridesSubject (the caller's Read on "
             + "the stored row's Procedure or rule; unreadable is the 404 a missing row gets), after the eBilling kill switch (review K2)."),
+        new GovernedFile("Api/Finance/RecordProcedureEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures and .../rules-in-force (ebilling-r1 task 084, EB-D-218) -- "
+            + "the Procedures a core record is subject to and the rules in force on it for a firm and a date; the core table is fixed per literal "
+            + "route chain. Step 0 on the group (RequireInternalFinanceCaller). Each route carries AddFinanceAuthorizationFilter(\"finance.read\", the "
+            + "core record set, recordId, UniformNotFound): Read on the route record as the caller, fail closed, unknown and unreadable the same "
+            + "404; the eBilling kill switch runs after it. RecordProcedureReadService then reads the rows once, app-only, and makes ONE batched "
+            + "CallerRecordAccessProbe check that the caller can Read EVERY row the answer exposes (chain records, Procedures, versions, rule sets, "
+            + "policies, override rows, firms, creators); an unreadable row, an unanswered rights question or a faulted read is 503 "
+            + "procedures.unavailable with no list. Reads only."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
@@ -1197,7 +1206,12 @@ public partial class RouteAuthorizationGuardTests
     // /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome on the
     // external collaboration group. Classified by GovernedFiles (GroupGated: AddFirmOutcomeAuthorizationFilter, credited above);
     // .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 152;
+    //
+    // 152 -> 153 (2026-11-12, ebilling-r1 task 084, EB-D-218). Net +1: Api/Finance/RecordProcedureEndpoints.cs ADDED -- GET
+    // /api/finance/{matters|projects|workassignments}/{recordId}/procedures and .../rules-in-force. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter("finance.read") on the route record as the caller);
+    // .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 153;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
