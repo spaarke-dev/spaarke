@@ -270,8 +270,21 @@ public class RecordProcedureReadService
     private void LogUnavailable(Exception ex, string coreTable)
     {
         // K2 (ProcedureResolutionFaultException): its message names row ids for operators, so it is logged and never returned.
-        _logger.LogWarning(ex, "Record procedures: the answer for a {CoreTable} could not be built; 503 {ErrorCode}", coreTable, UnavailableErrorCode);
+        // The 503 is the same for every fault; the level is not: a fault the code expects (bad data, a Dataverse or HTTP fault) is a
+        // warning, anything else is a defect an operator must see.
+        if (IsExpectedFault(ex))
+        {
+            _logger.LogWarning(ex, "Record procedures: the answer for a {CoreTable} could not be built; 503 {ErrorCode}", coreTable, UnavailableErrorCode);
+        }
+        else
+        {
+            _logger.LogError(ex, "Record procedures: unexpected fault building the answer for a {CoreTable}; 503 {ErrorCode}", coreTable, UnavailableErrorCode);
+        }
     }
+
+    /// <summary>The faults this reader expects: the resolver's own (bad rows), a Dataverse service fault or an HTTP fault (rights or WhoAmI call).</summary>
+    private static bool IsExpectedFault(Exception ex) =>
+        ex is ProcedureResolutionFaultException or System.ServiceModel.FaultException or HttpRequestException;
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
     // One reading: the rows (once), the resolution (once), the names

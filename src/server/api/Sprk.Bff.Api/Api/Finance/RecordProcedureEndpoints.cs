@@ -97,7 +97,7 @@ public static class RecordProcedureEndpoints
     private static async Task<IResult> Procedures(
         HttpContext http, RecordProcedureReadService service, string table, Guid recordId, string? firmId, string? date, CancellationToken ct)
     {
-        if (!TryParseQuery(firmId, date, out var firm, out var day, out var invalid))
+        if (!TryParseQuery(http, firmId, date, out var firm, out var day, out var invalid))
         {
             return invalid!;
         }
@@ -109,7 +109,7 @@ public static class RecordProcedureEndpoints
     private static async Task<IResult> Rules(
         HttpContext http, RecordProcedureReadService service, string table, Guid recordId, string? firmId, string? date, CancellationToken ct)
     {
-        if (!TryParseQuery(firmId, date, out var firm, out var day, out var invalid))
+        if (!TryParseQuery(http, firmId, date, out var firm, out var day, out var invalid))
         {
             return invalid!;
         }
@@ -134,14 +134,18 @@ public static class RecordProcedureEndpoints
     };
 
     /// <summary>The 400 for a query value that does not parse: a stable <c>errorCode</c> (ADR-019), as the sibling Finance routes answer.</summary>
-    private static IResult InvalidQuery(string detail) =>
+    private static IResult InvalidQuery(HttpContext http, string detail) =>
         Results.Problem(
             statusCode: StatusCodes.Status400BadRequest,
             title: "Validation Error",
             detail: detail,
-            extensions: new Dictionary<string, object?> { ["errorCode"] = InvalidQueryErrorCode });
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = InvalidQueryErrorCode,
+                ["correlationId"] = http.TraceIdentifier,
+            });
 
-    private static bool TryParseQuery(string? firmId, string? date, out Guid? firm, out DateOnly? day, out IResult? invalid)
+    private static bool TryParseQuery(HttpContext http, string? firmId, string? date, out Guid? firm, out DateOnly? day, out IResult? invalid)
     {
         firm = null;
         day = null;
@@ -150,7 +154,7 @@ public static class RecordProcedureEndpoints
         {
             if (!Guid.TryParse(firmId, out var parsedFirm) || parsedFirm == Guid.Empty)
             {
-                invalid = InvalidQuery("firmId must be a GUID.");
+                invalid = InvalidQuery(http, "firmId must be a GUID.");
                 return false;
             }
 
@@ -161,7 +165,7 @@ public static class RecordProcedureEndpoints
         {
             if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDay))
             {
-                invalid = InvalidQuery("date must be a calendar date, yyyy-MM-dd.");
+                invalid = InvalidQuery(http, "date must be a calendar date, yyyy-MM-dd.");
                 return false;
             }
 

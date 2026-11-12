@@ -64,7 +64,7 @@ public sealed class RecordProcedureEndpointsContractTests
         public HttpClient Client = null!;
         private WebApplication _app = null!;
 
-        public static async Task<Host> StartAsync(bool grantRecords = true)
+        public static async Task<Host> StartAsync(bool grantRecords = true, bool ebillingEnabled = true)
         {
             var host = new Host();
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
@@ -78,7 +78,7 @@ public sealed class RecordProcedureEndpointsContractTests
                 .AddScheme<AuthenticationSchemeOptions, FinanceAuthzTestAuthHandler>(FinanceAuthzTestAuthHandler.SchemeName, _ => { });
             builder.Services.AddAuthorization();
             host.StepZero = StatedCaller.Register(builder.Services);
-            builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = true);
+            builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton<IAccessDataSource>(host.Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
@@ -244,7 +244,9 @@ public sealed class RecordProcedureEndpointsContractTests
         {
             var response = await host.Client.SendAsync(Get($"/api/finance/matters/{M}/{list}?{query}"));
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-            (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("procedures.invalid_query");
+            var body = await Json(response);
+            body["errorCode"]!.GetValue<string>().Should().Be("procedures.invalid_query");
+            body["correlationId"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace("the 400 carries a correlationId as the 503 does");
         }
 
         host.Rig.World.QueriedTables.Should().BeEmpty();
@@ -489,6 +491,243 @@ public sealed class RecordProcedureEndpointsContractTests
         body.ContainsKey("procedures").Should().BeFalse("never a partial list");
         body.ContainsKey("rules").Should().BeFalse("never a partial list");
         host.Rig.NoWrites();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // The kill switch's place in the order (fix round 2, F2): step 0, then the record's Read, THEN the flag
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    [Theory(DisplayName = "084 (F2): flag off + a record the caller can Read is 503 ebilling.disabled on every route, before the service reads or checks anything")]
+    [MemberData(nameof(AllRoutes))]
+    public async Task FlagOff_ReadableRecord_Is503Disabled(string url, string set, string list)
+    {
+        await using var host = await Host.StartAsync(ebillingEnabled: false);
+
+        var response = await host.Client.SendAsync(Get(url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, $"{set} {list}");
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ebilling.disabled");
+        host.Access.Calls.Should().Contain(c => c.Set == set && c.HasToken, "the record's Read ran first, as the caller");
+        host.Rig.Probe.Batches.Should().BeEmpty();
+        host.Rig.World.QueriedTables.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "084 must-fire (F2): flag off + a record the caller cannot Read is the uniform 404, byte-identical to the flag-on unknown record (the record's Read runs BEFORE the flag)")]
+    [MemberData(nameof(AllRoutes))]
+    public async Task FlagOff_UnreadableRecord_IsTheUniform404_NotTheDisabled503(string url, string set, string _)
+    {
+        await using var off = await Host.StartAsync(grantRecords: false, ebillingEnabled: false);
+        var response = await off.Client.SendAsync(Get(url));
+
+        await using var unknown = await Host.StartAsync(grantRecords: false);
+        var unknownResponse = await unknown.Client.SendAsync(Get(url.Replace(Cores.First(c => c.Set == set).Id.ToString(), Guid.NewGuid().ToString(), StringComparison.Ordinal)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, "the flag must not answer for a record the caller may not know exists");
+        (await ShapeOf(response)).Should().Be(await ShapeOf(unknownResponse), "no existence oracle through the kill switch");
+        off.Rig.World.QueriedTables.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "084 must-fire (F2): flag off + a flagged-external, row-less or flag-fault caller is refused at step 0, before the record check and the flag")]
+    [MemberData(nameof(AllRoutesRefused))]
+    public async Task FlagOff_StepZero_RefusesFirst(string url, string set, string list, StepZeroCallerKind kind)
+    {
+        await using var host = await Host.StartAsync(ebillingEnabled: false);
+        host.StepZero.Kind = kind;
+
+        var response = await host.Client.SendAsync(Get(url));
+
+        await host.StepZero.AssertRefusedAsync(response, kind, uniformNotFound: true);
+        host.Access.Calls.Should().BeEmpty($"{set} {list} {kind}");
+        host.Rig.Probe.Batches.Should().BeEmpty();
+        host.Rig.World.QueriedTables.Should().BeEmpty();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Generic exposure guard (fix round 2, F2): every GUID in a 200 was asked of the caller
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private sealed record GuardSeed(string Segment, Guid RecordId, string Date, Guid[] AlsoAsked, Guid[]? AlsoAskedOnRules = null);
+
+    /// <summary>
+    /// The seeds the guard walks. <c>AlsoAsked</c>: rows that DECIDED something the answer shows only through a derived value or an absence (a pin
+    /// behind <c>pinned</c>/<c>level</c>, an Exclude behind a missing Procedure), so their ids are not in the JSON; the caller must be asked about them too.
+    /// </summary>
+    public static TheoryData<string, string> GuardCases
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var seed in new[] { "refusals seed", "changed and base retired", "conflicting parents", "parent pin", "excluded procedure" })
+            {
+                foreach (var list in Lists)
+                {
+                    data.Add(seed, list);
+                }
+            }
+
+            return data;
+        }
+    }
+
+    private static (Guid MatterPin, Guid ProjectPin) SeedConflictingParents(RecordProcedureRig rig)
+    {
+        rig.World.Add(WorkAssignment, W, ("sprk_name", "Work W"), ("sprk_regardingmatter", Ref(Matter, M)), ("sprk_regardingproject", Ref(Project, P)));
+        var procedure = rig.AddProcedure("Pinned twice", ProcedureAppliesTo.AssignedRecordsOnly);
+        var v1 = rig.AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        var v2 = rig.AddVersion(procedure, 2, Mar1, null);
+        var rule = rig.AddProcedureRule(procedure, "PIN-1");
+        rig.AddRuleVersion(rule, v1, Jan1);
+        rig.AddRuleVersion(rule, v2, Mar1, number: 2);
+        return (rig.Assign(Matter, M, procedure, ProcedureAssignmentEntity.ModePinned, v1, by: Reviewer), rig.Assign(Project, P, procedure, ProcedureAssignmentEntity.ModePinned, v2, by: Reviewer));
+    }
+
+    private static GuardSeed GuardSeedFor(string name, RecordProcedureRig rig)
+    {
+        switch (name)
+        {
+            case "refusals seed":
+                {
+                    var s = Seed(rig);
+                    rig.BillingFirm(Project, P, F);
+                    rig.Assign(Matter, M, rig.AddProcedure("ASSIGNED-F", ProcedureAppliesTo.AssignedRecordsOnly, F), reason: "firm", by: Reviewer);
+                    rig.ExcludeRule(Matter, M, s.RuleA, F, reason: "for F", by: Reviewer);
+                    return new GuardSeed("projects", P, "2026-02-01", [s.Assignment], [s.Exclude]);
+                }
+
+            case "changed and base retired":
+                {
+                    var s = rig.SeedChangedAndBaseRetired();
+                    return new GuardSeed("projects", P, "2026-03-15", [], [s.Changed.Exclude, s.Retired.Exclude]);
+                }
+
+            case "conflicting parents":
+                {
+                    var (matterPin, projectPin) = SeedConflictingParents(rig);
+                    return new GuardSeed("workassignments", W, "2026-03-15", [matterPin, projectPin]);
+                }
+
+            case "parent pin":
+                {
+                    var pin = SeedParentPin(rig);
+                    return new GuardSeed("projects", P, "2026-02-01", [pin.Pin, M]);
+                }
+
+            case "excluded procedure":
+                {
+                    rig.Simple("GENERAL");
+                    var removed = rig.Simple("REMOVED");
+                    return new GuardSeed("projects", P, "2026-02-01", [rig.Assign(Matter, M, removed.Procedure, ProcedureAssignmentEntity.ModeExcluded), M]);
+                }
+
+            default: throw new ArgumentOutOfRangeException(nameof(name), name, null);
+        }
+    }
+
+    private static IEnumerable<Guid> GuidsIn(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject o:
+                foreach (var value in o.Select(p => p.Value))
+                {
+                    foreach (var g in GuidsIn(value)) yield return g;
+                }
+
+                break;
+            case JsonArray a:
+                foreach (var value in a)
+                {
+                    foreach (var g in GuidsIn(value)) yield return g;
+                }
+
+                break;
+            case JsonValue v when v.TryGetValue<string>(out var text) && text.Length == 36 && Guid.TryParse(text, out var guid):
+                yield return guid;
+                break;
+        }
+    }
+
+    [Theory(DisplayName = "084 must-fire (F2 guard): every GUID-shaped value in a 200 body, and every row that decided something it shows, was asked of the caller (no exemptions: the record id and the firm id are asserted like the rest)")]
+    [MemberData(nameof(GuardCases))]
+    public async Task Every200Guid_WasAskedOfTheCaller(string seedName, string list)
+    {
+        await using var host = await Host.StartAsync();
+        var seed = GuardSeedFor(seedName, host.Rig);
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/{seed.Segment}/{seed.RecordId}/{list}?date={seed.Date}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var guids = GuidsIn(await Json(response)).Distinct().ToList();
+        var asked = host.Rig.Probe.Asked.Select(a => a.RecordId).ToHashSet();
+        guids.Should().Contain(seed.RecordId, "the guard walks a body that names the record");
+        guids.Count.Should().BeGreaterThanOrEqualTo(3, "the seed is rich enough to be a guard");
+        guids.Where(g => !asked.Contains(g)).Should().BeEmpty($"{seedName}/{list}: a GUID in the answer that the caller's rights were never checked against");
+        seed.AlsoAsked.Concat(list == "rules-in-force" ? seed.AlsoAskedOnRules ?? [] : []).Where(g => !asked.Contains(g)).Should().BeEmpty($"{seedName}/{list}: a row that decided what the answer shows, never checked");
+    }
+
+    [Theory(DisplayName = "084 must-fire (F2): two parents pin different versions and either pin row is unreadable is 503 (the gap's overrides are exposed), on both routes")]
+    [InlineData("procedures", true)]
+    [InlineData("procedures", false)]
+    [InlineData("rules-in-force", true)]
+    [InlineData("rules-in-force", false)]
+    public async Task ConflictingParents_OnePinDenied_Is503(string list, bool denyMatterPin)
+    {
+        await using var host = await Host.StartAsync();
+        var (matterPin, projectPin) = SeedConflictingParents(host.Rig);
+        var url = $"/api/finance/workassignments/{W}/{list}?date=2026-03-15";
+
+        (await host.Client.SendAsync(Get(url))).StatusCode.Should().Be(HttpStatusCode.OK, "the same seed with nothing denied is a 200");
+        host.Rig.Probe.Denied.Add((ProcedureAssignmentEntity.EntitySet, denyMatterPin ? matterPin : projectPin));
+
+        await AssertUnavailable(await host.Client.SendAsync(Get(url)), host);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Fault logging (fix round 2, K4): the 503 is the same, the log level says whether it was expected
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public static TheoryData<string, string> FaultLevels
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var list in Lists)
+            {
+                data.Add("unexpected", list);
+                data.Add("http", list);
+                data.Add("resolver", list);
+            }
+
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "084 (K4): an unexpected fault is logged at Error, an expected one (resolver, HTTP) at Warning; the answer is the same 503 either way")]
+    [MemberData(nameof(FaultLevels))]
+    public async Task Fault_IsLoggedAtItsLevel_AndAnswers503(string fault, string list)
+    {
+        await using var host = await Host.StartAsync();
+        var s = Seed(host.Rig);
+        switch (fault)
+        {
+            case "unexpected": host.Rig.Probe.Fault = new NullReferenceException("a bug"); break;
+            case "http": host.Rig.Probe.Fault = new HttpRequestException("rights call failed"); break;
+            default: host.Rig.AddVersion(s.Procedure, 2, Jan1, null); break; // two versions in force: the resolver's own fault
+        }
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/matters/{M}/{list}?date=2026-02-01"));
+
+        await AssertUnavailable(response, host);
+        var log = host.Rig.Log.Entries;
+        if (fault == "unexpected")
+        {
+            log.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Exception == typeof(NullReferenceException));
+        }
+        else
+        {
+            log.Should().NotContain(e => e.Level >= LogLevel.Error);
+            log.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Exception != null);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

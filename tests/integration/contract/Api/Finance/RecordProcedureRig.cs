@@ -56,6 +56,9 @@ internal sealed class RecordProcedureRig
 
     public RecordProcedureReadService Service { get; }
 
+    /// <summary>What the service logged at Warning or above: (level, exception type).</summary>
+    public CapturingLogger Log { get; } = new();
+
     private readonly Dictionary<Guid, Guid> _setOf = new();
     private DateTime _created = new(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
 
@@ -67,7 +70,7 @@ internal sealed class RecordProcedureRig
             schema, new PredicateCompiler(schema, new FakeTimeProvider(new DateTimeOffset(2026, 2, 10, 0, 0, 0, TimeSpan.Zero))),
             NullLogger<PolicyVersionValidator>.Instance);
         var describer = new RuleBodyDescriber(validator, Entities.Object, NullLogger<RuleBodyDescriber>.Instance);
-        Service = new RecordProcedureReadService(Entities.Object, Probe, describer, NullLogger<RecordProcedureReadService>.Instance)
+        Service = new RecordProcedureReadService(Entities.Object, Probe, describer, Log)
         {
             Clock = new FakeTimeProvider(new DateTimeOffset(2026, 2, 10, 12, 0, 0, TimeSpan.Zero)),
         };
@@ -302,6 +305,26 @@ internal sealed class RecordProcedureRig
 
     public static string JsonOf(object value) => JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
+    /// <summary>A logger that keeps (level, exception type) of every entry at Warning or above.</summary>
+    internal sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<RecordProcedureReadService>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, Type? Exception)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= Microsoft.Extensions.Logging.LogLevel.Warning)
+            {
+                Entries.Add((logLevel, exception?.GetType()));
+            }
+        }
+    }
+
     /// <summary>
     /// The caller's batched rights check, stated per test: by default the caller is established and holds Read on everything. A row can be
     /// denied (no Read) or unknown (no answer), the whole check can fault, or the caller can be unestablished.
@@ -321,6 +344,9 @@ internal sealed class RecordProcedureRig
 
         public bool Throws { get; set; }
 
+        /// <summary>When set, the rights check throws this (instead of the default <see cref="InvalidOperationException"/> of <see cref="Throws"/>).</summary>
+        public Exception? Fault { get; set; }
+
         /// <summary>Every batch the service asked, in order.</summary>
         public List<IReadOnlyList<(string EntitySet, Guid RecordId)>> Batches { get; } = new();
 
@@ -338,6 +364,11 @@ internal sealed class RecordProcedureRig
             string? callerBearerToken, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken ct = default)
         {
             Batches.Add(targets);
+            if (Fault is not null)
+            {
+                throw Fault;
+            }
+
             if (Throws)
             {
                 throw new InvalidOperationException("RetrievePrincipalAccess faulted");
