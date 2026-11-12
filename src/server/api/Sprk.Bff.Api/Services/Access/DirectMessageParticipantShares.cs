@@ -439,6 +439,16 @@ internal sealed class DirectMessageParticipantShares
             granted.AddRange(rowGranted.Select(user => (table, id, user)));
             complete &= rowComplete;
 
+            // uac-r2 197b review pass 2 F1: a message row that did not settle may have been re-filed between the check above and
+            // its read-back. Its content rows are written only while the message is still this Direct team's (a re-owned message
+            // writes nothing more and is retried, as R5 says).
+            if (table == CommunicationTable && !rowComplete
+                && !await OwnerUnchangedAsync(communicationId, owner, "content grants", ct).ConfigureAwait(false))
+            {
+                return new Outcome(Status.Unknown, granted, revoked, false, "the message's owner changed before its content grants",
+                    hiddenRevoked);
+            }
+
             // uac-r2 197b: on a row the predicate HIDES, a flagged participant's existing share is revoked (whatever made it); the
             // message's owner is read again first, as before every revoke here. Never on a deferred row (remove only on a
             // positive answer, round 70), and never an unflagged user's.

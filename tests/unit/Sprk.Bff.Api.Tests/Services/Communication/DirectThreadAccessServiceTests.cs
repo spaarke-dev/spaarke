@@ -2015,6 +2015,26 @@ public class DirectThreadAccessServiceTests
         VerifyNeverGranted(Other);
     }
 
+    [Fact(DisplayName = "197b review pass 2 F1 must-not-fire: a Direct-team message re-owned during its grant writes no content-row grant when flagged participants are in the audience")]
+    public async Task R197b_DirectTeam_AMessageReownedDuringItsGrant_GrantsNoContentRow()
+    {
+        DirectTeamMessageWorld();
+        _accessGrant
+            .Setup(g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => MessageOwnedByOwnerTeam(OtherTeamId))
+            .Returns(Task.CompletedTask);
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true, scopes: Scopes(NoRootDirectMessage().Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        foreach (var set in new[] { "sprk_communicationattachments", "sprk_communicationparticipants", "sprk_emailreviewlogs", "sprk_documents" })
+        {
+            _accessGrant.Verify(
+                g => g.GrantAccessAsync(set, It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Never, set);
+        }
+    }
+
     /// <summary>
     /// A grant SUT over the REAL derivation: <paramref name="anchorEntity"/> discovers <c>ownerid</c> (user/team),
     /// <c>owningteam</c> and <c>sprk_assignedattorney</c>; every team expands to <paramref name="teamMembers"/>.

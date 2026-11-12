@@ -1478,6 +1478,45 @@ public class DirectMessageParticipantSharesTests
         Holds("sprk_communication", message, Caller).Should().BeTrue();
     }
 
+    [Fact(DisplayName = "197b review K2 must-not-fire: a structural undecided answer keeps a flagged participant's held content shares (revoke on Hidden only)")]
+    public async Task R197b_AStructuralUndecided_KeepsHeldShares()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var content = rows.Where(r => r.Table != "sprk_communication" && r.Table != "sprk_emailreviewlog").ToList();
+        foreach (var (table, id) in content)
+            _shares.Seed(table, id, DataversePrincipalRef.User(Other), Read);
+        var stub = NoRoot(rows).Set("sprk_communication", message, VUndecided,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.ChainTooLong);
+
+        var outcome = await Reconciler198(stub.Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        (outcome.HiddenRevoked ?? []).Should().BeEmpty();
+        foreach (var (table, id) in content)
+            Holds(table, id, Other).Should().BeTrue($"{table}: withheld is not hidden, so nothing is revoked");
+    }
+
+    [Fact(DisplayName = "197b review pass 2 F1 must-not-fire: a message re-owned during its own grant writes no content row grant, and is retried")]
+    public async Task R197b_AMessageReownedDuringItsGrant_GrantsNoContentRow()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        _shares.AfterGrant = (_, id, _) =>
+        {
+            if (id == message)
+                _world.MoveOwner("sprk_communication", message, DataversePrincipalRef.Team(SecureChildShareWorld.RestrictedContentTeam));
+        };
+
+        var outcome = await Reconciler198(NoRoot(rows).Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeFalse("an owner change is retried");
+        foreach (var (table, id) in rows)
+        {
+            Holds(table, id, Other).Should().BeFalse($"{table}: the message is no longer the Direct team's");
+            Holds(table, id, Caller).Should().BeFalse($"{table}: nothing more is written after the owner changed");
+        }
+    }
+
     [Fact(DisplayName = "197b must-not-fire: a content row the predicate shows is NOT granted while its message is withheld")]
     public async Task R197b_AContentRow_FollowsItsMessage()
     {

@@ -420,7 +420,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         if (flagged.Count > 0)
         {
             var answers = await DecideForFlaggedParticipantsAsync(
-                communicationId, contentRows.Append((Table: MessageEntity, Id: communicationId)).ToList(), ct);
+                communicationId, contentRows.Append((Table: MessageEntity, Id: communicationId)).ToList(), directTeamOwnedWithPair: true, ct);
             granteesFor = (table, id) => participants
                 .Where(u => !flagged.Contains(u)
                             || (answers.TryGetValue((table, id), out var answer) && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant))
@@ -437,6 +437,15 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         }
 
         await GrantReadAccessToPrincipalsAsync(communicationId, threadId, granteesFor(MessageEntity, communicationId), ct);
+
+        // 197b review pass 2 F1: with flagged participants in the audience, the content rows are granted only while the message is
+        // still the Direct team's (each content row is also confirmed by its own owner below).
+        if (flagged.Count > 0 && !await DirectMessageParticipantShares.OwnerUnchangedAsync(
+                _entityService, communicationId, directTeam, "content grants", _logger, ct))
+        {
+            return;
+        }
+
         await GrantDirectContentRowsAsync(communicationId, threadId, directTeam, contentRows, granteesFor, ct);
     }
 
@@ -447,7 +456,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// not granted. No scope factory (a test composition): every row defers (no flagged participant is granted here).
     /// </summary>
     private async Task<IReadOnlyDictionary<(string Table, Guid Id), DirectMessageParticipantShares.FlaggedAnswer>> DecideForFlaggedParticipantsAsync(
-        Guid communicationId, IReadOnlyCollection<(string Table, Guid Id)> rows, CancellationToken ct, bool directTeamOwnedWithPair = true)
+        Guid communicationId, IReadOnlyCollection<(string Table, Guid Id)> rows, bool directTeamOwnedWithPair, CancellationToken ct)
     {
         if (_scopes is null)
         {
@@ -519,7 +528,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
             return participants;
 
         var answers = await DecideForFlaggedParticipantsAsync(
-            communicationId, [(MessageEntity, communicationId)], ct, directTeamOwnedWithPair: false);
+            communicationId, [(MessageEntity, communicationId)], directTeamOwnedWithPair: false, ct);
         var shown = answers.TryGetValue((MessageEntity, communicationId), out var answer)
             && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant;
         _logger.LogInformation("Message {CommunicationId}: {Count} Direct participant(s) flagged external (or unreadable) are {Outcome} " +
