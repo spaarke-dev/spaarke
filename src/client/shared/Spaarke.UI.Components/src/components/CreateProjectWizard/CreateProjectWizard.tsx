@@ -33,6 +33,7 @@ import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import { CreateProjectStep } from './CreateProjectStep';
 import { ProjectService } from './projectService';
+import { searchOrganizationsAsLookup } from '../CreateMatterWizard/matterService';
 import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
@@ -135,20 +136,6 @@ async function searchContactsAsLookup(dataService: IDataService, query: string):
   return result.entities.map(e => ({
     id: e['contactid'] as string,
     name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
-  }));
-}
-
-async function searchOrganizationsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
-  if (!query || query.trim().length < 2) return [];
-  const safeFilter = query.trim().replace(/'/g, "''");
-  const options =
-    `?$select=sprk_organizationid,sprk_name` +
-    `&$filter=contains(sprk_name,'${safeFilter}')` +
-    `&$orderby=sprk_name asc&$top=10`;
-  const result = await dataService.retrieveMultipleRecords('sprk_organization', options);
-  return result.entities.map(e => ({
-    id: e['sprk_organizationid'] as string,
-    name: e['sprk_name'] as string,
   }));
 }
 
