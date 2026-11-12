@@ -805,8 +805,10 @@ public sealed partial class RecordCreationServiceMappingSeamTests
 
         outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
         StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_location").Should().Be("Room 1");
-        // Task 022 fix round 2: the mapping-source rule reads whether the source is secure (its owner and flag), nothing else.
-        _sourceReads.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo("ownerid", AccessFollowsParent.SecureFlagColumn);
+        // Task 022 fix round 2: the mapping-source rule reads whether the source is secure (its owner and flag); task 022b: and
+        // its Access Permission (a matter carries the column). Nothing else.
+        _sourceReads.Should().ContainSingle().Which.Columns.Should().BeEquivalentTo(
+            "ownerid", AccessFollowsParent.SecureFlagColumn, InheritedAccessPermission.Column);
         _callerRead.Paths.Should().BeEmpty("no mapped source column was read app-only, so there is nothing to mask");
         outcome.MappingWarnings.Should().BeEmpty();
     }
