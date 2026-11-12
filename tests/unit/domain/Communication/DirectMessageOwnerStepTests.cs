@@ -49,6 +49,7 @@ public class DirectMessageOwnerStepTests
     public DirectMessageOwnerStepTests()
     {
         Store(DirectMessage());
+        Store(Thread());
         Store(Content("sprk_communicationattachment", Attachment, "sprk_communication", Owner(AppUser)));
         Store(Content("sprk_communicationparticipant", Participant, "sprk_communication", Owner(AppUser)));
         Store(Content("sprk_emailreviewlog", ReviewLog, "sprk_communication", Owner(AppUser)));
@@ -154,6 +155,15 @@ public class DirectMessageOwnerStepTests
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Debug);
     }
 
+    [Fact]
+    public async Task NotConfigured_LogsNothingAboveDebug()
+    {
+        await Step(DirectMessageOwnerTeamDouble.Unconfigured()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+
+        _log.Entries.Should().NotBeEmpty();
+        _log.Entries.Should().OnlyContain(e => e.Level <= LogLevel.Debug, "the Direct owner rule is off while both settings are unset");
+    }
+
     [Theory]
     [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey, DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
     [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey, DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
@@ -233,15 +243,80 @@ public class DirectMessageOwnerStepTests
         _log.Errors.Should().BeEmpty();
     }
 
-    [Theory]
-    [InlineData(ThreadGrantAudience.AnchorRecordMembers)] // a Direct thread filed to a (secure) record joins as Anchored
-    [InlineData(ThreadGrantAudience.None)] // the per-user master thread grants nobody
-    public async Task NonDirectJoin_GrantsOnly_AndNeverAsksTheLookup(ThreadGrantAudience audience)
+    [Fact]
+    public async Task AnchoredJoin_GrantsOnly_AndNeverAsksTheLookup()
     {
-        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, new ThreadAssignment(ThreadId, audience), CancellationToken.None);
+        // A Direct-typed thread filed to a (secure) record joins as Anchored.
+        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, new ThreadAssignment(ThreadId, ThreadGrantAudience.AnchorRecordMembers),
+            CancellationToken.None);
 
-        _calls.Should().Equal("grant " + audience);
+        _calls.Should().Equal("grant AnchorRecordMembers");
         _dataverse.Verify(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ReplyIntoThePerUserMaster_JoinsAsDirectParticipantsOnTheDefaultThread_KeepsTodaysOwner()
+    {
+        // The real path: the per-user master is typed Direct, so a reply into it joins as DirectParticipants (ThreadResolver's join).
+        // The stamp names no recipient there (the master holds no pair), and the thread is the default thread.
+        Store(Thread(isDefault: true));
+        Store(DirectMessage(recipient: Guid.Empty));
+
+        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().BeNull();
+        Owner("sprk_communication", MessageId).Should().Be(AppUser);
+        _log.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AStrictPairMessage_InTheDefaultThread_KeepsTodaysOwner()
+    {
+        Store(Thread(isDefault: true));
+
+        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().BeNull();
+        Owner("sprk_communication", MessageId).Should().Be(AppUser);
+        _calls.Should().Equal("grant DirectParticipants");
+    }
+
+    [Fact]
+    public async Task AStrictPairMessage_InAThreadNotTypedDirect_KeepsTodaysOwner()
+    {
+        Store(Thread(threadType: 100000000));
+
+        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TheThreadReadFaults_KeepsTodaysOwner_WithAnError()
+    {
+        _dataverse
+            .Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated read fault"));
+
+        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().BeNull();
+        _log.Errors.Should().ContainSingle(e => e.Event.Id == 5415);
+    }
+
+    [Fact]
+    public async Task Resolved_AContentRowFiledUnderARecord_WithTheSameOwner_StaysWhereItIs()
+    {
+        var filed = Content("sprk_document", FiledDocument, "sprk_relatedcommunication", Owner(AppUser));
+        filed["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+        Store(filed);
+
+        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam);
+        OwningTeam("sprk_document", OwnDocument).Should().Be(DirectTeam);
+        Owner("sprk_document", FiledDocument).Should().Be(AppUser, "a document filed under a matter is the matter's, not the message's");
+        _calls.Should().NotContain(c => c.Contains(FiledDocument.ToString()));
     }
 
     [Fact]
@@ -366,6 +441,14 @@ public class DirectMessageOwnerStepTests
             row["sprk_directrecipient"] = new EntityReference("systemuser", recipient ?? Recipient);
         return row;
     }
+
+    /// <summary>The joined thread as task 198 narrows on it: typed Direct and not the per-user master thread by default.</summary>
+    private static Entity Thread(int threadType = 100000001, bool isDefault = false) => new("sprk_communicationthread", ThreadId)
+    {
+        ["sprk_communicationthreadid"] = ThreadId,
+        ["sprk_threadtype"] = new OptionSetValue(threadType),
+        ["sprk_isdefaultthread"] = isDefault,
+    };
 
     private static Entity Content(string table, Guid id, string lookup, EntityReference owner) => new(table, id)
     {

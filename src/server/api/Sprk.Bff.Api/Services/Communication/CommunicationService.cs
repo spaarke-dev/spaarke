@@ -944,7 +944,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         // fm task 054 piece 3a: a 1:1 message is refused here, before anything is sent, when the Direct message owner team is
         // configured but unusable (409) or unreadable (503).
-        await RefuseOneToOneSendWhenDirectTeamUnusableAsync(request, preparedRecord, correlationId, ct);
+        await RefuseOneToOneSendWhenDirectTeamUnusableAsync(request, preparedRecord, senderEmail, correlationId, ct);
 
         try
         {
@@ -1711,14 +1711,29 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         && !Access.DirectMessageRecipient.CarriesATypedRegarding(preparedRecord);
 
     /// <summary>
-    /// fm task 054 piece 3a: <c>true</c> for a <b>1:1 message send</b>: a Message whose prepared row is filed under no record (no typed
-    /// regarding lookup) and whose To ∪ Cc ∪ Bcc names exactly one address (<see cref="DistinctRecipientAddresses"/>). Only such a
-    /// send can become a Direct message, so only it is checked against the Direct message owner team before anything is sent.
+    /// fm task 054 piece 3a: <c>true</c> for a Message send whose prepared row is filed under no record (no typed regarding lookup).
+    /// Only such a send can become a Direct message, so only it can be checked against the Direct message owner team.
     /// </summary>
-    internal static bool IsOneToOneMessageSend(SendCommunicationRequest request, DataverseEntity preparedRecord) =>
+    internal static bool IsUnfiledMessageSend(SendCommunicationRequest request, DataverseEntity preparedRecord) =>
         request.CommunicationType == CommunicationType.Message
-        && !Access.DirectMessageRecipient.CarriesATypedRegarding(preparedRecord)
-        && DistinctRecipientAddresses(request).Count == 1;
+        && !Access.DirectMessageRecipient.CarriesATypedRegarding(preparedRecord);
+
+    /// <summary>
+    /// fm task 054 piece 3a: <c>true</c> for a <b>1:1 message send by its addressees</b>, the rule for a send that names no
+    /// <see cref="SendCommunicationRequest.ThreadId"/>: an unfiled Message send (<see cref="IsUnfiledMessageSend"/>) whose
+    /// To ∪ Cc ∪ Bcc (<see cref="DistinctRecipientAddresses"/>), without the sender's own address, names exactly one other person.
+    /// A send into a thread is decided by the thread's shape instead (<see cref="Access.DirectMessageOwnerStep.CheckBeforeSendAsync(Guid?, CancellationToken)"/>).
+    /// </summary>
+    /// <remarks>Known limit: a recipient address that resolves to a contact or an external person still counts here; that
+    /// resolution runs only after the send (<see cref="ResolveDirectRecipientAsync"/>), so it is not available before it.</remarks>
+    internal static bool IsOneToOneMessageSend(SendCommunicationRequest request, DataverseEntity preparedRecord, string? senderEmail)
+    {
+        if (request.ThreadId.HasValue || !IsUnfiledMessageSend(request, preparedRecord))
+            return false;
+
+        var sender = string.IsNullOrWhiteSpace(senderEmail) ? null : CommunicationParticipantIndexer.NormalizeAddress(senderEmail);
+        return DistinctRecipientAddresses(request).Count(a => !string.Equals(a, sender, StringComparison.Ordinal)) == 1;
+    }
 
     /// <summary>To ∪ Cc ∪ Bcc, each normalized as the participant index does, empty entries dropped and duplicates counted once.</summary>
     private static List<string> DistinctRecipientAddresses(SendCommunicationRequest request) =>
@@ -1732,15 +1747,30 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
     /// <summary>
     /// fm task 054 piece 3a: refuses a 1:1 message send before anything is sent when the Direct message owner team is configured
-    /// but cannot be used (409) or cannot be read (503). No Direct setting at all, or a resolved team, sends.
+    /// but cannot be used (409) or cannot be read (503). No Direct setting at all, or a resolved team, sends. A send into a thread
+    /// (a reply) is 1:1 when the thread is a strict Direct pair, whoever it names in To/Cc/Bcc; a send with no thread is 1:1 by its
+    /// addressees (<see cref="IsOneToOneMessageSend"/>). A thread shape that cannot be read is a 503.
     /// </summary>
     private async Task RefuseOneToOneSendWhenDirectTeamUnusableAsync(
-        SendCommunicationRequest request, DataverseEntity preparedRecord, string correlationId, CancellationToken ct)
+        SendCommunicationRequest request, DataverseEntity preparedRecord, string senderEmail, string correlationId, CancellationToken ct)
     {
-        if (_directMessageOwnerStep is null || !IsOneToOneMessageSend(request, preparedRecord))
+        if (_directMessageOwnerStep is null)
             return;
 
-        var check = await _directMessageOwnerStep.CheckBeforeSendAsync(ct);
+        Access.DirectOwnerSendCheck check;
+        if (request.ThreadId is { } threadId)
+        {
+            if (!IsUnfiledMessageSend(request, preparedRecord))
+                return;
+            check = await _directMessageOwnerStep.CheckBeforeSendAsync(threadId, ct);
+        }
+        else
+        {
+            if (!IsOneToOneMessageSend(request, preparedRecord, senderEmail))
+                return;
+            check = await _directMessageOwnerStep.CheckBeforeSendAsync(ct);
+        }
+
         if (check.CanSend)
             return;
 

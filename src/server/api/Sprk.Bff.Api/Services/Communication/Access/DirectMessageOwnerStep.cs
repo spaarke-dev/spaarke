@@ -21,11 +21,14 @@ namespace Sprk.Bff.Api.Services.Communication.Access;
 /// join goes on. (3) The lookup: <see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/> stops here with nothing written and nothing
 /// refused. (4) The message, read whole: it must be a Message, owned by a user, filed under nothing (no ownership parent and no typed
 /// regarding lookup), filed into the joined thread, and carry exactly two distinct non-empty systemusers in <c>sprk_sentby</c> and
-/// <c>sprk_directrecipient</c> (<see cref="DirectMessageParticipantShares.ParticipantsOf"/>); otherwise it keeps its owner. (5) A lookup
+/// <c>sprk_directrecipient</c> (<see cref="DirectMessageParticipantShares.ParticipantsOf"/>); otherwise it keeps its owner. Its thread,
+/// read by type and default flag, must be typed Direct and not the per-user master thread (<see cref="WhyThreadIsNotDirect"/>, task 198's
+/// narrowing); a thread read fault keeps the owner, with an Error. (5) A lookup
 /// that is not resolved (any other refusal, including <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/>, or a fault)
 /// keeps the owner, with an Error. There is no default-team fallback, and the message is never dropped. (6) The owner write, conditional
 /// on the version read in (4), evicted and read back. (7) Each content row (<see cref="RestrictedFilingShareBar.ContentRows"/>) that
-/// had the message's previous owner follows it, in its own conditional write; a row that is refused or faults stays where it is.
+/// had the message's previous owner and is not itself filed under a record follows it, in its own conditional write; a row that is
+/// filed under a record, refused or faults stays where it is.
 /// (8) The grant again: the message is now Direct-team owned, so the grant takes its participant branch (uac-r2 task 198) and its
 /// gate Decision Records follow the message to the Direct team as <see cref="Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing"/>
 /// defines it (D-215). No owner is ever rolled back.</para>
@@ -64,6 +67,10 @@ public sealed class DirectMessageOwnerStep
     private readonly IGenericEntityService _dataverse;
     private readonly DirectMessageOwnerTeam _lookup;
     private readonly IMembershipCacheInvalidator? _cacheInvalidator;
+
+    /// <summary>The strict share read the 1:1 thread shape is decided from (<see cref="IsOneToOneThreadAsync"/>); without it a reply's
+    /// shape cannot be read.</summary>
+    private readonly IDataverseRecordShareService? _recordShares;
     private readonly ILogger<DirectMessageOwnerStep> _logger;
 
     public DirectMessageOwnerStep(
@@ -71,13 +78,15 @@ public sealed class DirectMessageOwnerStep
         IGenericEntityService dataverse,
         DirectMessageOwnerTeam lookup,
         ILogger<DirectMessageOwnerStep> logger,
-        IMembershipCacheInvalidator? cacheInvalidator = null)
+        IMembershipCacheInvalidator? cacheInvalidator = null,
+        IDataverseRecordShareService? recordShares = null)
     {
         _access = access ?? throw new ArgumentNullException(nameof(access));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _lookup = lookup ?? throw new ArgumentNullException(nameof(lookup));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cacheInvalidator = cacheInvalidator;
+        _recordShares = recordShares;
     }
 
     /// <summary>
@@ -88,9 +97,10 @@ public sealed class DirectMessageOwnerStep
     {
         ArgumentNullException.ThrowIfNull(assignment);
 
+        // The grant is best-effort and logs its own outcome; it may have been skipped or failed, so this says only that it ran.
         await _access.GrantMessageAccessAsync(communicationId, assignment, ct).ConfigureAwait(false);
-        _logger.LogInformation(
-            "Message {CommunicationId} granted to its thread's {Audience} audience (ThreadId={ThreadId}).",
+        _logger.LogDebug(
+            "Message {CommunicationId}: grant attempted for its thread's {Audience} audience (ThreadId={ThreadId}).",
             communicationId, assignment.Audience, assignment.ThreadId);
 
         if (assignment.Audience != ThreadGrantAudience.DirectParticipants)
@@ -110,37 +120,97 @@ public sealed class DirectMessageOwnerStep
     }
 
     /// <summary>
-    /// The pre-send check of a 1:1 message: <see cref="DirectOwnerSendCheck.Proceed"/> when the Direct team resolves or no Direct
-    /// setting is configured; <see cref="DirectOwnerSendCheck.Refused"/> for any other refusal (a configuration problem);
-    /// <see cref="DirectOwnerSendCheck.Unavailable"/> when the lookup could not read Dataverse. Never throws for a fault.
+    /// The pre-send check of a message the caller has found 1:1 from its addressees (<see cref="CheckBeforeSendAsync(Guid?, CancellationToken)"/>
+    /// with no thread).
     /// </summary>
-    public async Task<DirectOwnerSendCheck> CheckBeforeSendAsync(CancellationToken ct)
+    public Task<DirectOwnerSendCheck> CheckBeforeSendAsync(CancellationToken ct) => CheckBeforeSendAsync(threadId: null, ct);
+
+    /// <summary>
+    /// The pre-send check of a Message send filed under no record. <see cref="DirectOwnerSendCheck.Proceed"/> when the Direct team
+    /// resolves or no Direct setting is configured (nothing else is read); otherwise the send is refused only when it is 1:1:
+    /// <see cref="DirectOwnerSendCheck.Refused"/> for a configuration problem, <see cref="DirectOwnerSendCheck.Unavailable"/> when the
+    /// lookup could not read Dataverse. Never throws for a fault.
+    /// </summary>
+    /// <param name="threadId">A send into an existing thread (a reply): the thread's shape decides whether it is 1:1, never its
+    /// addressees. It is 1:1 exactly when the thread is a strict Direct pair (<see cref="DirectMessageRecipient.ReadStrictPairShapeAsync"/>,
+    /// typed Direct) that is not the per-user master thread (<see cref="WhyThreadIsNotDirect"/>). A shape that cannot be read is
+    /// <see cref="DirectOwnerSendCheck.Unavailable"/>. <c>null</c>: the caller found the send 1:1 from its addressees.</param>
+    public async Task<DirectOwnerSendCheck> CheckBeforeSendAsync(Guid? threadId, CancellationToken ct)
     {
-        DirectMessageOwnerTeamResolution resolution;
+        DirectMessageOwnerTeamResolution? resolution = null;
+        Exception? fault;
         try
         {
             resolution = await _lookup.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
+            fault = resolution.Fault;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(SendRefusedEvent, ex, "A 1:1 message send was refused: the Direct message owner team could not be read.");
-            return DirectOwnerSendCheck.Unavailable;
+            fault = ex;
         }
 
-        if (resolution.Fault is not null)
-        {
-            _logger.LogWarning(SendRefusedEvent, resolution.Fault,
-                "A 1:1 message send was refused: the Direct message owner team could not be read ({Refusal}).", resolution.Refusal);
-            return DirectOwnerSendCheck.Unavailable;
-        }
-
-        if (resolution.IsResolved || resolution.IsNotConfigured)
+        if (fault is null && resolution is not null && (resolution.IsResolved || resolution.IsNotConfigured))
             return DirectOwnerSendCheck.Proceed;
+
+        if (threadId is { } thread)
+        {
+            var (oneToOne, shapeFault) = await IsOneToOneThreadAsync(thread, ct).ConfigureAwait(false);
+            if (oneToOne == false)
+            {
+                _logger.LogDebug("A send into thread {ThreadId} is not 1:1, so the Direct message owner team does not gate it.", thread);
+                return DirectOwnerSendCheck.Proceed;
+            }
+
+            if (oneToOne is null)
+            {
+                _logger.LogWarning(SendRefusedEvent, shapeFault,
+                    "A send into thread {ThreadId} was refused: whether it is a 1:1 thread could not be read.", thread);
+                return DirectOwnerSendCheck.Unavailable;
+            }
+        }
+
+        if (fault is not null)
+        {
+            _logger.LogWarning(SendRefusedEvent, fault,
+                "A 1:1 message send was refused: the Direct message owner team could not be read ({Refusal}).", resolution?.Refusal);
+            return DirectOwnerSendCheck.Unavailable;
+        }
 
         _logger.LogWarning(SendRefusedEvent,
             "A 1:1 message send was refused: the Direct message owner team is not usable ({Refusal}, missing setting {MissingSetting}).",
-            resolution.Refusal, resolution.MissingSetting);
+            resolution!.Refusal, resolution.MissingSetting);
         return DirectOwnerSendCheck.Refused(resolution.Refusal ?? DirectMessageOwnerTeamRefusal.PartiallyConfigured);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="threadId"/> is a 1:1 thread: a strict Direct pair that is not the per-user master thread.
+    /// <c>null</c> (with the fault, when there is one) when that cannot be read.
+    /// </summary>
+    private async Task<(bool? OneToOne, Exception? Fault)> IsOneToOneThreadAsync(Guid threadId, CancellationToken ct)
+    {
+        if (_recordShares is null)
+            return (null, null);
+
+        var shape = await DirectMessageRecipient.ReadStrictPairShapeAsync(_dataverse, _recordShares, threadId, ct).ConfigureAwait(false);
+        if (shape.Reason == DirectPairShapeReason.ParticipantReadFault)
+            return (null, shape.Fault);
+        return (shape.IsStrictPair && !shape.IsDefaultThread, null);
+    }
+
+    /// <summary>
+    /// The thread narrowing task 198 applies (<see cref="DirectMessageParticipantShares"/>): the thread must be typed Direct and must
+    /// not be the per-user master thread. Why <paramref name="thread"/> fails it, or <c>null</c> when it passes.
+    /// </summary>
+    internal static string? WhyThreadIsNotDirect(Entity? thread)
+    {
+        if (thread is null || thread.Id == Guid.Empty)
+            return "its thread was not found";
+        if (thread.GetAttributeValue<OptionSetValue>(DirectMessageParticipantShares.ThreadTypeColumn)?.Value
+            != DirectMessageParticipantShares.ThreadTypeDirect)
+            return "its thread is not a Direct thread";
+        if (thread.GetAttributeValue<bool?>(DirectMessageParticipantShares.DefaultThreadColumn) == true)
+            return "its thread is the per-user master thread";
+        return null;
     }
 
     /// <summary>
@@ -166,6 +236,26 @@ public sealed class DirectMessageOwnerStep
         if (WhyNotDirect(message, threadId) is { } reason)
         {
             _logger.LogInformation("Message {CommunicationId} keeps its owner: {Reason}.", communicationId, reason);
+            return false;
+        }
+
+        // Task 198's thread narrowing, applied before the owner moves: the join's audience alone does not decide it.
+        Entity? thread;
+        try
+        {
+            thread = await ReadThreadAsync(threadId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(MessageNotMovedEvent, ex,
+                "Message {CommunicationId} keeps its owner: its thread {ThreadId} could not be read before its Direct owner write.",
+                communicationId, threadId);
+            return false;
+        }
+
+        if (WhyThreadIsNotDirect(thread) is { } threadReason)
+        {
+            _logger.LogInformation("Message {CommunicationId} keeps its owner: {Reason}.", communicationId, threadReason);
             return false;
         }
 
@@ -208,6 +298,18 @@ public sealed class DirectMessageOwnerStep
             : null;
     }
 
+    /// <summary>The thread's type and default flag, the two columns task 198 narrows on. A fault propagates to the caller.</summary>
+    private async Task<Entity?> ReadThreadAsync(Guid threadId, CancellationToken ct)
+    {
+        var query = new QueryExpression(DirectMessageParticipantShares.ThreadTable)
+        {
+            ColumnSet = new ColumnSet(DirectMessageParticipantShares.ThreadTypeColumn, DirectMessageParticipantShares.DefaultThreadColumn),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(DirectMessageParticipantShares.ThreadTable + "id", ConditionOperator.Equal, threadId);
+        return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
+    }
+
     private async Task<Entity?> ReadMessageAsync(Guid communicationId, CancellationToken ct)
     {
         try
@@ -233,7 +335,7 @@ public sealed class DirectMessageOwnerStep
             {
                 var query = new QueryExpression(table)
                 {
-                    ColumnSet = new ColumnSet(OwnerColumn, VersionColumn),
+                    ColumnSet = new ColumnSet(new[] { OwnerColumn, VersionColumn }.Concat(RecordLookupsOf(table)).ToArray()),
                     TopCount = RestrictedFilingShareBar.MaxRowsPerTable,
                 };
                 query.Criteria.AddCondition(lookup, ConditionOperator.Equal, communicationId);
@@ -264,6 +366,15 @@ public sealed class DirectMessageOwnerStep
                     continue;
                 }
 
+                // A row filed under a record is that record's, not the message's: it keeps its owner.
+                if (IsFiledUnderARecord(row))
+                {
+                    _logger.LogInformation(
+                        "Message {CommunicationId} moved to the Direct team; its {Table} row {RowId} is filed under a record and keeps its owner.",
+                        communicationId, table, row.Id);
+                    continue;
+                }
+
                 var fault = row.GetAttributeValue<long?>(VersionColumn) is { } version
                     ? await WriteDirectTeamOwnerAsync(table, row.Id, version, teamId, ct).ConfigureAwait(false)
                     : "its version could not be read";
@@ -276,6 +387,35 @@ public sealed class DirectMessageOwnerStep
             }
         }
     }
+
+    /// <summary>
+    /// The tables a content row may also link to and still be the message's own content: communications, documents and file
+    /// versions are content, not a record the row is filed under.
+    /// </summary>
+    private static readonly HashSet<string> ContentTables = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_communication", "sprk_document", "sprk_fileversion",
+    };
+
+    /// <summary>
+    /// The lookups of a content table that can file its row under a record: its lineage lookups
+    /// (<see cref="SecureChildLineage.Children"/>), and for a document every record link (<see cref="DocumentLinkFields.All"/>, which
+    /// also names the service request the lineage leaves out), each to an ownership-parent table that is not content.
+    /// </summary>
+    private static IEnumerable<string> RecordLookupsOf(string table) =>
+        SecureChildLineage.Children[table].Lookups
+            .Select(l => (Column: l.Key, Target: l.Value))
+            .Concat(string.Equals(table, "sprk_document", StringComparison.OrdinalIgnoreCase)
+                ? DocumentLinkFields.All.Select(f => (Column: f.LogicalName, Target: f.TargetEntityLogicalName))
+                : [])
+            .Where(l => !ContentTables.Contains(l.Target)
+                        && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.Target))
+            .Select(l => l.Column)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary><c>true</c> when the content row names a record it is filed under (any ownership parent that is not content).</summary>
+    private static bool IsFiledUnderARecord(Entity row) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row).Any(p => !ContentTables.Contains(p.EntityLogicalName));
 
     /// <summary>
     /// THE owner write of this class: the row to the Direct team, owner only, conditional on <paramref name="version"/>, then the
