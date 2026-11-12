@@ -62,7 +62,7 @@ public class SpeFileStore
 }
 ```
 
-**See**: [SpeFileStore Pattern](../../src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs)
+**See**: [`SpeFileStore.cs` (implementation)](../../src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs)
 
 ---
 

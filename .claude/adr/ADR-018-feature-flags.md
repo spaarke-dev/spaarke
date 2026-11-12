@@ -72,7 +72,7 @@ public async Task<JobResult> HandleAsync(AnalysisJob job, CancellationToken ct)
 }
 ```
 
-**See**: [Feature Flag Pattern](../patterns/provisioning/null-object-kill-switch-anti-pattern.md)
+**See**: [Null-object kill switch: the DI-registration anti-pattern to avoid](../patterns/provisioning/null-object-kill-switch-anti-pattern.md)
 
 ---
 

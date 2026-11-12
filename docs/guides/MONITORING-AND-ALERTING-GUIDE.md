@@ -686,4 +686,4 @@ When the BFF API emits a new custom metric:
 
 ---
 
-*This guide covers the monitoring stack deployed by task 020 (Deploy shared platform). For incident response procedures, see [INCIDENT-RESPONSE-PROCEDURES.md](INCIDENT-RESPONSE.md). For secret rotation, see [SECRET-ROTATION-PROCEDURES.md](SECRET-ROTATION-PROCEDURES.md).*
+*This guide covers the monitoring stack deployed by task 020 (Deploy shared platform). For incident response procedures, see [INCIDENT-RESPONSE.md](INCIDENT-RESPONSE.md). For secret rotation, see [SECRET-ROTATION-PROCEDURES.md](SECRET-ROTATION-PROCEDURES.md).*

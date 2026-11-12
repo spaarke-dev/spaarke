@@ -52,7 +52,7 @@
 | Domain | Constraint File | Source ADRs | Source Guides | Source Architecture |
 |--------|----------------|-------------|---------------|---------------------|
 | API/BFF | [.claude/constraints/api.md](.claude/constraints/api.md) | ADR-001, 004, 008, 010, 011, 017 | - | [sdap-bff-api-patterns.md](docs/architecture/sdap-bff-api-patterns.md) |
-| PCF | [.claude/constraints/pcf.md](.claude/constraints/pcf.md) | ADR-006, 012, 014, 015, 018 | [PCF-CONTROL-DEVELOPMENT.md](docs/guides/PCF-DEPLOYMENT-GUIDE.md) | [sdap-pcf-patterns.md](docs/architecture/sdap-pcf-patterns.md) |
+| PCF | [.claude/constraints/pcf.md](.claude/constraints/pcf.md) | ADR-006, 012, 014, 015, 018 | [PCF-DEPLOYMENT-GUIDE.md](docs/guides/PCF-DEPLOYMENT-GUIDE.md) | [sdap-pcf-patterns.md](docs/architecture/sdap-pcf-patterns.md) |
 | Plugins (none) + Write Path | [.claude/constraints/plugins.md](.claude/constraints/plugins.md) | ADR-002 | [DATAVERSE-WRITE-PATH-ARCHITECTURE.md](docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md) | - |
 | Auth | [.claude/constraints/auth.md](.claude/constraints/auth.md) | ADR-004, 016 | - | auth-boundaries.md, [sdap-auth-patterns.md](docs/architecture/sdap-auth-patterns.md) |
 | Data | [.claude/constraints/data.md](.claude/constraints/data.md) | ADR-003, 005, 007, 009, 019 | - | - |

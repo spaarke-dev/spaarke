@@ -65,21 +65,24 @@
 
     EXTERNAL VERDICTS (2026-11-11, #1717)
     -------------------------------------
-    An external link is BROKEN (fails the run) on 404/410/5xx or no response.
+    An external link is BROKEN (fails the run) on 404/410/5xx or no response
+    (DNS failure, TLS failure, connection refused).
     It is UNVERIFIABLE (listed in the report, does not fail) when the checker,
     an anonymous bot, cannot tell whether a human reader can open it:
 
       | Case                                    | Why it is not evidence of a dead link |
       |-----------------------------------------|----------------------------------------|
       | HTTP 401, 403, 429                      | Sign-in wall, bot blocking (e.g. openai.com) or rate limiting. |
+      | Timed out twice (10 s, then 20 s)       | A slow third-party host. It is retried once; a dead host fails fast with DNS/TLS/refused instead. (#2720 review: one slow pricing page turned the run red at random.) |
       | URL starts with an -UnverifiableUrlPrefixes entry | Private-by-design pages. Default: the spaarke-dev GitHub Projects boards (the portfolio board, project #2), which return 404 to anyone not signed in. |
 
     Keep the allowlist short and specific: add a prefix only for pages that are
     private by design, with the reason in this table.
 
 .PARAMETER MaxExternalChecks
-    Cap on external HEAD requests (default 200) to bound runtime on large repos.
-    Once exceeded, remaining external URLs are reported as "skipped" (not failures).
+    Cap on external requests to DISTINCT URLs (default 200) to bound runtime on large repos;
+    a repeated URL is answered from the cache and does not count. Once exceeded, remaining
+    external URLs are not checked (not failures); the summary prints how many were left out.
 
 .EXAMPLE
     pwsh ./scripts/validate-markdown-links.ps1 -Path projects/ci-cd-unit-test-remediation-r1
@@ -154,6 +157,18 @@ function Get-ErrorStatusCode($ErrorRecord) {
     return $null
 }
 
+# True when the request got no response because it ran out of time (as opposed to DNS, TLS or a
+# refused connection). PowerShell 7 reports an HttpClient timeout as a TaskCanceledException whose
+# inner exception is a TimeoutException.
+function Test-IsTimeoutError($ErrorRecord) {
+    $ex = $ErrorRecord.Exception
+    while ($ex) {
+        if ($ex -is [System.TimeoutException] -or $ex -is [System.OperationCanceledException]) { return $true }
+        $ex = $ex.InnerException
+    }
+    return $false
+}
+
 # Self-test (must-fire / must-not-fire), root CLAUDE.md §16: a platform quirk or a refactor must not
 # silently stop dot-folders being scanned, or start failing runs on unverifiable links.
 function Invoke-SelfTest {
@@ -166,6 +181,14 @@ function Invoke-SelfTest {
     if (-not (Test-UnverifiableUrl 'https://github.com/users/spaarke-dev/projects/2')) { throw 'Self-test failed: the private spaarke-dev project board is not on the unverifiable allowlist.' }
     if (Test-UnverifiableUrl 'https://github.com/users/someone-else/projects/2') { throw 'Self-test failed: the allowlist matches a project board outside spaarke-dev.' }
     if (Test-UnverifiableUrl 'https://github.com/spaarke-dev/spaarke') { throw 'Self-test failed: the allowlist matches a non-project spaarke-dev URL.' }
+    # Timeout vs dead host: a timeout is retried and then unverifiable; DNS/TLS/refused stays broken.
+    $timeout = [System.Management.Automation.ErrorRecord]::new(
+        [System.Threading.Tasks.TaskCanceledException]::new('The request was canceled due to the configured HttpClient.Timeout of 10 seconds elapsing.', [System.TimeoutException]::new('timeout')),
+        'selftest', 'OperationTimeout', $null)
+    $dns = [System.Management.Automation.ErrorRecord]::new(
+        [System.Net.Http.HttpRequestException]::new('No such host is known.'), 'selftest', 'ConnectionError', $null)
+    if (-not (Test-IsTimeoutError $timeout)) { throw 'Self-test failed (must-fire): an HttpClient timeout was not recognised as a timeout.' }
+    if (Test-IsTimeoutError $dns) { throw 'Self-test failed (must-not-fire): a DNS failure was classified as a timeout and would be hidden.' }
 
     # End to end, offline: a child run over a throwaway repo with a dot-folder.
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('mdlink-selftest-' + [guid]::NewGuid().ToString('N'))
@@ -273,6 +296,7 @@ $fencedCodeRegex = [regex]'(?ms)^```[\s\S]*?^```'
 $results = [System.Collections.Generic.List[object]]::new()
 $unverifiable = [System.Collections.Generic.List[object]]::new()
 $externalCheckCount = 0
+$externalSkippedByCap = 0
 $externalCache = @{}  # URL -> result (avoid duplicate HEAD)
 
 foreach ($file in $mdFiles) {
@@ -308,13 +332,14 @@ foreach ($file in $mdFiles) {
                 # Private by design — never requested, always listed (EXTERNAL VERDICTS in the header).
                 $status = 'unverifiable'
                 $reason = 'private by design (allowlisted prefix)'
-            } elseif ($externalCheckCount -ge $MaxExternalChecks) {
-                continue  # cap hit; silently skip remainder
             } elseif ($externalCache.ContainsKey($target)) {
-                $externalCheckCount++
+                # A repeated URL is answered from the cache and does not count against the cap.
                 $cached = $externalCache[$target]
                 $status = $cached.Status
                 $reason = $cached.Reason
+            } elseif ($externalCheckCount -ge $MaxExternalChecks) {
+                $externalSkippedByCap++
+                continue  # cap hit; counted and reported in the summary
             } else {
                 $externalCheckCount++
                 try {
@@ -332,8 +357,28 @@ foreach ($file in $mdFiles) {
                         if ($null -ne $code) {
                             $status = Get-StatusVerdict $code
                             $reason = "HTTP $code"
+                        } elseif (Test-IsTimeoutError $_) {
+                            # Slow host: one more try with a longer timeout before calling it unverifiable.
+                            try {
+                                $resp = Invoke-WebRequest -Uri $target -Method Get -TimeoutSec 20 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5 -Headers @{Range='bytes=0-0'}
+                                $status = Get-StatusVerdict $resp.StatusCode
+                                if ($status -ne 'ok') { $reason = "HTTP $($resp.StatusCode)" }
+                            } catch {
+                                $code = Get-ErrorStatusCode $_
+                                if ($null -ne $code) {
+                                    $status = Get-StatusVerdict $code
+                                    $reason = "HTTP $code"
+                                } elseif (Test-IsTimeoutError $_) {
+                                    $status = 'unverifiable'
+                                    $reason = 'timed out twice (10 s, 20 s)'
+                                } else {
+                                    $status = 'broken'
+                                    $reason = $_.Exception.Message -replace '\s+', ' '
+                                    if ($reason.Length -gt 80) { $reason = $reason.Substring(0, 80) + '...' }
+                                }
+                            }
                         } else {
-                            $status = 'broken'   # no response at all (DNS, TLS, timeout)
+                            $status = 'broken'   # no response at all (DNS, TLS, connection refused)
                             $reason = $_.Exception.Message -replace '\s+', ' '
                             if ($reason.Length -gt 80) { $reason = $reason.Substring(0, 80) + '...' }
                         }
@@ -389,7 +434,10 @@ Write-Host "================================================"
 Write-Host "Results"
 Write-Host "================================================"
 Write-Host "  Files scanned:       $($mdFiles.Count)"
-Write-Host "  External checks run: $externalCheckCount"
+Write-Host "  External checks run: $externalCheckCount (distinct URLs; cap $MaxExternalChecks)"
+if ($externalSkippedByCap -gt 0) {
+    Write-Host "  External links NOT checked (cap reached): $externalSkippedByCap"
+}
 Write-Host "  Broken links found:  $($results.Count)"
 Write-Host "  Unverifiable links:  $($unverifiable.Count) (listed, not failing - EXTERNAL VERDICTS in the script header)"
 Write-Host ""

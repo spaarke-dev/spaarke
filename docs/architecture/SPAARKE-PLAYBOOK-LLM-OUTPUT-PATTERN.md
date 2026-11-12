@@ -232,7 +232,7 @@ Worked example: `DAILY-BRIEFING-NARRATE.GenerateTldr` node.
 - **[`AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md)** — overall BFF AI subsystem architecture
 - **[`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md)** — playbook runtime contract (executor dispatch, scope resolution, node lifecycle)
 - **[`ai-architecture-actions-nodes-scopes.md`](ai-architecture-actions-nodes-scopes.md)** — Actions vs Nodes vs Scopes vs Skills/Knowledge — config-home decision tree
-- **[`ai-architecture-consumer-routing.md`](ai-architecture-playbook-consumer-routing.md)** — Path A.5 dispatch via `IConsumerRoutingService` → `IInvokePlaybookAi`
+- **[`ai-architecture-playbook-consumer-routing.md`](ai-architecture-playbook-consumer-routing.md)** — Path A.5 dispatch via `IConsumerRoutingService` → `IInvokePlaybookAi`
 - **[`JPS-AUTHORING-GUIDE.md`](../guides/JPS-AUTHORING-GUIDE.md)** — Action JPS body authoring
 - **[`PLAYBOOK-AUTHOR-GUIDE.md`](../guides/PLAYBOOK-AUTHOR-GUIDE.md)** — Playbook node + scope authoring
 - **[`ai-guide-playbook-deploy-recipe.md`](../guides/ai-guide-playbook-deploy-recipe.md)** — Deploy-Playbook.ps1 contract
