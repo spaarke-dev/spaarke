@@ -1,6 +1,6 @@
 /**
  * The rule sets (ebilling-r1 task 077, FR-28): name, where it applies (client default or a firm), status, "visible to firms" and
- * effective date, with "New rule set" for an admin. Opening a row opens the review of its rules.
+ * effective date. Opening a row opens the review of its rules. Rule sets are not created here: one comes with its Procedure (116).
  */
 
 import * as React from 'react';
@@ -20,7 +20,7 @@ import {
   tokens,
   type TableColumnDefinition,
 } from '@fluentui/react-components';
-import { AddRegular, ArrowClockwiseRegular } from '@fluentui/react-icons';
+import { ArrowClockwiseRegular } from '@fluentui/react-icons';
 import { thinScrollbarStyle } from '@spaarke/ui-components';
 import { RuleSetStatusBadge } from './Notices';
 import { describeScope } from './useFirmNames';
@@ -42,13 +42,11 @@ export interface RuleSetListViewProps {
   /** Null while the first load is in flight. */
   ruleSets: RuleSetSummary[] | null;
   firmNames: Record<string, string>;
-  canWrite: boolean;
   onOpen: (ruleSetId: string) => void;
-  onNew: () => void;
   onRefresh: () => void;
 }
 
-export const RuleSetListView: React.FC<RuleSetListViewProps> = ({ ruleSets, firmNames, canWrite, onOpen, onNew, onRefresh }) => {
+export const RuleSetListView: React.FC<RuleSetListViewProps> = ({ ruleSets, firmNames, onOpen, onRefresh }) => {
   const s = useStyles();
 
   const columns = React.useMemo<TableColumnDefinition<RuleSetSummary>[]>(
@@ -94,11 +92,6 @@ export const RuleSetListView: React.FC<RuleSetListViewProps> = ({ ruleSets, firm
           Rule sets
         </Text>
         <Button icon={<ArrowClockwiseRegular />} appearance="subtle" onClick={onRefresh} aria-label="Refresh the list" data-testid="list-refresh" />
-        {canWrite && (
-          <Button appearance="primary" icon={<AddRegular />} onClick={onNew} data-testid="new-ruleset">
-            New rule set
-          </Button>
-        )}
       </div>
 
       <div className={s.body}>
@@ -108,7 +101,7 @@ export const RuleSetListView: React.FC<RuleSetListViewProps> = ({ ruleSets, firm
           </div>
         ) : ruleSets.length === 0 ? (
           <div className={s.empty} data-testid="list-empty">
-            <Text>No rule sets yet. {canWrite ? 'Create one from a guideline document to draft its rules.' : ''}</Text>
+            <Text>No rule sets yet.</Text>
           </div>
         ) : (
           <DataGrid items={ruleSets} columns={columns} getRowId={(r: RuleSetSummary) => r.id} focusMode="composite" size="small">

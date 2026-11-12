@@ -391,6 +391,12 @@ public static class StoredFileRefusal
     /// <summary>No owner could be resolved for the row.</summary>
     public const string OwnerUnresolved = "stored_file.owner_unresolved";
 
+    /// <summary>
+    /// Task 116 fix round 1: a replace whose parent no longer accepts a file once the new file was Servable (a Procedure Version that stopped
+    /// being a Draft during the upload). The new file was withdrawn; the earlier file was left as it was.
+    /// </summary>
+    public const string ParentNoLongerAccepts = "stored_file.parent_no_longer_accepts";
+
     /// <summary>The blob is missing at the flip.</summary>
     public const string BlobMissing = "stored_file.blob_missing";
 

@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Tests.Integration.Regression;
 /// at 1,000 requests).
 /// </summary>
 /// <remarks>
-/// Reuses the <see cref="RateCardImportServiceTests.Harness"/> (Dataverse and SPE substituted at their seams; the workbook parser, the
+/// Reuses the <see cref="RateCardImportServiceTests.Harness"/> (Dataverse substituted at its seam, the real file store over its fakes; the workbook parser, the
 /// validator and the orchestration are real). Controls: reuse when the sheet matches the stored row, a blank contact cell, a publish at
 /// exactly the chunk size.
 /// </remarks>
@@ -241,7 +241,7 @@ public sealed class RateCardImportRosterRenewalAndPublishChunkingTests
         outcome.StatusCode.Should().Be(500);
         outcome.ErrorCode.Should().Be(RateCardImportService.CodeImportFailed);
         h.Rows["sprk_timekeeper"].Should().BeEmpty("what the import created is removed");
-        h.FileDeletes.Should().ContainSingle("the uploaded workbook is removed");
+        h.Files.Dataverse.Writes.Should().Be(0, "task 116: the workbook is written last, so none was stored");
     }
 
     // ═══ F1-3: publish approves in chunks ═══════════════════════════════════════════════════════════════════════
