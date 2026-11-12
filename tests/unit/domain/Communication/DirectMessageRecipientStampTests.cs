@@ -77,6 +77,9 @@ public partial class DirectMessageRecipientStampTests
     private readonly RecordingLogger<ThreadResolver> _resolverLog = new();
     private readonly RecordingLogger<CommunicationService> _serviceLog = new();
 
+    /// <summary>The ACS transmit double; it counts the sends that reached it (fm 054 piece 3a).</summary>
+    private readonly CannedMessagingSender _sender = new();
+
     /// <summary>The thread resolver's ownership double, so a test can see every reparent the join asked for.</summary>
     private readonly Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble _resolverOwnership = new();
     private readonly List<Entity> _created = new();
@@ -450,7 +453,8 @@ public partial class DirectMessageRecipientStampTests
     private CommunicationService Service(
         IThreadKeyStrategy? resolver,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? identities = null,
-        bool directAccess = true)
+        bool directAccess = true,
+        DirectMessageOwnerStep? ownerStep = null)
     {
         var options = new CommunicationOptions { ApprovedSenders = Array.Empty<ApprovedSenderConfig>(), DefaultMailbox = "noreply@contoso.com" };
         var senderValidator = new ApprovedSenderValidator(
@@ -461,7 +465,7 @@ public partial class DirectMessageRecipientStampTests
             Mock.Of<IDistributedCache>(),
             NullLogger<ApprovedSenderValidator>.Instance);
         var dispatcher = new CommunicationChannelDispatcher(
-            new ICommunicationChannelSender[] { new CannedMessagingSender() },
+            new ICommunicationChannelSender[] { _sender },
             new ICommunicationArchiver[] { new EmailArchiver(new EmlGenerationService(NullLogger<EmlGenerationService>.Instance)) });
         var comm = new Mock<ICommunicationDataverseService>();
         comm.Setup(c => c.QuerySystemUserByAzureAdOidAsync(SenderOid, It.IsAny<CancellationToken>())).ReturnsAsync(Sender);
@@ -484,14 +488,15 @@ public partial class DirectMessageRecipientStampTests
             scopeFactory: null,
             directThreadAccess: directAccess ? _directAccess.Object : null,
             recordShares: _shares.Object,
-            contactIdentities: identities);
+            contactIdentities: identities,
+            directMessageOwnerStep: ownerStep);
     }
 
-    private IncomingMessagingJobHandler InboundHandler(IThreadKeyStrategy strategy)
+    private IncomingMessagingJobHandler InboundHandler(IThreadKeyStrategy strategy, DirectMessageOwnerStep? ownerStep = null)
     {
         var ingestor = new MessagingIngestor(
             _entities.Object, Mock.Of<ICommunicationEnrichmentService>(), NullLogger<MessagingIngestor>.Instance,
-            Resolver(strategy), _directAccess.Object);
+            Resolver(strategy), _directAccess.Object, directMessageOwnerStep: ownerStep);
         var dispatcher = new CommunicationChannelDispatcher(
             senders: Enumerable.Empty<ICommunicationChannelSender>(),
             archivers: Enumerable.Empty<ICommunicationArchiver>(),
@@ -652,7 +657,15 @@ public partial class DirectMessageRecipientStampTests
     {
         public CommunicationType SupportedType => CommunicationType.Message;
 
-        public Task<ChannelSendResult> SendAsync(ChannelSendRequest request, CancellationToken cancellationToken = default) =>
+        public int Sends { get; private set; }
+
+        public Task<ChannelSendResult> SendAsync(ChannelSendRequest request, CancellationToken cancellationToken = default)
+        {
+            Sends++;
+            return Canned();
+        }
+
+        private static Task<ChannelSendResult> Canned() =>
             Task.FromResult(new ChannelSendResult
             {
                 FromAddress = SenderChatId,

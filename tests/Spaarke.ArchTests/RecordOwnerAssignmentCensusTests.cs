@@ -571,6 +571,14 @@ public class RecordOwnerAssignmentCensusTests
         RootFollowsFiling,
 
         /// <summary>
+        /// field-mapping-server-write-path-r1 task 054 piece 3a: assigns a Direct message filed under NO record, and its content rows,
+        /// to the configured Direct message owner team (<c>DirectMessageOwnerStep</c>), conditional on the row version. A message
+        /// filed under a record stays the resolver's. Asserted (<c>DirectMessageOwnerStepGuardTests</c>): it is the only member that
+        /// reads the Direct team's id and writes an owner.
+        /// </summary>
+        DirectMessageTeam,
+
+        /// <summary>
         /// Task 182: a write the contract forbids, listed only until the named ontology task removes it. Used only by
         /// <see cref="BusinessUnitWrites"/> (a direct <c>owningbusinessunit</c> write is never anything else).
         /// </summary>
@@ -772,6 +780,9 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
+        new OwnerWriteEntry("DirectMessageOwnerStep.cs", "WriteDirectTeamOwnerAsync", 1, OwnerWriteKind.DirectMessageTeam,
+            "fm 054 piece 3a: a Direct message filed under no record, and the content rows that had its owner, to the resolved "
+            + "Direct message owner team; owner only, conditional on the row version, evicted and read back."),
     };
 
     /// <summary>The gate an <see cref="OwnerWriteKind.UnfiledOnly"/> member must call before its owner write.</summary>
