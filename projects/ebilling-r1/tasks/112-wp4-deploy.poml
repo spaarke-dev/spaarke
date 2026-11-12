@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Writes to the shared dev environment (BFF app service, Dataverse rows, web resources) and to SpaarkeMaster source.</parallel-reason>
-    <deps>052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079</deps>
+    <deps>084, 084a, 084b, 084c, 084d, 084e, 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118, 119</deps>
     <tags>deploy, bff, code-page</tags>
     <estimated-effort>1 day</estimated-effort>
   </metadata>
@@ -71,12 +71,13 @@
     <step order="6">Navigation: in dev, add the Invoice Review entry (invoice form or view command, or sitemap subarea — as 110 / 111 notes require) inside SpaarkeMaster; export to temp with Export-SpaarkeMasterSource.ps1 and copy only those hunks and any WP4 components from step 2 into src/dataverse/solutions/SpaarkeMaster/; run Import-SolutionScoped.ps1 -PlanOnly and confirm only those components are listed.</step>
     <step order="7">Verify 029's "Invoices to review" view lists a test invoice for its eligible approver and not for another user.</step>
     <step order="8">Route smoke: for every route added by 100–107 call once unauthenticated (expect 401) and once authorized (expect 200); approve as a non-eligible user with invoice access (expect 403 ebilling.approver.not_eligible); override as a user without the privilege (expect 403). Record status codes per route.</step>
-    <step order="9">End-to-end: submit a real evaluation-set invoice; open it in the Invoice Review page; correct one misread value, reduce one flagged line with a reason, accept the rest, add an invoice adjustment, approve. Verify totals match I-1, the invoice is Approved, and each decision wrote exactly one Decision Record (read query). Return a second invoice to the firm and verify Returned to Firm and one Decision Record.</step>
-    <step order="10">NFR-02: open a 150-line invoice and the context pane ten times each; record p90 (target under 3 s).</step>
-    <step order="11">Run the 108–111 ui-tests against dev (including dark mode, with the PDF page light) and the 052 ui-tests; record results.</step>
-    <step order="12">Record evidence (commit SHA, script outputs summarised, status codes, record ids, timings, screenshot paths, solution files changed) in projects/ebilling-r1/notes/112-wp4-deploy.md.</step>
-    <step order="13">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
-    <step order="14">Record deviations in projects/ebilling-r1/notes/.</step>
+    <step order="9">084 caller-check precondition (EB-D-218, uac-r2 condition 2): after every solution import in this task, run the access-invariant verification agreed with uac-r2 (held outside the repo), before the 084 routes are smoke-tested. Record only "pass" or "fail" in the notes, never what it checks. On fail, stop, do not enable or smoke the 084 routes, and tell uac-r2 by message.</step>
+    <step order="10">End-to-end: submit a real evaluation-set invoice; open it in the Invoice Review page; correct one misread value, reduce one flagged line with a reason, accept the rest, add an invoice adjustment, approve. Verify totals match I-1, the invoice is Approved, and each decision wrote exactly one Decision Record (read query). Return a second invoice to the firm and verify Returned to Firm and one Decision Record.</step>
+    <step order="11">NFR-02: open a 150-line invoice and the context pane ten times each; record p90 (target under 3 s).</step>
+    <step order="12">Run the 108–111 ui-tests against dev (including dark mode, with the PDF page light) and the 052 ui-tests; record results.</step>
+    <step order="13">Record evidence (commit SHA, script outputs summarised, status codes, record ids, timings, screenshot paths, solution files changed) in projects/ebilling-r1/notes/112-wp4-deploy.md.</step>
+    <step order="14">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+    <step order="15">Record deviations in projects/ebilling-r1/notes/.</step>
   </steps>
 
   <escalation>
