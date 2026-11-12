@@ -1012,11 +1012,13 @@ function Invoke-ColumnSecurity($spec) {
 
 # Nobody besides the writer profile and System Administrator may create or update a secured column.
 function Test-OtherProfiles {
+    # The writer and the platform System Administrator profile (572329c1-..., fixed in every environment), matched by id (#2725).
+    $excused = @('572329c1-a042-4e22-be47-367c6374ea45', "$($script:WriterId)".ToLowerInvariant()) | Where-Object { $_ }
     foreach ($spec in $script:Secured) {
         $t = $spec.Table; $c = $spec.Column
         if (-not (Get-Attr $t $c 'LogicalName')) { continue }
-        $rows = @((Invoke-Dv "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$t' and attributelogicalname eq '$c'").value)
-        $otherWriters = @($rows | Where-Object { ($_.canupdate -eq 4 -or $_.cancreate -eq 4) -and $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' })
+        $rows = @((Invoke-Dv "fieldpermissions?`$select=canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=fieldsecurityprofileid,name)&`$filter=entityname eq '$t' and attributelogicalname eq '$c'").value)
+        $otherWriters = @($rows | Where-Object { ($_.canupdate -eq 4 -or $_.cancreate -eq 4) -and $_.fieldsecurityprofileid.fieldsecurityprofileid.ToString().ToLowerInvariant() -notin $excused })
         foreach ($o in $otherWriters) { Write-Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can also write $t.$c - only the BFF writer profile may" }
         if ($otherWriters.Count -eq 0) { Write-Report 'OK' "no profile besides '$WriterProfileName' and System Administrator can write $t.$c" }
     }
