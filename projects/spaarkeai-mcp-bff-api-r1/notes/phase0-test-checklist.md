@@ -60,5 +60,10 @@ Run as the **licensed non-admin test user** (`demo@…`) unless a step says "own
 | T4 | Chat, then Cowork | "Use the spike write tool to record title 'Phase 0' and note 'T4 check'." Then a second write in the same chat | Does the card show the title and note? Choose "Allow for conversation"; did the second write skip the card? |
 | T7 | Chat, then Cowork | "Echo 'instructions check' with the spike echo tool." | Did the message start with `SPK-T7:` (instructions honoured)? |
 | T12 | Cowork | "Use the spike unannotated tool with 'x'." | Did Cowork treat it as destructive (warning or confirmation)? |
-| T2 | Owner uploads the spike plugin package (`src/solutions/CopilotPlugins/spike-phase0/` on the spike branch); test user in Chat and Cowork | Run the T1 prompt through the plugin rather than the connector | Widget renders in Chat? in Cowork? |
-| T14 | Same package (two plugins in one app) | Ask for both A and B echo tools | Do both plugins appear and work from one package? |
+| T2 | Owner uploads the **`connectors/`** app package (`src/solutions/CopilotPlugins/spike-phase0/` on the spike branch, tip `d7369fecf1`; zip commands in its README). Optional second run with the `declarative-agent/` package. Test user in Chat and Cowork | Run the T1 prompt through the package rather than the federated connector | Widget renders in Chat? in Cowork? |
+| T14 | Same `connectors/` package (two `agentConnectors` in one app) | Ask for both A and B echo tools | Do both appear and work from one package? If only B fails to sign in, the OAuth registration's Base URL likely covers `/mcp/legal-operations` only |
+
+Notes for batch C (from the spike build, 2026-11-12):
+- Microsoft Learn's MCP Apps table lists only `readOnlyHint` as supported in Copilot; `destructiveHint`, `idempotentHint` and `openWorldHint` are marked unsupported. So T4 and T12 test what Copilot does with readOnly false or with no annotation, not with destructive.
+- App-only visibility (`_meta.ui.visibility: ["app"]`) may not be honoured in Copilot. If the model can see or call `spike_write_app`, record that under T3.
+- The Learn docs say MCP plugin manifests (schema v2.4) work only as declarative-agent actions; standalone plugins for Chat and Cowork use `agentConnectors` in the app manifest. Hence two packages.
