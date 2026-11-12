@@ -58,6 +58,25 @@
     Pass an explicit -ExcludePattern to override, or -Path to scan one subtree
     (e.g. `-Path projects/my-project` still works and ignores this default).
 
+    Dot-folders (.claude/**, .github/**) are collected with Get-ChildItem -Force.
+    Without -Force, PowerShell on Linux treats dot-prefixed folders as hidden and
+    skips them, so the CI runner silently never scanned .claude/** or .github/**
+    while a Windows run did (found 2026-11-11, #1717: 64 hidden broken links).
+
+    EXTERNAL VERDICTS (2026-11-11, #1717)
+    -------------------------------------
+    An external link is BROKEN (fails the run) on 404/410/5xx or no response.
+    It is UNVERIFIABLE (listed in the report, does not fail) when the checker,
+    an anonymous bot, cannot tell whether a human reader can open it:
+
+      | Case                                    | Why it is not evidence of a dead link |
+      |-----------------------------------------|----------------------------------------|
+      | HTTP 401, 403, 429                      | Sign-in wall, bot blocking (e.g. openai.com) or rate limiting. |
+      | URL starts with an -UnverifiableUrlPrefixes entry | Private-by-design pages. Default: the spaarke-dev GitHub Projects boards (the portfolio board, project #2), which return 404 to anyone not signed in. |
+
+    Keep the allowlist short and specific: add a prefix only for pages that are
+    private by design, with the reason in this table.
+
 .PARAMETER MaxExternalChecks
     Cap on external HEAD requests (default 200) to bound runtime on large repos.
     Once exceeded, remaining external URLs are reported as "skipped" (not failures).
@@ -94,10 +113,88 @@ param(
     # See the SCAN CORPUS table in the header for why each entry is here.
     [string]$ExcludeFromRootPattern = '(?i)^(projects|provisioning-runs|reports|\.claude[\\/](worktrees|archive))([\\/]|$)',
 
-    [int]$MaxExternalChecks = 200
+    [int]$MaxExternalChecks = 200,
+
+    # Private-by-design URL prefixes: reported as unverifiable, never requested.
+    # See EXTERNAL VERDICTS in the header for the reason behind each entry.
+    [string[]]$UnverifiableUrlPrefixes = @(
+        'https://github.com/users/spaarke-dev/projects/',
+        'https://github.com/orgs/spaarke-dev/projects/'
+    ),
+
+    # Internal: used by the self-test's child run so it does not recurse.
+    [switch]$SkipSelfTest
 )
 
+$UnverifiableStatusCodes = @(401, 403, 429)
+
+# One definition of "which files are scanned", shared by the scan and the self-test.
+# -Force: see the dot-folder note in the header.
+function Get-CandidateMarkdownFiles([string]$Root) {
+    Get-ChildItem -LiteralPath $Root -Filter '*.md' -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch $ExcludePattern }
+}
+
+function Get-StatusVerdict([int]$Code) {
+    if ($Code -ge 200 -and $Code -lt 400) { return 'ok' }
+    if ($UnverifiableStatusCodes -contains $Code) { return 'unverifiable' }
+    return 'broken'
+}
+
+function Test-UnverifiableUrl([string]$Url) {
+    foreach ($prefix in $UnverifiableUrlPrefixes) {
+        if ($Url.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Get-ErrorStatusCode($ErrorRecord) {
+    $response = $ErrorRecord.Exception.Response
+    if ($response -and $response.StatusCode) { return [int]$response.StatusCode }
+    return $null
+}
+
+# Self-test (must-fire / must-not-fire), root CLAUDE.md §16: a platform quirk or a refactor must not
+# silently stop dot-folders being scanned, or start failing runs on unverifiable links.
+function Invoke-SelfTest {
+    foreach ($case in @(@{ Code = 200; Want = 'ok' }, @{ Code = 301; Want = 'ok' }, @{ Code = 404; Want = 'broken' },
+                        @{ Code = 410; Want = 'broken' }, @{ Code = 500; Want = 'broken' }, @{ Code = 401; Want = 'unverifiable' },
+                        @{ Code = 403; Want = 'unverifiable' }, @{ Code = 429; Want = 'unverifiable' })) {
+        $got = Get-StatusVerdict $case.Code
+        if ($got -ne $case.Want) { throw "Self-test failed: HTTP $($case.Code) classified '$got', expected '$($case.Want)'." }
+    }
+    if (-not (Test-UnverifiableUrl 'https://github.com/users/spaarke-dev/projects/2')) { throw 'Self-test failed: the private spaarke-dev project board is not on the unverifiable allowlist.' }
+    if (Test-UnverifiableUrl 'https://github.com/users/someone-else/projects/2') { throw 'Self-test failed: the allowlist matches a project board outside spaarke-dev.' }
+    if (Test-UnverifiableUrl 'https://github.com/spaarke-dev/spaarke') { throw 'Self-test failed: the allowlist matches a non-project spaarke-dev URL.' }
+
+    # End to end, offline: a child run over a throwaway repo with a dot-folder.
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('mdlink-selftest-' + [guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Force -Path (Join-Path $tmp '.git'), (Join-Path $tmp '.dotdir') | Out-Null
+        Set-Content -LiteralPath (Join-Path $tmp '.dotdir/broken.md') -Value '[gone](does-not-exist.md)'
+        # On Windows a dot-folder is not hidden by name; mark it so the control reproduces Linux semantics.
+        if ($IsWindows) { $d = Get-Item -LiteralPath (Join-Path $tmp '.dotdir'); $d.Attributes = $d.Attributes -bor [IO.FileAttributes]::Hidden }
+        Set-Content -LiteralPath (Join-Path $tmp 'private.md') -Value '[board](https://github.com/users/spaarke-dev/projects/2)'
+
+        # Must fire: the broken link inside the dot-folder fails the run.
+        $out = & pwsh -NoProfile -File $PSCommandPath -Path $tmp -SkipSelfTest 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 1 -or $out -notmatch 'does-not-exist\.md') {
+            throw "Self-test failed (must-fire): a broken link in a dot-folder did not fail the run (exit $LASTEXITCODE). Dot-folders such as .claude/** would be skipped silently."
+        }
+        # Must not fire: an allowlisted private URL is listed as unverifiable and the run passes.
+        Remove-Item -LiteralPath (Join-Path $tmp '.dotdir/broken.md')
+        $out = & pwsh -NoProfile -File $PSCommandPath -Path $tmp -SkipSelfTest 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0 -or $out -notmatch 'unverifiable.*spaarke-dev/projects/2') {
+            throw "Self-test failed (must-not-fire): an allowlisted private URL failed the run or was not listed (exit $LASTEXITCODE)."
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $ErrorActionPreference = 'Stop'
+
+if (-not $SkipSelfTest) { Invoke-SelfTest }
 
 # Resolve scan root
 if (-not (Test-Path -LiteralPath $Path)) {
@@ -143,8 +240,7 @@ if ($explicitlyInsideExcludedArea) {
 Write-Host "================================================"
 
 # Collect .md files (filtered)
-$mdFiles = Get-ChildItem -LiteralPath $scanRoot -Filter '*.md' -Recurse -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch $ExcludePattern }
+$mdFiles = @(Get-CandidateMarkdownFiles $scanRoot)
 
 $foundBeforeCorpusFilter = $mdFiles.Count
 
@@ -175,6 +271,7 @@ $inlineCodeRegex = [regex]'`[^`]+`'
 $fencedCodeRegex = [regex]'(?ms)^```[\s\S]*?^```'
 
 $results = [System.Collections.Generic.List[object]]::new()
+$unverifiable = [System.Collections.Generic.List[object]]::new()
 $externalCheckCount = 0
 $externalCache = @{}  # URL -> result (avoid duplicate HEAD)
 
@@ -207,38 +304,39 @@ foreach ($file in $mdFiles) {
             if ($NoNetwork) {
                 continue  # skip silently
             }
-            if ($externalCheckCount -ge $MaxExternalChecks) {
+            if (Test-UnverifiableUrl $target) {
+                # Private by design — never requested, always listed (EXTERNAL VERDICTS in the header).
+                $status = 'unverifiable'
+                $reason = 'private by design (allowlisted prefix)'
+            } elseif ($externalCheckCount -ge $MaxExternalChecks) {
                 continue  # cap hit; silently skip remainder
-            }
-            $externalCheckCount++
-
-            if ($externalCache.ContainsKey($target)) {
+            } elseif ($externalCache.ContainsKey($target)) {
+                $externalCheckCount++
                 $cached = $externalCache[$target]
                 $status = $cached.Status
                 $reason = $cached.Reason
             } else {
+                $externalCheckCount++
                 try {
                     $resp = Invoke-WebRequest -Uri $target -Method Head -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5
-                    if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) {
-                        $status = 'ok'
-                    } else {
-                        $status = 'broken'
-                        $reason = "HTTP $($resp.StatusCode)"
-                    }
+                    $status = Get-StatusVerdict $resp.StatusCode
+                    if ($status -ne 'ok') { $reason = "HTTP $($resp.StatusCode)" }
                 } catch {
                     # Some servers reject HEAD; retry once with GET (range 0-0) before failing.
                     try {
                         $resp = Invoke-WebRequest -Uri $target -Method Get -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop -MaximumRedirection 5 -Headers @{Range='bytes=0-0'}
-                        if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) {
-                            $status = 'ok'
-                        } else {
-                            $status = 'broken'
-                            $reason = "HTTP $($resp.StatusCode)"
-                        }
+                        $status = Get-StatusVerdict $resp.StatusCode
+                        if ($status -ne 'ok') { $reason = "HTTP $($resp.StatusCode)" }
                     } catch {
-                        $status = 'broken'
-                        $reason = $_.Exception.Message -replace '\s+', ' '
-                        if ($reason.Length -gt 80) { $reason = $reason.Substring(0, 80) + '...' }
+                        $code = Get-ErrorStatusCode $_
+                        if ($null -ne $code) {
+                            $status = Get-StatusVerdict $code
+                            $reason = "HTTP $code"
+                        } else {
+                            $status = 'broken'   # no response at all (DNS, TLS, timeout)
+                            $reason = $_.Exception.Message -replace '\s+', ' '
+                            if ($reason.Length -gt 80) { $reason = $reason.Substring(0, 80) + '...' }
+                        }
                     }
                 }
                 $externalCache[$target] = @{ Status = $status; Reason = $reason }
@@ -269,7 +367,13 @@ foreach ($file in $mdFiles) {
             }
         }
 
-        if ($status -eq 'broken') {
+        if ($status -eq 'unverifiable') {
+            $unverifiable.Add([pscustomobject]@{
+                File   = (Resolve-Path -LiteralPath $file.FullName -Relative)
+                Target = $target
+                Reason = $reason
+            })
+        } elseif ($status -eq 'broken') {
             $results.Add([pscustomobject]@{
                 File   = (Resolve-Path -LiteralPath $file.FullName -Relative)
                 Target = $target
@@ -287,7 +391,16 @@ Write-Host "================================================"
 Write-Host "  Files scanned:       $($mdFiles.Count)"
 Write-Host "  External checks run: $externalCheckCount"
 Write-Host "  Broken links found:  $($results.Count)"
+Write-Host "  Unverifiable links:  $($unverifiable.Count) (listed, not failing - EXTERNAL VERDICTS in the script header)"
 Write-Host ""
+
+if ($unverifiable.Count -gt 0) {
+    Write-Host "Unverifiable (an anonymous checker cannot tell; a signed-in reader may open them):"
+    foreach ($u in $unverifiable) {
+        Write-Host ("  {0}`n      -> [unverifiable] {1}  ({2})" -f $u.File, $u.Target, $u.Reason)
+    }
+    Write-Host ""
+}
 
 if ($results.Count -gt 0) {
     # Per-area rollup FIRST — 200+ raw rows is a wall of text; the rollup tells a reader
