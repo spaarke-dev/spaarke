@@ -7,6 +7,8 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
+> **2026-11-12 ~20:45Z — TWO tasks open.** (1) **020** (MCP module + `/mcp/{area}` host) started early with the owner's go (Copilot outage blocks 003; `notes/decisions.md`). FULL rigor, delegated to an implementer agent (sonnet), which commits locally and does NOT push. Main session then: review the diff (Step 9.5 code-review + adr-check), publish-size and CVE check, POML/TASK-INDEX/board closure, push. Branch merged with master at `1ca4773907`. Gotcha: 020's module and the spike both map `/mcp/legal-operations`, so they must never share a build. (2) **003** stays open for live tests; state below.
+
 | Field | Value |
 |-------|-------|
 | **Task** | **003: Run and record Phase 0 tests** (`tasks/003-record-phase0-results.poml`), STANDARD (testing tags → Step 9.5 applies), prescriptive steps. Started 2026-11-12 ~19:00Z. |
