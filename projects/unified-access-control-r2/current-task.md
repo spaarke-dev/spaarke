@@ -12,8 +12,8 @@
 | Field | Value |
 |---|---|
 | **Mode** | Wrap-up, extended (round 90). This session (`uac-r2`) is authoritative and reviews peers. Merges: `git merge-tree` first, then squash with `--match-head-commit` after Router AND Client lint are green; ONE merge watcher at a time. Live actions need the owner's go IN THIS SESSION. At most 2 agents at once (Opus), fresh short-path worktree each. |
-| **In flight** | Dev BFF deploy running (background), from `C:\wtdep4` commit `4e64670ea0` = origin/master `350ca3da66` + spike `755987b385` + NEW spike `d7369fecf1` (owner go: "Fold into this deploy"). Ledger conflict resolved to count 153. Build 0 errors, ArchTests 2508/2508. |
-| **Next action** | (1) When the deploy finishes: gates `/healthz` 200, `/ping` 200, anonymous POST `/mcp/legal-operations` 401. (2) Send mcp-r1 one line with the deployed SHA (they asked); notify ebilling, ontology, word-add-in. (3) Update this file: Dev BFF = `4e64670ea0`, keep `C:\wtdep4`, remove `C:\wtdep3` + `C:\wtdep2` with Remove-WorktreeSafe. |
+| **Dev BFF** | **`4e64670ea0`** deployed 2026-11-12 ~19:40Z (LOCAL merge of origin/master `350ca3da66` + spike `755987b385` + spike `d7369fecf1`, never pushed; worktree `C:\wtdep4`, keep until the next deploy). Gates: /healthz 200, /ping 200, anon MCP 401; ArchTests 2508/2508. mcp-r1 + ebilling notified (ebilling relays to word-add-in, ontology). |
+| **Next action** | (1) Remove `C:\wtdep3` and `C:\wtdep2` with Remove-WorktreeSafe. (2) Wait: fm #2733 (054) merge (owner go in fm's session) → then the uac-r2 follow-up task below; fm 022c review; mcp-r1 #2731 fix review; spa-r4 #2681 deploy request; owner's TrackingFieldTrio 1.0.63 checks. (3) 191i when the owner is ready (each step an owner go). |
 
 ## Done 2026-11-12
 - Merged: #2726 191h `9df5e34f9a`; **#2736 191g `57dcb37e30`** (doc-block fix head b6b121198; setting `ExternalAccess:FlaggedOfficeEdit:Enabled` off; K1-K15 in its note); #2732 (mcp-r1 side session, fixes #2709) `4901e832ed`; **#2739 task 196 `350ca3da66`** (Email members = roles + active grants + user shares, minus expired/No Access/walled; Manage Access info notes behind a bell, errors inline).
