@@ -4,7 +4,7 @@
     <title>Revise budget on a matter with no budget becomes "Create budget" (D-180, UAT round 1)</title>
     <phase>11 UAT</phase>
     <gate>startable (D-180, owner 2026-10-22)</gate>
-    <status>pr-open-awaiting-merge (lane stopped before step 3; merge, dev deploy and step 4 belong to the main session; see notes/task-161-notes.md)</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a catalog action, an executor and a plan substitution in Sprk.Bff.Api (.cs); client prefill (.tsx).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -78,4 +78,8 @@
       <file>projects/spaarke-ontology-platform-r1/notes/uat-v4-log.md</file>
     </files>
   </knowledge>
+  <completion>
+    2026-11-12: closed on the owner's word ("yes close it"). Evidence: round 3 Create budget pass on a no-budget matter (with 166, 167); DR-1167 on REAL-2026-123456.02 (2026-11-09) took Revise budget with the one budget pre-selected, Done, sprk_budgetrevision written. notes/uat-v4-log.md, Rounds 3 and 4.
+  </completion>
+
 </task>
