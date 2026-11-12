@@ -1144,6 +1144,37 @@ public class DriveItemOperations
     /// the try. The content-dedup detector, which never throws (NFR-04), still reads that refusal as "no dedup"; it
     /// is harmless there because the item it hashes was written through the same guard.</para>
     /// </remarks>
+    // ── Item-level permissions (uac-r2 task 191g) ─────────────────────────────────────────────────────────────────
+    // Plumbing only (ADR-007; Task 083 Rule D): the drive and item arrive as parameters, the Graph client is the
+    // ownership-guarded app-only client the caller already holds (SpeContainerMembershipService.ForOwnedContainerAsync),
+    // and every outcome decision (404 handling, paging bounds, which permission is ours) stays with the caller. Graph
+    // faults propagate unchanged.
+
+    /// <summary><c>POST /drives/{driveId}/items/{itemId}/invite</c> — grants an item permission (task 191g).</summary>
+    internal static Task<Microsoft.Graph.Drives.Item.Items.Item.Invite.InvitePostResponse?> InviteOnItemAsync(
+        GraphServiceClient graphClient, string driveId, string itemId,
+        Microsoft.Graph.Drives.Item.Items.Item.Invite.InvitePostRequestBody body, CancellationToken ct)
+        => graphClient.Drives[driveId].Items[itemId].Invite.PostAsInvitePostResponseAsync(body, cancellationToken: ct);
+
+    /// <summary><c>GET /drives/{driveId}/items/{itemId}/permissions/{permissionId}</c> (task 191g).</summary>
+    internal static Task<Permission?> GetItemPermissionAsync(
+        GraphServiceClient graphClient, string driveId, string itemId, string permissionId, CancellationToken ct)
+        => graphClient.Drives[driveId].Items[itemId].Permissions[permissionId].GetAsync(cancellationToken: ct);
+
+    /// <summary>One page of <c>GET /drives/{driveId}/items/{itemId}/permissions</c>; <paramref name="nextLink"/> null for
+    /// the first page (task 191g).</summary>
+    internal static Task<PermissionCollectionResponse?> GetItemPermissionsPageAsync(
+        GraphServiceClient graphClient, string driveId, string itemId, string? nextLink, CancellationToken ct)
+        => string.IsNullOrEmpty(nextLink)
+            ? graphClient.Drives[driveId].Items[itemId].Permissions.GetAsync(cancellationToken: ct)
+            : graphClient.Drives[driveId].Items[itemId].Permissions.WithUrl(nextLink).GetAsync(cancellationToken: ct);
+
+    /// <summary><c>DELETE /drives/{driveId}/items/{itemId}/permissions/{permissionId}</c> — removes a sharing permission,
+    /// not content (task 191g).</summary>
+    internal static Task DeleteItemPermissionAsync(
+        GraphServiceClient graphClient, string driveId, string itemId, string permissionId, CancellationToken ct)
+        => graphClient.Drives[driveId].Items[itemId].Permissions[permissionId].DeleteAsync(cancellationToken: ct);
+
     public async Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
     {
         // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).

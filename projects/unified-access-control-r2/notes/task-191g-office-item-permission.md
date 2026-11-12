@@ -198,6 +198,12 @@ foreign marker under our key was cleared silently on the open path — now repor
 tests would have passed with the flag condition removed — the sweep now re-checks `sprk_isexternal == true` on every
 returned row, and the test includes an internal user and asserts the query's flag condition.
 
+**ADR-007 (complied, path C):** the ArchTests' Task 083 Rule D failed on the first full run — the item invite, permission
+read/list and permission delete reached `graphClient.Drives[...]` from `Infrastructure/ExternalAccess`, outside the Graph
+plumbing layer. They now sit in `DriveItemOperations` as four parameter-only static calls (no origination), and the
+membership service keeps every decision (404 handling, paging bound, ownership). `DeleteItemPermissionAsync` is pinned
+in the write-sink vocabulary as NotAContentWrite (a sharing permission, no content).
+
 **Deviations:** the code was built while the live test waited (main session's explicit allowance); the task-171
 cancellation fix is in scope (same gap); `ExternalRowVisibility.MayAnswerLater` is added to 191h's answer type (the sync
 needs "not visible for now" vs "not visible", and the transient set already lives in 191c).

@@ -1153,14 +1153,14 @@ public class SpeContainerMembershipService
             // 4. The grant: app-only invite, no mail, sign-in required, the user's existing identity only. From here to the
             //    marker the REQUEST's cancellation is not honoured (CancellationToken.None, bounded by the Graph client's own
             //    timeout): a request aborted after Graph made the permission must not leave a write permission nothing records.
-            var response = await graphClient.Drives[containerId].Items[itemId].Invite
-                .PostAsInvitePostResponseAsync(new Microsoft.Graph.Drives.Item.Items.Item.Invite.InvitePostRequestBody
+            var response = await DriveItemOperations.InviteOnItemAsync(graphClient, containerId, itemId,
+                new Microsoft.Graph.Drives.Item.Items.Item.Invite.InvitePostRequestBody
                 {
                     Recipients = [new DriveRecipient { ObjectId = userObjectId.ToString("D") }],
                     Roles = [ItemWriteRole],
                     RequireSignIn = true,
                     SendInvitation = false,
-                }, cancellationToken: CancellationToken.None)
+                }, CancellationToken.None)
                 .ConfigureAwait(false);
 
             var created = response?.Value?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Id));
@@ -1365,8 +1365,7 @@ public class SpeContainerMembershipService
     {
         try
         {
-            return await graphClient.Drives[driveId].Items[itemId].Permissions[permissionId].GetAsync(cancellationToken: ct)
-                .ConfigureAwait(false);
+            return await DriveItemOperations.GetItemPermissionAsync(graphClient, driveId, itemId, permissionId, ct).ConfigureAwait(false);
         }
         catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
         {
@@ -1380,8 +1379,7 @@ public class SpeContainerMembershipService
     {
         try
         {
-            await graphClient.Drives[driveId].Items[itemId].Permissions[permissionId].DeleteAsync(cancellationToken: ct)
-                .ConfigureAwait(false);
+            await DriveItemOperations.DeleteItemPermissionAsync(graphClient, driveId, itemId, permissionId, ct).ConfigureAwait(false);
             return true;
         }
         catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
@@ -1394,7 +1392,7 @@ public class SpeContainerMembershipService
     private static async Task<PermissionReadResult> ReadItemPermissionsAsync(
         GraphServiceClient graphClient, string driveId, string itemId, CancellationToken ct)
     {
-        var page = await graphClient.Drives[driveId].Items[itemId].Permissions.GetAsync(cancellationToken: ct).ConfigureAwait(false);
+        var page = await DriveItemOperations.GetItemPermissionsPageAsync(graphClient, driveId, itemId, nextLink: null, ct).ConfigureAwait(false);
         if (page is null)
             return new PermissionReadResult(Array.Empty<Permission>(), EnumerationComplete: false);
 
@@ -1404,8 +1402,8 @@ public class SpeContainerMembershipService
         {
             if (++pages > MaxPermissionPages)
                 return new PermissionReadResult(all, EnumerationComplete: false);
-            page = await graphClient.Drives[driveId].Items[itemId].Permissions.WithUrl(page.OdataNextLink)
-                .GetAsync(cancellationToken: ct).ConfigureAwait(false);
+            page = await DriveItemOperations.GetItemPermissionsPageAsync(graphClient, driveId, itemId, page.OdataNextLink, ct)
+                .ConfigureAwait(false);
             if (page is null)
                 return new PermissionReadResult(all, EnumerationComplete: false);
             all.AddRange(page.Value ?? []);
