@@ -1709,6 +1709,7 @@ public sealed class RecordOwnerUnsettledException : InvalidOperationException
 public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 {
     private const string SystemUserEntity = "systemuser";
+    private const string IsExternalUserColumn = "sprk_isexternal"; // uac-r2 191c: a stored true only
     private const string TeamEntity = "team";
     private const string BusinessUnitEntity = "businessunit";
     private const string BusinessUnitColumn = "businessunitid";
@@ -4291,6 +4292,24 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// Resolves the acting user's business unit, then that BU's owner team.
     /// <paramref name="userKeyColumn"/> selects which identity the caller is known by.
     /// </summary>
+    /// <summary>
+    /// uac-r2 task 191c: whether <paramref name="businessUnitId"/> (a flagged creator's CURRENT unit) is the External
+    /// Collaborators unit, found by name exactly as task 191e's placement job finds it
+    /// (<see cref="Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.ResolveUnitAsync"/>, no forked rule).
+    /// </summary>
+    /// <remarks>
+    /// No unit of that name: false (the creator cannot be in it). Two or more of that name, or one not under the root: true
+    /// when the creator is in ANY of them — which one isolates external users is undecided, so the shared-unit owner is never
+    /// chosen (fail closed). A read fault propagates as the caller's retryable 5xx (nothing is created), never as "not in
+    /// the unit", which would give the record to the shared unit.
+    /// </remarks>
+    private async Task<bool> IsInExternalCollaboratorsUnitAsync(Guid businessUnitId, CancellationToken ct)
+    {
+        var unit = await Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement
+            .ResolveUnitAsync(_dataverse, ct).ConfigureAwait(false);
+        return unit.Candidates.Contains(businessUnitId);
+    }
+
     private async Task<RecordOwnerResolution> ResolveFromUserAsync(
         string userKeyColumn, Guid userKey, RecordOwnershipContext context, CancellationToken ct)
     {
@@ -4300,7 +4319,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // container resolver could put one save's bytes and its row in different business units.
         var userQuery = new QueryExpression(SystemUserEntity)
         {
-            ColumnSet = new ColumnSet(BusinessUnitColumn),
+            ColumnSet = new ColumnSet(BusinessUnitColumn, IsExternalUserColumn),
             TopCount = 2,
             NoLock = true
         };
@@ -4333,6 +4352,31 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return RecordOwnerResolution.Refused(
                 RecordOwnerRefusal.ActingUserUnresolved,
                 "the acting user has no Dataverse user record with a business unit");
+        }
+
+        // uac-r2 task 191c (#2179 design §3.5): a user flagged external (a STORED sprk_isexternal = true — never inferred from
+        // an #EXT# UPN or an email domain) whom task 191e has placed in the External Collaborators business unit. That unit's
+        // default team is the team every external user is a member of, so a record it owned would be read by every external
+        // user (across firms). It is owned in the CUSTOMER's business unit (ExternalAccess:CustomerBusinessUnitId) instead;
+        // unset: refused, never the external unit's team. A flagged user NOT yet in that unit (191e's placement is off until
+        // 191i) keeps today's rule — their own unit owns it — so this ships safely before the customer unit is configured.
+        if (users.Entities[0].GetAttributeValue<bool?>(IsExternalUserColumn) == true
+            && await IsInExternalCollaboratorsUnitAsync(businessUnitId.Value, ct).ConfigureAwait(false))
+        {
+            var configured = _configuration[ExternalAccessOptionsValidator.CustomerBusinessUnitKey];
+            if (!ExternalAccessOptionsValidator.IsCustomerBusinessUnitConfigured(configured))
+            {
+                _logger.LogError(
+                    "Cannot resolve an owning team: the acting user ({UserKeyColumn}={UserKey}) is flagged external and {Key} "
+                    + "is not set, so there is no customer business unit to own their record. Refusing rather than giving it "
+                    + "to the external users' business unit.",
+                    userKeyColumn, userKey, ExternalAccessOptionsValidator.CustomerBusinessUnitKey);
+                return RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ActingUserUnresolved,
+                    "the acting user is flagged external and no customer business unit is configured to own their records");
+            }
+
+            businessUnitId = Guid.Parse(configured!.Trim());
         }
 
         // As for a parent read: "no such user" / "no business unit" is an answer (refuse); a Dataverse
