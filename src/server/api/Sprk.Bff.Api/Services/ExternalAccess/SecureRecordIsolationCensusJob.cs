@@ -128,10 +128,12 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                     continue;
                 }
 
-                if (finding.Verdict == SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege)
+                if (finding.Verdict is SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege
+                    or SecureBuVerdict.RestrictedContentPrivilegeNotResolved)
                 {
                     // Task 145: a coverage gap makes secure-child writes FAIL CLOSED — an availability defect, not a
-                    // disclosure. Error, not CRITICAL, so the exposure lines stay the ones that page someone.
+                    // disclosure. Error, not CRITICAL, so the exposure lines stay the ones that page someone. ebilling-r1:
+                    // an NFR-05 depth-list privilege the environment lacks leaves that table ungraded — loud, not an exposure.
                     _logger.LogError("[SECURE-CENSUS] {Verdict}: {Message} correlationId={CorrelationId}",
                         finding.Verdict, finding.Message, context.CorrelationId);
                     continue;

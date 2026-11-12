@@ -125,17 +125,37 @@ public static class ExternalAccessModule
         // systemuser hides nothing; a fault hides every asked invoice); AppOnlyInvoiceFamilyHiding is the assistant tools'
         // hide-only seam for invoice-family rows (the tool has decided the caller is external; a fault throws). Both resolve
         // their readers lazily, on the first call.
+        // Task 130-0 (design.md:414): with the caller's firms, read once per call through the one definition the submission routes
+        // and /me use (ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync), so a partner sees only its own firms' invoices.
         services.AddScoped<ExternalInvoiceHiding>(sp =>
             (caller, invoiceIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoicesForAsync(
-                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+                caller, invoiceIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync,
+                async (principal, token) =>
+                {
+                    var (firms, unreadable) = await Sprk.Bff.Api.Api.ExternalAccess.ExternalInvoiceSubmissionAuthorizationFilter.ReadCallerFirmsAsync(
+                        principal, sp.GetRequiredService<ExternalParticipationService>(),
+                        sp.GetRequiredService<ILogger<ExternalDataService>>(), token).ConfigureAwait(false);
+                    return CallerFirms.From(firms, unreadable);
+                }, ct));
         // Review round 4b: the external submission routes' seam (list and single read): with an invoice, the predicate above;
         // without one, the submission's own source. Same caller rule and fault rule as ExternalInvoiceHiding.
         services.AddScoped<ExternalInvoiceSubmissionHiding>(sp =>
             (caller, submissions, ct) => sp.GetRequiredService<ExternalDataService>().HideSubmissionsForAsync(
                 caller, submissions, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+        // Task 130-0b (design.md:414): with the firms of the tool call's systemuser, through the same contact-keyed core
+        // (ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync), read at most once per tool call (InvoiceFamilyCaller).
+        // Step 2: the same seam also decides rows of a child table with an invoice link (InvoiceLinks), by the invoices they link to.
         services.AddScoped<AppOnlyInvoiceFamilyHiding>(sp =>
-            (table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
-                table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync, ct));
+            (caller, table, rowIds, ct) => sp.GetRequiredService<ExternalDataService>().HideInvoiceFamilyRowsAsync(
+                caller, table, rowIds, sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync,
+                async (systemUserId, token) =>
+                {
+                    var (firms, unreadable) = await Sprk.Bff.Api.Api.ExternalAccess.ExternalInvoiceSubmissionAuthorizationFilter.ReadSystemUserFirmsAsync(
+                        systemUserId, sp.GetRequiredService<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>(),
+                        sp.GetRequiredService<ExternalParticipationService>(),
+                        sp.GetRequiredService<ILogger<ExternalDataService>>(), token).ConfigureAwait(false);
+                    return CallerFirms.From(firms, unreadable);
+                }, ct));
 
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
@@ -346,6 +366,31 @@ public static class ExternalAccessModule
         // store, the guard, the share seam, the tenant cache), so no Null-Object is needed.
         services.AddScoped<AssignedAccessStore>();
         services.AddScoped<AssignedAccessMaterializer>();
+        // Task 193 G2b (#2338): the ONE grant revoke, resolvable so every path that removes a share because the person must no
+        // longer see the record (/unshare-user, the No Access enforcer, the Restricted remover, the secure-root inheritance,
+        // the materializer) ends the grant PAIRED with that share through the same call (RevokePairedWithAsync).
+        // §11 — Existing: ExternalGrantRevocationService, built by hand by each caller. Extension: this registers that class
+        // as it is; no new type. Cost of doing nothing: each share-removal path would build its own copy from eight
+        // dependencies, or leave the paired grant (workforce-app access) active with nothing to end it: the reconciliation job's
+        // R5 deactivates one only with ExternalAccess:Reconciliation:WritesEnabled on (report-only by default), never retrying
+        // file access.
+        // Every dependency is registered unconditionally (ADR-032); the logger is the class's own (its constructor takes ILogger).
+        services.AddScoped(sp => new Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService(
+            sp.GetRequiredService<DataverseWebApiClient>(),
+            sp.GetRequiredService<SpeContainerMembershipService>(),
+            sp.GetRequiredService<ExternalParticipationService>(),
+            sp.GetRequiredService<AssignedAccessMaterializer>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IContactIdentityStore>(),
+            sp.GetRequiredService<ILoggerFactory>().CreateLogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>()));
+        // Task 193 (#2338): the ONE contact -> user rule (who a contact represents), over the identity store, the store above
+        // and the participation service — all unconditional, so this is too (ADR-032). The personal To Do assignee's callers
+        // and Manage Access's /grant resolve it; the materializer and the grant notifier build it from the same stores.
+        services.AddScoped<ContactUserRepresentation>();
+        // Task 193 (#2338) step 3: the share-or-grant decision for a contact grantee (/grant and /invite-and-grant) — the
+        // resolver above plus the /share-user write core. Every dependency is registered unconditionally (ADR-032).
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare>();
 
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the
@@ -512,10 +557,15 @@ public static class ExternalAccessModule
             Name = "invoices",
             RecordEntity = "sprk_invoice",
             RequireReadOnSecureRoots = true,
+            // ebilling-r1 task 130-0 fix round 2 (K3, D-28): an invoice's core record is exactly one of matter, project or work
+            // assignment, so it is also reached through its work assignment, and that work assignment joins the secure-roots rule
+            // through the scope dimension below (RootLinks types sprk_regardingworkassignment as a work assignment root; the registry
+            // refuses a module whose root dimension RootLinks does not type). Projected server-side with the other rule attributes.
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+                new ScopeDimension { Attribute = "sprk_regardingworkassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
             },
             // Grid 3ff4102c. Primary name = sprk_name (on the grid since r3 task 002; also the /record default
             // projection). Task 157 dropped (rule (b) only): sprk_visibilitystate, modifiedon, statecode.
@@ -529,6 +579,9 @@ public static class ExternalAccessModule
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate",
                 "sprk_totalamount", "sprk_project", "sprk_matter",
+                // ebilling-r1 task 130-0 fix round 2 (K3): a scope dimension must be readable (ExternalModuleRegistry.ValidateReadableColumns),
+                // like its matter and project siblings. Not on the grid; projected server-side for the scope and the secure-roots rule.
+                "sprk_regardingworkassignment",
                 // spaarke-SPA-external-access-platform-r3 (owner Partner UAT 2026-10-17, ebilling-r1 task 015 / D-41): NOT
                 // grid-derived. The invoice status is statuscode; the SPA record detail reads it. The retired invoice-status
                 // column was removed from this list by r3 task 002 (#2450) with ebilling's OK on 2026-10-29 (grid 3ff4102c moved
@@ -536,6 +589,12 @@ public static class ExternalAccessModule
                 "statuscode",
                 // spaarke-SPA-external-access-platform-r3 task 002 (owner 2026-10-29): grid column on grid 3ff4102c.
                 "sprk_totalamount_base",
+                // ebilling-r1 082c-2 (owner 2026-11-04 "In Review with a description"; uac-r2 APPROVED with conditions 2026-11-04): NOT
+                // grid-derived. The review detail: a local choice naming which kind of review a held invoice is in (blank = normal review).
+                // Partner-safe closed labels, derived server-side from the holds; never an access-deciding column. It IS listed in ParentLineage
+                // AccessColumns["sprk_invoice"] (fix round 1, F4), but only so that app-only generic writes refuse it: it decides no access and only
+                // its typed writers derive it. External Access R4 renders it only while statuscode is In Review.
+                "sprk_reviewdetail",
             },
         });
 

@@ -1,0 +1,87 @@
+{
+  "schema": "ebilling-calibration/1",
+  "kind": "cost-estimate",
+  "accepted_005_spend_usd": 32.0,
+  "unit_costs_from_005": {
+    "c": {
+      "usd_per_page_all": 0.02751,
+      "usd_per_page_le4": 0.02583,
+      "spike_total_usd": 7.02,
+      "spike_pages": 255.0
+    },
+    "cp": {
+      "usd_per_page_all": 0.02935,
+      "usd_per_page_le4": 0.02682,
+      "spike_total_usd": 7.48,
+      "spike_pages": 255.0
+    }
+  },
+  "coding_usd_per_line": {
+    "B": 0.000255,
+    "A": 0.000185
+  },
+  "sets": {
+    "B": {
+      "items": 150,
+      "pages": 374,
+      "lines": 3762,
+      "missing_pages": 0
+    },
+    "A": {
+      "items": 8,
+      "pages": 325,
+      "lines": 619,
+      "missing_pages": 0
+    },
+    "C": {
+      "items": 12,
+      "pages": 56,
+      "lines": 194,
+      "missing_pages": 0
+    },
+    "F": {
+      "items": 600,
+      "pages": 1158,
+      "lines": 8707,
+      "missing_pages": 0
+    },
+    "F120": {
+      "items": 120,
+      "pages": 217,
+      "lines": 1520
+    }
+  },
+  "scenarios": {
+    "S0_full_set_both_analyzers": {
+      "what": "A 8 + B 150 + C 12 + F 600 (all labelled items) through c and cp",
+      "items": 770,
+      "pages": 1913,
+      "c": 49.96,
+      "cp": 52.13,
+      "coding_per_analyzer": 3.23,
+      "total_both_analyzers": 108.55,
+      "exceeds_accepted_005_spend": true
+    },
+    "S1_proposed_subset_both_analyzers": {
+      "what": "the 37 set B spike items (14 bundled, B-0150 at 26 pages) + C-03, C-10, C-11 + A-07 (108 pages, the largest) + the 120-invoice guideline subset (15 seeded + 5 clean per rule set); both analyzers",
+      "items": 161,
+      "pages": 457,
+      "c": 11.99,
+      "cp": 12.53,
+      "coding_per_analyzer": 0.83,
+      "total_both_analyzers": 26.18,
+      "exceeds_accepted_005_spend": false
+    },
+    "S2_minimum_subset_both_analyzers": {
+      "what": "the 120-invoice guideline subset + the 14 bundled spike items + B-0150 + A-07; both analyzers",
+      "items": 136,
+      "pages": 393,
+      "c": 10.38,
+      "cp": 10.88,
+      "coding_per_analyzer": 0.61,
+      "total_both_analyzers": 22.48,
+      "exceeds_accepted_005_spend": false
+    }
+  },
+  "note": "Estimate only. Pages of F invoices missing from labels are priced at 2 pages. Dataverse and BFF compute are not priced (no marginal Azure meter). Re-run reads prices.json via 005's cost_of."
+}

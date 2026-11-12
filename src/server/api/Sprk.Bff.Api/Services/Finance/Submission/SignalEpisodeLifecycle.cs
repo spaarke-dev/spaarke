@@ -32,6 +32,9 @@ internal enum SignalLogContext
 
     /// <summary>Task 101's corrections re-evaluation; the id is the invoice id.</summary>
     Correction = 1,
+
+    /// <summary>Task 164's Add line (its Signals step); the id is the invoice id.</summary>
+    AddLine = 2,
 }
 
 /// <summary>What the lifecycle does when the latest episode of a (policy, subject) is already resolved.</summary>
@@ -96,7 +99,7 @@ internal sealed class SignalEpisodeLifecycle
 
     /// <summary>
     /// Writes <paramref name="request"/> through the lifecycle. <paramref name="context"/> and <paramref name="contextId"/> name the caller
-    /// (the submission id, or the invoice id of a correction) in the log lines only. Task 049's lines keep their original
+    /// (the submission id, or the invoice id of a correction or an Add line) in the log lines only. Task 049's lines keep their original
     /// <c>Invoice submission {SubmissionId}: ...</c> shape (queries on <c>SubmissionId</c> for <see cref="SignalWriteSkippedCode"/> /
     /// <see cref="SignalChangedCode"/> keep working); a correction logs <c>Invoice correction {InvoiceId}: ...</c>.
     /// </summary>
@@ -134,6 +137,10 @@ internal sealed class SignalEpisodeLifecycle
                     {
                         _logger.LogWarning("Invoice submission {SubmissionId}: Signal {SignalId} was read without a row version; not superseded", contextId, existing.Id);
                     }
+                    else if (context == SignalLogContext.AddLine)
+                    {
+                        _logger.LogWarning("Add line {InvoiceId}: Signal {SignalId} was read without a row version; not superseded", contextId, existing.Id);
+                    }
                     else
                     {
                         _logger.LogWarning("Invoice correction {InvoiceId}: Signal {SignalId} was read without a row version; not superseded", contextId, existing.Id);
@@ -163,6 +170,11 @@ internal sealed class SignalEpisodeLifecycle
             if (context == SignalLogContext.Submission)
             {
                 _logger.LogWarning("Invoice submission {SubmissionId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
+                    contextId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
+            }
+            else if (context == SignalLogContext.AddLine)
+            {
+                _logger.LogWarning("Add line {InvoiceId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} was skipped ({Refusal})",
                     contextId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, result.SkippedRefusalCode);
             }
             else

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Entity xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Name LocalizedName="Invoice Line" OriginalName="Billing Event">sprk_billingevent</Name>
+  <EntityInfo>
+    <entity Name="sprk_billingevent" unmodified="1">
+      <attributes />
+    </entity>
+  </EntityInfo>
+  <RibbonDiffXml />
+</Entity>

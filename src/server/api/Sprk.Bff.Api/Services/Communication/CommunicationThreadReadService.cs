@@ -337,6 +337,9 @@ public sealed class CommunicationThreadReadService
     /// membership-union (retired 2026-07-16). A private thread the caller has no grant for is absent from the
     /// impersonated thread set; an internal-only message the caller may not see is dropped by the filter (NFR-03).
     /// A bad <paramref name="entityType"/> is a 400 ProblemDetails (ADR-019); an empty regarding yields an empty result.
+    /// <para>Ontology task 177 (D-217): after the anchored threads come the threads of messages filed to the record by their
+    /// OWN typed lookup, each with only those messages (<see cref="ReadThreadsOfFiledMessagesAsync"/>), through the same
+    /// impersonated pipeline and access filter.</para>
     /// </summary>
     public async Task<RegardingReadResult> ReadByRegardingAsync(
         string entityType,
@@ -374,38 +377,123 @@ public sealed class CommunicationThreadReadService
             .Where(t => t.Id != Guid.Empty)
             .ToList();
 
-        if (threads.Count == 0)
+        var threadResults = new List<ThreadReadResult>();
+        if (threads.Count > 0)
         {
-            _logger.LogDebug(
-                "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads=0 (no visible threads)",
-                entityType, recordId, callerSystemUserId);
-            return new RegardingReadResult(entityType, recordId, Array.Empty<ThreadReadResult>(), 0, 0);
-        }
+            // 2) Impersonated message query across those threads (or-filter on thread id) + shared access filter.
+            var orClause = string.Join(" or ", threads.Select(t => $"{ThreadLookupValue} eq {t.Id}"));
+            var visible = await QueryVisibleMessagesAsync($"({orClause})", MaxRegardingScan, callerSystemUserId, ct);
 
-        // 2) Impersonated message query across those threads (or-filter on thread id) + shared access filter.
-        var orClause = string.Join(" or ", threads.Select(t => $"{ThreadLookupValue} eq {t.Id}"));
-        var visible = await QueryVisibleMessagesAsync($"({orClause})", MaxRegardingScan, callerSystemUserId, ct);
+            // 3) Group the access-filtered messages by thread (query order = createdon asc is preserved).
+            var byThread = visible
+                .GroupBy(v => v.ThreadId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<ThreadMessageDto>)g.Select(v => v.Dto).ToList());
 
-        // 3) Group the access-filtered messages by thread (query order = createdon asc is preserved).
-        var byThread = visible
-            .GroupBy(v => v.ThreadId)
-            .ToDictionary(g => g.Key, g => (IReadOnlyList<ThreadMessageDto>)g.Select(v => v.Dto).ToList());
-
-        var threadResults = threads
-            .Select(t =>
+            threadResults.AddRange(threads.Select(t =>
             {
                 var msgs = byThread.TryGetValue(t.Id, out var list) ? list : Array.Empty<ThreadMessageDto>();
                 return new ThreadReadResult(
                     ThreadId: t.Id, Name: t.Name, Messages: msgs, Count: msgs.Count, IsPinned: t.IsPinned);
-            })
-            .ToList();
+            }));
+        }
+
+        // 4) Ontology task 177 (D-217): messages filed to the record by their OWN typed lookup, on threads anchored elsewhere,
+        // after the anchored threads.
+        var anchored = threads.Select(t => t.Id).ToHashSet();
+        threadResults.AddRange(await ReadThreadsOfFiledMessagesAsync(
+            regardingField, recordId, anchored, openOnly, MaxThreads - threads.Count, callerSystemUserId, ct));
 
         var messageCount = threadResults.Sum(t => t.Count);
         _logger.LogDebug(
-            "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads={Threads} messages={Messages}",
-            entityType, recordId, callerSystemUserId, threadResults.Count, messageCount);
+            "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads={Threads} (anchored={Anchored}) messages={Messages}",
+            entityType, recordId, callerSystemUserId, threadResults.Count, threads.Count, messageCount);
 
         return new RegardingReadResult(entityType, recordId, threadResults, threadResults.Count, messageCount);
+    }
+
+    /// <summary>
+    /// Ontology task 177 (D-217, owner 2026-11-10): the threads of messages filed to <paramref name="recordId"/> by the message's
+    /// OWN typed regarding lookup (<paramref name="regardingField"/>, from the shared <see cref="RegardingFieldMap"/>) whose thread
+    /// is not anchored to the record, each carrying ONLY those messages. A thread carries one anchor, so without this an email
+    /// filed under two records (the budget inquiry: inquiry service request and matter) showed only under its anchor.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Same access as the anchored read.</b> The messages come from <see cref="QueryVisibleMessagesAsync"/>: the
+    /// impersonated read (Dataverse returns only rows the caller may read, so a No Access entry and Restricted for a flagged
+    /// external user apply here as on every thread), the shared <see cref="ICommunicationAccessFilter"/> (internal-only) and, for
+    /// an external caller, the D7 open-thread gate. Each thread's row (id, name, pinned) comes from one more impersonated read
+    /// with the same active clause and, for an external caller, the same <paramref name="openOnly"/> clause: a thread the caller
+    /// cannot read contributes nothing, so neither its name nor a count of its messages leaves Dataverse.</para>
+    /// <para><b>Once.</b> A message on an anchored thread is already in that thread's list (it is dropped here), and a message
+    /// with no thread has no group to show it under (not added; known limit).</para>
+    /// <para><b>Bounds.</b> The message read takes at most <see cref="MaxRegardingScan"/> rows. The thread rows are read in
+    /// batches of <see cref="CommunicationOpenThreadGate.ChunkSize"/> ids (one OR filter each), never one read per thread, and at
+    /// most <paramref name="threadBudget"/> threads are added (oldest first), so the whole result stays within
+    /// <see cref="MaxThreads"/>. A read fault propagates (the request fails; nothing is shown). The result shape has no
+    /// truncation flag, so a cut is only logged: when threads were left out for the budget, or when the visible filed messages
+    /// alone reach the scan cap.</para>
+    /// <para><b>Order.</b> Added threads follow the anchored ones, oldest thread first (<c>createdon</c> asc, like the anchored
+    /// threads); messages within a thread keep the read's <c>createdon</c> asc order.</para>
+    /// </remarks>
+    private async Task<IReadOnlyList<ThreadReadResult>> ReadThreadsOfFiledMessagesAsync(
+        string regardingField,
+        Guid recordId,
+        IReadOnlySet<Guid> anchoredThreadIds,
+        string openOnly,
+        int threadBudget,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        if (threadBudget <= 0)
+        {
+            // Review F2: the anchored threads used the whole budget, so the filed-message read is skipped. The result shape has
+            // no truncation flag, so the cut is logged as every other bound here is (the same Warning event).
+            _logger.LogWarning(
+                "[BY-REGARDING] record={RecordId} caller={Caller}: the filed-message read was bounded (threads read={Read}, added={Added}, messages={Messages}, scan cap={Cap})",
+                recordId, callerSystemUserId, 0, 0, 0, MaxRegardingScan);
+            return Array.Empty<ThreadReadResult>();
+        }
+
+        var filed = await QueryVisibleMessagesAsync(
+            $"_{regardingField}_value eq {recordId}", MaxRegardingScan, callerSystemUserId, ct);
+
+        var byThread = filed
+            .Where(m => m.ThreadId != Guid.Empty && !anchoredThreadIds.Contains(m.ThreadId))
+            .GroupBy(m => m.ThreadId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<ThreadMessageDto>)g.Select(m => m.Dto).ToList());
+        if (byThread.Count == 0)
+            return Array.Empty<ThreadReadResult>();
+
+        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField, CreatedOnField });
+        var rows = new List<(Guid Id, string? Name, bool IsPinned, DateTimeOffset CreatedOn)>();
+        foreach (var chunk in byThread.Keys.Chunk(CommunicationOpenThreadGate.ChunkSize))
+        {
+            var idClause = string.Join(" or ", chunk.Select(id => $"{ThreadPkField} eq {id}"));
+            var odata = $"$select={select}&$filter=({idClause}) and {ActiveOnlyClause}{openOnly}&$top={chunk.Length}";
+            foreach (var row in await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct))
+            {
+                if (TryGuid(row, ThreadPkField) is not { } id || !chunk.Contains(id))
+                    continue;
+                rows.Add((id, TryString(row, ThreadNameField), TryBool(row, PinnedField) ?? false,
+                    TryDateTimeOffset(row, CreatedOnField) ?? DateTimeOffset.MaxValue));
+            }
+        }
+
+        var added = rows
+            .OrderBy(t => t.CreatedOn)
+            .Take(threadBudget)
+            .Select(t => new ThreadReadResult(
+                ThreadId: t.Id, Name: t.Name, Messages: byThread[t.Id], Count: byThread[t.Id].Count, IsPinned: t.IsPinned))
+            .ToList();
+
+        if (rows.Count > added.Count || filed.Count >= MaxRegardingScan)
+        {
+            _logger.LogWarning(
+                "[BY-REGARDING] record={RecordId} caller={Caller}: the filed-message read was bounded (threads read={Read}, added={Added}, messages={Messages}, scan cap={Cap})",
+                recordId, callerSystemUserId, rows.Count, added.Count, filed.Count, MaxRegardingScan);
+        }
+
+        return added;
     }
 
     // ── app-only by-regarding read for the EXTERNAL plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04) ──
@@ -502,9 +590,9 @@ public sealed class CommunicationThreadReadService
 
     private static readonly string[] RootStampColumns = { ProjectStampColumn, MatterStampColumn, WorkAssignmentStampColumn };
 
-    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row lacks, or holds as JSON null, reads
-    /// as not filed).</summary>
-    private static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
+    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row holds as JSON null reads as not filed, a
+    /// column the row lacks reads as malformed, so the row is withheld).</summary>
+    internal static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
         RootStamp(row, ProjectStampColumn), RootStamp(row, MatterStampColumn), RootStamp(row, WorkAssignmentStampColumn),
         // Task 187: the row itself, whose other parents (thread, invoice, event ...) the rule derives and takes in LIVE.
         row);
@@ -516,13 +604,17 @@ public sealed class CommunicationThreadReadService
     private const string MalformedRootStamp = "malformed";
 
     /// <summary>
-    /// One stamp, fail CLOSED (fix round for r3 task 039, K3): absent or JSON null is "not filed", a string is the lookup, and
+    /// One stamp, fail CLOSED (fix round for r3 task 039, K3): an explicit JSON null is "not filed", a string is the lookup, and
     /// any other JSON value (a number, object, array, boolean) is malformed, so the row is withheld, as
-    /// <c>DocumentRootLinks</c> and the delete-target parse read the same case.
+    /// <c>DocumentRootLinks</c> and the delete-target parse read the same case. Fix round 3d: a column that is ABSENT from the row
+    /// was not read, so it is malformed too (the row is withheld); the read's <c>$select</c> (<see cref="ExternalSelect"/>) is not the
+    /// boundary.
     /// </summary>
     private static string? RootStamp(Dictionary<string, JsonElement> row, string key)
     {
-        if (!row.TryGetValue(key, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        if (!row.TryGetValue(key, out var v))
+            return MalformedRootStamp;
+        if (v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             return null;
         return v.ValueKind == JsonValueKind.String ? v.GetString() : MalformedRootStamp;
     }
@@ -544,13 +636,22 @@ public sealed class CommunicationThreadReadService
     /// <paramref name="includeContent"/> adds the body, its format and the subject: the task 033 thread read returns them;
     /// the notification feed never uses them, so it projects without (task 037 review K3, least data).
     /// </summary>
-    private static string ExternalSelect(IEnumerable<string> regardingValues, bool includeContent)
+    internal static string ExternalSelect(IEnumerable<string> regardingValues, bool includeContent)
     {
         // The three core-root stamps are ALWAYS read, whichever record the query is keyed on: they are what lets a row also
         // filed to a root the caller cannot read be withheld (RootsOf). A read that dropped one would list such a row.
         // Task 187 (owner round 99, D-123): and the row's other parent lookups, whose LIVE roots the rule takes in (RootsOf).
+        // Task 130-0 fix round 3: and every invoice link column of the table, by name from the registry (InvoiceLinks). The row's
+        // invoices are read from this select (ExternalDataService.InvoiceLinksOf), where a column that was not read is "not read",
+        // never "no link"; so the select must carry all of them.
         regardingValues = regardingValues.Concat(RootStampColumns)
             .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalMultiRootRule.LiveParentSelect(CommunicationTable))
+            .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceLinks.Tables.TryGetValue(CommunicationTable, out var invoiceLinked)
+                ? invoiceLinked.ValueColumns
+                : Array.Empty<string>())
+            // F3b fix round 1: and every parent edge column, so the external filter can follow the invoices of the rows a message is
+            // filed under (its thread, the event, analysis or service request it regards); a column not read is undecidable.
+            .Concat(Sprk.Bff.Api.Infrastructure.ExternalAccess.InvoiceLinks.ParentValueColumnsOf(CommunicationTable))
             .Distinct();
         var columns = new List<string> { PkField };
         if (includeContent)
@@ -810,10 +911,20 @@ public sealed class CommunicationThreadReadService
 
         var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
 
-        var items = rows
+        // Fix round 3e: the page is the first pageSize rows (the over-fetch row only says a further page exists). A row whose typed
+        // regarding columns were not all returned has an UNKNOWN anchor, so it is withheld from the list, the same way a row with no
+        // readable thread id is dropped below; the paging signals are taken from the rows read, not from what is kept, so a
+        // withheld row never hides a further page.
+        var page = rows.Take(pageSize).ToList();
+        var withheld = page.Count(r => !ResolveRegardingFromRow(r).Known);
+        if (withheld > 0)
+            _logger.LogWarning("[LIST-THREADS] {Withheld} thread row(s) did not carry every regarding column; withheld (unknown anchor).", withheld);
+
+        var items = page
+            .Where(r => ResolveRegardingFromRow(r).Known)
             .Select(r =>
             {
-                var (regType, regId) = ResolveRegardingFromRow(r);
+                var (regType, regId, _) = ResolveRegardingFromRow(r);
                 return new ThreadListItem(
                     ThreadId: TryGuid(r, ThreadPkField) ?? Guid.Empty,
                     Name: TryString(r, ThreadNameField),
@@ -828,14 +939,14 @@ public sealed class CommunicationThreadReadService
             .Where(t => t.ThreadId != Guid.Empty)
             .ToList();
 
-        var hasMore = items.Count > pageSize;
-        if (hasMore)
-            items = items.Take(pageSize).ToList();
+        var hasMore = rows.Count > pageSize;
 
         // A next cursor is only meaningful when there IS a further page AND the boundary row has a createdon; the
-        // cursor is the COMPOSITE (createdon, threadId) of the last kept row so the next page resumes losslessly.
-        var nextToken = hasMore && items.Count > 0 && items[^1].CreatedOn is { } last
-            ? EncodePageToken(last, items[^1].ThreadId)
+        // cursor is the COMPOSITE (createdon, threadId) of the last row of the page so the next page resumes losslessly.
+        var boundary = page.Count > 0 ? page[^1] : null;
+        var nextToken = hasMore && boundary is not null
+            && TryDateTimeOffset(boundary, CreatedOnField) is { } last && TryGuid(boundary, ThreadPkField) is { } lastId && lastId != Guid.Empty
+            ? EncodePageToken(last, lastId)
             : null;
         // If we could not mint a cursor (missing createdon), do not claim a further page the caller cannot fetch.
         hasMore = nextToken is not null;
@@ -1254,7 +1365,8 @@ public sealed class CommunicationThreadReadService
     /// projection (the same Dataverse row-level security as <see cref="CanCallerSeeThreadAsync"/>). The send route's
     /// authorization filter uses it to run AppendTo on the record a send into the thread is filed against (the send
     /// inherits the thread's regarding). The anchor is chosen in <c>RegardingFieldMap</c> priority order, the same order
-    /// the send reads it in. Returns <c>null</c> when the thread is not visible to the caller or does not exist; an
+    /// the send reads it in. Returns <c>null</c> when the thread is not visible to the caller or does not exist, or when the row did
+    /// not carry every typed regarding column (the anchor is unknown, fix round 3e); an
     /// unresolved caller throws 403 and a query fault propagates (the caller denies, fail closed).
     /// </summary>
     public async Task<ThreadRegardingTarget?> ReadVisibleThreadRegardingAsync(
@@ -1270,7 +1382,15 @@ public sealed class CommunicationThreadReadService
         if (rows.Count == 0)
             return null;
 
-        var (entityType, recordId) = ResolveRegardingFromRow(rows[0]);
+        // Fix round 3e: a row that did not carry every typed regarding column has an UNKNOWN anchor. It is answered like a thread
+        // that cannot be read (null), which the send route's authorization filter refuses with its one 403; never "no regarding".
+        var (entityType, recordId, known) = ResolveRegardingFromRow(rows[0]);
+        if (!known)
+        {
+            _logger.LogWarning("[THREAD-REGARDING] Thread {ThreadId} did not carry every regarding column; its anchor is unknown.", threadId);
+            return null;
+        }
+
         return new ThreadRegardingTarget(entityType, recordId);
     }
 
@@ -1526,18 +1646,32 @@ public sealed class CommunicationThreadReadService
         => row.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.String && v.TryGetDateTimeOffset(out var dto) ? dto : null;
 
     // round-8.4 item 3: resolve a thread row's associated ("regarding") record from the typed ADR-024 lookups, in
-    // RegardingFieldMap priority order — the first non-empty `_{field}_value` wins. (null, null) for a record-less
+    // RegardingFieldMap priority order — the first non-empty `_{field}_value` wins. (null, null, true) for a record-less
     // Direct thread. Mirrors CommunicationArrivedProducer.ResolveTypedRegarding, but over the raw OData row shape.
-    private static (string? EntityType, Guid? Id) ResolveRegardingFromRow(Dictionary<string, JsonElement> row)
+    // Fix round 3e: a Web API row lists an empty lookup as an explicit JSON null, so a typed regarding column the row does not
+    // carry (or carries as something that is not a GUID) was not read: the anchor is UNKNOWN (Known = false), never "no regarding".
+    private static (string? EntityType, Guid? Id, bool Known) ResolveRegardingFromRow(Dictionary<string, JsonElement> row)
     {
+        string? anchorType = null;
+        Guid? anchorId = null;
         foreach (var (entityLogicalName, field) in ThreadRegardingFields)
         {
-            if (TryGuid(row, $"_{field}_value") is { } id && id != Guid.Empty)
+            if (!row.TryGetValue($"_{field}_value", out var value))
+                return (null, null, false);
+
+            switch (value.ValueKind)
             {
-                return (entityLogicalName, id);
+                case JsonValueKind.Null or JsonValueKind.Undefined:
+                    continue;
+                case JsonValueKind.String when Guid.TryParse(value.GetString(), out var id):
+                    if (id != Guid.Empty && anchorType is null)
+                        (anchorType, anchorId) = (entityLogicalName, id);
+                    continue;
+                default:
+                    return (null, null, false);
             }
         }
 
-        return (null, null);
+        return (anchorType, anchorId, true);
     }
 }

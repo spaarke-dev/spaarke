@@ -65,6 +65,11 @@ public class DocumentAccessPermissionWriterGuardTests
             "without its record (DocumentCommunicationFieldsStagingTests). ebilling-r1 task 095: the same method's " +
             "submissionNarrowing branch sets Restricted with the NON-provisional AccessInheritance.OwnNarrowing(Restricted) and " +
             "the submission marker, for the from-email submission's .eml only (SubmissionMarkerWriterGuardTests)."),
+        new Writer("src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs", "StageEmbeddedAttachmentNarrowing",
+            "Ontology task 177 review F1b (uac-r2 binding addition): a sent .eml embeds its attachments' bytes, so it is created " +
+            "with the most restrictive OWN value of their source documents (unreadable = Restricted), only Limited or " +
+            "Restricted, always with the NON-provisional AccessInheritance.OwnNarrowing(level) record in the same create — an " +
+            "own narrowing the reconciler's DecideDocument keeps as max(own, inherited) and never widens."),
     };
 
     private static readonly IReadOnlyList<Writer> NonDocumentWriters = new[]
@@ -79,8 +84,6 @@ public class DocumentAccessPermissionWriterGuardTests
             "Task 175: work assignments and projects only (FollowParentsAsync throws for any other table)."),
         new Writer("src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs", "ApplyCoreAncestorStampsAsync",
             "Task 173: the communication being associated (CommunicationEntity)."),
-        new Writer("src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EmailDraftToolHandler.cs", "BuildCommunicationItem",
-            "Task 173: the payload of a communication draft."),
         new Writer("src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs", "AddRegardingWriteSet",
             "Task 173: the payload of an event create."),
         new Writer(Resolver, "StampAsync",

@@ -34,7 +34,7 @@ param(
     [Parameter(Mandatory)] [string] $ExportedRibbonDiff,
     [Parameter(Mandatory)]
     [ValidateSet('sprk_todo', 'sprk_event', 'sprk_invoice', 'sprk_reportcard', 'sprk_document', 'sprk_communication', 'sprk_budget',
-        'sprk_kpiassessment', 'sprk_billingevent')]
+        'sprk_kpiassessment')]
     [string] $Entity,
     [Parameter(Mandatory)] [string] $Out
 )
@@ -51,7 +51,6 @@ $Labels = @{
     sprk_communication = 'Message'
     sprk_budget        = 'Budget'
     sprk_kpiassessment = 'KPI Assessment'
-    sprk_billingevent  = 'Billing Event'
 }
 
 # Task 147 r1c: Spaarke's OWN subgrid creates of a table that also open a parent-prefilled create (quick create) - they

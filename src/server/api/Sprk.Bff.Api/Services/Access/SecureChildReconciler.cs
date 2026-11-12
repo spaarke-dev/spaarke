@@ -440,9 +440,10 @@ public sealed class SecureChildReconciler
     /// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), the same derivation their writers use.</summary>
     private readonly CoreAncestorResolver? _coreAncestors;
 
-    /// <summary>UAC task 194b fix round (F1-c): the To Do assignee links, so a no-core Signal's or Decision Record's question
-    /// asks the To Do job's own predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
-    private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? _links;
+    /// <summary>UAC task 194b fix round (F1-c): the To Do assignee rule's contact → user read (uac-r2 task 193:
+    /// <c>ContactUserRepresentation</c>), so a no-core Signal's or Decision Record's question asks the To Do job's own
+    /// predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
+    private readonly Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? _people;
 
     /// <summary>uac-r2 task 198 Part D: the one share seam the Restricted filing bar reads and revokes through
     /// (<see cref="RestrictedFilingShareBar"/>). Optional so the test compositions keep compiling; the host registers it
@@ -473,9 +474,11 @@ public sealed class SecureChildReconciler
     /// question names the same stamps its writer did (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>). Optional so the
     /// test compositions keep compiling; the host registers it unconditionally (<c>AddCoreAncestorResolver</c>). Without it such
     /// a row with a core record is not decided (fail closed).</param>
-    /// <param name="links">UAC task 194b fix round (F1-c): the To Do assignee links, so whether the To Do job keeps a no-core
-    /// row is asked with that job's own predicate. Optional so the test compositions keep compiling; the host registers it
-    /// (<c>AddScoped&lt;AssignedAccessStore&gt;</c>). Without it a no-core row about a To Do is not decided (fail closed).</param>
+    /// <param name="people">UAC task 194b fix round (F1-c): the To Do assignee rule's contact → user read, so whether the To Do
+    /// job keeps a no-core row is asked with that job's own predicate (uac-r2 task 193: the same
+    /// <c>ContactUserRepresentation</c> the job reads through). Optional so the test compositions keep compiling; the host
+    /// registers it (<c>AddScoped&lt;ContactUserRepresentation&gt;</c>). Without it a no-core row about a To Do is not decided
+    /// (fail closed).</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -489,7 +492,7 @@ public sealed class SecureChildReconciler
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         DocumentContainerRelocator? relocator = null,
         CoreAncestorResolver? coreAncestors = null,
-        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
+        Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? people = null,
         IDataverseRecordShareService? recordShares = null,
         Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
@@ -497,7 +500,7 @@ public sealed class SecureChildReconciler
         _directMessageOwnerTeam = directMessageOwnerTeam;
         _relocator = relocator;
         _coreAncestors = coreAncestors;
-        _links = links;
+        _people = people;
         _threads = threads;
         _ownerPrivileges = ownerPrivileges;
         _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
@@ -1771,7 +1774,7 @@ public sealed class SecureChildReconciler
         // per pass.
         private ExistingRowReads? _reads;
 
-        private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._links);
+        private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._people);
 
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,

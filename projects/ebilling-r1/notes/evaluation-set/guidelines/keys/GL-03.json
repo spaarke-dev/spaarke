@@ -1,0 +1,340 @@
+{
+ "schema": "ebilling-eval/1",
+ "kind": "guideline-key",
+ "id": "GL-03-KEY",
+ "guideline_id": "GL-03",
+ "rule_set_id": "RS-03",
+ "set": "F",
+ "meta": {
+  "title": "Brennick Industrial Group, Inc. Law Department: Outside Counsel Billing Requirements",
+  "issuer": "Brennick Industrial Group, Inc., Law Department",
+  "issuer_type": "corporate-mid",
+  "version": "4",
+  "effective": "2026-03-01",
+  "generator_id": "build_guidelines.py",
+  "licence": "Synthetic - authored for this evaluation set",
+  "licence_status": "synthetic",
+  "pii_note": "Fictional organisation; no personal data.",
+  "label_method": "authored-from-rule-set",
+  "storage": {
+   "location": "committed",
+   "path": "guidelines/GL-03.md"
+  },
+  "rendered": [
+   "local/guidelines/GL-03.docx",
+   "local/guidelines/GL-03.pdf"
+  ]
+ },
+ "profile": {
+  "persona": "P3: mid-size industrial manufacturer (corporate, mid-market)",
+  "organisation": "Manufacturer and distributor of industrial components; revenue about $2.5B (E)",
+  "in_house_lawyers": "10 (E; ACC 2025 median for $1-5B revenue is 12, S)",
+  "outside_counsel_spend": "about $4M a year (E; ACC 2025 band median $3.3M, S)",
+  "litigation_share": "about 36% (S-derived from ACC 2025 litigation spend for $1-5B): product liability, commercial contract disputes, employment, environmental",
+  "firms": "50-200-lawyer regional firms in secondary cities; the $520 partner maximum matches 2022 Atlanta and Baltimore litigation partner medians of $525-585 (S)",
+  "style": "procurement-led corporate requirements: a purchase order on every invoice, a strict 8-hour day, meal and copy limits, no internal conferences"
+ },
+ "rate_schedule": {
+  "name": "Schedule 1",
+  "currency": "USD",
+  "unit": "hour",
+  "maximum_rates": {
+   "Partner": 520,
+   "Of Counsel": 460,
+   "Senior Associate": 360,
+   "Associate": 280,
+   "Paralegal": 150,
+   "Legal Assistant": 120
+  }
+ },
+ "rules": [
+  {
+   "rule_id": "RS-03-R01",
+   "rule_type": "ApprovedRate",
+   "params": {
+    "rates": {
+     "Partner": 520,
+     "Of Counsel": 460,
+     "Senior Associate": 360,
+     "Associate": 280,
+     "Paralegal": 150,
+     "Legal Assistant": 120
+    }
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "2.1",
+    "heading": "Rates"
+   },
+   "paraphrase": "Rates are capped by classification (Schedule 1); excess is reduced.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "ApprovedRate",
+      "tolerancePercent": 0
+     }
+    ],
+    "consequence": "SuggestAdjustment",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-03-R02",
+   "rule_type": "TimeIncrement",
+   "params": {
+    "increment_hours": 0.1
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "3.1",
+    "heading": "Recording time"
+   },
+   "paraphrase": "0.1-hour increments; other increments are reduced.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "TimeIncrement",
+      "incrementHours": 0.1
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-03-R03",
+   "rule_type": "DailyHoursCap",
+   "params": {
+    "max_hours_per_timekeeper_per_day": 8
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "3.2",
+    "heading": "Recording time"
+   },
+   "paraphrase": "At most 8 hours per timekeeper per day; excess is reduced.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "DailyHoursCap",
+      "maxHoursPerDay": 8
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-03-R04",
+   "rule_type": "NonBillableActivity",
+   "params": {
+    "keywords": [
+     "scheduled conference call",
+     "calendar entries",
+     "docketed deadlines",
+     "conflict check",
+     "invoice preparation",
+     "photocopied exhibits",
+     "organized and indexed",
+     "internal conference"
+    ]
+   },
+   "consequence": "Disallow",
+   "clause_ref": {
+    "section": "3.4",
+    "heading": "Recording time"
+   },
+   "paraphrase": "Clerical work and internal firm conferences are not billable.",
+   "expressible": true,
+   "production": {
+    "status": "partial",
+    "rules": [
+     {
+      "type": "NonBillableActivity",
+      "codes": [
+       "A105"
+      ]
+     }
+    ],
+    "consequence": "SuggestAdjustment",
+    "not_expressible": "NonBillableActivity lists activity codes only, and no code identifies clerical work: A110 (Manage data/files) also covers legitimate document work, and invoice preparation is coded A111"
+   }
+  },
+  {
+   "rule_id": "RS-03-R05",
+   "rule_type": "ExpenseRule",
+   "params": {
+    "non_reimbursable": [
+     "E103",
+     "E106"
+    ]
+   },
+   "consequence": "Disallow",
+   "clause_ref": {
+    "section": "4.1",
+    "heading": "Expenses"
+   },
+   "paraphrase": "E103 and E106 are not reimbursable.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "ExpenseRule",
+      "nonReimbursableCodes": [
+       "E103",
+       "E106"
+      ]
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-03-R06",
+   "rule_type": "ExpenseRule",
+   "params": {
+    "caps": {
+     "E101": 0.1,
+     "E111": 60.0
+    }
+   },
+   "consequence": "Reduce",
+   "clause_ref": {
+    "section": "4.2",
+    "heading": "Expenses"
+   },
+   "paraphrase": "Copying capped at $0.10 per page and meals at $60.00 per meal.",
+   "expressible": true,
+   "production": {
+    "status": "none",
+    "rules": [],
+    "consequence": null,
+    "not_expressible": "ExpenseRule caps the line amount; it cannot cap a unit rate (cost per page); ExpenseRule maxAmountPerItem applies to every expense line; it cannot be limited to one expense code"
+   }
+  },
+  {
+   "rule_id": "RS-03-R07",
+   "rule_type": "AiObservation",
+   "params": {
+    "observations": [
+     "block_billing"
+    ]
+   },
+   "consequence": "Flag",
+   "clause_ref": {
+    "section": "3.3",
+    "heading": "Recording time"
+   },
+   "paraphrase": "Block-billed entries are referred for review.",
+   "expressible": true,
+   "production": {
+    "status": "full",
+    "rules": [
+     {
+      "type": "AiObservation",
+      "observation": "blockBilling",
+      "minConfidence": 0.7
+     }
+    ],
+    "consequence": "Flag",
+    "not_expressible": null
+   }
+  },
+  {
+   "rule_id": "RS-03-R08",
+   "rule_type": "RequiredData",
+   "params": {
+    "fields": [
+     "po_number"
+    ]
+   },
+   "consequence": "Reject",
+   "clause_ref": {
+    "section": "5.1",
+    "heading": "Invoices and payment"
+   },
+   "paraphrase": "Invoices without the PO number are returned unpaid.",
+   "expressible": true,
+   "production": {
+    "status": "none",
+    "rules": [],
+    "consequence": null,
+    "not_expressible": "RequiredData has no PO-number field (closed vocabulary: firmInvoiceNumber, invoiceDate, billingPeriodStart, billingPeriodEnd, timekeeper, lineDate, narrative, taskCode, activityCode, expenseCode)"
+   }
+  }
+ ],
+ "unmapped_provisions": [
+  {
+   "clause_ref": {
+    "section": "1.1",
+    "heading": "Working with the Law Department"
+   },
+   "paraphrase": "Monthly status report to the responsible in-house lawyer.",
+   "reason": "not-billing"
+  },
+  {
+   "clause_ref": {
+    "section": "1.2",
+    "heading": "Working with the Law Department"
+   },
+   "paraphrase": "Supplier Code of Conduct; security questionnaire within 10 business days.",
+   "reason": "not-billing"
+  },
+  {
+   "clause_ref": {
+    "section": "1.3",
+    "heading": "Working with the Law Department"
+   },
+   "paraphrase": "Annual diversity report.",
+   "reason": "not-billing"
+  },
+  {
+   "clause_ref": {
+    "section": "2.2",
+    "heading": "Rates"
+   },
+   "paraphrase": "One rate change a year, 90 days' notice, at most 3%.",
+   "reason": "needs-new-type"
+  },
+  {
+   "clause_ref": {
+    "section": "3.5",
+    "heading": "Recording time"
+   },
+   "paraphrase": "Research over 5 hours on one issue needs advance approval.",
+   "reason": "needs-new-type"
+  },
+  {
+   "clause_ref": {
+    "section": "4.3",
+    "heading": "Expenses"
+   },
+   "paraphrase": "Travel needs advance approval; economy fares only.",
+   "reason": "judgement"
+  },
+  {
+   "clause_ref": {
+    "section": "5.2",
+    "heading": "Invoices and payment"
+   },
+   "paraphrase": "Monthly invoices through the e-billing system.",
+   "reason": "needs-new-type"
+  },
+  {
+   "clause_ref": {
+    "section": "5.4",
+    "heading": "Invoices and payment"
+   },
+   "paraphrase": "Payment 60 days after approval.",
+   "reason": "not-billing"
+  }
+ ]
+}

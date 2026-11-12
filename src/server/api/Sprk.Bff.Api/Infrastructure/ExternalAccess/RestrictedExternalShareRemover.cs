@@ -149,12 +149,16 @@ public sealed class RestrictedExternalShareRemover
     private readonly IScheduledJobLease _recordLock;
     private readonly IOptionsMonitor<WorkforceIdentityOptions> _workforceIdentity;
     private readonly ILogger<RestrictedExternalShareRemover> _logger;
+    private readonly Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? _pairedGrants;
 
     /// <param name="recordLock">The atomic lease task 143's enforcer serializes its per-record removals on (the scheduler's
     /// lease store reused as a keyed mutex under <c>no-access-enforce:{table}:{id}</c> — never a job's dispatch key). The
     /// same project-scoped §6.5 path-A exception (design.md §9, task 143 r2) covers this second user of it.</param>
     /// <param name="workforceIdentity">The customer home directories (A9): a removed user's root sets are also cleared under
     /// each (<see cref="ImpersonatedRootSetSource.EvictionTenants"/>).</param>
+    /// <param name="pairedGrants">Task 193 G2b: the one grant revoke, which ends the grant PAIRED with each share this rule
+    /// removes. Registered unconditionally (ExternalAccessModule); optional only so this remover's test compositions keep
+    /// compiling — without it the shares alone are removed.</param>
     public RestrictedExternalShareRemover(
         ExternalParticipationService participations,
         IDataverseRecordShareService recordShare,
@@ -163,8 +167,10 @@ public sealed class RestrictedExternalShareRemover
         SecureChildShareSynchronizer secureChildShares,
         IScheduledJobLease recordLock,
         IOptionsMonitor<WorkforceIdentityOptions> workforceIdentity,
-        ILogger<RestrictedExternalShareRemover> logger)
+        ILogger<RestrictedExternalShareRemover> logger,
+        Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? pairedGrants = null)
     {
+        _pairedGrants = pairedGrants;
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
         _recordShare = recordShare ?? throw new ArgumentNullException(nameof(recordShare));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
@@ -278,12 +284,109 @@ public sealed class RestrictedExternalShareRemover
             }
         }
 
+        // ── Task 193 G2b (owner F1-b): each removed user's PAIRED grant ends with the share — the share first, then the grant ──
+        report = await EndPairedGrantsAsync(rootType, logical, recordId, report, ct).ConfigureAwait(false);
+
         _logger.LogInformation(
             "[RESTRICTED-EXTERNAL] Restricted {Type} {RecordId}: removed {Removed}, no internal reader {NoInternalReader}, " +
             "external owner {Owner}, failures {Failures}.", logical, recordId, report.Removed.Count, report.NoInternalReader,
             report.OwnerIsExternal?.ToString() ?? "none", report.Failures.Count);
         return report;
     }
+
+    /// <summary>
+    /// Task 193 G2b: for every user whose share this pass removed (confirmed by read-back), every grant on the record PAIRED
+    /// with them ("Add person") is ended through the one grant revoke, the same call <c>/unshare-user</c> makes. Task 193 G4a
+    /// (A-F1): so is the pairing of every user flagged external who holds NO share on the record (removed by an earlier pass
+    /// whose grant end did not complete, or elsewhere), as the No Access enforcer does for a walled user — so a grant end that
+    /// fails is retried by the next pass, not left behind once the share is gone. A grant that is not ended is a failure
+    /// (<see cref="PairedGrantNotEndedKind"/>), so the pass is not complete; the revoke logs it at Error with ids only. A
+    /// SYSTEM removal: no operator decline is recorded (owner ruling 2026-10-28). A pairing column that is not provisioned is
+    /// the revoke's Warning: the share alone is removed, as before.
+    /// </summary>
+    private async Task<RestrictedExternalShareReport> EndPairedGrantsAsync(
+        ExternalGrantRootType rootType, string logical, Guid recordId, RestrictedExternalShareReport report, CancellationToken ct)
+    {
+        if (_pairedGrants is null)
+            return report;
+
+        var failures = new List<RestrictedExternalShareFailure>();
+        var users = report.Removed.ToList();
+        if (report.Outcome == RestrictedExternalShareOutcome.Evaluated)
+            users.AddRange(await BarredPairedUsersHoldingNoShareAsync(rootType, logical, recordId, report.Removed, failures, ct)
+                .ConfigureAwait(false));
+
+        foreach (var userId in users)
+        {
+            var paired = await _pairedGrants.RevokePairedWithAsync(
+                logical, recordId, userId, Sprk.Bff.Api.Api.ExternalAccess.GrantEndCause.System, ct).ConfigureAwait(false);
+            if (paired.PairedGrantEnded is false)
+            {
+                failures.Add(new RestrictedExternalShareFailure(userId, PairedGrantNotEndedKind,
+                    $"The access of external user {userId} to this Restricted record was removed, but the external access " +
+                    $"paired with it could not be confirmed ended ({paired.Outcome}). The 5-minute safety net retries it."));
+            }
+        }
+
+        return failures.Count == 0 ? report : report with { Failures = report.Failures.Concat(failures).ToList() };
+    }
+
+    /// <summary>
+    /// Task 193 G4a (A-F1): the users flagged external (<see cref="InternalShareEndpoints.IsBarredOnRestricted"/>) with a grant
+    /// on the record still paired with them, active or not, who hold no direct share on it and were not removed this pass.
+    /// A read that fails is a failure (the pass is not complete), never "nobody".
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> BarredPairedUsersHoldingNoShareAsync(
+        ExternalGrantRootType rootType, string logical, Guid recordId, IReadOnlyList<Guid> removed,
+        List<RestrictedExternalShareFailure> failures, CancellationToken ct)
+    {
+        var read = await ExternalGrantLifecycle.ReadPairingsOnRecordAsync(
+            _dataverse, rootType, recordId, pairedWith: null, top: null, ct, includeInactive: true).ConfigureAwait(false);
+        if (read.Status == GrantPairingReadStatus.ColumnMissing)
+            return Array.Empty<Guid>();
+
+        if (read.Status != GrantPairingReadStatus.Read)
+        {
+            _logger.LogError(read.Fault,
+                "[RESTRICTED-EXTERNAL] The grants paired on Restricted {Type} {RecordId} could not be read.", logical, recordId);
+            failures.Add(new RestrictedExternalShareFailure(null, PairedGrantNotEndedKind,
+                "Which external access on this Restricted record is paired with a user could not be read, so access paired " +
+                "with an external user may remain. The 5-minute safety net retries it."));
+            return Array.Empty<Guid>();
+        }
+
+        var candidates = read.ByRow.Values.OfType<Guid>().Distinct().Where(u => !removed.Contains(u)).OrderBy(u => u).ToList();
+        if (candidates.Count == 0)
+            return Array.Empty<Guid>();
+
+        try
+        {
+            var holders = DirectUserMasks(
+                await _recordShare.GetPrincipalAccessOrThrowAsync(logical, recordId, ct).ConfigureAwait(false));
+            var withoutShare = candidates.Where(u => !holders.ContainsKey(u)).ToList();
+            if (withoutShare.Count == 0)
+                return Array.Empty<Guid>();
+
+            var users = await ReadUsersAsync(withoutShare, ct).ConfigureAwait(false);
+            return withoutShare
+                .Where(u => users.TryGetValue(u, out var row)
+                            && InternalShareEndpoints.IsBarredOnRestricted(row.IsExternal, rootIsRestricted: true))
+                .ToList();
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[RESTRICTED-EXTERNAL] Whether the users paired on Restricted {Type} {RecordId} still hold a share, or are " +
+                "flagged external, could not be read.", logical, recordId);
+            failures.Add(new RestrictedExternalShareFailure(null, PairedGrantNotEndedKind,
+                "Whether the users with access paired on this Restricted record are external could not be read, so access " +
+                "paired with an external user may remain. The 5-minute safety net retries it."));
+            return Array.Empty<Guid>();
+        }
+    }
+
+    /// <summary>Task 193 G2b: the failure kind of a paired grant that was not ended after its share was removed.</summary>
+    internal const string PairedGrantNotEndedKind = "paired-grant-not-ended";
 
     private async Task<RestrictedExternalShareReport> RemoveUnderLockAsync(
         ExternalGrantRootType rootType, string logical, Guid recordId, RootRecordFlags flags,

@@ -512,3 +512,12 @@ Criterion 89 (blank the writer client id, expect the writer-failure alert to fir
   - **Baseline on `e56a3a51d4` (2026-10-27..29):** worklist 1; decision-plan 0; `POST …/decision` averaged **28 WhoAmI (max 35), 179 Dataverse calls, 22.4 s** across 2 commits. 170 targets that commit path.
   - **Not exercised:** no decision commit since the deploy. A commit would act on the owner's open UAT items. The commit-side check (at most 2 WhoAmI per commit, plus the wall time) and the `BUD-` number on a new budget wait for the owner's next commit. Then query App Insights for `POST /api/v1/signals/{id}/decision` after 02:23:53Z.
 
+
+## 2026-11-10 — task 176 on dev: Console `26d135bc8f` and BFF `755987b385` (mcp-r1 spike carrying master)
+- **Master:** docs→master #2660 merged as `26d135bc8f`. It carries task 176 (#2655, D-216) and F-R3-1 (#2606). Field-mapping #2659 is NOT in it (master was at `c2fa55aa99`); uac 198 is not on master.
+- **Console:** `deploy-spaarke-ai.yml` succeeded at 14:41Z from `26d135bc8f` (`Spaarke.Communication.Components` reply mapping). The owner needs a hard reload.
+- **BFF:** the D-126 ancestor check against master FAILED. Live was `6fbb3a7642`, which is mcp-r1's `spike/spaarkeai-mcp-phase0`, not on master.
+  - The owner chose to preserve the spike, so mcp-r1 merged master into it as `755987b385` (clean; BFF 0 warnings; ArchTests 2114/2114). The owner gave the per-SHA go in uac-r2's session, and mcp-r1 deployed with /bff-deploy (4 critical files hash-verified).
+  - Ontology read-back: the DLL reads `1.0.0+755987b3851058381da0703b7e1f529e8dfe3215`; `26d135bc8f` is an ancestor of it; `/healthz` returns 200.
+  - The owner gave the 176 deploy go in the ontology session (2026-11-10).
+- **Smoke:** a live inquiry send needs the owner (UAT). After one Budget inquiry from Revise budget, verify by query: the communication carries `sprk_regardingservicerequest` + `sprk_regardingmatter` + `sprk_isinternalonly` = true; its thread is Private; an .eml Document is archived on the matter.

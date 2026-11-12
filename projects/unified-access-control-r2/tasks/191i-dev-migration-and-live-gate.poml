@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191i" project="unified-access-control-r2">
+  <metadata>
+    <title>T191i: dev migration and live gate: place flagged users, turn on the team share, field locks and Office item grants, prove AC-1 to AC-10 (#2179)</title>
+    <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
+    <gate>blocked: 191c, 191e, 191f, 191g, 191h merged and deployed to dev</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live role, business-unit, field-security and share writes on dev; every step owner-approved.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Ordered live migration with undo steps and a must-fire/must-not-fire gate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial: it changes live dev security state that every other uac-r2 live gate reads.</parallel-reason>
+    <deps>191c, 191d, 191e, 191f, 191g, 191h</deps>
+    <tags>dataverse, security, access-control, tenant-isolation, deployment, integration-test</tags>
+    <estimated-effort>1.5 days plus owner waits</estimated-effort>
+  </metadata>
+
+  <prompt>Run the design's §3.14 migration on dev in order, each write only after its owner go, then prove the acceptance criteria live with a test flagged user and an unflagged control.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in live Dataverse security changes with dry runs, read-backs and undo.</role>
+  <goal>On dev: flagged users sit in the External Collaborators BU with only the external role; the External team holds exactly the visible rows; the three marker columns are locked; Office item grants are on; AC-1 to AC-10 pass with evidence recorded (ids and counts only).</goal>
+
+  <context>
+    <background>Design §3.14 (migration), §3.17 (acceptance criteria), §3.19 (live steps), §4.1 (owner decisions), Appendix A.4 (spike findings F2-F5: count mask &gt; 0 only; search latency; owned rows do not move; WhoAmI ignores impersonation).</background>
+    <relevant-files>
+      <file role="canonical-reference">scripts/Set-ExternalCollaboratorRole.ps1 (191d)</file>
+      <file role="canonical-reference">scripts/Set-AccessMarkerFieldSecurity.ps1 (191f)</file>
+      <file role="canonical-reference">scripts/Set-RecordCreatorPersonSchema.ps1 and scripts/Set-DocumentNarrowingFieldSecurity.ps1 (reader-profile re-runs for the new BU)</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-191i-migration-and-live-gate.md</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (only the 191 gate section, if 191j has not added it yet)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="191c" status="pending">Team-share job (writes off).</dependency>
+      <dependency task="191d" status="pending">Role and BU script.</dependency>
+      <dependency task="191e" status="pending">Placement job and census (writes off).</dependency>
+      <dependency task="191f" status="pending">Field-security target.</dependency>
+      <dependency task="191g" status="pending">Office item grants (setting off).</dependency>
+      <dependency task="191h" status="pending">SPA and AI parity.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every write below needs its own owner go in the uac-r2 session; dry run first, read back after, undo recorded.</constraint>
+    <constraint source="project">No Entra, Key Vault or tenant-config write. Role, BU, field-security and share writes on dev only.</constraint>
+    <constraint source="project">Evidence carries ids and counts only; no names, emails, UPNs or a named identity's role holdings in the repo.</constraint>
+    <constraint source="project">Live checks use the test user's own token or impersonated reads, never WhoAmI (F5).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/unified-access-control-r2/notes/2179-flagged-external-dataverse-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="read-only verify mode with named gaps" location="scripts/Set-SecureRecordOwnerRolePrivileges.ps1">Separate -Apply and -Verify; VERIFY FAIL names each gap.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Read-only inventory (ids and counts): flagged users, their BU, the BU of each role assignment, POA shares, owned rows, team memberships, hierarchy setting. Save to the task note.</step>
+    <step order="2">Owner go: Set-ExternalCollaboratorRole.ps1 -Apply, then -Verify.</step>
+    <step order="3">Owner go: reader column profiles for the new BU's default team (existing -Apply re-runs); never the Stored File profile; -Verify.</step>
+    <step order="4">Team-share report-only run; review planned grants and refusals per table.</step>
+    <step order="5">Owner go: team-share writes on; count POA with mask &gt; 0.</step>
+    <step order="6">Owner go: Set-AccessMarkerFieldSecurity.ps1 -Apply, then -Verify.</step>
+    <step order="7">Owner go: placement writes on; verify each moved user's BU, role and default team; census clean.</step>
+    <step order="8">Owner go: re-own of flagged-owned rows and reassignment of a Restricted root with a flagged owner.</step>
+    <step order="9">First sweep: confirm internal-only per-user shares from the secure mirror and Direct messages are revoked.</step>
+    <step order="10">Owner go: Office item-grant setting on.</step>
+    <step order="11">Live gate: AC-1 to AC-10 of the design (§3.17) with a test flagged user and an unflagged control holding the same shares; writes as the test user are undone afterwards. Re-check Dataverse search after 24 hours (F3).</step>
+    <step order="12">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+    <step order="13">Record results and deviations in the task note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE / OWNER GO: steps 2, 3, 5, 6, 7, 8 and 10 each change live security state. Ask for each go in the uac-r2 session when it is due; never batch them without the owner saying so.</trigger>
+    <trigger>LIVE / OWNER GO: step 11's writes as the test user (Write negatives, creates) need the owner's go and an undo.</trigger>
+    <trigger>If any must-not-fire check fails (an unflagged user loses access, an internal share changes), STOP, turn the relevant setting off, and escalate.</trigger>
+    <trigger>If the report-only run plans to share a Restricted, secure or internal-only row with the External team, STOP before step 5 and escalate.</trigger>
+    <trigger>If the inventory shows hierarchy security on with a flagged manager, or a Deep role assigned from another BU that the move would not remove, STOP and escalate.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/unified-access-control-r2/notes/task-191i-migration-and-live-gate.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The External Collaborators BU and role exist on dev and -Verify passes; the BU owns 0 lineage rows.</criterion>
+    <criterion testable="true">Every flagged user is in the External BU with only the external role; the census reports zero findings.</criterion>
+    <criterion testable="true">AC-1: the test flagged user reads none of the internal-only kinds through the Web API; the unflagged control reads each.</criterion>
+    <criterion testable="true">AC-2: the test flagged user reads every ordinary row of a visible matter.</criterion>
+    <criterion testable="true">AC-3: the test flagged user's attempts to lower Access Permission, clear internal-only, open a Private thread, unlink or re-parent are each refused; the internal control's succeed.</criterion>
+    <criterion testable="true">AC-4 and AC-5: a row made internal-only out of product loses the team share within 2 min + run, and regains it when lowered.</criterion>
+    <criterion testable="true">AC-7: a newly flagged test user is moved within 2 min + run; an unflagged user is not.</criterion>
+    <criterion testable="true">AC-8: Office edit for the test flagged user is an item permission on one file; the sibling is refused; removal works.</criterion>
+    <criterion testable="true">AC-10: grid_overview, read_query and Dataverse search as the test user show only visible rows.</criterion>
+    <criterion testable="true">Every write has a recorded read-back and, for test-user writes, an undo.</criterion>
+  </acceptance-criteria>
+
+  <notes>Other environments repeat steps 1-11 under their own owner go; the deployment guide (191j) carries the checklist.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

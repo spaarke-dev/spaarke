@@ -126,6 +126,33 @@ public sealed class ApExportDownloadTests
         host.World.Gateway.StorageCalls.Should().Be(storageCalls, "no blob is opened for a batch that did not complete");
     }
 
+    [Theory(DisplayName = "ebilling-r1 hand-made batch: Completed with the formats typed in but no Stored File row is 404 file_not_available on download - no blob opened, no 5xx")]
+    [InlineData("csv")]
+    [InlineData("json")]
+    public async Task HandMadeCompletedBatchWithFormatsButNoFiles_Is404_FileNotAvailable(string format)
+    {
+        await using var host = await ApExportRoutesHost.StartAsync();
+        var batchId = Guid.NewGuid();
+        host.World.Dataverse.Put(new Entity("sprk_billingexport", batchId)
+        {
+            ["sprk_name"] = "Hand made",
+            ["sprk_exportstatus"] = new OptionSetValue(ApExportService.StatusCompleted),
+            ["sprk_formats"] = new OptionSetValueCollection(
+            [
+                new OptionSetValue(ApExportService.FormatCsv),
+                new OptionSetValue(ApExportService.FormatJson),
+            ]),
+        });
+        host.EbillingEnabled = true;
+        host.World.Access.Grant(ApExportAuthorization.BatchEntitySet, batchId, AccessRights.Read);
+
+        var response = await host.SendAsync(HttpMethod.Get, Url(batchId, format));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        JsonNode.Parse(await response.Content.ReadAsStringAsync())!["errorCode"]!.GetValue<string>().Should().Be(ApExportCodes.FileNotAvailable);
+        host.World.Gateway.StorageCalls.Should().Be(0);
+    }
+
     [Fact(DisplayName = "151a: a file with no scan verdict yet is 409 file_scan_pending and no bytes")]
     public async Task ScanPending_Is409()
     {

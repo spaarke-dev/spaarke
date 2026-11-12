@@ -701,6 +701,47 @@ Neither is a new exposure. In the first case, the Secure reconciler's own pass r
 
 **Test gap:** no guest-domain case on the Direct path (`InternalUsersAsync` filters a guest domain name, but only the D-169 tests exercise it).
 
+### §7.9 198b (FindExistingAsync on the strict-pair rule)
+
+Branch `task/uac-198b-direct-find-existing`, cut from `43f4f12525` (fm 054a piece 2b, PR #2675, plus master `c71414c7a0`).
+
+**What changed** (`DirectThreadAccessService.FindExistingAsync`):
+- **A. The match is fm's one strict-pair rule.** Each candidate goes through `DirectMessageRecipient.ReadStrictPairShapeAsync(_entityService, _accessGrant, threadId, ct)`. It matches only when the answer is `IsStrictPair` and {OwnerId, OtherId} equals {owner candidate, shared candidate} as a set. The rule is called, not forked. `_accessGrant` is the service's existing `IDataverseRecordShareService` (task 060's one POA seam), so no new POA client was added.
+  - A candidate that is not a strict pair is skipped, with an Information log naming the thread id and the reason code: `not_direct`, `typed_regarding`, `not_open`, `not_two_read_participants` or `extra_principal`.
+  - `participant_read_fault` (a fault reading the thread row or its shares) is skipped with a Warning that carries the fault. It is never a match and never thrown. Only the caller's cancellation propagates, as before.
+  - A strict pair of two other people is skipped silently, because it is an ordinary other conversation.
+- **B. Fallback path.** The seam has no "records shared to principal X" read. Every `IDataverseRecordShareService` read is per record (`GetPrincipalAccess*`, `GetPrincipalAccessForRecordsOrThrowAsync` by record ids). Adding a principal-keyed POA query would be a new seam method, not a small extension of an existing query, so none was added. The scan instead:
+  - reads the owner's Direct threads (`ownerid` plus `sprk_threadtype` = Direct, unchanged) newest first: `createdon` descending, then `sprk_communicationthreadid` descending as a tie-break so the paging cookie is stable;
+  - pages them with `PagingInfo` and the cookie (no skip), `CandidatePageSize` = 50;
+  - stops at **`MaxCandidateThreads` = 500** per direction (10 pages). When the bound is hit (`MoreRecords` after page 10) with no match, it logs a Warning that names the bound and says reuse was not decided, so a new thread is created and a duplicate is possible (NFR-03). Exactly 500 threads with no more records is a complete scan and logs nothing.
+- **C. Unchanged:** the create path, the caller-first direction order, the reuse log, and a fault of the candidate query itself (it still propagates, as before).
+
+**Tests** (`DirectThreadAccessServiceTests`, 12 new cases in 6 methods prefixed `F198b_`):
+1. `ACandidateWithAThirdPrincipal_IsNotReused`: a third user at mask 0 (`extra_principal`) or at Read (`not_two_read_participants`) is not reused. A new thread is created, and the Information log names the thread and the reason.
+2. `ACandidateThatIsNotAStrictDirectShape_IsNotReused`: a typed regarding, privacy not Open, or no privacy value.
+3. `AStrictPairCandidate_IsReused_InBothDirections`: the strict pair is reused past a newer team-shared candidate, both directions.
+4. `ACandidateWhoseReadFaults_IsSkipped_WithAWarning`: a share-read fault or a thread-row fault. No throw, a new thread, and a Warning naming the thread.
+5. `ThePairsThreadPastTheOld50Window_IsFound`: the 60th newest of 70 is found, and every candidate query orders by `createdon` descending.
+6. `TheScanBound_IsVisible`: 520 owned threads give one bound Warning (it names 500 and "duplicate"); exactly 500 give none. Both read exactly 500 candidates.
+
+The two existing reuse tests now set up an Open, regarding-free thread row (`PairThread`), because the strict rule reads the row.
+
+**Fail before / pass after:**
+- Before, with the original service restored and the new tests in place: `DirectThreadAccessServiceTests` 11 failed, 64 passed (75). All 11 failures are new cases. The one new case that passed before is the share-read fault: the old code skipped that candidate too.
+- After: 75/75.
+
+**Gates** (in `C:\wt198b`):
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. The unit test project, rebuilt `--no-incremental`, is also 0/0.
+- The filter `DirectThread|DirectMessage|Communication.Access` passed 336/336.
+- ArchTests built 0/0; the `--no-build` run passed 2145/2145.
+- `dotnet format whitespace --verify-no-changes` on both changed `.cs` files is clean.
+
+**Known limits:**
+- **No unique key.** Two concurrent find-or-creates for the same pair can both miss and both create (unchanged from before 198b).
+- **Past the bound, a duplicate is possible.** An owner with more than 500 Direct threads whose pair thread is older than the 500 newest gets a new thread. That outcome is now logged as a Warning, never silent.
+- **Read cost.** Each candidate costs two reads (the thread row and its shares) where the old scan made one share read. In the worst case (no thread for the pair, 500 or more owned threads in both directions) a first message costs about 2,000 reads plus 20 page queries. The common case is a short newest-first scan. A principal-keyed POA read on the seam would make this one query, but it is a new seam method and is out of this scope. **The cost repeats on every routed send, not only the first message of a pair** (fm review): `FindOrCreateDirectThreadAsync` runs per send. Every Direct thread the owner created more recently than the pair's own thread costs two reads on each message to that pair, up to the bound in each direction. Ordering by the thread's `modifiedon` would bring an active pair to the front, but only if filing a message updates the thread row, and that is unverified. The non-strict skip log is Debug for the same reason; a read fault stays a Warning.
+- **No reuse, by design.** A pair thread that was widened (a third principal or a team share) or filed (a typed regarding) is no longer reused. The pair gets a fresh strict thread, and the widened thread keeps its messages.
+
 ## Open questions
 
 - **Q1:** After an ordinary record → unfiled move (owner back to the Direct team), should anchor-grantee shares be removed so the audience is exactly the participants? No current path removes them.

@@ -66,6 +66,19 @@ public class NoAccessEnforcementStore
     /// alone for that reason).</summary>
     internal const string EntrySelect = NoAccessListReader.RowSelect + ",statecode,_modifiedby_value,sprk_name,modifiedon";
 
+    /// <summary>
+    /// Fix round 3e: the columns an entry row must CARRY for the entry to be determined: <see cref="NoAccessListReader.RowSelect"/>
+    /// (identity, subject and object), the state and the author. A Web API row lists an empty lookup as an explicit JSON null, so
+    /// a column that is absent was not read, which says nothing about whether the entry names a subject, an object or an author.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> EntryRequiredColumns =
+        NoAccessListReader.RowSelect.Split(',').Concat(new[] { "statecode", "_modifiedby_value" }).ToArray();
+
+    /// <summary>The owner columns <see cref="ReadOwnerAsync"/> selects; <see cref="OwnerFrom"/> requires every one.</summary>
+    internal const string OwnerSelect = "_owningteam_value,_owninguser_value";
+
+    internal static readonly IReadOnlyList<string> OwnerRequiredColumns = OwnerSelect.Split(',');
+
     /// <summary>The <c>Prefer</c> header that makes Dataverse return each lookup's display name beside its id.</summary>
     internal const string FormattedValuesPreference = "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"";
 
@@ -107,6 +120,11 @@ public class NoAccessEnforcementStore
     /// </summary>
     internal static NoAccessEntrySnapshot? EntryFrom(JsonElement row, Guid entryId)
     {
+        // Fix round 3e: a row that lacks a column the entry is determined by is UNDETERMINED, not "no entry" and not a malformed
+        // one that walls nothing. It throws, like every other fault of this store, which the enforcer records as an unreadable
+        // entry (a failed, retried run) and the per-record read reports as unknown; the read-time veto does not depend on it.
+        RequireColumns(row, EntryRequiredColumns, "No Access entry");
+
         if (GuidOf(row, "sprk_noaccessentryid") != entryId)
         {
             return null;
@@ -335,14 +353,39 @@ public class NoAccessEnforcementStore
     internal virtual async Task<DataversePrincipalRef?> ReadOwnerAsync(string entitySet, string idColumn, Guid recordId, CancellationToken ct)
     {
         using var doc = await GetAsync(
-            $"{entitySet}?$filter={idColumn} eq {recordId}&$select=_owningteam_value,_owninguser_value&$top=1", ct);
-        var row = Values(doc).FirstOrDefault();
+            $"{entitySet}?$filter={idColumn} eq {recordId}&$select={OwnerSelect}&$top=1", ct);
+        return OwnerFrom(Values(doc).FirstOrDefault());
+    }
+
+    /// <summary>
+    /// The owner one row names, or <c>null</c> when the read returned no row or both owner columns are explicitly empty. Pure, so
+    /// the column reading is asserted without a transport double. Fix round 3e: a row that does not carry BOTH owner columns throws
+    /// (the owner is undetermined, not "none"); the enforcer treats an owner it could not read as a counted, retried failure.
+    /// </summary>
+    internal static DataversePrincipalRef? OwnerFrom(JsonElement row)
+    {
         if (row.ValueKind != JsonValueKind.Object)
             return null;
+
+        RequireColumns(row, OwnerRequiredColumns, "record owner");
 
         return GuidOf(row, "_owningteam_value") is { } team && team != Guid.Empty ? DataversePrincipalRef.Team(team)
             : GuidOf(row, "_owninguser_value") is { } user && user != Guid.Empty ? DataversePrincipalRef.User(user)
             : null;
+    }
+
+    /// <summary>Throws when <paramref name="row"/> is not an object or does not carry every one of <paramref name="columns"/>
+    /// (an explicit JSON null counts as carried). The message names the column, never a value.</summary>
+    private static void RequireColumns(JsonElement row, IReadOnlyList<string> columns, string what)
+    {
+        if (row.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException($"A {what} row was not an object; it cannot be determined.");
+
+        foreach (var column in columns)
+        {
+            if (!row.TryGetProperty(column, out _))
+                throw new InvalidOperationException($"A {what} row did not carry column '{column}'; it cannot be determined.");
+        }
     }
 
     /// <summary>

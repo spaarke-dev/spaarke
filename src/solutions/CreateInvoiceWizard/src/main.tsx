@@ -22,13 +22,10 @@ function App() {
       <CreateInvoiceWizard
         open={true}
         dataService={b.dataService}
-        navigationService={b.navigationService}
         embedded={true}
         onClose={b.closeDialog}
         authenticatedFetch={b.authenticatedFetch}
         bffBaseUrl={b.bffBaseUrl}
-        resolveSpeContainerId={b.resolveSpeContainerId}
-        tenantId={b.tenantId}
         initialAssociation={b.initialAssociation}
         lockAssociation={b.lockAssociation}
       />
