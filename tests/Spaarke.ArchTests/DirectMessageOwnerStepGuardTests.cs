@@ -12,8 +12,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>The signal.</b> A source scan of <c>src/server/**</c>. A file <b>reads the Direct team</b> when it names the lookup type
 /// (<c>DirectMessageOwnerTeam</c>), either lookup method (<c>ResolveDirectMessageOwnerTeamAsync</c> /
 /// <c>IdentifyDirectMessageOwnerTeamAsync</c>), either answer type (<c>DirectMessageOwnerTeamResolution</c> /
-/// <c>DirectMessageOwnerTeamIdentity</c>), or the shared Direct-team checks (<c>IsDirectOwnerTeamAsync</c> /
-/// <c>CannotBeDirectOwnerTeamAsync</c>). A file <b>writes an owner</b> when it assigns the owner key (<c>"ownerid"</c>,
+/// <c>DirectMessageOwnerTeamIdentity</c>), the shared Direct-team checks (<c>IsDirectOwnerTeamAsync</c> /
+/// <c>CannotBeDirectOwnerTeamAsync</c>), or either configuration key by its literal (<c>"DirectMessage:BusinessUnitName"</c> /
+/// <c>"DirectMessage:OwnerTeamName"</c>). A file <b>writes an owner</b> when it assigns the owner key (<c>"ownerid"</c>,
 /// <c>"ownerid@odata.bind"</c>, or a constant holding either) through an indexer, a <c>{ key, value }</c> collection initializer,
 /// <c>Add</c>/<c>TryAdd</c> or <c>SetAttributeValue</c>; or builds an <c>AssignRequest</c>; or assigns through a writer's
 /// <c>.AssignAsync(</c>.</para>
@@ -146,6 +147,9 @@ public class DirectMessageOwnerStepGuardTests
             ("refusalonly.cs", RefusalOnlyControl.Split('\n')),
             ("decisions.cs", DecisionRecordControl.Split('\n')),
             ("unfile.cs", UnfileControl.Split('\n')),
+            ("unitkey.cs", UnitKeyControl.Split('\n')),
+            ("teamkey.cs", TeamKeyControl.Split('\n')),
+            ("otherkey.cs", OtherKeyControl.Split('\n')),
         };
         var seam = new Dictionary<string, string> { ["UnfileAsync"] = "control" };
         var listing = new Dictionary<string, Listed>
@@ -176,11 +180,15 @@ public class DirectMessageOwnerStepGuardTests
                                        && p.Contains("decision records only"));
         Assert.Contains(problems, p => p.StartsWith("unfile.cs", StringComparison.Ordinal) && p.Contains(" ReadsAndMovesAsync:")
                                        && p.Contains("reads the Direct team and writes an owner"));
+        // K4: either configuration key read by its literal is a read of the Direct team.
+        Assert.Contains(problems, p => p.StartsWith("unitkey.cs", StringComparison.Ordinal) && p.Contains("not listed"));
+        Assert.Contains(problems, p => p.StartsWith("teamkey.cs", StringComparison.Ordinal) && p.Contains("not listed"));
 
         // Must not fire: the sanctioned member, a file that writes owners but never reads the Direct team, a file that names only the
         // refusal codes, reads and comparisons, column arrays, a doc comment, the decision-record writer's own table, a listed
-        // writer member that does not read the team, and the seam member.
-        Assert.True(problems.Count == 12, string.Join("\n", problems));
+        // writer member that does not read the team, the seam member, and another configuration key.
+        Assert.True(problems.Count == 15, string.Join("\n", problems));
+        Assert.DoesNotContain(problems, p => p.StartsWith("otherkey.cs", StringComparison.Ordinal));
         Assert.DoesNotContain(problems, p => Regex.IsMatch(p, @"^step\.cs:\d+ WriteAsync:"));
         Assert.DoesNotContain(problems, p => p.StartsWith("owners.cs", StringComparison.Ordinal));
         Assert.DoesNotContain(problems, p => p.StartsWith("refusalonly.cs", StringComparison.Ordinal));
@@ -239,7 +247,9 @@ public class DirectMessageOwnerStepGuardTests
 
     private static readonly Regex DirectTeamRead = new(
         @"\b(?:ResolveDirectMessageOwnerTeamAsync|IdentifyDirectMessageOwnerTeamAsync|DirectMessageOwnerTeamResolution|" +
-        @"DirectMessageOwnerTeamIdentity|DirectMessageOwnerTeam|IsDirectOwnerTeamAsync|CannotBeDirectOwnerTeamAsync)\b",
+        @"DirectMessageOwnerTeamIdentity|DirectMessageOwnerTeam|IsDirectOwnerTeamAsync|CannotBeDirectOwnerTeamAsync)\b" +
+        // The two configuration keys, read by their literals (K4).
+        @"|""DirectMessage:(?:BusinessUnitName|OwnerTeamName)""",
         RegexOptions.Compiled);
 
     private static bool ReadsTheDirectTeam(IReadOnlyList<string> lines) =>
@@ -500,6 +510,35 @@ public class DirectMessageOwnerStepGuardTests
             private async Task ReownCommunicationAsync(Guid id, Guid team)
             {
                 await _writer.AssignAsync(CommunicationTable, id, new EntityReference("team", team), CancellationToken.None);
+            }
+        }
+        """;
+
+    private const string UnitKeyControl = """
+        internal sealed class ReadsTheUnitKey
+        {
+            public void Route(IConfiguration c, Dictionary<string, object> fields, Guid team)
+            {
+                var unit = c["DirectMessage:BusinessUnitName"];
+                fields["ownerid"] = new EntityReference("team", team);
+            }
+        }
+        """;
+
+    private const string TeamKeyControl = """
+        internal sealed class ReadsTheTeamKey
+        {
+            public string? Team(IConfiguration c) => c.GetValue<string>("DirectMessage:OwnerTeamName");
+        }
+        """;
+
+    private const string OtherKeyControl = """
+        internal sealed class ReadsAnotherKey
+        {
+            public void Route(IConfiguration c, Dictionary<string, object> fields, Guid team)
+            {
+                var name = c["SecureRecord:OwnerTeamName"];
+                fields["ownerid"] = new EntityReference("team", team);
             }
         }
         """;
