@@ -213,3 +213,11 @@ checks above. The ebilling review diff was regenerated at
 - **ebilling-r1:** approved Part 1 (incl. both known limits) and the rename, conditional on the shell test + twin (done).
 
 rework: fix-round-1 task 007
+
+## ebilling-r1 verification at b2b519acff (2026-11-12)
+
+Approval stands. They ran `InvoiceSubmitShell` + `InvoiceSubmitPage` at the head (68/68). Confirmed: `parseRecordLink`
+reads the exact key `record` (`getAll('record')`), so `invoiceRecord` is never a deep link; the link survives sign-in
+(`captureReturnTo` keeps pathname+search); one producer (`SubmitInvoiceAction`). Known limit (no change): inside Teams
+only `record=` deep links are restored, so a Teams sub-page link to `/invoices/submit?invoiceRecord=` would not be — no
+producer emits one; an emailed/Teams "submit an invoice for X" link would need that restore.
