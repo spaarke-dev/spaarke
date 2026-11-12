@@ -22,6 +22,8 @@ import {
   createClassificationService,
   createOntologyAuthoringService,
   createOntologyRulesService,
+  createXrmNavigationService,
+  getXrm,
   searchLookupTarget,
 } from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
@@ -64,9 +66,21 @@ export const OntologyAdminWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () =
   // Task 102b (D-165): the rule wizard's matter picker, offered for a rule about matters. It searches matters by name AS THE CALLER
   // (Xrm.WebApi) through the shared lookup search the record header uses; only the chosen id reaches the BFF, which reads the matter
   // again as the caller and refuses a limit on any other subject.
-  const matterPicker = React.useMemo<MatterPicker>(
-    () => ({ subject: MATTER_TABLE, search: (query: string) => searchLookupTarget(MATTER_TABLE, query) }),
+  //
+  // D-219 Q5: the matter limit opens the Dataverse side pane (`INavigationService.openLookup`), like the create wizards. The adapter is
+  // built here at the host root, and only when this frame can reach `Xrm.Utility.lookupObjects`; without it (a non-MDA dev shell) no
+  // pane is offered and the wizard keeps its inline search rather than showing a Select button that cannot open.
+  const navigationService = React.useMemo(
+    () => (getXrm('lookupObjects') ? createXrmNavigationService() : undefined),
     []
+  );
+  const matterPicker = React.useMemo<MatterPicker>(
+    () => ({
+      subject: MATTER_TABLE,
+      search: (query: string) => searchLookupTarget(MATTER_TABLE, query),
+      navigationService,
+    }),
+    [navigationService]
   );
 
   return (
