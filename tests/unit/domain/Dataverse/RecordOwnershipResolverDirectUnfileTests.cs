@@ -366,15 +366,115 @@ public class RecordOwnershipResolverDirectUnfileTests
     }
 
     [Fact]
-    public async Task ClearingTheLastContact_OfADirectMessageTheSecureTeamOwns_LeavesItsContentRowsToTheSecureChildReconcile()
+    public async Task ClearingTheLastContact_OfADirectMessageTheSecureTeamOwns_ByItsCreator_LeavesItsContentRowsToTheSecureChildReconcile()
     {
-        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam);
-        var request = ClearTheContact();
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(FakeDirectory.CallerUserId);
+        var request = ClearTheContact() with { SecureExitCaller = CallerHoldingNoAccess() };
 
         var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
+        resolution.IsRefused.Should().BeFalse("the creator may take the message out of secure isolation");
         resolution.DirectUnfile.Should().Be(new DirectUnfileDue(ThreadId, LeavesSecureOwner: true));
         resolution.ParentsUnchanged.Should().BeFalse();
+    }
+
+    // ── Pass 3 (F1): a move off the Secure owner is asked F3 on every unfile branch ──────────────────────────────────────
+
+    public static TheoryData<string> CallersWhoDidNotCreateIt => new() { "no rights", "full access on every record" };
+
+    /// <summary>
+    /// The row the unfile takes off the Secure owner names no secure root it leaves (its filing does not change), so F3 admits
+    /// only its creator, the rule for any row held in the Secure Record business unit that leaves isolation with no secure root
+    /// that can be named. A caller with Full Access on every record is refused the same way, as on the non-Direct path.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(CallersWhoDidNotCreateIt))]
+    public async Task ClearingTheLastContact_OfADirectMessageTheSecureTeamOwns_ByAnotherCaller_IsForbidden_AndWritesNothing(string caller)
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(Sender);
+        var request = ClearTheContact() with
+        {
+            SecureExitCaller = caller == "no rights" ? CallerHoldingNoAccess() : CallerHoldingFullAccess(),
+        };
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        resolution.IsForbidden.Should().BeTrue();
+        resolution.DirectUnfile.Should().BeNull();
+        applied.Should().BeFalse("nothing is written");
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson")?.Id
+            .Should().Be(ContactId);
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(FakeDirectory.SecureNamedTeam);
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClearingTheLastContact_OfADirectMessageWhoseOwningUnitDidNotComeBack_ByAnotherCaller_IsForbidden()
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(Sender);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?> { ["owningbusinessunit"] = null });
+        var request = ClearTheContact() with { SecureExitCaller = CallerHoldingFullAccess() };
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        resolution.IsForbidden.Should().BeTrue("an owning unit that did not come back counts as the Secure Record unit");
+        applied.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ClearingTheLastContact_OfADirectMessageTheSecureTeamOwns_ForNobody_IsForbidden()
+    {
+        var directory = World().WithMessageLinkedOnlyToAContact(FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(FakeDirectory.CallerUserId);
+        var request = ClearTheContact();
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        resolution.IsForbidden.Should().BeTrue("nobody's rights can be checked");
+        applied.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(CallersWhoDidNotCreateIt))]
+    public async Task Unfile_FromAnOrdinaryRecord_OfADirectMessageTheSecureTeamOwns_ByAnotherCaller_IsForbidden_AndWritesNothing(string caller)
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam).CreatedBy(Sender);
+        var request = Unfile() with
+        {
+            SecureExitCaller = caller == "no rights" ? CallerHoldingNoAccess() : CallerHoldingFullAccess(),
+        };
+        var applied = false;
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request, () => applied = true),
+            CancellationToken.None);
+
+        resolution.IsForbidden.Should().BeTrue();
+        resolution.DirectUnfile.Should().BeNull();
+        applied.Should().BeFalse("nothing is written");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Unfile_FromAnOrdinaryRecord_OfADirectMessageTheSecureTeamOwns_ByItsCreator_CarriesTheMove()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(FakeDirectory.CallerUserId);
+        var request = Unfile() with { SecureExitCaller = CallerHoldingNoAccess() };
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse();
+        resolution.DirectUnfile.Should().Be(new DirectUnfileDue(ThreadId, LeavesSecureOwner: true));
     }
 
     [Theory]
@@ -672,6 +772,16 @@ internal static class DirectUnfileWorldExtensions
         CommunicationType type = CommunicationType.Message, bool withRecipient = true,
         int threadType = 100000001, bool isDefaultThread = false) =>
         directory.WithThread(threadType, isDefaultThread).WithMessage(owningBusinessUnit, owningTeam, type, withRecipient, matter);
+
+    /// <summary>The message's recorded creator (<c>createdby</c>), the person F3 admits when no secure root can be named.</summary>
+    public static OwnershipDirectory CreatedBy(this OwnershipDirectory directory, Guid systemUserId)
+    {
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["createdby"] = new EntityReference("systemuser", systemUserId),
+        });
+        return directory;
+    }
 
     /// <summary>A Direct message filed under nothing, in its Direct thread.</summary>
     public static OwnershipDirectory WithUnfiledDirectMessage(this OwnershipDirectory directory, Guid owningBusinessUnit, Guid owningTeam) =>

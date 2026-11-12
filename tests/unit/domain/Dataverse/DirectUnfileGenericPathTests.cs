@@ -203,22 +203,81 @@ public class DirectUnfileGenericPathTests
             "reconcile after the re-file");
     }
 
+    // ── Pass 3 (F1): the move off the Secure owner is asked F3 ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// One person with Full Access on the secure record moves the message to a contact (the owner stays the Secure team); then a
+    /// second person clears the contact. The unfile takes the message off the Secure owner with no secure root that can be named,
+    /// so F3 admits only its creator: the second person is refused and nothing is written. The first is refused the same way, as on
+    /// the non-Direct path for a row held in the Secure Record business unit that leaves it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateHandler_MovedFromASecureRecordToAContact_ThenTheContactClearedByAPersonWhoDidNotCreateIt_IsForbidden_AndWritesNothing(
+        bool clearedByTheFirstPerson)
+    {
+        var world = World().WithSecureRoot("sprk_matter", SecureMatterId)
+            .WithMessageFiledUnder(SecureMatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(Creator);
+        var (handler, writes) = UpdateHandler(world, Resolved(), threads: ThreadReconciles().Object, shares: FullRightsFor(Person));
+
+        await handler.UpdateAsync("sprk_communication", MessageId, ToAContact(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+        OwningTeam(world).Should().Be(FakeDirectory.SecureNamedTeam);
+        _calls.Clear();
+        writes.Clear();
+
+        var act = () => handler.UpdateAsync("sprk_communication", MessageId, ClearTheContact(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: clearedByTheFirstPerson ? Person : SecondPerson);
+
+        var refused = (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.IsReasonCode(refused.RefusalCode).Should().BeTrue("the F3 refusal");
+        writes.Should().BeEmpty("nothing is written");
+        world.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson")?.Id.Should().Be(ContactId);
+        OwningTeam(world).Should().Be(FakeDirectory.SecureNamedTeam);
+        world.Assignments.Should().BeEmpty();
+        _calls.Should().BeEmpty("no grant, no move, no reconcile");
+    }
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingFromASecureRecord_ByAPersonWithoutF3_IsForbidden_BeforeTheDirectTeamIsAsked()
+    {
+        var world = World().WithSecureRoot("sprk_matter", SecureMatterId)
+            .WithMessageFiledUnder(SecureMatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(Creator);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        var (handler, writes) = UpdateHandler(world, lookup.Lookup(), shares: FullRightsFor(Person));
+
+        var act = () => handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: SecondPerson);
+
+        var refused = (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which;
+        Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.IsReasonCode(refused.RefusalCode).Should().BeTrue();
+        lookup.Reads.Should().Be(0, "the Direct team is not asked for a change the caller may not make");
+        writes.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.SecureNamedTeam);
+        _calls.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task UpdateHandler_MovedFromASecureRecordToAContact_ThenTheContactCleared_MovesTheMessage_AndRunsTheSecureChildReconcile()
     {
         var world = World().WithSecureRoot("sprk_matter", SecureMatterId)
             .WithMessageFiledUnder(SecureMatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam)
+            .CreatedBy(Creator)
             .WithRecord(AttachmentTable, AttachmentId, FakeDirectory.SecureBu, owningTeam: FakeDirectory.SecureNamedTeam, extra: AttachmentOf());
         var threads = ThreadReconciles();
-        var (handler, _) = UpdateHandler(world, Resolved(), threads: threads.Object, shares: FullRights());
+        var (handler, _) = UpdateHandler(world, Resolved(), threads: threads.Object, shares: FullRightsFor(Person));
 
         await handler.UpdateAsync("sprk_communication", MessageId, ToAContact(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
             impersonateSystemUserId: Person);
         OwningTeam(world).Should().Be(FakeDirectory.SecureNamedTeam);
         _calls.Clear();
 
+        // The contact is cleared by the message's creator, whom F3 admits.
         await handler.UpdateAsync("sprk_communication", MessageId, ClearTheContact(), ConcurrencyMode.None, maxRetries: 1,
-            CancellationToken.None, impersonateSystemUserId: Person);
+            CancellationToken.None, impersonateSystemUserId: Creator);
 
         OwningTeam(world).Should().Be(DirectTeam);
         world.Row(AttachmentTable, AttachmentId).GetAttributeValue<EntityReference>("owningteam")?.Id
@@ -473,14 +532,23 @@ public class DirectUnfileGenericPathTests
         return threads;
     }
 
-    /// <summary>The impersonated person holds every right (F3 permits leaving the secure record).</summary>
-    private static Sprk.Bff.Api.Services.Access.IDataverseRecordShareService FullRights()
+    /// <summary>The message's recorded creator: neither the acting <see cref="Person"/> nor <see cref="SecondPerson"/>.</summary>
+    private static readonly Guid Creator = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003ca");
+
+    /// <summary>A second person, who holds only Read and did not create the message.</summary>
+    private static readonly Guid SecondPerson = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003cb");
+
+    /// <summary><paramref name="holder"/> holds every right on every record (F3 permits leaving a secure record it names); anyone
+    /// else holds Read only.</summary>
+    private static Sprk.Bff.Api.Services.Access.IDataverseRecordShareService FullRightsFor(Guid holder)
     {
         var shares = new Mock<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>();
         shares
             .Setup(s => s.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share
-                          | AccessRights.Delete);
+            .ReturnsAsync((Guid principal, string _, Guid _, CancellationToken _) => principal == holder
+                ? AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share
+                  | AccessRights.Delete
+                : AccessRights.Read);
         return shares.Object;
     }
 

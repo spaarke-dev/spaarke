@@ -2460,8 +2460,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
             // fm task 054 piece 3b: but clearing a typed regarding lookup the communication holds that files it under no ownership
             // parent (a contact, an account, an organization) can still leave it linked to nothing: an unfile, decided by the same
-            // rule BEFORE the write, refused the same way when the Direct team cannot be confirmed. No secure root is left here
-            // (its filing does not change), so there is no F3 question.
+            // rule BEFORE the write, refused the same way when the Direct team cannot be confirmed. Its filing does not change, so
+            // no named secure root is left; a message the unfile takes off the Secure owner is asked F3 all the same.
             if (request.WhenUnfiled == UnfiledOwnership.UnfiledCommunication
                 && request.ChangesARegardingLink(current)
                 && byColumn.Count == 0 && threadAfter.Count == 0)
@@ -2475,6 +2475,23 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                         "Refusing to re-file {Entity} {RecordId}: {Reason} ({Code}). The change was NOT written.",
                         request.EntityLogicalName, request.RecordId, answer.Reason, answer.RefusalCode);
                     return answer;
+                }
+
+                // A move out of the Secure owner leaves secure isolation, so F3 is asked before anything is written, as for any
+                // row held in the Secure Record business unit that leaves it.
+                if (answer.DirectUnfile is { LeavesSecureOwner: true })
+                {
+                    var (directExitRefusal, _, _) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
+                        request, current, filedUnderBefore, filedUnderBefore, ownBefore, ownBefore,
+                        Array.Empty<RecordOwnershipParent>(), answer, leavesSecureOwner: true, ct).ConfigureAwait(false);
+                    if (directExitRefusal is not null)
+                    {
+                        _logger.LogWarning(
+                            "Refusing to re-file {Entity} {RecordId} out of a secure record: {Reason} ({Code}). The change was NOT "
+                            + "written.", request.EntityLogicalName, request.RecordId, directExitRefusal.Reason,
+                            directExitRefusal.RefusalCode);
+                        return directExitRefusal;
+                    }
                 }
 
                 if (answer.DirectUnfile is not null)
@@ -2534,7 +2551,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             // V-fix 3: filed under, after the change, includes the Secure-only parents it still holds (as filedUnderBefore does),
             // so keeping a copy's canonical is never read as leaving the canonical's secure root.
             request, current, filedUnderBefore, parents.Concat(secureOnlyAfter).Distinct().ToArray(), ownBefore, ownAfter,
-            threadTheReconcileMayLeave, resolution, ct)
+            threadTheReconcileMayLeave, resolution, leavesSecureOwner: false, ct)
             .ConfigureAwait(false);
         if (exitRefusal is not null)
         {
@@ -2561,6 +2578,28 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     "Refusing to re-file {Entity} {RecordId}: {Reason} ({Code}). The change was NOT written.",
                     request.EntityLogicalName, request.RecordId, resolution.Reason, resolution.RefusalCode);
                 return resolution;
+            }
+
+            // A move out of the Secure owner leaves secure isolation. The check above asked F3 only for the secure roots the
+            // change leaves, while the answer still kept the owner; unless it was asked and permitted that, F3 is asked now,
+            // before anything is written, as for any row held in the Secure Record business unit that leaves it.
+            if (resolution.DirectUnfile is { LeavesSecureOwner: true } && !permittedToLeaveSecure)
+            {
+                var (directExitRefusal, directPermitted, directPermit) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
+                    request, current, filedUnderBefore, parents.Concat(secureOnlyAfter).Distinct().ToArray(), ownBefore, ownAfter,
+                    threadTheReconcileMayLeave, resolution, leavesSecureOwner: true, ct)
+                    .ConfigureAwait(false);
+                if (directExitRefusal is not null)
+                {
+                    _logger.LogWarning(
+                        "Refusing to re-file {Entity} {RecordId} out of a secure record: {Reason} ({Code}). The change was NOT "
+                        + "written.", request.EntityLogicalName, request.RecordId, directExitRefusal.Reason,
+                        directExitRefusal.RefusalCode);
+                    return directExitRefusal;
+                }
+
+                permittedToLeaveSecure = directPermitted;
+                exitPermit ??= directPermit;
             }
         }
 
@@ -3337,13 +3376,17 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// secure root above it can be named (its secure parent is not one of its own columns — a message secured by the
     /// record thread it joined) admits only its creator. A filing deeper than <see cref="MaxLineageDepth"/> refuses, as
     /// the owner decision does.</para>
+    /// <para><b>A move the writer makes after the re-file</b> (fm task 054 piece 3b). <paramref name="leavesSecureOwner"/>: the
+    /// answer carries a move of the row off the Secure owner that the writer makes after the change (a Direct unfile,
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectUnfileDue.LeavesSecureOwner"/>), so the row leaves isolation
+    /// although the answer keeps its owner, and it is held in the Secure Record business unit as that answer read it.</para>
     /// </remarks>
     private async Task<(RecordOwnerResolution? Refusal, bool PermittedToLeave, SecureExitPermit? Permit)>
         RefuseUnlessPermittedToLeaveSecureRootsAsync(
         RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
         IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, IReadOnlyCollection<RecordOwnershipParent> ownBefore,
         IReadOnlyCollection<RecordOwnershipParent> ownAfter, IReadOnlyCollection<RecordOwnershipParent> threadTheReconcileMayLeave,
-        RecordOwnerResolution resolution, CancellationToken ct)
+        RecordOwnerResolution resolution, bool leavesSecureOwner, CancellationToken ct)
     {
         // Two cheap facts first, so the many re-files that leave nothing (a thread JOIN, an invoice link, additive inbound
         // filing) cost no read: a change that removes none of the row's parents leaves no root (both walks would read the
@@ -3352,7 +3395,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // #2143 round 7 (F1): a parent taken out of the row's OWN columns, though another source (its thread) still files the
         // row under it — the move a re-file makes; the thread follows it after the write.
         var removesAnOwnParent = ownBefore.Any(parent => !ownAfter.Contains(parent));
-        var mayLeaveIsolation = !resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged;
+        var mayLeaveIsolation = leavesSecureOwner
+                                || (!resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged);
         if (!removesAParent && !removesAnOwnParent && threadTheReconcileMayLeave.Count == 0 && !mayLeaveIsolation)
         {
             return (null, false, null);
@@ -3424,7 +3468,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var unidentified = left.Count == 0
             && mayLeaveIsolation
             && secureBu.Id is { } secureBuId
-            && current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId;
+            && (leavesSecureOwner || current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId);
 
         if (left.Count == 0 && !unidentified)
         {
