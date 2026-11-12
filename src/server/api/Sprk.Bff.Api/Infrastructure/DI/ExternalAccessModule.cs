@@ -752,6 +752,16 @@ public static class ExternalAccessModule
         // unconditional (and IGenericEntityService, resolved per run from a scope, is too), so no Null-Object is needed.
         services.AddScheduledJob<SecureRecordIsolationCensusJob>(SecureRecordIsolationCensusJob.DefaultCronSchedule);
 
+        // unified-access-control-r2 task 191e (#2179 design 3.13; owner rounds 114-115 Q5, Q7 = a) — every 2 minutes, moves
+        // each systemuser whose stored sprk_isexternal reads true into the External Collaborators unit and assigns it the
+        // Spaarke External Collaborator role from that unit, then reads both back; one-way, never application users,
+        // disabled users or administrators; alerts (Critical) only on a failed placement. ENABLED but REPORT-ONLY: writes
+        // need FlaggedUserPlacementJob.WritesEnabledConfigKey = true (absent, empty or unparseable = report-only); turning
+        // it on is an owner go per environment (task 191i). ADR-052 places it in the BFF on the in-process scheduler
+        // (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): IServiceScopeFactory, IConfiguration and TimeProvider are
+        // unconditional, and IGenericEntityService, resolved per run from a scope, is too.
+        services.AddScheduledJob<FlaggedUserPlacementJob>(FlaggedUserPlacementJob.DefaultCronSchedule);
+
         // unified-access-control-r2 task 149 (C10 part 2, sharees; ships with task 146) — the ONE synchronizer that keeps
         // every child of a secure record shared with exactly its root's internal sharees (never wider; Share and Assign
         // never mirrored). Called by /share-user and /unshare-user (fan-out in the request), by secure provisioning, and by
