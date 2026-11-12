@@ -2780,6 +2780,33 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// uac-r2 task 191c (191b handoff): the CALLER-LESS (a′) decision for <c>ExternalVisibility</c>'s invoice rule, read app-only
+    /// through the same readers as every other (a′) decision, without the own-firms rule (the External Collaborators team is no
+    /// firm's caller: an invoice visible to some partner is not thereby hidden). A failed read THROWS, which the predicate turns
+    /// into an Undecided row (fail closed). Bound by <c>AddExternalAccess</c>'s <c>ExternalVisibilityDecider</c>.
+    /// </summary>
+    internal async Task<InvoiceVisibilityResult> DecideInvoicesWithoutCallerAsync(
+        IReadOnlyCollection<Guid> invoiceIds, EffectiveRootFlagReader rootFlags, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(invoiceIds);
+        ArgumentNullException.ThrowIfNull(rootFlags);
+        var asked = invoiceIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        var decision = await ExternalInvoiceVisibility.DecideAsync(asked, InvoiceVisibilityReadersOver(rootFlags), ct);
+        LogInvoiceVisibilityCost(ExternalTeamSharePlane, asked.Count, decision);
+        return decision;
+    }
+
+    /// <summary>uac-r2 task 191c: the cost lines' plane for the External-team share's reads (<c>ExternalVisibilityDecider</c>).</summary>
+    internal const string ExternalTeamSharePlane = "external-team-share";
+
+    /// <summary>
+    /// uac-r2 task 191c: the app-only OData reader <c>ExternalVisibility</c> reads the 065 rule and thread privacy through (the
+    /// same reader as the document narrowing). A failed read THROWS.
+    /// </summary>
+    internal Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryVisibilityRowsAsync(
+        string entitySet, string odata, CancellationToken ct) => QueryRowsOrThrowAsync(entitySet, odata, ct);
+
+    /// <summary>
     /// The predicate's readers, every one app-only: this service's OData reader, 188's decision with the marker-aware rule 2
     /// (the core decision is called only here and in <see cref="ExternalDocumentNarrowing"/>, the 188 guard's app-only rule),
     /// the live-parent walk and <paramref name="rootFlags"/>. Task 130-0: <paramref name="callerFirms"/> only from

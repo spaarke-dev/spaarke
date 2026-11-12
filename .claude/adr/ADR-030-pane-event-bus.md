@@ -110,7 +110,7 @@ Payloads carry deterministic IDs + summaries only (per ADR-015 tier-1 safety) â€
 | ADR | Relationship |
 |---|---|
 | [ADR-012](ADR-012-shared-components.md) | PaneEventBus lives in `@spaarke/ai-widgets` per ADR-012's shared-lib placement |
-| [ADR-021](ADR-021-design-system.md) | All consumers are Fluent v9 React components |
+| [ADR-021](ADR-021-fluent-design-system.md) | All consumers are Fluent v9 React components |
 | [ADR-022](ADR-022-pcf-platform-libraries.md) | Bus is consumed by Code Pages (React 19); PCF does NOT consume the bus directly |
 | ADR-031 (R4 task A-2b) | Stage lifecycle (ADR-031) consumes bus events as its primary signals |
 

@@ -752,6 +752,16 @@ public static class ExternalAccessModule
         // unconditional (and IGenericEntityService, resolved per run from a scope, is too), so no Null-Object is needed.
         services.AddScheduledJob<SecureRecordIsolationCensusJob>(SecureRecordIsolationCensusJob.DefaultCronSchedule);
 
+        // unified-access-control-r2 task 191e (#2179 design 3.13; owner rounds 114-115 Q5, Q7 = a) — every 2 minutes, moves
+        // each systemuser whose stored sprk_isexternal reads true into the External Collaborators unit and assigns it the
+        // Spaarke External Collaborator role from that unit, then reads both back; one-way, never application users,
+        // disabled users or administrators; alerts (Critical) only on a failed placement. ENABLED but REPORT-ONLY: writes
+        // need FlaggedUserPlacementJob.WritesEnabledConfigKey = true (absent, empty or unparseable = report-only); turning
+        // it on is an owner go per environment (task 191i). ADR-052 places it in the BFF on the in-process scheduler
+        // (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): IServiceScopeFactory, IConfiguration and TimeProvider are
+        // unconditional, and IGenericEntityService, resolved per run from a scope, is too.
+        services.AddScheduledJob<FlaggedUserPlacementJob>(FlaggedUserPlacementJob.DefaultCronSchedule);
+
         // unified-access-control-r2 task 149 (C10 part 2, sharees; ships with task 146) — the ONE synchronizer that keeps
         // every child of a secure record shared with exactly its root's internal sharees (never wider; Share and Assign
         // never mirrored). Called by /share-user and /unshare-user (fan-out in the request), by secure provisioning, and by
@@ -762,6 +772,45 @@ public static class ExternalAccessModule
         // dependency — IGenericEntityService, the one POA seam IDataverseRecordShareService, the guard — is registered
         // unconditionally. Placement + §11 justification: notes/task-149-secure-child-sharee-access.md §6 and §13.
         services.AddScoped<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+
+        // unified-access-control-r2 task 191c (#2179 design §3.4): THE predicate (task 191b) over the BFF's app-only readers —
+        // the external plane's OData reader (the 065 rule, thread privacy), task 188's app-only document narrowing, the effective
+        // root flags, ebilling's caller-less (a′) decision and the Procedure Library container — and the External-team mode of the
+        // share synchronizer that asks it. The readers are built on the first decision, so a request that never decides builds no
+        // client. SCOPED, like the synchronizer, the reconciler and the Restricted remover that take the engine as an optional
+        // collaborator (default null in test compositions). Its writes are OFF unless ExternalAccess:ExternalTeamShare:WritesEnabled
+        // (and, for the re-own, ReownWritesEnabled) is true. §10/§11: notes/task-191c-external-team-share-job.md.
+        services.AddScoped<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>(sp =>
+        {
+            ExternalVisibility.Readers? readers = null;
+            return (rows, ct) =>
+            {
+                if (readers is null)
+                {
+                    var data = sp.GetRequiredService<ExternalDataService>();
+                    EffectiveRootFlagReader rootFlags = sp.GetRequiredService<ExternalParticipationService>().GetEffectiveRootRecordFlagsAsync;
+                    readers = new ExternalVisibility.Readers(
+                        sp.GetRequiredService<IGenericEntityService>(),
+                        data.QueryVisibilityRowsAsync,
+                        sp.GetRequiredService<AppOnlyDocumentNarrowing>(),
+                        rootFlags,
+                        (invoiceIds, token) => data.DecideInvoicesWithoutCallerAsync(invoiceIds, rootFlags, token),
+                        sp.GetRequiredService<IOptions<Sprk.Bff.Api.Configuration.FinanceOptions>>().Value.ProcedureLibraryContainerId,
+                        sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer>>());
+                }
+
+                return ExternalVisibility.DecideAsync(rows, readers, ct);
+            };
+        });
+        services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer(
+            sp.GetRequiredService<IGenericEntityService>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>(),
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer>>(),
+            sp.GetService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(),
+            sp.GetService<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>(),
+            sp.GetService<Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam>()));
 
         // Task 149 — the scheduled safety net and the mechanism for every writer that does not pass through the share
         // endpoints: children created or re-filed under a secure record, and model-driven-app Share/Unshare of a secure root

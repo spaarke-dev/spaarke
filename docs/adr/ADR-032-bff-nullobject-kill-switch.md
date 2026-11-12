@@ -7,7 +7,7 @@
 > **Concise version**: [`.claude/adr/ADR-032-bff-nullobject-kill-switch.md`](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md)
 > **Note (2026-06-02)**: Originally drafted on master as ADR-030. Renumbered to ADR-032 during R4 merge to resolve number collision with R4's ADR-030 (PaneEventBus) + ADR-031 (Stage Lifecycle). See [`.claude/adr/INDEX.md`](../../.claude/adr/INDEX.md).
 > **Cross-references**:
-> - Supersedes parts of [ADR-018](.../../.claude/adr/ADR-018-feature-flags.md) (kill switches) — extends with composition-root binding requirement
+> - Supersedes parts of [ADR-018](ADR-018-feature-flags-and-kill-switches.md) (kill switches) — extends with composition-root binding requirement
 > - Reinforces [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) (DI minimalism) — Null-Objects do NOT add new interfaces
 > - Codifies the workflow rule from CLAUDE.md §10 bullet 6 ("Endpoints that map unconditionally must have unconditional service registration") — explains HOW to satisfy that rule when a service must remain feature-gated
 > - Resolves r1 ledger entries RB-T028-03/04/05/06

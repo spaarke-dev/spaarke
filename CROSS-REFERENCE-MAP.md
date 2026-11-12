@@ -52,13 +52,13 @@
 | Domain | Constraint File | Source ADRs | Source Guides | Source Architecture |
 |--------|----------------|-------------|---------------|---------------------|
 | API/BFF | [.claude/constraints/api.md](.claude/constraints/api.md) | ADR-001, 004, 008, 010, 011, 017 | - | [sdap-bff-api-patterns.md](docs/architecture/sdap-bff-api-patterns.md) |
-| PCF | [.claude/constraints/pcf.md](.claude/constraints/pcf.md) | ADR-006, 012, 014, 015, 018 | [PCF-CONTROL-DEVELOPMENT.md](docs/guides/PCF-CONTROL-DEVELOPMENT.md) | [sdap-pcf-patterns.md](docs/architecture/sdap-pcf-patterns.md) |
+| PCF | [.claude/constraints/pcf.md](.claude/constraints/pcf.md) | ADR-006, 012, 014, 015, 018 | [PCF-DEPLOYMENT-GUIDE.md](docs/guides/PCF-DEPLOYMENT-GUIDE.md) | [sdap-pcf-patterns.md](docs/architecture/sdap-pcf-patterns.md) |
 | Plugins (none) + Write Path | [.claude/constraints/plugins.md](.claude/constraints/plugins.md) | ADR-002 | [DATAVERSE-WRITE-PATH-ARCHITECTURE.md](docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md) | - |
-| Auth | [.claude/constraints/auth.md](.claude/constraints/auth.md) | ADR-004, 016 | - | [auth-boundaries.md](docs/architecture/auth-boundaries.md), [sdap-auth-patterns.md](docs/architecture/sdap-auth-patterns.md) |
+| Auth | [.claude/constraints/auth.md](.claude/constraints/auth.md) | ADR-004, 016 | - | auth-boundaries.md, [sdap-auth-patterns.md](docs/architecture/sdap-auth-patterns.md) |
 | Data | [.claude/constraints/data.md](.claude/constraints/data.md) | ADR-003, 005, 007, 009, 019 | - | - |
 | Testing | [.claude/constraints/testing.md](.claude/constraints/testing.md) | ADR-022 | - | - |
 | Config | [.claude/constraints/config.md](.claude/constraints/config.md) | ADR-020, 021 | - | - |
-| AI | [.claude/constraints/ai.md](.claude/constraints/ai.md) | ADR-013 | [AI-TOOL-FRAMEWORK-GUIDE.md](docs/guides/AI-TOOL-FRAMEWORK-GUIDE.md) | [AI-ARCHITECTURE.md](docs/architecture/AI-ARCHITECTURE.md) |
+| AI | [.claude/constraints/ai.md](.claude/constraints/ai.md) | ADR-013 | AI-TOOL-FRAMEWORK-GUIDE.md | [AI-ARCHITECTURE.md](docs/architecture/AI-ARCHITECTURE.md) |
 
 ---
 
