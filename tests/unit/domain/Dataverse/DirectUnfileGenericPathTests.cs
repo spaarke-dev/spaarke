@@ -1,0 +1,278 @@
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Nodes;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.Services.Communication;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Xunit;
+using FakeDirectory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
+
+namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
+
+/// <summary>
+/// field-mapping-server-write-path-r1 task 054 piece 3b: the generic update paths (the playbook output mapping's
+/// <see cref="DataverseUpdateHandler"/> and the Update Record node's <see cref="UpdateRecordActionCore"/>) take the one unfile rule
+/// (<see cref="DirectMessageOwnerStep.UnfiledOwnershipFor"/>) when they act for a person: an eligible Direct message returns to the
+/// Direct team after the change, its participants granted first; one whose Direct team cannot be confirmed is refused before
+/// anything is written; any other unfiled communication is Unchanged pending #2722 — no owner is written, neither the acting
+/// user's business-unit team nor its creator. A write that acts for nobody keeps its refusal.
+/// </summary>
+/// <remarks>The REAL <see cref="RecordOwnershipResolver"/> over <see cref="FakeDirectory"/>, the REAL
+/// <see cref="DirectMessageOwnerStep"/> over the same directory, and the REAL <see cref="DirectMessageOwnerTeam"/> over
+/// <see cref="DirectMessageOwnerTeamDouble"/>.</remarks>
+public class DirectUnfileGenericPathTests
+{
+    private static readonly Guid DirectUnit = DirectMessageOwnerTeamDouble.DirectUnitId;
+    private static readonly Guid DirectTeam = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c1");
+    private static readonly Guid DirectUnitDefaultTeam = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c2");
+    private static readonly Guid MessageId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003b3");
+    private static readonly Guid MatterId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003c5");
+    private static readonly Guid Person = FakeDirectory.CallerUserId;
+
+    private readonly List<string> _calls = new();
+
+    // ── DataverseUpdateHandler ───────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingACommunicationThatIsNotADirectMessage_AsAPerson_WritesNoOwner()
+    {
+        // UAC-r2: the generic path no longer hands an unfiled communication to the acting user's business-unit team.
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email);
+        var (handler, writes) = UpdateHandler(world, Resolved());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle("the unfile itself is written");
+        world.Assignments.Should().BeEmpty("Unchanged pending #2722: no owner is written");
+        world.ConditionalWrites.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam).And.NotBe(FakeDirectory.GeneralTeam);
+        _calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingADirectMessage_AsAPerson_GrantsItsParticipants_ThenReturnsItToTheDirectTeam()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var (handler, writes) = UpdateHandler(world, Resolved());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle();
+        OwningTeam(world).Should().Be(DirectTeam);
+        world.Assignments.Should().Equal(("sprk_communication", MessageId, DirectTeam));
+        _calls.Should().Equal("grant DirectParticipants", "owner sprk_communication", "grant DirectParticipants");
+    }
+
+    [Theory]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task UpdateHandler_UnfilingADirectMessage_WhoseDirectTeamIsNotUsable_IsRefused_AndWritesNothing(string onlySet)
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var (handler, writes) = UpdateHandler(world, DirectMessageOwnerStepTests.PartiallyConfigured(onlySet));
+
+        var act = () => handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: Person);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnusable);
+        writes.Should().BeEmpty();
+        world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingADirectMessage_WhenTheLookupFaults_IsRefusedAsUnavailable_AndWritesNothing()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        lookup.Faults = true;
+        var (handler, writes) = UpdateHandler(world, lookup.Lookup());
+
+        var act = () => handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None, impersonateSystemUserId: Person);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnavailable);
+        writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingACommunication_ForNobody_KeepsItsRefusal()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var (handler, writes) = UpdateHandler(world, Resolved());
+
+        var act = () => handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(RecordOwnerRefusal.NoOwnerSource);
+        writes.Should().BeEmpty();
+        _calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateHandler_WithNoStepComposed_KeepsTheCreator_AndNeverAsksTheDirectRule()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+        var (handler, writes) = UpdateHandler(world, DirectMessageOwnerStepTests.PartiallyConfigured(
+            DirectMessageOwnerTeam.BusinessUnitNameConfigKey), withStep: false);
+
+        await handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle();
+        world.Assignments.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
+    }
+
+    // ── UpdateRecordActionCore ───────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateRecordNode_UnfilingADirectMessage_AsAPerson_ReturnsItToTheDirectTeam()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+
+        await UpdateRecordCore(world, Resolved()).UpdateAsync(UnfileInput(Person), CancellationToken.None);
+
+        OwningTeam(world).Should().Be(DirectTeam);
+        _calls.First().Should().Be("grant DirectParticipants");
+    }
+
+    [Fact]
+    public async Task UpdateRecordNode_UnfilingACommunicationThatIsNotADirectMessage_AsAPerson_WritesNoOwner()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, withRecipient: false);
+
+        await UpdateRecordCore(world, Resolved()).UpdateAsync(UnfileInput(Person), CancellationToken.None);
+
+        world.Assignments.Should().BeEmpty();
+        OwningTeam(world).Should().Be(FakeDirectory.ChildTeam);
+    }
+
+    [Fact]
+    public async Task UpdateRecordNode_UnfilingADirectMessage_WhoseDirectTeamIsNotUsable_IsRefused()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
+
+        var act = () => UpdateRecordCore(world, DirectMessageOwnerStepTests.PartiallyConfigured(
+            DirectMessageOwnerTeam.OwnerTeamNameConfigKey)).UpdateAsync(UnfileInput(Person), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode.Should().Be(RecordOwnerRefusal.DirectTeamUnusable);
+        world.Assignments.Should().BeEmpty();
+    }
+
+    // ── The HTTP refusal shape ───────────────────────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(RecordOwnerRefusal.DirectTeamUnavailable, StatusCodes.Status503ServiceUnavailable)]
+    [InlineData(RecordOwnerRefusal.DirectTeamUnusable, StatusCodes.Status409Conflict)]
+    [InlineData(RecordOwnerRefusal.NoOwnerSource, StatusCodes.Status409Conflict)]
+    public void HttpRefusal_AnUnreadableDirectTeamIs503_EveryOtherOwnerRefusalStays409(string code, int status)
+    {
+        var result = ProblemDetailsHelper.RecordOwnerRefused(RecordOwnerResolution.Refused(code, "reason"), "communication", "trace");
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(status);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(code);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private static FakeDirectory World() => FakeDirectory.Standard()
+        .WithBusinessUnit(DirectUnit, DirectMessageOwnerTeamDouble.BusinessUnitName, parent: FakeDirectory.GeneralBu)
+        .WithTeam(DirectUnitDefaultTeam, DirectUnit, isDefault: true, teamType: 0, DirectMessageOwnerTeamDouble.BusinessUnitName)
+        .WithTeam(DirectTeam, DirectUnit, isDefault: false, teamType: 0, DirectMessageOwnerTeamDouble.OwnerTeamName)
+        .WithOrdinaryRoot("sprk_matter", MatterId);
+
+    private static Dictionary<string, object?> Unfile() => new() { ["sprk_regardingmatter"] = null };
+
+    private static UpdateRecordActionInput UnfileInput(Guid person) => new(
+        "sprk_communication", MessageId, FieldMappings: null,
+        LegacyFields: new Dictionary<string, string?> { ["sprk_regardingmatter"] = null }, Lookups: null,
+        ImpersonateSystemUserId: person);
+
+    private static Guid? OwningTeam(FakeDirectory world) =>
+        world.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("owningteam")?.Id;
+
+    private static DirectMessageOwnerTeam Resolved() => new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam).Lookup();
+
+    private (DataverseUpdateHandler Handler, List<Dictionary<string, object?>> Writes) UpdateHandler(
+        FakeDirectory world, DirectMessageOwnerTeam lookup, bool withStep = true)
+    {
+        var writes = new List<Dictionary<string, object?>>();
+        var handler = new DataverseUpdateHandler(
+            FieldWrites(world, writes), Mock.Of<IGenericEntityService>(),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
+            world.Resolver(directMessageOwnerTeam: lookup),
+            SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            SecureChildReconcilerFixtures.OverEmptyWorld(),
+            directOwner: withStep ? Step(world, lookup) : null);
+        return (handler, writes);
+    }
+
+    private UpdateRecordActionCore UpdateRecordCore(FakeDirectory world, DirectMessageOwnerTeam lookup) =>
+        new(
+            FieldWrites(world, new List<Dictionary<string, object?>>()),
+            new ServiceCollection()
+                .AddSingleton(new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper)
+                .AddSingleton<IRecordOwnershipResolver>(world.Resolver(directMessageOwnerTeam: lookup))
+                .AddSingleton(Step(world, lookup))
+                .AddSingleton(EntitySetNameFixtures.Service())
+                .BuildServiceProvider()
+                .GetRequiredService<IServiceScopeFactory>(),
+            NullLogger.Instance);
+
+    /// <summary>The path's own PATCH, landed on the directory row (the resolver reads the row after it).</summary>
+    private static IFieldMappingDataverseService FieldWrites(FakeDirectory world, List<Dictionary<string, object?>> writes)
+    {
+        var fields = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        fields
+            .Setup(f => f.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((t, id, f, _, _) =>
+            {
+                writes.Add(f);
+                world.ApplyPatch(t, id, f);
+            })
+            .Returns(Task.CompletedTask);
+        return fields.Object;
+    }
+
+    /// <summary>The real step over the directory: rows read by id, content rows none, owner writes conditional.</summary>
+    private DirectMessageOwnerStep Step(FakeDirectory world, DirectMessageOwnerTeam lookup)
+    {
+        var dataverse = new Mock<IGenericEntityService>();
+        dataverse
+            .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+                q.Criteria.Conditions.Any(c => c.AttributeName == q.EntityName + "id") ? world.Answer(q) : new EntityCollection());
+        dataverse
+            .Setup(d => d.UpdateIfRowVersionMatchesAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string, Dictionary<string, object>, CancellationToken>((table, id, version, fields, _) =>
+            {
+                _calls.Add("owner " + table);
+                world.UpdateIfVersion(table, id, version, fields);
+            })
+            .Returns(Task.CompletedTask);
+        var access = new Mock<IDirectThreadAccessService>();
+        access
+            .Setup(a => a.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ThreadAssignment, CancellationToken>((_, assignment, _) => _calls.Add("grant " + assignment.Audience))
+            .Returns(Task.CompletedTask);
+        return new DirectMessageOwnerStep(access.Object, dataverse.Object, lookup, NullLogger<DirectMessageOwnerStep>.Instance);
+    }
+}

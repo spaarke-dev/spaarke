@@ -816,7 +816,9 @@ public static class ChildRecordEndpoints
         try
         {
             outcome = await OwnedChildWrite.RefileAsync(
-                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities)
+                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities,
+                // fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team.
+                httpContext.RequestServices?.GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>())
                 .ConfigureAwait(false);
         }
         catch (RecordOwnerUnsettledException)

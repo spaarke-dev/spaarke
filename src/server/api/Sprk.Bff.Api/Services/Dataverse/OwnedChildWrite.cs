@@ -1453,7 +1453,8 @@ internal static class OwnedChildWrite
         DataverseWriteItemMapper.MappedItem item,
         Guid? callerObjectId,
         CancellationToken ct,
-        IGenericEntityService? appOnlyEntities = null)
+        IGenericEntityService? appOnlyEntities = null,
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
     {
         // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): asked on the
         // item's shape alone, before any read or write, so the re-file core holds it for any table a caller passes. Nothing written.
@@ -1581,10 +1582,10 @@ internal static class OwnedChildWrite
                     ParentChanges = changes,
                     CallerObjectId = callerObjectId,
                     CallerSystemUserId = me.SystemUserId,
-                    // E1: a communication filed under nothing keeps its creator.
-                    WhenUnfiled = string.Equals(table, "sprk_communication", StringComparison.OrdinalIgnoreCase)
-                        ? UnfiledOwnership.KeepCreator
-                        : UnfiledOwnership.ActingUserTeam,
+                    // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
+                    // to the Direct team; any other communication is Unchanged pending #2722).
+                    WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
+                        table, actsForAPerson: true, directOwner),
                     SecureExitCaller = secureExitCaller,
                 },
                 async token =>
@@ -1596,6 +1597,10 @@ internal static class OwnedChildWrite
                         throw new CallerWriteFailedException(response);
                 },
                 ct).ConfigureAwait(false);
+
+            // Piece 3b: an unfiled Direct message returns to the Direct team now, before the host's step after the re-file.
+            if (directOwner is not null && !resolution.IsRefused)
+                await directOwner.AfterReparentAsync(recordId, resolution, CancellationToken.None).ConfigureAwait(false);
 
             return resolution switch
             {
