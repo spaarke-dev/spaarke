@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -294,13 +295,22 @@ public static class RateLimitingModule
                 var json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(problemDetails);
                 await context.HttpContext.Response.Body.WriteAsync(json, cancellationToken);
 
-                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                // ADR-015 (Tier 1 App Insights logs): identifiers, sizes, timings and reason codes only — never a
+                // claim value. Identity.Name is the UPN/email, and the client IP is personal data the ADR's
+                // allow-list does not include, so neither is logged. The caller is identified by the same opaque
+                // key the limiter partitions by (oid, else sub); an unauthenticated caller has none.
+                // TraceIdentifier correlates the entry with the request in the platform's own HTTP logs.
+                var httpContext = context.HttpContext;
+                var policyName = httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName
+                                 ?? "unknown";
+                var logger = httpContext.RequestServices.GetRequiredService<ILogger<Program>>();
                 logger.LogWarning(
-                    "Rate limit exceeded for {Path} by {User} (IP: {IP}). Retry after {RetryAfter}s",
-                    context.HttpContext.Request.Path,
-                    context.HttpContext.User?.Identity?.Name ?? "anonymous",
-                    context.HttpContext.Connection.RemoteIpAddress,
-                    retryAfter);
+                    "Rate limit exceeded for {Path} on policy {Policy} by caller {CallerKey}. Retry after {RetryAfter}s. TraceId {TraceId}",
+                    httpContext.Request.Path,
+                    policyName,
+                    CallerResolution.ResolveOpaqueCallerKey(httpContext.User) ?? "anonymous",
+                    retryAfter,
+                    httpContext.TraceIdentifier);
             };
         });
 
