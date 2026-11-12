@@ -4,7 +4,7 @@
 > **State at 2026-11-12:**
 > - **#2689, #2708 and #2724 (116) MERGED** to master. #2724 merged at 05:25Z (merge commit, auto-merge, owner "Yes proceed").
 > - **Dev:** BFF `b3ca99cad5` (a local merge with mcp-r1's spike `755987b385`; every later dev deploy must include the spike). 164 and 096b ribbons applied (with 029's hides); SecureChild `-Verify` exits 0.
-> - **BLOCKER for 116 on dev and on stamps:** 116's BFF reads and writes `sprk_procedureversion.sprk_notconvertedlist`. That column is NOT on dev: 080's `Deploy-EbillingProcedureSchema.ps1` (`861008c591`) has not been applied, and it needs the owner's go plus uac-r2 notices before and after. uac-r2 has been told to keep #2724 out of dev until it is applied. The column was also missing from SpaarkeMaster; 1.3.1.0 adds it.
+> - **116's column `sprk_procedureversion.sprk_notconvertedlist` IS on dev** (Memo, secured, audited, created 2026-11-10 14:35 by 116's own run of 080's script). A 2026-11-12 `-WhatIf` of `Deploy-EbillingProcedureSchema.ps1` reported 0 created, 0 changed; no write was made. The earlier "not on dev" note was wrong; uac-r2 and provisioning-r1 were told so. #2724 may go into a dev deploy. **Stamps** still need SpaarkeMaster 1.3.1.0 (which adds the column to source) before they get a BFF carrying 116.
 > - **SpaarkeMaster 1.3.1.0** (Build over the published 1.3.0.0, `d53d67f604`) is committed locally as `4085149e85`, NOT pushed. It contains:
 >   - the version bump and 116's memo in source, with `sprk_notconverted`'s grants and the EB-D-211 Description;
 >   - a release-history row in `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`;
