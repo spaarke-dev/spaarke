@@ -33,6 +33,7 @@
 **ebilling-r1 (`ebilling-r1`)**
 - EB-D-216 (inactive Draft policy versions): no draft lister on our side; their guard stays out of `Services/Ontology/**` and `Services/Signals/**`; `ReadVersionsAsync` stays unfiltered. They send file:line if their sweep finds one of ours.
 - DEF-061 review F1 + rulings sent; waiting for their follow-on SHA. Owed by them: RowReads rerun, DEF-059 outcome. DEF-060 builds after 116 + 130.
+- **084 (EB-D-217, owner brought into R1):** 084d adds a caller-read dry-run route over `Services/Signals/Billing/ProcedureResolver.cs` via an in-memory row-source overlay (selection logic unchanged). They send the design before building, plus any `Services/Signals/**` diff. Our review conditions sent 2026-11-11: overlay at the row-source seam only; parity test through the real resolver; caller-read filtering (D-123); per-request, uncached; no writes; route census. Part A and 084a–c don't touch Signals.
 - **Held PRs ours:** 174 (#2580) and 175 (#2579) wait for ebilling 112 (Invoice Review) on dev; then merge both and send SHAs to uac-r2.
 
 **provisioning-r1** — task 267 (writer into its own business unit): we answered "the writer reads no field-secured column as itself"; recorded in their notes. No ACME check needed now.
