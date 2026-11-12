@@ -308,3 +308,13 @@ B-1 only moves the endpoint bodies into capability methods that take `HttpContex
   - T5 is answered;
   - task 050 can no longer meet "≤ 200 lines", because root CLAUDE.md is already 218. It now adds no net lines without the owner's OK.
 - Report: session scratchpad `plan-drift-report.md` (not committed); this entry is the record.
+
+## 2026-11-12 — Start 020 before 003 closes (owner go)
+
+- **Why:** a Microsoft 365 Copilot outage blocks 003's remaining live tests. The owner chose to start 020 now rather than wait.
+- **What 020 actually needs from 003 is already in hand:**
+  - T0 passed live (`notes/phase0-results.md`): stateless calls through the connector, 401 / 406 / 200 / 405.
+  - T13's route mechanism (one `MapMcp` per route, the tool set chosen per request path) passed in-process on the spike (`notes/spikes/phase0-spike-measurements.md` §4). The live T13 run decides naming in Sources and on the approval card, not the mechanism.
+- **What 020 does not take from 003:** the widget budget (Size → 030), the confirmation wording (T3/T4 → 032), and the packaging route (T2/T14 → 040). None of those tasks start before 020 and 021 finish.
+- **Risk if live T13 surprises us:** naming only. The fallback in 020's notes (one route that filters by area) keeps the `/mcp/{area}` URL shape.
+- 003 stays open (🔲) until every Phase 0 row has a result and the owner has reviewed it.
