@@ -1,7 +1,9 @@
 """Individual-base package: the review method, the custom instruction, the agent recipes, the legal hold playbook
 and the path convention, each with a must-fire control."""
+import contextlib
 import difflib
 import io
+import json
 import os
 import re
 import sys
@@ -247,6 +249,38 @@ class PathConventionTests(unittest.TestCase):
                     if any(o in text for o in old):
                         hits.append(os.path.relpath(p, ROOT))
         self.assertEqual(hits, [])
+
+
+class WordProbeTests(unittest.TestCase):
+    """The Word plugin tests (WP-0..WP-2) are only as good as the probe's codes."""
+
+    def test_probe_zip_has_both_skills_and_the_codes_sit_only_in_the_bodies(self):
+        import build_word_probe as wp
+        with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(wp.build(tmp)) as z:
+            names = set(z.namelist())
+            for skill in wp.SKILLS:
+                self.assertIn(f"skills/{skill}/SKILL.md", names)
+            for skill, code in (("spaarke-word-probe", wp.INSTRUCTION_CODE),
+                                ("spaarke-word-probe-script", wp.SCRIPT_CODE)):
+                text = z.read(f"skills/{skill}/SKILL.md").decode("utf-8")
+                front, body = text.split("\n---\n", 1)
+                self.assertNotIn(code, front, "a code in the description proves nothing: Word lists descriptions")
+                self.assertIn(code, body)
+            manifest = json.loads(z.read("manifest.json"))
+            self.assertEqual([s["folder"] for s in manifest["agentSkills"]],
+                             [f"./skills/{s}" for s in wp.SKILLS])
+
+    def test_the_script_prints_the_expected_line_and_the_value_is_not_written_anywhere_in_the_zip(self):
+        import build_word_probe as wp
+        with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(wp.build(tmp)) as z:
+            script = z.read("skills/spaarke-word-probe-script/scripts/probe_hash.py").decode("utf-8")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                exec(compile(script, "probe_hash.py", "exec"), {"__name__": "__main__"})
+            self.assertTrue(out.getvalue().startswith(wp.expected_line() + " python "), out.getvalue())
+            value = str(wp.probe_value())
+            self.assertFalse(any(value in z.read(n).decode("utf-8", "ignore") for n in z.namelist()),
+                             "the expected value must be computed, never stored in the plugin")
 
 
 if __name__ == "__main__":

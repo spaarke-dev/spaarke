@@ -2,7 +2,8 @@
 
 Mechanics only: does each piece install, get found, and do what it should. No scoring yet.
 **Word:** sections W-1 to P-1 below are round 1 (run 2026-11-11; kept for reference). Run Word from
-"Word round 2", which is organised by the four Word use cases. Cowork (C-) and advanced (A-) tests follow it.
+"Word round 2", which is organised by the four Word use cases. The Word plugin tests (WP-0 to WP-4) come next,
+then Cowork (C-) and advanced (A-) tests.
 Design: `notes/accelerator-components-by-surface.md`. Layout and archive: `onedrive-layout.md`.
 
 **How to record.** Screenshots go to OneDrive `Documents/Spaarke Test Documents/Screens/`, named `<test id>-<n>.png`
@@ -13,6 +14,7 @@ Design: `notes/accelerator-components-by-surface.md`. Layout and archive: `onedr
 |---|---|
 | `SRM-1110-A` | `Cowork/Playbooks/Review method/Spaarke Review Method.docx` (the real one) |
 | `SRM-DECOY-1` | the decoy copy (G-1, G-2 only) |
+| `WPI-1112-A` / `WPS-1112-A` | the probe plugin's instructions skill / script skill (WP-0 to WP-2) |
 | `NDAR-1112-A` / `LHR-1112-A` | the NDA / Legal Hold Review agents (v0.3 instructions: review in chat, redlines through the skill). `NDAR-1110-A` / `LHR-1110-A` = the old v0.2 agents |
 
 Test documents (from the test zip): `Spaarke Test Documents/Brightwater Mutual NDA.docx` (contract) and
@@ -231,6 +233,85 @@ Point Logistics, the agreement of March 1, 2024, preserve from January 1, 2024);
 
 ---
 
+## Word plugin tests (WP-0 to WP-4), added 2026-11-12
+
+**Why.** On 2026-11-01 Word listed our NDA plugin but never ran it (T-12b). That test was narrow: Word for the web
+only, a plugin uploaded for you only, with skills that need Python. Partner plugins that reach Word (Harvey,
+iManage, Litera) work differently: their work runs on their own server, which Copilot calls as an MCP tool. These
+tests separate the questions: does Word read a third-party skill's instructions, run its scripts, or call an MCP
+tool such as the Spaarke MCP? Design note: `notes/copilot-app-components.md`.
+
+**The probe plugin** (`Spaarke Word probe plugin v0.1.zip`, sent with this script; built by
+`src/accelerators/build/build_word_probe.py`). Two harmless skills that review nothing and change nothing:
+- `spaarke-word-probe` (instructions only): answers *Run the Spaarke Word probe* with a line holding `WPI-1112-A`.
+  The code is only in the skill's instructions, not in its description, so seeing it proves Word read them.
+- `spaarke-word-probe-script` (runs Python): answers *Run the Spaarke script probe* with the line its script prints.
+
+Save the zip on your PC **outside OneDrive** (for example `C:\Temp`) and don't extract it, so Word's search can't
+find the skill text and fake a pass.
+
+**Reading the script probe's answer:**
+
+| Answer | Means |
+|---|---|
+| `WPS-1112-A 528452740 python 3.x …` | the script ran |
+| `Spaarke script probe · scripts not run · WPS-1112-A` | Word read the skill but can't run scripts |
+| `WPS-1112-A` with any other number | Word read the skill and made up the output (record it: a model faking a script run) |
+| no `WPS-1112-A` at all | Word didn't load the skill |
+
+### WP-0. Control: the probe works in Cowork (5 minutes; run first)
+1. Cowork › Customize › Plugins › **Upload** the probe zip (Only you).
+2. New Cowork chat: *Run the Spaarke Word probe.* Then: *Run the Spaarke script probe.*
+
+**Pass:** the `WPI-1112-A` line, then `WPS-1112-A 528452740 python 3.… Linux`. If either fails here, stop: the
+probe is broken, and the Word results would mean nothing.
+
+### WP-1. Word desktop: does it run a third-party skill's script?
+1. Word for Windows, open any document (a copy of Brightwater is fine). Copilot pane › the **+** or plugins button ›
+   **Manage plugins & skills**: switch **Spaarke Word Probe** on. Close Word completely and reopen it.
+2. Three tries, each in a new Copilot chat:
+   - (a) Type *Run the Spaarke script probe.*
+   - (b) Pick the skill `spaarke-word-probe-script` from **+** (it shows as a chip), then type the same.
+   - (c) As (b), with agent mode on (Chat only).
+
+**Record:** for each try, the answer per the table above, and screenshots of the plugin list and the answer.
+
+### WP-2. Word desktop: does it follow a third-party skill's instructions?
+Same as WP-1, with the skill `spaarke-word-probe` and *Run the Spaarke Word probe.*
+
+**Pass:** the `WPI-1112-A` line plus the document's headings. This is the test that matters most for Word: if Word
+follows instructions-only skills, a Word edition of our playbook procedures becomes possible even without scripts.
+
+**Optional:**
+- **WP-2b:** WP-1 and WP-2 again in Word for the web, to compare with the 2026-11-01 result.
+- **WP-2c (needs an admin):** if WP-1 and WP-2 show no code, have the probe deployed by an admin instead (Microsoft
+  365 admin center › Agents › Tools › upload, assigned to you only). Check again after 24 hours.
+
+### WP-3. Word: does it call the Spaarke MCP?
+Run this as the user who passed the Spaarke MCP connection test on 2026-11-12 (the demo user), or any licensed user
+with **Spaarke MCP** connected. I'm confirming with the MCP project that its test tools are still deployed on the
+dev server; wait for my go before running this.
+1. Word for the web (an InPrivate window signed in as that user is easiest): open a blank document, Copilot pane ›
+   **+** › **Sources** (or the plugins list): is **Spaarke MCP** there? Select it.
+2. Type: *Use Spaarke MCP to run SpaarkeMCP_spike_echo with the text "Word probe".*
+3. Then: *Run SpaarkeMCP_spike_whoami and show me the full result.*
+4. If you can sign in to Word desktop as that user, repeat 1–3 there.
+
+**Record:** whether Spaarke MCP is listed in Word; whether each tool ran (echo returns the server's time; whoami
+returns `status: ok` and the tenant id); any approval card Word showed. **Pass:** a tool result with the server's
+time. This is the route to the advanced redline in Word: the redline engine would run on our server as a tool.
+
+### WP-4 (optional, 3 minutes). Word: watch a partner plugin run
+1. Word desktop, Copilot pane › plugins list: is **Harvey** (or another legal partner) listed?
+2. Pick it and type: *Ask Harvey what a mutual NDA is.*
+
+**Record:** what Word does. A Harvey sign-in prompt is enough: it means Word tried to call Harvey's tool. **Don't
+sign up or sign in**; just screenshot and close it.
+
+**Afterwards:** remove the probe plugin (Cowork › Customize › Plugins › Remove) so it doesn't show in your lists.
+
+---
+
 ## P-1. One custom instruction for Word and Cowork? (moved here from Word; run before C-1)
 
 As written above, in three places: Cowork, the Copilot app, and Word agent mode (Chat only). Word is included only
@@ -325,6 +406,13 @@ table and the redline files came from one request with one approval.
 | H-1 | | | — | | |
 | **Use case 4** | | | | | |
 | R-3 (draft from template) | | | — | route; files accepted | |
+| **Word plugin tests** | | | | | |
+| WP-0 (Cowork control) | | | WPI / WPS | must pass before WP-1 and WP-2 count | |
+| WP-1 (script skill) (a) (b) (c) | | | | answer per the table | |
+| WP-2 (instructions skill) (a) (b) (c) | | | | headings listed? | |
+| WP-2b / WP-2c (optional) | | | | web; admin-deployed | |
+| WP-3 (Spaarke MCP) | | | — | listed? echo / whoami ran? web / desktop | |
+| WP-4 (Harvey, optional) | | | — | sign-in prompt? | |
 | **Cowork and app** | | | | | |
 | P-1 | | | — | where P1-CHECK appears | |
 | C-1 | | | — | | |
