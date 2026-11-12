@@ -153,9 +153,11 @@ public sealed class GrantPolicyContractTests : IClassFixture<ExternalAccessContr
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         (await ProblemOf(response)).ReasonCode.Should().Be(RecordRestricted);
-        _fixture.IdentityStore.Reads.Should().BeEmpty(
-            "the onboarding seam's first step — the Contact lookup, through the identity binder since task 141 — is " +
-            "never reached, so no CIAM account is provisioned");
+        // Task 193: one read-only email lookup now precedes the policy (does the email's contact represent a colleague, who
+        // would be shared with, not refused?); the binder's onboarding lookup is still never reached.
+        _fixture.IdentityStore.Reads.Should().Equal(new[] { "email" },
+            "only task 193's read-only lookup runs; the onboarding seam's first step — the Contact lookup, through the " +
+            "identity binder since task 141 — is never reached, so no CIAM account is provisioned");
         AssertNothingWritten();
     }
 
@@ -266,7 +268,9 @@ public sealed class GrantPolicyContractTests : IClassFixture<ExternalAccessContr
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await ProblemOf(response)).ReasonCode.Should().Be(PolicyUnreadable);
-        _fixture.IdentityStore.Reads.Should().BeEmpty("the Contact lookup (the identity binder, task 141) is never reached");
+        // Task 193: only its read-only email lookup precedes the policy; the binder's lookup is never reached.
+        _fixture.IdentityStore.Reads.Should().Equal(new[] { "email" },
+            "only task 193's read-only lookup runs; the Contact lookup (the identity binder, task 141) is never reached");
         AssertNothingWritten();
     }
 
