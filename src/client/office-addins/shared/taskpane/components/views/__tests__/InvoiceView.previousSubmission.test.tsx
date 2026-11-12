@@ -143,8 +143,35 @@ describe('InvoiceView — the email was already submitted (§11)', () => {
       finish({ ...running, status: 'Failed', message: 'The invoice could not be read.' });
       await waitFor(() => expect(screen.getByText("This email's invoice could not be processed")).toBeInTheDocument());
       expect(screen.getByTestId('invoice-previous-submission')).toHaveTextContent('The invoice could not be read.');
-      // Announced once it is final: the live region carries the title too.
-      await waitFor(() => expect(screen.getAllByText("This email's invoice could not be processed")).toHaveLength(2));
+      // Announced once it is final: the live region carries the title and the outcome sentence.
+      await waitFor(() =>
+        expect(
+          Array.from(document.querySelectorAll('[aria-live="polite"]')).some(
+            region =>
+              region.textContent === "This email's invoice could not be processed. The invoice could not be read."
+          )
+        ).toBe(true)
+      );
+    },
+    TIMEOUT
+  );
+
+  it(
+    'announces the followed outcome sentence too, so a firm_missing acceptance is heard',
+    async () => {
+      const message = 'Submitted without a firm. A reviewer will add the firm before approval.';
+      const running: InvoicePreviousSubmission = { ...ACCEPTED, status: 'Processing', invoiceId: null };
+      renderView({
+        loadPreviousSubmission: jest.fn(async () => running),
+        followPreviousSubmission: jest.fn(async () => ({ ...ACCEPTED, message })),
+      });
+      await waitFor(() =>
+        expect(
+          Array.from(document.querySelectorAll('[aria-live="polite"]')).some(
+            region => region.textContent === `This email's invoice was already submitted. ${message}`
+          )
+        ).toBe(true)
+      );
     },
     TIMEOUT
   );

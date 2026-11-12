@@ -1,7 +1,12 @@
 /**
- * R3 task 050 (FR-01 / FR-02 / FR-03) — opening a grid row in the external SPA / Teams tab shows a read-only detail view.
+ * R4 task 005 (FR-01 / FR-02) — the record template's sections for all six types, opened from a grid row. Ported from
+ * R3's `RecordDetailModal.test.tsx` (R3 task 050, FR-01 / FR-02 / FR-03) when the template replaced R3's stacked modal:
+ * every R3 assertion is kept except the modal title, which is now "{type} {number}" (owner 2026-11-08, FR-02); the
+ * assertion inventory is in notes/task-005-notes.md. New here: the FR-01 left / right sections per type, in order, and
+ * the negative case (a type with no template opens nothing, from the grid and from `RecordOpener`).
  *
- * What runs for real: the six widget bodies (`createGridWidgetBody`), `RecordDetailModal`, `RecordDetailFields`, the
+ * What runs for real: the six widget bodies (`createGridWidgetBody`), `RecordTemplateModal` and its sections,
+ * `RecordDetailFields`, the
  * canonical `SprkModal` shell, and the existing `EventsCalendar` / `SmartTodo` / `web-api-client`. What is substituted:
  * the network seam (`bffApiCall`, answering the module read seam's routes — the id-filtered fetch is the ONE detail
  * read for all six entities; the mock models the real server, which attaches `@formattedValues` on the fetch seam only), the shared grid (a fake that reports its rows
@@ -11,6 +16,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { installLayout, uninstallLayout } from './jsdomLayout';
 
 const { bffApiCall, gridSpecs } = vi.hoisted(() => ({
   bffApiCall: vi.fn(),
@@ -87,6 +93,7 @@ import ProjectsWidgetBody from '../src/widgets/ProjectsWidget';
 import ServiceRequestsWidgetBody from '../src/widgets/ServiceRequestsWidget';
 import WorkAssignmentsWidgetBody from '../src/widgets/WorkAssignmentsWidget';
 import { createGridWidgetBody } from '../src/widgets/GridWidgetBody';
+import { RecordOpenerProvider, useOpenRecord } from '../src/components/detail/RecordOpener';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -113,7 +120,7 @@ interface Case {
   nameAttribute: string;
   /** Grid rows. The grid shows its own row text; the detail's value comes from the READ, so it differs on purpose. */
   rowIds: string[];
-  /** Detail title and one field value the read returns for the first row. */
+  /** Modal title ("{type} {number}", FR-02) and one field value the read returns for the first row. */
   title: string;
   fieldTestId: string;
   fieldValue: string;
@@ -128,7 +135,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_projectid',
     nameAttribute: 'sprk_projectnumber',
     rowIds: ID.project,
-    title: 'Project Read-Name',
+    title: 'Project PRJ-READ-1',
     fieldTestId: 'record-detail-field-sprk_projectnumber',
     fieldValue: 'PRJ-READ-1',
   },
@@ -140,7 +147,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_matterid',
     nameAttribute: 'sprk_matternumber',
     rowIds: ID.matter,
-    title: 'Matter Read-Name',
+    title: 'Matter MAT-READ-1',
     fieldTestId: 'record-detail-field-sprk_matternumber',
     fieldValue: 'MAT-READ-1',
   },
@@ -152,7 +159,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_workassignmentid',
     nameAttribute: 'sprk_name',
     rowIds: ID.wa,
-    title: 'WA Read-Name',
+    title: 'Work assignment WA-READ-1',
     fieldTestId: 'record-detail-field-sprk_workassignmentnumber',
     fieldValue: 'WA-READ-1',
   },
@@ -164,7 +171,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_documentid',
     nameAttribute: 'sprk_documentname',
     rowIds: ID.document,
-    title: 'Document Read-Name',
+    title: 'Document Document Read-Name',
     fieldTestId: 'record-detail-field-sprk_documenttype',
     fieldValue: 'Contract',
   },
@@ -176,7 +183,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_invoiceid',
     nameAttribute: 'sprk_name',
     rowIds: ID.invoice,
-    title: 'INV-READ-1',
+    title: 'Invoice INV-READ-1',
     fieldTestId: 'record-detail-field-statuscode',
     fieldValue: 'Approved',
   },
@@ -188,7 +195,7 @@ const CASES: Case[] = [
     idAttribute: 'sprk_servicerequestid',
     nameAttribute: 'sprk_name',
     rowIds: ID.sr,
-    title: 'SR Read-Name',
+    title: 'Service request SR-READ-1',
     fieldTestId: 'record-detail-field-sprk_servicerequestnumber',
     fieldValue: 'SR-READ-1',
   },
@@ -291,7 +298,8 @@ function installNetwork(): void {
       const key = `${cond.attribute}:${cond.value}`;
       if (body.entityName === 'sprk_invoice') return { entities: mocks.invoices[key] ?? [], moreRecords: false };
     }
-    if (/\/messages$/.test(path)) return { value: [] };
+    // Task 006: the thread says the caller may post, so the toolbar offers New message.
+    if (/\/messages$/.test(path)) return { value: [], canCreate: true };
     if (/\/(projects|matters|workassignments)\/[^/]+\/events$/.test(path)) return { value: mocks.events };
     if (/\/(projects|matters|workassignments)\/[^/]+\/todos$/.test(path)) return { value: mocks.todos };
     throw new Error(`unexpected BFF call ${options?.method ?? 'GET'} ${path}`);
@@ -359,7 +367,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe.each(CASES)('$label grid', c => {
-  it("opens the detail modal with the record's read-only fields when a row is clicked", async () => {
+  it("opens the record template with the record's read-only fields when a row is clicked", async () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     renderWidget(c.Body);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -371,20 +379,25 @@ describe.each(CASES)('$label grid', c => {
     await waitFor(() => expect(titleOf(dialog)).toBe(c.title));
     expect(within(dialog).getByTestId(c.fieldTestId).textContent).toBe(c.fieldValue);
 
-    // Read-only: the record itself has no input. The ONE input in the modal is the Messages compose box (task 051:
-    // posting to the thread is not editing the record) - exactly one textbox, inside the Messages section, for an entity
-    // with a thread and none at all for a document. Nothing is excluded from the scan, so a stray input anywhere fails.
+    // Read-only: the record itself has no input, and (task 004) neither does the thread: the compose box moved out of the
+    // Messages section into the New message dialog that the toolbar opens. So the record modal holds no input at all (a
+    // stray input anywhere fails), and for an entity with a thread the dialog the toolbar opens holds exactly one
+    // textbox - a textarea - which is not inside the Messages section (it is its own child dialog).
     const inputs = Array.from(dialog.querySelectorAll('input, textarea, select, [role="textbox"]'));
-    if (c.entityName === 'sprk_document') {
-      expect(inputs).toHaveLength(0);
-    } else {
-      const messages = within(dialog).getByTestId('record-detail-messages');
-      expect(within(messages).getAllByRole('textbox')).toHaveLength(1);
-      expect(inputs).toHaveLength(1);
-      expect(messages.contains(inputs[0])).toBe(true);
-      expect(inputs[0].tagName).toBe('TEXTAREA');
-    }
+    expect(inputs).toHaveLength(0);
     expect(dialog.querySelectorAll('input[type="file"]')).toHaveLength(0);
+    if (c.entityName !== 'sprk_document') {
+      // Let the record's own modal layer finish its ~250 ms hide pass first, or the child opened in it is hidden with it.
+      await act(async () => void (await new Promise(resolve => setTimeout(resolve, 350))));
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'New message' }));
+      const compose = await screen.findByRole('dialog', { name: 'New message' });
+      const boxes = Array.from(compose.querySelectorAll('input, textarea, select, [role="textbox"]'));
+      expect(boxes).toHaveLength(1);
+      expect(boxes[0].tagName).toBe('TEXTAREA');
+      expect(within(dialog).getByTestId('record-detail-messages').contains(boxes[0])).toBe(false);
+      fireEvent.click(within(compose).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New message' })).toBeNull());
+    }
 
     // In-app: no Xrm navigation and no new window — so it works the same in the browser host and the Teams host.
     expect(open).not.toHaveBeenCalled();
@@ -445,26 +458,26 @@ describe('browsing', () => {
     installDetailRead('sprk_matter', id => ({
       sprk_matterid: id,
       sprk_mattername: `Matter ${id.slice(-3)}`,
-      sprk_matternumber: id,
+      sprk_matternumber: `M-${id.slice(-3)}`,
     }));
     renderWidget(matter.Body);
 
     // Open the SECOND row: the counter starts at 2 of 3.
     fireEvent.click(gridRow(matter, 2));
     const dialog = await screen.findByRole('dialog');
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 202'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-202'));
     expect(within(dialog).getByText('2 of 3')).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 203'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-203'));
     expect(within(dialog).getByText('3 of 3')).toBeTruthy();
     // Last row: Next is disabled.
     expect((within(dialog).getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Previous record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 202'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-202'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Previous record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 201'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-201'));
     expect(within(dialog).getByText('1 of 3')).toBeTruthy();
     expect((within(dialog).getByRole('button', { name: 'Previous record' }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -480,13 +493,15 @@ describe('browsing', () => {
   it("shows a denied record's state while browsing, then the next accessible record", async () => {
     // The second matter is outside the caller's set: the fetch returns no row for it.
     installDetailRead('sprk_matter', id =>
-      id === ID.matter[1] ? null : { sprk_matterid: id, sprk_mattername: `Matter ${id.slice(-3)}` }
+      id === ID.matter[1]
+        ? null
+        : { sprk_matterid: id, sprk_mattername: `Matter ${id.slice(-3)}`, sprk_matternumber: `M-${id.slice(-3)}` }
     );
     renderWidget(matter.Body);
 
     fireEvent.click(gridRow(matter, 1));
     const dialog = await screen.findByRole('dialog');
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 201'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-201'));
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
     await within(dialog).findByTestId('record-detail-denied');
@@ -495,7 +510,7 @@ describe('browsing', () => {
     expect(within(dialog).getByText('2 of 3')).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Matter 203'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-203'));
     expect(within(dialog).queryByTestId('record-detail-denied')).toBeNull();
   });
 
@@ -510,19 +525,34 @@ describe('browsing', () => {
   describe('while a message is being sent (review 051 K3)', () => {
     let finishPost!: (v: unknown) => void;
 
+    // The real focus trap and aria-hidden pass need geometry jsdom lacks (see jsdomLayout): with it, tabster behaves as in a
+    // browser, so the New message dialog is asserted by role (not hidden) and the record behind it is hidden from the tree.
+    beforeEach(() => installLayout());
+    afterEach(() => uninstallLayout());
+
+    /** Lets already-queued promise callbacks run (the hold's guard answers on a microtask); no real timer is involved. */
+    const flush = (): Promise<void> => act(async () => void (await Promise.resolve()));
+
     /** Opens matter 1 of 3 with a POST that stays in flight until `finishPost`, and starts a send. */
     async function startSend(): Promise<HTMLElement> {
       const inFlight = new Promise(resolve => {
         finishPost = resolve;
       });
       bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (path.endsWith('/messages')) return options?.method === 'POST' ? inFlight : { value: [] };
+        // Task 006: the thread says the caller may post, so the toolbar offers New message.
+        if (path.endsWith('/messages')) return options?.method === 'POST' ? inFlight : { value: [], canCreate: true };
         if (sideReads(path) !== undefined) return sideReads(path);
         const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
         const detail = detailReadOf(body);
         if (detail) {
           return {
-            entities: [{ [detail.c.idAttribute]: detail.id, sprk_mattername: `Matter ${detail.id.slice(-3)}` }],
+            entities: [
+              {
+                [detail.c.idAttribute]: detail.id,
+                sprk_mattername: `Matter ${detail.id.slice(-3)}`,
+                sprk_matternumber: `M-${detail.id.slice(-3)}`,
+              },
+            ],
             moreRecords: false,
           };
         }
@@ -531,13 +561,23 @@ describe('browsing', () => {
       renderWidget(matter.Body);
       fireEvent.click(gridRow(matter, 1));
       const dialog = await screen.findByRole('dialog');
-      await waitFor(() => expect(titleOf(dialog)).toBe('Matter 201'));
+      await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-201'));
       await within(dialog).findByTestId('record-messages-empty');
-      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Write a message' }), {
+      // Task 004: the compose box lives in the New message dialog the toolbar opens (a child of this modal, so while it is
+      // open the record's own controls are aria-hidden by the modal layer - they are read with hidden: true below).
+      // A real timer must run here: the record's own modal layer hides everything outside it for ~250 ms after it opens
+      // (tabster's debounce), and a child opened inside that window would be hidden with it.
+      await act(async () => void (await new Promise(resolve => setTimeout(resolve, 350))));
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'New message' }));
+      const compose = await screen.findByRole('dialog', { name: 'New message' });
+      // Same debounce for the child itself (the record is hidden behind it): once it ran the child is not aria-hidden.
+      await act(async () => void (await new Promise(resolve => setTimeout(resolve, 350))));
+      expect(compose.closest('[aria-hidden="true"]')).toBeNull();
+      fireEvent.change(within(compose).getByRole('textbox', { name: 'Write a message' }), {
         target: { value: 'in flight' },
       });
-      fireEvent.click(within(dialog).getByRole('button', { name: /^Send/ }));
-      await waitFor(() => expect(within(dialog).getByRole('button', { name: /^Sending/ })).toBeTruthy());
+      fireEvent.click(within(compose).getByRole('button', { name: /^Send/ }));
+      await waitFor(() => expect(within(compose).getByRole('button', { name: /^Sending/ })).toBeTruthy());
       return dialog;
     }
 
@@ -551,11 +591,11 @@ describe('browsing', () => {
     it('previous / next do not move to another record, and the footer Close is disabled', async () => {
       const dialog = await startSend();
 
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
-      // The guard answers on a microtask; give it (and a would-be record read) the chance to run.
-      await new Promise(resolve => setTimeout(resolve, 20));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Next record', hidden: true }));
+      // The guard answers on a microtask; let it (and a would-be record read) run.
+      await flush();
       expect(within(dialog).getByText('1 of 3')).toBeTruthy();
-      expect(titleOf(dialog)).toBe('Matter 201');
+      expect(titleOf(dialog)).toBe('Matter M-201');
       expect(matterReads()).toEqual([ID.matter[0]]);
       expect(within(dialog).getByText('Close').closest('button')?.disabled).toBe(true);
 
@@ -563,18 +603,32 @@ describe('browsing', () => {
       await act(async () => {
         finishPost({});
       });
-      await waitFor(() => expect(within(dialog).queryByRole('button', { name: /^Sending/ })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole('button', { name: /^Sending/ })).toBeNull());
     });
 
     it('the x, Escape and the footer Close do not close the dialog', async () => {
       const dialog = await startSend();
 
-      for (const close of within(dialog).getAllByRole('button', { name: 'Close' })) fireEvent.click(close);
+      const compose = screen.getByRole('dialog', { name: 'New message' });
+      for (const close of within(dialog).getAllByRole('button', { name: 'Close', hidden: true }))
+        fireEvent.click(close);
       fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
       fireEvent.keyDown(document.body, { key: 'Escape', code: 'Escape' });
-      await new Promise(resolve => setTimeout(resolve, 20));
-      expect(screen.queryByRole('dialog')).not.toBeNull();
-      expect(within(dialog).getByRole('button', { name: /^Sending/ })).toBeTruthy();
+      // Esc pressed where the user is: inside the New message dialog (focus asserted there first).
+      const sending = within(compose).getByRole('button', { name: /^Sending/ });
+      sending.focus();
+      expect(compose.contains(document.activeElement)).toBe(true);
+      fireEvent.keyDown(document.activeElement as Element, { key: 'Escape', code: 'Escape' });
+      await flush();
+      // Both the record and its New message dialog are still open and the child is still reachable by role (not
+      // aria-hidden); the send is still in flight.
+      expect(dialog.isConnected).toBe(true);
+      expect(screen.getByRole('dialog', { name: 'New message' })).toBe(compose);
+      expect(compose.closest('[aria-hidden="true"]')).toBeNull();
+      expect(within(compose).getByRole('button', { name: /^Sending/ })).toBeTruthy();
+      expect((within(compose).getByRole('textbox', { name: 'Write a message' }) as HTMLTextAreaElement).value).toBe(
+        'in flight'
+      );
     });
 
     it('once the send settles, navigation and Close work again', async () => {
@@ -582,11 +636,12 @@ describe('browsing', () => {
       await act(async () => {
         finishPost({});
       });
-      await waitFor(() => expect(within(dialog).queryByRole('button', { name: /^Sending/ })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole('button', { name: /^Sending/ })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New message' })).toBeNull());
 
       expect(within(dialog).getByText('Close').closest('button')?.disabled).toBe(false);
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
-      await waitFor(() => expect(titleOf(dialog)).toBe('Matter 202'));
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Next record', hidden: true }));
+      await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-202'));
       fireEvent.click(within(dialog).getByText('Close'));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     });
@@ -958,7 +1013,7 @@ describe('negative cases', () => {
     let fail = true;
     installDetailRead('sprk_matter', id => {
       if (fail) throw new ApiError(500, 'boom');
-      return { sprk_matterid: id, sprk_mattername: 'Recovered' };
+      return { sprk_matterid: id, sprk_mattername: 'Recovered', sprk_matternumber: 'M-OK' };
     });
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
@@ -969,7 +1024,7 @@ describe('negative cases', () => {
 
     fail = false;
     fireEvent.click(within(dialog).getByRole('button', { name: 'Try again' }));
-    await waitFor(() => expect(titleOf(dialog)).toBe('Recovered'));
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter M-OK'));
   });
 
   it('a 403 from the fetch is the denied state, not an error', async () => {
@@ -992,5 +1047,103 @@ describe('negative cases', () => {
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
     await screen.findByTestId('record-detail-notfound');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-01 — each type renders exactly its template's left / right sections, in order (R4 task 005)
+// ---------------------------------------------------------------------------
+
+describe('FR-01 template sections', () => {
+  const LAYOUT: Record<string, { left: string[]; right: string[] }> = {
+    sprk_project: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
+    sprk_matter: { left: ['information', 'documents', 'invoices'], right: ['messages', 'tasksEvents'] },
+    sprk_workassignment: { left: ['information', 'documents'], right: ['messages', 'tasksEvents'] },
+    sprk_invoice: { left: ['information', 'files'], right: ['messages'] },
+    sprk_servicerequest: { left: ['information', 'documents'], right: ['messages'] },
+    sprk_document: { left: ['information', 'preview'], right: [] },
+  };
+
+  const sectionIds = (column: HTMLElement): string[] =>
+    Array.from(column.querySelectorAll('[data-testid^="record-section-"]'))
+      // Only the column's own section cards (a section never nests another).
+      .map(el => (el.getAttribute('data-testid') ?? '').replace('record-section-', ''));
+
+  it.each(CASES.map(c => [c.entityName, c] as const))(
+    '%s: the FR-01 left and right sections, in order',
+    async (_e, c) => {
+      renderWidget(c.Body);
+      fireEvent.click(gridRow(c, 1));
+      const dialog = await screen.findByRole('dialog');
+      const left = await within(dialog).findByTestId('record-template-left');
+      const want = LAYOUT[c.entityName];
+
+      expect(sectionIds(left)).toEqual(want.left);
+      if (want.right.length === 0) {
+        // Document: no right column at all; the left one is full width.
+        expect(within(dialog).queryByTestId('record-template-right')).toBeNull();
+        expect(within(dialog).getByTestId('record-template-columns').getAttribute('data-columns')).toBe('1');
+      } else {
+        expect(sectionIds(within(dialog).getByTestId('record-template-right'))).toEqual(want.right);
+        expect(within(dialog).getByTestId('record-template-columns').getAttribute('data-columns')).toBe('2');
+      }
+      // Every section is a labelled region (its card header names it).
+      for (const id of [...want.left, ...want.right]) {
+        expect(within(dialog).getByTestId(`record-section-${id}`).getAttribute('aria-label')).toBeTruthy();
+      }
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Negative (R4 task 005): a type with no template opens nothing and throws nothing
+// ---------------------------------------------------------------------------
+
+describe('a type with no template', () => {
+  it('RecordOpener opens nothing, makes no BFF call, throws nothing, and ends the opening', async () => {
+    const onTerminal = vi.fn();
+    let open!: ReturnType<typeof useOpenRecord>;
+    const Probe: React.FC = () => {
+      open = useOpenRecord();
+      return null;
+    };
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RecordOpenerProvider>
+          <Probe />
+        </RecordOpenerProvider>
+      </FluentProvider>
+    );
+
+    expect(() =>
+      act(() => {
+        open({ entityName: 'sprk_gridconfiguration', recordId: guid(1) }, { onTerminal });
+      })
+    ).not.toThrow();
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(bffApiCall).not.toHaveBeenCalled();
+    expect(onTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it('RecordOpener still opens a type that has one (must-not-fire pair)', async () => {
+    let open!: ReturnType<typeof useOpenRecord>;
+    const Probe: React.FC = () => {
+      open = useOpenRecord();
+      return null;
+    };
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RecordOpenerProvider>
+          <Probe />
+        </RecordOpenerProvider>
+      </FluentProvider>
+    );
+    act(() => {
+      open({ entityName: 'sprk_matter', recordId: ID.matter[0] });
+    });
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(titleOf(dialog)).toBe('Matter MAT-READ-1'));
   });
 });

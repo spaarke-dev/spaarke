@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Per-record access, hide-don't-disable, "Your access" — remove both ViewOnly hard-codes (FR-06, FR-07)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>after 002 and 004</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-driven UI behaviour across .ts/.tsx files (tags frontend, authorization, integration-test)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization behaviour with a hard invariant: no action the UI offers may answer 403</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential chain on the template files (003 → 005 → 004 → 006 → 007); also touches SmartTodo/EventsCalendar shared with 004</parallel-reason>
+    <deps>002, 004</deps>
+    <tags>frontend, react, authorization, integration-test</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Drive Upload, New message, Add to-do, Add event and delete-own on every record from the server's per-record answer (`/me` `writeAccessPerRecord` and each list's `canCreate`), remove both ViewOnly hard-codes and the project-only create gates, hide (never disable) what the caller cannot do, add one "why" line per read-only section, and show "Your access" in the record header.</prompt>
+  <role>SPAARKE platform developer. Expert in React and external-plane authorization semantics (ADR-028 A1, ADR-003 fail closed). Follow ADRs strictly.</role>
+  <goal>On matters, projects and work assignments a caller with Create sees and can use all four actions and a View-only caller sees none (no disabled placeholders); every offered action's POST is the one task 002 proved answers 201 for that caller; the header names the caller's right; tests prove both access levels on matter and work assignment to-dos and events.</goal>
+
+  <context>
+    <background>Spec FR-06, FR-07, NFR-04; project gotcha 2026-11-09 (two hard-codes). Hard-codes verified 2026-11-10: the template's Tasks &amp; events section passes `AccessLevel.ViewOnly` (moved by task 005 from `RecordDetailModal.tsx:524-525`); `SmartTodo.tsx:629` forces ViewOnly for non-project roots, and `:655`/`:659` keep create/toggle project-only. A third, unlisted gate: `EventsCalendar.tsx:588-592` allows create only when `root === 'projects'`. The SPA create clients are project-only: `createEvent` (`web-api-client.ts:721-729`) and `createTodo` (`:796-798`). Task 002 adds the matter/WA event routes and makes the to-do, event and message lists return `canCreate` to every caller; `DocumentLibrary` already follows its list's `canCreate` (`DocumentLibrary.tsx:701`, `:748-766`). `/me` carries levels for projects only (`bff-client.ts:145-176`).</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/SmartTodo.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/EventsCalendar.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordMessages.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts</file>
+      <file role="modify">src/client/external-spa/src/components/record/RecordTemplateModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/TasksEventsSection.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/DocumentsSection.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/record/sections/MessagesSection.tsx</file>
+      <file role="new">src/client/external-spa/src/components/record/recordAccess.ts</file>
+      <file role="new">src/client/external-spa/tests/RecordTemplateAccess.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/PerRecordWriteAccess.test.tsx</file>
+      <file role="modify">src/client/external-spa/tests/DetailEventsTodosRoots.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/bff-client.ts</file>
+      <file role="canonical-reference">src/client/external-spa/tests/ProjectPage.perRecordWrite.test.tsx</file>
+      <file role="canonical-reference">tests/integration/contract/Api/ExternalAccess/ExternalRootEventCreateContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Matter/WA event POST routes; list `canCreate` for every caller on to-dos, events and messages</dependency>
+      <dependency task="004" status="pending">Toolbar actions open in-parent dialogs</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-06 / NFR-04">Each of the four create actions on a record is shown only when that record's matching list answered `canCreate === true` (documents → Upload, messages → New message, to-dos → Add to-do, events → Add event). Absent, null, a failed list read or a still-loading list = hidden. The one exception kept: a project for a caller without `writeAccessPerRecord` may still use its `/me` level where its list sends no `canCreate` (today's ProjectPage rule), and must agree with the list when both exist.</constraint>
+    <constraint source="FR-06">Remove `AccessLevel.ViewOnly` from the Tasks &amp; events section, the `root === 'projects'` force at `SmartTodo.tsx:629` and the project-only conditions at `SmartTodo.tsx:655/659` and `EventsCalendar.tsx:588-592`. Creates call root-aware clients (`createRootTodo(root, id, …)`, `createRootEvent(root, id, …)`) built on the existing `rootTodosPath`/`rootEventsPath` (`web-api-client.ts:534-539`); the project wrappers stay as thin calls to them.</constraint>
+    <constraint source="FR-06">The to-do status toggle on a matter or work assignment is shown only when the caller's right to PATCH that to-do is known from a server answer; if none is available it stays hidden there (never offered to fail).</constraint>
+    <constraint source="FR-07">A caller without write sees only Refresh, Copy link and Download (where the type has it). No disabled create control appears anywhere in the template. Delete-own stays driven by the creator stamp, unchanged.</constraint>
+    <constraint source="FR-07">Each read-only section shows exactly one short line saying why (e.g. Messages: "You can read this thread. Posting needs Collaborate access."). All lines and the header labels live in one map in `recordAccess.ts`; a caller with `writeAccessPerRecord` gets wording that does not name a grant level.</constraint>
+    <constraint source="FR-07">The header's "Your access" value is derived only from what the BFF answered for this record: a project's `/me` level label, otherwise "Can contribute" when any of the record's lists answered `canCreate: true` and "Read only" when all answered false. Unknown (lists not loaded) shows nothing rather than a guess.</constraint>
+    <constraint source="ADR-028 A1">The client decides only what is shown; it never sends a level and never skips the server's check. A 403 from any action still shows the existing error and changes nothing.</constraint>
+    <constraint source="project">`ProjectPage` behaviour is unchanged except that it inherits the root-aware clients; its tests pass unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+      <file>.claude/patterns/auth/oauth-scopes.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="List canCreate drives the control" location="src/client/external-spa/src/components/DocumentLibrary.tsx">`uploadFromList` / `canActOnDocuments` at :748-766 — copy this rule for to-dos, events and messages.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Add the root-aware create clients; repoint the project wrappers.</step>
+    <step order="2">Remove the hard-codes and project-only gates in SmartTodo, EventsCalendar and the Tasks &amp; events section; apply the list-`canCreate` rule.</step>
+    <step order="3">Read `canCreate` from the message list (task 002) in RecordMessages; hide the inline compose when it is not true and show the read-only line.</step>
+    <step order="4">Write `recordAccess.ts` (rights per record from the list answers + `/me`; texts map) and feed the toolbar visibility and the header "Your access" line from it.</step>
+    <step order="5">Write `tests/RecordTemplateAccess.test.tsx` with mocked BFF responses: for matter and for work assignment, Create holder vs View-only, for to-dos and events (plus documents and messages); update `PerRecordWriteAccess.test.tsx` and `DetailEventsTodosRoots.test.tsx`.</step>
+    <step order="6">Run `npm run typecheck`, `npm run lint` and `npm test` in `src/client/external-spa`; confirm task 002's contract tests (`ExternalRootEventCreateContractTests`, the list `canCreate` tests) pass on this branch.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-006-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the four actions has no server `canCreate` for some root or caller kind after task 002, STOP: do not infer it from another list; a new server answer is a UAC-reviewed BFF change (new task).</trigger>
+    <trigger>If the owner expects a named grant level ("View only / Collaborate / Full access") in "Your access" for matters, work assignments, invoices or service requests, STOP: `/me` carries levels for projects only, so that needs a BFF change.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`DocumentLibrary.tsx:748-766` already derives Upload from its list's `canCreate`; `useAccessLevel.ts` (`canUpload`, `mapAccessLevelString`) maps `/me` project levels; `rootTodosPath`/`rootEventsPath` (`web-api-client.ts:534-539`) already build root routes for reads.</existing>
+    <extension>Yes for the clients and the per-section rules (extended in place). `recordAccess.ts` is new only because the record-level aggregate (toolbar visibility across four lists, the header "Your access" value and the read-only texts) has no existing home; it reuses `useAccessLevel` for project labels.</extension>
+    <cost-of-doing-nothing>Matter and work-assignment to-dos and events stay read-only for callers who hold Create, and the header cannot name the caller's right (FR-06, FR-07 acceptance fail).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Write caller sees and uses all four actions">
+      <url>{spa-dev-url}/?record=matter:{matter-id-collaborate}</url>
+      <steps><step>Sign in as a partner with Collaborate on the matter; open it.</step><step>Use Upload, New message, Add to-do and Add event once each.</step><step>Repeat on a work assignment and a project.</step></steps>
+      <expected>All four actions are visible and each succeeds (no 403); "Your access" names the right.</expected>
+    </test>
+    <test name="View-only caller sees none">
+      <url>{spa-dev-url}/?record=matter:{matter-id-viewonly}</url>
+      <steps><step>Sign in as a View-only partner; open the matter, a work assignment and a project.</step><step>Inspect toolbar and sections.</step></steps>
+      <expected>Only Refresh and Copy link; no disabled buttons; each read-only section shows its one-line reason; "Your access" says Read only.</expected>
+    </test>
+    <test name="Dark Mode (ADR-021)">
+      <steps><step>Repeat the View-only test in dark theme.</step></steps>
+      <expected>The access lines and header use semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, lint and vitest in src/client/external-spa</tool>
+    <tool name="dotnet">Run task 002's contract tests to confirm the server side</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/record/recordAccess.ts</output>
+    <output type="code">src/client/external-spa/src/components/SmartTodo.tsx</output>
+    <output type="code">src/client/external-spa/src/components/EventsCalendar.tsx</output>
+    <output type="code">src/client/external-spa/src/api/web-api-client.ts</output>
+    <output type="test">src/client/external-spa/tests/RecordTemplateAccess.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-006-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a matter, a project and a work assignment whose lists answer `canCreate: true`, all four actions are visible and each submits to the record's own root route (to-dos/events to `/{root}/{id}/…`).</criterion>
+    <criterion testable="true">Given lists that answer `canCreate: false`, none of the four actions is in the DOM, no disabled placeholder exists, and each read-only section shows its one line.</criterion>
+    <criterion testable="true">Given a list that fails, is loading, or omits `canCreate`, its action is hidden (fail closed).</criterion>
+    <criterion testable="true">No action the UI offers answers 403: for matter and work-assignment to-dos and events, the SPA tests' visibility table equals the 201/403 table of task 002's contract tests (cited by test name in the task notes).</criterion>
+    <criterion testable="true">A grep of `src/client/external-spa/src` finds no `AccessLevel.ViewOnly` passed as a prop and no `root === 'projects'` create/toggle gate in SmartTodo or EventsCalendar.</criterion>
+    <criterion testable="true">"Your access" shows the project level label, "Can contribute" or "Read only" per the FR-07 constraint, and nothing while unknown; the text for each access level is asserted.</criterion>
+    <criterion testable="true">Delete-own still shows only on the caller's own rows; a 403 from any action shows the existing error and the list is unchanged.</criterion>
+    <criterion testable="true">ProjectPage tests (`ProjectPage.perRecordWrite.test.tsx` and others) pass unchanged.</criterion>
+    <criterion testable="true">typecheck, lint and the vitest suite pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract (both access levels × matter/work assignment × to-dos/events, plus documents and messages visibility, the fail-closed cases and the header text). Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-06, FR-07, NFR-04; spec §Affected Areas lists only the two hard-codes — the `EventsCalendar.tsx:588-592` gate and the project-only create clients were found on 2026-11-10 and are in scope here because FR-06 cannot be met without them. Two adversarial-review passes (authorization).
+
+Completed 2026-11-11: implemented by an Opus sub-agent; two Opus adversarial passes + one scoped Sonnet re-check; fix round 1 closed every F-class finding. Out-of-scope findings filed: D-9 #2716 (ProjectPage offers creates the list refused; owner question), D-10 #2717 (no server answer for the to-do PATCH right; toggle hidden in the record view), D-11 #2718 (label copies). Details: notes/task-006-notes.md.
+rework: fix-round-1 task 006</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

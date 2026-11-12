@@ -432,6 +432,14 @@ public class ExternalDocumentNarrowingGuardTests
             "External plane (round 1): the documents module fetch drops the rows ExternalDataService.NarrowDocumentsAsync hides.",
         ["Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints"] =
             "External plane (round 1): download and versions refuse a document ExternalDataService.IsDocumentVisibleAsync hides.",
+        ["Sprk.Bff.Api.Services.Documents.OfficeEditAccessService"] =
+            "uac-r2 191g: asks the visibility seam whether ONE document is externally visible before a flagged-external caller " +
+            "gets a write permission on its file (only Visible from a decision that did not fault grants); no rows, no reasons, " +
+            "nothing returned to the caller but its own edit/view answer.",
+        ["Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync"] =
+            "uac-r2 191g: asks the visibility seam whether the documents of recorded item grants are still externally visible, " +
+            "to REMOVE a grant (Hidden or structurally undecidable) or keep it (Visible, or not decidable for now); no rows, " +
+            "nothing returned to any caller.",
         ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility"] =
             "uac-r2 191b: THE external visibility predicate asks the seam for a document's hide decision only (its verdict, " +
             "never a row) and returns Visible / Hidden / Undecided; every reader it takes is app-only.",
@@ -1259,6 +1267,9 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid (the team the row's parents resolve to), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::ReleaseOwnSecureWriteAsync"] =
             "Writes only ownerid (the ordinary team the fresh parents give), conditioned on the row version.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::WriteDirectTeamOwnerAsync"] =
+            "fm 054 piece 3a: writes only ownerid (a typed reference to the resolved Direct message owner team), built in this " +
+            "member, conditioned on the row version; never a link value.",
         ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer::ReownAsync"] =
             "uac-r2 task 191c: writes only ownerid (the team a flagged owner's row's own I-6 question gives), conditioned on the " +
             "row version read with the owner check; never a link column.",

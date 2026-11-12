@@ -45,6 +45,14 @@ public sealed class ExternalRowVisibility
     /// a row that does not come back, a closure that reaches no root), rather than because a rule hides it.</summary>
     public bool IsUndecided(string table, Guid id) => _result.For(table, id).Verdict == ExternalVisibilityVerdict.Undecided;
 
+    /// <summary>uac-r2 task 191g: whether a not-visible row is not visible only for now — the decision faulted, or the row is
+    /// Undecided for a reason a later read may answer (task 191c's transient set: a failed read, a row not found this time, an
+    /// undecided parent, ...) — rather than because a rule hides it or its filing is structurally unresolvable. A caller that
+    /// REVOKES on "not visible" keeps on this answer and retries (round 70: remove only on a positive answer).</summary>
+    public bool MayAnswerLater(string table, Guid id) =>
+        Faulted || (_result.For(table, id) is { Verdict: ExternalVisibilityVerdict.Undecided } decision
+                    && Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer.IsTransient(decision.Reason));
+
     /// <summary>The not-visible count per reason code for <paramref name="rows"/> (one log line; codes and counts only, ADR-015).</summary>
     public string Summary(IEnumerable<(string Table, Guid Id)> rows) =>
         ExternalVisibilityResult.Summary(rows.Select(r => _result.For(r.Table, r.Id)));

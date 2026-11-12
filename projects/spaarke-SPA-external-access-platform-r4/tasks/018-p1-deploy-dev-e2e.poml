@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>P1 deploy (BFF via uac-r2, SPA to dev) + E2E + inherited first-E2E checks (FR-33, NFR-06)</title>
+    <phase>1 Record template and actions</phase>
+    <gate>after 002, 004, 005, 006, 007 merged to master; owner go per live change</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment and E2E verification task (tags deploy, e2e-test); no code change expected</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook deployment through existing workflows and the uac-r2 orchestrator, then scripted E2E checks</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live deployment to shared dev environments</parallel-reason>
+    <deps>002, 004, 005, 006, 007</deps>
+    <tags>deploy, e2e-test</tags>
+    <estimated-effort>3-5 hours (plus uac-r2's 30-minute gate)</estimated-effort>
+  </metadata>
+
+  <prompt>Get Phase 1 live on dev: request the dev BFF deploy of the master SHA carrying task 002 through the uac-r2 orchestrator, deploy the SPA to `swa-spaarke-external-spa-dev` through its workflow after the BFF gate passes, then run the P1 E2E and the four inherited first-E2E checks and record the evidence.</prompt>
+  <role>SPAARKE platform developer. Release engineer for shared dev environments. Follow ADRs strictly.</role>
+  <goal>The dev BFF runs a master SHA that includes task 002 (uac-r2 gate PASS, 0 new 5xx); the dev SWA serves the P1 SPA; the P1 E2E passes at both access levels with no offered action answering 403; FR-33's checks have recorded evidence in `notes/task-018-deploy-record.md`.</goal>
+
+  <context>
+    <background>NFR-06 (staged delivery; BFF only through uac-r2 with the owner's go for the exact SHA; the SPA through its own workflow), FR-33 (design §7.2 "Inherited state"): (1) R3's WorkforceHome invite answers 409 `sdap.access.invite.workforce_home_contact` (`ContactBindingDecision.cs:932`) and writes no collision flag; (2) a held invoice renders Review detail — only once ebilling's 082c-2 is live, otherwise recorded as deferred to task 028; (3) `85fbba3f64` (registration "not set up" text) ships with this first SPA deploy; (4) the external routes on the current dev BFF build carry traffic successfully. Project gotcha: the SPA's BFF host is baked in at Vite build time.</background>
+    <relevant-files>
+      <file role="canonical-reference">docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml</file>
+      <file role="canonical-reference">projects/spaarke-SPA-external-access-platform-r3/tasks/070-deploy-spa-dev.poml</file>
+      <file role="canonical-reference">scripts/Test-BffDevDeployReadback.ps1</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-018-deploy-record.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">BFF event routes, list canCreate, delete-409 — merged to master</dependency>
+      <dependency task="004" status="pending">Child dialogs in the parent modal</dependency>
+      <dependency task="005" status="pending">All six types on the template; R3 modal retired</dependency>
+      <dependency task="006" status="pending">Per-record access and "Your access"</dependency>
+      <dependency task="007" status="pending">Submit invoice action</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06 / dev-bff-deploy-coordination">Never deploy the dev BFF from this session. Ask uac-r2 (the orchestrator) for a deploy of the exact master SHA; the owner gives "go BFF deploy &lt;sha&gt;" in uac-r2's session; R4 gives its peer OK and waits for the gate result.</constraint>
+    <constraint source="project">Owner approval and a stated rollback before the SPA deploy: rollback = re-run `deploy-external-spa.yml` (environment dev) on the previous deployed commit. Deploy only through the workflow (`workflow_dispatch`, environment dev); no manual SWA upload.</constraint>
+    <constraint source="project">The SPA deploy starts only after uac-r2 reports gate PASS for the BFF SHA (the SPA's new actions call the new routes and `canCreate`).</constraint>
+    <constraint source="project">Live reads (for example checking that no collision flag was written) are read-only, and their exact commands are shown to the owner before they run. Records mask tokens, emails, UPNs and object ids.</constraint>
+    <constraint source="project">If an E2E check fails, do not fix code in this task: record it, roll back the SPA if users are affected (with owner approval), and open the fix as a new task via `/project-defer-issue-tracking` or the owning task's fix round.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file>docs/procedures/dev-bff-deploy-coordination.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPA dev deploy runbook" location="projects/spaarke-SPA-external-access-platform-r3/tasks/070-deploy-spa-dev.poml">Owner approval, workflow dispatch, smoke test, deploy record.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Confirm 002, 004, 005, 006 and 007 are completed and merged to master; note the master SHA. Confirm `git merge-base --is-ancestor 85fbba3f64 &lt;sha&gt;` exits 0.</step>
+    <step order="2">Send uac-r2 the deploy request: SHA, R4's content (task 002 routes and list canCreate, delete-409 body), UAC review reference from task 002's notes, and R4's peer OK. Ask the owner to give the go in uac-r2's session.</step>
+    <step order="3">Wait for uac-r2's read-back and 30-minute gate result. On FAIL, stop here and record it.</step>
+    <step order="4">Show the owner the SPA deploy plan (workflow, environment dev, commit, rollback commit); get approval.</step>
+    <step order="5">Dispatch `deploy-external-spa.yml` (environment dev); record the run id and the deployed commit.</step>
+    <step order="6">E2E per record type (browser and Teams host): each of the six types opens in the template with its FR-01 sections and toolbar; Refresh and Copy link work; deep link and bell item open the right record.</step>
+    <step order="7">E2E access levels: as a write caller on a matter, a project and a work assignment, use Upload, New message, Add to-do and Add event (each succeeds); as a View-only caller, confirm none is shown and "Your access" reads correctly. Record any 403 from an offered action as a failure.</step>
+    <step order="8">E2E Submit invoice: a firm-linked partner lands on the right record; a no-firm caller sees no action.</step>
+    <step order="9">FR-33 checks: (1) invite a WorkforceHome contact from a project and record the 409 code; show the owner the read-only query that proves no collision flag was written, then run it; (2) Review detail on a held invoice if ebilling 082c-2 is live, else record "deferred to task 028"; (3) the registration "not set up" text renders for its case; (4) record external-route request counts and status codes from the gate window.</step>
+    <step order="10">Write `notes/task-018-deploy-record.md`: SHAs, run ids, gate result, each E2E check with PASS/FAIL and evidence, rollback targets.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="12">Record deviations and decisions in `projects/spaarke-SPA-external-access-platform-r4/notes/task-018-notes.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If uac-r2's gate fails or shows new 5xx on the external routes, STOP; the SPA is not deployed; report to the owner with uac-r2's record.</trigger>
+    <trigger>If sign-in or record opening fails after the SPA deploy, roll back the SPA (owner approval) and escalate.</trigger>
+    <trigger>If an offered action answers 403 on dev, STOP the E2E, record the record type, caller kind and route, and escalate: it breaks NFR-04.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Template per type">
+      <url>{spa-dev-url}/?record={token}:{id}</url>
+      <steps><step>Open one record of each type from its grid and from a deep link.</step><step>Check the console.</step></steps>
+      <expected>Each type shows its FR-01 layout and toolbar; no console errors.</expected>
+    </test>
+    <test name="Both access levels">
+      <steps><step>Write caller: use the four actions on a matter, a project and a work assignment.</step><step>View-only caller: open the same records.</step></steps>
+      <expected>Write caller: every action succeeds. View-only: only Refresh and Copy link; no disabled controls; no 403 anywhere.</expected>
+    </test>
+    <test name="Dark Mode and Teams (ADR-021)">
+      <steps><step>Repeat the per-type check in dark theme and in the Teams host.</step></steps>
+      <expected>Semantic tokens throughout; no white panels in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="gh">Dispatch and watch the SPA workflow</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-018-deploy-record.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-018-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dev BFF runs a master SHA containing task 002, deployed by uac-r2 with the owner's go for that SHA; the read-back and the 30-minute gate PASS with 0 new 5xx are recorded.</criterion>
+    <criterion testable="true">The dev SWA serves the P1 SPA (workflow run id and commit recorded), deployed after owner approval with the rollback stated.</criterion>
+    <criterion testable="true">All six types open in the template on dev; deep links and bell items open the right record.</criterion>
+    <criterion testable="true">A write caller completes Upload, New message, Add to-do and Add event on a matter, a project and a work assignment; a View-only caller sees none of them; no offered action answered 403.</criterion>
+    <criterion testable="true">FR-33: the WorkforceHome invite 409 code and the no-collision-flag read are recorded; `85fbba3f64` is in the deployed SPA and its text renders; external-route traffic and status codes from the gate window are recorded; the held-invoice Review detail check is recorded as PASS or as deferred to task 028.</criterion>
+    <criterion testable="true">Negative: no command in this task deployed the dev BFF directly, and no live write ran without the owner's recorded approval.</criterion>
+    <criterion testable="true">The deploy record exists with every check's evidence.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-33, NFR-06, Success Criteria 1, 2 and 9. Dev: BFF `spaarke-bff-dev`; SWA `swa-spaarke-external-spa-dev` (R3 host `green-dune-0c4f1221e.7.azurestaticapps.net`); workflow `.github/workflows/deploy-external-spa.yml`. The Teams package is not redeployed in P1 (task 058). If the dev BFF host changed since the last SPA build, the SPA must be rebuilt (project gotcha).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

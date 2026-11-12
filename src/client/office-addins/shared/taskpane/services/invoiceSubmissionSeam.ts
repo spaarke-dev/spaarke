@@ -113,7 +113,8 @@ export interface InvoiceSubmissionMark {
 export interface InvoiceSubmissionInput {
   targetEntity: InvoiceSubmissionTarget;
   marks: InvoiceSubmissionMark[];
-  firmId: string;
+  /** The firm, or null for an invoice submitted without one (contract §2, EB-D-185). Sent as `firmId: null`. */
+  firmId: string | null;
   firmInvoiceNumber: string;
   poNumber: string | null;
   mode: 'New' | 'Correction';
@@ -172,7 +173,8 @@ export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<Invo
  */
 export interface InvoiceCorrectionPrefill {
   invoiceId: string;
-  firm: { id: string; name: string };
+  /** The invoice's firm, or null when it was submitted without one (§10, EB-D-185); a correction then sends no firm. */
+  firm: { id: string; name: string } | null;
   coreRecord: InvoiceFiledUnder;
   /** The lifecycle status name (`InReview`, `SentToAp`, `Superseded`, ...), or null when the server doesn't know it. */
   invoiceStatus: string | null;
@@ -437,12 +439,12 @@ export function normalizeFirmInvoiceNumber(raw: string): string | null {
   return trimmed.length >= 1 && trimmed.length <= FIRM_INVOICE_NUMBER_MAX ? trimmed : null;
 }
 
-/** Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number is null. */
+/** Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number or firm is null. */
 export function buildInvoiceSubmissionInput(args: {
   target: InvoiceSubmissionTarget;
   attachments: readonly InvoiceListedAttachment[];
   marking: InvoiceMarkingValue;
-  firmId: string;
+  firmId: string | null;
   firmInvoiceNumber: string;
   poNumber: string;
   mode: 'New' | 'Correction';
@@ -452,7 +454,7 @@ export function buildInvoiceSubmissionInput(args: {
   return {
     targetEntity: { entityType: args.target.entityType, entityId: cleanGuid(args.target.entityId) },
     marks: toSubmissionMarks(args.attachments, args.marking),
-    firmId: cleanGuid(args.firmId),
+    firmId: args.firmId && args.firmId.trim().length > 0 ? cleanGuid(args.firmId) : null,
     firmInvoiceNumber: args.firmInvoiceNumber.trim(),
     poNumber: po.length > 0 ? po : null,
     mode: args.mode,
