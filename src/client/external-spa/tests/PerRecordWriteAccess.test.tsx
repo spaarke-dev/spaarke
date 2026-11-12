@@ -2,7 +2,8 @@
  * unified-access-control-r2 task 036 fix round 1 (F4, open question g): a caller whose write access is decided per record
  * (`/me` `writeAccessPerRecord`, a licensed systemuser under the FR-20 flag) has a `/me` level that says only what they
  * may SEE — mostly ViewOnly. Their create/upload controls follow the record's own list `canCreate` (the BFF asks
- * Dataverse for the record in hand), never the level. Every other caller keeps the level rule, unchanged.
+ * Dataverse for the record in hand), never the level. Every other caller keeps the level rule, and since R4 D-9 (#2716)
+ * the list's `canCreate` must agree with it (a list that sends none follows the level).
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -71,8 +72,18 @@ describe('per-record write access: SmartTodo "Add Task"', () => {
     expect(screen.queryByRole('button', { name: 'Create new task' })).toBeNull();
   });
 
-  it('every other caller keeps the level rule, whatever a list says', async () => {
+  // R4 D-9 (#2716): every other caller needs the level AND the list. This test used to pin "the level, whatever a list
+  // says" (a Collaborate caller offered Add Task over canCreate=false), the gap that let a role-ceiling 403 through.
+  it('every other caller is NOT offered Add Task when the list says canCreate=false, even at Collaborate (D-9)', async () => {
     answerLists(false);
+    inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
+    await settled();
+
+    expect(screen.queryByRole('button', { name: 'Create new task' })).toBeNull();
+  });
+
+  it('every other caller follows the level where the list sent no canCreate (the kept exception)', async () => {
+    answerLists(undefined);
     inFluent(<SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
 
     expect(await screen.findByRole('button', { name: 'Create new task' })).toBeTruthy();
@@ -95,8 +106,17 @@ describe('per-record write access: EventsCalendar "Create Event"', () => {
     expect(screen.queryByRole('button', { name: /Create Event/ })).toBeNull();
   });
 
-  it('every other caller keeps the level rule', async () => {
+  // R4 D-9 (#2716): was "every other caller keeps the level rule" over canCreate=false.
+  it('every other caller is NOT offered Create Event when the list says canCreate=false, even at Collaborate (D-9)', async () => {
     answerLists(false);
+    inFluent(<EventsCalendar projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
+    await settled();
+
+    expect(screen.queryByRole('button', { name: /Create Event/ })).toBeNull();
+  });
+
+  it('every other caller follows the level where the list sent no canCreate (the kept exception)', async () => {
+    answerLists(undefined);
     inFluent(<EventsCalendar projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
 
     expect(await screen.findByRole('button', { name: /Create Event/ })).toBeTruthy();
@@ -127,8 +147,17 @@ describe('per-record write access: a project DocumentLibrary "Upload Document"',
     expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
   });
 
-  it('every other caller keeps the level rule for a project (the list canCreate is not consulted)', async () => {
+  // R4 D-9 (#2716): was "every other caller keeps the level rule for a project (the list canCreate is not consulted)".
+  it('every other caller is NOT offered Upload on a project when the list says canCreate=false, even at Collaborate (D-9)', async () => {
     answerLists(false);
+    inFluent(<DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
+    await settled();
+
+    expect(screen.queryByRole('button', { name: /Upload Document/ })).toBeNull();
+  });
+
+  it('every other caller follows the level on a project where the list sent no canCreate (the kept exception)', async () => {
+    answerLists(undefined);
     inFluent(<DocumentLibrary projectId={PROJECT} accessLevel={AccessLevel.Collaborate} />);
 
     expect(await screen.findByRole('button', { name: /Upload Document/ })).toBeTruthy();
@@ -297,9 +326,12 @@ describe('per-record write access: SmartTodo status toggle (fix round 2, F1)', (
     expect(screen.queryByText(/Failed to fetch/)).toBeNull();
   });
 
-  it('a matter to-do list stays read-only for a per-record caller (task 057)', async () => {
+  // R4 task 006 (FR-06): a matter has no `/me` level, so its host passes none (the ViewOnly it used to receive was the
+  // hard-code task 006 removed). No list or row says whether the caller may PATCH a matter's to-do, so the toggle is not
+  // offered there, for a per-record caller too.
+  it('a matter to-do list offers no status toggle to a per-record caller: nothing says they may PATCH (task 006)', async () => {
     answerTodos(() => undefined);
-    inFluent(<SmartTodo projectId="m-036" root="matters" accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />);
+    inFluent(<SmartTodo projectId="m-036" root="matters" writeAccessPerRecord />);
     await screen.findByText('Review brief');
 
     expect(screen.queryByRole('button', { name: 'Mark task complete' })).toBeNull();
