@@ -72,6 +72,10 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     /// already finished are skipped when the held window is listed again).</summary>
     internal const int MaxDirectCarried = 1000;
 
+    /// <summary>#2731: the most finished messages remembered for the skip while a window is held; past it the oldest are
+    /// forgotten (and worked again if listed). Bounds the per-instance state however long a window stays held.</summary>
+    internal const int MaxDirectFinishedRemembered = 5000;
+
     /// <summary>Fix round 1 R4: how many runs in a row one message may stay incomplete before it is backed off.</summary>
     internal const int MaxDirectAttempts = 3;
 
@@ -95,7 +99,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     private readonly Dictionary<Guid, (int Failures, DateTimeOffset? RetryAt)> _directAttempts = new();
 
     // #2731: per message reconciled complete, the start of the run that finished it. A held window is listed again; a message
-    // finished after its latest listed change is skipped. Pruned as the watermark passes, so it stays within the held window.
+    // finished after its latest listed change is skipped. Only listed messages are recorded; entries are pruned as the watermark
+    // passes them and capped at MaxDirectFinishedRemembered, so it stays bounded however long a window is held.
     private readonly Dictionary<Guid, DateTimeOffset> _directFinishedAt = new();
 
     /// <summary>Stable job id — the scheduler's run history and admin endpoints key off it.</summary>
@@ -442,7 +447,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         if (listingCapped)
         {
             _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Capped} recent-changes listing(s) reached the cap of {Cap}; the watermark " +
-                "moves only to the last row listed, so the rest is listed by the next runs.", runId, horizons.Count,
+                "moves at most to the last row listed, so the rest is listed by the next runs.", runId, horizons.Count,
                 MaxDirectListedPerTable);
         }
 
@@ -553,11 +558,22 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         var carryOverflow = carry.Count > MaxDirectCarried;
         if (carryOverflow)
         {
-            // A dropped message this run did not list (one carried in) is not listed again either: only the sweep reaches it.
+            // A dropped message this run did not list (one carried in) is reached only by the sweep — certainly so when the listing
+            // was complete; when it faulted or was capped, the next runs may still list it.
             var unlisted = carry.Skip(MaxDirectCarried).Count(id => !firstChange.ContainsKey(id));
-            _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Carry} messages to carry, past the cap of {Cap}; the watermark is held, so " +
-                "the dropped messages this run listed are listed again (those already finished are skipped), and the {Unlisted} " +
-                "dropped message(s) it did not list are reached by the sweep.", runId, carry.Count, MaxDirectCarried, unlisted);
+            if (failure is null && !listingCapped)
+            {
+                _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Carry} messages to carry, past the cap of {Cap}; the watermark is held, so " +
+                    "the dropped messages this run listed are listed again (those already finished are skipped), and the {Unlisted} " +
+                    "dropped message(s) it did not list are reached by the sweep.", runId, carry.Count, MaxDirectCarried, unlisted);
+            }
+            else
+            {
+                _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Carry} messages to carry, past the cap of {Cap}; the watermark is held, so " +
+                    "the dropped messages this run listed are listed again (those already finished are skipped); the listing was " +
+                    "incomplete, so the {Unlisted} dropped message(s) it did not list are listed again by a later run or reached by " +
+                    "the sweep.", runId, carry.Count, MaxDirectCarried, unlisted);
+            }
         }
 
         DateTimeOffset? watermark = null;
@@ -593,8 +609,9 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             foreach (var (id, attempt) in attempts.Where(a => _directPending.Contains(a.Key)))
                 _directAttempts[id] = attempt;
 
-            // #2731: what this run finished, and no longer what it left incomplete (an incomplete message is worked again).
-            foreach (var id in finished)
+            // #2731: what this run finished AND listed (a skip only ever applies to a listed message, so a swept or carried-only
+            // message is not recorded), and no longer what it left incomplete (an incomplete message is worked again).
+            foreach (var id in finished.Where(firstChange.ContainsKey))
                 _directFinishedAt[id] = startedAt;
             foreach (var id in incomplete)
                 _directFinishedAt.Remove(id);
@@ -605,6 +622,14 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                 // Every change listed from here on is at or after the watermark, so an entry finished within the overlap of it
                 // can no longer skip anything.
                 foreach (var id in _directFinishedAt.Where(f => f.Value - DirectOverlap <= next).Select(f => f.Key).ToList())
+                    _directFinishedAt.Remove(id);
+            }
+
+            // A window held for long keeps every entry; past the cap the oldest go. Forgetting one only means working it again.
+            if (_directFinishedAt.Count > MaxDirectFinishedRemembered)
+            {
+                foreach (var id in _directFinishedAt.OrderBy(f => f.Value).ThenBy(f => f.Key)
+                             .Take(_directFinishedAt.Count - MaxDirectFinishedRemembered).Select(f => f.Key).ToList())
                     _directFinishedAt.Remove(id);
             }
 
@@ -637,8 +662,9 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     }
 
     /// <summary>
-    /// The ids of the Direct-team messages changed since <paramref name="since"/>: the messages themselves
-    /// (<paramref name="messageLookup"/> null), or the messages a content table's changed rows name — oldest change first, at most
+    /// The Direct-team messages changed since <paramref name="since"/>, each with the row's <c>modifiedon</c> (null when the row
+    /// carries none): the messages themselves (<paramref name="messageLookup"/> null), or the messages a content table's changed
+    /// rows name — oldest change first, at most
     /// <see cref="MaxDirectListedPerTable"/> rows. <c>Capped</c> when the cap was reached; <c>Horizon</c> is then the last listed
     /// row's <c>modifiedon</c> (null when it carries none). A fault propagates (the caller holds the window).
     /// </summary>

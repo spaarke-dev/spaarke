@@ -44,6 +44,12 @@ public class Issue2731_DirectCarryOverflowWatermarkTests
     /// <summary>One past what a run works plus what it may carry: the first run's carry overflows.</summary>
     private const int Burst = PriorityBudget + Job.MaxDirectCarried + 1;
 
+    /// <summary>Backed-off messages the carry-order test holds ahead of the left-over tail.</summary>
+    private const int DeferredCount = 3;
+
+    /// <summary>Messages (listed) that fill the carry-order test's carry one past its cap beside the backed-off ones.</summary>
+    private const int BurstOverBackedOff = PriorityBudget + Job.MaxDirectCarried - DeferredCount + 1;
+
     /// <summary>Under one listing's cap, so a burst spread over three tables caps none of them.</summary>
     private const int PerListing = Job.MaxDirectListedPerTable - 1;
 
@@ -58,6 +64,7 @@ public class Issue2731_DirectCarryOverflowWatermarkTests
     private readonly DirectMessageOwnerTeamDouble _directory = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
     private readonly FakeTimeProvider _time = new(T0);
     private readonly Dictionary<Guid, int> _participantReads = new();
+    private readonly HashSet<Guid> _unreadable = new();
     private Guid _thread;
 
     public Issue2731_DirectCarryOverflowWatermarkTests()
@@ -133,9 +140,17 @@ public class Issue2731_DirectCarryOverflowWatermarkTests
         // After its finish: a new participant row (that listing stays under its cap), which its participants do not yet hold.
         _time.Advance(TimeSpan.FromMinutes(2));
         var row = ContentRow(Participant, changed, _time.GetUtcNow() - TimeSpan.FromSeconds(30));
+
+        // And enough new messages that the second run's carry overflows too: the window stays held, so the first run's finished
+        // record is kept and the change times alone decide the skip. (A second run that fit its carry would move the watermark and
+        // prune every finished record, and a skip that ignored the change times would then pass.) Candidates of the second run:
+        // the 1000 carried, the changed message, the one the first run dropped, and these.
+        for (var i = 0; i < PriorityBudget; i++)
+            ContentRowFor(Participant, _time.GetUtcNow() - TimeSpan.FromSeconds(20) + TimeSpan.FromMilliseconds(i));
         var second = await RunAsync(job);
 
         Bool(second, "listingCapped").Should().BeFalse();
+        Int(second, "carried").Should().Be(Job.MaxDirectCarried, "the second run's carry overflows, so the window is held and the finished record kept");
 
         await RunUntilAsync(job, () => ReadsOf(changed) > reads, maxRuns: 9);
 
@@ -180,6 +195,51 @@ public class Issue2731_DirectCarryOverflowWatermarkTests
         messages.Should().OnlyContain(m => Granted(m), $"no message is lost, the ones past the capped horizon included (runs: {runs.Count})");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ACarryPastItsCap_KeepsTheBackedOffMessages_AndDropsTheNewestListedChange()
+    {
+        // Three messages that stay incomplete until they are backed off, then fall out of the window (the watermark moves past
+        // them): only the carry holds them, with their attempt counts.
+        var deferred = new List<Guid>();
+        for (var i = 0; i < DeferredCount; i++)
+            deferred.Add(Message(T0 - TimeSpan.FromMinutes(10)));
+        _unreadable.UnionWith(deferred);
+        var job = NewJob();
+
+        for (var run = 1; run <= Job.MaxDirectAttempts; run++)
+        {
+            var attempt = await RunAsync(job);
+            Int(attempt, "incomplete").Should().Be(DeferredCount, $"run {run}: the unreadable messages stay incomplete");
+            _time.Advance(TimeSpan.FromMinutes(2));
+        }
+
+        // A burst after the watermark: one message over what the carry can hold next to the backed-off ones. The newest change is
+        // the last of them, listed through a participant row.
+        var changedAfter = _time.GetUtcNow() - TimeSpan.FromSeconds(30);
+        var burst = SpreadBurst(i => changedAfter + TimeSpan.FromMilliseconds(i), BurstOverBackedOff - 1);
+        var newest = Message(changedAt: null);
+        var newestRow = ContentRow(Participant, newest, changedAfter + TimeSpan.FromMilliseconds(BurstOverBackedOff));
+
+        var overflow = await RunAsync(job);
+
+        Int(overflow, "backedOff").Should().Be(DeferredCount, "the unreadable messages are backed off");
+        Int(overflow, "carried").Should().Be(Job.MaxDirectCarried, "the carry is full: one message over");
+
+        // Take the dropped change out of the window, so that only the carry could still reach what it kept.
+        _world.Set(Participant, newestRow, "modifiedon", (T0 - TimeSpan.FromMinutes(5)).UtcDateTime);
+        _time.Advance(TimeSpan.FromMinutes(2));
+        var next = await RunAsync(job);
+
+        Since(next).Should().Be(Since(overflow), "a carry past its cap holds the watermark");
+        Int(next, "backedOff").Should().Be(DeferredCount, "the backed-off messages and their attempt counts are carried ahead of the left-over tail");
+
+        await RunUntilAsync(job, () => burst.All(Granted), maxRuns: 8);
+
+        burst.Should().OnlyContain(m => Granted(m), "every listed message but the newest change is kept by the carry and worked");
+        ReadsOf(newest).Should().Be(0, "the newest listed change is the one the overflowing carry drops");
+        Granted(newest).Should().BeFalse();
+    }
+
     // ── The job, as the host composes it ──
 
     private Job NewJob()
@@ -188,6 +248,8 @@ public class Issue2731_DirectCarryOverflowWatermarkTests
         entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) =>
             {
+                if (ByIdRead(query) is { } unreadable && _unreadable.Contains(unreadable))
+                    throw new InvalidOperationException("Test: this message cannot be read.");
                 if (ParticipantRead(query) is { } message)
                     _participantReads[message] = ReadsOf(message) + 1;
                 return Task.FromResult(IsSweep(query) ? new EntityCollection() : _world.Answer(query));
@@ -242,12 +304,12 @@ public class Issue2731_DirectCarryOverflowWatermarkTests
         _shares.Seed("sprk_communicationthread", _thread, DataversePrincipalRef.User(Recipient), Read);
     }
 
-    /// <summary><see cref="Burst"/> messages, the i-th changed at <paramref name="changedAt"/>(i) through its own row (the first
+    /// <summary><paramref name="count"/> (<see cref="Burst"/>) messages, the i-th changed at <paramref name="changedAt"/>(i) through its own row (the first
     /// listing's worth), an attachment row (the next) or a participant row (the rest) — no listing reaches its cap.</summary>
-    private List<Guid> SpreadBurst(Func<int, DateTimeOffset> changedAt)
+    private List<Guid> SpreadBurst(Func<int, DateTimeOffset> changedAt, int count = Burst)
     {
         var burst = new List<Guid>();
-        for (var i = 0; i < Burst; i++)
+        for (var i = 0; i < count; i++)
         {
             burst.Add(i < PerListing
                 ? Message(changedAt(i))
@@ -300,6 +362,14 @@ public class Issue2731_DirectCarryOverflowWatermarkTests
 
     /// <summary>How many times the reconciler read the message's participants: once per reconcile of it.</summary>
     private int ReadsOf(Guid message) => _participantReads.TryGetValue(message, out var reads) ? reads : 0;
+
+    /// <summary>The message a read of one message row by its id names.</summary>
+    private static Guid? ByIdRead(QueryExpression query) =>
+        query.EntityName == Communication
+        && query.Criteria.Conditions.SingleOrDefault(c => c.AttributeName == Communication + "id" && c.Operator == ConditionOperator.Equal)
+            is { } byId && byId.Values.Single() is Guid id
+            ? id
+            : null;
 
     private static Guid? ParticipantRead(QueryExpression query) =>
         query.EntityName == Communication && query.ColumnSet.Columns.Contains(DirectMessageParticipantShares.SentByColumn)
