@@ -63,15 +63,16 @@ import {
  * Reached from the pane's Invoice tab (package 1.1.4, owner UAT 2026-11-03; a received email only — `canGetAttachments`),
  * and from a cached older manifest's ribbon `?action=submitInvoice` (outlook/taskpane/index.tsx → App `initialAction`).
  *
- * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (required; its options
- *   come from {@link InvoiceViewProps.loadFirms}), the firm's invoice number (required, 1-100), an optional PO number,
- *   and the email's attachments marked Invoice / Supporting / Don't save.
+ * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (OPTIONAL since ebilling
+ *   EB-D-185: its options come from {@link InvoiceViewProps.loadFirms}; with none chosen the invoice is sent with
+ *   `firmId: null` and held until a reviewer adds one), the firm's invoice number (required, 1-100), an optional PO
+ *   number, and the email's attachments marked Invoice / Supporting / Don't save.
  * - Existing invoice: pick the invoice, then submit a corrected invoice or add supporting files. Corrections are shown
  *   disabled with their reason until {@link InvoiceViewProps.correctionAvailable} (ebilling 097 on the server); supporting
  *   files until the upload route exists (ebilling 123; its contract is agreed, the route is not built, so the add-in
  *   does not call it yet).
  * - Correction: the chosen invoice's prefill ({@link InvoiceViewProps.loadCorrectionPrefill}, contract §10) decides.
- *   When it can be corrected, the form shows the firm, core record and firm invoice number the correction keeps (not
+ *   When it can be corrected, the form shows the firm (or "none"), core record and firm invoice number the correction keeps (not
  *   editable: the server refuses any other) and the attachment marking; otherwise the view says why, and offers a
  *   Superseded invoice's replacement.
  *
@@ -153,6 +154,9 @@ export const INVOICE_UPLOAD_HINT = 'You can still submit this invoice in Spaarke
 
 /** Retryable failures in a row before the view also suggests uploading in Spaarke. */
 const RETRIES_BEFORE_HINT = 2;
+
+/** The firm is optional (EB-D-185); without one the server holds the invoice until a reviewer adds it. */
+const HELD_FOR_FIRM = 'The invoice will be held until a reviewer adds one.';
 
 const ENDED_TITLES: Record<'Rejected' | 'Failed', string> = {
   Rejected: 'The invoice was rejected',
@@ -259,6 +263,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [coreRecord, setCoreRecord] = useState<EntitySearchResult | null>(null);
   const [invoice, setInvoice] = useState<EntitySearchResult | null>(null);
   const [firms, setFirms] = useState<FirmLoad>({ status: 'none' });
+  /** The request `firms` describes ({@link firmsKey} when its effect last ran); it lags the chosen record by a render. */
+  const [firmsFor, setFirmsFor] = useState<string | null>(null);
   const [firmId, setFirmId] = useState('');
   const [firmInvoiceNumber, setFirmInvoiceNumber] = useState('');
   const [poNumber, setPoNumber] = useState('');
@@ -364,7 +370,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       }
       if (controller.signal.aborted || !followed) return;
       setPrevious({ status: 'ready', submission: followed, following: false });
-      if (!isRunning(followed.status)) announce(previousSubmissionTitle(followed), 'polite');
+      if (!isRunning(followed.status)) {
+        announce(
+          followed.message
+            ? `${previousSubmissionTitle(followed)}. ${followed.message}`
+            : previousSubmissionTitle(followed),
+          'polite'
+        );
+      }
     })();
     return () => controller.abort();
   }, [loadPreviousSubmission, followPreviousSubmission, previousReload, announce]);
@@ -404,10 +417,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     };
   }, [hostAdapter]);
 
-  // The firms linked to the chosen core record. A newer choice supersedes an older request.
+  // The firms linked to the chosen core record. A newer choice supersedes an older request. `firmsKey` names the
+  // record and the reload count, so `firms` is only used for the record it was loaded for (see `detailsReady`), and a
+  // reload (Retry, or Done on a finished submission) re-runs this even when the record object is unchanged.
+  const firmsKey = coreRecord ? `${coreRecord.id}:${firmsReload}` : null;
   useEffect(() => {
     const request = ++firmRequestRef.current;
     setFirmId('');
+    setFirmsFor(firmsKey);
     if (!coreRecord || !isCoreRecordType(coreRecord.entityType)) {
       setFirms({ status: 'none' });
       return;
@@ -433,7 +450,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         });
       }
     );
-  }, [coreRecord, loadFirms, firmsReload]);
+  }, [coreRecord, loadFirms, firmsReload, firmsKey]);
 
   // A correction of the chosen invoice: read what it must keep and whether it can be made (§10). A newer choice
   // supersedes an older request.
@@ -537,14 +554,20 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     const list: string[] = [];
     if (mode !== 'new') return list;
     if (!coreRecord) list.push('the matter, project or work assignment');
-    if (!firmId) list.push('the firm');
     if (!normalizedNumber) list.push("the firm's invoice number");
     return list;
-  }, [mode, coreRecord, firmId, normalizedNumber]);
+  }, [mode, coreRecord, normalizedNumber]);
 
   const detailsReady =
     mode === 'new'
-      ? coreRecord !== null && isCoreRecordType(coreRecord.entityType) && firmId.length > 0 && normalizedNumber !== null
+      ? // The firm is optional (EB-D-185), but not while the list is loading: a record's only firm is auto-selected
+        // when it arrives, and a submit before that would send "no firm" for a record that has one. `firms` must also
+        // describe the CURRENT record: for the render in which the record changed, it still describes the previous one.
+        coreRecord !== null &&
+        isCoreRecordType(coreRecord.entityType) &&
+        firms.status !== 'loading' &&
+        firmsFor === firmsKey &&
+        normalizedNumber !== null
       : correction !== null && normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
 
   const canSubmit =
@@ -595,7 +618,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (result.kind !== 'success' && result.kind !== 'ended') setPreviousReload(n => n + 1);
     announce(
       result.kind === 'success'
-        ? 'Invoice submitted.'
+        ? // The outcome sentence too (firm_missing, held, replaced): the visible bar says it, so a screen reader must.
+          result.message
+          ? `Invoice submitted. ${result.message}`
+          : 'Invoice submitted.'
         : result.kind === 'ended'
           ? `${ENDED_TITLES[result.status]}. ${result.message}`
           : result.message,
@@ -611,7 +637,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         target: { entityType: correction.coreRecord.entityType, entityId: correction.coreRecord.entityId },
         attachments,
         marking,
-        firmId: correction.firm.id,
+        firmId: correction.firm?.id ?? null,
         firmInvoiceNumber: correction.firmInvoiceNumber,
         poNumber,
         mode: 'Correction',
@@ -650,6 +676,9 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       setCoreRecord(filedRecord);
       setInvoice(null);
       setFirmId('');
+      // The firm effect re-runs even when the record is unchanged (the filed record is the same object): it lists the
+      // firms again and re-selects a record's only firm, which `setFirmId('')` above just cleared.
+      setFirmsReload(n => n + 1);
       setFirmInvoiceNumber('');
       setPoNumber('');
       setRetryableInARow(0);
@@ -883,7 +912,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const renderFirmField = () => {
     if (firms.status === 'none') {
       return (
-        <Field label="Firm" required hint="Choose the matter, project or work assignment first.">
+        <Field label="Firm" hint="Choose the matter, project or work assignment first.">
           <Select disabled value="">
             <option value="">Choose a firm</option>
           </Select>
@@ -892,14 +921,18 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     }
     if (firms.status === 'loading') {
       return (
-        <Field label="Firm" required>
+        <Field label="Firm">
           <Spinner size="tiny" label="Loading firms…" />
         </Field>
       );
     }
     if (firms.status === 'unavailable') {
       return (
-        <Field label="Firm" required validationState="warning" validationMessage="Firms can't be listed here yet.">
+        <Field
+          label="Firm"
+          validationState="warning"
+          validationMessage={`Firms can't be listed here yet. ${HELD_FOR_FIRM}`}
+        >
           <Select disabled value="">
             <option value="">Choose a firm</option>
           </Select>
@@ -909,7 +942,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (firms.status === 'error') {
       return (
         <>
-          <Field label="Firm" required validationState="error" validationMessage={firms.message}>
+          <Field label="Firm" validationState="error" validationMessage={`${firms.message} ${HELD_FOR_FIRM}`}>
             <Select disabled value="">
               <option value="">Choose a firm</option>
             </Select>
@@ -929,7 +962,11 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     }
     if (firms.firms.length === 0) {
       return (
-        <Field label="Firm" required validationState="warning" validationMessage="No firm is linked to this record">
+        <Field
+          label="Firm"
+          validationState="warning"
+          validationMessage={`No firm is linked to this record. ${HELD_FOR_FIRM}`}
+        >
           <Select disabled value="">
             <option value="">Choose a firm</option>
           </Select>
@@ -937,7 +974,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       );
     }
     return (
-      <Field label="Firm" required>
+      <Field
+        label="Firm"
+        {...(firmId === ''
+          ? { validationState: 'warning' as const, validationMessage: `No firm selected. ${HELD_FOR_FIRM}` }
+          : {})}
+      >
         <Select value={firmId} onChange={(_, data) => setFirmId(data.value)} disabled={locked}>
           <option value="">Choose a firm</option>
           {firms.firms.map(firm => (
@@ -957,7 +999,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         Correcting{c.trackingNumber ? ` (tracking ${c.trackingNumber})` : ''}
       </Text>
       <Text size={200}>{`${CORE_TYPE_LABEL[c.coreRecord.entityType]}: ${c.coreRecord.name}`}</Text>
-      <Text size={200}>{`Firm: ${c.firm.name}`}</Text>
+      <Text size={200}>{`Firm: ${c.firm ? c.firm.name : 'none'}`}</Text>
       <Text size={200}>{`Firm invoice number: ${c.firmInvoiceNumber}`}</Text>
       <Text size={200} className={styles.note}>
         {"A correction keeps the original invoice's firm, record and firm invoice number."}

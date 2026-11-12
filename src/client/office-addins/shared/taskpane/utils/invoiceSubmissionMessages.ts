@@ -83,8 +83,17 @@ export const HELD_FOR_REVIEW_MESSAGE =
 export const REPLACED_BY_CORRECTION_CODE = 'ebilling.submission.replaced_by_correction';
 
 /**
+ * §9 (ebilling EB-D-185): an Accepted submission made without a firm. The invoice is accepted and then held until a
+ * reviewer sets a firm.
+ */
+export const FIRM_MISSING_CODE = 'ebilling.submission.firm_missing';
+/** The sentence for {@link FIRM_MISSING_CODE} (the contract's wording). */
+export const FIRM_MISSING_MESSAGE = 'Submitted without a firm. A reviewer will add the firm before approval.';
+
+/**
  * The sentence for an Accepted submission: none without a code, the replaced-by-correction sentence for
- * {@link REPLACED_BY_CORRECTION_CODE}, and {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
+ * {@link REPLACED_BY_CORRECTION_CODE}, {@link FIRM_MISSING_MESSAGE} for {@link FIRM_MISSING_CODE}, and
+ * {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
  */
 export function describeAcceptedOutcome(
   code: string | null | undefined,
@@ -96,6 +105,7 @@ export function describeAcceptedOutcome(
       ? `This invoice was replaced by a correction (tracking ${replacedByTrackingNumber}).`
       : 'This invoice was replaced by a correction.';
   }
+  if (code === FIRM_MISSING_CODE) return FIRM_MISSING_MESSAGE;
   return HELD_FOR_REVIEW_MESSAGE;
 }
 
@@ -322,6 +332,16 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
   // Task 094 (2026-10-28): a re-attempt is allowed (EB-D-160).
   'ebilling.submission.source_changed':
     "The email's saved copy in Spaarke changed while the invoice was being processed, so it was not processed. Submit it again.",
+  // 095c-4 (2026-11-03): the job retries these and stores the code on its last attempt; a re-attempt is allowed.
+  'ebilling.submission.core_record_changed':
+    'The matter, project or work assignment changed while the invoice was being processed, so it was not processed. ' +
+    'Submit it again.',
+  'ebilling.submission.firm_changed':
+    'The firm was set or cleared while the invoice was being processed, so it was not processed. Submit it again.',
+  'ebilling.submission.changed':
+    'The submission changed in Spaarke while the invoice was being processed, so it was not processed. Submit it again.',
+  'ebilling.submission.row_version_missing':
+    "Spaarke couldn't confirm the submission's latest version, so the invoice was not processed. Submit it again.",
   // ebilling task 191 (2026-11-01): the AI reading and line coding. The first two are permanent; the job retries the
   // other three and stores the code on its last attempt, so a later re-submission can work.
   'ai.invoice.read.not_configured':

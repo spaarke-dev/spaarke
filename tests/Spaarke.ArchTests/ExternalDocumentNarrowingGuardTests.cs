@@ -432,6 +432,14 @@ public class ExternalDocumentNarrowingGuardTests
             "External plane (round 1): the documents module fetch drops the rows ExternalDataService.NarrowDocumentsAsync hides.",
         ["Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints"] =
             "External plane (round 1): download and versions refuse a document ExternalDataService.IsDocumentVisibleAsync hides.",
+        ["Sprk.Bff.Api.Services.Documents.OfficeEditAccessService"] =
+            "uac-r2 191g: asks the visibility seam whether ONE document is externally visible before a flagged-external caller " +
+            "gets a write permission on its file (only Visible from a decision that did not fault grants); no rows, no reasons, " +
+            "nothing returned to the caller but its own edit/view answer.",
+        ["Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync"] =
+            "uac-r2 191g: asks the visibility seam whether the documents of recorded item grants are still externally visible, " +
+            "to REMOVE a grant (Hidden or structurally undecidable) or keep it (Visible, or not decidable for now); no rows, " +
+            "nothing returned to any caller.",
         ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility"] =
             "uac-r2 191b: THE external visibility predicate asks the seam for a document's hide decision only (its verdict, " +
             "never a row) and returns Visible / Hidden / Undecided; every reader it takes is app-only.",

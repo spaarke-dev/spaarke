@@ -1518,7 +1518,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     // =====================================================================
     // Task 036 fix round 1 (F4, open question g): a Dataverse-decided caller's /me level says only what they may see, so
     // the record's own lists say whether its create route would admit them (`canCreate`) — one probe for the record in
-    // hand. Every other caller's list is byte-for-byte unchanged (no `canCreate` member).
+    // hand. Since R4 task 002 (FR-06) every other caller's list says `canCreate` too, from the composed rights the create
+    // route checks, and Dataverse is still asked nothing for them.
     // =====================================================================
 
     private static async Task<System.Text.Json.JsonElement> ListJsonAsync(HttpClient client, string path)
@@ -1578,10 +1579,12 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         json.GetProperty("canCreate").GetBoolean().Should().BeFalse();
     }
 
-    [Theory(DisplayName = "Task 036 F4 twin: flag OFF (any level), the to-do list carries no canCreate and asks Dataverse nothing")]
+    // R4 task 002 (FR-06) changed this twin: a caller whose access Dataverse does NOT decide is now told canCreate too —
+    // from the composed rights the create route itself checks — and is still asked nothing (no extra Dataverse read).
+    [Theory(DisplayName = "R4 task 002 (FR-06): flag OFF, the to-do list's canCreate is the composed Create, and Dataverse is asked nothing")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Fr20_TodoList_FlagOff_IsUnchanged_AndAsksNothing(bool collaborate)
+    public async Task Fr20_TodoList_FlagOff_ReportsTheComposedCreate_AndAsksNothing(bool collaborate)
     {
         _fixture.Reset();
         var rights = collaborate ? ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate) : AccessRights.Read;
@@ -1591,9 +1594,14 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/todos");
 
-        json.TryGetProperty("canCreate", out _).Should().BeFalse("flag off, the wire is byte-for-byte what it was");
+        json.GetProperty("canCreate").GetBoolean().Should().Be(collaborate,
+            "flag off, the composed rights decide the create route, so they decide canCreate");
         _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
         _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
+
+        // The list's canCreate equals the create route's own answer for the same caller and record.
+        var create = await client.PostAsJsonAsync($"/api/v1/external/projects/{InScopeProject}/todos", ValidCreate());
+        create.StatusCode.Should().Be(collaborate ? HttpStatusCode.Created : HttpStatusCode.Forbidden);
     }
 
     [Theory(DisplayName = "Task 036 F4: flag ON, the PROJECT event list's canCreate is the event create route's Dataverse answer")]
@@ -1618,23 +1626,52 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         json.GetProperty("canCreate").GetBoolean().Should().Be(expected);
     }
 
-    [Theory(DisplayName = "Task 036 F4 twin: no event create route on a matter, and flag OFF on a project — no canCreate, no probe")]
-    [InlineData("matters", true)]
-    [InlineData("projects", false)]
-    public async Task Fr20_EventList_WithoutACreateRoute_OrFlagOff_IsUnchanged(string segment, bool dataverseDecides)
+    // R4 task 002 (FR-06, FR-08) replaced "no event create route on a matter — no canCreate": every root has one now, so the
+    // matter and work-assignment event lists say canCreate as the project's does, and a flag-off caller is told too.
+    [Theory(DisplayName = "R4 task 002: flag ON, a matter/WA event list's canCreate is that root's event create route's Dataverse answer")]
+    [InlineData("matters", AccessRights.Read | AccessRights.AppendTo, true, true)]
+    [InlineData("matters", AccessRights.Read | AccessRights.AppendTo, false, false)]
+    [InlineData("workassignments", AccessRights.Read | AccessRights.AppendTo, true, true)]
+    [InlineData("workassignments", AccessRights.Read | AccessRights.Write, true, false)]
+    public async Task Fr20_RootEventList_CanCreate_IsTheCreateRoutesDataverseAnswer(
+        string segment, AccessRights dataverse, bool holdsCreate, bool expected)
     {
         _fixture.Reset();
         var (kind, rootId) = segment == "matters"
             ? (ExternalDataService.TodoRootKind.Matter, InScopeMatter)
-            : (ExternalDataService.TodoRootKind.Project, InScopeProject);
-        _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides);
-        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
+            : (ExternalDataService.TodoRootKind.WorkAssignment, InScopeWorkAssignment);
+        _fixture.Principal = SystemUserHolding(kind, rootId, AccessRights.Read, dataverseDecides: true);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, EntitySetOf(kind), rootId, dataverse);
+        if (holdsCreate)
+        {
+            _fixture.Probe.HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
+        }
 
         using var client = _fixture.CreateAuthenticatedClient();
         var json = await ListJsonAsync(client, $"/api/v1/external/{segment}/{rootId}/events");
 
-        json.TryGetProperty("canCreate", out _).Should().BeFalse();
+        json.GetProperty("canCreate").GetBoolean().Should().Be(expected);
+        _fixture.Probe.AppOnlyCalls.Should().ContainSingle("one probe, for the record in hand");
+
+        var create = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{rootId}/events", new { sprk_name = "Kickoff" });
+        create.StatusCode.Should().Be(expected ? HttpStatusCode.Created : HttpStatusCode.Forbidden,
+            "the list's canCreate is the create route's own decision");
+    }
+
+    [Fact(DisplayName = "R4 task 002 twin: flag OFF on a project, the event list reports the composed Create and asks Dataverse nothing")]
+    public async Task Fr20_EventList_FlagOff_ReportsTheComposedCreate_AndAsksNothing()
+    {
+        _fixture.Reset();
+        _fixture.Principal = SystemUserHolding(
+            ExternalDataService.TodoRootKind.Project, InScopeProject, AccessRights.Read, dataverseDecides: false);
+        _fixture.Probe.AnswerAppOnly(Fr20SystemUser, "sprk_projects", InScopeProject, AccessRights.Read | AccessRights.AppendTo).HoldsAppOnly(Fr20SystemUser, EventCreatePrivilege);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var json = await ListJsonAsync(client, $"/api/v1/external/projects/{InScopeProject}/events");
+
+        json.GetProperty("canCreate").GetBoolean().Should().BeFalse("Read alone does not admit the create route");
         _fixture.Probe.AppOnlyCalls.Should().BeEmpty();
+        _fixture.Probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
     }
 
     // =====================================================================
@@ -2067,13 +2104,20 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastCreateCallerContactId = null;
             LastCreateCreator = null;
             CreateEventCallCount = 0;
+            LastCreateEventArgs = null;
         }
 
+        /// <summary>R4 task 002: what the route handed the event create (root kind and id from the ROUTE, the owner team).</summary>
+        public (ExternalDataService.TodoRootKind Kind, Guid RootId, Guid OwningTeamId, CreateExternalEventRequest Request, CallerPrincipal Creator)?
+            LastCreateEventArgs
+        { get; private set; }
+
         public override Task<ExternalEventDto> CreateEventAsync(
-            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
-            CancellationToken ct = default)
+            ExternalDataService.TodoRootKind rootKind, Guid rootId, CreateExternalEventRequest request, Guid owningTeamId,
+            CallerPrincipal creator, CancellationToken ct = default)
         {
             CreateEventCallCount++;
+            LastCreateEventArgs = (rootKind, rootId, owningTeamId, request, creator);
             return Task.FromResult(new ExternalEventDto { SprkEventid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 

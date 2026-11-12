@@ -192,7 +192,8 @@ async function load() {
   const msalAuth = await import('../src/auth/msal-auth');
   msalAuth.setActiveBffTokenAcquirer(vi.fn(async () => 'ciam-token'));
   selection.activateBackend('ciam', { ...CONTOSO });
-  const { InvoiceSubmitPage, INVOICE_SUBMIT_PATH } = await import('../src/pages/InvoiceSubmitPage');
+  const { InvoiceSubmitPage } = await import('../src/pages/InvoiceSubmitPage');
+  const { INVOICE_SUBMIT_PATH } = await import('../src/pages/invoiceSubmitLink');
   const { default: InvoicesWidgetBody } = await import('../src/widgets/InvoicesWidget');
   return { InvoiceSubmitPage, INVOICE_SUBMIT_PATH, InvoicesWidgetBody };
 }
@@ -611,6 +612,286 @@ describe('InvoiceSubmitPage — Choose firm (owner, 2026-10-17: add a firm step)
     },
     SLOW
   );
+});
+
+// R4 task 007 (FR-10), agreed with ebilling-r1: `?invoiceRecord={kind}:{guid}` preselects a record in the wizard. The option
+// comes from the page's own `loadRecords` result (no name in the address), a firm is never picked by the link, and
+// `submissionId` still wins. Every "preselected" test has its "not preselected" twin below.
+describe('InvoiceSubmitPage — ?invoiceRecord= preselect (R4 task 007, FR-10)', () => {
+  const MATTER_LINK = `/invoices/submit?invoiceRecord=${encodeURIComponent(`matter:${MATTER_ID}`)}`;
+  const firmRadio = (name: string) => screen.findByRole('radio', { name }, SLOW);
+  const recordRadio = (name: RegExp) => screen.findByRole('radio', { name }, SLOW);
+  const isChecked = (el: HTMLElement) => (el as HTMLInputElement).checked;
+  const firmRecordReads = () => calls.filter(c => c.url.includes('/firm-records'));
+  const projectReads = () => calls.filter(c => new URL(c.url).pathname === '/api/v1/external/projects');
+
+  /** The Record step is shown, its list loaded, and nothing in it is chosen. */
+  async function expectNothingChosen() {
+    const radios = await screen.findAllByRole('radio', { name: /Acme v\. Roadrunner|Patent portfolio/ }, SLOW);
+    for (const radio of radios) expect(isChecked(radio)).toBe(false);
+    expect(isEnabled(await next())).toBe(false);
+  }
+
+  it(
+    'a single-firm caller goes straight to the Record step with the linked record chosen, and no list is read twice',
+    async () => {
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, MATTER_LINK);
+
+      const matter = await recordRadio(/Acme v\. Roadrunner/);
+      expect(isChecked(matter)).toBe(true);
+      // The other record on the list is not chosen, and the wizard lets the caller go on.
+      expect(isChecked(screen.getByRole('radio', { name: /Patent portfolio/ }))).toBe(false);
+      expect(isEnabled(await next())).toBe(true);
+      expect(screen.queryByText('Choose the firm this invoice is from')).toBeNull();
+      // The page's own read was handed to the wizard: one firm-records read and one projects read, not two.
+      expect(firmRecordReads()).toHaveLength(1);
+      expect(projectReads()).toHaveLength(1);
+      expect(firmRecordReads()[0].url).toContain(`firmId=${FIRM_ALPHA.firmId}`);
+    },
+    SLOW
+  );
+
+  it(
+    'the GUID is matched without regard to case, and the chosen record is the one that gets submitted against',
+    async () => {
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, `/invoices/submit?invoiceRecord=matter:${MATTER_ID.toUpperCase()}`);
+
+      expect(isChecked(await recordRadio(/Acme v\. Roadrunner/))).toBe(true);
+      fireEvent.click(await next());
+      const input = await waitFor(() => {
+        const el = document.querySelector('input[type="file"]');
+        if (!el) throw new Error('no file input yet');
+        return el as HTMLInputElement;
+      });
+      fireEvent.change(input, {
+        target: { files: [new File(['%PDF-1.4 test'], 'invoice.pdf', { type: 'application/pdf' })] },
+      });
+      await waitFor(() => expect(isEnabled(screen.getByRole('button', { name: /^next$/i }))).toBe(true));
+      fireEvent.click(await next());
+      fireEvent.change(await screen.findByLabelText(/Firm invoice number/i), { target: { value: 'INV-9' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit invoice' }));
+
+      expect(await screen.findByText('Invoice received', {}, SLOW)).toBeTruthy();
+      expect(submitCalls()).toHaveLength(1);
+      expect(submitCalls()[0].url).toBe(
+        `https://contoso-bff.test/api/v1/external/matters/${MATTER_ID}/invoice-submissions`
+      );
+    },
+    SLOW
+  );
+
+  it(
+    'a project link chooses the project',
+    async () => {
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, `/invoices/submit?invoiceRecord=${encodeURIComponent(`project:${PROJECT_ID}`)}`);
+      expect(isChecked(await recordRadio(/Patent portfolio/))).toBe(true);
+      expect(isChecked(screen.getByRole('radio', { name: /Acme v\. Roadrunner/ }))).toBe(false);
+    },
+    SLOW
+  );
+
+  it.each([
+    ['an unknown kind', `invoice:${MATTER_ID}`],
+    ['a kind in the wrong case', `Matter:${MATTER_ID}`],
+    ['an id that is not a GUID', 'matter:not-a-guid'],
+    ['an empty id', 'matter:'],
+    ['no colon', `matter${MATTER_ID}`],
+    ['no kind', `:${MATTER_ID}`],
+    ['an id with trailing text', `matter:${MATTER_ID}x`],
+  ])(
+    'a malformed link (%s) is ignored: the wizard starts empty, exactly as without a link',
+    async (_name, value) => {
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, `/invoices/submit?invoiceRecord=${encodeURIComponent(value)}`);
+      await expectNothingChosen();
+      // Nothing was read ahead of the wizard: its own single read of each list.
+      expect(firmRecordReads()).toHaveLength(1);
+      expect(projectReads()).toHaveLength(1);
+    },
+    SLOW
+  );
+
+  it(
+    'a record the caller cannot submit for (not on the list) is not preselected, and nothing is invented for it',
+    async () => {
+      // The firm is linked to the project only: the matter in the link is not offered at all.
+      script.firmRecords = firmId => linkedTo(firmId, [], [PROJECT_ID]);
+      const { InvoiceSubmitPage } = await load();
+      const view = renderPage(InvoiceSubmitPage, MATTER_LINK);
+      await expectNothingChosen();
+      expect(screen.queryByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeNull();
+
+      // A well-formed id the caller has never heard of: also nothing.
+      view.unmount();
+      const { InvoiceSubmitPage: Again } = await load();
+      renderPage(
+        Again,
+        `/invoices/submit?invoiceRecord=${encodeURIComponent('matter:99999999-9999-4999-8999-999999999999')}`
+      );
+      await expectNothingChosen();
+    },
+    SLOW
+  );
+
+  it(
+    'a failed record read ahead of the wizard is not kept: the wizard asks again and shows the failure, with nothing chosen',
+    async () => {
+      script.firmRecords = () => problem(403, undefined, 'ebilling.submission.use_internal_route');
+      const { InvoiceSubmitPage } = await load();
+      renderPage(InvoiceSubmitPage, MATTER_LINK);
+      expect(await screen.findByText(/submitted from the internal workspace/i, {}, SLOW)).toBeTruthy();
+      expect(screen.queryByRole('radio')).toBeNull();
+      expect(firmRecordReads()).toHaveLength(2); // the page's read failed; the wizard's own read is live
+    },
+    SLOW
+  );
+
+  it(
+    'submissionId wins: the resume screen shows, the wizard is not shown, and the record link reads nothing',
+    async () => {
+      script.status = [() => json(200, statusView({ status: 'Rejected', outcomeReasonCode: 'po_mismatch' }))];
+      const { InvoiceSubmitPage } = await load();
+      renderPage(
+        InvoiceSubmitPage,
+        `/invoices/submit?submissionId=${SUBMISSION_ID}&invoiceRecord=${encodeURIComponent(`matter:${MATTER_ID}`)}`
+      );
+      expect(await screen.findByText(/Reason: po_mismatch/, {}, SLOW)).toBeTruthy();
+      expect(screen.queryByRole('radio')).toBeNull();
+      expect(firmRecordReads()).toHaveLength(0);
+      expect(projectReads()).toHaveLength(0);
+      expect(calls.some(c => c.url.includes('/dataverse/fetch'))).toBe(false);
+    },
+    SLOW
+  );
+
+  // The parser is the one place the link's shape is decided; the page tests above prove what the wizard then shows.
+  describe('the link format', () => {
+    it(
+      'reads {kind}:{guid} for the three kinds, any case of GUID; the builder writes what the parser reads',
+      async () => {
+        const { parseInvoiceRecordParam, invoiceSubmitPathFor } = await import('../src/pages/invoiceSubmitLink');
+        for (const kind of ['matter', 'project', 'workassignment'] as const) {
+          expect(parseInvoiceRecordParam(`${kind}:${MATTER_ID}`)).toEqual({ kind, recordId: MATTER_ID });
+          expect(parseInvoiceRecordParam(`${kind}:${MATTER_ID.toUpperCase()}`)).toEqual({
+            kind,
+            recordId: MATTER_ID.toUpperCase(),
+          });
+          const path = invoiceSubmitPathFor(kind, MATTER_ID);
+          expect(path).toBe(`/invoices/submit?invoiceRecord=${kind}%3A${MATTER_ID}`);
+          expect(parseInvoiceRecordParam(new URL(path, 'https://x.test').searchParams.get('invoiceRecord'))).toEqual({
+            kind,
+            recordId: MATTER_ID,
+          });
+        }
+      },
+      SLOW
+    );
+
+    it.each([
+      ['absent', null],
+      ['empty', ''],
+      ['an unknown kind', `invoice:${MATTER_ID}`],
+      ['a kind in the wrong case', `Matter:${MATTER_ID}`],
+      ['a work assignment spelled with a space', `work assignment:${MATTER_ID}`],
+      ['an id that is not a GUID', 'matter:not-a-guid'],
+      ['an empty id', 'matter:'],
+      ['no colon', `matter${MATTER_ID}`],
+      ['no kind', `:${MATTER_ID}`],
+      ['a space before the id', `matter: ${MATTER_ID}`],
+      ['trailing text', `matter:${MATTER_ID}x`],
+      ['a second record', `matter:${MATTER_ID}:project:${PROJECT_ID}`],
+    ])(
+      'rejects %s',
+      async (_name, value) => {
+        const { parseInvoiceRecordParam } = await import('../src/pages/invoiceSubmitLink');
+        expect(parseInvoiceRecordParam(value)).toBeNull();
+      },
+      SLOW
+    );
+  });
+
+  describe('a caller with several firms', () => {
+    beforeEach(() => {
+      script.me = meWith([FIRM_ALPHA, FIRM_BETA]);
+    });
+
+    it(
+      'the firm step stays first and no firm is chosen by the link; the record is chosen once the chosen firm lists it',
+      async () => {
+        // Alpha is linked to the matter and the project; Beta to the project only.
+        script.firmRecords = firmId =>
+          firmId === FIRM_ALPHA.firmId
+            ? linkedTo(firmId, [MATTER_ID], [PROJECT_ID])
+            : linkedTo(firmId, [], [PROJECT_ID]);
+        const { InvoiceSubmitPage } = await load();
+        renderPage(InvoiceSubmitPage, MATTER_LINK);
+
+        const alpha = await firmRadio('Alpha LLP');
+        expect(screen.getByText('Choose the firm this invoice is from')).toBeTruthy();
+        expect(isChecked(alpha)).toBe(false);
+        expect(isChecked(screen.getByRole('radio', { name: 'Beta & Co' }))).toBe(false);
+        expect(isEnabled(await next())).toBe(false);
+        expect(screen.queryByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeNull();
+
+        fireEvent.click(alpha);
+        fireEvent.click(await next());
+        expect(isChecked(await recordRadio(/Acme v\. Roadrunner/))).toBe(true);
+        expect(isEnabled(await next())).toBe(true);
+        // Each firm's list was read once (the page's read handed to the wizard), none twice.
+        expect(
+          firmRecordReads()
+            .map(c => new URL(c.url).searchParams.get('firmId'))
+            .sort()
+        ).toEqual([FIRM_ALPHA.firmId, FIRM_BETA.firmId].sort());
+      },
+      SLOW
+    );
+
+    it(
+      'a firm whose list does not contain the record starts the Record step empty',
+      async () => {
+        script.firmRecords = firmId =>
+          firmId === FIRM_ALPHA.firmId
+            ? linkedTo(firmId, [MATTER_ID], [PROJECT_ID])
+            : linkedTo(firmId, [], [PROJECT_ID]);
+        const { InvoiceSubmitPage } = await load();
+        renderPage(InvoiceSubmitPage, MATTER_LINK);
+
+        fireEvent.click(await firmRadio('Beta & Co'));
+        fireEvent.click(await next());
+        await expectNothingChosen();
+        expect(screen.queryByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeNull();
+      },
+      SLOW
+    );
+
+    it(
+      'the record is found when only the second firm lists it, and chosen only for that firm',
+      async () => {
+        script.firmRecords = firmId =>
+          firmId === FIRM_BETA.firmId
+            ? linkedTo(firmId, [MATTER_ID], [PROJECT_ID])
+            : linkedTo(firmId, [], [PROJECT_ID]);
+        const { InvoiceSubmitPage } = await load();
+        renderPage(InvoiceSubmitPage, MATTER_LINK);
+
+        fireEvent.click(await firmRadio('Beta & Co'));
+        fireEvent.click(await next());
+        expect(isChecked(await recordRadio(/Acme v\. Roadrunner/))).toBe(true);
+
+        // Back to the firm step and the other firm: the choice does not follow to a list that lacks the record.
+        fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+        fireEvent.click(await firmRadio('Alpha LLP'));
+        fireEvent.click(await next());
+        await expectNothingChosen();
+        expect(screen.queryByRole('radio', { name: /Acme v\. Roadrunner/ })).toBeNull();
+      },
+      SLOW
+    );
+  });
 });
 
 describe('InvoiceSubmitPage — resume (FR-18)', () => {

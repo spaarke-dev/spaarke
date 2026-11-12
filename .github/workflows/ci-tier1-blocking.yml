@@ -396,7 +396,10 @@ jobs:
     # 5 -> 10 (2026-10-22, GATE REPAIR; #2009): at 1355 tests the job measures 3m50s-4m10s when it
     # passes (build ~1m40s + test ~2m), and slower runners crossed 5m and read `cancelled` on master
     # (runs 39702128977, 39710479837, 39777076810) and on PR #2233 twice. Same headroom rule as #813.
-    timeout-minutes: 10
+    # 10 -> 20 (2026-11-12, GATE REPAIR; #2527): at 2,507 tests successful runs take 6-10 min (05:51-06:01Z and
+    # 07:27-07:37Z on 2026-11-12 both 9m53s), and two runs that day were cancelled at 10 min, which turns Router red.
+    # Revisit at ~5,000 tests or a run over 14 minutes.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
