@@ -58,10 +58,13 @@ esac
 # files, selected 9,341 tests and the night was cancelled at the job cap; the nested
 # `Outcome` record did the same the night before. A top-level declaration is the least
 # indented one in its file (column 0 under a file-scoped namespace, 4 under a block one).
+# `record struct X` / `record class X` name X: without the optional second keyword the
+# name read was the word `struct`, which matches ~2,250 test files (RecordShareLevels.cs,
+# SecureChildShareSynchronizer.cs and SecureDesignationRemoval.cs each declare one).
 types="$(
   while IFS= read -r f; do
     basename "$f" .cs | sed 's/\..*$//'
-    grep -hoE '^[[:space:]]*(public|internal)?[[:space:]]*((sealed|static|abstract|partial|readonly|ref)[[:space:]]+)*(class|interface|record|enum|struct)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" |
+    grep -hoE '^[[:space:]]*(public|internal)?[[:space:]]*((sealed|static|abstract|partial|readonly|ref)[[:space:]]+)*(class|interface|record([[:space:]]+(class|struct))?|enum|struct)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" |
       awk '{ match($0, /^[ \t]*/); indent[NR] = RLENGTH; name[NR] = $NF; if (NR == 1 || RLENGTH < min) min = RLENGTH }
            END { for (i = 1; i <= NR; i++) if (indent[i] == min) print name[i] }'
   done < "$files" | sort -u
