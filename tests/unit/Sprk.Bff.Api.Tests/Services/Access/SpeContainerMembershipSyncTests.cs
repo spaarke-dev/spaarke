@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,6 +12,7 @@ using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -74,8 +76,12 @@ public class SpeContainerMembershipSyncTests
             .ReturnsAsync(Membership.MarkedRemovalOutcome.Removed);
     }
 
+    private readonly ExternalVisibilityDeciderStub _visibility = new();
+    private readonly Dictionary<string, string?> _settings = [];
+
     private SpeContainerMembershipSync Sut(Membership? membership = null, ILogger<SpeContainerMembershipSync>? logger = null) => new(
-        _dataverse.Object, membership ?? _membership.Object, _registry.Object, _rights.Object,
+        _dataverse.Object, membership ?? _membership.Object, _registry.Object, _rights.Object, _visibility.Decider,
+        new ConfigurationBuilder().AddInMemoryCollection(_settings).Build(),
         logger ?? NullLogger<SpeContainerMembershipSync>.Instance);
 
     private static Entity User(Guid id, Guid unit, bool disabled = false, bool? external = null, Guid? applicationId = null)
@@ -379,6 +385,273 @@ public class SpeContainerMembershipSyncTests
 
         result.SecureContainers.Should().Be(1);
         _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Task 191g: item grants (flagged-external holders, one file) ───────────────────────────────────────────────
+
+    private static readonly Guid Doc = Guid.Parse("191a0000-0000-4000-8000-0000000000e1");
+    private const string ItemId = "item-191g";
+    private const string ItemPermission = "perm-item";
+
+    private string ItemKey(Guid holder) => Membership.ItemMarkerKey(holder, Doc);
+
+    /// <summary>A secure container carrying one item grant for <paramref name="holder"/> on <see cref="Doc"/>, and no JIT
+    /// container grant.</summary>
+    private void SecureContainerWithItemGrant(Guid holder, bool restricted = false)
+    {
+        _secureProjects.Add(new Entity("sprk_project", SecureProject) { ["sprk_containerid"] = SecureContainer });
+        var markers = new Dictionary<string, string> { [ItemKey(holder)] = Membership.ItemMarkerValue(ItemId, ItemPermission) };
+        _membership.Setup(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>())).ReturnsAsync(markers);
+        _membership.Setup(m => m.ReadAccessAsync(SecureContainer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess([], true, markers));
+        _membership.Setup(m => m.RemoveMarkedItemGrantAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Membership.MarkedRemovalOutcome.Removed);
+        _dataverse.Setup(d => d.RetrieveAsync("sprk_project", SecureProject, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_project", SecureProject)
+            {
+                ["sprk_accesspermission"] = new OptionSetValue(restricted ? 100000002 : 100000000),
+            });
+    }
+
+    private void HolderRights(Guid holder, AccessRights? rights)
+        => _rights.Setup(r => r.GetPrincipalRightsOrUnknownAsync(holder, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(rights);
+
+    private void ItemRemovalVerified(Guid holder, Times times)
+        => _membership.Verify(m => m.RemoveMarkedItemGrantAsync(
+            SecureContainer, ItemKey(holder), ItemId, ItemPermission, It.IsAny<CancellationToken>()), times);
+
+    [Fact(DisplayName = "Task 191g: an item grant is KEPT while the flagged holder has Write and the document is visible")]
+    public async Task Item_WriteAndVisible_IsKept()
+    {
+        SecureContainerWithItemGrant(Alice);
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Read | AccessRights.Write);
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        ItemRemovalVerified(Alice, Times.Never());
+        result.ItemGrantsSeen.Should().Be(1);
+        result.Kept.Should().Be(1);
+        _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "an item grant is decided without the container's roles (sweep off)");
+    }
+
+    [Fact(DisplayName = "Task 191g: an item grant is REMOVED when Dataverse positively answers the holder has no Write")]
+    public async Task Item_WriteGone_IsRemoved()
+    {
+        SecureContainerWithItemGrant(Alice);
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Read);
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        ItemRemovalVerified(Alice, Times.Once());
+        result.Removed.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 191g: an item grant of a DISABLED holder is removed")]
+    public async Task Item_DisabledHolder_IsRemoved()
+    {
+        SecureContainerWithItemGrant(Alice);
+        Holder(Alice, disabled: true, external: true);
+
+        await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        ItemRemovalVerified(Alice, Times.Once());
+    }
+
+    [Fact(DisplayName = "Task 191g: an item grant on a RESTRICTED record is removed")]
+    public async Task Item_RestrictedRecord_IsRemoved()
+    {
+        SecureContainerWithItemGrant(Alice, restricted: true);
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Write);
+
+        await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        ItemRemovalVerified(Alice, Times.Once());
+    }
+
+    [Theory(DisplayName = "Task 191g: an item grant is REMOVED when the document is no longer externally visible (hidden, or structurally undecidable), even with Write")]
+    [InlineData("Hidden", "DocumentHidden")]
+    [InlineData("Hidden", "RootRestricted")]
+    [InlineData("Undecided", "RowNotFound")]
+    [InlineData("Undecided", "NoRoot")]
+    public async Task Item_DocumentNotVisible_IsRemoved(string verdict, string reason)
+    {
+        SecureContainerWithItemGrant(Alice);
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Write);
+        _visibility.Set("sprk_document", Doc, Enum.Parse<ExternalVisibilityVerdict>(verdict), Enum.Parse<ExternalVisibilityReason>(reason));
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        ItemRemovalVerified(Alice, Times.Once());
+        result.Removed.Should().Be(1);
+        _visibility.Calls.Should().ContainSingle().Which.Should().Equal(("sprk_document", Doc));
+    }
+
+    [Theory(DisplayName = "Task 191g: an item grant whose answer could not be obtained is KEPT, counted unknown and reported — never a revocation loop")]
+    [InlineData("rights")]
+    [InlineData("visibility-throws")]
+    [InlineData("visibility-faulted")]
+    [InlineData("visibility-read-failed")]
+    public async Task Item_UnknownAnswer_IsKeptAndReported(string unknownBecause)
+    {
+        SecureContainerWithItemGrant(Alice);
+        Holder(Alice, external: true);
+        HolderRights(Alice, unknownBecause == "rights" ? null : AccessRights.Write);
+        switch (unknownBecause)
+        {
+            case "visibility-throws": _visibility.Throws = new HttpRequestException("throttled"); break;
+            case "visibility-faulted": _visibility.Faulted = true; break;
+            case "visibility-read-failed":
+                _visibility.Set("sprk_document", Doc, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed);
+                break;
+        }
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        ItemRemovalVerified(Alice, Times.Never());
+        result.Unknown.Should().Be(1);
+        result.Problems.Should().ContainSingle().Which.Should().Contain(Doc.ToString()).And.Contain("kept this run");
+    }
+
+    [Fact(DisplayName = "Task 191g: a malformed item marker value is reported and left alone")]
+    public async Task Item_MalformedMarkerValue_IsReportedAndLeftAlone()
+    {
+        SecureContainerWithItemGrant(Alice);
+        _membership.Setup(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, string> { [ItemKey(Alice)] = "no-separator" });
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        result.ItemGrantsSeen.Should().Be(0);
+        result.Problems.Should().ContainSingle().Which.Should().Contain("no readable value");
+        _membership.Verify(m => m.RemoveMarkedItemGrantAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Task 191g: flagged users' container roles on secure containers (setting-gated sweep) ─────────────────────
+
+    private const string FlaggedRole = "perm-flagged";
+    private const string InternalRole = "perm-internal";
+
+    /// <summary>A secure container with no markers on which Alice (flagged) and Bob (internal) hold hand-granted roles.</summary>
+    private void SecureContainerWithHandGrantedRoles()
+    {
+        _secureProjects.Add(new Entity("sprk_project", SecureProject) { ["sprk_containerid"] = SecureContainer });
+        _membership.Setup(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, string>());
+        _membership.Setup(m => m.ReadAccessAsync(SecureContainer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess(
+                [
+                    new Membership.ContainerUserRole(FlaggedRole, ["writer"], $"{Alice:N}@contoso.example", Alice.ToString()),
+                    new Membership.ContainerUserRole(InternalRole, ["writer"], $"{Bob:N}@contoso.example", Bob.ToString()),
+                ],
+                true, new Dictionary<string, string>()));
+        _membership.Setup(m => m.RemoveFlaggedUserContainerRoleAsync(SecureContainer, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _users.Add(User(Alice, Unit, external: true)); // the flagged-user query answers from _users
+    }
+
+    [Fact(DisplayName = "Task 191g: with the setting ON, a flagged user's hand-granted container role on a secure container is removed; an internal user's is not")]
+    public async Task Sweep_On_RemovesFlaggedRoleOnly()
+    {
+        _settings[Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
+        SecureContainerWithHandGrantedRoles();
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        _membership.Verify(m => m.RemoveFlaggedUserContainerRoleAsync(SecureContainer, FlaggedRole, It.IsAny<CancellationToken>()), Times.Once);
+        _membership.Verify(m => m.RemoveFlaggedUserContainerRoleAsync(SecureContainer, InternalRole, It.IsAny<CancellationToken>()), Times.Never);
+        result.FlaggedRoleSweep.Should().BeTrue();
+        result.FlaggedRolesRemoved.Should().Be(1);
+        result.Failed.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "Task 191g (must not fire): with the setting OFF (absent, false, unparseable), no container role is removed and no role list is read")]
+    [InlineData(null)]
+    [InlineData("false")]
+    [InlineData("yes")]
+    public async Task Sweep_Off_TouchesNothing(string? setting)
+    {
+        if (setting is not null)
+            _settings[Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = setting;
+        SecureContainerWithHandGrantedRoles();
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        _membership.Verify(m => m.RemoveFlaggedUserContainerRoleAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        result.FlaggedRoleSweep.Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "Task 191g: with the setting ON, a flagged holder's MARKED JIT container grant is removed even with Write — once, through the marked removal")]
+    public async Task Sweep_On_FlaggedMarkedJitGrant_IsRemovedOnce()
+    {
+        _settings[Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
+        SecureContainerWithJitGrant(Alice);
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Read | AccessRights.Write);
+        _users.Add(User(Alice, Unit, external: true));
+        _membership.Setup(m => m.ReadAccessAsync(SecureContainer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess(
+                [new Membership.ContainerUserRole("perm-jit", ["writer"], $"{Alice:N}@contoso.example", Alice.ToString())], true,
+                new Dictionary<string, string> { [Membership.MarkerKey(Membership.JitWriterMarkerPrefix, Alice)] = "perm-jit" }));
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        RemovalVerified(SecureContainer, Alice, Membership.JitWriterMarkerPrefix, Times.Once());
+        _membership.Verify(m => m.RemoveFlaggedUserContainerRoleAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the marked removal already took it");
+        result.Removed.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 191g (must not fire): with the setting OFF, a flagged holder's JIT container grant with Write is KEPT (today's behaviour until the go)")]
+    public async Task Sweep_Off_FlaggedMarkedJitGrantWithWrite_IsKept()
+    {
+        SecureContainerWithJitGrant(Alice);
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Read | AccessRights.Write);
+        _users.Add(User(Alice, Unit, external: true));
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        RemovalVerified(SecureContainer, Alice, Membership.JitWriterMarkerPrefix, Times.Never());
+        result.Kept.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 191g: with the setting ON, a flagged-user list that cannot be read sweeps nothing and is a named failure")]
+    public async Task Sweep_On_FlaggedListUnreadable_SweepsNothing()
+    {
+        _settings[Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
+        SecureContainerWithHandGrantedRoles();
+        _dataverse.Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "systemuser"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("throttled"));
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        _membership.Verify(m => m.RemoveFlaggedUserContainerRoleAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        result.Failed.Should().Be(1);
+        result.Problems.Should().Contain(p => p.Contains("flagged-external users could not be listed"));
+    }
+
+    [Fact(DisplayName = "Task 191g: an item marker key round-trips holder and document, and no container prefix parses it")]
+    public void ItemMarkerKey_RoundTrips_AndIsNotAContainerMarker()
+    {
+        var key = Membership.ItemMarkerKey(Alice, Doc);
+
+        Membership.TryParseItemMarkerKey(key, out var holder, out var doc).Should().BeTrue();
+        (holder, doc).Should().Be((Alice, Doc));
+        Membership.TryParseMarkerKey(key, Membership.JitWriterMarkerPrefix, out _).Should().BeFalse();
+        Membership.TryParseMarkerKey(key, Membership.StandingWriterMarkerPrefix, out _).Should().BeFalse();
+        Membership.TryParseItemMarkerKey(Membership.MarkerKey(Membership.JitWriterMarkerPrefix, Alice), out _, out _).Should().BeFalse();
+        Membership.IsGrantMarkerName(key).Should().BeTrue("the SPE admin property editor must not show or change it");
+        Membership.TryParseItemMarkerValue(Membership.ItemMarkerValue(ItemId, ItemPermission), out var item, out var perm).Should().BeTrue();
+        (item, perm).Should().Be((ItemId, ItemPermission));
     }
 
     private static SdapProblemException NotOwned() => new(

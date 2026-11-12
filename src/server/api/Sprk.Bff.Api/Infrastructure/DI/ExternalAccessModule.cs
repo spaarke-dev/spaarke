@@ -886,8 +886,17 @@ public static class ExternalAccessModule
         // that replaces hand-adding users. Every removal is limited to roles this code recorded (marked grants). ADR-052
         // places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): the engine's
         // dependencies (IGenericEntityService, SpeContainerMembershipService, ISecurableEntityRegistry,
-        // IDataverseRecordShareService) are registered unconditionally.
-        services.AddScoped<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync>();
+        // IDataverseRecordShareService) are registered unconditionally. Task 191g: a factory because the constructor takes 191c's
+        // internal ExternalVisibilityDecider (registered above) for the item-grant removal pass; IConfiguration carries
+        // ExternalAccess:FlaggedOfficeEdit:Enabled (the flagged users' container-role sweep, off by default).
+        services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync(
+            sp.GetRequiredService<IGenericEntityService>(),
+            sp.GetRequiredService<SpeContainerMembershipService>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.ISecurableEntityRegistry>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>(),
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync>>()));
         services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSyncJob>(
             Sprk.Bff.Api.Services.Access.SpeContainerMembershipSyncJob.DefaultCronSchedule);
 

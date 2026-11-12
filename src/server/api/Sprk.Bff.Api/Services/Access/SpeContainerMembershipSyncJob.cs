@@ -57,8 +57,10 @@ public sealed class SpeContainerMembershipSyncJob : IScheduledJob
     /// <inheritdoc />
     public string Description =>
         "Every 5 minutes, keeps internal users as standing writers on their business unit's SharePoint Embedded container, " +
-        "and removes just-in-time Office-edit grants on secure containers once the holder no longer has Write. Only roles " +
-        "this job (or the Office edit-open) created are ever removed.";
+        "and removes just-in-time Office-edit grants on secure containers (container roles, and flagged-external users' " +
+        "one-file permissions) once the holder no longer has Write or the file is no longer externally visible. Only grants " +
+        "this job (or the Office edit-open) created are removed, except that, when ExternalAccess:FlaggedOfficeEdit:Enabled " +
+        "is on, a flagged-external user's container role on a secure container is always removed.";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -97,10 +99,11 @@ public sealed class SpeContainerMembershipSyncJob : IScheduledJob
         _logger.LogInformation(
             "[SPE-MEMBERSHIP-SYNC] heartbeat attempt={Attempt} standing={{containers={Containers}, granted={Granted}, alreadyHeld={AlreadyHeld}, "
             + "removed={StandingRemoved}, unknown={StandingUnknown}, failed={StandingFailed}, capped={Capped}}} jit={{secureContainers={SecureContainers}, "
-            + "grants={JitSeen}, removed={JitRemoved}, kept={JitKept}, unknown={JitUnknown}, failed={JitFailed}, unresolvable={JitUnresolvable}, truncated={Truncated}}} durationMs={DurationMs}",
+            + "grants={JitSeen}, itemGrants={ItemGrants}, removed={JitRemoved}, kept={JitKept}, unknown={JitUnknown}, failed={JitFailed}, unresolvable={JitUnresolvable}, truncated={Truncated}, flaggedRoleSweep={FlaggedRoleSweep}, flaggedRolesRemoved={FlaggedRolesRemoved}}} durationMs={DurationMs}",
             context.Attempt,
             standing?.Containers, standing?.Granted, standing?.AlreadyHeld, standing?.Removed, standing?.Unknown, standing?.Failed, standing?.Capped,
-            jit?.SecureContainers, jit?.GrantsSeen, jit?.Removed, jit?.Kept, jit?.Unknown, jit?.Failed, jit?.Unresolvable, jit?.Truncated,
+            jit?.SecureContainers, jit?.GrantsSeen, jit?.ItemGrantsSeen, jit?.Removed, jit?.Kept, jit?.Unknown, jit?.Failed, jit?.Unresolvable, jit?.Truncated,
+            jit?.FlaggedRoleSweep, jit?.FlaggedRolesRemoved,
             (long)duration.TotalMilliseconds);
 
         if (standing is null && jit is null)
@@ -125,7 +128,7 @@ public sealed class SpeContainerMembershipSyncJob : IScheduledJob
         return new JobRunResult(
             Success: success,
             ErrorMessage: success ? null : "Some containers could not be synced, or a pass was capped/truncated — see ResultJson; the next run retries.",
-            ProcessedItems: (standing?.Granted ?? 0) + (standing?.Removed ?? 0) + (jit?.Removed ?? 0),
+            ProcessedItems: (standing?.Granted ?? 0) + (standing?.Removed ?? 0) + (jit?.Removed ?? 0) + (jit?.FlaggedRolesRemoved ?? 0),
             Duration: duration,
             ResultJson: resultJson);
     }

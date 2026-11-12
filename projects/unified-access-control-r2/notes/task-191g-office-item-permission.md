@@ -4,10 +4,12 @@
 > gets a role on a secure container; Office edit is a just-in-time write permission on the one file. Design §3.12, AC-8,
 > §3.19 step 1. Ids in this note are truncated; full ids live only in the operator's scratch folder.
 
-## 1. Live-test plan (design §3.19 step 1) — WAITING FOR THE OWNER'S GO
+## 1. Live-test plan (design §3.19 step 1) — GO GIVEN (Route A), RUN BY THE OWNER
 
-**Status:** plan written; nothing below has run. No Graph write and no live write of any kind happens before the
-owner's go, relayed by the uac-r2 main session (escalation trigger 1).
+**Status:** the owner gave the go for Route A (relayed by the uac-r2 main session, 2026-11-12). The owner pastes the
+script into the dev BFF's SSH console after the coordinator's dev deploy and does the browser checks; the agent runs
+nothing live. The script prints PASS/FAIL per step and a final `UNDO-VERIFIED` / `UNDO-NOT-VERIFIED` line, with every
+printed id truncated to 8 characters.
 
 ### 1.1 What the test must prove
 
@@ -18,7 +20,7 @@ owner's go, relayed by the uac-r2 main session (escalation trigger 1).
 | C3 | The sibling file is not shared | the sibling item's permission list has no entry for the test user | STOP |
 | C4 | Office for the web edits the test file as the flagged user | the owner, signed in as the test user, opens the file in Word for the web in edit mode and a change saves | STOP |
 | C5 | The sibling is refused | the same browser session opening the sibling file's URL gets "access denied" / "request access" | STOP |
-| C6 | The marker key the code will write is accepted | `PATCH …/containers/{id}/customProperties` with a 75-character key (`SprkItm` + systemuserid + documentid) answers 200 and reads back | not a STOP: the code shortens the key (hash), re-tested in the deploy gate |
+| C6 | The marker key the code will write is accepted | `PATCH …/containers/{id}/customProperties` with a 71-character key (`SprkItm` + systemuserid + documentid) answers 200 and reads back | not a STOP: the code shortens the key (hash), re-tested in the deploy gate |
 | C7 | Removal takes access away | `DELETE /drives/{d}/items/{i}/permissions/{p}` answers 204, read-back 404; a NEW private window as the test user is refused within 10 min (Word for the web re-checks at least every 5 min, task 171 row b′) | STOP |
 
 The restrictive-vs-open sharing model of the dev container type is not readable app-only (task 171 row a′); C1 answers
@@ -55,9 +57,10 @@ The managed identity answers only on its own Azure compute (spike S4), so the sc
 Service container** (Linux):
 
 - **Route A (preferred):** the operator opens *spaarke-bff-dev → SSH* in the Azure portal and pastes the prepared script
-  (`c191g/item-permission-test.sh` in the agent's scratch folder; bash + curl; prints ids, status codes and pass/fail only,
-  plus the two file URLs for the browser steps). The agent prepares it and reads the output back; the agent cannot drive
-  an interactive console or enter the platform's SSH password.
+  (`c191g/owner-paste.txt` in the agent's scratch folder: one heredoc that writes `/tmp/191g.sh`, then `phase0` …
+  `phase3`; bash + curl; prints truncated ids, status codes and PASS/FAIL only, plus the two file URLs for the browser
+  steps). The agent prepares it and reads the output back; the agent cannot drive an interactive console or enter the
+  platform's SSH password.
 - **Route B (if the owner prefers the agent runs it):** first a read-only probe of the Kudu command endpoint
   (`/api/command`, ARM token) asking only whether `IDENTITY_ENDPOINT` is present (yes/no). If yes, the agent runs the same
   script there; if no, Route A.
@@ -89,9 +92,38 @@ Service container** (Linux):
 | Two new versions of the test file (step 4; net content unchanged) | none (version history is accepted on a test record); on request, `restoreVersion` to the step-0 version | file size equals the step-0 size |
 | Nothing else | the container role list and the sibling's list are re-read | both equal the step-0 snapshot |
 
-The 5-minute `SpeContainerMembershipSyncJob` neither reads nor changes item permissions or `SprkItm` properties
-(it parses only `SprkStd`/`SprkJit` keys), so it cannot confound C7 or remove the probe early.
+The 5-minute `SpeContainerMembershipSyncJob` in the DEPLOYED dev build (without this branch) neither reads nor changes
+item permissions or `SprkItm` properties (it parses only `SprkStd`/`SprkJit` keys), so it cannot confound C7 or remove
+the probe early. (This branch's sync does read `SprkItm` keys; it is not deployed during the test.)
 
 ## 2. Results
 
 Not run yet.
+
+## 3. Code (built behind a setting while the live test waits — allowed by the main session)
+
+**Setting:** `ExternalAccess:FlaggedOfficeEdit:Enabled` (app setting `ExternalAccess__FlaggedOfficeEdit__Enabled`).
+Absent, empty or unparseable = off. It stays off until the live test passes and the owner turns it on.
+
+| Path | Setting off (default) | Setting on |
+|---|---|---|
+| Office edit-open, flagged caller (`sprk_isexternal = true`) | view only; never a container role (unconditional) | Write + not Restricted + document externally Visible (191c's `ExternalVisibilityDecider`, a faulted decision never counts) → one item write permission (`item-writer-jit`); anything else view only; a grant that cannot be made, read back or recorded → 503 |
+| Office edit-open, caller whose flag cannot be read | `(false, "unknown")`, no grant of any kind | same |
+| Office edit-open, internal caller | unchanged (container JIT writer, task 171) | unchanged |
+| Sync: marked item grants (`SprkItm…`) | removed when the holder lost Write OR the document is no longer Visible (Hidden, or structurally undecidable); an unknown answer keeps the grant and reports it (round 70) | same |
+| Sync: a flagged user's container role on a secure container | untouched | removed with `Prefer: onlyRemoveContainerScopedPermission` (item grants stay), whoever granted it |
+
+**Ownership rule** (same as the container grants): only a permission that is still exactly what this code made (direct,
+not a link, one user, roles exactly `write`) is ever deleted; a changed one only has its marker cleared. Item permission
+ids are identity-derived, so a marker's id can name a permission a person re-made — never deleted.
+
+**Known limits** (K-class; none holds a confirmed defect on a real path):
+- K1 — Two concurrent first opens of the same file by the same flagged user can both invite; Graph returns the same
+  identity-derived permission id, so both record the same marker value (idempotent), but this is not live-proven.
+- K2 — With the setting off, a flagged user who still holds a leftover container role from before 191g edits through it
+  (the open reports view only, the role is not removed) until the setting is turned on and the sweep runs.
+- K3 — The item grant follows the document's CURRENT file; when a document's file is replaced, the old item's grant is
+  undone at the next open of the new one (stale-marker path) or by the sync once Write or visibility goes.
+
+**Deviation:** the code was built before the live test passed (main session's explicit allowance); the PR waits for the
+live-test output.

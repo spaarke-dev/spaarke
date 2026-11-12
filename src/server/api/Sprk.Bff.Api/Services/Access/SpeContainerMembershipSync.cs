@@ -29,6 +29,13 @@ namespace Sprk.Bff.Api.Services.Access;
 /// record (<c>RetrievePrincipalAccess</c> as that user — unshare, No Access, a role change), or the holder is disabled, or
 /// the record is Restricted and the holder is flagged external (round 67). An answer that could not be obtained removes
 /// nothing and is counted, so a Dataverse outage never becomes a revocation loop.</item>
+/// <item><b>Item grants on secure containers</b> (uac-r2 task 191g, owner Q2 = b). The same pass also reads every
+/// <see cref="SpeContainerMembershipService.ItemWriterMarkerPrefix"/> marker (a flagged-external caller's write permission on
+/// ONE file) and removes it on the same positive answers, plus "the document is no longer externally visible"
+/// (<see cref="ExternalVisibility"/> through 191c's <see cref="ExternalVisibilityDecider"/>; Hidden, or an Undecided that is not
+/// a failed read). An unknown answer keeps the grant this run and reports it. With
+/// <c>ExternalAccess:FlaggedOfficeEdit:Enabled</c> on, it also removes ANY container role a flagged-external user holds on a
+/// secure container (container-scoped, so their item grants stay).</item>
 /// </list>
 /// <para><b>Why one new component</b> (CLAUDE.md §11). Existing: the reconciliation jobs all keep DATAVERSE shares; none
 /// touches SPE roles, and <see cref="SpeContainerMembershipService"/> had grant/revoke primitives with no caller.
@@ -58,19 +65,25 @@ public class SpeContainerMembershipSync
     private readonly SpeContainerMembershipService _membership;
     private readonly ISecurableEntityRegistry _securableEntities;
     private readonly IDataverseRecordShareService _rights;
+    private readonly ExternalVisibilityDecider _visibility;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<SpeContainerMembershipSync> _logger;
 
-    public SpeContainerMembershipSync(
+    internal SpeContainerMembershipSync(
         IGenericEntityService dataverse,
         SpeContainerMembershipService membership,
         ISecurableEntityRegistry securableEntities,
         IDataverseRecordShareService rights,
+        ExternalVisibilityDecider visibility,
+        IConfiguration configuration,
         ILogger<SpeContainerMembershipSync> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _membership = membership ?? throw new ArgumentNullException(nameof(membership));
         _securableEntities = securableEntities ?? throw new ArgumentNullException(nameof(securableEntities));
         _rights = rights ?? throw new ArgumentNullException(nameof(rights));
+        _visibility = visibility ?? throw new ArgumentNullException(nameof(visibility));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -82,9 +95,15 @@ public class SpeContainerMembershipSync
     /// <summary>What one just-in-time removal pass did.</summary>
     /// <param name="Unresolvable">Secure containers whose id Graph does not resolve in this tenant (#1830): skipped and
     /// named in <paramref name="Problems"/>, not counted in <paramref name="Failed"/>.</param>
+    /// <param name="ItemGrantsSeen">Task 191g: item-level grants (<see cref="SpeContainerMembershipService.ItemWriterMarkerPrefix"/>)
+    /// inspected; their removals, keeps, unknowns and failures are counted in the shared counters.</param>
+    /// <param name="FlaggedRoleSweep">Task 191g: whether the removal of flagged users' container roles ran
+    /// (<see cref="Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey"/>).</param>
+    /// <param name="FlaggedRolesRemoved">Task 191g: container roles of flagged-external users removed from secure containers.</param>
     public sealed record JitResult(
         int SecureContainers, int GrantsSeen, int Removed, int MarkersCleared, int Kept, int Unknown, int Failed,
-        int Unresolvable, bool Truncated, IReadOnlyList<string> Problems);
+        int Unresolvable, bool Truncated, IReadOnlyList<string> Problems,
+        int ItemGrantsSeen = 0, bool FlaggedRoleSweep = false, int FlaggedRolesRemoved = 0);
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Pass 1 — standing writers (round 70)
@@ -288,8 +307,33 @@ public class SpeContainerMembershipSync
         var securable = await _securableEntities.GetSecurableEntitiesAsync(ct).ConfigureAwait(false);
 
         int containers = 0, seen = 0, removed = 0, cleared = 0, kept = 0, unknown = 0, failed = 0, unresolvable = 0;
+        int itemSeen = 0, flaggedRolesRemoved = 0;
         var problems = new List<string>();
         var truncated = false;
+
+        // Task 191g: the flagged users whose container roles on secure containers are removed — only with the setting on.
+        var sweep = Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabled(_configuration);
+        IReadOnlyList<Entity>? flaggedUsers = null;
+        if (sweep)
+        {
+            try
+            {
+                var query = new QueryExpression("systemuser")
+                {
+                    ColumnSet = new ColumnSet("systemuserid", "domainname", "azureactivedirectoryobjectid"),
+                };
+                query.Criteria.AddCondition("sprk_isexternal", ConditionOperator.Equal, true);
+                flaggedUsers = await ReadAllAsync(query, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "[SPE-MEMBERSHIP-SYNC] Flagged-external users could not be listed; their container roles are not swept this run.");
+                problems.Add("flagged-external users could not be listed; their container roles were not swept");
+                failed++;
+            }
+        }
+
+        var flaggedIds = flaggedUsers?.Select(u => u.Id).ToHashSet() ?? [];
 
         foreach (var entity in securable.OrderBy(e => e, StringComparer.Ordinal))
         {
@@ -332,30 +376,105 @@ public class SpeContainerMembershipSync
                 {
                     var markers = await _membership.ReadMarkersAsync(container, ct).ConfigureAwait(false);
                     resolved = true;
-                    var jit = markers is null
-                        ? new Dictionary<Guid, string>()
-                        : ParseMarkers(markers, SpeContainerMembershipService.JitWriterMarkerPrefix);
-                    if (jit.Count == 0)
+                    if (markers is null)
+                        continue;
+                    var jit = ParseMarkers(markers, SpeContainerMembershipService.JitWriterMarkerPrefix);
+                    var items = ParseItemMarkers(markers, problems, entity, record.Id);
+                    var sweepHere = flaggedUsers is { Count: > 0 };
+                    if (jit.Count == 0 && items.Count == 0 && !sweepHere)
+                        continue;
+
+                    var restricted = jit.Count > 0 || items.Count > 0
+                        ? await IsRestrictedAsync(entity, record.Id, ct).ConfigureAwait(false)
+                        : null;
+
+                    // Task 191g: item grants (flagged-external holders, one file each). Same rules as the container grants,
+                    // plus "the document is no longer externally visible". The container roles are not read for them.
+                    if (items.Count > 0)
+                    {
+                        var visibility = await DecideDocumentsAsync(items.Select(i => i.DocumentId).Distinct().ToList(), ct)
+                            .ConfigureAwait(false);
+                        foreach (var item in items)
+                        {
+                            itemSeen++;
+                            var holderVerdict = await JitVerdictAsync(item.SystemUserId, entitySet, record.Id, restricted, ct).ConfigureAwait(false);
+                            var verdict = Combine(holderVerdict, DocumentVerdict(visibility, item.DocumentId));
+                            if (verdict == Verdict.Keep) { kept++; continue; }
+                            if (verdict == Verdict.Unknown)
+                            {
+                                unknown++;
+                                problems.Add($"{entity} {record.Id}: item grant for user {item.SystemUserId} on document {item.DocumentId} could not be decided; kept this run");
+                                continue;
+                            }
+
+                            switch (await _membership.RemoveMarkedItemGrantAsync(container, item.MarkerKey, item.ItemId, item.PermissionId, ct).ConfigureAwait(false))
+                            {
+                                case SpeContainerMembershipService.MarkedRemovalOutcome.Removed: removed++; break;
+                                case SpeContainerMembershipService.MarkedRemovalOutcome.MarkerCleared: cleared++; break;
+                                default: failed++; break;
+                            }
+                        }
+                    }
+
+                    if (jit.Count == 0 && !sweepHere)
                         continue;
 
                     var access = await _membership.ReadAccessAsync(container, ct).ConfigureAwait(false);
                     if (access is null)
                         continue;
 
-                    var restricted = await IsRestrictedAsync(entity, record.Id, ct).ConfigureAwait(false);
+                    // Permissions the JIT loop already removed, or failed on (retried next run): the sweep leaves them alone.
+                    var handledPermissions = new HashSet<string>(StringComparer.Ordinal);
                     foreach (var (systemUserId, permissionId) in jit)
                     {
                         seen++;
-                        var verdict = await JitVerdictAsync(systemUserId, entitySet, record.Id, restricted, ct).ConfigureAwait(false);
+                        // Task 191g: with the sweep on, a flagged holder's container grant goes whatever their Write.
+                        var verdict = sweepHere && flaggedIds.Contains(systemUserId)
+                            ? Verdict.Remove
+                            : await JitVerdictAsync(systemUserId, entitySet, record.Id, restricted, ct).ConfigureAwait(false);
                         if (verdict == Verdict.Keep) { kept++; continue; }
                         if (verdict == Verdict.Unknown) { unknown++; continue; }
 
                         var key = SpeContainerMembershipService.MarkerKey(SpeContainerMembershipService.JitWriterMarkerPrefix, systemUserId);
                         switch (await _membership.RemoveMarkedGrantAsync(container, key, permissionId, access, ct).ConfigureAwait(false))
                         {
-                            case SpeContainerMembershipService.MarkedRemovalOutcome.Removed: removed++; break;
+                            case SpeContainerMembershipService.MarkedRemovalOutcome.Removed:
+                                removed++;
+                                handledPermissions.Add(permissionId);
+                                break;
                             case SpeContainerMembershipService.MarkedRemovalOutcome.MarkerCleared: cleared++; break;
-                            default: failed++; break;
+                            default:
+                                failed++;
+                                handledPermissions.Add(permissionId);
+                                break;
+                        }
+                    }
+
+                    // Task 191g (owner Q2 = b): a flagged-external user holds NO role on a secure container, whoever granted it
+                    // (a hand-granted role, an owner role, a pre-191g grant whose role was changed). Removed with the
+                    // container-scoped Prefer, so the user's item grants stay. Only a role the read SHOWS is acted on.
+                    if (sweepHere)
+                    {
+                        foreach (var role in access.Roles)
+                        {
+                            if (handledPermissions.Contains(role.PermissionId))
+                                continue;
+                            var holder = flaggedUsers!.FirstOrDefault(u => role.IsFor(
+                                u.GetAttributeValue<string>("domainname"), u.GetAttributeValue<Guid?>("azureactivedirectoryobjectid")));
+                            if (holder is null)
+                                continue;
+
+                            if (await _membership.RemoveFlaggedUserContainerRoleAsync(container, role.PermissionId, ct).ConfigureAwait(false))
+                            {
+                                flaggedRolesRemoved++;
+                                _logger.LogWarning(
+                                    "[SPE-MEMBERSHIP-SYNC] Removed flagged-external user {SystemUserId}'s container role on secure {Entity} {RecordId}.",
+                                    holder.Id, entity, record.Id);
+                            }
+                            else
+                            {
+                                failed++;
+                            }
                         }
                     }
                 }
@@ -403,8 +522,81 @@ public class SpeContainerMembershipSync
                 break;
         }
 
-        return new JitResult(containers, seen, removed, cleared, kept, unknown, failed, unresolvable, truncated, problems);
+        return new JitResult(containers, seen, removed, cleared, kept, unknown, failed, unresolvable, truncated, problems,
+            itemSeen, sweep, flaggedRolesRemoved);
     }
+
+    /// <summary>One item-grant marker (task 191g), parsed.</summary>
+    private sealed record ItemGrant(string MarkerKey, Guid SystemUserId, Guid DocumentId, string ItemId, string PermissionId);
+
+    /// <summary>The item-grant markers on a container. A marker whose value cannot be read is reported and left alone.</summary>
+    private static List<ItemGrant> ParseItemMarkers(
+        IReadOnlyDictionary<string, string> markers, List<string> problems, string entity, Guid recordId)
+    {
+        var items = new List<ItemGrant>();
+        foreach (var (key, value) in markers)
+        {
+            if (!SpeContainerMembershipService.TryParseItemMarkerKey(key, out var systemUserId, out var documentId))
+                continue;
+            if (!SpeContainerMembershipService.TryParseItemMarkerValue(value, out var itemId, out var permissionId))
+            {
+                problems.Add($"{entity} {recordId}: item-grant marker for user {systemUserId} on document {documentId} has no readable value; left alone");
+                continue;
+            }
+
+            items.Add(new ItemGrant(key, systemUserId, documentId, itemId, permissionId));
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// The external visibility of the documents item grants were made for (one batched decision), or <see langword="null"/>
+    /// when the decision itself threw (every document is then unknown, never removed).
+    /// </summary>
+    private async Task<ExternalVisibilityResult?> DecideDocumentsAsync(IReadOnlyList<Guid> documentIds, CancellationToken ct)
+    {
+        try
+        {
+            return await _visibility(documentIds.Select(id => ("sprk_document", id)).ToList(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "[SPE-MEMBERSHIP-SYNC] The external visibility of {Count} item-granted document(s) could not be decided.",
+                documentIds.Count);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Task 191g: what the document's external visibility says about its item grant. Hidden → remove. Undecided because a
+    /// read failed (a faulted decision, or a reason that names a failed or partial read) → unknown: kept this run and reported,
+    /// so an outage never becomes a revocation. Any other Undecided is a definite "cannot be visible" (the row is gone, has no
+    /// root, is filed too deep, ...) → remove. Visible → keep.
+    /// </summary>
+    internal static Verdict DocumentVerdict(ExternalVisibilityResult? visibility, Guid documentId)
+    {
+        if (visibility is null)
+            return Verdict.Unknown;
+        var decision = visibility.For("sprk_document", documentId);
+        if (decision.IsHidden)
+            return Verdict.Remove;                       // a positive answer, even inside a faulted decision (the 065 rule)
+        if (decision.IsVisible && !visibility.Faulted)
+            return Verdict.Keep;                         // Visible counts only from a decision that did not fault
+        return visibility.Faulted || decision.Reason is ExternalVisibilityReason.ReadFailed
+                   or ExternalVisibilityReason.RootUnreadable
+                   or ExternalVisibilityReason.DocumentUndecided
+                   or ExternalVisibilityReason.InvoiceUndecided
+                   or ExternalVisibilityReason.NotAsked
+            ? Verdict.Unknown
+            : Verdict.Remove;
+    }
+
+    /// <summary>Remove on ANY positive answer; otherwise unknown if either is unknown; keep only when both keep.</summary>
+    internal static Verdict Combine(Verdict holder, Verdict document)
+        => holder == Verdict.Remove || document == Verdict.Remove ? Verdict.Remove
+           : holder == Verdict.Unknown || document == Verdict.Unknown ? Verdict.Unknown
+           : Verdict.Keep;
 
     /// <summary>
     /// Keep, remove, or "could not tell". Remove ONLY on a positive answer: the holder is disabled (or its row carries no
@@ -484,7 +676,7 @@ public class SpeContainerMembershipSync
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    private enum Verdict { Keep, Remove, Unknown }
+    internal enum Verdict { Keep, Remove, Unknown }
 
     private static IReadOnlyDictionary<Guid, string> MarkersOf(SpeContainerMembershipService.ContainerAccess access, string prefix)
         => ParseMarkers(access.Markers, prefix);

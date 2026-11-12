@@ -184,6 +184,8 @@ public class SpeAppOnlyContainerIsolationTests
         "ItemCreator", "MetadataUncached", "DownloadVersion", "CurrentVersionId", "EmbedPreview", "DriveItem",
         "ReplaceContent", "UploadSession",
         "MembershipReadAccess", "MembershipReadMarkers", "MembershipGrantMarked", "MembershipRemoveMarked",
+        // uac-r2 task 191g: the flagged-external item grant, its removal, and the flagged-role sweep.
+        "MembershipGrantItem", "MembershipRemoveItem", "MembershipRemoveFlaggedRole",
     };
 
     [Theory]
@@ -230,6 +232,10 @@ public class SpeAppOnlyContainerIsolationTests
                 ForeignContainer, "marker", "perm",
                 new SpeContainerMembershipService.ContainerAccess(
                     Array.Empty<SpeContainerMembershipService.ContainerUserRole>(), true, new Dictionary<string, string>())),
+            "MembershipGrantItem" => () => membership.GrantMarkedItemWriterAsync(
+                ForeignContainer, "item", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
+            "MembershipRemoveItem" => () => membership.RemoveMarkedItemGrantAsync(ForeignContainer, "marker", "item", "perm"),
+            "MembershipRemoveFlaggedRole" => () => membership.RemoveFlaggedUserContainerRoleAsync(ForeignContainer, "perm"),
             _ => throw new ArgumentOutOfRangeException(nameof(path), path, null),
         };
 

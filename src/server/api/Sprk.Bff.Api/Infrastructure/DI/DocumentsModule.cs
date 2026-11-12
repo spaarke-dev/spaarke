@@ -69,8 +69,18 @@ public static class DocumentsModule
         // unified-access-control-r2 task 171 (owner rounds 69 + 70): the just-in-time Office-edit grant on a SECURE
         // container, used by GET /api/documents/{id}/office and /open-links. UNCONDITIONAL because FileAccessEndpoints maps
         // unconditionally (bff-extensions.md section F.1); its dependencies (RecordContainerResolver, CallerRecordAccessProbe,
-        // SpeContainerMembershipService, IGenericEntityService) are registered unconditionally too.
-        services.AddScoped<Sprk.Bff.Api.Services.Documents.OfficeEditAccessService>();
+        // SpeContainerMembershipService, IGenericEntityService) are registered unconditionally too. Task 191g: a flagged-external
+        // caller gets an item-level grant instead of a container role, deciding "externally visible" through 191c's
+        // ExternalVisibilityDecider (AddExternalAccess, unconditional in Program.cs). A factory because the constructor takes that
+        // internal delegate; the item grant is off unless ExternalAccess:FlaggedOfficeEdit:Enabled is true.
+        services.AddScoped(sp => new Sprk.Bff.Api.Services.Documents.OfficeEditAccessService(
+            sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService>(),
+            sp.GetRequiredService<Spaarke.Dataverse.IGenericEntityService>(),
+            sp.GetRequiredService<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>(),
+            sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+            sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Documents.OfficeEditAccessService>>()));
 
         // The legacy migration (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"): registered DISABLED — it runs only when
         // scripts/Invoke-DocumentContainerMigration.ps1 triggers it through /api/admin/jobs (SystemAdmin), and writes
