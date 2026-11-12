@@ -98,12 +98,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly Spaarke.Dataverse.IGenericEntityService? _appOnlyEntities;
+    private readonly Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? _directOwner;
 
     /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
     /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
     /// <param name="appOnlyEntities">ebilling-r1 D-96: the app-only reader an invoice's lines are counted with when this tool
     /// moves an invoice to another core record (<c>OwnedChildWrite.RefileAsync</c>). Registered unconditionally by the host;
     /// optional so the test compositions keep compiling — absent, such a move fails closed.</param>
+    /// <param name="directOwner">fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team
+    /// (<c>OwnedChildWrite.RefileAsync</c>). Registered by the host; absent, an unfiled communication keeps its owner.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
@@ -111,7 +114,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         IServiceScopeFactory? scopes = null,
-        Spaarke.Dataverse.IGenericEntityService? appOnlyEntities = null)
+        Spaarke.Dataverse.IGenericEntityService? appOnlyEntities = null,
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
@@ -125,6 +129,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _scopes = scopes;
         _appOnlyEntities = appOnlyEntities;
+        _directOwner = directOwner;
     }
 
     /// <inheritdoc />
@@ -430,7 +435,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
             // Task 147 r1c (round 36), AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule
             // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
-            if (refile.Written && children is not null && wasIsolated is not null)
+            // #2091 / fm 054 piece 3b: not when the reparent moved none of the row's parents (ParentsUnchanged — a clear of a link
+            // that files nothing, a re-bind onto the record a column already holds): written, but no re-file, as on the route.
+            if (refile.Written && refile.Resolution?.ParentsUnchanged != true && children is not null && wasIsolated is not null)
             {
                 // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
                 // #2159 slice 2: with the reparent's answer (its F3 permission), so a re-filed document's file release is recorded.
@@ -509,7 +516,8 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     {
         var callerOid = Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : (Guid?)null;
         var outcome = await OwnedChildWrite.RefileAsync(
-            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct, _appOnlyEntities)
+            _dataverse, _ownership, tablename, recordId, entitySetName, primaryIdAttribute, item, callerOid, ct, _appOnlyEntities,
+            _directOwner)
             .ConfigureAwait(false);
 
         return outcome switch

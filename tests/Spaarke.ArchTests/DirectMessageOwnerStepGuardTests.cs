@@ -37,7 +37,10 @@ public class DirectMessageOwnerStepGuardTests
 
     /// <summary>
     /// The seam for fm task 054 piece 3b: the <c>SecureChildReconciler</c> members that may read the Direct team and write an owner,
-    /// to move a content row back to the Direct team on unfile. Empty until 3b adds its member here, with its reason.
+    /// to move a content row back to the Direct team on unfile. Empty: piece 3b's unfile writes the Direct owner through the owner
+    /// step's one member (<see cref="OwnerStepMember"/>, called by <c>DirectMessageOwnerStep.AfterReparentAsync</c>), and the
+    /// reconcile moves content rows by the record ownership resolver's answer through its listed writer members, so no reconciler
+    /// member reads the Direct team and writes an owner.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> DirectTeamUnfileMembers = new Dictionary<string, string>();
 

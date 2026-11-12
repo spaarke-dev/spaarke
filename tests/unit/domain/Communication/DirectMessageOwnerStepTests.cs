@@ -45,6 +45,7 @@ public class DirectMessageOwnerStepTests
     private readonly List<string> _calls = new();
     private readonly HashSet<Guid> _refusedWrites = new();
     private readonly HashSet<Guid> _changedRows = new();
+    private readonly List<Guid> _secureUnits = new() { SecureUnit };
 
     public DirectMessageOwnerStepTests()
     {
@@ -428,9 +429,389 @@ public class DirectMessageOwnerStepTests
         (await Step(world.Lookup()).CheckBeforeSendAsync(CancellationToken.None)).Should().Be(DirectOwnerSendCheck.Unavailable);
     }
 
+    // ── Piece 3b: the unfile direction, decided before the write ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DecideUnfile_AnEligibleDirectMessage_WithAResolvedLookup_GoesToTheDirectTeam()
+    {
+        var decision = await Decide(Resolved(), FiledDirectMessage());
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.ToDirectTeam);
+        _calls.Should().BeEmpty("the decision writes and grants nothing");
+    }
+
+    [Fact]
+    public async Task DecideUnfile_NotConfigured_KeepsTheOwner_AndReadsNothing()
+    {
+        var decision = await Decide(DirectMessageOwnerTeamDouble.Unconfigured(), FiledDirectMessage());
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.KeepOwner);
+        _dataverse.Verify(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+        _log.Entries.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task DecideUnfile_OnlyOneSettingSet_IsRefused_WithAStableWarning(string onlySet)
+    {
+        var decision = await Decide(PartiallyConfigured(onlySet), FiledDirectMessage());
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.Refused);
+        decision.Refusal.Should().Be(DirectMessageOwnerTeamRefusal.PartiallyConfigured);
+        _log.Entries.Should().ContainSingle(e => e.Event.Id == 5419 && e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task DecideUnfile_ConfiguredButRefused_IsRefused_WithTheLookupsCode()
+    {
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam).WithUserInDirectUnit(Sender).Lookup();
+
+        var decision = await Decide(lookup, FiledDirectMessage());
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.Refused);
+        decision.Refusal.Should().Be(DirectMessageOwnerTeamRefusal.BusinessUnitHasUsers);
+    }
+
+    [Fact]
+    public async Task DecideUnfile_LookupFaults_IsUnavailable()
+    {
+        var world = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        world.Faults = true;
+
+        var decision = await Decide(world.Lookup(), FiledDirectMessage());
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.Unavailable);
+        decision.Fault.Should().NotBeNull();
+        _log.Entries.Should().ContainSingle(e => e.Event.Id == 5419 && e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task DecideUnfile_TheThreadReadFaults_IsUnavailable()
+    {
+        _dataverse
+            .Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated read fault"));
+
+        var decision = await Decide(Resolved(), FiledDirectMessage());
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.Unavailable);
+    }
+
+    [Theory]
+    [InlineData("empty recipient")]
+    [InlineData("same user")]
+    [InlineData("email")]
+    [InlineData("record thread")]
+    [InlineData("default thread")]
+    public async Task DecideUnfile_NotADirectMessage_KeepsTheOwner_EvenWhenTheLookupCannotAnswer(string shape)
+    {
+        var message = FiledDirectMessage(shape switch
+        {
+            "empty recipient" => Guid.Empty,
+            "same user" => Sender,
+            _ => null,
+        });
+        if (shape == "email")
+            message["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Email);
+        if (shape == "record thread")
+            Store(Thread(threadType: 100000000));
+        if (shape == "default thread")
+            Store(Thread(isDefault: true));
+
+        var decision = await Decide(PartiallyConfigured(DirectMessageOwnerTeam.BusinessUnitNameConfigKey), message);
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.KeepOwner, "only an eligible Direct message is ever refused");
+        _log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task DecideUnfile_NoThread_KeepsTheOwner()
+    {
+        var decision = await DirectMessageOwnerStep.DecideUnfileAsync(
+            _dataverse.Object, Resolved(), Unfiled(FiledDirectMessage(), threadAfter: null), threadId: null, _log, CancellationToken.None);
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.KeepOwner);
+    }
+
+    // ── Piece 3b fix round: the row as the change leaves it ──────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("the change links a contact")]
+    [InlineData("the row already links a contact")]
+    [InlineData("the change links an account")]
+    public async Task DecideUnfile_ARowStillLinkedToARecordAfterTheChange_KeepsTheOwner_AndIsNeverRefused(string shape)
+    {
+        var filed = FiledDirectMessage();
+        var links = new Dictionary<string, EntityReference>();
+        switch (shape)
+        {
+            case "the change links a contact":
+                links["sprk_regardingperson"] = new EntityReference("contact", Guid.NewGuid());
+                break;
+            case "the row already links a contact":
+                filed["sprk_regardingperson"] = new EntityReference("contact", Guid.NewGuid());
+                break;
+            default:
+                links["sprk_regardingaccount"] = new EntityReference("account", Guid.NewGuid());
+                break;
+        }
+
+        var rowAfter = DirectMessageOwnerStep.RowAfterChange(
+            filed, new Dictionary<string, EntityReference?> { ["sprk_regardingmatter"] = null }, links, ThreadId);
+        var decision = await Decide(PartiallyConfigured(DirectMessageOwnerTeam.BusinessUnitNameConfigKey), rowAfter, unfile: false);
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.KeepOwner, "a message still linked to a record is not unfiled");
+        _log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task DecideUnfile_TheChangeClearsTheContactToo_IsAnUnfile()
+    {
+        var filed = FiledDirectMessage();
+        filed["sprk_regardingperson"] = new EntityReference("contact", Guid.NewGuid());
+
+        var rowAfter = DirectMessageOwnerStep.RowAfterChange(
+            filed,
+            new Dictionary<string, EntityReference?> { ["sprk_regardingmatter"] = null, ["sprk_regardingperson"] = null },
+            new Dictionary<string, EntityReference>(), ThreadId);
+
+        (await Decide(Resolved(), rowAfter, unfile: false)).Verdict.Should().Be(DirectUnfileVerdict.ToDirectTeam);
+    }
+
+    [Theory]
+    [InlineData("email")]
+    [InlineData("empty recipient")]
+    [InlineData("still linked")]
+    public async Task DecideUnfile_NotAnEligibleUnfile_ReadsNeitherTheLookupNorTheThread(string shape)
+    {
+        var message = FiledDirectMessage(shape == "empty recipient" ? Guid.Empty : null);
+        if (shape == "email")
+            message["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Email);
+        if (shape == "still linked")
+            message["sprk_regardingorganization"] = new EntityReference("sprk_organization", Guid.NewGuid());
+        var world = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+
+        var decision = await Decide(world.Lookup(), message);
+
+        decision.Verdict.Should().Be(DirectUnfileVerdict.KeepOwner);
+        world.Reads.Should().Be(0, "a communication that is not an eligible Direct message reads nothing extra");
+        _dataverse.Verify(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DecideUnfile_AnEligibleUnfile_DoesReadTheLookup()
+    {
+        var world = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+
+        (await Decide(world.Lookup(), FiledDirectMessage())).Verdict.Should().Be(DirectUnfileVerdict.ToDirectTeam);
+        world.Reads.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task AfterReparent_WhenTheRowReadBackIsStillLinkedToARecord_GrantsNothing_AndMovesNothing()
+    {
+        UnfiledFromRecordTeam();
+        _rows[("sprk_communication", MessageId)]["sprk_regardingperson"] = new EntityReference("contact", Guid.NewGuid());
+
+        await Step(Resolved()).AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        _calls.Should().BeEmpty("the participants are granted only for a message that moves");
+        OwningTeam("sprk_communication", MessageId).Should().Be(RecordTeam);
+        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(RecordTeam);
+    }
+
+    [Theory]
+    [InlineData("a record thread")]
+    [InlineData("an unresolved lookup")]
+    public async Task AfterReparent_WhenTheThreadOrTheLookupDoesNotPass_GrantsNothing(string shape)
+    {
+        UnfiledFromRecordTeam();
+        var lookup = Resolved();
+        if (shape == "a record thread")
+            Store(Thread(threadType: 100000000));
+        else
+            lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam).WithUserInDirectUnit(Sender).Lookup();
+
+        await Step(lookup).AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        _calls.Should().BeEmpty();
+        OwningTeam("sprk_communication", MessageId).Should().Be(RecordTeam);
+    }
+
+    [Fact]
+    public async Task DecideUnfile_AMessageTheDirectTeamAlreadyOwns_KeepsTheOwner()
+    {
+        var message = FiledDirectMessage();
+        message["owningteam"] = new EntityReference("team", DirectTeam);
+
+        (await Decide(Resolved(), message)).Verdict.Should().Be(DirectUnfileVerdict.KeepOwner);
+    }
+
+    // ── Piece 3b: the move after the write ───────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AfterReparent_FromAnOrdinaryRecord_GrantsFirst_AssignsTheMessage_MovesItsContentRows_ThenGrantsAgain()
+    {
+        UnfiledFromRecordTeam();
+
+        await Step(Resolved()).AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam);
+        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(DirectTeam);
+        OwningTeam("sprk_document", OwnDocument).Should().Be(DirectTeam);
+        OwningTeam("sprk_document", FiledDocument).Should().Be(OtherTeam, "a row owned elsewhere is not the message's");
+        _calls.First().Should().Be("grant DirectParticipants", "the participants are granted before the owner moves");
+        _calls.IndexOf("owner sprk_communication " + MessageId).Should().Be(1);
+        _calls.Last().Should().Be("grant DirectParticipants");
+        _log.Errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AfterReparent_FromASecureRecord_AssignsTheMessage_AndLeavesItsContentRowsToTheSecureChildReconcile()
+    {
+        UnfiledFromRecordTeam();
+
+        await Step(Resolved()).AfterReparentAsync(MessageId, Due(leavesSecureOwner: true), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam);
+        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(RecordTeam);
+        OwningTeam("sprk_document", OwnDocument).Should().Be(RecordTeam);
+        _calls.Should().Equal("grant DirectParticipants", "owner sprk_communication " + MessageId, "grant DirectParticipants");
+    }
+
+    [Fact]
+    public async Task AfterReparent_WithNoMoveDue_DoesNothing()
+    {
+        UnfiledFromRecordTeam();
+        var step = Step(Resolved());
+
+        await step.AfterReparentAsync(MessageId, null, CancellationToken.None);
+        await step.AfterReparentAsync(MessageId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Unchanged("unchanged"),
+            CancellationToken.None);
+
+        _calls.Should().BeEmpty();
+        OwningTeam("sprk_communication", MessageId).Should().Be(RecordTeam);
+    }
+
+    [Fact]
+    public async Task AfterReparent_TheOwnerWriteNotConfirmed_KeepsTheOwner_WithAStableError_AndNeverThrows()
+    {
+        UnfiledFromRecordTeam();
+        _changedRows.Add(MessageId);
+
+        await Step(Resolved()).AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(RecordTeam, "the unfile stands; 054c is the recovery");
+        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(RecordTeam);
+        _log.Errors.Should().ContainSingle(e => e.Event.Id == 5415);
+    }
+
+    [Theory]
+    [InlineData("it is now in the Secure Record business unit")]
+    [InlineData("its owning unit did not come back")]
+    [InlineData("the Secure Record business unit is ambiguous")]
+    [InlineData("the step has no configuration to name the Secure Record business unit")]
+    public async Task AfterReparent_WhenTheOwnerReadBackIsSecureOrCannotBeTold_ButTheDecisionSaidItWasNot_GrantsNothing_MovesNothing_AndLogsTheError(
+        string shape)
+    {
+        UnfiledFromRecordTeam();
+        var row = _rows[("sprk_communication", MessageId)];
+        switch (shape)
+        {
+            case "it is now in the Secure Record business unit":
+                row["owningbusinessunit"] = new EntityReference("businessunit", SecureUnit);
+                break;
+            case "its owning unit did not come back":
+                row.Attributes.Remove("owningbusinessunit");
+                break;
+            case "the Secure Record business unit is ambiguous":
+                _secureUnits.Add(Guid.NewGuid());
+                break;
+        }
+
+        await Step(Resolved(), withConfiguration: shape != "the step has no configuration to name the Secure Record business unit")
+            .AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        _calls.Should().BeEmpty("nothing is granted or written when the owner is not the one the decision saw");
+        OwningTeam("sprk_communication", MessageId).Should().Be(RecordTeam, "the unfile stands; 054c is the recovery");
+        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(RecordTeam);
+        OwningTeam("sprk_document", OwnDocument).Should().Be(RecordTeam);
+        _log.Errors.Should().ContainSingle(e => e.Event.Id == 5415 && e.Message.Contains("owner changed after the unfile was decided"));
+    }
+
+    [Fact]
+    public async Task AfterReparent_WhenThereIsNoSecureRecordBusinessUnit_AndTheDecisionSaidNotSecure_StillMoves()
+    {
+        UnfiledFromRecordTeam();
+        _secureUnits.Clear();
+        _rows[("sprk_communication", MessageId)].Attributes.Remove("owningbusinessunit");
+
+        await Step(Resolved()).AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam, "an environment with no Secure Record unit has none to be in");
+        _log.Errors.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_communication", true, true, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.UnfiledCommunication)]
+    [InlineData("sprk_communication", true, false, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator)]
+    [InlineData("sprk_communication", false, true, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.ActingUserTeam)]
+    [InlineData("sprk_event", true, true, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.ActingUserTeam)]
+    public void UnfiledOwnershipFor_IsTheOneRuleEveryWriterTakes(
+        string table, bool actsForAPerson, bool withStep, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership expected) =>
+        DirectMessageOwnerStep.UnfiledOwnershipFor(table, actsForAPerson, withStep ? Step(Resolved()) : null).Should().Be(expected);
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private DirectMessageOwnerStep Step(DirectMessageOwnerTeam lookup) => new(_access.Object, _dataverse.Object, lookup, _log);
+    private static readonly Guid RecordTeam = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000021");
+    private static readonly Guid SecureUnit = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000022");
+    private static readonly Guid OrdinaryUnit = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000023");
+
+    /// <summary>The decision before an unfile: <paramref name="message"/> as read before the change, unfiled by clearing its matter
+    /// (<see cref="Unfiled"/>) unless <paramref name="unfile"/> is false (the row is already the row after the change).</summary>
+    private Task<DirectUnfileDecision> Decide(DirectMessageOwnerTeam lookup, Entity message, bool unfile = true) =>
+        DirectMessageOwnerStep.DecideUnfileAsync(
+            _dataverse.Object, lookup, unfile ? Unfiled(message, ThreadId) : message, ThreadId, _log, CancellationToken.None);
+
+    /// <summary>The row the unfile leaves: <paramref name="filed"/> with its matter cleared, in <paramref name="threadAfter"/>.</summary>
+    private static Entity Unfiled(Entity filed, Guid? threadAfter) =>
+        DirectMessageOwnerStep.RowAfterChange(
+            filed, new Dictionary<string, EntityReference?> { ["sprk_regardingmatter"] = null },
+            new Dictionary<string, EntityReference>(), threadAfter);
+
+    /// <summary>The message as the reparent reads it before an unfile: filed under a matter, owned by that matter's team.</summary>
+    private static Entity FiledDirectMessage(Guid? recipient = null)
+    {
+        var row = DirectMessage(recipient);
+        row["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+        row["ownerid"] = new EntityReference("team", RecordTeam);
+        row["owningteam"] = new EntityReference("team", RecordTeam);
+        return row;
+    }
+
+    /// <summary>The message after its unfile was written: filed under nothing, still owned (with its content rows) by the team of
+    /// the record it left.</summary>
+    private void UnfiledFromRecordTeam()
+    {
+        var row = DirectMessage();
+        row["ownerid"] = new EntityReference("team", RecordTeam);
+        row["owningteam"] = new EntityReference("team", RecordTeam);
+        row["owningbusinessunit"] = new EntityReference("businessunit", OrdinaryUnit);
+        Store(row);
+        Store(Content("sprk_communicationattachment", Attachment, "sprk_communication", new EntityReference("team", RecordTeam)));
+        Store(Content("sprk_document", OwnDocument, "sprk_relatedcommunication", new EntityReference("team", RecordTeam)));
+    }
+
+    private static Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution Due(bool leavesSecureOwner) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Unchanged("unfiled") with
+        {
+            DirectUnfile = new DirectUnfileDue(ThreadId, leavesSecureOwner),
+        };
+
+    private DirectMessageOwnerStep Step(DirectMessageOwnerTeam lookup, bool withConfiguration = true) =>
+        new(_access.Object, _dataverse.Object, lookup, _log,
+            configuration: withConfiguration ? new ConfigurationBuilder().Build() : null);
 
     private static DirectMessageOwnerTeam Resolved() => new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam).Lookup();
 
@@ -508,6 +889,9 @@ public class DirectMessageOwnerStepTests
 
     private EntityCollection Query(QueryExpression q)
     {
+        if (q.EntityName == "businessunit")
+            return new EntityCollection(_secureUnits.Select(id => new Entity("businessunit", id)).ToList());
+
         var condition = q.Criteria.Conditions.Single();
         var value = (Guid)condition.Values.Single();
         var rows = condition.AttributeName == q.EntityName + "id"

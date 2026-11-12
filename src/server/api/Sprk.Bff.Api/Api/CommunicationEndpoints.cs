@@ -156,7 +156,9 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
-            .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            // fm task 054 piece 3b: the owner the re-file needs could not be read now (nothing written; try again).
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
 
         // GET /{id}/status was DELETED by unified-access-control-r2 task 161 (owner round 10 item 1): it had no caller
         // anywhere in the repository and is in no published API description (src/solutions/CopilotAgent/

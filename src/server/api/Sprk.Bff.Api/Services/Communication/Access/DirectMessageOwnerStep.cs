@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -5,6 +6,9 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Communication.Models;
+using RecordOwnerResolution = Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution;
+using RecordReparent = Sprk.Bff.Api.Services.Dataverse.RecordReparent;
+using UnfiledOwnership = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership;
 
 namespace Sprk.Bff.Api.Services.Communication.Access;
 
@@ -54,16 +58,22 @@ public sealed class DirectMessageOwnerStep
     /// <summary>Warning: a 1:1 message send was refused before anything was sent.</summary>
     internal const string SendRefusedEventCode = "direct_message.send_refused";
 
+    /// <summary>Warning: piece 3b, an unfile of a Direct message was refused before anything was written, because the Direct
+    /// message owner team could not be confirmed.</summary>
+    internal const string UnfileRefusedEventCode = "direct_message.unfile_refused";
+
     internal static readonly EventId OwnerNotSetEvent = new(5414, OwnerNotSetEventCode);
     internal static readonly EventId MessageNotMovedEvent = new(5415, MessageNotMovedEventCode);
     internal static readonly EventId ContentRowNotMovedEvent = new(5416, ContentRowNotMovedEventCode);
     internal static readonly EventId SendRefusedEvent = new(5417, SendRefusedEventCode);
+    internal static readonly EventId UnfileRefusedEvent = new(5419, UnfileRefusedEventCode);
 
     private const string CommunicationTable = "sprk_communication";
     private const string ThreadLookup = "sprk_communicationthread";
     private const string TypeColumn = "sprk_communicationtype";
     private const string OwnerColumn = "ownerid";
     private const string OwningTeamColumn = "owningteam";
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string VersionColumn = "versionnumber";
     private const string EvictionReason = "direct-message-owner-step";
 
@@ -77,13 +87,18 @@ public sealed class DirectMessageOwnerStep
     private readonly IDataverseRecordShareService? _recordShares;
     private readonly ILogger<DirectMessageOwnerStep> _logger;
 
+    /// <summary>Names the Secure Record business unit (<c>SecureRecord:BusinessUnitName</c>) for the check an unfile makes on the owner
+    /// it reads back (<see cref="WhyOwnerLeftSecureSinceDecidedAsync"/>). Without it that check cannot be made, so such an unfile is refused.</summary>
+    private readonly IConfiguration? _configuration;
+
     public DirectMessageOwnerStep(
         IDirectThreadAccessService access,
         IGenericEntityService dataverse,
         DirectMessageOwnerTeam lookup,
         ILogger<DirectMessageOwnerStep> logger,
         IMembershipCacheInvalidator? cacheInvalidator = null,
-        IDataverseRecordShareService? recordShares = null)
+        IDataverseRecordShareService? recordShares = null,
+        IConfiguration? configuration = null)
     {
         _access = access ?? throw new ArgumentNullException(nameof(access));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
@@ -91,6 +106,7 @@ public sealed class DirectMessageOwnerStep
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cacheInvalidator = cacheInvalidator;
         _recordShares = recordShares;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -136,7 +152,8 @@ public sealed class DirectMessageOwnerStep
 
         try
         {
-            if (await OwnDirectAsync(communicationId, assignment.ThreadId, ct).ConfigureAwait(false))
+            if (await ConfirmDirectMoveAsync(communicationId, assignment.ThreadId, unfile: false, ct).ConfigureAwait(false) is { } move
+                && await WriteDirectMoveAsync(move, leavesSecureOwner: false, ct).ConfigureAwait(false))
                 await _access.GrantMessageAccessAsync(communicationId, assignment, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -145,6 +162,227 @@ public sealed class DirectMessageOwnerStep
                 "Message {CommunicationId} keeps its owner: the Direct owner step faulted (ThreadId={ThreadId}).",
                 communicationId, assignment.ThreadId);
         }
+    }
+
+    // ── piece 3b: the unfile direction ──────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Piece 3b, the ONE choice every re-file writer makes for what an unfile does (<see cref="RecordReparent.WhenUnfiled"/>):
+    /// a <c>sprk_communication</c> re-filed for a person takes <see cref="UnfiledOwnership.UnfiledCommunication"/>: an eligible
+    /// Direct message returns to the Direct message owner team (decided by <see cref="DecideUnfileAsync"/> before the write,
+    /// moved by <see cref="AfterReparentAsync"/> after it), and any other communication is Unchanged pending #2722. Without the
+    /// step to move it, <see cref="UnfiledOwnership.KeepCreator"/>. A write that acts for nobody (app-only) and every other
+    /// table keep <see cref="UnfiledOwnership.ActingUserTeam"/>, so their refusal when no person is named stays as it is.
+    /// </summary>
+    /// <param name="table">The re-filed row's table.</param>
+    /// <param name="actsForAPerson">The writer names the person it acts for.</param>
+    /// <param name="step">The step that moves the message after the write; <c>null</c> where none is composed.</param>
+    public static UnfiledOwnership UnfiledOwnershipFor(string table, bool actsForAPerson, DirectMessageOwnerStep? step)
+    {
+        if (!string.Equals(table?.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase) || !actsForAPerson)
+            return UnfiledOwnership.ActingUserTeam;
+        return step is null ? UnfiledOwnership.KeepCreator : UnfiledOwnership.UnfiledCommunication;
+    }
+
+    /// <summary>
+    /// Piece 3b, after a written re-file: when the reparent answered that the unfiled message returns to the Direct team
+    /// (<see cref="RecordOwnerResolution.DirectUnfile"/>), confirms it first, on the row read back after the write (the same
+    /// eligibility rule as before the write, <see cref="WhyNotAnEligibleUnfile"/>; its thread; the lookup), and only then grants it
+    /// to its two participants, assigns it to the Direct team through the one owner write, moves its content rows (unless it was
+    /// owned by the Secure team: the secure-child reconcile moves those and takes their mirror off), and grants it again. A message
+    /// that does not pass the checks is neither granted nor moved. Any other answer does nothing. Never throws for a Dataverse
+    /// fault: the unfile has landed, so a message that cannot be moved keeps its owner with an Error, and
+    /// <c>Migrate-DirectMessagesToOwnerTeam.ps1</c> is the recovery. A writer calls it before the step after the re-file
+    /// (<c>SecureChildReconciler.AfterRefileAsync</c>), so that step sees the message's new owner.
+    /// </summary>
+    public async Task AfterReparentAsync(Guid communicationId, RecordOwnerResolution? reparent, CancellationToken ct)
+    {
+        if (reparent?.DirectUnfile is not { } due)
+            return;
+
+        try
+        {
+            if (await ConfirmDirectMoveAsync(communicationId, due.ThreadId, unfile: true, ct, due.LeavesSecureOwner).ConfigureAwait(false) is not { } move)
+                return;
+
+            var assignment = ThreadAssignment.Direct(due.ThreadId);
+            await _access.GrantMessageAccessAsync(communicationId, assignment, ct).ConfigureAwait(false);
+            if (await WriteDirectMoveAsync(move, due.LeavesSecureOwner, ct).ConfigureAwait(false))
+                await _access.GrantMessageAccessAsync(communicationId, assignment, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(MessageNotMovedEvent, ex,
+                "Message {CommunicationId} was unfiled and keeps its owner: its return to the Direct team faulted (ThreadId={ThreadId}).",
+                communicationId, due.ThreadId);
+        }
+    }
+
+    /// <summary>
+    /// Piece 3b: the row a re-file leaves, judged BEFORE it is written: <paramref name="current"/> (as read before the change) with
+    /// every column the change clears removed, every lookup it sets applied (<paramref name="parentChanges"/>), every typed regarding
+    /// lookup it sets onto a table that is no ownership parent applied (<paramref name="regardingLinksSet"/>), every other column
+    /// the rule reads that it writes applied (<paramref name="ruleColumnsWritten"/>: the type and the stamped pair; a <c>null</c>
+    /// removes the column), and its thread lookup naming <paramref name="threadIdAfter"/>. <see cref="DecideUnfileAsync"/> asks
+    /// <see cref="WhyNotAnEligibleUnfile"/> of it, the rule <see cref="AfterReparentAsync"/> asks of the row read back after the
+    /// write.
+    /// </summary>
+    internal static Entity RowAfterChange(
+        Entity current,
+        IReadOnlyDictionary<string, EntityReference?> parentChanges,
+        IReadOnlyDictionary<string, EntityReference> regardingLinksSet,
+        Guid? threadIdAfter,
+        IReadOnlyDictionary<string, object?>? ruleColumnsWritten = null)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(parentChanges);
+        ArgumentNullException.ThrowIfNull(regardingLinksSet);
+
+        var after = new Entity(current.LogicalName, current.Id);
+        foreach (var attribute in current.Attributes)
+            after[attribute.Key] = attribute.Value;
+
+        foreach (var (key, value) in parentChanges)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = SecureRootInheritance.NormalizeColumn(key);
+            if (value is null || value.Id == Guid.Empty)
+                after.Attributes.Remove(column);
+            else
+                after[column] = value;
+        }
+
+        foreach (var (key, link) in regardingLinksSet)
+        {
+            if (!string.IsNullOrWhiteSpace(key) && link is { } set && set.Id != Guid.Empty)
+                after[SecureRootInheritance.NormalizeColumn(key)] = set;
+        }
+
+        foreach (var (key, value) in ruleColumnsWritten ?? new Dictionary<string, object?>())
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = SecureRootInheritance.NormalizeColumn(key);
+            if (value is null)
+                after.Attributes.Remove(column);
+            else
+                after[column] = value;
+        }
+
+        if (threadIdAfter is { } thread && thread != Guid.Empty)
+            after[ThreadLookup] = new EntityReference(DirectMessageParticipantShares.ThreadTable, thread);
+        else
+            after.Attributes.Remove(ThreadLookup);
+
+        return after;
+    }
+
+    /// <summary>
+    /// Piece 3b, the ONE eligibility rule of an unfile, asked of the row as the write leaves it: before the write of the row
+    /// <see cref="RowAfterChange"/> builds (<see cref="DecideUnfileAsync"/>), after it of the row read back
+    /// (<see cref="AfterReparentAsync"/>). Eligible: a Message, linked to no record (no ownership parent and no typed regarding
+    /// lookup), filed into <paramref name="threadId"/>, carrying a valid stamped pair. Why <paramref name="rowAfter"/> is not, or
+    /// <c>null</c> when it is. Reads nothing.
+    /// </summary>
+    internal static string? WhyNotAnEligibleUnfile(Entity rowAfter, Guid? threadId)
+    {
+        ArgumentNullException.ThrowIfNull(rowAfter);
+        if (WhyNotAMessage(rowAfter) is { } notAMessage)
+            return notAMessage;
+        if (WhyFiledUnderARecord(rowAfter) is { } filed)
+            return filed;
+        if (threadId is not { } thread || thread == Guid.Empty
+            || rowAfter.GetAttributeValue<EntityReference>(ThreadLookup)?.Id is not { } filedThread || filedThread != thread)
+            return "it is not filed into the thread it was unfiled in";
+        return WhyNoDirectPair(rowAfter);
+    }
+
+    /// <summary>
+    /// Piece 3b, BEFORE an unfile is written: what the unfile does with the owner of <paramref name="rowAfter"/> (the row as the
+    /// change leaves it, <see cref="RowAfterChange"/>) in <paramref name="threadId"/>. The record ownership resolver asks it for
+    /// <see cref="UnfiledOwnership.UnfiledCommunication"/>. The checks that read nothing come first, so a communication that is not
+    /// an eligible Direct message costs no read.
+    /// <list type="bullet">
+    /// <item>Not eligible (<see cref="WhyNotAnEligibleUnfile"/>: not a Message, still linked to a record, not in the thread, no
+    /// valid stamped pair): <see cref="DirectUnfileVerdict.KeepOwner"/>, nothing read.</item>
+    /// <item>Neither Direct setting configured: <see cref="DirectUnfileVerdict.KeepOwner"/>, from configuration alone.</item>
+    /// <item>A thread not typed Direct, or the per-user master thread: <see cref="DirectUnfileVerdict.KeepOwner"/>.</item>
+    /// <item>Eligible, and the lookup resolves: <see cref="DirectUnfileVerdict.ToDirectTeam"/>.</item>
+    /// <item>Eligible, and the lookup refuses (<see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/> included):
+    /// <see cref="DirectUnfileVerdict.Refused"/>. A fault reading the lookup or the thread: <see cref="DirectUnfileVerdict.Unavailable"/>.
+    /// Both refuse the unfile before anything is written.</item>
+    /// </list>
+    /// Never throws for a fault; cancellation of <paramref name="ct"/> propagates.
+    /// </summary>
+    internal static async Task<DirectUnfileDecision> DecideUnfileAsync(
+        IGenericEntityService dataverse, DirectMessageOwnerTeam? lookup, Entity rowAfter, Guid? threadId, ILogger logger,
+        CancellationToken ct)
+    {
+        if (lookup is null)
+            return DirectUnfileDecision.KeepOwner;
+
+        var message = rowAfter;
+        if (WhyNotAnEligibleUnfile(message, threadId) is { } reason)
+        {
+            logger.LogDebug("Unfiling message {CommunicationId} keeps its owner: {Reason}.", message.Id, reason);
+            return DirectUnfileDecision.KeepOwner;
+        }
+
+        var thread = threadId!.Value;
+        DirectMessageOwnerTeamResolution? resolution = null;
+        Exception? fault;
+        try
+        {
+            resolution = await lookup.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
+            fault = resolution.Fault;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            fault = ex;
+        }
+
+        if (fault is null && resolution!.IsNotConfigured)
+            return DirectUnfileDecision.KeepOwner;
+
+        Entity? threadRow;
+        try
+        {
+            threadRow = await ReadThreadAsync(dataverse, thread, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(UnfileRefusedEvent, ex,
+                "Unfiling message {CommunicationId} was refused: its thread {ThreadId} could not be read. Nothing was written.",
+                message.Id, thread);
+            return DirectUnfileDecision.Unavailable(ex);
+        }
+
+        if (WhyThreadIsNotDirect(threadRow) is { } threadReason)
+        {
+            logger.LogDebug("Unfiling message {CommunicationId} keeps its owner: {Reason}.", message.Id, threadReason);
+            return DirectUnfileDecision.KeepOwner;
+        }
+
+        if (fault is not null)
+        {
+            logger.LogWarning(UnfileRefusedEvent, fault,
+                "Unfiling Direct message {CommunicationId} was refused: the Direct message owner team could not be read. Nothing was " +
+                "written.", message.Id);
+            return DirectUnfileDecision.Unavailable(fault);
+        }
+
+        if (!resolution!.IsResolved || resolution.TeamId is not { } teamId || teamId == Guid.Empty)
+        {
+            logger.LogWarning(UnfileRefusedEvent,
+                "Unfiling Direct message {CommunicationId} was refused: the Direct message owner team is not usable ({Refusal}, missing " +
+                "setting {MissingSetting}). Nothing was written.", message.Id, resolution.Refusal, resolution.MissingSetting);
+            return DirectUnfileDecision.Refused(resolution.Refusal ?? DirectMessageOwnerTeamRefusal.PartiallyConfigured);
+        }
+
+        return message.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id == teamId
+            ? DirectUnfileDecision.KeepOwner
+            : DirectUnfileDecision.ToDirectTeam;
     }
 
     /// <summary>
@@ -241,16 +479,29 @@ public sealed class DirectMessageOwnerStep
         return null;
     }
 
+    /// <summary>A message confirmed for the owner write (<see cref="ConfirmDirectMoveAsync"/>): the version it was read at, its
+    /// owner then, and the resolved Direct team.</summary>
+    private sealed record DirectMove(Guid CommunicationId, long Version, EntityReference PreviousOwner, Guid TeamId);
+
     /// <summary>
-    /// Steps 3 to 7 of the class remarks. <c>true</c> when the message now reads back as owned by the Direct team.
+    /// Steps 3 to 5 of the class remarks, writing and granting nothing: the lookup, the message read whole and judged, its thread,
+    /// the resolved team. The move to make, or <c>null</c> when the message keeps its owner.
     /// </summary>
-    private async Task<bool> OwnDirectAsync(Guid communicationId, Guid threadId, CancellationToken ct)
+    /// <param name="unfile">Piece 3b: the message was just unfiled (<see cref="AfterReparentAsync"/>), so it is owned by the team
+    /// of the record it left rather than by a user, and it is judged by <see cref="WhyNotAnEligibleUnfile"/>. <c>false</c> at a
+    /// join.</param>
+    /// <param name="leavesSecureOwner">Piece 3b, with <paramref name="unfile"/>: the answer before the write said the message was NOT
+    /// owned in the Secure Record business unit (<see cref="DirectUnfileDue.LeavesSecureOwner"/> <c>false</c>), so its content rows
+    /// move here. The owner read back must still be outside that unit; if it is in it, or cannot be told, nothing is granted or moved
+    /// (<see cref="WhyOwnerLeftSecureSinceDecidedAsync"/>). Ignored at a join.</param>
+    private async Task<DirectMove?> ConfirmDirectMoveAsync(
+        Guid communicationId, Guid threadId, bool unfile, CancellationToken ct, bool leavesSecureOwner = false)
     {
         var resolution = await _lookup.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
         if (resolution.IsNotConfigured && resolution.Fault is null)
         {
             _logger.LogDebug("Message {CommunicationId} keeps its owner: no Direct message owner team is configured.", communicationId);
-            return false;
+            return null;
         }
 
         var message = await ReadMessageAsync(communicationId, ct).ConfigureAwait(false);
@@ -258,33 +509,33 @@ public sealed class DirectMessageOwnerStep
         {
             _logger.LogError(MessageNotMovedEvent,
                 "Message {CommunicationId} keeps its owner: it could not be read before its Direct owner write.", communicationId);
-            return false;
+            return null;
         }
 
-        if (WhyNotDirect(message, threadId) is { } reason)
+        if (WhyNotDirect(message, threadId, unfile) is { } reason)
         {
             _logger.LogInformation("Message {CommunicationId} keeps its owner: {Reason}.", communicationId, reason);
-            return false;
+            return null;
         }
 
         // Task 198's thread narrowing, applied before the owner moves: the join's audience alone does not decide it.
         Entity? thread;
         try
         {
-            thread = await ReadThreadAsync(threadId, ct).ConfigureAwait(false);
+            thread = await ReadThreadAsync(_dataverse, threadId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(MessageNotMovedEvent, ex,
                 "Message {CommunicationId} keeps its owner: its thread {ThreadId} could not be read before its Direct owner write.",
                 communicationId, threadId);
-            return false;
+            return null;
         }
 
         if (WhyThreadIsNotDirect(thread) is { } threadReason)
         {
             _logger.LogInformation("Message {CommunicationId} keeps its owner: {Reason}.", communicationId, threadReason);
-            return false;
+            return null;
         }
 
         if (!resolution.IsResolved || resolution.TeamId is not { } teamId || teamId == Guid.Empty)
@@ -292,10 +543,61 @@ public sealed class DirectMessageOwnerStep
             _logger.LogError(OwnerNotSetEvent, resolution.Fault,
                 "Message {CommunicationId} keeps its owner: the Direct message owner team did not resolve ({Refusal}, missing setting " +
                 "{MissingSetting}).", communicationId, resolution.Refusal, resolution.MissingSetting);
-            return false;
+            return null;
         }
 
-        var previousOwner = message.GetAttributeValue<EntityReference>(OwnerColumn)!;
+        if (message.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id == teamId)
+        {
+            _logger.LogInformation("Message {CommunicationId} is already owned by the Direct message owner team.", communicationId);
+            return null;
+        }
+
+        // Piece 3b: the content rows of a message decided as NOT Secure-owned move with it here; one that is Secure-owned now (or whose
+        // owner cannot be told) is the secure-child reconcile's, which was not told, so it is not moved at all. The unfile stands;
+        // Migrate-DirectMessagesToOwnerTeam.ps1 (054c) is the recovery.
+        if (unfile && !leavesSecureOwner
+            && await WhyOwnerLeftSecureSinceDecidedAsync(message, ct).ConfigureAwait(false) is { } changed)
+        {
+            _logger.LogError(MessageNotMovedEvent,
+                "Message {CommunicationId} was unfiled and keeps its owner: the owner changed after the unfile was decided ({Reason}). " +
+                "Nothing was granted or moved.", communicationId, changed);
+            return null;
+        }
+
+        return new DirectMove(communicationId, version, message.GetAttributeValue<EntityReference>(OwnerColumn)!, teamId);
+    }
+
+    /// <summary>
+    /// Piece 3b: why the owner read back after an unfile is in the Secure Record business unit, or cannot be told to be outside it,
+    /// although the answer before the write said the message was not Secure-owned; <c>null</c> when it is outside it. The same
+    /// reading as that answer: an owning unit that did not come back counts as Secure, and an environment with no Secure Record
+    /// business unit has none for a message to be in. A unit that cannot be decided (two carry its name, or no configuration was
+    /// given) is a reason too. A fault reading the unit propagates to <see cref="AfterReparentAsync"/>, which logs it.
+    /// </summary>
+    private async Task<string?> WhyOwnerLeftSecureSinceDecidedAsync(Entity message, CancellationToken ct)
+    {
+        if (_configuration is null)
+            return "the Secure Record business unit cannot be read";
+
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+            return "the Secure Record business unit cannot be decided";
+
+        var owningUnit = message.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+        return secureBu.Id is { } secureId && (owningUnit is null || owningUnit == Guid.Empty || owningUnit == secureId)
+            ? "it is owned in the Secure Record business unit, or its owning unit is not known"
+            : null;
+    }
+
+    /// <summary>
+    /// Steps 6 and 7 of the class remarks, for a move <see cref="ConfirmDirectMoveAsync"/> confirmed: the owner write, then the
+    /// content rows. <c>true</c> when the message now reads back as owned by the Direct team.
+    /// </summary>
+    /// <param name="leavesSecureOwner">Piece 3b: the message was unfiled from the Secure team; its content rows are left to the
+    /// secure-child reconcile. <c>false</c> at a join.</param>
+    private async Task<bool> WriteDirectMoveAsync(DirectMove move, bool leavesSecureOwner, CancellationToken ct)
+    {
+        var (communicationId, version, previousOwner, teamId) = (move.CommunicationId, move.Version, move.PreviousOwner, move.TeamId);
         if (await WriteDirectTeamOwnerAsync(CommunicationTable, communicationId, version, teamId, ct).ConfigureAwait(false) is { } fault)
         {
             _logger.LogError(MessageNotMovedEvent,
@@ -303,31 +605,67 @@ public sealed class DirectMessageOwnerStep
             return false;
         }
 
+        // Piece 3b: a message unfiled from a Secure record leaves its content rows to the secure-child reconcile, which moves them
+        // out of the Secure team by the record ownership resolver's Direct rule and takes their mirrored shares off with them.
+        if (leavesSecureOwner)
+        {
+            _logger.LogInformation(
+                "Message {CommunicationId} returned to the Direct team from the Secure team; its content rows follow it through the " +
+                "secure-child reconcile.", communicationId);
+            return true;
+        }
+
         await MoveContentRowsAsync(communicationId, previousOwner, teamId, ct).ConfigureAwait(false);
         return true;
     }
 
     /// <summary>Why the message is not a Direct message this step may assign, or <c>null</c> when it is.</summary>
-    private static string? WhyNotDirect(Entity message, Guid threadId)
+    /// <param name="unfile">Piece 3b: the message was just unfiled, so its owner is the team of the record it left and any owner
+    /// read back is accepted; it is judged by <see cref="WhyNotAnEligibleUnfile"/>, the rule asked before the write. At a join
+    /// (<c>false</c>) it must be owned by a user.</param>
+    private static string? WhyNotDirect(Entity message, Guid threadId, bool unfile)
     {
-        if (message.GetAttributeValue<OptionSetValue>(TypeColumn)?.Value != (int)CommunicationType.Message)
-            return "it is not a Message";
-        if (message.GetAttributeValue<EntityReference>(OwnerColumn) is not { } owner
-            || !string.Equals(owner.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase) || owner.Id == Guid.Empty
+        if (message.GetAttributeValue<EntityReference>(OwnerColumn) is not { } owner || owner.Id == Guid.Empty)
+            return WhyNotAMessage(message) ?? "its owner could not be read";
+        if (unfile)
+            return WhyNotAnEligibleUnfile(message, threadId);
+
+        if (WhyNotAMessage(message) is { } notAMessage)
+            return notAMessage;
+        if (!string.Equals(owner.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase)
             || message.GetAttributeValue<EntityReference>(OwningTeamColumn) is { Id: var team } && team != Guid.Empty)
             return "it is not owned by a user";
-        if (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(message).Count > 0
-            || DirectMessageRecipient.CarriesATypedRegarding(message))
-            return "it is filed under a record";
+        if (WhyFiledUnderARecord(message) is { } filed)
+            return filed;
         if (message.GetAttributeValue<EntityReference>(ThreadLookup)?.Id is not { } filedThread || filedThread != threadId)
             return "it is not filed into the joined thread";
-        return DirectMessageParticipantShares.ParticipantsOf(message) is { Participants: null } derivation
-            ? $"it names no Direct pair ({derivation.NoPair ?? derivation.Unknown})"
-            : null;
+        return WhyNoDirectPair(message);
     }
 
+    /// <summary>Why <paramref name="message"/> is filed under a record (an ownership parent or a typed regarding lookup), or
+    /// <c>null</c> when it is linked to none (the join and the unfile).</summary>
+    private static string? WhyFiledUnderARecord(Entity message) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(message).Count > 0
+        || DirectMessageRecipient.CarriesATypedRegarding(message)
+            ? "it is filed under a record"
+            : null;
+
+    /// <summary>Why <paramref name="message"/> is not a Message row, or <c>null</c> when it is (the join and the unfile).</summary>
+    internal static string? WhyNotAMessage(Entity message) =>
+        message.GetAttributeValue<OptionSetValue>(TypeColumn)?.Value != (int)CommunicationType.Message ? "it is not a Message" : null;
+
+    /// <summary>
+    /// Why <paramref name="message"/> carries no valid stamped pair (<see cref="DirectMessageParticipantShares.ParticipantsOf"/>:
+    /// exactly two distinct non-empty systemusers in <c>sprk_sentby</c> and <c>sprk_directrecipient</c>), or <c>null</c> when it
+    /// does (the join and the unfile).
+    /// </summary>
+    internal static string? WhyNoDirectPair(Entity message) =>
+        DirectMessageParticipantShares.ParticipantsOf(message) is { Participants: null } derivation
+            ? $"it names no Direct pair ({derivation.NoPair ?? derivation.Unknown})"
+            : null;
+
     /// <summary>The thread's type and default flag, the two columns task 198 narrows on. A fault propagates to the caller.</summary>
-    private async Task<Entity?> ReadThreadAsync(Guid threadId, CancellationToken ct)
+    private static async Task<Entity?> ReadThreadAsync(IGenericEntityService dataverse, Guid threadId, CancellationToken ct)
     {
         var query = new QueryExpression(DirectMessageParticipantShares.ThreadTable)
         {
@@ -335,7 +673,7 @@ public sealed class DirectMessageOwnerStep
             TopCount = 1,
         };
         query.Criteria.AddCondition(DirectMessageParticipantShares.ThreadTable + "id", ConditionOperator.Equal, threadId);
-        return (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
+        return (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
     }
 
     private async Task<Entity?> ReadMessageAsync(Guid communicationId, CancellationToken ct)
@@ -523,6 +861,45 @@ public sealed class DirectOwnerJoin
     /// <summary>The join's assignment (its thread and its Direct audience).</summary>
     public ThreadAssignment Assignment { get; }
 }
+
+/// <summary>Piece 3b: what an unfile does with a communication's owner (<see cref="DirectMessageOwnerStep.DecideUnfileAsync"/>).</summary>
+public enum DirectUnfileVerdict
+{
+    /// <summary>It keeps its owner: not an eligible Direct message, or the Direct owner rule is off. Unchanged pending #2722.</summary>
+    KeepOwner,
+
+    /// <summary>An eligible Direct message, and the Direct team resolved: it returns to the Direct team after the write.</summary>
+    ToDirectTeam,
+
+    /// <summary>An eligible Direct message, and the Direct team is configured in a way that cannot be used: the unfile is refused.</summary>
+    Refused,
+
+    /// <summary>An eligible Direct message, and the lookup or its thread could not be read: the unfile is refused, try again.</summary>
+    Unavailable,
+}
+
+/// <summary>Piece 3b: <see cref="DirectMessageOwnerStep.DecideUnfileAsync"/>'s answer.</summary>
+/// <param name="Verdict">What the unfile does.</param>
+/// <param name="Refusal">With <see cref="DirectUnfileVerdict.Refused"/>, the lookup's stable refusal code.</param>
+/// <param name="Fault">With <see cref="DirectUnfileVerdict.Unavailable"/>, the fault.</param>
+public sealed record DirectUnfileDecision(DirectUnfileVerdict Verdict, string? Refusal = null, Exception? Fault = null)
+{
+    internal static readonly DirectUnfileDecision KeepOwner = new(DirectUnfileVerdict.KeepOwner);
+    internal static readonly DirectUnfileDecision ToDirectTeam = new(DirectUnfileVerdict.ToDirectTeam);
+
+    internal static DirectUnfileDecision Refused(string refusal) => new(DirectUnfileVerdict.Refused, refusal);
+
+    internal static DirectUnfileDecision Unavailable(Exception fault) => new(DirectUnfileVerdict.Unavailable, Fault: fault);
+}
+
+/// <summary>
+/// Piece 3b: carried on a written unfile's answer (<see cref="RecordOwnerResolution.DirectUnfile"/>): the message returns to the
+/// Direct message owner team (<see cref="DirectMessageOwnerStep.AfterReparentAsync"/>).
+/// </summary>
+/// <param name="ThreadId">The Direct thread the message sits in after the unfile; its participants are granted.</param>
+/// <param name="LeavesSecureOwner">The message was owned in the Secure Record business unit before the unfile: its content rows are
+/// moved by the secure-child reconcile, not by the step.</param>
+public sealed record DirectUnfileDue(Guid ThreadId, bool LeavesSecureOwner);
 
 /// <summary>The pre-send check of a 1:1 message (<see cref="DirectMessageOwnerStep.CheckBeforeSendAsync"/>).</summary>
 public sealed record DirectOwnerSendCheck(bool CanSend, bool IsTransient, string? RefusalCode)

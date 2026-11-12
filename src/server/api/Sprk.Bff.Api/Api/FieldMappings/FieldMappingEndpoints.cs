@@ -1578,6 +1578,8 @@ public static class FieldMappingEndpoints
                             wasIsolated = await Sprk.Bff.Api.Services.Access.RefileIsolationRead.BeforeWriteAsync(
                                 children, targetEntity.Trim().ToLowerInvariant(), childRecordId, ct);
 
+                            var directOwner = refileScope!.ServiceProvider
+                                .GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>();
                             var reparent = await ownership.ReparentAsync(
                                 new Sprk.Bff.Api.Services.Dataverse.RecordReparent
                                 {
@@ -1585,6 +1587,14 @@ public static class FieldMappingEndpoints
                                     RecordId = childRecordId,
                                     ParentChanges = parentChanges,
                                     CallerSystemUserId = callerSystemUserId,
+                                    // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct
+                                    // message returns to the Direct team; any other communication is Unchanged pending #2722).
+                                    WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
+                                        targetEntity, actsForAPerson: true, directOwner),
+                                    RegardingLinksSet = Sprk.Bff.Api.Services.Dataverse.RecordReparent.RegardingLinksSetIn(
+                                        targetEntity, updatePayload),
+                                    UnfileRuleColumnsWritten = Sprk.Bff.Api.Services.Dataverse.RecordReparent.UnfileRuleColumnsWrittenIn(
+                                        targetEntity, updatePayload),
                                     // A move out of a secure root (owner round 10 item 7) is asked of the person this push acts as.
                                     SecureExitCaller = secureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
                                         callerSystemUserId,
@@ -1604,6 +1614,10 @@ public static class FieldMappingEndpoints
                                 });
                                 continue;
                             }
+
+                            // Piece 3b: an unfiled Direct message returns to the Direct team now, before the step after the re-file.
+                            if (directOwner is not null)
+                                await directOwner.AfterReparentAsync(childRecordId, reparent, CancellationToken.None);
 
                             // #2091 round 4: a rule that re-binds the parent the child already holds moves nothing — no step.
                             refiled = !reparent.ParentsUnchanged;

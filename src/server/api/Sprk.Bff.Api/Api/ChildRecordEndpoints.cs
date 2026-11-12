@@ -246,7 +246,9 @@ public static class ChildRecordEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            // fm task 054 piece 3b: the owner the update needs could not be read now (nothing written; try again).
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
     /// <summary>POST /api/v1/child-records/{table}.</summary>
@@ -816,7 +818,9 @@ public static class ChildRecordEndpoints
         try
         {
             outcome = await OwnedChildWrite.RefileAsync(
-                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities)
+                user, ownership, entity, id, entitySet, primaryId, mapped.Item!, CallerObjectId(httpContext), ct, appOnlyEntities,
+                // fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team.
+                httpContext.RequestServices?.GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>())
                 .ConfigureAwait(false);
         }
         catch (RecordOwnerUnsettledException)
