@@ -207,13 +207,20 @@ def build_test_documents(out, kit, method_md):
         shutil.rmtree(parent)
     top = os.path.join(parent, "Spaarke Test Documents")
     os.makedirs(os.path.join(top, "Decoy"))
+    os.makedirs(os.path.join(top, "References"))
     os.makedirs(os.path.join(top, "Screens"))
     open(os.path.join(top, "Screens", ".keep"), "wb").close()
     lk = os.path.join(kit, "kit", "Legal Knowledge")
     for src, name in ((os.path.join(lk, "Matters", "Brightwater Systems", "Brightwater Mutual NDA.docx"),
                        "Brightwater Mutual NDA.docx"),
                       (os.path.join(lk, "Inbox", "NDA batch", "b01 - Kestrel Mutual Non-Disclosure Agreement.docx"),
-                       "b01 - Kestrel Mutual Non-Disclosure Agreement.docx")):
+                       "b01 - Kestrel Mutual Non-Disclosure Agreement.docx"),
+                      # Word round 2, R-1 and R-2: reference documents (a precedent and a policy)
+                      (os.path.join(lk, "Precedents", "NDA", "Acme Mutual NDA (model form).docx"),
+                       os.path.join("References", "Acme Mutual NDA (model form).docx")),
+                      (os.path.join(lk, "Grounding", "Normative", "NDA",
+                                    "Acme NDA Approval and Signature Authority Policy v1.0.docx"),
+                       os.path.join("References", "Acme NDA Approval and Signature Authority Policy v1.0.docx"))):
         if not os.path.isfile(src):
             raise GateFailure(f"test document source missing: {src}")
         shutil.copy2(src, os.path.join(top, name))
@@ -310,7 +317,9 @@ def main(argv=None):
         verify_zip(test_zip, {"Spaarke Test Documents"}, [
             "Spaarke Test Documents/Harbor Point – Legal Hold Notice (draft A).docx",
             "Spaarke Test Documents/Harbor Point – Legal Hold Notice (draft B).docx",
-            "Spaarke Test Documents/Decoy/Spaarke Review Method.docx", "Spaarke Test Documents/Screens/.keep"])
+            "Spaarke Test Documents/Decoy/Spaarke Review Method.docx", "Spaarke Test Documents/Screens/.keep",
+            "Spaarke Test Documents/References/Acme Mutual NDA (model form).docx",
+            "Spaarke Test Documents/References/Acme NDA Approval and Signature Authority Policy v1.0.docx"])
     except GateFailure as ex:
         log(f"\nPACKAGE BUILD FAILED: {ex}")
         return 1

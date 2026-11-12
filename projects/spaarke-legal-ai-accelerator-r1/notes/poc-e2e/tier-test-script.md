@@ -109,16 +109,20 @@ place after a rated review?
 
 Round 1 showed: W-1 passes; G-1 failed 3 of 3 (the method file was never read); attaching the playbook **and**
 the method works for a non-contract; a contract review takes only one attached file. Results: `results.md`, gaps
-#36–#38. Run in this order. G-4 (`.md` playbook) is dropped: attaching the `.docx` works.
+#36–#38. Run in this order (R-1 and R-2, reference documents, added 2026-11-11). G-4 (`.md` playbook) is
+dropped: attaching the `.docx` works.
 
 **Before you start.**
 1. **Install the rebuilt package (2026-11-11).** Extract the new `Spaarke Legal Accelerator - Individual base
    v0.1.zip` into `Documents` again and choose **Replace the files in the destination**. What changed: the legal
    hold Word playbook now starts with the review method (G-5); the review method copies the playbook version from
    the playbook's own text (gap #38); the Read me has a folder guide and the new steps.
-2. **Fresh decoy.** The decoy was edited in round 1 (its "Review protocol" line became a link), and the method
-   changed. Extract the new test zip's `Decoy/Spaarke Review Method.docx` and replace both decoy copies
-   (`Spaarke Test Documents/Decoy/` and `Documents/`).
+2. **New test zip.** Extract the new `Spaarke test documents v0.1.zip` into `Documents` (replace files). It adds
+   `Spaarke Test Documents/References/` with two reference documents for R-1 and R-2: `Acme Mutual NDA (model
+   form).docx` (a precedent) and `Acme NDA Approval and Signature Authority Policy v1.0.docx` (a policy; its rules
+   are numbered `NDA-1.1` to `NDA-5.1`, so a citation of one shows Word read it). **Fresh decoy:** the decoy was
+   edited in round 1 (its "Review protocol" line became a link), and the method changed. Copy the new
+   `Decoy/Spaarke Review Method.docx` over the decoy copy in `Documents/` too.
 3. Wait about 15 minutes after both, so search picks up the new files.
 4. Rename each test copy before the first prompt, for example `… - R2 G-1b.docx`.
 
@@ -150,6 +154,35 @@ colours, row count. **Pass:** SRM-1110-A, 🟢🟡🔴, 13 rows, without attachi
 After a W-1 review, same chat, attach only the method file: *Follow the attached review method to produce the
 topic-by-topic chart for the review you just ran.* **Record:** the "Playbook applied" line (expected v1.2, gap #38),
 the row count (24), and whether each rating matches the review card's icon.
+
+### R-1. Contract: a reference document attached with the playbook (two chats)
+Microsoft lists "agreement context" as something a Word review can take besides the playbook. Round 1 refused a
+second file, but that file was the review method, which reads like a second playbook. This asks whether a real
+reference document is accepted.
+- **R-1a, precedent.** Fresh copy of `Brightwater Mutual NDA.docx` (`… - R2 R-1a.docx`), Allow editing. Attach the
+  NDA playbook **and** `References/Acme Mutual NDA (model form).docx`. Type: *Review this NDA against the attached
+  playbook. Use the attached model form as our standard wording for reference.*
+- **R-1b, policy.** Fresh copy (`… - R2 R-1b.docx`), Allow editing. Attach the NDA playbook **and**
+  `References/Acme NDA Approval and Signature Authority Policy v1.0.docx`. Type: *Review this NDA against the
+  attached playbook. Also check it against the attached approval policy and tell me who must approve and sign it.*
+
+**Record, for each:** accepted or refused (exact message); the playbook card name and topic count; Sources
+(expanded): is the reference file listed?; any sign it was used (R-1a: wording quoted from the model form; R-1b: a
+rule number such as `NDA-3.5` or `NDA-4.2`, or an approval and signatory answer). **Tells us:** if Word accepts
+one reference file next to the playbook, the checklist line "reference documents attached to the review" becomes
+✅ for contracts. If both are refused, a contract review takes the playbook only, and references go to a second
+step (as in W-2) or to Cowork.
+
+### R-2. Contract: draft a new NDA from a precedent
+1. New blank document in Word desktop, saved as `Documents/Spaarke Test Documents/R2 R-2 draft.docx`. Copilot pane.
+2. Choose the prompt starter **Draft new contract from a precedent** (or type `@Draft-new-contract`). When asked
+   for the precedent, attach `References/Acme Mutual NDA (model form).docx`. Type: *Draft a mutual NDA with
+   Brightwater Systems, Inc. from this precedent.*
+3. Follow Word's steps to the end (fill in the placeholders, then **Finish Draft** if it offers it).
+
+**Record:** whether the starter is there and asks for a precedent; whether it drafts in the open document or in
+the pane; placeholders or content controls, and which; whether the clauses follow the model form (spot-check
+term, residuals, governing law); about how long it took. Mechanics only: no quality scoring.
 
 ### G-3 (optional). `/`-reference instead of the paperclip
 As written above. Useful only if typing `/` is easier for users than attaching.
@@ -233,6 +266,9 @@ what the agent does about the redline (expected: says it can't create files and 
 | H-1 | | | | | |
 | G-5 | | | | | |
 | W-2 | | | | | |
+| R-1a (precedent) | | | — | accepted / refused; in Sources? | |
+| R-1b (policy) | | | — | accepted / refused; rule numbers cited? | |
+| R-2 (draft from precedent) | | | — | | |
 | G-3 (optional) | | | | | |
 | G-4 | — | dropped | — | attaching the .docx works | — |
 | C-1 | | | — | | |
