@@ -79,6 +79,17 @@
     <cost-of-doing-nothing>A user without the privilege walks the four wizard steps and is refused at Confirm (EB-D-221), and 084b's "Read-only user" ui-test cannot pass.</cost-of-doing-nothing>
   </justification>
 
+  <ui-tests>
+    <test name="Read-only user (084b's test, now satisfiable)">
+      <steps><step>Sign in as a user without the billing-admin privilege; open a Procedure, then a rule</step></steps>
+      <expected>Both wizards open read-only: every write choice disabled with the reason, no Confirm; no console errors</expected>
+    </test>
+    <test name="Billing admin">
+      <steps><step>Sign in as a billing admin; open the same Procedure</step></steps>
+      <expected>Write choices enabled as in 084b</expected>
+    </test>
+  </ui-tests>
+
   <acceptance-criteria>
     <criterion testable="true">Both read routes, on every core-record type, return `permissions` {assignOrExclude, remove, change}; for a caller holding every check all three are true, and each flag turns false when exactly one of its checks is denied (one test per check).</criterion>
     <criterion testable="true">A guard asserts each write route's enforced declaration equals its flag's declaration plus that route's per-subject Read (must-fire: adding a check to one side only fails it).</criterion>
