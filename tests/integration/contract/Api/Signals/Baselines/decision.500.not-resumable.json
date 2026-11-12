@@ -2,7 +2,7 @@
   "case": "decision.500.not-resumable",
   "status": 500,
   "contentType": "application/problem+json",
-  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"The decision was not recorded\",\"status\":500,\"detail\":\"The amount was not written\",\"reasonCode\":\"ontology.decision.not_resumable\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000026\",\"actionCode\":\"revise-budget\",\"failedStep\":2,\"landed\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"}],\"possiblyLanded\":[],\"steps\":[{\"key\":\"action:revise-budget\",\"code\":\"revise-budget\",\"phase\":2,\"status\":\"Failed\",\"written\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"}],\"possiblyWritten\":[],\"reasonCode\":\"decision.action.write_failed\",\"detail\":\"The amount was not written\"}],\"recordMayExist\":false,\"sentButNotRecorded\":false,\"resumable\":false,\"replayed\":true}",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"The decision was not recorded\",\"status\":500,\"detail\":\"The amount was not written\",\"reasonCode\":\"ontology.decision.not_resumable\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000026\",\"actionCode\":\"revise-budget\",\"failedStep\":2,\"landed\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"}],\"possiblyLanded\":[],\"steps\":[{\"key\":\"action:revise-budget\",\"code\":\"revise-budget\",\"phase\":2,\"status\":\"Failed\",\"written\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"}],\"possiblyWritten\":[],\"reasonCode\":\"decision.action.write_failed\",\"detail\":\"The amount was not written\",\"warning\":null}],\"recordMayExist\":false,\"sentButNotRecorded\":false,\"resumable\":false,\"replayed\":true}",
   "bodyPretty": {
     "type": "https://tools.ietf.org/html/rfc9110#section-15.6.1",
     "title": "The decision was not recorded",
@@ -34,7 +34,8 @@
         ],
         "possiblyWritten": [],
         "reasonCode": "decision.action.write_failed",
-        "detail": "The amount was not written"
+        "detail": "The amount was not written",
+        "warning": null
       }
     ],
     "recordMayExist": false,

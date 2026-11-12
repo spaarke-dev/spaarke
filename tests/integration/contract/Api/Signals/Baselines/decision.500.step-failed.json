@@ -2,7 +2,7 @@
   "case": "decision.500.step-failed",
   "status": 500,
   "contentType": "application/problem+json",
-  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"The decision was not recorded\",\"status\":500,\"detail\":\"no\",\"reasonCode\":\"decision.action.write_failed\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000032\",\"actionCode\":\"add-todo\",\"failedStep\":3,\"landed\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"}],\"possiblyLanded\":[],\"steps\":[{\"key\":\"action:revise-budget\",\"code\":\"revise-budget\",\"phase\":2,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null},{\"key\":\"next-step:add-todo#0\",\"code\":\"add-todo\",\"phase\":3,\"status\":\"Failed\",\"written\":[],\"possiblyWritten\":[],\"reasonCode\":\"decision.action.write_failed\",\"detail\":\"no\"}],\"recordMayExist\":false,\"sentButNotRecorded\":false,\"resumable\":false,\"replayed\":false}",
+  "body": "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.6.1\",\"title\":\"The decision was not recorded\",\"status\":500,\"detail\":\"no\",\"reasonCode\":\"decision.action.write_failed\",\"correlationId\":\"<volatile>\",\"reviewId\":\"c0430011-0000-4000-8000-000000000032\",\"actionCode\":\"add-todo\",\"failedStep\":3,\"landed\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"}],\"possiblyLanded\":[],\"steps\":[{\"key\":\"action:revise-budget\",\"code\":\"revise-budget\",\"phase\":2,\"status\":\"Done\",\"written\":[{\"entity\":\"sprk_budgetrevision\",\"id\":\"c0430000-0000-4000-8000-000000000052\"},{\"entity\":\"sprk_budget\",\"id\":\"c0430000-0000-4000-8000-000000000040\"}],\"possiblyWritten\":[],\"reasonCode\":null,\"detail\":null,\"warning\":null},{\"key\":\"next-step:add-todo#0\",\"code\":\"add-todo\",\"phase\":3,\"status\":\"Failed\",\"written\":[],\"possiblyWritten\":[],\"reasonCode\":\"decision.action.write_failed\",\"detail\":\"no\",\"warning\":null}],\"recordMayExist\":false,\"sentButNotRecorded\":false,\"resumable\":false,\"replayed\":false}",
   "bodyPretty": {
     "type": "https://tools.ietf.org/html/rfc9110#section-15.6.1",
     "title": "The decision was not recorded",
@@ -42,7 +42,8 @@
         ],
         "possiblyWritten": [],
         "reasonCode": null,
-        "detail": null
+        "detail": null,
+        "warning": null
       },
       {
         "key": "next-step:add-todo#0",
@@ -52,7 +53,8 @@
         "written": [],
         "possiblyWritten": [],
         "reasonCode": "decision.action.write_failed",
-        "detail": "no"
+        "detail": "no",
+        "warning": null
       }
     ],
     "recordMayExist": false,
