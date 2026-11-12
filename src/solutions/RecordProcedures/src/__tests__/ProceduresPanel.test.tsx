@@ -9,8 +9,10 @@ import { createOverridesApi } from '../services/overridesApi';
 import type { FirmChoices, InvoicedFirms } from '../services/firmChoices';
 import { DIMMED_MARK_KINDS } from '../services/model';
 import {
+  CAP_OUTRANKED_MARK,
   FENWICK,
   MATTER_ID,
+  OUTRANKED_MARK,
   OKAFOR,
   PROJECT_ID,
   TODAY,
@@ -748,10 +750,10 @@ describe('reads', () => {
 });
 
 describe('marks and wording', () => {
-  it('an UNKNOWN mark kind is a neutral badge with its own text; once the kind is in the dimmed set (084e) the row dims', async () => {
+  it('an UNKNOWN mark kind is a neutral badge with its own text; once the kind is in the dimmed set the row dims', async () => {
     const rules = {
       ...matterRules,
-      rules: [{ ...matterRules.rules[0], marks: [mark('Outranked', { reason: 'x' })] }, ...matterRules.rules.slice(1)],
+      rules: [{ ...matterRules.rules[0], marks: [mark('FutureKind', { reason: 'x' })] }, ...matterRules.rules.slice(1)],
     };
     renderPanel({ rules: () => rules });
     await ready();
@@ -759,23 +761,65 @@ describe('marks and wording', () => {
 
     const row = screen.getByTestId('rule-row-r-block');
     const badge = within(row).getByTestId('status-badge');
-    expect(badge).toHaveTextContent('Outranked');
+    expect(badge).toHaveTextContent('FutureKind');
     expect(badge).toHaveAttribute('data-tone', 'neutral');
     expect(row).toHaveAttribute('data-dimmed', 'false');
   });
 
   it('the dimmed set decides which rows dim (a new kind is a one-line change)', async () => {
     const set = DIMMED_MARK_KINDS as Set<string>;
-    set.add('Outranked');
+    set.add('FutureKind');
     try {
-      const rules = { ...matterRules, rules: [{ ...matterRules.rules[0], marks: [mark('Outranked')] }] };
+      const rules = { ...matterRules, rules: [{ ...matterRules.rules[0], marks: [mark('FutureKind')] }] };
       renderPanel({ rules: () => rules });
       await ready();
       fireEvent.click(screen.getByRole('tab', { name: /Rules in force/ }));
       expect(screen.getByTestId('rule-row-r-block')).toHaveAttribute('data-dimmed', 'true');
     } finally {
-      set.delete('Outranked');
+      set.delete('FutureKind');
     }
+  });
+
+  it('084e fix 1 (B): an Outranked rule row shows "In force" and "Outranked by X", the note under the badges and "by" as the tooltip; it is not dimmed', async () => {
+    const rules = {
+      ...matterRules,
+      rules: [{ ...matterRules.rules[0], marks: [OUTRANKED_MARK] }, ...matterRules.rules.slice(1)],
+    };
+    renderPanel({ rules: () => rules });
+    await ready();
+    fireEvent.click(screen.getByRole('tab', { name: /Rules in force/ }));
+
+    const row = screen.getByTestId('rule-row-r-block');
+    expect(within(row).getAllByTestId('status-badge').map(b => b.textContent)).toEqual(['In force', 'Outranked by FIRM-RATE']);
+    expect(within(row).getByTestId('rule-mark-note')).toHaveTextContent(OUTRANKED_MARK.note!);
+    expect(within(row).getByTestId('rule-badges')).toHaveAttribute('title', 'Outranked by: FIRM-RATE (Firm)');
+    expect(row).toHaveAttribute('data-dimmed', 'false');
+    expect(row.textContent).not.toMatch(/^Outranked$/m);
+  });
+
+  it('084e fix 1 (B): a CapOutranked rule row shows "In force" and "Cap outranked by X and Y" with its note; it is not dimmed', async () => {
+    const rules = {
+      ...matterRules,
+      rules: [{ ...matterRules.rules[0], marks: [CAP_OUTRANKED_MARK] }, ...matterRules.rules.slice(1)],
+    };
+    renderPanel({ rules: () => rules });
+    await ready();
+    fireEvent.click(screen.getByRole('tab', { name: /Rules in force/ }));
+
+    const row = screen.getByTestId('rule-row-r-block');
+    expect(within(row).getAllByTestId('status-badge').map(b => b.textContent)).toEqual(['In force', 'Cap outranked by FIRM-EXP and LEGACY-EXP']);
+    expect(within(row).getByTestId('rule-mark-note')).toHaveTextContent(CAP_OUTRANKED_MARK.note!);
+    expect(within(row).getByTestId('rule-badges')).toHaveAttribute('title', 'Outranked by: FIRM-EXP (Firm); LEGACY-EXP (Firm, rule set)');
+    expect(row).toHaveAttribute('data-dimmed', 'false');
+  });
+
+  it('084e fix 1 (B, negative): a row with no precedence mark has no note line and no tooltip', async () => {
+    renderPanel({ rules: () => matterRules });
+    await ready();
+    fireEvent.click(screen.getByRole('tab', { name: /Rules in force/ }));
+
+    expect(screen.queryAllByTestId('rule-mark-note')).toEqual([]);
+    for (const badges of screen.getAllByTestId('rule-badges')) expect(badges).not.toHaveAttribute('title');
   });
 
   it('the word "displaced" is never shown, on any of the three records', async () => {

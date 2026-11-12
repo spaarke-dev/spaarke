@@ -116,6 +116,25 @@ export function rule(r: Partial<RuleItem> & Pick<RuleItem, 'policyId' | 'code'>)
 
 export const mark = (kind: string, extra: Partial<RuleMark> = {}): RuleMark => ({ kind, ...extra });
 
+// ── 084e: the precedence marks, as RecordProcedureReadService sends them (ontology-r1 wording) ──────────────
+
+export const OUTRANKED_MARK: RuleMark = mark('Outranked', {
+  text: 'Outranked by FIRM-RATE',
+  note: 'does not run while FIRM-RATE is in force; it can run if FIRM-RATE is refused when an invoice is checked; a line can differ (dates, fallback)',
+  by: [
+    { policyId: 'pol-firm-rate', policyVersionId: 'pv-firm-rate', code: 'FIRM-RATE', name: 'Approved rate', versionNumber: 1, source: 'Procedure', procedureId: 'p-firm', level: 'Firm', distance: 0 },
+  ],
+});
+
+export const CAP_OUTRANKED_MARK: RuleMark = mark('CapOutranked', {
+  text: 'Cap outranked by FIRM-EXP and LEGACY-EXP',
+  note: 'its code check always runs; its cap yields to those of FIRM-EXP and LEGACY-EXP and can apply if all of them are refused when an invoice is checked; a line can differ (dates, fallback)',
+  by: [
+    { policyId: 'pol-firm-exp', policyVersionId: 'pv-firm-exp', code: 'FIRM-EXP', name: 'Expenses', versionNumber: 1, source: 'Procedure', procedureId: 'p-firm', level: 'Firm', distance: 0 },
+    { policyId: 'pol-legacy-exp', policyVersionId: 'pv-legacy-exp', code: 'LEGACY-EXP', name: 'Expenses', versionNumber: 2, source: 'Legacy', procedureId: null, level: 'Firm', distance: 0 },
+  ],
+});
+
 // ── Matter 2026-LIT-4471 ─────────────────────────────────────────────────────
 
 const pinRow = override({ rowId: 'row-pin', mode: 'Pinned', chainRecord: MATTER, pinnedVersion: V.rate1, newerVersion: V.rate2, reason: 'Grandfathered 2025 rates' });

@@ -4,7 +4,9 @@
  * mark, or "In force" when it has none. Task 084b: a row opens the Rule wizard on a click, or on Enter or Space while it has focus.
  *
  * Marks are rendered generically (`model.ts`): the array is open, an unknown kind is a neutral badge with its own text, and the set of
- * kinds that dim a row is one table (`DIMMED_MARK_KINDS`) so 084e's `Outranked` is a one-line addition.
+ * kinds that dim a row is one table (`DIMMED_MARK_KINDS`). Task 084e's `Outranked` and `CapOutranked` are NOT dimmed: the rule is still in
+ * force, keeps "In force", its badge is the mark's text ("Outranked by X"), the note is a line under the badges and the outranking rules
+ * are the badges' tooltip.
  */
 
 import * as React from 'react';
@@ -24,7 +26,7 @@ import {
 import { StatusBadge } from '@spaarke/ui-components';
 import { openProps } from './rowOpen';
 import type { RuleItem } from '../services/recordProceduresApi';
-import { isRuleDimmed, levelLabel, publishedNote, ruleBadges, versionLabel } from '../services/model';
+import { isRuleDimmed, levelLabel, markByHint, markNote, publishedNote, ruleBadges, versionLabel } from '../services/model';
 
 const useStyles = makeStyles({
   dim: { color: tokens.colorNeutralForeground3 },
@@ -62,6 +64,8 @@ export const RuleList: React.FC<RuleListProps> = ({ rules, emptyText, onOpen }) 
             const dim = isRuleDimmed(r);
             const note = publishedNote(r);
             const procedureVersion = r.procedure?.version;
+            const markNotes = r.marks.map(markNote).filter((n): n is string => n !== null);
+            const byHint = r.marks.map(markByHint).filter((h): h is string => h !== null).join('\n') || undefined;
             return (
               <TableRow
                 key={`${r.policyId}-${i}`}
@@ -93,9 +97,16 @@ export const RuleList: React.FC<RuleListProps> = ({ rules, emptyText, onOpen }) 
                   </span>
                 </TableCell>
                 <TableCell>
-                  <span className={s.badges}>
-                    {ruleBadges(r).map((b, k) => (
-                      <StatusBadge key={`${b.label}-${k}`} label={b.label} tone={b.tone} />
+                  <span className={s.stack}>
+                    <span className={s.badges} title={byHint} data-testid="rule-badges">
+                      {ruleBadges(r).map((b, k) => (
+                        <StatusBadge key={`${b.label}-${k}`} label={b.label} tone={b.tone} />
+                      ))}
+                    </span>
+                    {markNotes.map((n, k) => (
+                      <Caption1 key={`note-${k}`} className={s.sub} data-testid="rule-mark-note">
+                        {n}
+                      </Caption1>
                     ))}
                   </span>
                 </TableCell>

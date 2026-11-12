@@ -4,8 +4,9 @@
  *
  * Two mappings are written to be extended without touching the components:
  *   - {@link RULE_MARKS}: one entry per mark kind (label, tone). A kind not in the table renders as a NEUTRAL badge with the kind's own
- *     text (the mark array is open: task 084e adds `Outranked`).
- *   - {@link DIMMED_MARK_KINDS}: the mark kinds whose rule does not run here and is shown dimmed. 084e adds `Outranked` to this one set.
+ *     text (the mark array is open). Task 084e's `Outranked` and `CapOutranked` show the server's own `text` ("Outranked by X").
+ *   - {@link DIMMED_MARK_KINDS}: the mark kinds whose rule does not run here and is shown dimmed. `Outranked` and `CapOutranked` are NOT
+ *     in it: an outranked rule is still in force (it runs if every outranking rule is refused on an invoice), so it keeps "In force".
  * The word "displaced" is never shown (EB-D-219: it is "outranked", task 084e).
  */
 
@@ -171,15 +172,24 @@ export function matchesProcedureFilter(f: ProcedureFilter, p: ProcedureItem): bo
 // Rules
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Label and tone per mark kind. Add a row here for a new kind (084e: Outranked); an unknown kind is neutral with its own text. */
+/** Label and tone per mark kind. Add a row here for a new kind; an unknown kind is neutral with its own text. */
 export const RULE_MARKS: Readonly<Record<string, Badge>> = {
   Changed: { label: 'Changed here', tone: 'info' },
   Excluded: { label: 'Excluded', tone: 'neutral' },
   Stale: { label: 'Base rule updated', tone: 'warning' },
   BaseRetired: { label: 'Base rule retired', tone: 'warning' },
+  // 084e: the label is the fallback only; the badge shows the mark's own text ("Outranked by X"), see markBadge.
+  Outranked: { label: 'Outranked', tone: 'neutral' },
+  CapOutranked: { label: 'Cap outranked', tone: 'neutral' },
 };
 
-/** The mark kinds whose rule does not run on this date and is shown dimmed. Extend this set for a new kind (084e: `Outranked`). */
+/**
+ * 084e (EB-D-219, R4): the precedence marks. The rule is still in force (it runs if every outranking rule is refused when an invoice is
+ * checked), so it keeps its "In force" badge, is not dimmed, and its badge always names who outranks it: never a bare "Outranked".
+ */
+export const PRECEDENCE_MARK_KINDS: ReadonlySet<string> = new Set(['Outranked', 'CapOutranked']);
+
+/** The mark kinds whose rule does not run on this date and is shown dimmed. The precedence kinds are never in it (see above). */
 export const DIMMED_MARK_KINDS: ReadonlySet<string> = new Set(['Excluded']);
 
 /** Marks that put a rule under "Needs attention". */
@@ -188,16 +198,41 @@ const ATTENTION_MARK_KINDS: ReadonlySet<string> = new Set(['Stale', 'BaseRetired
 export const hasMark = (r: RuleItem, kind: string): boolean => r.marks.some(m => m.kind === kind);
 export const isRuleDimmed = (r: RuleItem): boolean => r.marks.some(m => DIMMED_MARK_KINDS.has(m.kind));
 
-/** The badge of one mark: its table entry, else neutral with the kind's own text. */
-export function markBadge(mark: RuleMark): Badge {
-  return RULE_MARKS[mark.kind] ?? { label: mark.kind, tone: 'neutral' };
+/** "X"; "X and Y"; "X, Y and Z": the server's join rule for the outranking codes. */
+export function joinCodes(codes: readonly string[]): string {
+  return codes.length <= 1 ? codes.join('') : `${codes.slice(0, -1).join(', ')} and ${codes[codes.length - 1]}`;
 }
 
-/** The badges of a rule: one per mark (a mark with no kind is dropped), or "In force" when it has none. */
+/** The badge of one mark: its table entry, else neutral with the kind's own text. A precedence mark shows its own text, which names "by". */
+export function markBadge(mark: RuleMark): Badge {
+  const entry = RULE_MARKS[mark.kind] ?? { label: mark.kind, tone: 'neutral' };
+  if (!PRECEDENCE_MARK_KINDS.has(mark.kind)) return entry;
+  if (mark.text) return { ...entry, label: mark.text };
+  const codes = (mark.by ?? []).map(b => b.code).filter(Boolean);
+  return codes.length > 0 ? { ...entry, label: `${entry.label} by ${joinCodes(codes)}` } : entry;
+}
+
+/** The secondary line of a precedence mark: its note (when the rule can still run), else null. */
+export function markNote(mark: RuleMark): string | null {
+  return PRECEDENCE_MARK_KINDS.has(mark.kind) && mark.note ? mark.note : null;
+}
+
+/** The tooltip of a precedence mark: every outranking rule at the top rank, with its source level. Null for any other mark. */
+export function markByHint(mark: RuleMark): string | null {
+  if (!PRECEDENCE_MARK_KINDS.has(mark.kind) || !mark.by || mark.by.length === 0) return null;
+  return `Outranked by: ${mark.by.map(b => `${b.code} (${levelLabel(b.level, null)}${b.source === 'Legacy' ? ', rule set' : ''})`).join('; ')}`;
+}
+
+/**
+ * The badges of a rule: one per mark (a mark with no kind is dropped), or "In force" when it has none. A rule in force with a precedence
+ * mark (084e) keeps "In force" first, so the mark never reads as "does not run".
+ */
 export function ruleBadges(r: RuleItem): Badge[] {
   const marks = r.marks.filter(m => typeof m.kind === 'string' && m.kind.length > 0);
-  if (marks.length === 0) return [r.inForce ? { label: 'In force', tone: 'success' } : { label: 'Not in force', tone: 'neutral' }];
-  return marks.map(markBadge);
+  const status: Badge = r.inForce ? { label: 'In force', tone: 'success' } : { label: 'Not in force', tone: 'neutral' };
+  if (marks.length === 0) return [status];
+  const keepsInForce = r.inForce && marks.some(m => PRECEDENCE_MARK_KINDS.has(m.kind)) && !marks.some(m => DIMMED_MARK_KINDS.has(m.kind));
+  return keepsInForce ? [status, ...marks.map(markBadge)] : marks.map(markBadge);
 }
 
 export type RuleFilter = 'all' | 'changed' | 'excluded' | 'attention';

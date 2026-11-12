@@ -237,7 +237,8 @@ public sealed class RecordProcedureReadModelContractTests
         view.Rules.Where(r => r.InForce).Select(r => r.Procedure!.Name).Should().Equal(resolver.Rules.Select(r => r.Procedure.ProcedureName));
         view.Rules.Where(r => !r.InForce).Select(r => r.PolicyId).Should().Equal(resolver.ExcludedRules.Where(e => !e.ReplacedByRecordRule).Select(e => e.Version.PolicyId));
         view.Rules.Should().NotBeEmpty();
-        viaService.Should().Be(oneResolution, "the lists share one resolution; there is no second selection");
+        // 084e (R6): plus the evaluator's legacy-rule read, which is ONE sprk_ruleset query here (no legacy set exists, so no policy or version read).
+        viaService.Should().Be(oneResolution + 1, "the lists share one resolution; there is no second selection");
         view.Rules.Where(r => r.InForce).Should().OnlyContain(r => r.Name == (r.RecordRule ? "Changed rate" : "Approved rate") && r.RuleType == "ApprovedRate" && !string.IsNullOrWhiteSpace(r.ParameterSummary));
     }
 
@@ -369,8 +370,8 @@ public sealed class RecordProcedureReadModelContractTests
         result.Value.Should().BeNull();
     }
 
-    [Fact(DisplayName = "084 rules: the marks array is open and carries only the four kinds (the outranked mark is task 084e)")]
-    public async Task Marks_AreFourKindsOnly()
+    [Fact(DisplayName = "084 rules: the marks array is open; with no rule of a higher rank in the same key, only the four record kinds appear (Excluded, Changed, Stale, BaseRetired; 084e adds the precedence kinds Outranked and CapOutranked)")]
+    public async Task Marks_WithNoHigherRankedRule_AreTheFourRecordKindsOnly()
     {
         var rig = new RecordProcedureRig();
         var general = rig.Simple("GENERAL");
