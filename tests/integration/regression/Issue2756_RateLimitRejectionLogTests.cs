@@ -30,7 +30,6 @@ public class Issue2756_RateLimitRejectionLogTests
 {
     private const string CallerEmail = "jane.doe@contoso.example";
     private const string CallerOid = "5d1c6f0e-2b0f-4a43-9a45-2756a2756a27";
-    private const string UploadPolicy = "ai-upload";
     private const int UploadPermitLimit = 5;
     private const string ClientIp = "203.0.113.77";
 
@@ -85,7 +84,6 @@ public class Issue2756_RateLimitRejectionLogTests
         line.Should().NotContain("@", "no email-shaped value may reach the log");
         line.Should().NotContain(ClientIp, "the client IP is not on ADR-015's allow-list");
         line.Should().Contain(CallerOid, "the opaque caller key (oid) identifies the caller instead");
-        line.Should().Contain(UploadPolicy, "the policy that rejected the call is logged");
     }
 
     private static MultipartFormDataContent MultipartBody() =>

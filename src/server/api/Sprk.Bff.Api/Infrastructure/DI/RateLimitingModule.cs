@@ -1,5 +1,4 @@
 using System.Threading.RateLimiting;
-using Microsoft.AspNetCore.RateLimiting;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -300,14 +299,14 @@ public static class RateLimitingModule
                 // allow-list does not include, so neither is logged. The caller is identified by the same opaque
                 // key the limiter partitions by (oid, else sub); an unauthenticated caller has none.
                 // TraceIdentifier correlates the entry with the request in the platform's own HTTP logs.
+                // The policy name is not logged: OnRejectedContext does not carry it, and the only way to read it
+                // is the endpoint's EnableRateLimitingAttribute, which RouteAuthorizationGuardTests bans from source
+                // (RateLimitPoliciesAreAppliedOnlyOnAScannedChain). The path identifies the route and so its policy.
                 var httpContext = context.HttpContext;
-                var policyName = httpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName
-                                 ?? "unknown";
                 var logger = httpContext.RequestServices.GetRequiredService<ILogger<Program>>();
                 logger.LogWarning(
-                    "Rate limit exceeded for {Path} on policy {Policy} by caller {CallerKey}. Retry after {RetryAfter}s. TraceId {TraceId}",
+                    "Rate limit exceeded for {Path} by caller {CallerKey}. Retry after {RetryAfter}s. TraceId {TraceId}",
                     httpContext.Request.Path,
-                    policyName,
                     CallerResolution.ResolveOpaqueCallerKey(httpContext.User) ?? "anonymous",
                     retryAfter,
                     httpContext.TraceIdentifier);
