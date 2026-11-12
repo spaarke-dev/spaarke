@@ -1,0 +1,291 @@
+using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.Services.Communication;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Xunit;
+using FakeDirectory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
+
+namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
+
+/// <summary>
+/// uac-r2 task 197a (#2722, owner decision 2026-11-12): the owner of a communication a re-file leaves filed under nothing that is
+/// not an eligible Direct message. It moves to its recorded creator's business-unit team (D-11), through the resolver's one
+/// creator-team path (191c's External Collaborators rule included), written by the re-file's settle. It keeps its former owner
+/// (round 87, a re-file never loosens) when a parent it leaves is Secure, Restricted or owned in the Secure Record unit, when the
+/// message itself is held there, Secure or Restricted, when its creator is not recorded or cannot be resolved, and when a fact
+/// cannot be read.
+/// </summary>
+/// <remarks>The REAL <see cref="RecordOwnershipResolver"/> over <see cref="FakeDirectory"/>; the Direct rule is off (or the message is
+/// an email), so every case here is a non-Direct unfile.</remarks>
+public class RecordOwnershipResolverUnfileOwnerTests
+{
+    private static readonly Guid MessageId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003b3");
+    private static readonly Guid MatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a1");
+    private static readonly Guid SecureMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a2");
+    private static readonly Guid RestrictedMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a3");
+    private static readonly Guid SecureOwnedUnflaggedMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a4");
+    private static readonly Guid CreatorId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000c1");
+    private static readonly Guid CreatorOid = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000c2");
+    private const int Restricted = 100000002;
+
+    private readonly RecordingLogger _log = new();
+
+    // ── Must fire ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(CommunicationType.Email)]
+    [InlineData(CommunicationType.Message)]
+    public async Task Unfile_FromAStandardMatter_MovesToTheCreatorsBusinessUnitTeam_WrittenByTheSettle(CommunicationType type)
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: type)
+            .WithRecordedCreator();
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.IsOwned.Should().BeTrue(resolution.Reason);
+        resolution.OwningTeamId.Should().Be(FakeDirectory.CustomerChildTeam, "the creator's business unit's default team (D-11)");
+        Owner(directory).Should().Be(FakeDirectory.CustomerChildTeam);
+        directory.ConditionalWrites.Should().ContainSingle(w => w.Applied && w.Fields.ContainsKey("ownerid"),
+            "the owner is written conditionally, at the version read after the change");
+        resolution.ParentsUnchanged.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ClearingTheLastContact_OfAnEmailLinkedToNothingElse_Settles_ToTheCreatorsTeam()
+    {
+        var directory = World()
+            .WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam, CommunicationType.Email)
+            .WithRecordedCreator();
+        var request = Unfile() with
+        {
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_regardingperson"] = null },
+        };
+
+        var resolution = await Resolver(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(FakeDirectory.CustomerChildTeam, resolution.Reason);
+        Owner(directory).Should().Be(FakeDirectory.CustomerChildTeam, "the regarding-only path settles the owner too");
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson").Should().BeNull();
+        resolution.ParentsUnchanged.Should().BeFalse("the writer runs the step after a re-file for a message that moved");
+    }
+
+    [Fact]
+    public async Task Unfile_ByACreatorInExternalCollaborators_FollowsThe191cRule_TheCustomersUnit()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam,
+                type: CommunicationType.Email)
+            .WithRecordedCreator(FakeDirectory.ChildBu)
+            .WithExternalFlag(CreatorId, flagged: true)
+            .WithUserInExternalCollaborators(CreatorId);
+        directory.CustomerBusinessUnitSetting = FakeDirectory.CustomerChildBu.ToString();
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(FakeDirectory.CustomerChildTeam, "never the External Collaborators unit's team");
+        Owner(directory).Should().NotBe(FakeDirectory.ExternalCollaboratorsTeam);
+    }
+
+    // ── Must not fire: what it leaves ────────────────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<string> ParentsItMayNotLeaveLooser => new() { "secure", "restricted", "owned by the Secure team" };
+
+    [Theory]
+    [MemberData(nameof(ParentsItMayNotLeaveLooser))]
+    public async Task Unfile_FromASecureOrRestrictedParent_KeepsTheFormerOwner(string parent)
+    {
+        var matter = parent switch
+        {
+            "secure" => SecureMatterId,
+            "restricted" => RestrictedMatterId,
+            _ => SecureOwnedUnflaggedMatterId,
+        };
+        // The message is still owned in an ordinary unit (a stale owner), so only the parent can keep it.
+        var directory = World().WithMessageFiledUnder(matter, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator();
+        var request = Unfile(matter) with { SecureExitCaller = CallerHoldingFullAccess() };
+
+        var resolution = await Resolver(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.Reason.Should().Contain("keeps its former owner").And.Contain(matter.ToString("D"));
+        Owner(directory).Should().Be(FakeDirectory.ChildTeam);
+        directory.ConditionalWrites.Should().BeEmpty();
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    public static TheoryData<string> MessagesHeldSecureOrRestricted => new() { "owned by the Secure team", "flagged secure", "restricted", "no owning unit" };
+
+    [Theory]
+    [MemberData(nameof(MessagesHeldSecureOrRestricted))]
+    public async Task Unfile_OfAMessageItselfSecureOrRestricted_KeepsTheFormerOwner(string held)
+    {
+        var directory = held == "owned by the Secure team"
+            ? World().WithMessageFiledUnder(MatterId, FakeDirectory.SecureBu, FakeDirectory.SecureNamedTeam, type: CommunicationType.Email)
+            : World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email);
+        directory.WithRecordedCreator();
+        if (held == "flagged secure")
+            directory.Write("sprk_communication", MessageId, new Dictionary<string, object?> { ["sprk_issecure"] = true });
+        if (held == "restricted")
+            directory.Write("sprk_communication", MessageId, new Dictionary<string, object?> { ["sprk_accesspermission"] = new OptionSetValue(Restricted) });
+        if (held == "no owning unit")
+            directory.Write("sprk_communication", MessageId, new Dictionary<string, object?> { ["owningbusinessunit"] = null });
+        var ownerBefore = Owner(directory);
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.Reason.Should().Contain("the communication itself");
+        Owner(directory).Should().Be(ownerBefore);
+        directory.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("faults")]
+    [InlineData("does not come back")]
+    public async Task Unfile_WhenAParentItLeavesCannotBeRead_KeepsTheFormerOwner(string failure)
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator();
+        directory.BeforeAnswer = query =>
+        {
+            // Only the read of what the message leaves (it alone selects the Access Permission of a matter here).
+            if (query.EntityName != "sprk_matter" || !query.ColumnSet.Columns.Contains("sprk_accesspermission"))
+                return;
+            if (failure == "faults")
+                throw new InvalidOperationException("Test: the parent read faulted.");
+            query.Criteria.Conditions[0].Values[0] = Guid.NewGuid();
+        };
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse("the unfile is never refused for it");
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        Owner(directory).Should().Be(FakeDirectory.ChildTeam);
+        directory.ConditionalWrites.Should().BeEmpty();
+        _log.Entries.Should().Contain(e => e.Event.Id == RecordOwnershipResolver.UnfileKeepsOwnerEvent.Id);
+    }
+
+    // ── Must not fire: who created it ────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Unfile_WithNoRecordedCreator_KeepsTheFormerOwner_NeverFallingBackToCreatedBy()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .CreatedBy(FakeDirectory.CallerUserId);
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.Reason.Should().Contain("creator is not recorded");
+        Owner(directory).Should().Be(FakeDirectory.ChildTeam, "createdby (the caller, in the general unit) is never used");
+        directory.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("unknown")]
+    [InlineData("external, no customer unit configured")]
+    public async Task Unfile_WhenTheCreatorCannotBeResolved_KeepsTheFormerOwner_LoggedWithIdsOnly(string creator)
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            [RecordCreatorPerson.Column] = new EntityReference("systemuser", CreatorId),
+        });
+        if (creator == "disabled")
+            directory.WithDisabledUser(CreatorId, CreatorOid, FakeDirectory.CustomerChildBu);
+        if (creator.StartsWith("external", StringComparison.Ordinal))
+        {
+            directory.WithUser(CreatorId, CreatorOid, FakeDirectory.ChildBu).WithExternalFlag(CreatorId, flagged: true)
+                .WithUserInExternalCollaborators(CreatorId);
+            directory.CustomerBusinessUnitSetting = null;
+        }
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        Owner(directory).Should().Be(FakeDirectory.ChildTeam);
+        directory.ConditionalWrites.Should().BeEmpty();
+        _log.Entries.Should().Contain(e => e.Event.Id == RecordOwnershipResolver.UnfileKeepsOwnerEvent.Id
+                                           && e.Message.Contains(CreatorId.ToString()));
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private static Guid? Owner(FakeDirectory directory) =>
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("owningteam")?.Id;
+
+    private static FakeDirectory World() => FakeDirectory.Standard()
+        .WithOrdinaryRoot("sprk_matter", MatterId)
+        .WithSecureRoot("sprk_matter", SecureMatterId)
+        .WithRecord("sprk_matter", RestrictedMatterId, FakeDirectory.ChildBu, isSecure: false, owningTeam: FakeDirectory.ChildTeam,
+            extra: new() { ["sprk_accesspermission"] = new OptionSetValue(Restricted) })
+        .WithRecord("sprk_matter", SecureOwnedUnflaggedMatterId, FakeDirectory.SecureBu, isSecure: false,
+            owningTeam: FakeDirectory.SecureNamedTeam);
+
+    /// <summary>The unfile a writer sends: the matter cleared, for a person, with the unfiled-communication rule.</summary>
+    private static RecordReparent Unfile(Guid? _ = null) => new()
+    {
+        EntityLogicalName = "sprk_communication",
+        RecordId = MessageId,
+        ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_regardingmatter"] = null },
+        CallerSystemUserId = FakeDirectory.CallerUserId,
+        WhenUnfiled = UnfiledOwnership.UnfiledCommunication,
+    };
+
+    private static Func<CancellationToken, Task> Applies(FakeDirectory directory, RecordReparent request) =>
+        _ =>
+        {
+            var written = request.ParentChanges.ToDictionary(change => change.Key, change => (object?)change.Value);
+            directory.Write(request.EntityLogicalName, request.RecordId, written);
+            return Task.CompletedTask;
+        };
+
+    private static Sprk.Bff.Api.Services.Access.SecureRemovalCaller CallerHoldingFullAccess() =>
+        new(_ => Task.FromResult<Guid?>(FakeDirectory.CallerUserId),
+            (_, _) => Task.FromResult(
+                Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write | Spaarke.Dataverse.AccessRights.Append
+                | Spaarke.Dataverse.AccessRights.AppendTo | Spaarke.Dataverse.AccessRights.Share | Spaarke.Dataverse.AccessRights.Delete));
+
+    private RecordOwnershipResolver Resolver(FakeDirectory directory) =>
+        directory.Resolver(logger: _log, directMessageOwnerTeam: DirectMessageOwnerTeamDouble.Unconfigured());
+
+    private sealed class RecordingLogger : ILogger<RecordOwnershipResolver>
+    {
+        public List<(LogLevel Level, EventId Event, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, eventId, formatter(state, exception)));
+    }
+}
+
+/// <summary>uac-r2 task 197a: the message's recorded creator person.</summary>
+internal static class UnfileOwnerWorldExtensions
+{
+    private static readonly Guid MessageId = Guid.Parse("d1d1d1d1-0054-4054-8054-0000000003b3");
+    private static readonly Guid CreatorId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000c1");
+    private static readonly Guid CreatorOid = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000c2");
+
+    /// <summary>A creator in <paramref name="businessUnit"/> (the customer's Litigation unit by default), recorded as the
+    /// message's <c>sprk_createdbyperson</c>.</summary>
+    public static OwnershipDirectory WithRecordedCreator(this OwnershipDirectory directory, Guid? businessUnit = null)
+    {
+        directory.WithUser(CreatorId, CreatorOid, businessUnit ?? OwnershipDirectory.CustomerChildBu);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            [RecordCreatorPerson.Column] = new EntityReference("systemuser", CreatorId),
+        });
+        return directory;
+    }
+}
