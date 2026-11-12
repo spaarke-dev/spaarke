@@ -447,7 +447,8 @@ public class WriterBuilderOwnershipParityTests
                     Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), entities: Entities())
                 .CreateAsync(
                     new RecordCreationRequest(
-                        table, new RecordCreationPayload.Mapped(item)) { ServerSetLookupColumns = ServerSet },
+                        table, new RecordCreationPayload.Mapped(item))
+                    { ServerSetLookupColumns = ServerSet },
                     principal, CancellationToken.None);
             var written = outcome.CreatedId is { } id ? _stamps.RowOf(table, id) : null;
 
