@@ -133,9 +133,12 @@ internal sealed class OwnershipDirectory
 
     /// <summary>
     /// The REAL resolver over this directory, with the Secure Record names configured explicitly. A <paramref
-    /// name="fault"/> makes every directory read throw it — a Dataverse fault, which must propagate.
+    /// name="fault"/> makes every directory read throw it — a Dataverse fault, which must propagate. fm task 054 (F1):
+    /// <paramref name="directMessageOwnerTeam"/> is the Direct message owner team lookup the resolver composes (none by default).
     /// </summary>
-    public RecordOwnershipResolver Resolver(Exception? fault = null, ILogger<RecordOwnershipResolver>? logger = null)
+    public RecordOwnershipResolver Resolver(
+        Exception? fault = null, ILogger<RecordOwnershipResolver>? logger = null,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
@@ -175,7 +178,8 @@ internal sealed class OwnershipDirectory
             ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
         }).Build();
 
-        return new RecordOwnershipResolver(entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance);
+        return new RecordOwnershipResolver(
+            entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance, directMessageOwnerTeam);
     }
 
     /// <summary>
@@ -535,6 +539,9 @@ internal sealed class OwnershipDirectory
                 {
                     // Task 148 r2: a planned owner's business unit is read from its team row.
                     ["businessunitid"] = new EntityReference("businessunit", t.BusinessUnit),
+                    // fm task 054 (F1): the shared Direct-team check reads a team's own kind first.
+                    ["isdefault"] = t.IsDefault,
+                    ["teamtype"] = new OptionSetValue(t.TeamType),
                 }),
             // R4b-2c: by id too (the walk to the customer's top unit), with its parent.
             "businessunit" => _businessUnits

@@ -81,6 +81,15 @@ public class DirectMessageOwnerStepGuardTests
             },
             ("it assigns sprk_decisionrecord only, never a communication",
                 static (write, code) => AssignsOnly("sprk_decisionrecord", write, code))),
+        ["src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs"] = new(
+            "fm task 054 (F1): answers the owner of a message's content row; a row whose message the Direct team owns is the " +
+            "Direct team's, decided by the lookup and the shared Direct-team check, never a default team.",
+            new Dictionary<string, string>
+            {
+                ["ApplyTo"] = "writes a resolved owner onto a new row (RecordOwnerResolution.ApplyTo).",
+                ["SettleOwnerAsync"] = "the re-file's owner write, to the team the rule answered.",
+                ["ReleaseOwnSecureWriteAsync"] = "puts back the ordinary owner a re-file's own Secure write replaced.",
+            }),
         [Reconciler] = new(
             "uac-r2 task 198: hands the Direct team to the participant-share reconcile after a re-file.",
             new Dictionary<string, string>
