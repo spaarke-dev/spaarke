@@ -1,0 +1,32 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+  "schema_version": "v2.4",
+  "name_for_human": "Spaarke MCP spike B",
+  "namespace": "spikeb",
+  "description_for_human": "Phase 0 test tool (route B). Records nothing.",
+  "description_for_model": "Phase 0 platform test tool served by the Spaarke MCP spike on the second route. Use only when the user explicitly asks to call spike_echo_b.",
+  "functions": [
+    {
+      "name": "spike_echo_b",
+      "description": "Use for: Phase 0 route test T13 only; echoes the message back from the second route. Not for: any real work."
+    }
+  ],
+  "runtimes": [
+    {
+      "type": "RemoteMCPServer",
+      "auth": {
+        "type": "OAuthPluginVault",
+        "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI="
+      },
+      "spec": {
+        "url": "https://spaarke-bff-dev.azurewebsites.net/mcp/spike-area-b",
+        "mcp_tool_description": {
+          "file": "mcp-tools-b.json"
+        }
+      },
+      "run_for_functions": [
+        "spike_echo_b"
+      ]
+    }
+  ]
+}

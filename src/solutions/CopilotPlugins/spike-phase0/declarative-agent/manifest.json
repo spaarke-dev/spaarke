@@ -1,0 +1,40 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.25/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.25",
+  "version": "1.0.0",
+  "id": "a94dfa53-0a8a-4edf-a249-86296e36b0d9",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://www.example.com",
+    "privacyUrl": "https://www.example.com/privacy",
+    "termsOfUseUrl": "https://www.example.com/termsofuse"
+  },
+  "name": {
+    "short": "Spaarke MCP spike",
+    "full": "Spaarke MCP spike (Phase 0)"
+  },
+  "description": {
+    "short": "Phase 0 platform test. Not for real work.",
+    "full": "Phase 0 platform test package for the Spaarke MCP spike. It echoes text and records nothing. Not for real work."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0F6CBD",
+  "copilotAgents": {
+    "declarativeAgents": [
+      {
+        "id": "declarativeAgent",
+        "file": "declarativeAgent.json"
+      }
+    ]
+  },
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "spaarke-bff-dev.azurewebsites.net"
+  ]
+}

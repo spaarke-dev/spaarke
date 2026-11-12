@@ -1,0 +1,57 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+  "schema_version": "v2.4",
+  "name_for_human": "Spaarke MCP spike A",
+  "namespace": "spikea",
+  "description_for_human": "Phase 0 test tools (route A). Records nothing.",
+  "description_for_model": "Phase 0 platform test tools served by the Spaarke MCP spike on the legal-operations route. Use only when the user explicitly asks to call a spike tool.",
+  "functions": [
+    {
+      "name": "spike_echo",
+      "description": "Use for: Phase 0 platform tests only; echoes the message back. Not for: any real work."
+    },
+    {
+      "name": "spike_echo_3mb",
+      "description": "Use for: Phase 0 widget-size test only; echoes the message back and renders a ~3 MB widget. Not for: any real work."
+    },
+    {
+      "name": "spike_echo_6mb",
+      "description": "Use for: Phase 0 widget-size test only; echoes the message back and renders a ~6 MB widget. Not for: any real work."
+    },
+    {
+      "name": "spike_write",
+      "description": "Use for: Phase 0 test T4 only (a model-callable tool that is not read-only). This is a Phase 0 test tool that records nothing: it writes no data anywhere and only returns what it would have written. Not for: any real work."
+    },
+    {
+      "name": "spike_unannotated",
+      "description": "Use for: Phase 0 test T12 only; echoes the message back from a tool that declares no annotations. Not for: any real work."
+    },
+    {
+      "name": "spike_whoami",
+      "description": "Use for: Phase 0 auth test T5 only; returns the caller's Dataverse systemuserid (on-behalf-of) and which token claims are present. Not for: any real work."
+    }
+  ],
+  "runtimes": [
+    {
+      "type": "RemoteMCPServer",
+      "auth": {
+        "type": "OAuthPluginVault",
+        "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI="
+      },
+      "spec": {
+        "url": "https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations",
+        "mcp_tool_description": {
+          "file": "mcp-tools-a.json"
+        }
+      },
+      "run_for_functions": [
+        "spike_echo",
+        "spike_echo_3mb",
+        "spike_echo_6mb",
+        "spike_write",
+        "spike_unannotated",
+        "spike_whoami"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "tools": [
+    {
+      "name": "spike_echo",
+      "title": "Spike echo",
+      "description": "Use for: Phase 0 platform tests only; echoes the message back. Not for: any real work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "annotations": {
+        "title": "Spike echo",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://spaarke/spike.html"
+        }
+      }
+    },
+    {
+      "name": "spike_echo_3mb",
+      "title": "Spike echo (3 MB widget)",
+      "description": "Use for: Phase 0 widget-size test only; echoes the message back and renders a ~3 MB widget. Not for: any real work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "annotations": {
+        "title": "Spike echo (3 MB widget)",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://spaarke/spike-3mb.html"
+        }
+      }
+    },
+    {
+      "name": "spike_echo_6mb",
+      "title": "Spike echo (6 MB widget)",
+      "description": "Use for: Phase 0 widget-size test only; echoes the message back and renders a ~6 MB widget. Not for: any real work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "annotations": {
+        "title": "Spike echo (6 MB widget)",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "_meta": {
+        "ui": {
+          "resourceUri": "ui://spaarke/spike-6mb.html"
+        }
+      }
+    },
+    {
+      "name": "spike_write",
+      "title": "Spike write",
+      "description": "Use for: Phase 0 test T4 only (a model-callable tool that is not read-only). This is a Phase 0 test tool that records nothing: it writes no data anywhere and only returns what it would have written. Not for: any real work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "description": "A title for the note.",
+            "type": "string"
+          },
+          "note": {
+            "description": "The note text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "note"
+        ]
+      },
+      "annotations": {
+        "title": "Spike write",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      }
+    },
+    {
+      "name": "spike_write_app",
+      "title": "Spike write (app only)",
+      "description": "Phase 0 test T3 only: callable by the widget, hidden from the model. This is a Phase 0 test tool that records nothing: it writes no data anywhere and only returns what it would have written.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "description": "A title for the note.",
+            "type": "string"
+          },
+          "note": {
+            "description": "The note text.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "note"
+        ]
+      },
+      "annotations": {
+        "title": "Spike write (app only)",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "_meta": {
+        "ui": {
+          "visibility": [
+            "app"
+          ]
+        }
+      }
+    },
+    {
+      "name": "spike_unannotated",
+      "description": "Use for: Phase 0 test T12 only; echoes the message back from a tool that declares no annotations. Not for: any real work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "spike_whoami",
+      "title": "Spike who am I",
+      "description": "Use for: Phase 0 auth test T5 only; returns the caller's Dataverse systemuserid (on-behalf-of) and which token claims are present. Not for: any real work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "title": "Spike who am I",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    }
+  ]
+}

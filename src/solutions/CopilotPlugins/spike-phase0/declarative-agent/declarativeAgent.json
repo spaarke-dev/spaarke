@@ -1,0 +1,31 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/declarative-agent/v1.6/schema.json",
+  "version": "v1.6",
+  "name": "Spaarke MCP spike",
+  "description": "Phase 0 platform test agent for the Spaarke MCP spike. Not for real work.",
+  "instructions": "You are a Phase 0 test agent. Use the Spaarke MCP spike A and B plugin tools only when the user asks you to call a named spike tool. Report the tool result verbatim. These tools record nothing.",
+  "conversation_starters": [
+    {
+      "title": "Echo (A)",
+      "text": "Call spike_echo with the message hello"
+    },
+    {
+      "title": "Echo (B)",
+      "text": "Call spike_echo_b with the message hello"
+    },
+    {
+      "title": "Write (T4)",
+      "text": "Call spike_write with title Phase 0 T4 and note from the model"
+    }
+  ],
+  "actions": [
+    {
+      "id": "spikeA",
+      "file": "ai-plugin-a.json"
+    },
+    {
+      "id": "spikeB",
+      "file": "ai-plugin-b.json"
+    }
+  ]
+}

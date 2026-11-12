@@ -1,0 +1,64 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.30/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.30",
+  "version": "1.0.0",
+  "id": "f1130369-cbf9-40a7-9203-5d4059467a58",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://www.example.com",
+    "privacyUrl": "https://www.example.com/privacy",
+    "termsOfUseUrl": "https://www.example.com/termsofuse"
+  },
+  "name": {
+    "short": "Spaarke MCP spike",
+    "full": "Spaarke MCP spike (Phase 0)"
+  },
+  "description": {
+    "short": "Phase 0 platform test. Not for real work.",
+    "full": "Phase 0 platform test package for the Spaarke MCP spike. It echoes text and records nothing. Not for real work."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0F6CBD",
+  "agentConnectors": [
+    {
+      "id": "spaarke-mcp-spike-a",
+      "displayName": "Spaarke MCP spike A",
+      "description": "Phase 0 test connector A (legal-operations route). Echo and test tools only; records nothing.",
+      "toolSource": {
+        "remoteMcpServer": {
+          "mcpServerUrl": "https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations",
+          "authorization": {
+            "type": "OAuthPluginVault",
+            "referenceId": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI="
+          },
+          "mcpToolDescription": {
+            "file": "toolDescription-a.json"
+          }
+        }
+      }
+    },
+    {
+      "id": "spaarke-mcp-spike-b",
+      "displayName": "Spaarke MCP spike B",
+      "description": "Phase 0 test connector B (second route). Echo tool only; records nothing.",
+      "toolSource": {
+        "remoteMcpServer": {
+          "mcpServerUrl": "https://spaarke-bff-dev.azurewebsites.net/mcp/spike-area-b",
+          "authorization": {
+            "type": "OAuthPluginVault",
+            "referenceId": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyNhMTIxZDQwNi00YmVmLTRkZjQtYjhkZC0xMWMyNWI5OTNjNDI="
+          },
+          "mcpToolDescription": {
+            "file": "toolDescription-b.json"
+          }
+        }
+      }
+    }
+  ],
+  "validDomains": [
+    "spaarke-bff-dev.azurewebsites.net"
+  ]
+}

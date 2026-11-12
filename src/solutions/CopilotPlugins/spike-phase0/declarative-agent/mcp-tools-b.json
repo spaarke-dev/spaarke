@@ -1,0 +1,27 @@
+{
+  "tools": [
+    {
+      "name": "spike_echo_b",
+      "title": "Spike echo B",
+      "description": "Use for: Phase 0 route test T13 only; echoes the message back from the second route. Not for: any real work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "annotations": {
+        "title": "Spike echo B",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      }
+    }
+  ]
+}
