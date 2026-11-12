@@ -128,8 +128,16 @@ public sealed class SecureRecordSetupProcedure
     /// <summary>S10/S12: Read/Create/Update on those columns; the BFF's application users are its only members.</summary>
     public const string WriterProfileName = "Spaarke BFF-Managed Field Writers";
 
-    /// <summary>S14: the platform's own field-security profile, exempt from the other-writer rule (owner decision F4).</summary>
+    /// <summary>The display name of <see cref="SystemAdministratorFieldSecurityProfileId"/> — for messages only; never matched.</summary>
     public const string SystemAdministratorProfileName = "System Administrator";
+
+    /// <summary>
+    /// S14/S18/S19/S22/S26: the platform's own "System Administrator" field-security profile — a fixed ID in every environment,
+    /// which Dataverse grants every secured column — the only profile besides a lock's writer excused from the other-writer
+    /// rule (owner decision F4). Matched by ID, never by name (task 268 review: a look-alike name would be excused; the same ID
+    /// as scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 <c>$SystemAdministratorProfileId</c>).
+    /// </summary>
+    public static readonly Guid SystemAdministratorFieldSecurityProfileId = Guid.Parse("572329c1-a042-4e22-be47-367c6374ea45");
 
     /// <summary>S13/S14: the secure flag only the BFF writes (task 150).</summary>
     public const string SecureFlagColumn = "sprk_issecure";
@@ -191,9 +199,10 @@ public sealed class SecureRecordSetupProcedure
 
     /// <summary>S26: the remedy an incomplete invoice money lock names.</summary>
     internal const string InvoiceMoneyLockRemedy =
-        "A new run imports the SpaarkeMaster release that carries ebilling task 166 at H6; an existing environment runs " +
-        "scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, then -Verify) with the owner's OK. Then resume. " +
-        "Nothing was written.";
+        "The published SpaarkeMaster 1.3.0.0 predates ebilling task 166 and H6 skips an installed version: either import a " +
+        "SpaarkeMaster release ABOVE 1.3.0.0 that carries task 166 (a new run, H6), or run " +
+        "scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 (apply, then -Verify) on this environment with the " +
+        "owner's OK, then resume. Nothing was written.";
 
     /// <summary>
     /// S19/S20 (ISS-020 / #1565): the profile whose membership lets an identity READ the field-secured
@@ -866,8 +875,9 @@ public sealed class SecureRecordSetupProcedure
                 $"'{WriterProfileName}' grants {SecureFlagColumn} on no table: the package's field-security lock (task 150) " +
                 "is missing. Import SpaarkeMaster (H6), then resume. Nothing was written.");
         }
-        var systemAdministratorProfiles = await dv.FindFieldSecurityProfilesAsync(t, SystemAdministratorProfileName, ct)
-            .ConfigureAwait(false);
+        // The platform's own profile, matched by its fixed ID, never by name: Dataverse's name filter ignores case and accents, so
+        // a look-alike profile named "System Administrator" (or "Systém Administrator") would otherwise be excused (task 268 review).
+        IReadOnlyCollection<Guid> systemAdministratorProfiles = [SystemAdministratorFieldSecurityProfileId];
         foreach (var table in lockedTables)
         {
             var secured = await dv.IsAttributeSecuredAsync(t, table, SecureFlagColumn, ct).ConfigureAwait(false);
@@ -932,9 +942,11 @@ public sealed class SecureRecordSetupProcedure
             {
                 return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
                     $"Profiles other than '{WriterProfileName}' may create or update {InvoiceMoneyTable}.{column}: " +
-                    $"{Ids(otherMoneyWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is " +
-                    "its member). Only the BFF sets an invoice's amounts and firm (EB-D-200); who else may is an owner " +
-                    "decision. Nothing is removed here. Nothing was written.");
+                    $"{string.Join(", ", otherMoneyWriters.Take(NamedPrincipalLimit).Select(p => $"{p.ProfileId} read/create/update={Rights(p)}"))}" +
+                    (otherMoneyWriters.Any(p => p.ProfileId == readerProfileId)
+                        ? $" — '{ReaderProfileName}' among them, so every user (every default team is its member)" : string.Empty) +
+                    ". Only the BFF sets an invoice's amounts and firm (EB-D-200); who else may is an owner decision. Nothing " +
+                    "is removed here. Nothing was written.");
             }
         }
 
@@ -1030,7 +1042,7 @@ public sealed class SecureRecordSetupProcedure
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.StandingGrantLockOtherWriter,
                 $"Profiles other than '{StandingGrantProfileName}' may create or update {StandingGrantTable}.{StandingGrantColumn}: " +
-                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                $"{Ids(standingOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team is its " +
                 "member). Only Standing Grant Administrators and System Administrator may create or update the standing grant; " +
                 "who was granted more is an operator decision. Nothing was written.");
         }
@@ -1145,7 +1157,7 @@ public sealed class SecureRecordSetupProcedure
         {
             return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.InviteMarkerLockOtherWriter,
                 $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{InviteMarkerColumn}: " +
-                $"{Ids(markerOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team is its " +
+                $"{Ids(markerOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team is its " +
                 "member). Whoever can write the marker can open a contact to an email bind. Nothing was written.");
         }
 
@@ -1269,7 +1281,7 @@ public sealed class SecureRecordSetupProcedure
             {
                 return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AccessRemovedOnLockOtherWriter,
                     $"Profiles other than '{WriterProfileName}' may create or update {InviteTable}.{AccessRemovedOnColumn}: " +
-                    $"{Ids(removedOtherWriters.Select(p => p.ProfileId))} (the Readers profile included — every default team " +
+                    $"{Ids(removedOtherWriters.Select(p => p.ProfileId))} (the Readers profile is not exempt — every default team " +
                     "is its member). Only the BFF records that a person's external access was removed. Nothing was written.");
             }
             notes.Add($"{InviteTable}.{AccessRemovedOnColumn}: present, secured, Readers 4/0/0, Writers 4/4/4, no other writer.");

@@ -703,6 +703,13 @@ public sealed class SecureRecordSetupProcedureTests
             { "the Readers profile may update sprk_invoice.sprk_approvedtotal (4/0/4)", dv =>
                     Replace(dv, "sprk_approvedtotal", dv.ReaderProfileId, 4, 0, 4),
                 SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_invoice.sprk_totalamount", dv =>
+                    dv.ColumnPermissions("sprk_totalamount").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_invoice", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+            { "a look-alike 'Systém Administrator' profile may update sprk_matter.sprk_issecure", dv =>
+                    dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.AddProfile("Systém Administrator"), "sprk_matter", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.FieldLockOtherWriter, FailureClass.QuarantineRequired },
             { "another profile may create sprk_invoice.sprk_vendororg", dv =>
                     dv.ColumnPermissions("sprk_vendororg")
                         .Add(new SecureSetupFieldPermission(dv.AddProfile("Billing Admins"), "sprk_invoice", 4, 4, 0)),

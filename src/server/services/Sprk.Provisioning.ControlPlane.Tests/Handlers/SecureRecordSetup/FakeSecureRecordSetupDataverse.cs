@@ -154,7 +154,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
         dv.ReaderProfileId = dv.AddProfile(SecureRecordSetupProcedure.ReaderProfileName);
         dv.WriterProfileId = dv.AddProfile(SecureRecordSetupProcedure.WriterProfileName);
-        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName);
+        dv.SystemAdministratorProfileId = dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName,
+            SecureRecordSetupProcedure.SystemAdministratorFieldSecurityProfileId);
         foreach (var table in LockedTables)
         {
             dv.FieldPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, table, 4, 0, 0));
@@ -314,9 +315,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         return permissions;
     }
 
-    internal Guid AddProfile(string name)
+    internal Guid AddProfile(string name, Guid? fixedId = null)
     {
-        var id = Guid.NewGuid();
+        var id = fixedId ?? Guid.NewGuid();
         if (!Profiles.TryGetValue(name, out var ids))
         {
             Profiles[name] = ids = [];

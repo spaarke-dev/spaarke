@@ -38,6 +38,8 @@ public sealed class InvoiceMoneyColumnLockPackagedTests
 
         ScriptColumns(script).Should().BeEquivalentTo(SecureRecordSetupProcedure.InvoiceMoneyColumns,
             $"H7b S26 checks exactly the columns {ScriptRelativePath} secures (EB-D-200)");
+        Regex.Match(script, @"^\$Table\s*=\s*'(?<t>[^']+)'", RegexOptions.Multiline).Groups["t"].Value
+            .Should().Be(Table, "the script secures the columns on the same table H7b S26 checks");
     }
 
     [Fact]
@@ -128,8 +130,9 @@ public sealed class InvoiceMoneyColumnLockPackagedTests
                 .Select(f => ((string)p.Attribute("name")!, Level(f, "CanRead"), Level(f, "CanCreate"), Level(f, "CanUpdate"))))
             .ToList();
 
+    /// <summary>The grant level, or -1 when the element is missing or unreadable (so a malformed row never reads as "no right").</summary>
     private static int Level(XElement permission, string name)
-        => int.TryParse((string?)permission.Element(name), out var level) ? level : 0;
+        => int.TryParse((string?)permission.Element(name), out var level) ? level : -1;
 
     /// <summary>The attribute's IsSecured flag, or null when the package does not carry the attribute.</summary>
     private static bool? IsSecured(XDocument entity, string logicalName)

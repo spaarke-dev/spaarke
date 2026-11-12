@@ -146,9 +146,9 @@ public static class SecureRecordSetupRejectionCodes
 
     /// <summary>
     /// S26: the shipped lock on a column of <see cref="SecureRecordSetupProcedure.InvoiceMoneyColumns"/> is incomplete — the
-    /// column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import the
-    /// SpaarkeMaster release carrying ebilling task 166, H6, or run scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1
-    /// in an existing environment).
+    /// column absent or not secured, or the BFF-managed Readers (read 4) / Writers (4/4/4) grant missing (Resumable: import a
+    /// SpaarkeMaster release ABOVE 1.3.0.0 carrying ebilling task 166, H6 — the published 1.3.0.0 predates it — or run
+    /// scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1 on the environment).
     /// </summary>
     public const string InvoiceMoneyLockIncomplete = "secure_setup.invoice_money_lock_incomplete";
 
