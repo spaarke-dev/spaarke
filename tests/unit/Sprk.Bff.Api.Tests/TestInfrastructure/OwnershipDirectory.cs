@@ -477,6 +477,27 @@ internal sealed class OwnershipDirectory
     /// <summary>uac-r2 191c: <c>ExternalAccess:CustomerBusinessUnitId</c> as the resolver reads it (null: unset).</summary>
     public string? CustomerBusinessUnitSetting { get; set; }
 
+    /// <summary>uac-r2 191c: the External Collaborators unit (191e's name, a child of the root) and its default owner team.</summary>
+    public static readonly Guid ExternalCollaboratorsBu = Guid.Parse("0e5c0e5c-0191-4191-8191-0000000000e1");
+    public static readonly Guid ExternalCollaboratorsTeam = Guid.Parse("0e5c0e5c-0191-4191-8191-0000000000e2");
+
+    /// <summary>uac-r2 191c: adds the External Collaborators unit and its default team, and moves <paramref name="systemUserId"/>
+    /// into it (as 191e's placement does).</summary>
+    public OwnershipDirectory WithUserInExternalCollaborators(Guid systemUserId)
+    {
+        if (_businessUnits.All(b => b.BusinessUnitId != ExternalCollaboratorsBu))
+        {
+            WithBusinessUnit(ExternalCollaboratorsBu,
+                Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName, parent: GeneralBu);
+            WithTeam(ExternalCollaboratorsTeam, ExternalCollaboratorsBu, isDefault: true, teamType: 0,
+                Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName);
+        }
+
+        var index = _users.FindIndex(u => u.SystemUserId == systemUserId);
+        _users[index] = _users[index] with { BusinessUnit = ExternalCollaboratorsBu };
+        return this;
+    }
+
     /// <summary>uac-r2 191c: store <c>sprk_isexternal</c> on a seeded systemuser.</summary>
     public OwnershipDirectory WithExternalFlag(Guid systemUserId, bool flagged)
     {
@@ -554,9 +575,10 @@ internal sealed class OwnershipDirectory
             "businessunit" => _businessUnits
                 .Where(b => MatchesName(conditions, b.Name) && Matches(conditions, "businessunitid", b.BusinessUnitId)
                             && (!rootOnly || b.Parent is null))
+                // uac-r2 191c: with its name, as Dataverse returns it (191e's unit lookup re-checks the name).
                 .Select(b => b.Parent is { } parent
-                    ? new Entity("businessunit", b.BusinessUnitId) { ["parentbusinessunitid"] = new EntityReference("businessunit", parent) }
-                    : new Entity("businessunit", b.BusinessUnitId)),
+                    ? new Entity("businessunit", b.BusinessUnitId) { ["name"] = b.Name, ["parentbusinessunitid"] = new EntityReference("businessunit", parent) }
+                    : new Entity("businessunit", b.BusinessUnitId) { ["name"] = b.Name }),
             "teammembership" => _memberships
                 .Where(m => Matches(conditions, "teamid", m.TeamId))
                 .Select(m => new Entity("teammembership", Guid.NewGuid()) { ["systemuserid"] = m.SystemUserId }),

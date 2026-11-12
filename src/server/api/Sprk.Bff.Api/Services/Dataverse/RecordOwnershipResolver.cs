@@ -4290,6 +4290,24 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// Resolves the acting user's business unit, then that BU's owner team.
     /// <paramref name="userKeyColumn"/> selects which identity the caller is known by.
     /// </summary>
+    /// <summary>
+    /// uac-r2 task 191c: whether <paramref name="businessUnitId"/> (a flagged creator's CURRENT unit) is the External
+    /// Collaborators unit, found by name exactly as task 191e's placement job finds it
+    /// (<see cref="Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.ResolveUnitAsync"/>, no forked rule).
+    /// </summary>
+    /// <remarks>
+    /// No unit of that name: false (the creator cannot be in it). Two or more of that name, or one not under the root: true
+    /// when the creator is in ANY of them — which one isolates external users is undecided, so the shared-unit owner is never
+    /// chosen (fail closed). A read fault propagates as the caller's retryable 5xx (nothing is created), never as "not in
+    /// the unit", which would give the record to the shared unit.
+    /// </remarks>
+    private async Task<bool> IsInExternalCollaboratorsUnitAsync(Guid businessUnitId, CancellationToken ct)
+    {
+        var unit = await Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement
+            .ResolveUnitAsync(_dataverse, ct).ConfigureAwait(false);
+        return unit.Candidates.Contains(businessUnitId);
+    }
+
     private async Task<RecordOwnerResolution> ResolveFromUserAsync(
         string userKeyColumn, Guid userKey, RecordOwnershipContext context, CancellationToken ct)
     {
@@ -4335,11 +4353,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         // uac-r2 task 191c (#2179 design §3.5): a user flagged external (a STORED sprk_isexternal = true — never inferred from
-        // an #EXT# UPN or an email domain) sits in the External Collaborators business unit, whose default team is the team
-        // every external user is a member of. A record that user's unit would own is read by every external user, so it is
-        // owned in the CUSTOMER's business unit (ExternalAccess:CustomerBusinessUnitId) instead. Unset: refused, never the
-        // external unit's team.
-        if (users.Entities[0].GetAttributeValue<bool?>(IsExternalUserColumn) == true)
+        // an #EXT# UPN or an email domain) whom task 191e has placed in the External Collaborators business unit. That unit's
+        // default team is the team every external user is a member of, so a record it owned would be read by every external
+        // user (across firms). It is owned in the CUSTOMER's business unit (ExternalAccess:CustomerBusinessUnitId) instead;
+        // unset: refused, never the external unit's team. A flagged user NOT yet in that unit (191e's placement is off until
+        // 191i) keeps today's rule — their own unit owns it — so this ships safely before the customer unit is configured.
+        if (users.Entities[0].GetAttributeValue<bool?>(IsExternalUserColumn) == true
+            && await IsInExternalCollaboratorsUnitAsync(businessUnitId.Value, ct).ConfigureAwait(false))
         {
             var configured = _configuration[ExternalAccessOptionsValidator.CustomerBusinessUnitKey];
             if (!ExternalAccessOptionsValidator.IsCustomerBusinessUnitConfigured(configured))

@@ -32,7 +32,7 @@
   - `SecureChildReconciler` after a re-file;
   - `SecureChildReconciler` after an Apply-mode secure transition (not the sweep).
 - **Secure mirror.** `FilterFlaggedAsync` adds nothing for a flagged or unverifiable user on a child the predicate hides. It revokes a flagged user's held share there when writes are on, and asks the predicate in batches.
-- **Resolver.** `RecordOwnershipResolver`: an unfiled create by a flagged acting user is owned by the customer BU's default team (`ExternalAccess:CustomerBusinessUnitId`). With no customer BU configured it is refused (`ActingUserUnresolved`).
+- **Resolver.** `RecordOwnershipResolver`: an unfiled create by a flagged acting user whose CURRENT business unit is the External Collaborators unit (found by name with 191e's `ExternalCollaboratorPlacement.ResolveUnitAsync`) is owned by the customer BU's default team (`ExternalAccess:CustomerBusinessUnitId`); with no customer BU configured it is refused (`ActingUserUnresolved`). A flagged creator still in their original unit keeps today's rule (their own unit's team). Two units of that name: a creator in either takes the customer rule (fail closed). A failed read of either unit propagates as the caller's retryable 5xx; nothing is created.
 
 ## Settings (names only; all default off or unset)
 
@@ -41,7 +41,7 @@
 | `ExternalAccess:ExternalTeamShare:WritesEnabled` | false | Team-share grants and revokes, and flagged-user per-user revokes (engine and mirror). Off: report-only, with planned grants and revokes logged per table. |
 | `ExternalAccess:ExternalTeamShare:ReownWritesEnabled` | false | Owner writes for rows owned by flagged users. Off: re-owns are reported. |
 | `ExternalAccess:ExternalTeamShare:BusinessUnitName` | `External Collaborators` | The unit whose default team is shared with. |
-| `ExternalAccess:CustomerBusinessUnitId` | unset | Owner unit for unfiled creates and re-owns by flagged users. **Not gated:** the resolver change is live on deploy. |
+| `ExternalAccess:CustomerBusinessUnitId` | unset | Owner unit for unfiled creates and re-owns by flagged users in the External Collaborators unit. Not a setting gate, but it only acts once 191e has placed someone in that unit, which is off until 191i. |
 
 ## Deviations from the POML (recorded, not silent)
 
@@ -101,6 +101,12 @@
 | Systemic-fault load (K2). | **Fixed.** Splitting stops after the first split. |
 | Mirror batch scope (K3). | **Fixed.** Lazy batches of up to 200. |
 
+### Coordinator review of PR #2723: F2 fixed
+
+| Finding | Disposition |
+|---|---|
+| F2 (breaking on deploy): the resolver refused every flagged user's unfiled create while `ExternalAccess:CustomerBusinessUnitId` was unset, before anyone had been moved. | **Fixed.** The customer rule applies only when the creator's current unit is the External Collaborators unit (191e's name lookup, no forked rule). Must-fire, must-not-fire (unit present and absent), two-units and read-fault tests in `RecordOwnershipResolverTests`; scoped re-check of the fix diff. |
+
 ## Known limits
 
 - **K1.** The Restricted remover's team-share hook runs only when that call removed per-user shares. Otherwise the two-minute pass handles it, because the root's `modifiedon` changed.
@@ -110,8 +116,9 @@
 - **K5.** Idle cost while writes are off: the pass still lists, decides and reports every two minutes.
 - **K6.** NoLock reads can race a concurrent writer. The next run converges, and the re-own write is version-conditional.
 - **K7.** The guard checks who grants, not that each grantor asks the predicate. Reviewers check the reason given for each entry.
-- **K8.** The resolver change is not setting-gated. `ExternalAccess:CustomerBusinessUnitId` must be set on every slot before flagged users create unfiled rows, or those creates are refused.
+- **K8.** The resolver's customer rule is not setting-gated, but it only fires for a flagged creator already in the External Collaborators unit. `ExternalAccess:CustomerBusinessUnitId` must be set on every slot before 191e's placement writes are turned on, or those creators' unfiled creates are refused. An UNFLAGGED user found in that unit keeps today's rule (191e's census alerts on such a user).
 - **K9.** L1 hooks discard `WalkAgain`; the two-minute pass relists the changed row.
+- **K10.** The External Collaborators unit lookup is 191e's, so for a flagged creator it inherits that lookup's throw when the root unit cannot be identified (Dataverse has exactly one). That is a retryable 5xx, never a wrong owner. A single unit of that name that is not under the root counts as the unit (fail closed).
 
 ## Owner-go list for 191i (run in order, each with its own go)
 
@@ -120,7 +127,7 @@
    - any internal user's share is planned for revoke;
    - any Restricted, secure or never table is planned for a grant;
    - `externalTeamOwned` > 0.
-3. **Set `ExternalAccess:CustomerBusinessUnitId`** on every slot, if it is not already set.
+3. **Set `ExternalAccess:CustomerBusinessUnitId`** on every slot, if it is not already set. This is a precondition for 191e's `ExternalAccess:FlaggedUserPlacement:WritesEnabled`, not for the deploy: until a flagged user is placed, the resolver keeps today's owner.
 4. **Set `ExternalAccess:ExternalTeamShare:WritesEnabled = true`.** Watch:
    - `failures` stays 0;
    - `written` matches the planned counts;
@@ -131,9 +138,9 @@
    - no `BU OWNS ROWS` errors.
 6. **Rollback:** set the setting back to false. Grants already written stay until the predicate hides the row. Per-user revokes are not restored by this engine.
 
-## Owner questions
+## Owner questions (answered by the uac-r2 session, 2026-11-12)
 
-1. The Direct-message writers (`DirectMessageParticipantShares`, `DirectThreadAccessService`) grant participants without the predicate. Should 198's owner add the flagged-principal filter?
-2. `GateDecisionRecordSharing`'s guest test also reads `domainname`, which is inference beyond the stored flag. It is pre-existing; keep it or remove it?
-3. Unfiled communications and threads owned by flagged users keep their creator (146 E1). Is that acceptable once flagged users sit in the External BU?
-4. Confirm that a refused unfiled create (no customer BU configured) is the wanted fail-closed behaviour.
+1. **Direct-message writers** (`DirectMessageParticipantShares`, `DirectThreadAccessService`): yes, they get the predicate, in a uac-r2 follow-up task after field-mapping's piece 3b lands (it is editing 198's tests). Not in #2723; the allow-list entry stays a known gap pointing at that follow-up.
+2. **`GateDecisionRecordSharing`'s `domainname` guest test:** it breaks round 67 (only the stored flag is external) and treats Model 1 licensed B2B users as guests. Same follow-up; not changed in #2723.
+3. **Unfiled communications and threads of flagged users (146 E1):** for creators in the External Collaborators unit, the 191c customer-unit rule replaces the shared unit; creators outside it keep today's rule. Note for the session: E1 KeepCreator rows are USER-owned, not owned by the unit's team, and the External Collaborator role reads lineage tables at Basic depth only (`config/external-collaborator-role.json`), so a KeepCreator row stays readable by its creator only (plus shares). The engine still reports and does not re-own them. If the intent is that in-unit creators' unfiled communications also go to the customer team, that changes ThreadResolver's per-user master-thread keying and 198's Direct-thread privacy, so it needs its own task.
+4. **Refusing when no customer BU is set:** yes, only for creators in the unit. Implemented by the F2 fix.
