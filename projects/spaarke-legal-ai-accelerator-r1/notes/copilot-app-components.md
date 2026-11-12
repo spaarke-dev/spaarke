@@ -14,7 +14,7 @@ and §10 without renumbering. Instructions alone did not hold the redline rules;
 | | Cowork skills (folder now, plugin for teams) | Agent Builder agent |
 |---|---|---|
 | What it is | Written procedures plus reference files plus Python scripts | One instruction text (8,000 characters at most) plus knowledge files, called by @-name |
-| Where it runs | Cowork, in the Copilot app. Word lists the plugin but never loads it (tested) | Copilot app chat, Teams, Word agent mode, Cowork |
+| Where it runs | Cowork, in the Copilot app. Word lists the plugin but didn't run its skills (tested in Word for the web only, user-scoped upload, 2026-11-01, T-12b; Word desktop asked once). Not tested: Word desktop, admin deployment, an instruction-only skill, a plugin with an MCP tool | Copilot app chat, Teams, Word agent mode, Cowork |
 | Runs our Python | Yes (tested) | No |
 | Redline | Built and checked by script: one comment per change with its Topic ID, numbering kept, summary page | Whatever the model writes in that run |
 | Table and redline in one pass | Yes: plan table, one approval card, then all files | Only as far as the model follows its instructions |
