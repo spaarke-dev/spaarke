@@ -41,7 +41,9 @@ public static class McpModule
             services.AddSingleton<McpToolCatalog>(_ => new NullMcpToolCatalog());
         }
 
-        services.AddMcpServer().WithHttpTransport(transport =>
+        // AddAuthorizationFilters: the SDK checks each tool's [Authorize] metadata on tools/list (hides it) and tools/call
+        // (refuses it) with the request's user (B-7; McpToolAuthorization.ValidateTool makes [Authorize] mandatory).
+        services.AddMcpServer().AddAuthorizationFilters().WithHttpTransport(transport =>
         {
             transport.SessionMode = HttpServerSessionMode.Stateless;
             transport.ConfigureSessionOptions = (httpContext, serverOptions, _) =>

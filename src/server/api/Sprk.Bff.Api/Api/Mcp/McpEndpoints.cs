@@ -12,8 +12,10 @@ namespace Sprk.Bff.Api.Api.Mcp;
 /// <c>McpModule</c>'s <c>ConfigureSessionOptions</c> from the <see cref="McpAreaMetadata"/> stamped here (Phase 0 T13, notes/phase0-results.md).
 /// </summary>
 /// <remarks>
-/// <para><b>Chain, outermost first.</b> <c>.RequireAuthorization()</c> on the default workforce scheme (ADR-028; A10 refusals and
-/// per-tool policies are task 021's); the <c>mcp</c> rate-limit policy per caller (ADR-016); a 256 KiB request-body limit (ADR-001;
+/// <para><b>Chain, outermost first.</b> <c>.RequireAuthorization()</c> on the default workforce scheme (ADR-028); then
+/// <see cref="McpConnectorTokenFilter"/>, which refuses with 401 every token that is not an ADR-028 A10 caller (CIAM, A9 home
+/// directory, Copilot audience, app-only) before the transport runs (per-tool <c>[Authorize]</c> policies are checked inside the
+/// transport by the SDK's authorization filters, <see cref="McpToolAuthorization"/>); the <c>mcp</c> rate-limit policy per caller (ADR-016); a 256 KiB request-body limit (ADR-001;
 /// a Decision review is a few KB); response buffering off (the transport may answer with an SSE stream; SDK 2.3.1 also does this
 /// itself, and the route does not rely on that); then <see cref="McpEnabledFilter"/> (ADR-032 kill switch, after authorization: a
 /// switched-off server still answers an anonymous caller 401).</para>
@@ -42,6 +44,7 @@ public static class McpEndpoints
         // Keep it equal to RateLimitingModule.McpPolicyName.
         app.MapMcp(LegalOperationsRoute)
             .RequireAuthorization()
+            .RequireMcpConnectorToken()
             .RequireRateLimiting("mcp")
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
             .WithMetadata(new McpAreaMetadata(LegalOperationsArea))

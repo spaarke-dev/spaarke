@@ -117,9 +117,6 @@ public partial class RouteAuthorizationGuardTests
     private static readonly IReadOnlySet<string> PendingOwners = new HashSet<string>(StringComparer.Ordinal)
     {
         "159", "160", "161", "162", "163", "164", "165", "166", "UNOWNED-NEW",
-        // spaarkeai-mcp-bff-api-r1 task 021 (2026-11-12): the interim waiver on POST /mcp/legal-operations until 021 credits it
-        // through the Decision capability's own authorization (a mapped MCP route carries no per-resource filter of its own).
-        "021",
     };
 
     // =============================================================================================
@@ -288,7 +285,7 @@ public partial class RouteAuthorizationGuardTests
             var waived = byRoute.GetValueOrDefault(a.Key) ?? new List<Waiver>();
             switch (a.Credit)
             {
-                case Credit.None when waived.Count == 0 && !ProvenRoutes.Value.Contains(a.Key):
+                case Credit.None when waived.Count == 0 && !ProvenRoutes.Value.Contains(a.Key) && !McpCreditedRoutes.Value.Contains(a.Key):
                     violations.Add($"{a.Key}\n      at {a.Route.File}:{a.Route.Line} — only signed-in (or nothing): "
                                    + $"[{string.Join(", ", a.Route.Forms)}]");
                     break;

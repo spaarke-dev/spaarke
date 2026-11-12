@@ -83,6 +83,7 @@ public class McpToolCatalog
             }
 
             var tool = ((McpToolDefinition)Activator.CreateInstance(type, nonPublic: true)!).Create(services);
+            McpToolAuthorization.ValidateTool(tool, type); // [Authorize], no forbidden policy, explicit ReadOnly and title (B-7, FR-03)
 
             // A tool name is unique across areas too: the connector's approval card and the model address a tool by name.
             if (!seenNames.Add(tool.ProtocolTool.Name))

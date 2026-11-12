@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -34,8 +35,11 @@ namespace Sprk.Bff.Api.Tests.Api.Mcp;
 /// </summary>
 internal sealed class McpTestHost : IAsyncDisposable
 {
-    private const string Issuer = "https://mcp-contract.test/issuer";
-    private const string Audience = "api://mcp-contract-bff";
+    // A realistic ADR-028 A10 token (task 021): the route refuses any other shape. Spaarke tenant, exact v2 issuer, aud = the BFF app id.
+    internal const string TenantId = "11111111-2222-4333-8444-555555555555";
+    internal const string BffClientId = "66666666-7777-4888-9999-aaaaaaaaaaaa";
+    private const string Issuer = "https://login.microsoftonline.com/" + TenantId + "/v2.0";
+    private const string Audience = BffClientId;
     private static readonly SymmetricSecurityKey SigningKey = new(Encoding.UTF8.GetBytes("mcp-contract-test-signing-key-0123456789-0123456789"));
 
     private readonly WebApplication _app;
@@ -63,7 +67,12 @@ internal sealed class McpTestHost : IAsyncDisposable
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
         builder.Logging.ClearProviders();
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["Mcp:Enabled"] = mcpEnabled ? "true" : "false" });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Mcp:Enabled"] = mcpEnabled ? "true" : "false",
+            ["AzureAd:TenantId"] = TenantId,
+            ["AzureAd:ClientId"] = BffClientId,
+        });
 
         var probe = new McpProbeState();
         var capability = new McpProbeCapability();
@@ -80,7 +89,9 @@ internal sealed class McpTestHost : IAsyncDisposable
                 ValidAudience = Audience,
                 IssuerSigningKey = SigningKey,
             });
-        builder.Services.AddAuthorization(); // no FallbackPolicy: the route's own RequireAuthorization() is what is under test
+        // No FallbackPolicy: the route's own RequireAuthorization() is what is under test. "SystemAdmin" exists because the A10 suite's
+        // admin probe tool (tests/integration/auth/Mcp) is in this assembly too; here it admits nobody.
+        builder.Services.AddAuthorization(o => o.AddPolicy("SystemAdmin", p => p.RequireAssertion(_ => false)));
         builder.Services.AddRateLimitingModule();
         builder.Services.AddMcpModule(builder.Configuration, typeof(McpTestHost).Assembly);
 
@@ -119,7 +130,7 @@ internal sealed class McpTestHost : IAsyncDisposable
         {
             ["scp"] = "user_impersonation",
             ["oid"] = oid.ToString(),
-            ["tid"] = Guid.Parse("11111111-2222-4333-8444-555555555555").ToString(),
+            ["tid"] = TenantId,
         },
     });
 
@@ -251,6 +262,7 @@ internal sealed class McpProbeCapability : IDecisionCapability
 
 /// <summary>Probe tool of the served area: counts its invocations.</summary>
 [McpArea(McpEndpoints.LegalOperationsArea)]
+[Authorize]
 internal sealed class McpProbeEchoTool : McpToolDefinition
 {
     public override McpServerTool Create(IServiceProvider services) =>
@@ -267,6 +279,7 @@ internal sealed class McpProbeEchoTool : McpToolDefinition
 
 /// <summary>Probe tool of the served area that does what every production tool must: hand the capability exactly <c>IHttpContextAccessor.HttpContext</c>.</summary>
 [McpArea(McpEndpoints.LegalOperationsArea)]
+[Authorize]
 internal sealed class McpProbeHttpContextTool : McpToolDefinition
 {
     public override McpServerTool Create(IServiceProvider services) =>
@@ -286,10 +299,13 @@ internal sealed class McpProbeHttpContextTool : McpToolDefinition
 
 /// <summary>Probe tool of ANOTHER area: must never appear on <c>/mcp/legal-operations</c>.</summary>
 [McpArea("zz-other-area")]
+[Authorize]
 internal sealed class McpProbeOtherAreaTool : McpToolDefinition
 {
     public override McpServerTool Create(IServiceProvider services) =>
         McpServerTool.Create(
-            () => "other",
+            Other,
             new McpServerToolCreateOptions { Services = services, Name = "probe_other_area", Title = "Probe other area", ReadOnly = true });
+
+    private static string Other() => "other";
 }

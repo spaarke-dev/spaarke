@@ -288,10 +288,12 @@ public partial class RouteAuthorizationGuardTests
             + "write (a missing right is 403). Core record and item subject are derived server-side from the Signal, never the body; "
             + "the Decision Record's owning team is the ownership resolver's answer for the core and every resolved Signal's subject (D-129)."),
         new GovernedFile("Api/Mcp/McpEndpoints.cs", Scope.RouteLevelGate,
-            "POST /mcp/legal-operations (spaarkeai-mcp-bff-api-r1 task 020, FR-01): the stateless MCP Streamable HTTP endpoint, registered with the "
-            + "SDK's MapMcp on the application root. The route's own gate is .RequireAuthorization() on the default workforce scheme (signed-in only: "
-            + "no record id in the URL or the transport envelope); the tool a call names decides what is read, and every tool runs as the caller. "
-            + "Per-tool policies, the A10 refusals and the tools/list annotation checks are task 021's (see the interim Pending waiver)."),
+            "POST /mcp/legal-operations (spaarkeai-mcp-bff-api-r1 tasks 020-021, FR-01, FR-02; ADR-028 Amendment A10): the stateless MCP "
+            + "Streamable HTTP endpoint, registered with the SDK's MapMcp on the application root. The route's gate is .RequireAuthorization() on "
+            + "the default workforce scheme, then .RequireMcpConnectorToken(): only an A10 caller (Spaarke tenant, exact v2 issuer, aud = the BFF "
+            + "app, user_impersonation, a user) reaches the transport; CIAM and A9 home-directory tokens get 401 before any tool runs. No record "
+            + "id is in the URL or the transport envelope; the tool a call names decides what is read, as the caller, under its own [Authorize] "
+            + "policy. Declared by the MCP credit (McpRoutes + McpTools, RouteAuthorizationGuardTests.Mcp.cs), not by a waiver."),
         new GovernedFile("Api/Signals/SignalReadEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/v1/signals/worklist (ontology platform R1 task 038, D-15, FR-54) -- the worklist's only Signal reader. The "
             + "record-level decision is SignalReadService.ReadAsync, every row-visibility read AS THE CALLER through IDataverseUserClient: "
@@ -1206,6 +1208,9 @@ public partial class RouteAuthorizationGuardTests
     // 152 -> 153 (2026-11-12, spaarkeai-mcp-bff-api-r1 task 020, FR-01). Net +1: Api/Mcp/McpEndpoints.cs ADDED -- POST /mcp/legal-operations,
     // the stateless MCP endpoint, counted once the census vocabulary learned MapMcp (the SDK's MCP registration form). Classified by
     // GovernedFiles (RouteLevelGate) and one interim Pending waiver owned by task 021, which replaces it with the per-tool policy ledger.
+    //
+    // 153, unchanged (2026-11-12, spaarkeai-mcp-bff-api-r1 task 021, ADR-028 A10): Api/Mcp/McpEndpoints.cs stays the one MCP file. Its
+    // interim Pending waiver is gone; the route is declared by the MCP credit (McpRoutes + McpTools, RouteAuthorizationGuardTests.Mcp.cs).
     private const int ExpectedEndpointFileCount = 153;
 
     // =============================================================================================
@@ -1558,6 +1563,10 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("RequireMcpEnabled",
             "spaarkeai-mcp-bff-api-r1 task 020: the MCP kill switch (McpEnabledFilter, ADR-032 P3) answers 503 mcp.disabled when Mcp:Enabled is "
             + "false. Chained AFTER .RequireAuthorization(), so an anonymous caller still gets 401; decides nothing about who may act on what."),
+        new NotAuthorizationForm("RequireMcpConnectorToken",
+            "spaarkeai-mcp-bff-api-r1 task 021 (ADR-028 A10): McpConnectorTokenFilter (McpToolAuthorization.cs) refuses with 401 a token that "
+            + "is not an A10 caller (tenant, issuer, audience, scope, user); a TOKEN rule that names no record and decides nothing about who may "
+            + "act on what. The MCP credit (RouteAuthorizationGuardTests.Mcp.cs) requires it on every MCP route; it is never a per-resource credit."),
         new NotAuthorizationForm("WithMetadata(new McpAreaMetadata)",
             "spaarkeai-mcp-bff-api-r1 task 020: endpoint METADATA naming the product area the route serves (/mcp/{area}); McpModule reads it to "
             + "choose the route's tool set. Not a filter; decides nothing."),
@@ -3310,13 +3319,6 @@ public partial class RouteAuthorizationGuardTests
         // prvCreatesprk_Todo, so their waivers are deleted (close-project is sweep S-39, resolved in the ledger); the DELETE
         // pin's 404-vs-403 split is gone, so its Pending waiver became the Permanent OwnerComparison below in the diff that
         // landed the fix (maintenance rule 4's one sanctioned exception, named by owner round 12 item 4).
-
-        // ---------- task 020: the MCP endpoint, interim until task 021 ----------
-        Pending("POST /mcp/legal-operations", "021", Gap.NoDecision,
-            "[low] Signed-in only (.RequireAuthorization(), McpEndpoints.cs:44): the route itself takes no record id and, in task 020, serves "
-            + "NO production tool (only a test probe in the contract tests), so nothing is read. Task 021 adds the per-tool policies, the "
-            + "A10 refusal of CIAM and home-directory tokens, and the ledger entries, and replaces this waiver. Do not add a tool "
-            + "before it does."),
 
         // ---------- P:ReferenceData ----------
         Permanent("GET /api/ai/capabilities", PermanentBasis.ReferenceData, "167",
