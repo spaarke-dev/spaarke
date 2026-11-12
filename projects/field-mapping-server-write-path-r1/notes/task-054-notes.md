@@ -891,3 +891,88 @@ Not verified without a live environment:
   - per-reason count removed: **Failed 2**;
   - restored: **Passed 113, Failed 0**.
 - **CI job set** (`Set-CustomerOwnerTeams.Tests.ps1` + the new file, Pester 5.7.1 as CI pins): **131 passed, 0 failed** before the F1 round; **149 passed, 0 failed** after it. Under Pester 6.2 the files fail at load (the harness incompatibility the workflow's pin comment records), not a script defect.
+
+## 054a piece 3 — the Direct owner rule (3a, 3b, 3c)
+
+**Rule.** A Direct 1:1 message filed under no record is owned by the Direct message owner team (the `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` settings, resolved by `DirectMessageOwnerTeam`). One member assigns it: `DirectMessageOwnerStep.WriteDirectTeamOwnerAsync`. The step runs at the join (the chat ingestor and the outbound send) and on an unfile (the four re-file writers). A message filed under a record stays the resolver's.
+
+**Pieces.** 3a: lookup state `PartiallyConfigured`, the one owner step on the join sites, the pre-send 1:1 refusal, the resolver rule for a message's content rows, EventIds 5414–5418, ArchTest `DirectMessageOwnerStepGuardTests`. 3b: `UnfiledOwnership.UnfiledCommunication` and `DirectMessageOwnerStep.UnfiledOwnershipFor` on the four re-file writers, the unfile refusal (409 / 503), `RecordOwnershipResolver.NonDirectUnfileAnswer`, EventId 5419, ArchTest `RefileWriterUnfileRuleGuardTests`. 3c: the registry rationale text, the census reasons, the inbound-creators guard, the cross-surface owner tests and these notes. 3c changes no production behaviour.
+
+### Placement Justification (`.claude/constraints/bff-extensions.md`)
+
+- The rule is in the BFF because the BFF is the write path for a communication and its content rows. There is no Dataverse plugin (ADR-002): one server-side owner for the invariant (`DirectMessageOwnerStep`), wizards and clients preview only, and the security checks fail closed.
+- Placement: `Services/Communication/Access/DirectMessageOwnerStep.cs` (composed in `CommunicationModule`), the lookup in `Infrastructure/Dataverse/DirectMessageOwnerTeam.cs` (054a), the content-row and unfile answers in `Services/Dataverse/RecordOwnershipResolver.cs`. No new endpoint, no new package, no new background work, no AI surface (no `PublicContracts` change).
+- Publish-size delta against a fresh build: 3a +15,979 B, 3b +12,573 B (39.89 MB, 191 = 191 files). 3c edits one string literal in `RecordTableRules.cs`; it adds no production surface and was not measured again. No new vulnerable package.
+
+### §11 answers
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `DirectMessageOwnerStep` | `DirectThreadAccessService.GrantMessageAccessAsync` (the grant at the join) and `RecordOwnershipResolver` (owners of rows filed under a record). | The resolver answers Unchanged for a message filed under nothing by design (escalation E1), and it knows neither the stamped pair nor the Direct team; the grant must run on both sides of the owner write. The step composes the existing grant and the existing lookup instead of adding an owner path to each join site. | No writer assigns a Direct message to the Direct team, so the rule "a Direct 1:1 message filed under no record is owned by the Direct message owner team" has no owner and a message stays with its creator. |
+| `DirectMessageOwnerTeamRefusal.PartiallyConfigured` | The refusal set of `DirectMessageOwnerTeam` (`NotConfigured`, ambiguous name, team with members, and so on). | One new state in that set, not a new type: `NotConfigured` stays "both settings unset" (rule off). | A configuration with one setting unset reads as `NotConfigured`, which turns the rule off silently; the pre-send and unfile refusals could not tell "off" from "set but invalid". |
+| `UnfiledOwnership.UnfiledCommunication` (with `UnfiledOwnershipFor`) | `UnfiledOwnership.KeepCreator` and `ActingUserTeam`. | Neither can say "decided after the write: back to the Direct team, or Unchanged pending #2722". One new member, chosen in one static method that all four re-file writers call. | Each of the four writers would carry its own unfile rule for a communication, or an unfiled Direct message would keep the owner it had; the four paths would disagree. |
+| `record_owner_direct_team_unusable` (409) and `record_owner_direct_team_unavailable` (503) | `RecordOwnerRefusal.ParentUnresolved` and the ADR-019 problem mapping in `ProblemDetailsHelper`. | `ParentUnresolved` is a permanent refusal about a parent row. A configuration an admin must fix (409) and a fault the user can retry (503) need distinct stable codes; the mapping gains one status rule. | A lookup fault would be reported as a permanent 409, or the unfile would proceed with the owner unconfirmed, against the owner decision "refuse before any write: 409 config, 503 fault". |
+| `RecordOwnershipResolver.NonDirectUnfileAnswer` | The re-file answer inside `ReparentAsync` (`DirectUnfileAnswerAsync`). | A named private method extracted from the existing code; the body is unchanged (Unchanged). | #2722 would have to edit the middle of `ReparentAsync`; one named decision point lets UAC-r2 build it with one writer of the file at a time. |
+| `DirectMessageOwnerStepGuardTests` | `RecordOwnerAssignmentCensusTests` counts owner writes by member, not by which team the write names. | A source scan for the one member that both reads the Direct team's id and writes an owner, with must-fire and must-not-fire controls. | A new member could assign a communication to the Direct team and nothing would fail. |
+| `RefileWriterUnfileRuleGuardTests` | `RefileWriterAfterRefileGuardTests` (the task 198 step after a re-file). | A per-method scan that each re-file writer takes its unfile value from `UnfiledOwnershipFor`. | A fifth writer, or a changed writer, could re-file a communication with its own unfile value and nothing would fail. |
+
+3c adds no new production surface. Its test additions extend `InboundIngestionCreatorsGuardTests` and `CrossSurfaceOwnerTests`; the census gains no entry (the one writer was already listed in 3a) and only its reasons change.
+
+### EventIds 5414–5419
+
+| Id | Constant | Code | Level | Logs |
+|---|---|---|---|---|
+| 5414 | `DirectMessageOwnerStep.OwnerNotSetEvent` (`DirectMessageOwnerStep.cs:65`; logged at :161, :543) | `direct_message.owner_team_not_set` | Error | The step faulted, or the Direct team did not resolve at the join: the message keeps its owner. |
+| 5415 | `MessageNotMovedEvent` (:66; logged at :215, :510, :529, :561, :603) | `direct_message.owner_write_not_confirmed` | Error | The message was not moved: it or its thread could not be read, the owner changed since the unfile was decided, the owner write was not confirmed, or the return to the Direct team faulted. It keeps its owner. |
+| 5416 | `ContentRowNotMovedEvent` (:67; logged at :712, :720, :749) | `direct_message.content_row_not_moved` | Error | The message moved but a content row did not: its read faulted, the per-table cap was reached, or the row's own write failed. The row stays where it is. |
+| 5417 | `SendRefusedEvent` (:68; logged at :432, :440, :445) | `direct_message.send_refused` | Warning | A 1:1 send was refused before anything was sent: the thread's shape could not be read, the Direct team could not be read, or the team is not usable. |
+| 5418 | `RecordOwnershipResolver.DirectParentUndecidedEvent` (`RecordOwnershipResolver.cs:4303`) | `direct_message.content_owner_undecided` | Error | A content row's parent message is owned by a team that may be the Direct team, and whether it is cannot be decided: the row is given no owner (`ParentUnresolved`). |
+| 5419 | `UnfileRefusedEvent` (`DirectMessageOwnerStep.cs:69`; logged at :355, :369, :377) | `direct_message.unfile_refused` | Warning | An unfile of a Direct message was refused before any write: its thread could not be read, the Direct team could not be read, or the team is not usable. |
+
+### Known limits of 3a
+
+- With only one Direct setting set, a content row under a message owned by another named team is refused until the check can tell that team is not the Direct team; the check costs one uncached read per row. A per-team cache in `DirectMessageParticipantShares.IsDirectOwnerTeamAsync` is UAC-r2's to decide, and that file is UAC-r2's.
+- If the request is cancelled while the step moves content rows, the rows not yet moved keep their creator and nothing retries them. The 054c script is the recovery.
+- A 1:1 send to a single contact or external address is refused while the Direct settings are set but invalid.
+- `DirectOwnerJoin` has an internal constructor; "grant first, owner after the content rows exist" is kept by convention and by the call order the inbound-creators guard pins.
+- The configuration-key guard does not see `GetSection("DirectMessage")[...]`; the keys are read through the constants.
+- A reply into a deleted thread while the settings are invalid answers 503.
+
+### Known limits of 3b
+
+- The unfile guard checks the call shape (each writer takes its value from `UnfiledOwnershipFor`), not the arguments passed.
+- The unfile step grants the message to the thread's participants; task 198 Part C reconciles the audience.
+- If a paired message's thread cannot be read at an unfile, the unfile is refused with 503, even when the thread might not be a Direct thread.
+- If the owner assignment fails after the lookup resolved, the unfile stands, the failure is logged (5415) and the 054c script is the recovery.
+- A communication that is not an eligible Direct message keeps its owner on an unfile (Unchanged) until UAC-r2 builds #2722 in `RecordOwnershipResolver.NonDirectUnfileAnswer`.
+- #2728: a document linked only through `sprk_relatedcommunication` keeps its owner when its message is unfiled. Making it follow its communication is UAC-r2's follow-up, together with #2722.
+
+### Owner-assign scan (production sites that assign an owner on `sprk_communication` or its content rows)
+
+Content rows are `RestrictedFilingShareBar.ContentRows`: `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog` and a `sprk_document` linked through `sprk_relatedcommunication`. Scanned: every `"ownerid"` and `"ownerid@odata.bind"` write, `RecordOwnerResolution.ApplyTo`, and every `AssignAsync` / `AssignRequest` in `src/server`.
+
+| Site | Writes | Rule |
+|---|---|---|
+| `Services/Communication/Access/DirectMessageOwnerStep.cs:793` (`WriteDirectTeamOwnerAsync`; called at :601 for the message and :745 for its content rows) | `sprk_communication` and its content rows | **The Direct team's single writer.** Held by `DirectMessageOwnerStepGuardTests`; census kind `DirectMessageTeam`. |
+| `Services/Signals/GateDecisionRecordSharing.cs:991` (`ReownToDirectAsync`) | `sprk_decisionrecord` only | The gate Decision Record follows its message to the Direct team (D-215). Not a communication; the guard holds it to `sprk_decisionrecord`. |
+| `Services/Communication/IncomingCommunicationProcessor.cs:1019` | create of the mailbox communication | The resolver's team under `owner.IsOwned`; an unfiled row keeps its creator. |
+| `Services/Communication/IncomingCommunicationProcessor.cs:1622` (`ApplyOwner`) | the attachment documents, attachment rows and archived `.eml` | The communication's resolved owner, carried through. |
+| `Services/Communication/EmailUploadCaptureService.cs:188` | create of an uploaded email | The resolver's team under `owner.IsOwned`. |
+| `Services/Communication/CommunicationService.cs:1207`, `:2285`, `:3200`, `:3434` | create of an outbound or message communication | `RecordOwnerResolution.ApplyTo` (`RecordOwnershipResolver.cs:1847`); an unfiled row keeps its creator, and the step moves a Direct 1:1 message after the join. |
+| `Services/Communication/CommunicationService.cs:3334` (`ApplyContentOwner`; callers :690, :3851, :4148, :4309) | attachment documents, attachment rows and the archive document | The resolver's answer for content of the message (`ContentOf`). |
+| `Services/Communication/MessageAttachmentMaterializer.cs:285`, `:298` | attachment document and row of a chat message | The resolver's answer for content of the message. |
+| `Services/Communication/CommunicationEnrichmentService.cs:761` (`AssignOwningTeamAsync`) | `sprk_communication` | Category routing for a row filed under nothing only (`IsFiledOrUnreadableAsync` first). |
+| `Services/Communication/CommunicationEnrichmentService.cs:1287` | `sprk_emailreviewlog` | The resolver's answer for content of the message. |
+| `Services/Communication/CommunicationParticipantIndexer.cs:125` | `sprk_communicationparticipant` | The resolver's answer for content of the message. |
+| `Services/Dataverse/RecordOwnershipResolver.cs:3086`, `:3113` (`SettleOwnerAsync`), `:3292` (`ReleaseOwnSecureWriteAsync`) | the re-filed row (a communication after a re-file) | The re-file's owner assignment from the row's parents; for a Direct message the unfile value is `UnfiledCommunication` and the move to the Direct team is the step's (`AfterReparentAsync`). |
+| `Services/Access/SecureChildReconciler.cs:3067` (`AssignAsync`), `:3111` (`RestoreStartOwnerAsync`), `:883` (`ReownOrdinaryRowCoreAsync`), `:1071` (`ReownFiledRootAsync`) | child rows of a record, content rows of a Secure-owned message | Writes the team the resolver answered (for a content row of a Direct-team message, the Direct team by the 3a resolver rule); no reconciler member reads the Direct team. |
+| `Services/RecordCreation/RecordCreationService.cs:1536`, `:1621`, `:1639` | rows created or repaired through the unified service | Never a communication (the registry exception refuses an unfiled create, and a Direct message is never created here). |
+
+Rows not listed write other tables: thread rows (`ThreadResolver.cs:251`, `:1098`, `:1351`, `:1800`, `:1957`; `DirectThreadAccessService.cs:127`), root cascades (`AssignCascadeChildOwners.cs:231`, `ProvisionProjectEndpoint.cs:3723`, `UnsecureProjectEndpoint.cs:650`), and unrelated tables (finance, notifications, playbooks, documents outside a message).
+
+### 3c guards and tests
+
+- `RecordTableRules.cs`: `UnfiledCommunicationKeepsCreator` stays; its rationale now says the unified service never creates a Direct message and the Direct owner rule is a writer rule (`DirectMessageOwnerStep`), as the gate Decision Record is.
+- `RecordOwnerAssignmentCensusTests`: the `DirectMessageOwnerStep.WriteDirectTeamOwnerAsync` entry and its kind comment now cover the join and the unfile; the `MessagingIngestor` waiver reason names the step as the only owner change after the join.
+- `InboundIngestionCreatorsGuardTests`: rule (7). The chat ingestor calls `GrantAtJoinAsync` then `OwnDirectAfterContentAsync` once each, in that order after the thread resolver's join, calls no other member of the step, names no Assign and does not read the Direct team; the join members are called only from the chat ingestor and the outbound send. Must-fire controls mutate the real source (an Assign, a second call, a wrong member, a lookup read, a removed call, a step call added to the mailbox processor); must-not-fire controls cover comments and declarations.
+- `CrossSurfaceOwnerTests`: a content row of a Direct-team message gets the Direct team from every question a surface asks (content of the message, owning-team question, the gate record, each content table); a content row of a record-filed message does not; with both settings unset the answer is today's; a row that is not message content is not routed.

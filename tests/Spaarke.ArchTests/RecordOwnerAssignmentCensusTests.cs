@@ -262,7 +262,9 @@ public class RecordOwnerAssignmentCensusTests
             + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
             + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync). The registry names this "
             + "rule UnfiledCommunicationKeepsCreator (the unified service refuses such a create); this file is its only "
-            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034).",
+            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034). The Direct owner rule is "
+            + "not this file's: after the join the only owner change is DirectMessageOwnerStep (fm 054 piece 3a), called "
+            + "from here and pinned by the same guard.",
             WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
@@ -571,10 +573,10 @@ public class RecordOwnerAssignmentCensusTests
         RootFollowsFiling,
 
         /// <summary>
-        /// field-mapping-server-write-path-r1 task 054 piece 3a: assigns a Direct message filed under NO record, and its content rows,
-        /// to the configured Direct message owner team (<c>DirectMessageOwnerStep</c>), conditional on the row version. A message
-        /// filed under a record stays the resolver's. Asserted (<c>DirectMessageOwnerStepGuardTests</c>): it is the only member that
-        /// reads the Direct team's id and writes an owner.
+        /// field-mapping-server-write-path-r1 task 054 pieces 3a and 3b, the Direct owner rule: assigns a Direct message filed under NO
+        /// record, and its content rows, to the configured Direct message owner team (<c>DirectMessageOwnerStep</c>) at the join and on
+        /// an unfile, conditional on the row version. A message filed under a record stays the resolver's. Asserted
+        /// (<c>DirectMessageOwnerStepGuardTests</c>): it is the only member that reads the Direct team's id and writes an owner.
         /// </summary>
         DirectMessageTeam,
 
@@ -781,8 +783,11 @@ public class RecordOwnerAssignmentCensusTests
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
         new OwnerWriteEntry("DirectMessageOwnerStep.cs", "WriteDirectTeamOwnerAsync", 1, OwnerWriteKind.DirectMessageTeam,
-            "fm 054 piece 3a: a Direct message filed under no record, and the content rows that had its owner, to the resolved "
-            + "Direct message owner team; owner only, conditional on the row version, evicted and read back."),
+            "The Direct owner rule's one writer (fm 054 pieces 3a and 3b): a Direct 1:1 message filed under no record, and the content "
+            + "rows that had its owner, to the resolved Direct message owner team. Reached from the join (GrantAtJoinAsync / "
+            + "OwnDirectAfterContentAsync, MessagingIngestor and CommunicationService) and from an unfile (AfterReparentAsync, behind "
+            + "UnfiledOwnershipFor on the four re-file writers). Owner only, conditional on the row version, evicted and read back; no "
+            + "other member of the server assigns a communication to the Direct team (DirectMessageOwnerStepGuardTests)."),
     };
 
     /// <summary>The gate an <see cref="OwnerWriteKind.UnfiledOnly"/> member must call before its owner write.</summary>
