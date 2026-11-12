@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084e" project="ebilling-r1">
+  <metadata>
+    <title>Rules in force (B5): one shared precedence function, and the "Outranked by X" mark on the record's rules-in-force list</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217, EB-D-219)</phase>
+    <gate>084 merged into work. ontology-r1 is told the design before the build and reviews the Services/Signals/** diff before merge.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Refactors the evaluator's precedence step (the code that judges invoices) into a shared function, plus a new mark on 084's route.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius: the evaluator's displacement must stay byte-identical (parity), and the record-level mark must not claim more than a record read knows.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends 084's read service and touches InvoiceComplianceEvaluator (ontology-r1-reviewed).</parallel-reason>
+    <deps>084</deps>
+    <tags>bff-api, api, refactoring, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Extract the per-key computation of InvoiceComplianceEvaluator's precedence step (step 4, ~lines 415-480 on work/ebilling-r1: the top-valid-rank search, Displacing, the Replace / Split marking) into ONE pure function under Services/Signals/Billing that takes the versions, their PrecedenceKey and a validity predicate, and returns per version: outright-displaced, cap-displaced, and the displacing set. The evaluator calls it with its full Valid predicate (behaviour unchanged); 084's rules-in-force read calls it with the record-level predicate and adds the fifth mark, "Outranked by X" (Split: "cap outranked by X"), to the marks array.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Signals billing evaluator, rule precedence (D-39, D-205) and ASP.NET Core Minimal APIs.</role>
+
+  <goal>The record's rules-in-force list shows which rules are outranked on that record, computed by the same code that decides displacement for an invoice line, and worded so it never claims more than a record-level read knows; the evaluator's results are unchanged.</goal>
+
+  <context>
+    <background>EB-D-219 (owner, 2026-11-12) and ontology-r1's conditions R1-R6 (message 2026-11-12, recorded in notes/084-procedure-review-ui.md). Validity in the evaluator partly depends on the invoice (HandlerAccepts runs the handler on the invoice's facts), so a record read cannot know it; per the owner's B2 ruling (2026-10-18) a broken specific rule leaves the general rule in force.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/InvoiceComplianceEvaluator.cs (step 4 calls the shared function; ontology-r1 reviews)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/RulePrecedence.cs (the pure function; name may differ, state it in the notes)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs (084): the fifth mark</file>
+      <file role="new">tests for the function (tests/unit/domain/**) and the evaluator parity test</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/BillingRuleCatalogue.cs (PrecedenceOf), the evaluator's PrecedenceKey</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="084" status="pending">The rules-in-force read and its marks array.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ontology-r1 R1">The top rank is the highest rank holding a version that passes at record level: the gate accepts it (TryPrepareBillingRule) and it is not downgraded (DisallowedConsequenceType). Never the plain top rank.</constraint>
+    <constraint source="ontology-r1 R2">Under Split only a version that states a cap (MaxAmountPerItem not null) can displace (D-205), and the lower version is "cap outranked", not outranked. Under Additive nothing is marked. A version tied at the top rank is never marked (ties all apply).</constraint>
+    <constraint source="ontology-r1 R3">"By which rule" lists EVERY displacing version at the top rank.</constraint>
+    <constraint source="ontology-r1 R4">The mark reads "Outranked by X" (Split: "cap outranked by X") with the fixed note "applies unless X is refused when an invoice is checked; a line can differ (dates, fallback)". Never a bare "displaced".</constraint>
+    <constraint source="ontology-r1 R5">One implementation: the evaluator and 084 call the same function; no rank loop is written in the read service. The evaluator's existing tests pass unchanged, and a parity test shows the evaluator's displacedOutright / capDisplaced are identical before and after. The Services/Signals/** diff goes to ontology-r1 before merge.</constraint>
+    <constraint source="ontology-r1 R6">Group exactly what the evaluator groups on that date: legacy policy versions as well as Procedure rules (D-205 item 2), each picked with the same SelectVersion for the date, system rules excluded; the line set of rules, not RulesWithFallback (stated in the note).</constraint>
+    <constraint source="EB-D-218">084's read rules are unchanged: one app-only read plus the batched caller-rights check over every exposed row; any refusal or fault is 503 procedures.unavailable. Any legacy row the mark exposes is in that check.</constraint>
+    <constraint source="ADR-001, ADR-008, .claude/constraints/bff-extensions.md">No new route, no new package; publish-size delta recorded.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/ebilling-r1/notes/084-procedure-review-ui.md (084's DTOs; ontology-r1 R1-R6)</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 6.3, 6.5, 7)</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Send ontology-r1 the function's signature and the evaluator call site before building.</step>
+    <step order="2">Extract the function; switch the evaluator to it; parity test; existing evaluator tests unchanged.</step>
+    <step order="3">Add the fifth mark to 084's rules-in-force read with the R4 wording; tests.</step>
+    <step order="4">dotnet build and test (BFF tests and ArchTests); publish-size delta; ontology-r1 review of the Signals diff.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the evaluator's step 4 cannot be extracted without changing any evaluator result (the parity test fails and the difference is not a bug), STOP and raise 🔔 Human Input Required with ontology-r1's view; do not ship a second rank loop.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>InvoiceComplianceEvaluator step 4 computes displacement per line; ProcedureResolver.RulesOn says precedence is not there; no record-level function exists.</existing>
+    <extension>Yes: the evaluator's own step becomes the shared function (an extraction, not a second implementation); 084's read service gains one mark.</extension>
+    <cost-of-doing-nothing>A billing admin reviewing a record cannot see that a firm's rule outranks the client default for that key, so an override can be made against a rule that never runs on the record.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">The shared precedence function; InvoiceComplianceEvaluator.cs (call site); RecordProcedureReadService.cs (mark)</output>
+    <output type="test">Function tests; evaluator parity test; mark tests on 084's route</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The evaluator calls the shared function; its existing tests pass unchanged and the parity test shows identical displacedOutright / capDisplaced before and after.</criterion>
+    <criterion testable="true">Must-fire: a valid higher-rank Replace version marks the lower "Outranked by X"; a capped higher Split version marks the lower "cap outranked by X"; a legacy version at a higher rank outranks a Procedure rule; a two-version tie at the top lists both under "by" for a lower version.</criterion>
+    <criterion testable="true">Must-not-fire: a gate-refused or downgraded higher version leaves the lower NOT outranked; a capless higher Split version leaves the lower cap in force; a tie at the top marks neither; an Additive key marks nothing; the AddedFee late-fee cap and admin-fee cap are separate keys.</criterion>
+    <criterion testable="true">The mark carries the R4 note text; no "displaced" wording reaches the DTO.</criterion>
+    <criterion testable="true">084's 503 and step-0 behaviour unchanged (the existing 084 tests pass); no new route or package; publish-size delta recorded; ontology-r1 approved the Signals diff.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-11-12 from EB-D-219 (owner). Deployment: 112.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

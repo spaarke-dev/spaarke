@@ -89,6 +89,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 084b | 🔲 [open] | Procedures on the record (B2): Procedure wizard and rule Exclude on 089 routes | FULL | sonnet / high | P3-E2 | 084a |
 | 084c | 🔲 [open] | Procedures on the record (B3): Change for this record, typed form per rule type | FULL | sonnet / high | P3-E2 | 084b |
 | 084d | 🔲 [open] | Procedures on the record (B4): before/after Impact dry run and Assign Procedure (ontology-r1 reviews) | FULL | opus / high | P3-E2 | 084, 084b |
+| 084e | 🔲 [open] | Rules in force (B5): one shared precedence function and the "Outranked by X" mark (EB-D-219; ontology-r1 reviews) | FULL | opus / high | P3-E2 | 084 |
 | 085 | ✅ [merged into work 052307dc0b; one adversarial pass, two fix rounds (publish and create are check-then-use with 409 on a changed version or type; F1-b reverted per ontology ruling (c), durable fix DEF-061); uac-r2 and ontology-r1 approved] | Rate cards keyed to Procedure Version: import, copy-forward, resolver tiers re-keyed to the rank; no scope column | FULL | sonnet / xhigh | P3-E | 080, 082 |
 | 086 | 🔄 [code ported onto work/ebilling-r1 (task/ebill-086-rebased); role -WhatIf/-Verify and creator-person -Verify pass on dev (40 tables). Pending: pre-deploy count of Stored Files on invoices of Secure records, -Apply outputs and owner OK with dates, live NFR-05 census after a dev BFF deploy, second adversarial pass, uac-r2 review; notes/086-storedfile-secure-child.md "Port"] | Invoice Stored Files join the secure family as a leaf child of sprk_invoice: lineage, role row, creator person, census | FULL | opus / high | P3-D (p-safe false) | 088, 090, 089 |
 | 087 | ✖ [cancelled] | Secure BU snapshot writer — cancelled 2026-10-21 by EB-D-148 (BU filter dropped, model §12 / O-12) | — | — | — | — |
@@ -149,7 +150,7 @@ To begin: `work on task 001`. Wave W0-1 (001, 002, 003) and W2-1 (040, 041) have
 | 109 | ✅ [done] | ConsoleKit additions: outcome cards, count filters, disclosure, status labels | STANDARD | sonnet / high | P4-A | none |
 | 110 | ✅ [done] | Invoice Review code page — lines, review pane, corrections, bulk, by-rule | STANDARD | opus / high | P4-C | 100, 101, 102, 108, 109 |
 | 111 | ✅ [done] | Invoice decision wizard and context / related / history panes | STANDARD | sonnet / high | none | 110, 103, 104, 105, 106, 107 |
-| 112 | 🔲 [open] | Deploy WP4 to dev | STANDARD | sonnet / high | none (deploy) | 084, 084a, 084b, 084c, 084d, 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118, 119 |
+| 112 | 🔲 [open] | Deploy WP4 to dev | STANDARD | sonnet / high | none (deploy) | 084, 084a, 084b, 084c, 084d, 084e, 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118, 119 |
 
 ### Phase 5 — Firm feedback (WP5)
 
@@ -308,7 +309,7 @@ joined at 049 by `029 → 070 → 071 → 072 → 073 → 049`, and WP1 `029` ga
 | 093, 098 (external gate) | uac-r2 task 188 (`ExternalDocumentNarrowing`) merged. **Met: merged on master 446c83d927 (#2170), 2026-10-21.** 093 also R3 deploy pairing (BFF then SPA; SPA side is R4's) |
 | 095 (external gate) | #2177 merged and deployed — met on dev 2026-10-21 (master 84291ecea8) |
 | 096 | word-add-in-r1 removes the add-in side first; server legs one release later |
-| 084 | Split per EB-D-217: 084 Part A, then 084a → 084b → 084c, 084d after 084 and 084b; all deploy with 112 |
+| 084 | Split per EB-D-217: 084 Part A, then 084a → 084b → 084c, 084d after 084 and 084b, 084e after 084 (EB-D-219); all deploy with 112 |
 | 116 | The `sprk_sourcedocument` column delete runs only after 079, with the owner's OK |
 | 119 (external gate) | ontology-r1 task 157 (SignalReadService Duplicate read check) merged; the same rule is reused |
 | 120 | Live dev role change: owner's DIRECT OK (D-185 came via ontology-r1) + notices to ontology-r1 and uac-r2 before/after; send ontology-r1 the role-XML diff (overlaps their #2298) |
