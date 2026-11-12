@@ -4,6 +4,16 @@
 
 ## 1. Spike head SHA (for the owner's per-SHA deploy go)
 
+> **Update 2026-11-12 — deployed and exercised.** The spike tip is now **`755987b385`** (pushed). Since `5c9e301572` it gained master merges plus `fdfd7b1d23`, which teaches the route guard `MapMcp`. mcp-r1 first deployed it to the dev BFF on 2026-11-10 with the owner's per-SHA go. Since 2026-11-11, uac-r2 includes it in every dev deploy as a local, never-pushed merge with master; today that is `6dbe69b9e2` (master `a654da59c4` + spike). Dev URL: `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations`.
+>
+> **Live results so far:**
+> - Anonymous POST: 401.
+> - Copilot connector handshake: 2026-11-10.
+> - **T5 passed** 2026-11-12 (`phase0-registration-facts.md` (d)).
+> - The 1 MB widget (`spike.html`) **rendered inline in Copilot Chat (web)**, with `connected: true`, init 30 ms and theme light, and its `callServerTool` echo worked (2026-11-12 16:12Z). This also covers the UI test listed under §8.
+>
+> The text below records the state at first writing.
+
 **`5c9e301572`** on `spike/spaarkeai-mcp-phase0` (one commit on top of master `f9ba615b09`). Not pushed to origin; not deployed. **No deploy has happened and none was requested of the dev App Service.** The deploy needs the owner's explicit go for this SHA, in unified-access-control-r2's session (project CLAUDE.md §5). Deployed URL: not yet (record here when the owner confirms).
 
 What the deploy needs from the owner, besides the go: nothing to configure (the spike routes are always mapped; there is no `Mcp:Enabled` switch on the spike); a licensed `systemuser` workforce token for T5 (`spike_whoami`); and the branch pushed to origin, or a deploy from the worktree path (I did not push).
@@ -79,7 +89,8 @@ Padding is a deterministic pseudo-random string in an inline `<script>` (so a ho
 
 ## 8. Not done, and why
 
-- **Deploy to the dev BFF:** not performed; needs the owner's per-SHA go (escalation trigger 1).
+- **Deploy to the dev BFF:** not performed at first writing. **Done since** (2026-11-10, owner per-SHA go; see §1 update).
+- **Size test (3 / 6 MB in Chat and Cowork):** belongs to task 003. The 3 and 6 MB variants are not bound to a tool, so 003 needs a small spike change (bind one to `spike_echo_b`, or switch `spike.html`) and a new spike SHA deployed through uac-r2 with the owner's go.
 - **UI test in a local MCP Apps host (render, echo round-trip, dark mode):** not run; no browser/Chrome integration in this session, and the ext-apps basic host needs a token-injecting setup. The widget builds and type-checks; rendering is untested. 003 will see it in Copilot first.
 - **Full `Sprk.Bff.Api.Tests` run:** started once; on this heavily loaded machine 29+ long-running tests timed out (3 minute durations: host-start tests and seam tests). The four failing classes I re-ran alone (`UserEndpointsTests`, `ContentUnderstandingHostContractTests`, `DiGraphValidationTests`, `DocumentProfileContractTests`) pass (20 passed, 1 skipped). I killed the full run before it finished, so there is no full-suite count. Seam tests that read `C:\code_files\...` corpus paths and Graph/Dataverse live seams are environmental.
 - ArchTests (`tests/Spaarke.ArchTests`, route authorization census) were not run; the spike branch is never merged, so they gate nothing here. Production 020 owns B-8.

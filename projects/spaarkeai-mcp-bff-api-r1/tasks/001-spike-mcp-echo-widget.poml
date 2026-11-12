@@ -4,7 +4,7 @@
     <title>Spike MCP server, echo tool and test widget</title>
     <phase>0 Platform spike</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies code files (.cs, .ts) on the spike branch, and the spike is deployed to the dev BFF behind live auth</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -158,7 +158,11 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Design §13 lists T0–T14 and E1–E5; this task only builds what they need — 003 runs and records them. Remove the spike worktree at project wrap-up with scripts/worktree/Remove-WorktreeSafe.ps1 (FAILURE-MODES G-20). The plan's Discovered Resources path for useMcpApp.tsx is missing the src/ segment; the correct path is knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx. Use dotnet build/test without --no-build after edits (FAILURE-MODES G-12).</notes>
+  <notes>Design §13 lists T0–T14 and E1–E5; this task only builds what they need — 003 runs and records them. Remove the spike worktree at project wrap-up with scripts/worktree/Remove-WorktreeSafe.ps1 (FAILURE-MODES G-20). The plan's Discovered Resources path for useMcpApp.tsx is missing the src/ segment; the correct path is knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx. Use dotnet build/test without --no-build after edits (FAILURE-MODES G-12).
+Completed 2026-11-12 (closed out after the fact; the build work was done 2026-11-06 to 11-10). The spike branch spike/spaarkeai-mcp-phase0 is at tip 755987b385 (pushed, never merged; draft PR #2615) in worktree C:\code_files\spaarke-wt-spaarkeai-mcp-phase0-spike. Local checks passed (19 spike tests): T13 two tool sets on two routes, 401 + WWW-Authenticate, 406 without the dual Accept, resources/read MIME type text/html;profile=mcp-app with an empty csp. Publish delta +0.703 MB. Widget variants 1/3/6 MB. All recorded in notes/spikes/phase0-spike-measurements.md (updated 2026-11-12).
+Deployed to the dev BFF 2026-11-10 by mcp-r1 on the owner's per-SHA go for 755987b385 (given in the mcp-r1 session). Since 2026-11-11 uac-r2 includes it in every dev deploy (currently 6dbe69b9e2). Live: anonymous POST 401; T5 passed 2026-11-12; the widget rendered in Copilot Chat (web) and its callServerTool echo worked, which covers the ui-tests' render and round-trip. The dark-mode check is left to 003 (T1/T2).
+Deviation: the 3 and 6 MB variants are not bound to a tool, so 003's Size test needs a small spike change and a new owner-approved SHA.
+rework: none task 001</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

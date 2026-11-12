@@ -11,7 +11,7 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel | Model / effort | Rigor |
 |-----|-------|-------|--------|--------------|----------|----------------|-------|
-| 001 | Spike MCP server, echo tool and test widget | 0 | 🔲 [open] | none | Group A | sonnet / high | FULL |
+| 001 | Spike MCP server, echo tool and test widget | 0 | ✅ [done] | none | Group A | sonnet / high | FULL |
 | 002 | A10 connector client, OAuth and connector registration | 0 | ✅ [done] | 001 | Group B | opus / high | STANDARD |
 | 003 | Run and record Phase 0 tests T0–T14, E1–E5 | 0 | 🔲 [open] | 001, 002 | Group C | sonnet / high | STANDARD |
 | 011 | Contract baseline for signal, plan and decision routes | A | ✅ [done] | none | Group A | sonnet / high | FULL |
