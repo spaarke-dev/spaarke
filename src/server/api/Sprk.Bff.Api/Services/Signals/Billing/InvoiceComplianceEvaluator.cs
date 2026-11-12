@@ -437,33 +437,17 @@ public sealed class InvoiceComplianceEvaluator
         {
             foreach (var key in versions.Where(v => accepted.ContainsKey(v.PolicyVersionId)).GroupBy(v => accepted[v.PolicyVersionId].PrecedenceKey))
             {
-                var precedence = BillingRuleCatalogue.PrecedenceOf(key.Key.RuleType);
+                // 084e: the one shared precedence function (RulePrecedence.Resolve; the record's rules-in-force read calls it too). Ranks are
+                // tried from the top and Valid is asked lazily (O-1), so a version displaced outright (Replace) is never run.
+                var resolved = RulePrecedence.Resolve(
+                    BillingRuleCatalogue.PrecedenceOf(key.Key.RuleType), key.ToList(), v => v.Rank,
+                    v => accepted[v.PolicyVersionId].MaxAmountPerItem is not null, Valid);
 
-                // The highest rank holding a valid version. Ranks are tried from the top, so a version below it is never run when it is
-                // displaced outright (Replace). Under Split only a version that STATES a cap (MaxAmountPerItem) can displace a lower
-                // version's cap (D-205 ruling): a capless higher version leaves the lower cap in force. A deliberate "no cap on this record"
-                // is a rule-level Exclude, or a record rule in the base's slot, never precedence.
-                ProcedureRank? top = null;
-                if (precedence != BillingRulePrecedence.Additive)
-                {
-                    bool Displacing(BillingRuleCandidate v) =>
-                        (precedence != BillingRulePrecedence.Split || accepted[v.PolicyVersionId].MaxAmountPerItem is not null) && Valid(v);
-                    foreach (var atRank in key.GroupBy(v => v.Rank).OrderByDescending(g => g.Key))
-                    {
-                        if (atRank.Any(Displacing))
-                        {
-                            top = atRank.Key;
-                            break;
-                        }
-                    }
-                }
-
-                foreach (var version in key)
+                foreach (var (version, outcome) in resolved.Outcomes)
                 {
                     // Below the top valid rank: Replace displaces it; Split keeps it for its code check and drops its cap (step 5). A tie
                     // with the top is not displaced: ties all apply.
-                    var displaced = top is { } t && version.Rank.CompareTo(t) < 0;
-                    if (displaced && precedence == BillingRulePrecedence.Replace)
+                    if (outcome == PrecedenceOutcome.DisplacedOutright)
                     {
                         Add(displacedOutright, version.PolicyVersionId, subject);
                         continue;
@@ -475,7 +459,7 @@ public sealed class InvoiceComplianceEvaluator
                     }
 
                     Add(subjectsByVersion, version.PolicyVersionId, subject);
-                    if (displaced)
+                    if (outcome == PrecedenceOutcome.CapDisplaced)
                     {
                         Add(capDisplaced, version.PolicyVersionId, subject);
                     }
