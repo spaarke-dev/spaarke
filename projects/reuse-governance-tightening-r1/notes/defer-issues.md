@@ -39,7 +39,7 @@ Rename `ActionType` → `ExecutorType` and `SupportedActionTypes` → `Supported
 
 ---
 
-### ISS-002 — Test-InstructionPaths.ps1 exits 1 on master with two false positives
+### ISS-002 — Test-InstructionPaths.ps1: 2 false positives on master, and 11 dead directory paths it misses on Windows
 
 | Field | Value |
 |---|---|
@@ -69,6 +69,43 @@ Extend the line-suffix regex to comma lists (`:\d+(-\d+)?(,\d+(-\d+)?)*$`) with 
 **Estimated effort**: 30–60 minutes
 **Blockers**: none
 **Related**: root `CLAUDE.md` §16 (enforcement ladder: guards ship with must-fire/must-not-fire controls)
+
+#### Update 2026-11-11: 11 more dead paths that the checker hides on Windows
+
+On the Linux CI runner the check reports **13** new missing paths, not 2 (Tier 2 "Markdown Link Validator" job [130795653236](https://github.com/spaarke-dev/spaarke/actions/runs/43101945192/job/130795653236): "Missing paths: 36 (baseline 23, new 13)"). A Windows checkout reports only the 2 above.
+
+##### Why Windows and CI disagree (a defect in the checker)
+
+`Test-InstructionPaths.ps1:89` skips a path when `git check-ignore -q --no-index -- $p` exits 0. On Windows with `core.autocrlf=true`, `.gitignore` is checked out with CRLF endings (`i/lf w/crlf`). There, git 2.51.0.windows.1 reports **any** path that ends in `/` as ignored, and attributes the match to a blank line (`.gitignore:173`, `src/client/pcf/.gitignore:21`). Even `zzz/nothing/` matches. The same path without the slash is not ignored. So on Windows the checker silently skips every directory reference. The 2026-10-08 baseline was recorded that way, which is why these 11 references (some dating from 2025-12) were never in it. On Linux they are found.
+
+**Fix:** make the ignore test give the same answer on both platforms. For example, test the path without its trailing `/` first and handle directory-only patterns explicitly, or read the ignore rules from the index rather than the CRLF working-tree files. Add a must-fire control: a dead `dir/` reference must be reported on Windows.
+
+##### The 11 references
+
+**Dead: the text should change (7)**
+
+| Instruction file | Path named | What happened |
+|---|---|---|
+| `.claude/adr/ADR-011-dataset-pcf.md` | `src/client/pcf/UniversalDatasetGrid/` | Control deleted 2026-06-05 (`c1c428e92b`, datagrid-framework-r1 #329) |
+| `.claude/constraints/pcf.md` | `src/client/pcf/UniversalDatasetGrid/` | Same |
+| `.claude/patterns/pcf/error-handling.md` | `src/client/pcf/UniversalDatasetGrid/control/` | Same |
+| `.claude/adr/ADR-024-polymorphic-resolver-pattern.md` | `src/client/pcf/RegardingLink/` | Control deleted 2026-03-15 (`ded4e037c2`) |
+| `.claude/skills/repo-cleanup/SKILL.md` | `docs/ai-knowledge/catalogs/` | Moved to `.claude/catalogs/` 2026-04-05 (`fb043944c9`) |
+| `.claude/skills/spe-integration/SKILL.md` | `src/server/api/Sprk.Bff.Api/Infrastructure/SpeFileStore/` | Never existed. `SpeFileStore` is `Infrastructure/Graph/SpeFileStore.cs` |
+| `.claude/skills/foundry-agent/SKILL.md` | `src/server/api/Sprk.Bff.Api/agents/workflows/` | Never existed. No Foundry workflow YAML is in the repo |
+
+**Named on purpose, not created yet: reword so the path is not checkable, or baseline it (4)**
+
+| Instruction file | Path named | Why it is absent |
+|---|---|---|
+| `.claude/adr/ADR-052-workload-placement.md` | `src/server/functions/` | Rule for where a future Functions project goes; none exists yet |
+| `.claude/skills/adr-check/SKILL.md` | `src/server/functions/` | Same rule |
+| `.claude/skills/devops-portfolio-status/SKILL.md` | `docs/portfolio/` | Created by `--snapshot` on first use |
+| `.claude/skills/power-page-deploy/SKILL.md` | `src/client/external-spa/.site-download/spaarke-external-workspace/` | Created by `pac pages download`. It is not gitignored, so it may also need a `.gitignore` line |
+
+##### Revised effort
+
+2–3 hours: the checker fix with must-fire and must-not-fire controls, 7 text fixes, 4 rewordings or baseline lines, then the 2 original false positives. All edits are in `.claude/` and `scripts/quality/`.
 
 ---
 
