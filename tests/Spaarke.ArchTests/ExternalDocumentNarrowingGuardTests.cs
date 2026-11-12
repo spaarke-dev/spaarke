@@ -1167,6 +1167,9 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid (the team the row's parents resolve to), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::ReleaseOwnSecureWriteAsync"] =
             "Writes only ownerid (the ordinary team the fresh parents give), conditioned on the row version.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::WriteDirectTeamOwnerAsync"] =
+            "fm 054 piece 3a: writes only ownerid (a typed reference to the resolved Direct message owner team), built in this " +
+            "member, conditioned on the row version; never a link value.",
         ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService::CreateAsync"] =
             "Creates only (step 11, a fresh Guid upserted; an isolated root too): a link set in a create can only HIDE the new " +
             "row (D7 narrows, never widens), and no existing document is re-pointed or un-linked.",

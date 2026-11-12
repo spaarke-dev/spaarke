@@ -107,7 +107,9 @@ public static class CommunicationEndpoints
             .Produces<SendCommunicationResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
 
         group.MapPost("/send-bulk", SendBulkCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()

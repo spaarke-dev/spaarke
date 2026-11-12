@@ -723,6 +723,10 @@ public static class CommunicationModule
         // (DirectMessage:BusinessUnitName / DirectMessage:OwnerTeamName, no defaults: unset refuses at use, never at
         // startup). Concrete singleton (ADR-010): it holds the short-lived verdict cache (ADR-009 metadata exception).
         services.AddSingleton<Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam>();
+        // field-mapping-server-write-path-r1 task 054 piece 3a — the one step after a message joins a thread (the grant, then the
+        // Direct team for a Direct message filed under nothing) and the 1:1 pre-send check. Concrete singleton (ADR-010: one
+        // implementation, no seam needed); CommunicationService and MessagingIngestor take it as an optional dependency.
+        services.AddSingleton<DirectMessageOwnerStep>();
         // task 041/043 — explicit participant/grant reader. Task 041 registered the ADR-032 Null-Object default
         // (no explicit grants); task 043 replaces it with the REAL Direct-topology reader (owner ∪ POA share).
         // For a Direct thread it returns the two participants; for any non-Direct thread it returns EMPTY, so

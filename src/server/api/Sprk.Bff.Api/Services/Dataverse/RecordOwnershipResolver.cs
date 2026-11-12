@@ -1915,14 +1915,20 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private readonly IConfiguration _configuration;
     private readonly ILogger<RecordOwnershipResolver> _logger;
 
+    /// <summary>fm task 054 (F1): the Direct message owner team lookup <see cref="DirectMessageParentAnswerAsync"/> reads. Production
+    /// DI composes it (<c>CommunicationModule</c>); a construction without it leaves that rule off.</summary>
+    private readonly DirectMessageOwnerTeam? _directMessageOwnerTeam;
+
     public RecordOwnershipResolver(
         IGenericEntityService dataverse,
         IConfiguration configuration,
-        ILogger<RecordOwnershipResolver> logger)
+        ILogger<RecordOwnershipResolver> logger,
+        DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _directMessageOwnerTeam = directMessageOwnerTeam;
     }
 
     /// <inheritdoc />
@@ -3695,6 +3701,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         /// <summary>Fix round (B-K2): a project whose ADR-024 pair is EMPTY — filed under nothing, so it is never looked
         /// through (its own business unit decides, and no look-through depth is spent on it).</summary>
         public bool UnpairedProject { get; init; }
+
+        /// <summary>The team that owns the parent (its planned team, when one is planned); <c>null</c> when no team owns it.
+        /// Read by <see cref="DirectMessageParentAnswerAsync"/> only.</summary>
+        public Guid? OwningTeamId { get; init; }
     }
 
     /// <summary>
@@ -3842,9 +3852,94 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, primaryUndecided);
         }
 
+        // fm task 054 (F1): a team-owned communication primary parent that is, or may be, the Direct message owner team's.
+        if (await DirectMessageParentAnswerAsync(facts[0], context, ct).ConfigureAwait(false) is { } direct)
+            return direct;
+
         return await OrdinaryExitAsync(
             await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false),
             facts[0].BusinessUnitId, context, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Error: whether a row's communication parent is owned by the Direct message owner team cannot be decided, so the
+    /// row is given no owner.</summary>
+    internal const string DirectParentUndecidedEventCode = "direct_message.content_owner_undecided";
+
+    internal static readonly EventId DirectParentUndecidedEvent = new(5418, DirectParentUndecidedEventCode);
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 054 (F1). A CONTENT row of a message — a question asked as content
+    /// (<see cref="RecordOwnershipContext.ContentOf"/>) or a row of a message content table
+    /// (<see cref="Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar.ContentRows"/>) — whose PRIMARY parent is a team-owned
+    /// <c>sprk_communication</c>, decided by the one Direct message owner team lookup (<see cref="DirectMessageOwnerTeam"/>), after
+    /// the secure decision and before the ordinary exit. <c>null</c>: today's answer (the parent business unit's default team) stands.
+    /// A gate Decision Record of a message asks with <see cref="RecordOwnershipContext.KeepCreatorUnlessTargetIsTeamOwned"/> and
+    /// the communication as its first parent, so it takes this rule too: a gate record of a Direct-team message is owned by the
+    /// Direct team, and an answer that cannot be told is no write. Any other row (an event or an analysis filed under a message)
+    /// keeps today's answer.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>The lookup resolves and the parent's owning team IS that team (ids, non-null): the row is owned by the Direct team.
+    /// Any other team: <c>null</c>.</item>
+    /// <item>Neither Direct setting is configured: <c>null</c>, from configuration alone (nothing is read).</item>
+    /// <item>Any other answer (a refusal, including <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/>, or a fault):
+    /// the shared check (<see cref="Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares.IsDirectOwnerTeamAsync"/>) decides
+    /// whether the parent's team could be the Direct team. A team proven not to be it (a default team, an access team, a team
+    /// other than the one the configuration names) gives <c>null</c>. Otherwise the answer is a refusal
+    /// (<see cref="RecordOwnerRefusal.ParentUnresolved"/>) logged with <see cref="DirectParentUndecidedEvent"/>: the row is not
+    /// written, and the parent business unit's default team is never the answer. When the answer is unknown BECAUSE a read faulted
+    /// (the lookup's, or the check's), it is not a refusal: the fault propagates, as every other read fault in this resolver does,
+    /// so the caller retries instead of reporting a permanent refusal.</item>
+    /// </list>
+    /// Only a communication parent takes this rule. A Secure-owned parent was answered before it (secure-if-any). Without the lookup
+    /// (a construction that does not compose it) the rule is off.
+    /// </remarks>
+    private async Task<RecordOwnerResolution?> DirectMessageParentAnswerAsync(
+        ParentFacts primary, RecordOwnershipContext context, CancellationToken ct)
+    {
+        var contentRow = context.KeepCreatorUnlessTargetIsTeamOwned
+                         || Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar.ContentRows.Any(c =>
+                             string.Equals(c.Table, context.ChildEntityLogicalName, StringComparison.OrdinalIgnoreCase));
+        if (_directMessageOwnerTeam is null
+            || !contentRow
+            || !string.Equals(primary.Parent.EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase)
+            || !primary.HasOwningTeam
+            || primary.OwningTeamId is not { } parentTeam
+            || parentTeam == Guid.Empty)
+        {
+            return null;
+        }
+
+        var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
+        if (direct.IsNotConfigured && direct.Fault is null)
+            return null;
+        if (direct.IsResolved && direct.Fault is null)
+            return direct.TeamId == parentTeam ? RecordOwnerResolution.Owned(parentTeam) : null;
+
+        var isDirect = await Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares
+            .IsDirectOwnerTeamAsync(_dataverse, _directMessageOwnerTeam, parentTeam, _logger, ct).ConfigureAwait(false);
+        if (isDirect == false)
+            return null;
+        if (isDirect == true)
+            return RecordOwnerResolution.Owned(parentTeam);
+
+        // An unknown answer behind a FAULTED read is not an answer to refuse on (it would surface as a permanent 409): the fault
+        // propagates, as ReadFilingRowAsync's does. The shared check swallows its own faults into "unknown", so when the lookup
+        // itself did not fault, the identity read it relies on is asked once more for the fault it hid.
+        var fault = direct.Fault
+                    ?? (await _directMessageOwnerTeam.IdentifyDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false)).Fault;
+        if (fault is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
+
+        _logger.LogError(DirectParentUndecidedEvent,
+            "Refusing to resolve an owning team: the parent {ParentEntity} {ParentId} is owned by team {TeamId}, and whether that is "
+            + "the Direct message owner team cannot be decided ({Refusal}). The row is given no owner.",
+            primary.Parent.EntityLogicalName, primary.Parent.RecordId, parentTeam, direct.Refusal);
+        return RecordOwnerResolution.Refused(
+            RecordOwnerRefusal.ParentUnresolved,
+            $"the parent {primary.Parent.EntityLogicalName} {primary.Parent.RecordId:D} is owned by a team that may be the Direct "
+            + "message owner team, and that cannot be decided now");
     }
 
     /// <summary>
@@ -4278,10 +4373,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 return null;
             }
 
-            return new ParentFacts(parent, plannedBu.Value, HasOwningTeam: true, flaggedSecure) { UnpairedProject = unpairedProject };
+            return new ParentFacts(parent, plannedBu.Value, HasOwningTeam: true, flaggedSecure)
+            {
+                UnpairedProject = unpairedProject,
+                OwningTeamId = plannedTeam,
+            };
         }
 
-        return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure) { UnpairedProject = unpairedProject };
+        return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure)
+        {
+            UnpairedProject = unpairedProject,
+            OwningTeamId = hasOwningTeam ? row.GetAttributeValue<EntityReference>(OwningTeamColumn)!.Id : null,
+        };
     }
 
     /// <summary>

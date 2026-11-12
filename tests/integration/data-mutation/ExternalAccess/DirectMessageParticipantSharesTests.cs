@@ -141,7 +141,8 @@ public class DirectMessageParticipantSharesTests
 
     // ── The scheduled job ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private SecureChildShareReconciliationJob Job(GateDecisionRecordSharing? gate = null)
+    private SecureChildShareReconciliationJob Job(
+        GateDecisionRecordSharing? gate = null, Microsoft.Extensions.Logging.ILogger<SecureChildShareReconciliationJob>? logger = null)
     {
         var services = new ServiceCollection();
         if (gate is not null)
@@ -157,7 +158,33 @@ public class DirectMessageParticipantSharesTests
             .BuildServiceProvider();
         return new SecureChildShareReconciliationJob(
             provider.GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(), _time,
-            NullLogger<SecureChildShareReconciliationJob>.Instance);
+            logger ?? NullLogger<SecureChildShareReconciliationJob>.Instance);
+    }
+
+    /// <summary>fm 054 piece 3a: the lookup with exactly ONE Direct setting set (the other unset). It reads nothing.</summary>
+    private DirectMessageOwnerTeam PartiallyConfiguredLookup(string onlySetKey) => new(
+        _users,
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [onlySetKey] = onlySetKey == DirectMessageOwnerTeam.BusinessUnitNameConfigKey
+                ? DirectMessageOwnerTeamDouble.BusinessUnitName
+                : DirectMessageOwnerTeamDouble.OwnerTeamName,
+        }).Build(),
+        _time,
+        NullLogger<DirectMessageOwnerTeam>.Instance);
+
+    /// <summary>Records each log entry's level and message.</summary>
+    private sealed class RecordingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     private static JobRunContext RunContext() =>
@@ -635,6 +662,52 @@ public class DirectMessageParticipantSharesTests
         run.Success.Should().BeTrue(run.ErrorMessage);
         run.ResultJson.Should().Contain(SecureChildShareReconciliationJob.DirectMessageRun.StatusNotConfigured);
         _shares.WriteLog.Should().BeEmpty();
+    }
+
+    // fm 054 piece 3a (agreed with uac-r2 2026-11-11, a named test edit): exactly one Direct setting set is PartiallyConfigured —
+    // an unknown, never "not configured". Nothing is granted or revoked; the run reports TeamUnknown with a Warning.
+    [Theory(DisplayName = "fm 054 3a must-fire: only one Direct setting set, the pass is TeamUnknown with a Warning and writes nothing")]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task Job_WithOnlyOneDirectSettingSet_IsTeamUnknown_WithAWarning_AndWritesNothing(string onlySetKey)
+    {
+        var (message, _) = DirectMessage();
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+        _lookup = PartiallyConfiguredLookup(onlySetKey);
+        var logger = new RecordingLogger<SecureChildShareReconciliationJob>();
+
+        var run = await Job(logger: logger).ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeFalse("an undecidable Direct team is not a clean run");
+        run.ResultJson.Should().Contain(SecureChildShareReconciliationJob.DirectMessageRun.StatusTeamUnknown);
+        run.ResultJson.Should().NotContain(SecureChildShareReconciliationJob.DirectMessageRun.StatusNotConfigured);
+        logger.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+                                             && e.Message.Contains("partially_configured", StringComparison.Ordinal));
+        Grants().Should().Be(0);
+        Revokes().Should().Be(0);
+        Holds("sprk_communication", message, Outsider).Should().BeTrue("an unknown revokes nothing");
+    }
+
+    [Theory(DisplayName = "fm 054 3a must-fire: only one Direct setting set, a Direct-team-owned message is unknown and nothing is granted or revoked")]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task Reconcile_WithOnlyOneDirectSettingSet_IsUnknown_AndWritesNothing(string onlySetKey)
+    {
+        var (message, _) = DirectMessage();
+        _shares.Seed("sprk_communication", message, DataversePrincipalRef.User(Outsider), Read);
+        _lookup = PartiallyConfiguredLookup(onlySetKey);
+
+        (await DirectMessageParticipantShares.IsDirectOwnerTeamAsync(SecureChildShareWorld.EntitiesOver(() => _world).Object, Lookup(),
+                DirectTeam, NullLogger.Instance, CancellationToken.None))
+            .Should().BeNull("one setting set is unknown, never 'not the Direct team'");
+
+        var outcome = await new DirectMessageParticipantShares(
+            SecureChildShareWorld.EntitiesOver(() => _world).Object, _shares, Lookup(), _configuration,
+            SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Status.Should().Be(DirectMessageParticipantShares.Status.Unknown);
+        outcome.Complete.Should().BeFalse("an unknown is retried");
+        _shares.WriteLog.Should().BeEmpty("nothing is granted or revoked");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
