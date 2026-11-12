@@ -14,11 +14,22 @@ Stryker is run with `since` enabled, so only mutants on lines changed in the win
 active; every other mutant is `Ignored` and not counted. A mutant that survives, or is
 not covered by any test, on a changed line of a security-critical file is the signal.
 
+Paths: Stryker.NET 5 keys each file by its ABSOLUTE path on the runner (and may leave `..` in it, e.g.
+`/home/runner/work/x/x/src/server/api/Sprk.Bff.Api/../../shared/Contracts/A.cs`). Such a key is normalised and made
+relative to --repo-root (default: $GITHUB_WORKSPACE, else the current directory). Only a RELATIVE key is joined to the
+report's SOURCE_ROOT. Prefixing SOURCE_ROOT to an absolute key printed every path twice (issue #1821).
+
+The table lists only files with at least one active mutant; Stryker's report also carries every other file of the
+project (all mutants `Ignored` in since-mode), which are counted in one line instead of a row each.
+
 Usage:
-  summarize-mutation-report.py --report LABEL=path/to/mutation-report.json=SOURCE_ROOT ...
+  summarize-mutation-report.py --report LABEL=path/to/mutation-report.json=SOURCE_ROOT ... [--repo-root DIR]
 """
 import argparse
 import json
+import os
+import posixpath
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +47,22 @@ def md_code(text: str, limit: int = 90) -> str:
     return "`" + text.replace("`", "'").replace("|", "\\|") + "`"
 
 
+_ABSOLUTE = re.compile(r"^(/|[A-Za-z]:/)")
+
+
+def repo_relative(fname: str, root: str, repo_root: str) -> str:
+    """The repo-relative path of a report file key (see the module docstring)."""
+    path = fname.replace("\\", "/")
+    if not _ABSOLUTE.match(path):
+        return posixpath.normpath(posixpath.join(root, path) if root else path)
+    path = posixpath.normpath(path)
+    base = posixpath.normpath(repo_root.replace("\\", "/")).rstrip("/")
+    # A Windows drive path compares case-insensitively; a POSIX one does not.
+    windows = bool(re.match(r"^[A-Za-z]:/", path))
+    same = path.lower().startswith(base.lower() + "/") if windows else path.startswith(base + "/")
+    return path[len(base) + 1:] if same else path
+
+
 def load(spec: str):
     label, path, root = (spec.split("=", 2) + ["", ""])[:3]
     return label, Path(path), root.strip("/")
@@ -47,6 +74,8 @@ def main() -> int:
     ap.add_argument("--out-md", required=True)
     ap.add_argument("--out-alert", required=True)
     ap.add_argument("--out-verdict", required=True)
+    ap.add_argument("--repo-root", default=os.environ.get("GITHUB_WORKSPACE") or os.getcwd(),
+                    help="checkout root that absolute report paths are made relative to")
     args = ap.parse_args()
 
     rows = []       # (repo path, killed, survived, uncovered, ignored)
@@ -60,7 +89,7 @@ def main() -> int:
             continue
         report = json.loads(path.read_text(encoding="utf8"))
         for fname, data in sorted(report.get("files", {}).items()):
-            repo_path = (root + "/" if root else "") + fname.replace("\\", "/")
+            repo_path = repo_relative(fname, root, args.repo_root)
             source_lines = (data.get("source") or "").splitlines()
             killed = survived = uncovered = ignored = 0
             for m in data.get("mutants", []):
@@ -83,14 +112,17 @@ def main() -> int:
     verdict = "failing" if failing else "ok"
     Path(args.out_verdict).write_text(verdict, encoding="utf8")
 
+    active_rows = [r for r in rows if r[1] + r[2] + r[3] > 0]
+    inactive = len(rows) - len(active_rows)
+
     def table():
         out = ["| File | Killed | Survived | No coverage | Score |", "|---|---:|---:|---:|---:|"]
-        for path, k, s, u, _ in rows:
-            denom = k + s + u
-            score = "n/a (no active mutants)" if denom == 0 else f"{100.0 * k / denom:.1f}%"
-            out.append(f"| `{path}` | {k} | {s} | {u} | {score} |")
-        if not rows:
-            out.append("| _no mutated file in the reports_ | | | | |")
+        for path, k, s, u, _ in active_rows:
+            out.append(f"| `{path}` | {k} | {s} | {u} | {100.0 * k / (k + s + u):.1f}% |")
+        if not active_rows:
+            out.append("| _no file in the reports has an active mutant_ | | | | |")
+        if inactive:
+            out += ["", f"{inactive} other file(s) in the report had no active mutant (nothing on a changed line)."]
         return out
 
     def listing(limit):

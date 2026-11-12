@@ -34,6 +34,13 @@ internal sealed class UserFlagDirectoryDouble : DataverseWebApiClient
 
     public bool Faults { get; set; }
 
+    /// <summary>
+    /// When set, every <c>systemusers</c> read throws what this returns instead of <see cref="Faults"/>'s
+    /// <see cref="HttpRequestException"/> — e.g. a <see cref="TaskCanceledException"/> (an HttpClient timeout, no caller
+    /// cancellation) or an <see cref="OperationCanceledException"/> paired with a cancelled caller token (#1821).
+    /// </summary>
+    public Func<Exception>? Fault { get; set; }
+
     public List<string> Queries { get; } = new();
 
     /// <summary>The <c>$select</c> of every <c>systemusers</c> read, in order.</summary>
@@ -56,6 +63,8 @@ internal sealed class UserFlagDirectoryDouble : DataverseWebApiClient
 
         Queries.Add(filter ?? string.Empty);
         Selects.Add(select ?? string.Empty);
+        if (Fault is not null)
+            throw Fault();
         if (Faults)
             throw new HttpRequestException("Test: the users could not be read.");
 
