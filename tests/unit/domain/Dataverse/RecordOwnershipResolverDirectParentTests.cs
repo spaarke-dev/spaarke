@@ -85,6 +85,30 @@ public class RecordOwnershipResolverDirectParentTests
         _log.Entries.Should().NotContain(e => e.Event.Id == 5418);
     }
 
+    [Fact]
+    public async Task GateRecord_OfAMessageTheResolvedDirectTeamOwns_IsTheDirectTeams()
+    {
+        var resolution = await Resolver(World().WithMessage(DirectUnit, DirectTeam), Resolved()).ResolveOwnerAsync(
+            GateContext(), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Owned);
+        resolution.OwningTeamId.Should().Be(DirectTeam, "a gate record of a Direct-team message is the Direct team's");
+    }
+
+    [Theory]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task GateRecord_WhenTheDirectTeamCannotBeIdentified_RefusesWithEvent5418(string onlySet)
+    {
+        var resolution = await Resolver(World().WithMessage(DirectUnit, DirectTeam), DirectMessageOwnerStepTests.PartiallyConfigured(onlySet))
+            .ResolveOwnerAsync(GateContext(), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        resolution.OwningTeamId.Should().BeNull();
+        _log.Entries.Should().ContainSingle(e => e.Event.Id == 5418 && e.Level == LogLevel.Error);
+    }
+
     // ── Must not fire ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -164,6 +188,10 @@ public class RecordOwnershipResolverDirectParentTests
         .WithTeam(DirectUnitDefaultTeam, DirectUnit, isDefault: true, teamType: 0, DirectMessageOwnerTeamDouble.BusinessUnitName)
         .WithTeam(DirectTeam, DirectUnit, isDefault: false, teamType: 0, DirectMessageOwnerTeamDouble.OwnerTeamName)
         .WithTeam(OtherNamedTeam, FakeDirectory.ChildBu, isDefault: false, teamType: 0, "Another owner team");
+
+    /// <summary>The gate writer's question: the communication first, as content of it (DecisionRecordWriter, GateDecisionRecordSharing).</summary>
+    private static RecordOwnershipContext GateContext() =>
+        RecordOwnershipContext.ForParents([new RecordOwnershipParent("sprk_communication", MessageId)]) with { KeepCreatorUnlessTargetIsTeamOwned = true };
 
     private RecordOwnershipResolver Resolver(FakeDirectory directory, DirectMessageOwnerTeam lookup) =>
         directory.Resolver(logger: _log, directMessageOwnerTeam: lookup);

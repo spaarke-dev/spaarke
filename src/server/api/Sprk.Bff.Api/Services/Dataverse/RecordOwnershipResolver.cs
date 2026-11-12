@@ -3873,7 +3873,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// (<see cref="Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar.ContentRows"/>) — whose PRIMARY parent is a team-owned
     /// <c>sprk_communication</c>, decided by the one Direct message owner team lookup (<see cref="DirectMessageOwnerTeam"/>), after
     /// the secure decision and before the ordinary exit. <c>null</c>: today's answer (the parent business unit's default team) stands.
-    /// Any other row (a gate Decision Record, an event or an analysis filed under a message) keeps today's answer.
+    /// A gate Decision Record of a message asks with <see cref="RecordOwnershipContext.KeepCreatorUnlessTargetIsTeamOwned"/> and
+    /// the communication as its first parent, so it takes this rule too: a gate record of a Direct-team message is owned by the
+    /// Direct team, and an answer that cannot be told is no write. Any other row (an event or an analysis filed under a message)
+    /// keeps today's answer.
     /// </summary>
     /// <remarks>
     /// <list type="bullet">
