@@ -4,6 +4,7 @@
 > **Source ADRs**: ADR-001, ADR-007, ADR-008, ADR-010, ADR-013 (refined 2026-05-20), ADR-029 (forthcoming — publish hygiene)
 > **Source Assessment**: [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md)
 > **Last Updated**: 2026-05-20
+> **Last Reviewed**: 2026-11-12 (cross-reference links only; the `IInvokePlaybookAi` wording is stale, tracked in #2740)
 > **Status**: Active (binding)
 
 ---
