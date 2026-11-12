@@ -61,6 +61,21 @@ internal sealed class RecordProcedureRig
 
     private readonly Dictionary<Guid, Guid> _setOf = new();
     private DateTime _created = new(2026, 1, 1, 8, 0, 0, DateTimeKind.Utc);
+    private int _nextId;
+    private readonly Dictionary<Guid, string> _procedureNames = new();
+    private readonly Dictionary<Guid, string> _ruleCodes = new();
+
+    /// <summary>
+    /// The next row id. Ids are a counter, not random, so two rigs seeded the same way hold the same ids and a 200 body can be compared
+    /// byte for byte across them (the fix round 3 guard removes one row from a fresh rig and compares).
+    /// </summary>
+    private Guid NextId() => new($"08400000-0000-4000-9000-{++_nextId:x12}");
+
+    /// <summary>
+    /// Every Procedure Version and policy version row seeded, with a label that names it by what it is (not by id), in seeding order:
+    /// (entity set, id, label). The fix round 3 guard walks these.
+    /// </summary>
+    public List<(string Set, Guid Id, string Label)> VersionRows { get; } = new();
 
     public RecordProcedureRig()
     {
@@ -99,7 +114,7 @@ internal sealed class RecordProcedureRig
 
     public Guid AddProcedure(string name, ProcedureAppliesTo appliesTo, Guid? firm = null, int status = ProcedureEntity.StatusActive, ProcedureType? type = null)
     {
-        var id = Guid.NewGuid();
+        var id = NextId();
         var columns = new List<(string, object)>
         {
             (ProcedureEntity.AreaColumn, Option(RuleDomains.PolicyDomainBilling)),
@@ -110,8 +125,9 @@ internal sealed class RecordProcedureRig
         if (firm is { } f) columns.Add((ProcedureEntity.FirmColumn, Ref("sprk_organization", f)));
         if (type is { } t) columns.Add((ProcedureEntity.TypeColumn, Option((int)t)));
         World.Add(ProcedureEntity.Entity, id, columns.ToArray());
+        _procedureNames[id] = name;
 
-        var set = Guid.NewGuid();
+        var set = NextId();
         World.Add(RuleSet, set,
             ("sprk_procedure", Ref(ProcedureEntity.Entity, id)), (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)),
             ("statecode", Option(0)));
@@ -121,7 +137,7 @@ internal sealed class RecordProcedureRig
 
     public Guid AddVersion(Guid procedure, int number, DateOnly? from, DateOnly? to, int status = ProcedureEntity.VersionStatusActive)
     {
-        var id = Guid.NewGuid();
+        var id = NextId();
         var columns = new List<(string, object)>
         {
             (ProcedureEntity.VersionProcedureColumn, Ref(ProcedureEntity.Entity, procedure)),
@@ -133,15 +149,17 @@ internal sealed class RecordProcedureRig
         if (from is { } f) columns.Add((ProcedureEntity.VersionEffectiveFromColumn, Stored(f)));
         if (to is { } t) columns.Add((ProcedureEntity.VersionEffectiveToColumn, Stored(t)));
         World.Add(ProcedureEntity.VersionEntity, id, columns.ToArray());
+        VersionRows.Add((ProcedureEntity.VersionEntitySet, id, $"Procedure version {number} of '{_procedureNames.GetValueOrDefault(procedure, "?")}'"));
         return id;
     }
 
     public Guid AddRule(Guid set, string code, Guid? id = null)
     {
-        id ??= Guid.NewGuid();
+        id ??= NextId();
         World.Add(Policy, id.Value,
             ("sprk_policycode", code), ("sprk_ruleset", Ref(RuleSet, set)), ("sprk_enabled", true), ("statecode", Option(0)),
             (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)));
+        _ruleCodes[id.Value] = code;
         return id.Value;
     }
 
@@ -152,7 +170,7 @@ internal sealed class RecordProcedureRig
 
     public Guid AddRuleVersion(Guid policy, Guid? procedureVersion, DateOnly from, int number = 1, Guid? basedOn = null, DateTime? created = null, string? headline = null)
     {
-        var id = Guid.NewGuid();
+        var id = NextId();
         var columns = new List<(string, object)>
         {
             ("sprk_policy", Ref(Policy, policy)),
@@ -167,12 +185,13 @@ internal sealed class RecordProcedureRig
         if (basedOn is { } b) columns.Add((ProcedureAssignmentService.BasedOnVersionColumn, Ref(PolicyVersion, b)));
         if (created is { } c) columns.Add(("createdon", c));
         World.Add(PolicyVersion, id, columns.ToArray());
+        VersionRows.Add(("sprk_policyversions", id, $"policy version {number} of rule '{_ruleCodes.GetValueOrDefault(policy, "?")}' (in force from {from:yyyy-MM-dd})"));
         return id;
     }
 
     private Guid AddRow(string table, Guid record, DateTime? created, params (string Column, object Value)[] columns)
     {
-        var id = Guid.NewGuid();
+        var id = NextId();
         var all = new List<(string, object)>(columns) { ("statecode", Option(0)), (table, Ref(table, record)) };
         if (created is { } c) all.Add(("createdon", c));
         World.Add(ProcedureAssignmentEntity.Entity, id, all.ToArray());
@@ -235,7 +254,7 @@ internal sealed class RecordProcedureRig
     /// <summary>The ids of <see cref="SeedChangedAndBaseRetired"/>: a changed rule that is still in force on Mar15 and a record rule whose base is gone by then.</summary>
     public sealed record ChangedAndRetired(
         Guid Procedure, Guid Version, Guid ChangedBase, Guid ChangedBaseV1, Guid ChangedBaseV2, ChangedRows Changed,
-        Guid RetiredBase, Guid RetiredBaseVersion, ChangedRows Retired);
+        Guid RetiredBase, Guid RetiredBaseVersion, ChangedRows Retired, Guid FirstVersion);
 
     /// <summary>
     /// One Procedure (all records; version 1 to Mar 1, version 2 after). GENERAL is published under both versions and changed on the record
@@ -255,7 +274,7 @@ internal sealed class RecordProcedureRig
         var droppedVersion = AddRuleVersion(dropped, v1, Jan1);
         var changed = ChangeRuleRows(Matter, M, general, generalV1, Jan15, code: "BRR-GENERAL");
         var retired = ChangeRuleRows(Project, P, dropped, droppedVersion, Jan15, code: "BRR-DROPPED");
-        return new ChangedAndRetired(procedure, v2, general, generalV1, generalV2, changed, dropped, droppedVersion, retired);
+        return new ChangedAndRetired(procedure, v2, general, generalV1, generalV2, changed, dropped, droppedVersion, retired, v1);
     }
 
     /// <summary>A Procedure with one version [from, open) and one rule <paramref name="code"/> published under it.</summary>

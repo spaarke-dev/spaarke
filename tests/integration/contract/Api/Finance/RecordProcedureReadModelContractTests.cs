@@ -318,6 +318,57 @@ public sealed class RecordProcedureReadModelContractTests
             m.RecordRuleId == recordRule && m.BasedOn!.Id == droppedVersion && m.BaseCode == "DROPPED");
     }
 
+    [Fact(DisplayName = "084 rules (K2): a base-retired record rule shows the version of its CURRENT episode, the one the resolver counts, not the latest version of an earlier removed change")]
+    public async Task BaseRetired_ShowsTheCurrentEpisodesVersion_AsTheResolverCountsIt()
+    {
+        var rig = new RecordProcedureRig();
+        var procedure = rig.AddProcedure("Guideline", ProcedureAppliesTo.AllRecords);
+        var v1 = rig.AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        rig.AddVersion(procedure, 2, Mar1, null);
+        var dropped = rig.AddProcedureRule(procedure, "DROPPED"); // published under v1 only, so it is gone on Mar15
+        var baseOld = rig.AddRuleVersion(dropped, v1, Jan1);
+        var baseNew = rig.AddRuleVersion(dropped, v1, Jan1, number: 2);
+        // Episode 1: a change, in force from Feb15, based on the first base version. It is removed (its Exclude row deleted).
+        var first = rig.ChangeRuleRows(Project, P, dropped, baseOld, new DateOnly(2026, 2, 15), code: "BRR-DROPPED");
+        rig.World.Remove(ProcedureAssignmentEntity.Entity, first.Exclude);
+        // Episode 2: the same record rule changed again (a newer Exclude row), in force from Jan15 (EARLIER than episode 1's version), based on the second base version.
+        var episodeStart = rig.Tick();
+        rig.ExcludeRule(Project, P, dropped, created: episodeStart);
+        var second = rig.AddRuleVersion(first.RecordRule, null, Jan15, number: 2, basedOn: baseNew, created: episodeStart);
+
+        // The resolver's own answer while the base still runs (Feb 20): only the current episode counts.
+        var resolver = await rig.ResolverSays(CoreRecordKind.Project, P, F, new DateOnly(2026, 2, 20));
+        var resolved = resolver.Rules.Should().ContainSingle(r => r.RecordRule != null).Subject;
+        resolved.Version.PolicyVersionId.Should().Be(second, "the resolver counts the current episode only");
+        resolved.Version.BasedOnVersionId.Should().Be(baseNew);
+
+        var stranded = (await Rules(rig, Project, P, date: Mar15)).Rules.Single();
+
+        stranded.Marks.Select(m => m.Kind).Should().Equal("Changed", "BaseRetired");
+        stranded.Marks.Single(m => m.Kind == "BaseRetired").BasedOn.Should().Match<PolicyVersionRefView>(b => b.Id == baseNew && b.Number == 2,
+            "BaseRetired must name the version the resolver would have run, not the latest version of a removed change");
+        stranded.Marks.Single(m => m.Kind == "Changed").BasedOn!.Id.Should().Be(baseNew);
+    }
+
+    [Fact(DisplayName = "084 rules (K2): a base-retired record rule whose current change has no version at all (a state the BFF never writes) is Unavailable, as the resolver faults on it, never a guess from an older change")]
+    public async Task BaseRetired_WithNoVersionInTheCurrentEpisode_IsUnavailable()
+    {
+        var rig = new RecordProcedureRig();
+        var procedure = rig.AddProcedure("Guideline", ProcedureAppliesTo.AllRecords);
+        var v1 = rig.AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        rig.AddVersion(procedure, 2, Mar1, null);
+        var dropped = rig.AddProcedureRule(procedure, "DROPPED");
+        var droppedVersion = rig.AddRuleVersion(dropped, v1, Jan1);
+        var first = rig.ChangeRuleRows(Project, P, dropped, droppedVersion, Jan15, code: "BRR-DROPPED");
+        rig.World.Remove(ProcedureAssignmentEntity.Entity, first.Exclude);
+        rig.ExcludeRule(Project, P, dropped, created: rig.Tick()); // a newer change, and no version created for it
+
+        var result = await rig.Service.ListRulesInForceAsync(Project, P, null, Mar15, Token, CancellationToken.None);
+
+        result.Status.Should().Be(RecordProcedureReadStatus.Unavailable);
+        result.Value.Should().BeNull();
+    }
+
     [Fact(DisplayName = "084 rules: the marks array is open and carries only the four kinds (the outranked mark is task 084e)")]
     public async Task Marks_AreFourKindsOnly()
     {
@@ -346,7 +397,8 @@ public sealed class RecordProcedureReadModelContractTests
         rig.Probe.Asked.Should().BeEquivalentTo(new (string, Guid)[]
         {
             ("sprk_projects", P), ("sprk_matters", M), (ProcedureEntity.EntitySet, a.Procedure), (ProcedureEntity.VersionEntitySet, a.Version),
-            (ProcedureAssignmentEntity.EntitySet, assignment), ("systemusers", Reviewer), ("sprk_organizations", F),
+            (ProcedureAssignmentEntity.EntitySet, assignment), ("systemusers", Reviewer),
+            // Not ("sprk_organizations", F): F is the record's billing firm, a lookup value on a row already checked (fix round 3, F-D).
         });
     }
 
@@ -367,13 +419,16 @@ public sealed class RecordProcedureReadModelContractTests
         rig.Probe.Asked.Should().BeEquivalentTo(new (string, Guid)[]
         {
             ("sprk_projects", P), ("sprk_matters", M), (ProcedureEntity.EntitySet, s.Procedure), (ProcedureEntity.VersionEntitySet, s.Version),
+            // every version of the Procedure, not only the one in force: the choice of version derives from the whole set (fix round 3, F-B)
+            (ProcedureEntity.VersionEntitySet, s.FirstVersion),
             // the changed rule: the base rule, the version it is based on, the base's version in force, the record rule, its version and set, the Exclude row
             ("sprk_policies", s.ChangedBase), ("sprk_policyversions", s.ChangedBaseV1), ("sprk_policyversions", s.ChangedBaseV2),
             ("sprk_policies", s.Changed.RecordRule), ("sprk_policyversions", s.Changed.RuleVersion), ("sprk_rulesets", s.Changed.RuleSet),
             (ProcedureAssignmentEntity.EntitySet, s.Changed.Exclude),
-            // the base-retired record rule: the base rule, the record rule, its set, the version it is based on, the Exclude row
+            // the base-retired record rule: the base rule, the record rule, its set, the record rule's latest version (basedOn is read from it:
+            // fix round 3, F-A), the version it is based on, the Exclude row
             ("sprk_policies", s.RetiredBase), ("sprk_policies", s.Retired.RecordRule), ("sprk_rulesets", s.Retired.RuleSet),
-            ("sprk_policyversions", s.RetiredBaseVersion), (ProcedureAssignmentEntity.EntitySet, s.Retired.Exclude),
+            ("sprk_policyversions", s.Retired.RuleVersion), ("sprk_policyversions", s.RetiredBaseVersion), (ProcedureAssignmentEntity.EntitySet, s.Retired.Exclude),
         });
     }
 
