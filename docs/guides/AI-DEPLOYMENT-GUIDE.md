@@ -1286,7 +1286,7 @@ See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#patte
 | [RAG-CONFIGURATION.md](RAG-CONFIGURATION.md) | RAG configuration reference |
 | [RAG-TROUBLESHOOTING.md](RAG-TROUBLESHOOTING.md) | RAG troubleshooting guide |
 | [ai-troubleshooting.md](./ai-troubleshooting.md) | General AI troubleshooting |
-| [PCF-V9-PACKAGING.md](./PCF-V9-PACKAGING.md) | PCF build/deploy guide |
+| [PCF-V9-PACKAGING.md](./PCF-DEPLOYMENT-GUIDE.md) | PCF build/deploy guide |
 
 ---
 

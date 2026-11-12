@@ -218,8 +218,8 @@ Once R3 Phase 2 tasks (080 / 084 / 085) land, the following services consume thi
 - **Design**: [`projects/spaarke-platform-foundations-r3/design.md`](../../projects/spaarke-platform-foundations-r3/design.md) Part 1 §"Phase 2 — Junction table `sprk_userentityassociation`"
 - **Task**: [`projects/spaarke-platform-foundations-r3/tasks/070-create-sprk-userentityassociation-entity.poml`](../../projects/spaarke-platform-foundations-r3/tasks/070-create-sprk-userentityassociation-entity.poml)
 - **Pairs with**:
-  - [task 071](../../projects/spaarke-platform-foundations-r3/tasks/071-provision-servicebus-topic.poml) — Service Bus topic `sprk-membership-changes`
-  - [task 072](../../projects/spaarke-platform-foundations-r3/tasks/072-membership-changed-event-payload-contract.poml) — `MembershipChangedEvent` payload contract
+  - [task 071](../../projects/spaarke-platform-foundations-r3/tasks/071-provision-service-bus-topic.poml) — Service Bus topic `sprk-membership-changes`
+  - [task 072](../../projects/spaarke-platform-foundations-r3/tasks/072-membership-changed-event-contract.poml) — `MembershipChangedEvent` payload contract
   - task 080 — P-event-1 endpoint inventory (consumers of this entity logical name)
   - task 084 — `MembershipJunctionUpdater` subscription handler
   - task 085 — `MembershipReconciliationJob` real logic

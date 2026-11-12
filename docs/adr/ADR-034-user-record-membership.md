@@ -51,7 +51,7 @@ Today, **each consumer re-derives membership independently**. There is no canoni
 
 The result: silent breakage (the A1 defect), inconsistent definitions across UI surfaces, and configuration drift — what one playbook calls "owner" another calls "assignedTo".
 
-A naming-collision concern: an existing PCF named `AssociationResolver` ([`src/client/pcf/AssociationResolver/`](../../src/client/pcf/AssociationResolver/)) handles a DIFFERENT concept (record-to-record FieldMapping for copying values when an Event's Regarding lookup is set). Any new membership service must be disambiguated to prevent operator confusion. R3 uses **"Membership"** terminology throughout (`MembershipResolverService`, `/api/users/me/memberships/{entityType}`, this ADR).
+A naming-collision concern: an existing PCF named `AssociationResolver` (`src/client/pcf/AssociationResolver/`, since deleted) handled a DIFFERENT concept (record-to-record FieldMapping for copying values when an Event's Regarding lookup is set). Any new membership service must be disambiguated to prevent operator confusion. R3 uses **"Membership"** terminology throughout (`MembershipResolverService`, `/api/users/me/memberships/{entityType}`, this ADR).
 
 ---
 
@@ -777,5 +777,5 @@ auto grant in place (fail-open in that direction only). The sync route and the L
 - Decision note: [`projects/spaarke-platform-foundations-r3/notes/sprk-organization-mapping-decision.md`](../../projects/spaarke-platform-foundations-r3/notes/sprk-organization-mapping-decision.md)
 - Code: `src/server/api/Sprk.Bff.Api/Services/Ai/Membership/`, `src/server/api/Sprk.Bff.Api/Api/Membership/`, `src/server/api/Sprk.Bff.Api/Api/Admin/MembershipAdminEndpoints.cs`, `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs` (task 041)
 - Constraints: [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) §§A, F.1
-- Naming-collision: distinct from [`src/client/pcf/AssociationResolver/`](../../src/client/pcf/AssociationResolver/) PCF (record-to-record FieldMapping) + `sprk_fieldmappingprofile` / `sprk_fieldmappingrule` Dataverse entities
+- Naming-collision: distinct from the since-deleted `src/client/pcf/AssociationResolver/` PCF (record-to-record FieldMapping) + `sprk_fieldmappingprofile` / `sprk_fieldmappingrule` Dataverse entities
 - Related ADRs: ADR-009 (Redis), ADR-010 (DI minimalism), ADR-013 (AI architecture), ADR-024 (polymorphic resolver), ADR-028 (Spaarke Auth v2 — `azureactivedirectoryobjectid` cross-ref), ADR-029 (BFF publish hygiene), ADR-036 (Spaarke.Scheduling — `MembershipReconciliationJob` is the 2nd reference consumer)

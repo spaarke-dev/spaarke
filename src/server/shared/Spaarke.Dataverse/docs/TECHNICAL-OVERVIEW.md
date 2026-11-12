@@ -129,7 +129,7 @@ Spaarke.Dataverse provides a unified `IDataverseService` interface with two impl
 
 **File**: `DataverseServiceClientImpl.cs`
 **Status**: ✅ Currently used in production
-**Lifetime**: Singleton (registered in [Program.cs:269-274](../../api/Spe.Bff.Api/Program.cs#L269))
+**Lifetime**: Singleton (registered in [Program.cs:269-274](../../../api/Sprk.Bff.Api/Program.cs))
 
 **Purpose**: Primary Dataverse integration using ServiceClient SDK
 
@@ -226,7 +226,7 @@ builder.Services.AddHttpClient<IDataverseService, DataverseWebApiService>(client
 **Status**: ✅ Production (used by authorization system)
 **Purpose**: Query user access permissions and team memberships
 
-**Integration**: Implements `IAccessDataSource` interface used by [Spaarke.Core.Auth.AuthorizationService](../../shared/Spaarke.Core/docs/TECHNICAL-OVERVIEW.md)
+**Integration**: Implements `IAccessDataSource` interface used by [Spaarke.Core.Auth.AuthorizationService](../../Spaarke.Core/README.md)
 
 **Key Features**:
 - Queries Dataverse for user's `AccessRights` (Read/Write/Delete/Create/Append/AppendTo/Share)
@@ -605,7 +605,7 @@ Both implementations share `IDataverseService`, making switching straightforward
 
 ### Switch to Web API (From ServiceClient)
 
-**Step 1**: Update DI Registration in [Program.cs](../../api/Spe.Bff.Api/Program.cs)
+**Step 1**: Update DI Registration in [Program.cs](../../../api/Sprk.Bff.Api/Program.cs)
 ```csharp
 // Replace this:
 // builder.Services.AddSingleton<IDataverseService>(sp =>
@@ -789,7 +789,7 @@ builder.Services.AddScoped<IDataverseService>(...)
 - Connection pooling requires persistent connections
 - Singleton eliminates per-request overhead
 
-**Implementation**: [Program.cs:269-274](../../api/Spe.Bff.Api/Program.cs#L269)
+**Implementation**: [Program.cs:269-274](../../../api/Sprk.Bff.Api/Program.cs)
 
 ### ADR-008: Authorization & Security
 
@@ -800,7 +800,7 @@ builder.Services.AddScoped<IDataverseService>(...)
 - Returns AccessSnapshot consumed by Spaarke.Core.Auth
 - Fail-closed on errors (AccessRights.None)
 
-**Integration**: [Spaarke.Core Authorization](../Spaarke.Core/docs/TECHNICAL-OVERVIEW.md)
+**Integration**: [Spaarke.Core Authorization](../../Spaarke.Core/README.md)
 
 ---
 
@@ -809,9 +809,9 @@ builder.Services.AddScoped<IDataverseService>(...)
 - **Dataverse ServiceClient**: [Microsoft Documentation](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/xrm-tooling/build-windows-client-applications-xrm-tools)
 - **Dataverse Web API**: [Microsoft Documentation](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/overview)
 - **Azure Identity (ClientSecretCredential)**: [Microsoft Documentation](https://learn.microsoft.com/en-us/dotnet/api/azure.identity.clientsecretcredential)
-- **ADR-010**: [DI Minimalism](../../../../docs/adr/ADR-010-di-minimalism.md)
-- **ADR-008**: [Authorization & Security](../../../../docs/adr/ADR-008-authorization-security.md)
-- **Spaarke.Core**: [Authorization System](../Spaarke.Core/docs/TECHNICAL-OVERVIEW.md)
+- **ADR-010**: [DI Minimalism](../../../../../docs/adr/ADR-010-di-minimalism.md)
+- **ADR-008**: [Authorization & Security](../../../../../docs/adr/ADR-008-authorization-endpoint-filters.md)
+- **Spaarke.Core**: [Authorization System](../../Spaarke.Core/README.md)
 
 ---
 

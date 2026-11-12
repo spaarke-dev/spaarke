@@ -766,6 +766,6 @@ Before running pack.ps1, verify ALL required files exist:
 
 ## Related ADRs
 
-- [ADR-006](.claude/adr/ADR-006-pcf-over-webresources.md) - PCF over legacy webresources
-- [ADR-021](.claude/adr/ADR-021-fluent-design-system.md) - Fluent UI v9
-- [ADR-022](.claude/adr/ADR-022-pcf-platform-libraries.md) - React 16 compatibility
+- [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) - PCF over legacy webresources
+- [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) - Fluent UI v9
+- [ADR-022](../../.claude/adr/ADR-022-pcf-platform-libraries.md) - React 16 compatibility
