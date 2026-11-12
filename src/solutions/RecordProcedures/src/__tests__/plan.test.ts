@@ -11,7 +11,7 @@ const parentFollow = override({ rowId: 'par-follow', mode: 'FollowLatest', chain
 
 const firmProc = (overrides = [] as ReturnType<typeof override>[]) => procedure({ id: 'p', name: 'P', appliesTo: 'Firm', firm: FENWICK, overrides });
 const manualProc = (overrides = [] as ReturnType<typeof override>[]) =>
-  procedure({ id: 'm', name: 'M', appliesTo: 'Manual', overrides, sources: [{ kind: 'ManualOwn', winning: true, distance: 0, via: null, mode: 'FollowLatest', rowId: 'x' }] });
+  procedure({ id: 'm', name: 'M', appliesTo: 'AssignedRecordsOnly', overrides, sources: [{ kind: 'ManualOwn', winning: true, distance: 0, via: null, mode: 'FollowLatest', rowId: 'x' }] });
 
 const kinds = (p: Plan) => p.steps.map(s => s.kind);
 
@@ -46,7 +46,7 @@ describe('the choices a Procedure row offers', () => {
 
 describe('the calls a Procedure choice makes', () => {
   it('Pin creates one Pinned row with the version and the reason', () => {
-    expect(planProcedure(firmProc(), 'pin', { versionId: 'v-1', reason: ' Grandfathered ' }).steps).toEqual([
+    expect(planProcedure(firmProc(), 'pin', { versionId: 'v-1', reason: ' Grandfathered ', pinnable: ['v-1'] }).steps).toEqual([
       { kind: 'assign', procedureId: 'p', mode: 'Pinned', pinnedVersionId: 'v-1', reason: 'Grandfathered' },
     ]);
   });
@@ -68,14 +68,14 @@ describe('the calls a Procedure choice makes', () => {
   });
 
   it('the same choice again changes nothing', () => {
-    expect(planProcedure(firmProc([ownPin]), 'pin', { versionId: V.rate1.id, reason: 'old' }).steps).toEqual([]);
+    expect(planProcedure(firmProc([ownPin]), 'pin', { versionId: V.rate1.id, reason: 'old', pinnable: [V.rate1.id] }).steps).toEqual([]);
     expect(planProcedure(firmProc([ownExcl]), 'exclude', { reason: 'why' }).steps).toEqual([]);
     expect(planProcedure(firmProc(), 'follow', {}).steps).toEqual([]);
     expect(planProcedure(manualProc([ownFollow]), 'follow', {}).steps).toEqual([]);
   });
 
   it('the same version with a new reason is a change', () => {
-    expect(kinds(planProcedure(firmProc([ownPin]), 'pin', { versionId: V.rate1.id, reason: 'new reason' }))).toEqual(['remove', 'assign']);
+    expect(kinds(planProcedure(firmProc([ownPin]), 'pin', { versionId: V.rate1.id, reason: 'new reason', pinnable: [V.rate1.id] }))).toEqual(['remove', 'assign']);
   });
 
   it('Follow latest returns a Procedure to its source by removing the row, where the row does no work', () => {

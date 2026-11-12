@@ -18,6 +18,7 @@ import type { CoreRoute, GapView, ProcedureItem, VersionView } from '../../servi
 import { failureText, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
 import { gapFor, procedureState, recordNoun, recordWords, shortDate, sourceLabel, versionLabel, versionLines } from '../../services/model';
 import {
+  MAX_REASON_CHARS,
   currentProcedureChoice,
   ownOverride,
   parentOverrides,
@@ -26,7 +27,7 @@ import {
   type ProcedureChoice,
 } from './plan';
 import { ChoiceGroup, KeyValues, useWizardStyles, type ChoiceOption } from './steps';
-import { WizardFrame, type WizardNav } from './WizardFrame';
+import { WizardFrame, type OnChanged, type WizardNav } from './WizardFrame';
 import { isPinnable, overrideWords, stampWords, versionOption } from './words';
 
 export interface ProcedureWizardProps {
@@ -40,7 +41,7 @@ export interface ProcedureWizardProps {
   date: string;
   api: OverridesApi;
   nav?: WizardNav;
-  onChanged: () => void;
+  onChanged: OnChanged;
   onClose: () => void;
 }
 
@@ -118,7 +119,10 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
   const pinnable = versions?.id === row.id && versions.state === 'ready' ? versions.versions.filter(isPinnable) : [];
   const chosen = pinnable.find(v => v.id === form.versionId) ?? (own?.pinnedVersion && own.pinnedVersion.id === form.versionId ? own.pinnedVersion : undefined);
 
-  const plan = planProcedure(row, form.choice, { versionId: form.versionId, reason: form.reason });
+  // The version the form carries (the record's own pin, pre-filled) is not one the route accepts: the plan stays empty until another is chosen.
+  const versionRefused = versions?.id === row.id && versions.state === 'ready' && !!form.versionId && !pinnable.some(v => v.id.toLowerCase() === form.versionId.toLowerCase());
+
+  const plan = planProcedure(row, form.choice, { versionId: form.versionId, reason: form.reason, pinnable: pinnable.map(v => v.id) });
   const canChoose = plan.steps.length > 0;
   const recordLabel = recordWords(record.table, record.name);
 
@@ -186,8 +190,8 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
 
   // ── Step 2: the choices ──────────────────────────────────────────────────
   const reasonField = (
-    <Field label="Reason" required>
-      <Textarea value={form.reason} onChange={(_, d) => set({ reason: d.value })} resize="vertical" />
+    <Field label="Reason" required hint={`At most ${MAX_REASON_CHARS} characters.`}>
+      <Textarea value={form.reason} onChange={(_, d) => set({ reason: d.value })} resize="vertical" maxLength={MAX_REASON_CHARS} />
     </Field>
   );
 
@@ -221,8 +225,14 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
               <Field
                 label="Version"
                 required
-                validationState={versions?.state === 'failed' ? 'error' : 'none'}
-                validationMessage={versions?.state === 'failed' ? `The versions could not be read. ${failureText(versions.failure)}` : undefined}
+                validationState={versions?.state === 'failed' || versionRefused ? 'error' : 'none'}
+                validationMessage={
+                  versions?.state === 'failed'
+                    ? `The versions could not be read. ${failureText(versions.failure)}`
+                    : versionRefused
+                      ? 'This version can no longer be pinned (it has not been in force, or is retired). Choose another.'
+                      : undefined
+                }
               >
                 {versions?.state === 'loading' ? (
                   <Spinner size="tiny" label="Reading the versions…" />

@@ -10,6 +10,10 @@
  * Authorization is the server's: the frame never inspects who the caller is. A refusal (403, 404, 409, 422 ...) is thrown out of `onFinish`,
  * which `WizardShell` shows in its error bar with the wizard still open; nothing is re-read because nothing changed. The lists are re-read
  * (`onChanged`) after a write succeeded, and also when a plan of two calls got only as far as its first (the record's override changed).
+ *
+ * While a save runs the frame blocks the header ‹ › and the close (the shared shell only disables its own footer buttons), so a result or a
+ * partial-save message can never land under another row, and the user is never left unaware of a half-done switch. After a partial save the
+ * wizard holds the row it was opened on, which is out of date: Finish stays off until the panel hands back the re-read row.
  */
 
 import * as React from 'react';
@@ -18,8 +22,15 @@ import { CheckmarkCircle48Filled } from '@fluentui/react-icons';
 import { WizardShell, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
 import type { CoreRoute } from '../../services/recordProceduresApi';
 import { failureText, type OverridesApi, type RemovalPreview, type WriteFailure } from '../../services/overridesApi';
-import { executePlan, removalOf, type Plan } from './plan';
+import { executePlan, removalOf, type Plan, type PlanRun } from './plan';
 import { ConfirmStep, ImpactStep, O21_LINE, type PreviewState } from './steps';
+
+/**
+ * Told to the panel after a write: `done` (the plan ran to its end) or `partial` (its first call was accepted and the next refused). For a
+ * `partial` the panel answers (a promise) whether the open wizard now holds the re-read row of the same key, so a retry sends only what is left.
+ */
+export type ChangeOutcome = 'done' | 'partial';
+export type OnChanged = (outcome: ChangeOutcome) => void | Promise<boolean>;
 
 /** The "N of M" nav of the modal header, as `WizardShell` takes it. */
 export interface WizardNav {
@@ -59,8 +70,10 @@ export interface WizardFrameProps {
   partialNote: string;
 
   /** Both lists must be read again: the write succeeded (or part of it did). */
-  onChanged: () => void;
+  onChanged: OnChanged;
   onClose: () => void;
+  /** Words added to a refusal's text (a hint for one code), or null. */
+  refusalHint?: (failure: WriteFailure) => string | null;
 }
 
 export const WizardFrame: React.FC<WizardFrameProps> = props => {
@@ -97,29 +110,48 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
 
   const retryPreview = React.useCallback(() => setFetched(null), []);
 
+  // A partial save leaves the wizard on a row that is out of date; it is held (Finish off) until the panel hands back the re-read row.
+  const [stale, setStale] = React.useState(false);
+  const staleRef = React.useRef(false);
+  staleRef.current = stale;
+  // True from the first call of a save to its answer: nothing may move the wizard to another row or close it meanwhile.
+  const saving = React.useRef(false);
+
   // The wizard moved to another row: forget the previous row's answer.
   const [seenKey, setSeenKey] = React.useState(resetKey);
   if (seenKey !== resetKey) {
     setSeenKey(resetKey);
     setFetched(null);
+    setStale(false);
     inFlight.current = null;
   }
 
   // ── The write ────────────────────────────────────────────────────────────
   const onFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     const p = live.current;
-    const run = await executePlan(p.api, p.core, p.recordId, p.plan);
+    saving.current = true;
+    let run: PlanRun;
+    try {
+      run = await executePlan(p.api, p.core, p.recordId, p.plan);
+    } finally {
+      saving.current = false;
+    }
     if (!run.ok) {
       const failure = run.failure as WriteFailure;
+      const text = [failureText(failure), p.refusalHint?.(failure)].filter((x): x is string => !!x).join(' ');
       if (run.completed > 0) {
-        // The first call of the plan was accepted and the second was refused: the record's override changed, so the lists are read again.
-        p.onChanged();
-        throw new Error(`${failureText(failure)} ${p.partialNote}`);
+        // The first call of the plan was accepted and the second was refused: the record's override changed, so the lists are read again,
+        // and the wizard (still on the row it was opened with, whose override is now gone) waits for the re-read row.
+        setStale(true);
+        void Promise.resolve(p.onChanged('partial')).then(adopted => {
+          if (adopted === true) setStale(false);
+        });
+        throw new Error(`${text} ${p.partialNote}`);
       }
       // Nothing changed: the wizard stays open and nothing is re-read.
-      throw new Error(failureText(failure));
+      throw new Error(text);
     }
-    p.onChanged();
+    void p.onChanged('done');
     const notes = run.removed.flatMap(r => [r.message, r.affectedText]).filter((x): x is string => !!x);
     return {
       icon: <CheckmarkCircle48Filled />,
@@ -161,17 +193,23 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       // A removal is confirmed only after its preview was shown.
       canAdvance: () => previewRef.current.state === 'none' || previewRef.current.state === 'ready',
     },
-    { id: 'confirm', label: 'Confirm', renderContent: () => <ConfirmStep rows={live.current.confirmRows} />, canAdvance: () => true },
+    { id: 'confirm', label: 'Confirm', renderContent: () => <ConfirmStep rows={live.current.confirmRows} />, canAdvance: () => !staleRef.current },
   ];
+
+  // The shell disables only its own footer buttons while a save runs; the header ‹ › and × are guarded here.
+  const guardedNav = nav ? { ...nav, onBeforeNavigate: () => !saving.current } : undefined;
+  const guardedClose = React.useCallback(() => {
+    if (!saving.current) live.current.onClose();
+  }, []);
 
   return (
     <WizardShell
       open
       title={title}
       steps={steps}
-      nav={nav}
+      nav={guardedNav}
       resetKey={resetKey}
-      onClose={props.onClose}
+      onClose={guardedClose}
       onFinish={onFinish}
       finishLabel={props.finishLabel}
       finishingLabel="Saving…"

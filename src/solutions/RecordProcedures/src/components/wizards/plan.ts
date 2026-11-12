@@ -39,7 +39,11 @@ export const ownOverride = (p: ProcedureItem): OverrideView | undefined => p.ove
 /** The rows set on the records this one is filed under (distance above 0). */
 export const parentOverrides = (p: ProcedureItem): OverrideView[] => p.overrides.filter(o => o.distance > 0);
 
-const isManual = (p: ProcedureItem): boolean => p.appliesTo === 'Manual';
+/** `ProcedureAppliesTo.AssignedRecordsOnly` (ProcedureService.cs): the server sends the enum member name, `procedure.AppliesTo.ToString()`. */
+export const APPLIES_TO_ASSIGNED_ONLY = 'AssignedRecordsOnly';
+
+/** A Procedure that reaches a record only through an assignment row (its `AppliesTo` is AssignedRecordsOnly). */
+const isManual = (p: ProcedureItem): boolean => p.appliesTo === APPLIES_TO_ASSIGNED_ONLY;
 
 /** What the record does now, in the wizard's own choices (the prototype's `currentOf`). */
 export function currentProcedureChoice(p: ProcedureItem): ProcedureChoice {
@@ -61,15 +65,33 @@ export function procedureChoices(p: ProcedureItem): ProcedureChoice[] {
   return out;
 }
 
+/** The server's limit on a reason, after trimming (`MaxReasonChars` in ProcedureAssignmentService.cs; `CheckReason` answers 400 above it). */
+export const MAX_REASON_CHARS = 2000;
+
+/** A reason the route accepts: not blank, and within the server's limit. */
+export const reasonValid = (reason: string | undefined): boolean => {
+  const n = (reason ?? '').trim().length;
+  return n > 0 && n <= MAX_REASON_CHARS;
+};
+
 export interface ProcedureInput {
   versionId?: string;
   reason?: string;
+  /**
+   * The ids of the versions a pin accepts (Active or Superseded, per task 081's read). A pin is planned only for one of these: the plan
+   * removes this record's own row first, and a POST the server will certainly refuse (a Retired version) would leave the pin lost.
+   * Absent means the versions are not known yet, so no pin can be planned.
+   */
+  pinnable?: readonly string[];
 }
 
-/** Whether the choice's own inputs are complete (a pin names a version and a reason, an exclude a reason). */
+const pinnableVersion = (input: ProcedureInput): boolean =>
+  !!input.versionId && !!input.pinnable?.some(id => id.toLowerCase() === input.versionId!.toLowerCase());
+
+/** Whether the choice's own inputs are complete (a pin names a pinnable version and a reason, an exclude a reason; reasons within the limit). */
 export function procedureInputValid(choice: ProcedureChoice, input: ProcedureInput): boolean {
-  if (choice === 'pin') return !!input.versionId && !!input.reason?.trim();
-  if (choice === 'exclude') return !!input.reason?.trim();
+  if (choice === 'pin') return pinnableVersion(input) && reasonValid(input.reason);
+  if (choice === 'exclude') return reasonValid(input.reason);
   return true;
 }
 
@@ -113,8 +135,11 @@ export function planProcedure(p: ProcedureItem, choice: ProcedureChoice, input: 
 // Rules
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** `parent`: As set on the parent. `keep`: Run the published rule. `exclude`: Exclude here. */
-export type RuleChoice = 'parent' | 'keep' | 'exclude';
+/**
+ * `parent`: As set on the parent. `keep`: Run the published rule. `exclude`: Exclude here. `changed`: the state of a rule changed on this
+ * record (what it does now); it is no choice the wizard offers, so a wizard on such a rule opens with nothing selected.
+ */
+export type RuleChoice = 'parent' | 'keep' | 'exclude' | 'changed';
 
 const distanceOf = (m: RuleMark): number => m.distance ?? 0;
 const markOf = (r: RuleItem, kind: string, own: boolean): RuleMark | undefined => r.marks.find(m => m.kind === kind && (distanceOf(m) === 0) === own);
@@ -136,6 +161,8 @@ export function ownRuleOverrideId(r: RuleItem): string | null {
 export function currentRuleChoice(r: RuleItem): RuleChoice {
   if (ownExclude(r)) return 'exclude';
   if (inheritedOverride(r)) return 'parent';
+  // A rule changed on this record does not run as published, so "Run the published rule" is not the current state (it removes the change).
+  if (ownChange(r)) return 'changed';
   return 'keep';
 }
 
@@ -155,12 +182,14 @@ export function keepBlocker(r: RuleItem): string | null {
   if (inherited) {
     return `Not available: the parent's rule ${inherited.kind === 'Excluded' ? 'exclusion' : 'change'} applies to this record. Change it on the parent.`;
   }
-  if (isBaseRetired(r) && !ownRuleOverrideId(r)) return 'The base rule is retired, so there is nothing published to run. The record rule is removed from the change flow.';
+  if (isBaseRetired(r) && !ownRuleOverrideId(r)) return 'The base rule is retired, so there is nothing published to run. No override row is available here; see 084c.';
   return null;
 }
 
 /** Whether "Exclude here" can be chosen, and why not. A rule changed on this record is excluded only after its change is removed. */
 export function excludeBlocker(r: RuleItem): string | null {
+  // A change made on a parent cannot be undone here (P-3), so "Run the published rule first" would be a dead end: the way out is on the parent.
+  if (!ownChange(r) && markOf(r, 'Changed', false)) return 'Changed on the parent; change it there.';
   if (ownChange(r) || r.recordRule) return 'This rule is changed on this record. Run the published rule first, then exclude it.';
   return null;
 }
@@ -169,13 +198,14 @@ export function excludeBlocker(r: RuleItem): string | null {
 export const fixedFirmId = (r: RuleItem): string | null => r.firmScope?.id ?? null;
 
 export function ruleInputValid(choice: RuleChoice, input: RuleInput): boolean {
-  return choice !== 'exclude' || !!input.reason?.trim();
+  return choice !== 'exclude' || reasonValid(input.reason);
 }
 
 export function planRule(r: RuleItem, choice: RuleChoice, input: RuleInput): Plan {
   const own = ownExclude(r);
   switch (choice) {
     case 'parent':
+    case 'changed':
       return NO_CHANGE;
 
     case 'keep': {

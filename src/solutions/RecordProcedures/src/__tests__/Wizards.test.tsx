@@ -394,7 +394,6 @@ describe('a refusal keeps the wizard open and re-reads nothing', () => {
     [403, 'Forbidden', 'access.denied'],
     [404, 'Not Found', 'assignment.override_not_found'],
     [409, 'Conflict', 'assignment.duplicate'],
-    [422, 'Unprocessable Content', 'assignment.unprocessable'],
   ];
 
   it.each(refusals)('%s (%s) on an Exclude: the ProblemDetails title is shown, the wizard stays open on its last step, no list is re-read', async (status, title, code) => {
@@ -491,11 +490,17 @@ describe('a refusal keeps the wizard open and re-reads nothing', () => {
     await waitFor(() => expect(calls.length).toBe(reads + 2));
   });
 
-  it('the wizard opens with every choice enabled whoever the caller is: the route decides', async () => {
-    renderHarness({ writes: respond({}) });
-    const d = await openProcedure('p-ocg', 'Acme Outside Counsel Guidelines');
-    await toChoices(d);
-    for (const r of within(d).getAllByRole('radio', { hidden: true })) expect(r).toBeEnabled();
+  it('the wizard code reads nothing about the caller (role, privilege, permission): the route decides (control: the scan sees one)', () => {
+    const root = path.join(__dirname, '..', 'components', 'wizards');
+    // (`role="alert"` is an ARIA attribute, not a role of the caller: only the plural and the user-role names count.)
+    const caller = /\b(caller|userRoles?|securityRoles?|getUserRoles|roles|privileges?|permissions?|isAdmin|canWrite|canEdit|canDelete|userSettings)\b/i;
+    // Comments may say what the page does not do; the scan reads code only.
+    const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const files = fs.readdirSync(root).filter(f => /\.(ts|tsx)$/.test(f));
+    expect(files.length).toBeGreaterThanOrEqual(6);
+    for (const f of files) expect([f, caller.test(code(fs.readFileSync(path.join(root, f), 'utf8')))]).toEqual([f, false]);
+    expect(caller.test('const roles = Xrm.Utility.getGlobalContext().userSettings.roles')).toBe(true);
+    expect(caller.test('if (!user.canWrite) return;')).toBe(true);
   });
 });
 

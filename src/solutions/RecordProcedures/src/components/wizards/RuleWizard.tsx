@@ -20,6 +20,7 @@ import type { OverridesApi } from '../../services/overridesApi';
 import type { FirmOption } from '../../services/firmChoices';
 import { levelLabel, recordWords, ruleBadges, versionLabel } from '../../services/model';
 import {
+  MAX_REASON_CHARS,
   currentRuleChoice,
   excludeBlocker,
   fixedFirmId,
@@ -32,7 +33,7 @@ import {
   type RuleChoice,
 } from './plan';
 import { ChoiceGroup, KeyValues, useWizardStyles, type ChoiceOption } from './steps';
-import { WizardFrame, type WizardNav } from './WizardFrame';
+import { WizardFrame, type OnChanged, type WizardNav } from './WizardFrame';
 import { stampWords } from './words';
 
 export interface RuleWizardProps {
@@ -44,7 +45,7 @@ export interface RuleWizardProps {
   firms: readonly FirmOption[];
   api: OverridesApi;
   nav?: WizardNav;
-  onChanged: () => void;
+  onChanged: OnChanged;
   onClose: () => void;
 }
 
@@ -60,6 +61,9 @@ const initialForm = (r: RuleItem): Form => ({
   reason: ownExclude(r)?.reason ?? '',
   firmId: fixedFirmId(r) ?? ownExclude(r)?.firm?.id ?? '',
 });
+
+/** 089 answers 409 `assignment.duplicate` for a second exclusion of the rule on the record, whichever firm the first one names. */
+export const DUPLICATE_HINT = 'An exclusion for another firm may exist on this record; switch the firm to see it.';
 
 const ruleKey = (r: RuleItem): string => `${r.policyId}:${r.policyVersionId ?? ''}`;
 
@@ -100,6 +104,7 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
   // ── Step 1: the rule as the server describes it ──────────────────────────
   const excludedMarks = row.marks.filter(m => m.kind === 'Excluded');
   const changed = row.marks.find(m => m.kind === 'Changed');
+  const changedHere = ownChange(row);
   const stale = row.marks.find(m => m.kind === 'Stale');
   const reviewStep = (
     <div className={s.step} data-testid="rule-step">
@@ -205,7 +210,9 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       keepBlock ??
       (current === 'keep'
         ? `As published${row.parameterSummary ? `: ${row.parameterSummary}` : ''}.`
-        : `Removes this record's ${ownChange(row) ? 'change' : 'exclusion'}. The published rule runs again for invoices checked from now on.`),
+        : current === 'changed'
+          ? `Removes this record's change: the published${changedHere?.baseParameterSummary ? ` values (${changedHere.baseParameterSummary})` : ' rule'} run again instead of the changed${row.parameterSummary ? ` values (${row.parameterSummary})` : ' ones'} for invoices checked from now on, unless a parent excludes the rule. The lists show the result.`
+          : `Removes this record's exclusion. The published rule runs again for invoices checked from now on, unless a parent excludes it. The lists show the result.`),
     disabled: keepBlock !== null,
   });
   options.push({
@@ -216,8 +223,8 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
     body: (
       <>
         {firmField}
-        <Field label="Reason" required>
-          <Textarea value={form.reason} onChange={(_, d) => set({ reason: d.value })} resize="vertical" />
+        <Field label="Reason" required hint={`At most ${MAX_REASON_CHARS} characters.`}>
+          <Textarea value={form.reason} onChange={(_, d) => set({ reason: d.value })} resize="vertical" maxLength={MAX_REASON_CHARS} />
         </Field>
       </>
     ),
@@ -236,7 +243,8 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
     form.choice === 'exclude'
       ? `Excluded${firmName ? ` for ${firmName} invoices` : ''}: the rule does not run`
       : form.choice === 'keep'
-        ? `In force${afterKeep ? ` · ${afterKeep}` : ''}`
+        ? // Rule overrides are decided by the nearest record only, so a parent's exclusion can still apply once this record's is gone.
+          `Runs again unless a parent excludes it${afterKeep ? ` · ${afterKeep}` : ''}`
         : before;
   const removeOnly = plan.steps.length > 0 && plan.steps.every(x => x.kind === 'remove');
   const twoCalls = plan.steps.length > 1;
@@ -272,7 +280,8 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       confirmRows={confirmRows}
       finishLabel={removeOnly ? 'Remove override' : 'Exclude rule'}
       successTitle={removeOnly ? 'Override removed' : 'Rule excluded'}
-      successBody={`${row.code} on ${recordLabel}: ${after}.`}
+      successBody={`${row.code} on ${recordLabel}: ${after}. The lists show the result.`}
+      refusalHint={f => (f.errorCode === 'assignment.duplicate' && form.choice === 'exclude' ? DUPLICATE_HINT : null)}
       partialNote="The record's earlier exclusion was removed but the new one was not saved. Close this window and open the rule again."
       onChanged={onChanged}
       onClose={onClose}

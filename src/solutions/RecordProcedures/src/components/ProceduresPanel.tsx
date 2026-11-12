@@ -68,6 +68,7 @@ import { ProcedureList } from './ProcedureList';
 import { RuleList } from './RuleList';
 import { ProcedureWizard } from './wizards/ProcedureWizard';
 import { RuleWizard } from './wizards/RuleWizard';
+import type { ChangeOutcome } from './wizards/WizardFrame';
 
 const useStyles = makeStyles({
   root: {
@@ -163,23 +164,45 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
 
   // After a wizard's write: read both lists again for the same firm and date WITHOUT going back to "loading", so the open wizard (and its
   // success screen) stays where it is. Either read failing is the same fail-closed state as on any read: no rows.
-  const refresh = React.useCallback(() => {
-    const seq = ++readSeq.current;
-    const query = { firmId, date: requestDate };
-    Promise.all([api.procedures(core, recordId, query), api.rulesInForce(core, recordId, query)])
-      .then(([procedures, rules]) => {
-        if (seq !== readSeq.current) return;
-        if (procedures.ok && rules.ok) {
-          setLoad({ state: 'ready', procedures: procedures.value, rules: rules.value });
-          return;
-        }
-        const [first, second] = [procedures, rules].flatMap(r => (r.ok ? [] : [r.failure]));
-        setLoad({ state: 'error', failure: pickFailure(first, second ?? null) });
-      })
-      .catch(() => {
-        if (seq === readSeq.current) setLoad({ state: 'error', failure: { status: 0, errorCode: null, detail: null, signInFailed: false } });
-      });
-  }, [api, core, recordId, firmId, requestDate]);
+  //
+  // After a PARTIAL save (a plan's first call was accepted, the next refused) the open wizard holds the row as it was opened, with an override
+  // that is gone: a retry would delete it again and be told 404. So the open snapshot is replaced by the re-read row of the same key, and the
+  // answer says whether that worked (the wizard keeps Finish off until it did).
+  const openRef = React.useRef(open);
+  openRef.current = open;
+  const refresh = React.useCallback(
+    (outcome: ChangeOutcome = 'done'): Promise<boolean> => {
+      const seq = ++readSeq.current;
+      const query = { firmId, date: requestDate };
+      return Promise.all([api.procedures(core, recordId, query), api.rulesInForce(core, recordId, query)])
+        .then(([procedures, rules]) => {
+          if (seq !== readSeq.current) return false;
+          if (procedures.ok && rules.ok) {
+            setLoad({ state: 'ready', procedures: procedures.value, rules: rules.value });
+            const cur = openRef.current;
+            if (outcome !== 'partial' || !cur) return false;
+            if (cur.kind === 'procedure') {
+              const row = procedures.value.procedures.find(p => procedureKey(p) === cur.key);
+              if (!row) return false;
+              setOpen({ kind: 'procedure', key: cur.key, row, gaps: procedures.value.gaps, date: procedures.value.date });
+              return true;
+            }
+            const row = rules.value.rules.find(r => ruleKey(r) === cur.key);
+            if (!row) return false;
+            setOpen({ kind: 'rule', key: cur.key, row });
+            return true;
+          }
+          const [first, second] = [procedures, rules].flatMap(r => (r.ok ? [] : [r.failure]));
+          setLoad({ state: 'error', failure: pickFailure(first, second ?? null) });
+          return false;
+        })
+        .catch(() => {
+          if (seq === readSeq.current) setLoad({ state: 'error', failure: { status: 0, errorCode: null, detail: null, signInFailed: false } });
+          return false;
+        });
+    },
+    [api, core, recordId, firmId, requestDate]
+  );
 
   // BOTH routes for every (firm, date). Either failing is one failure and no rows.
   React.useEffect(() => {
