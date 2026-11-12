@@ -84,3 +84,32 @@ Unchanged and noted only: "an unreturned sharee row is skipped" and "a read faul
    Direct threads and messages as NoRoot and revoke flagged users' shares there. This agrees with limit 2 but should be decided
    explicitly before 191i. To be filed and reported.
 4. **Refile path** defers flagged participants (no seam there, 197a's file); the job grants them within one run.
+5. **A double flag-read fault on a message the Direct team does not own** fails closed. The read is retried once, and a second
+   fault is logged as an Error. No job re-grants such a message, so an internal recipient may lack Read on it until a later
+   grant. A fault in the predicate itself on that branch is not retried either. **Open question for the coordinator:** keep
+   failing closed, or add a re-grant path for user-owned Direct messages.
+6. **The hidden-row revoke has no gate-record revoke mirror** (D-215 rule 5). This is low risk: gate records are never shared
+   with users flagged external (piece 2), so none is held there.
+7. **A structural Withhold on a content row is re-decided only by the rolling sweep.** A change to that row's own parent chain
+   does not move the message's `modifiedon`. The cost is missed grants, never leaked ones.
+8. **The retired-key ArchTest scan's nested-JSON pattern** stops at the first `}`, so it can miss the key when another nested
+   object comes before it inside `ExternalTeamShare`. The startup warning still covers live settings.
+9. **No composition test checks that the host injects `IServiceScopeFactory` into `DirectThreadAccessService`.** If it were
+   dropped, live grants to flagged participants would defer, and the job would grant them within one run.
+
+## 5. Review
+
+Two Opus adversarial passes ran. Every finding is fixed or recorded in section 4.
+
+| Pass | Finding | Resolution |
+|---|---|---|
+| 1 | F1: the live Direct-team grant ran well after its owner check (the predicate added reads in between) | The owner is read again after the decision and before the message grant. Test: re-owned during the decision, nothing granted. |
+| 1 | F2: on a message the Direct team does not own, a flag-read fault silently left internal recipients ungranted, with no retry | The read is retried once; a second fault is an Error log, fails closed, and is known limit 5. Tests: one fault then granted; two faults, nothing granted, and the Error is logged. |
+| 1 | K: gate mirror, a nested unit now refused, structural re-settle, refile tests | Known limits 6 and 7. Section 3 covers the unit. |
+| 2 | F1: after a message row that did not settle, the job still granted content rows | After the message row, the owner is re-read and a change returns Unknown (retried). The live path does the same when flagged participants are present. Tests on both paths. |
+| 2 | K: no test for a structural answer keeping a held share | Test added (`R197b_AStructuralUndecided_KeepsHeldShares`). |
+| 2 | K: the exemption argument had a default | The default was removed, so every call site states it. |
+| 2 | K: the retired-key scan pattern, and no `IServiceScopeFactory` composition test | Known limits 8 and 9. |
+
+PR #2748 (#2731, skip finished Direct messages in a held window) merges cleanly with this branch. A deferred or owner-changed
+outcome is never Complete, so #2748 never records it as finished.
