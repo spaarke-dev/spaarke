@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="187" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Rule Review, ontology rule wizard and SPE Admin pickers use the side-pane lookup (D-219 Q5)</title>
+    <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
+    <gate>after 178</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Same component wiring as 179 in three surfaces; one judgement (SPE Admin pickers may not be Dataverse lookups) has an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>178</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner D-219 Q5: the same UX rule applies to the other record pickers — Rule Review (Firm), the ontology rule wizard ("Limit to one matter") and SPE Admin (Business Unit, Environment, Container Type Config) — so they use the side-pane lookup.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
+  <goal>Each listed picker that selects a Dataverse record renders DataverseLookupField over the host navigationService; any listed picker that is not a Dataverse record lookup is recorded in task notes with what it lists and is left unchanged.</goal>
+  <context>
+    <background>Review section 2.1 rows: OntologyAdmin/RuleWizard/steps/ScopeNoiseStep.tsx:80; src/solutions/RuleReview/src/components/NewRuleSetModal.tsx:109 and AssignmentPanel.tsx:77; src/solutions/SpeAdminApp/src/components/layout/BuContextPicker.tsx:646, 687 and settings/ContainerTypeConfig.tsx:605, 620 (not yet checked whether these are Dataverse lookups).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/OntologyAdmin/RuleWizard/steps/ScopeNoiseStep.tsx</file>
+      <file role="modify">src/solutions/RuleReview/src/components/NewRuleSetModal.tsx</file>
+      <file role="modify">src/solutions/RuleReview/src/components/AssignmentPanel.tsx</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/layout/BuContextPicker.tsx</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/settings/ContainerTypeConfig.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectStep.tsx</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="owner">Owner directive 2026-11-12, applies to every file this task touches: reuse the existing side-pane lookup (`DataverseLookupField` over `INavigationService.openLookup`) and the existing `EmailComposer`; never re-create either. A third rendering of the lookup pattern is a defect (review section 4 item 6).</constraint>
+    <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
+    <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
+    <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="owner">Owner D-219 (2026-11-12, notes/decisions.md) Q5 and Q1: every Dataverse record picker uses the side pane; option sets and non-Dataverse lists (e.g. values from the BFF or Graph) are not lookups and stay as they are.</constraint>
+    <constraint source="owner">Every contact (person) field converted in this task passes `filters` limiting the pane to active contacts: [{ entityLogicalName: "contact", filterXml: '&lt;filter&gt;&lt;condition attribute="statecode" operator="eq" value="0"/&gt;&lt;/filter&gt;' }] (Owner D-219 (2026-11-12, notes/decisions.md) Q6). Put this filter in ONE exported constant beside DataverseLookupField and import it; do not copy the XML.</constraint>
+    <constraint source="project">Each host passes its existing createXrmNavigationService(); if a host has none, add the existing adapter call at the host root (not inside a component) and say so in task notes.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataverseLookupField" location="src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx">The one side-pane lookup field for wizards: Select button opens INavigationService.openLookup, chip + clear once picked.</pattern>
+      <pattern name="Project Enter Info side-pane fields" location="src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectStep.tsx">Lines ~437-457: Project Type and Practice Area rendered with DataverseLookupField + navigationService + onSearch fallback. Copy this.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">For each listed picker record: table or source, today's search callback, and whether the host has a navigationService.</step>
+    <step order="2">Convert each Dataverse record picker to DataverseLookupField; leave non-Dataverse lists and record them.</step>
+    <step order="3">Add tests and run the dev check in each host.</step>
+    <step order="4">Run the tests named in the acceptance criteria, the touched folders' suites, `npx tsc --noEmit -p .` and ESLint on touched files in src/client/shared/Spaarke.UI.Components; all pass.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
+    <step order="6">Record any deviation from this POML, and the dev-check result, in projects/spaarke-ontology-platform-r1/notes/task-187-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If the ontology rule wizard's host (OntologyAdmin) cannot reach Xrm, STOP and escalate rather than leaving a broken pane.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Firm opens the side pane in Rule Review → New rule set">
+      <steps>
+        <step>Open Rule Review → New rule set in the Console (in-app) on dev</step>
+        <step>Reach the step with Firm; click its Select button</step>
+        <step>Pick a record; then reopen and cancel</step>
+        <step>Switch the Console to dark mode and repeat</step>
+      </steps>
+      <expected>The Dataverse side pane opens above the wizard; the pick shows as a chip; cancel keeps the prior value; all values already typed in the wizard are kept; no white surfaces in dark mode; no console errors.</expected>
+    </test>
+    <test name="Limit to one matter opens the side pane in Ontology admin → new rule">
+      <steps>
+        <step>Open Ontology admin → new rule in the Console (in-app) on dev</step>
+        <step>Reach the step with Limit to one matter; click its Select button</step>
+        <step>Pick a record; then reopen and cancel</step>
+        <step>Switch the Console to dark mode and repeat</step>
+      </steps>
+      <expected>The Dataverse side pane opens above the wizard; the pick shows as a chip; cancel keeps the prior value; all values already typed in the wizard are kept; no white surfaces in dark mode; no console errors.</expected>
+    </test>
+    <test name="SPE Admin pickers">
+      <steps>
+        <step>Open SPE Admin on dev</step>
+        <step>Use the Business Unit picker and Container Type Config pickers</step>
+      </steps>
+      <expected>Dataverse pickers open the side pane; non-Dataverse lists behave as before; light and dark themed.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Run jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/RuleReview/src/components/NewRuleSetModal.tsx</output>
+    <output type="docs">projects/spaarke-ontology-platform-r1/notes/task-187-notes.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Each listed Dataverse record picker opens the pane for its table and renders no inline search input; contact pickers pass the active-contacts filter.</criterion>
+    <criterion testable="true">Each listed picker left unchanged is in task notes with its source and the reason.</criterion>
+    <criterion testable="true">Saved values are unchanged in shape (existing tests pass unchanged); given no navigationService the components render as today.</criterion>
+    <criterion testable="true">Dev check (Console in-app wizard AND one code-page dialog wizard): the side pane opens ABOVE the wizard; after a pick and after a cancel the wizard is usable and keeps every value already entered; light and dark themed (review section 4 risk 5).</criterion>
+    <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
+    <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
+  </acceptance-criteria>
+  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>

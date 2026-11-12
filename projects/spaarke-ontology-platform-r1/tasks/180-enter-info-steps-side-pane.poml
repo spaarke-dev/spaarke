@@ -3,7 +3,7 @@
   <metadata>
     <title>Event, To Do, Invoice and Report Card Enter Info steps use the side-pane lookup for person and organization fields</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
-    <gate>after 179 (shares the Event, Invoice and Report Card wizard files); Event Type gated on owner question 1</gate>
+    <gate>after 179 (shares the Event, Invoice and Report Card wizard files)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
@@ -45,7 +45,9 @@
     <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
     <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
     <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
-    <constraint source="project">Scope: the person and organization fields listed in review section 2.1 for these four steps. Event Type changes only if owner question 1 is answered "side pane".</constraint>
+    <constraint source="owner">Owner D-219 (2026-11-12, notes/decisions.md) Q1: every lookup uses the side pane, reference tables included (Matter Type, Practice Area, Event Type, other *_ref tables); only option sets stay dropdowns. The pane entityType is the table the field's current search already queries.</constraint>
+    <constraint source="owner">Every contact (person) field converted in this task passes `filters` limiting the pane to active contacts: [{ entityLogicalName: "contact", filterXml: '&lt;filter&gt;&lt;condition attribute="statecode" operator="eq" value="0"/&gt;&lt;/filter&gt;' }] (Owner D-219 (2026-11-12, notes/decisions.md) Q6). Put this filter in ONE exported constant beside DataverseLookupField and import it; do not copy the XML.</constraint>
+    <constraint source="project">Scope: the lookup fields of these four steps listed in review section 2.1, including Event Type (CreateEventStep.tsx:221).</constraint>
   </constraints>
   <knowledge>
     <files>
@@ -71,7 +73,7 @@
     </patterns>
   </knowledge>
   <steps mode="directional">
-    <step order="1">Read review section 2.1 and the owner answer to question 1.</step>
+    <step order="1">Read notes/decisions.md D-219 and review section 2.1.</step>
     <step order="2">Convert each listed field to DataverseLookupField, keeping the existing search callback as onSearch.</step>
     <step order="3">Thread navigationService into the two follow-on wrappers.</step>
     <step order="4">Add tests and run the dev check.</step>
@@ -121,7 +123,7 @@
     <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/__tests__/CreateReportCardStep.sidePane.test.tsx</output>
   </outputs>
   <acceptance-criteria>
-    <criterion testable="true">Given a navigationService, each listed field opens the pane for its table (contact or sprk_organization) and renders no inline search input.</criterion>
+    <criterion testable="true">Given a navigationService, each listed field (Event Type included) opens the pane for its table and renders no inline search input; contact fields pass the active-contacts filter.</criterion>
     <criterion testable="true">The ids written at Finish are unchanged in shape for every converted field (existing service tests pass unchanged).</criterion>
     <criterion testable="true">The Create Event and Add To Do follow-ons render the same side-pane fields when the parent wizard has a navigationService.</criterion>
     <criterion testable="true">Given no navigationService, each step renders as today.</criterion>
@@ -129,7 +131,7 @@
     <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
     <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
-  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <notes>D-219 removed the owner-question gate (2026-11-12). Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>

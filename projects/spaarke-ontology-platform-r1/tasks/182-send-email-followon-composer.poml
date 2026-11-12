@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="182" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>Send Email follow-on uses the shared EmailComposer in compose-only mode (F-R4-3); fix the "draft" wording and body format</title>
+    <title>Send Email follow-on uses the shared EmailComposer with From, Cc/Bcc, attachments, templates and AI drafting (F-R4-3, D-219)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
-    <gate>after 179 (shares CreateRecordWizard.tsx); sent-as, attachments and Cc/Bcc gated on owner questions 2-4</gate>
+    <gate>after 179 (shares CreateRecordWizard.tsx)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
@@ -15,16 +15,18 @@
     <parallel-reason>file-overlap with task 179 (CreateRecordWizard.tsx)</parallel-reason>
     <deps>179</deps>
     <tags>frontend, react, fluent-ui, testing</tags>
-    <estimated-effort>4-6 hours</estimated-effort>
+    <estimated-effort>6-8 hours</estimated-effort>
   </metadata>
-  <prompt>The owner found (UAT round 4, F-R4-3) that the create wizards' Send Email step still uses the old email step, not the shared EmailComposer the budget inquiry uses (D-179). Replace the inner step with EmailComposer in compose-only mode, keeping the step's props so the eight consuming wizards and their Finish code do not change.</prompt>
+  <prompt>The owner found (UAT round 4, F-R4-3) that the create wizards' Send Email step still uses the old email step. Owner D-219: the step must offer what the Send Email dialog offers — a From choice (My mailbox / Spaarke shared mailbox), To, Cc and Bcc, attachments, templates and AI drafting — and the email is sent when the wizard finishes, filed under the new record.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
-  <goal>`SendEmailFollowOnStep` renders `EmailComposer` with composeOnly; the wizards still send at Finish through the same route with the same request shape (except changes the owner agreed); the step no longer says the email is saved as a draft; plain-text bodies are sent as plain text.</goal>
+  <goal>`SendEmailFollowOnStep` renders `EmailComposer` (no Send button: the wizard sends at Finish) with the From row, Cc, Bcc, attachments, template picker and AI draft; at Finish the email is sent through the same route and request builder the composer uses, from the chosen mailbox, with Cc, Bcc and attachments, filed under the created record; the step no longer says "draft"; plain-text bodies keep their line breaks.</goal>
   <context>
-    <background>Review sections 2.2 and 3. The wrapper is WizardFollowOns/steps/SendEmailFollowOnStep.tsx:136-151; both old step and composer use POST /api/communications/send; EntityCreationService.sendEmail splits `to` on ; and , (:877-883) and defaults bodyFormat to HTML (:897) while the body is plain text (six wizards; Work Assignment already sends PlainText, workAssignmentService.ts:712). The step text says "saved as a draft activity" (:92-94, CreateRecordWizard.tsx:537) but Finish sends.</background>
+    <background>Review sections 2.2 and 3; notes/decisions.md D-219. Wrapper: WizardFollowOns/steps/SendEmailFollowOnStep.tsx:136-151. EmailComposer hides the From row when composeOnly (EmailComposer.tsx ~1281 and ~1339: `!props.composeOnly`); sendMode is engine state (~528). Template and AI handlers come from createXrmEmailComposeHandlers (onListEmailTemplates, onDraftWithAi), wired today by DocumentEmailStep.tsx:320-322 and EmailWorkspaceWidget.tsx:218-220. The current Finish path (EntityCreationService.sendEmail, :877-897) sends To/Cc/subject/body only and defaults bodyFormat to HTML.</background>
     <relevant-files>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/SendEmailFollowOnStep.tsx</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/EmailMessageFields.tsx</file>
       <file role="new">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/composeOnlyText.ts</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
@@ -40,8 +42,9 @@
     <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
     <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
     <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
-    <constraint source="project">Keep SendEmailFollowOnStep's existing props and the IFollowOnState fields it writes (emailTo as addresses joined with "; ", subject, body), so no wizard Finish code changes except bodyFormat.</constraint>
-    <constraint source="project">Sent-as (owner question 2), attachments/templates/AI draft (question 3) and Cc/Bcc (question 4): implement only what the owner answered, recorded in task notes; until answered keep today's behaviour (shared mailbox, no attachments, Cc only where it exists today, Bcc hidden or warned as EmailMessageFields does).</constraint>
+    <constraint source="owner">Owner D-219 (2026-11-12, notes/decisions.md) Q2-Q4: From choice, Cc and Bcc, attachments, templates and AI drafting are all ON in this step, matching the Send Email dialog.</constraint>
+    <constraint source="project">Showing the From row in compose-only mode is ONE optional EmailComposer prop (default keeps today's behaviour for every other composeOnly host, e.g. the decision wizard). Do not fork the composer or copy its From menu.</constraint>
+    <constraint source="project">At Finish, send through the composer's own request building (the same path SendEmailDialog / DocumentEmailStep use) with associations = the created record; do not extend EntityCreationService.sendEmail with a parallel attachment/Bcc implementation. If the composer exposes no reusable request builder, STOP (escalation).</constraint>
     <constraint source="project">Move EmailMessageFields.toPlainText (:45-52) into EmailComposer/composeOnlyText.ts and import it from both places; do not copy it.</constraint>
   </constraints>
   <knowledge>
@@ -68,34 +71,34 @@
     </patterns>
   </knowledge>
   <steps mode="directional">
-    <step order="1">Read review sections 2.2, 3 and 4 items 1, 2 and 4, and the owner answers to questions 2-4.</step>
+    <step order="1">Read notes/decisions.md D-219, review sections 2.2, 3 and 4 items 1, 2 and 4, and how SendEmailDialog and DocumentEmailStep build and send the request.</step>
     <step order="2">Move toPlainText to EmailComposer/composeOnlyText.ts; update EmailMessageFields to import it.</step>
-    <step order="3">Replace the inner EmailStep in SendEmailFollowOnStep with EmailComposer (composeOnly, initialTo/initialCc/initialSubject/initialBody from the follow-on state, onStateChange writing back), keeping the headerContent slot (Summarize Files toggle).</step>
-    <step order="4">Fix the wording in SendEmailFollowOnStep and CreateRecordWizard.tsx (~520-537): the email is sent when the wizard finishes.</step>
-    <step order="5">Send plain-text bodies with bodyFormat PlainText at the Finish sites that omit it, after confirming on dev that an HTML-formatted plain body loses its line breaks (record the evidence).</step>
+    <step order="3">Add the optional compose-only From prop to EmailComposer (types + render), default off.</step>
+    <step order="4">Replace the inner EmailStep in SendEmailFollowOnStep with EmailComposer (composeOnly, From shown, initial values from the follow-on state, onStateChange writing back the full compose state incl. sendMode, Bcc and attachments), template and AI handlers from the host compose handlers, keeping the headerContent slot (Summarize Files toggle).</step>
+    <step order="5">At Finish (CreateRecordWizard.tsx ~520-537 and the wizards that send), send via the composer request path with associations = the new record; fix the "draft" wording.</step>
     <step order="6">Add tests and run the dev check.</step>
     <step order="7">Run the tests named in the acceptance criteria, the touched folders' suites, `npx tsc --noEmit -p .` and ESLint on touched files in src/client/shared/Spaarke.UI.Components; all pass.</step>
     <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
     <step order="9">Record any deviation from this POML, and the dev-check result, in projects/spaarke-ontology-platform-r1/notes/task-182-notes.md.</step>
   </steps>
   <escalation>
-    <trigger>If keeping the prop contract is impossible without changing a wizard's Finish code beyond bodyFormat, STOP and escalate with the reason.</trigger>
-    <trigger>If dev shows plain bodies already keep line breaks with HTML, do not change bodyFormat; record the evidence.</trigger>
+    <trigger>If the composer has no request builder usable after the record exists (only a mounted Send button), STOP and escalate with the options rather than duplicating the send.</trigger>
+    <trigger>If a consuming wizard's host cannot supply the compose handlers (no fetch or BFF base URL), STOP and list it.</trigger>
   </escalation>
   <justification>
-    <existing>src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/EmailMessageFields.tsx:45-52 holds toPlainText privately.</existing>
-    <extension>No: two consumers (decision wizard and this step) need the same helper, and copying it is the duplication CLAUDE.md section 11 forbids; moving it is the extension.</extension>
-    <cost-of-doing-nothing>Without a shared helper the Send Email step must copy the function, and the two copies drift (review section 4 item 7).</cost-of-doing-nothing>
+    <existing>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx ~1281/~1339 hide the From row whenever composeOnly; DecisionWizard/steps/EmailMessageFields.tsx:45-52 holds toPlainText privately.</existing>
+    <extension>Yes: one optional prop on the existing composer and one moved helper; no new component.</extension>
+    <cost-of-doing-nothing>Without the prop the wizard step cannot offer the From choice the owner requires (D-219 Q2); without the shared helper the step must copy toPlainText and the copies drift.</cost-of-doing-nothing>
   </justification>
   <ui-tests>
-    <test name="Send Email step uses the composer">
+    <test name="Send Email step matches the Send Email dialog">
       <steps>
         <step>Create Project in the Console on dev, Next steps → Send Email</step>
-        <step>Pick two recipients with the pane, type subject and body</step>
+        <step>Choose From = My mailbox; pick two To recipients and one Bcc with the pane; attach a file; apply a template; use AI draft</step>
         <step>Back, then Next</step>
         <step>Finish</step>
       </steps>
-      <expected>Composer shows no Send button and no From row; values survive Back/Next; at Finish one email is sent to both recipients, filed under the new project, with the body's line breaks intact; dark mode themed.</expected>
+      <expected>From, Cc, Bcc, attachments, template picker and AI draft all present; no Send button; values survive Back/Next; at Finish one email is sent from the chosen mailbox to the To/Cc/Bcc recipients with the attachment, filed under the new project, line breaks intact; dark mode themed.</expected>
     </test>
   </ui-tests>
   <tools>
@@ -108,18 +111,19 @@
     <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/__tests__/SendEmailFollowOnStep.composer.test.tsx</output>
   </outputs>
   <acceptance-criteria>
-    <criterion testable="true">The step renders EmailComposer with composeOnly: no Send button and no From row.</criterion>
-    <criterion testable="true">Several typed or picked recipients arrive in the follow-on state as "a; b".</criterion>
-    <criterion testable="true">Back then Next restores To, Cc (where present), subject and body.</criterion>
-    <criterion testable="true">The composer makes no network call while composing (test with a rejecting fetch, as EmailMessageFields tests do).</criterion>
-    <criterion testable="true">For a single recipient the request body sent at Finish is identical to today's except bodyFormat (if changed per the dev evidence) and any owner-agreed change.</criterion>
+    <criterion testable="true">The step renders EmailComposer with no Send button and WITH the From row (My mailbox / Spaarke shared mailbox), Cc, Bcc, attachments, template picker and AI draft.</criterion>
+    <criterion testable="true">Other composeOnly hosts (decision wizard) render exactly as today (existing EmailMessageFields tests pass unchanged).</criterion>
+    <criterion testable="true">Back then Next restores From, To, Cc, Bcc, subject, body and attachments.</criterion>
+    <criterion testable="true">The composer makes no network call while composing except template listing and AI draft when the user invokes them.</criterion>
+    <criterion testable="true">At Finish the send request carries the chosen sendMode, To, Cc, Bcc, attachments and associations = the created record, built by the composer request path; a send failure is reported and does not undo the record.</criterion>
+    <criterion testable="true">A plain-text body arrives with its line breaks (bodyFormat PlainText, or the composer's HTML with breaks — whichever the composer path produces; assert the breaks).</criterion>
     <criterion testable="true">The step text no longer says "draft"; SendEmailFollowOnStep no longer imports ../../EmailStep.</criterion>
     <criterion testable="true">The Summarize Files wizard's header toggle still renders and works.</criterion>
-    <criterion testable="true">Negative: Bcc is either sent end to end or visibly warned as not sent; it is never silently dropped.</criterion>
+    <criterion testable="true">Negative: Bcc is never silently dropped.</criterion>
     <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
     <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
-  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <notes>Rewritten 2026-11-12 for D-219 (full composer parity). Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>

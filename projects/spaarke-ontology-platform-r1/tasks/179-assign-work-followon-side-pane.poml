@@ -3,7 +3,7 @@
   <metadata>
     <title>Assign Work follow-on: Assigned Attorney / Paralegal / Outside Counsel use the side-pane lookup (F-R4-2)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
-    <gate>after 178; Matter Type / Practice Area part gated on owner question 1, contact filter on question 6</gate>
+    <gate>after 178</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
@@ -41,7 +41,8 @@
     <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
     <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
     <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
-    <constraint source="project">Scope: the three Assigned fields only. Matter Type and Practice Area in this step change ONLY if the owner answers question 1 (review section 6) "side pane"; record the answer in task notes before touching them.</constraint>
+    <constraint source="owner">Owner D-219 (2026-11-12, notes/decisions.md) Q1: every lookup uses the side pane, reference tables included (Matter Type, Practice Area, Event Type, other *_ref tables); only option sets stay dropdowns. The pane entityType is the table the field's current search already queries.</constraint>
+    <constraint source="owner">Every contact (person) field converted in this task passes `filters` limiting the pane to active contacts: [{ entityLogicalName: "contact", filterXml: '&lt;filter&gt;&lt;condition attribute="statecode" operator="eq" value="0"/&gt;&lt;/filter&gt;' }] (Owner D-219 (2026-11-12, notes/decisions.md) Q6). Put this filter in ONE exported constant beside DataverseLookupField and import it; do not copy the XML.</constraint>
     <constraint source="project">The new config field is ONE optional top-level `navigationService?: INavigationService` on the CreateRecordWizard config; the existing associateToStep / existingRecordPicker fields are not changed.</constraint>
   </constraints>
   <knowledge>
@@ -68,9 +69,9 @@
     </patterns>
   </knowledge>
   <steps mode="directional">
-    <step order="1">Read the owner answers to review section 6 questions 1 and 6 in notes/decisions.md or the task notes; if unanswered, convert only the three Assigned fields.</step>
+    <step order="1">Read notes/decisions.md D-219 and review section 2.1 rows for AssignWorkFollowOnStep.tsx (:249, :257, :307, :328, :336).</step>
     <step order="2">Add the optional navigationService to the CreateRecordWizard config type and pass it from CreateRecordWizard.tsx (~441-466) to AssignWorkFollowOnStep.</step>
-    <step order="3">In AssignWorkFollowOnStep render the three Assigned fields with DataverseLookupField (entityType contact / contact / sprk_organization), keeping the existing search callbacks as onSearch; keep "Assign to me".</step>
+    <step order="3">In AssignWorkFollowOnStep render Matter Type, Practice Area, Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel with DataverseLookupField, keeping the existing search callbacks as onSearch; the two contact fields pass the active-contacts filter; keep "Assign to me".</step>
     <step order="4">Pass the navigationService the Matter, Project, Event, Invoice and Report Card wizards already receive into their config (Invoice ~403-427 and Report Card ~402-426 pass it to the step directly).</step>
     <step order="5">Add tests and run the dev check.</step>
     <step order="6">Run the tests named in the acceptance criteria, the touched folders' suites, `npx tsc --noEmit -p .` and ESLint on touched files in src/client/shared/Spaarke.UI.Components; all pass.</step>
@@ -115,7 +116,7 @@
     <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/__tests__/AssignWorkFollowOnStep.sidePane.test.tsx</output>
   </outputs>
   <acceptance-criteria>
-    <criterion testable="true">Given a navigationService, then Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel render no inline search input and open the pane for contact, contact and sprk_organization respectively.</criterion>
+    <criterion testable="true">Given a navigationService, then Matter Type, Practice Area, Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel render no inline search input and open the pane for their tables (the two person fields: contact with the active-contacts filter; Outside Counsel: sprk_organization, no filter).</criterion>
     <criterion testable="true">Given a pick in each field, then the picked ids and names reach onFinish (the work assignment create) unchanged from today's shape (assignedAttorneyId/Name, assignedParalegalId/Name, assignedOutsideCounselId/Name).</criterion>
     <criterion testable="true">"Assign to me" still fills Assigned Attorney.</criterion>
     <criterion testable="true">Given no navigationService, the step renders exactly as today; the existing AssignWorkFollowOnStep.assignToMe test passes unchanged.</criterion>
@@ -124,7 +125,7 @@
     <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
     <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
-  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <notes>D-219 removed the owner-question gates (2026-11-12). Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>

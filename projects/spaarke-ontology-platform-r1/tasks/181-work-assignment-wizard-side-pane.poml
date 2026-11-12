@@ -3,7 +3,7 @@
   <metadata>
     <title>Work Assignment wizard: Assigned Attorney / Paralegal / Law Firm / Law Firm Attorney / Assigned To use the side-pane lookup</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
-    <gate>after 178; Matter Type / Practice Area gated on owner question 1</gate>
+    <gate>after 178</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
@@ -37,7 +37,9 @@
     <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
     <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
     <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
-    <constraint source="project">Law Firm Attorney: read AssignWorkStep.tsx:156-159 first and reproduce today's rule exactly (disabled or unfiltered when no firm is chosen), using the `filters` prop from task 178 for the firm filter. Matter Type / Practice Area only per owner question 1.</constraint>
+    <constraint source="owner">Owner D-219 (2026-11-12, notes/decisions.md) Q1: every lookup uses the side pane, reference tables included (Matter Type, Practice Area, Event Type, other *_ref tables); only option sets stay dropdowns. The pane entityType is the table the field's current search already queries.</constraint>
+    <constraint source="owner">Every contact (person) field converted in this task passes `filters` limiting the pane to active contacts: [{ entityLogicalName: "contact", filterXml: '&lt;filter&gt;&lt;condition attribute="statecode" operator="eq" value="0"/&gt;&lt;/filter&gt;' }] (Owner D-219 (2026-11-12, notes/decisions.md) Q6). Put this filter in ONE exported constant beside DataverseLookupField and import it; do not copy the XML.</constraint>
+    <constraint source="project">Law Firm Attorney: read AssignWorkStep.tsx:156-159 first and reproduce today's rule exactly (disabled or unfiltered when no firm is chosen). With a firm chosen its pane filter combines the firm condition AND the active-contacts condition in one filter element. Scope includes Matter Type and Practice Area in EnterInfoStep.tsx (:330, :337).</constraint>
   </constraints>
   <knowledge>
     <files>
@@ -94,15 +96,15 @@
     <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/__tests__/AssignWorkStep.sidePane.test.tsx</output>
   </outputs>
   <acceptance-criteria>
-    <criterion testable="true">Given a navigationService, each listed field opens the pane for its table and renders no inline search input.</criterion>
-    <criterion testable="true">Given a chosen Law Firm, the Law Firm Attorney pane receives a filter limiting it to contacts of that firm; given no firm, the field behaves exactly as today (per the recorded :156-159 rule).</criterion>
+    <criterion testable="true">Given a navigationService, each listed field (Matter Type and Practice Area included) opens the pane for its table and renders no inline search input; contact fields pass the active-contacts filter.</criterion>
+    <criterion testable="true">Given a chosen Law Firm, the Law Firm Attorney pane receives one filter limiting it to ACTIVE contacts of that firm; given no firm, the field behaves exactly as today (per the recorded :156-159 rule) with the active-contacts filter.</criterion>
     <criterion testable="true">Changing the Law Firm clears a Law Firm Attorney who no longer matches, as today.</criterion>
     <criterion testable="true">Existing EnterInfoStep.assignedTo and WorkAssignmentWizardDialog tests pass unchanged; given no navigationService the steps render as today.</criterion>
     <criterion testable="true">Dev check (Console in-app wizard AND one code-page dialog wizard): the side pane opens ABOVE the wizard; after a pick and after a cancel the wizard is usable and keeps every value already entered; light and dark themed (review section 4 risk 5).</criterion>
     <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
     <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
-  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <notes>D-219 removed the owner-question gate (2026-11-12). Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>

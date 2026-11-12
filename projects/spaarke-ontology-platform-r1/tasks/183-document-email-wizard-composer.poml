@@ -37,7 +37,7 @@
     <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
     <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
     <constraint source="project">The PCF host change follows docs/guides/PCF-DEPLOYMENT-GUIDE.md: version bump in every location the pcf-deploy skill lists; build with npm run build:prod.</constraint>
-    <constraint source="project">Sent-as stays the shared mailbox (today's behaviour) unless the owner answered question 2 otherwise.</constraint>
+    <constraint source="owner">Owner D-219 (2026-11-12, notes/decisions.md): From choice, Cc and Bcc, attachments, templates and AI drafting are ON (wire onListEmailTemplates / onDraftWithAi from the host compose handlers, as DocumentEmailStep.tsx:320-322).</constraint>
   </constraints>
   <knowledge>
     <files>
@@ -100,7 +100,8 @@
   </outputs>
   <acceptance-criteria>
     <criterion testable="true">DocumentEmailWizard renders EmailComposer and no longer imports ../EmailStep.</criterion>
-    <criterion testable="true">The send request (route, sendMode, associations, attachments of the selected documents) matches today's for the same input.</criterion>
+    <criterion testable="true">The composer shows the From choice, Cc, Bcc, attachments, template picker and AI draft in both hosts.</criterion>
+    <criterion testable="true">The send request uses the chosen mailbox and carries associations (the record) and the selected documents as today.</criterion>
     <criterion testable="true">The SemanticSearchControl PCF builds with build:prod and its version is bumped in every location; the DocumentRelationshipViewer page builds.</criterion>
     <criterion testable="true">Both hosts pass the dev check; no console errors.</criterion>
     <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>

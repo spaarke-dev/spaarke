@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy the create-wizard lookup and composer changes to dev and verify (Console, wizard code pages, SemanticSearchControl PCF)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
-    <gate>after 184; deploys need the owner's go</gate>
+    <gate>after 184, 186 and 187; deploys need the owner's go</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment-phase task (no code changes).</rigor-reason>
@@ -13,11 +13,11 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deployment; ordered and owner-gated.</parallel-reason>
-    <deps>184</deps>
+    <deps>184, 186, 187</deps>
     <tags>deploy, dataverse, pcf, frontend</tags>
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
-  <prompt>Ship tasks 178-184 to dev: the Console picks up the shared library from master automatically; the Create{Matter,Project,Todo,WorkAssignment,Event,Invoice,ReportCard} wizard code pages, SummarizeFiles, DocumentRelationshipViewer and the SemanticSearchControl PCF need their own builds and deploys. Then run the owner checks.</prompt>
+  <prompt>Ship tasks 178-184, 186 and 187 to dev: the Console picks up the shared library from master automatically; the Create* wizard code pages, SummarizeFiles, DocumentRelationshipViewer, RuleReview, SpeAdminApp and the SemanticSearchControl PCF need their own builds and deploys. Then run the owner checks.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
   <goal>Every host that renders the changed wizards runs the new code on dev, verified, and the deploy log records what was deployed from which master SHA.</goal>
   <context>

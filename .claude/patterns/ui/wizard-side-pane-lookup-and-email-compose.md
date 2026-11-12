@@ -26,10 +26,12 @@ For a lookup outside a wizard (grid filter, record header, widget search box) us
 ## Key Rules
 - **Never build a new lookup component or email form.** A wizard person/organization field is `DataverseLookupField`; a wizard email is `EmailComposer`. A third rendering of either is a defect (owner directive 2026-11-12).
 - **Pass the host's `navigationService` down** to every step that has a person/organization field. A step without one falls back to the inline `LookupField` — that fallback is for hosts with no Xrm, not a choice.
-- **Reference tables** (Matter Type, Practice Area, Event Type, other `*type` tables) may stay inline type-ahead until the owner rules otherwise (review §6 Q1); record the ruling in the task notes.
+- **Every Dataverse record lookup uses the side pane**, reference tables included (Matter Type, Practice Area, Event Type, other `*_ref` tables) and admin pickers too; only option sets stay dropdowns (owner D-219, 2026-11-12).
+- **Person (contact) lookups show active contacts only** — pass the shared active-contacts `filters` constant; never copy the filter XML.
+- **Wizard email = the Send Email dialog's feature set**: From choice (My mailbox / Spaarke shared mailbox), To, Cc, Bcc, attachments, template picker and AI draft (`onListEmailTemplates` / `onDraftWithAi` from `createXrmEmailComposeHandlers`); a host that omits those handlers silently hides the feature.
 - **Filters** (e.g. Law Firm Attorney limited to the chosen firm) go through `DataverseLookupField`'s `filters` prop → `LookupOptions.filters`, never a client-side post-filter.
 - **A failed pane is a cancel**: value unchanged, logged, no unhandled rejection.
-- **Compose-only inside a wizard**: `EmailComposer` with `composeOnly` — no Send button, no From row; state lifted with `onStateChange`; the wizard sends at Finish. Do not say "saved as a draft" when Finish sends.
+- **Compose-only inside a wizard**: `EmailComposer` with `composeOnly` — no Send button; state lifted with `onStateChange`; the wizard sends at Finish through the composer's own request path. (`composeOnly` hides the From row today; the create wizards' Send Email step shows it via the option ontology task 182 adds.) Do not say "saved as a draft" when Finish sends.
 - **Plain-text bodies are sent as `PlainText`**, not the `HTML` default of `EntityCreationService.sendEmail`.
 - **Bcc is sent end to end or visibly warned** — never silently dropped.
 - Do **not** import the old `components/EmailStep/` in new code; it is being retired (ontology task 184, with a source-scan guard).
