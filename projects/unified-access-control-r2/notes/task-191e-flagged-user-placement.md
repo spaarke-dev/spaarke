@@ -81,7 +81,38 @@ No unit yet: `inert`, one Warning with the flagged-user count, not a finding, ru
 - K-3 The job does not remove roles a move left behind (S2 says there are none); it alerts and the census keeps reporting
   them. An S2 deviation is an escalation trigger, not something the job repairs.
 - K-4 Disabled, application, support and non-interactive flagged users are not graded by the census (they cannot sign in
-  interactively), matching what the job never moves.
+  interactively), matching what the job never moves. The reverse is not symmetric: a flagged System Administrator or a
+  flagged user in access mode 1 or 5 IS graded (so stays a CRITICAL `FlaggedUserOutsideExternalUnit` every run) but is
+  never moved by the job. That is deliberate drift for an administrator to resolve (clear the flag or the admin role).
+- K-5 Before 191i creates the unit, placement is inert (Warning with the count), not a census failure (D-3).
+- K-6 Ownership: one 500-row page per owner chunk. An owner whose rows all fall after that page gets no finding until the
+  first owner's rows are fixed (the run is red either way, never clean).
+- K-7 The run bound (25) takes users in id order: 25 or more users that keep failing would hold every slot each tick.
+  Each failure is its own Critical line, so this is visible.
+- K-8 The pre-write re-read covers the user and its direct roles, not its team roles; the role association after a move
+  does not re-read the flag. The windows are seconds; the next tick and the census see the result.
+- K-9 A re-read failure for one user is `unverified` (Error, run unsuccessful) and does not stop the other users in the
+  run: each write rests on that user's own fresh read. Literal ADR-036 A1 rule 4 is "throw on read failure"; every read
+  that decides the run's candidate list still throws.
+- K-10 Lineage tables the environment does not have (no privilege returned) are listed as `ungradedTables` at Error and
+  skipped for ownership (fix-round 1, finding 1).
+
+## 4.5 Review (one Opus adversarial pass, 2026-11-11)
+
+| # | Finding | Class | Disposition |
+|---|---|---|---|
+| 1 | Census queried every lineage table; a table the environment lacks throws, so after 191i the whole census (secure half included) fails every run | F4 fix-now | Fixed: only tables with a returned privilege are queried; the rest are `ungradedTables` (Error line, ResultJson). Test `Placement_ALineageTableTheEnvironmentLacks_IsListedAsUngraded_AndTheRestIsStillGraded` |
+| 2 | `Classify` said Placed for in-unit + role + other roles; read-back said failure, so one alert then silence | F1 fix-now | Fixed: new `PlacedWithOtherRoles` decision, Critical every run in both modes, run unsuccessful, `otherRoles` in result and heartbeat. Test extended to a second run, plus a report-only test and rule-table rows |
+| 3 | Census job resolved the Dataverse seam outside every try | K | Fixed (resolved inside each try) |
+| 4 | Ownership first page only | K | K-6 |
+| 5 | Run bound starvation | K | K-7 |
+| 6 | Team roles and flag not re-read before association | K | K-8 |
+| 7 | Per-user re-read failure does not throw | K | K-9 |
+| 8 | Census grades admins/mode 1/5 that the job never moves | K | K-4 (documented) |
+| 9 | Role missing or ambiguous gave no census finding | K | Fixed: one `RoleUnresolved` finding; test added |
+| 10 | Census double ignores ColumnSet; position-model branch untested; job-level app/admin-mode cases overlap the access-mode check | K | Position-model test added. ColumnSet: the job's double projects columns (privacy test pins the job's column list); census columns are not pinned (left as known limit). App/admin-mode: pinned by the pure `Classify` rule table |
+
+rework: fix-round-1 task 191e (findings 1, 2 fixed; 3, 9, 10-part fixed as cheap hardening).
 
 ## 5. Dev metadata read (2026-11-11, read-only)
 

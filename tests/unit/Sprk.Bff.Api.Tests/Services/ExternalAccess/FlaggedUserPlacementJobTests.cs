@@ -329,6 +329,34 @@ public class FlaggedUserPlacementJobTests
         result.Success.Should().BeFalse();
         _log.Entries.Where(e => e.Level == LogLevel.Critical).Should().ContainSingle()
             .Which.Message.Should().Contain(user.ToString()).And.Contain("otherDirectRoles=1");
+
+        // Review finding 2: the next run must NOT count the user as placed (in the unit, holding the role, AND another
+        // role): it alerts again, fails again, and writes nothing (the job never removes roles).
+        _log.Clear();
+        var writesBefore = _directory.Writes.Count;
+        var second = await RunAsync(writes: true);
+
+        second.Success.Should().BeFalse();
+        _directory.Writes.Should().HaveCount(writesBefore, "nothing is written for a user holding another role");
+        _log.Entries.Where(e => e.Level == LogLevel.Critical).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString()).And.Contain("hold another direct role");
+        Json(second).GetProperty("alreadyPlaced").GetInt32().Should().Be(0);
+        Json(second).GetProperty("otherRoles").GetProperty("ids").EnumerateArray().Select(e => e.GetGuid()).Should().Equal(user);
+        _log.Entries.Should().ContainSingle(e => e.Message.Contains("heartbeat status=failed") && e.Message.Contains("otherRoles=1"));
+    }
+
+    [Fact]
+    public async Task WritesOff_AUserInTheUnitHoldingAnotherRoleBesideTheExternalOne_IsAlerted_NotCountedPlaced()
+    {
+        var user = _directory.User(ExternalBu, flag: true, roles: [ExternalRole, BasicUserCustomerCopy]);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        _directory.Writes.Should().BeEmpty();
+        _log.Entries.Where(e => e.Level == LogLevel.Critical).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString());
+        Json(result).GetProperty("alreadyPlaced").GetInt32().Should().Be(0);
     }
 
     [Fact]
@@ -504,6 +532,8 @@ public class FlaggedUserPlacementJobTests
         C(U(mode: 2)).Should().Be(PlacementDecision.Move, "Read access mode is an interactive person");
         C(U(bu: ExternalBu)).Should().Be(PlacementDecision.AssignRole);
         C(U(bu: ExternalBu), direct: [ExternalRole]).Should().Be(PlacementDecision.Placed);
+        C(U(bu: ExternalBu), direct: [ExternalRole, BasicUserCustomerCopy]).Should().Be(PlacementDecision.PlacedWithOtherRoles);
+        C(U(bu: ExternalBu), direct: [BasicUserCustomerCopy]).Should().Be(PlacementDecision.AssignRole);
         C(U(), noUnit: true).Should().Be(PlacementDecision.Unplaceable);
         C(U(flag: null)).Should().Be(PlacementDecision.SkipNotFlagged);
         C(U(flag: false)).Should().Be(PlacementDecision.SkipNotFlagged);

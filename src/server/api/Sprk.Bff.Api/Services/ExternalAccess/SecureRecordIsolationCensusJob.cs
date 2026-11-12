@@ -111,9 +111,10 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
 
         using (var scope = _scopeFactory.CreateScope())
         {
-            var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
+            // The seam is resolved inside each try, so a resolution failure still ends in the error line and the heartbeat.
             try
             {
+                var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
                 outcome = await SecureRecordIsolationCensus.EvaluateAsync(dataverse, _configuration, cancellationToken)
                     .ConfigureAwait(false);
                 status = SecureRecordIsolationCensus.StatusOf(outcome);
@@ -132,6 +133,7 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
             // one census never blinds the other. A failure of either fails the attempt below.
             try
             {
+                var dataverse = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
                 placement = await ExternalCollaboratorPlacement.EvaluateCensusAsync(dataverse, cancellationToken)
                     .ConfigureAwait(false);
                 placementStatus = placement.Status;
@@ -156,6 +158,16 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                     "[SECURE-CENSUS] PlacementInert: no '{Unit}' business unit, so {Flagged} flagged-external user(s) cannot be " +
                     "placed and placement is not graded. correlationId={CorrelationId}",
                     ExternalCollaboratorPlacement.BusinessUnitName, placement.FlaggedUsers, context.CorrelationId);
+            }
+
+            if (placement.UngradedTables.Count > 0)
+            {
+                // A codified lineage table this environment does not have: no rows to own, so nothing is exposed, but the
+                // ownership check did not run on it. Loud, not CRITICAL (the secure census treats the same gap the same way).
+                _logger.LogError(
+                    "[SECURE-CENSUS] PlacementTablesNotInEnvironment: no privilege of {Count} lineage table(s) was returned, so " +
+                    "ownership by flagged users is not graded on them: {Tables}. correlationId={CorrelationId}",
+                    placement.UngradedTables.Count, string.Join(", ", placement.UngradedTables), context.CorrelationId);
             }
 
             foreach (var finding in placement.Findings)
@@ -258,6 +270,7 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                         status = placementStatus,
                         flaggedUsers = placement!.FlaggedUsers,
                         findings = placement.Findings.Select(f => new { kind = f.Kind.ToString(), message = f.Message }).ToArray(),
+                        ungradedTables = placement.UngradedTables,
                     },
                     attempt = context.Attempt
                 },

@@ -230,8 +230,23 @@ internal static class ExternalCollaboratorPlacement
         var defaultTeamIds = await ReadDefaultTeamIdsAsync(dataverse, unitId, ct).ConfigureAwait(false);
         var findings = new List<PlacementFinding>();
 
+        if (role.State != UnitState.Found)
+        {
+            // Without exactly one role copy in the unit the job places nobody, so say so once; the per-user role findings
+            // below then name every role a flagged user holds.
+            findings.Add(new PlacementFinding(PlacementDriftKind.RoleUnresolved, Guid.Empty,
+                role.State == UnitState.Missing
+                    ? $"business unit '{BusinessUnitName}' ({unitId}) has no role '{RoleName}': no flagged user can be placed. " +
+                      "Task 191d's script creates it."
+                    : $"business unit '{BusinessUnitName}' ({unitId}) has more than one role '{RoleName}': which one a flagged user " +
+                      "holds cannot be decided, so no flagged user is placed. Keep exactly one."));
+        }
+
         if (humans.Count == 0 && defaultTeamIds.Count == 0)
-            return new PlacementCensusOutcome(PlacementCensusStatus.Clean, findings, 0);
+        {
+            return new PlacementCensusOutcome(
+                findings.Count == 0 ? PlacementCensusStatus.Clean : PlacementCensusStatus.Findings, findings, 0);
+        }
 
         var humanIds = humans.Select(user => user.Id).ToArray();
 
@@ -290,6 +305,7 @@ internal static class ExternalCollaboratorPlacement
 
         // ── 4 and 5. Depth above Basic on a lineage table, and prvWriteUser — on EVERY role held, THE role included ──
         var privileges = await ReadLineagePrivilegesAsync(dataverse, ct).ConfigureAwait(false);
+        var (presentTables, ungradedTables) = LineageTablesIn(privileges.Values);
         var depths = await ReadDepthsAsync(dataverse, roles, privileges.Keys, ct).ConfigureAwait(false);
         foreach (var user in humans)
         {
@@ -333,15 +349,43 @@ internal static class ExternalCollaboratorPlacement
         }
 
         // ── 6. A lineage row owned by a flagged user or by the unit's default team ──
-        await AddOwnershipFindingsAsync(dataverse, humanIds.Concat(defaultTeamIds).ToHashSet(), defaultTeamIds, findings, ct)
-            .ConfigureAwait(false);
+        //    Only tables the environment has (a privilege of the table was returned): querying a table that does not exist
+        //    throws, and an environment may legitimately lack a codified table (the secure census grades that as a coverage
+        //    gap, not a failure). A missing table has no rows to own; it is listed as ungraded.
+        await AddOwnershipFindingsAsync(dataverse, presentTables, humanIds.Concat(defaultTeamIds).ToHashSet(), defaultTeamIds,
+            findings, ct).ConfigureAwait(false);
 
         // ── 7. Hierarchy security with a flagged manager ──
         await AddHierarchyFindingsAsync(dataverse, humans, findings, ct).ConfigureAwait(false);
 
         return new PlacementCensusOutcome(
-            findings.Count == 0 ? PlacementCensusStatus.Clean : PlacementCensusStatus.Findings, findings, humans.Count);
+            findings.Count == 0 ? PlacementCensusStatus.Clean : PlacementCensusStatus.Findings, findings, humans.Count)
+        {
+            UngradedTables = ungradedTables,
+        };
     }
+
+    /// <summary>
+    /// The lineage-registry tables split by whether the environment returned any privilege of theirs (so the table exists):
+    /// present ones are graded, the rest listed as ungraded.
+    /// </summary>
+    private static (IReadOnlyList<string> Present, IReadOnlyList<string> Ungraded) LineageTablesIn(IEnumerable<string> privilegeNames)
+    {
+        var names = privilegeNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var present = new List<string>();
+        var ungraded = new List<string>();
+        foreach (var table in LineageTables())
+        {
+            (AccessTypes.Any(access => names.Contains($"prv{access}{table}")) ? present : ungraded).Add(table);
+        }
+
+        return (present, ungraded);
+    }
+
+    private static IEnumerable<string> LineageTables() =>
+        SecureChildLineage.Roots.Concat(SecureChildLineage.Children.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.Ordinal);
 
     private static PlacementFinding RoleFinding(
         Guid principalId, string holder, Guid roleId, IReadOnlyDictionary<Guid, CensusRole> roles, Guid unitId)
@@ -360,15 +404,12 @@ internal static class ExternalCollaboratorPlacement
     }
 
     private static async Task AddOwnershipFindingsAsync(
-        IGenericEntityService dataverse, IReadOnlySet<Guid> owners, IReadOnlySet<Guid> teamOwners, List<PlacementFinding> findings,
-        CancellationToken ct)
+        IGenericEntityService dataverse, IReadOnlyList<string> tables, IReadOnlySet<Guid> owners, IReadOnlySet<Guid> teamOwners,
+        List<PlacementFinding> findings, CancellationToken ct)
     {
         if (owners.Count == 0)
             return;
 
-        var tables = SecureChildLineage.Roots.Concat(SecureChildLineage.Children.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(name => name, StringComparer.Ordinal);
         foreach (var table in tables)
         {
             var counts = new Dictionary<Guid, int>();
@@ -502,8 +543,7 @@ internal static class ExternalCollaboratorPlacement
     /// </summary>
     private static async Task<Dictionary<Guid, string>> ReadLineagePrivilegesAsync(IGenericEntityService dataverse, CancellationToken ct)
     {
-        var wanted = SecureChildLineage.Roots.Concat(SecureChildLineage.Children.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+        var wanted = LineageTables()
             .SelectMany(table => AccessTypes.Select(access => $"prv{access}{table}"))
             .Append(WriteUserPrivilege)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -639,6 +679,9 @@ internal enum PlacementDriftKind
     /// <summary>More than one unit carries the name, or it is not under the root.</summary>
     UnitAmbiguous,
 
+    /// <summary>The unit has no copy of THE role, or more than one: nobody can be placed.</summary>
+    RoleUnresolved,
+
     /// <summary>A flagged user outside the unit.</summary>
     FlaggedUserOutsideExternalUnit,
 
@@ -684,4 +727,8 @@ internal static class PlacementCensusStatus
 }
 
 /// <summary>A graded placement census.</summary>
-internal sealed record PlacementCensusOutcome(string Status, IReadOnlyList<PlacementFinding> Findings, int FlaggedUsers);
+internal sealed record PlacementCensusOutcome(string Status, IReadOnlyList<PlacementFinding> Findings, int FlaggedUsers)
+{
+    /// <summary>Lineage tables this environment does not have (no privilege of theirs returned): not graded for ownership.</summary>
+    public IReadOnlyList<string> UngradedTables { get; init; } = [];
+}

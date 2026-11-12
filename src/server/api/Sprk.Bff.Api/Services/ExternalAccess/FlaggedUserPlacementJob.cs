@@ -158,9 +158,15 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
             return PlacementDecision.Unplaceable;
         if (user.BusinessUnitId == unitId)
         {
-            return roleId is { } role && directRoleIds.Contains(role)
+            if (roleId is not { } role || !directRoleIds.Contains(role))
+                return PlacementDecision.AssignRole;
+
+            // Placed means THE role only, the same test the read-back applies: a user that also holds another direct role
+            // (a move that kept roles, contrary to spike S2, or a role an administrator added) is alerted on every run, never
+            // counted as placed. The job does not remove roles (known limit K-3).
+            return directRoleIds.All(id => id == role)
                 ? PlacementDecision.Placed
-                : PlacementDecision.AssignRole;
+                : PlacementDecision.PlacedWithOtherRoles;
         }
 
         return PlacementDecision.Move;
@@ -198,12 +204,12 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
         _logger.Log(report.Status == StatusOk ? LogLevel.Information : LogLevel.Warning,
             "{Prefix} heartbeat status={Status} mode={Mode} unit={Unit} role={Role} flagged={Flagged} placed={Placed} " +
             "moved={Moved} roleAssigned={RoleAssigned} wouldMove={WouldMove} wouldAssignRole={WouldAssignRole} " +
-            "unplaceable={Unplaceable} failed={Failed} unverified={Unverified} changed={Changed} deferred={Deferred} " +
+            "unplaceable={Unplaceable} otherRoles={OtherRoles} failed={Failed} unverified={Unverified} changed={Changed} deferred={Deferred} " +
             "skipped={Skipped} unflaggedInUnit={UnflaggedInUnit} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} " +
             "runId={RunId} correlationId={CorrelationId}",
             LogPrefix, report.Status, report.Mode, report.Unit, report.Role, report.Flagged, report.AlreadyPlaced,
             report.Moved.Count, report.RoleAssigned.Count, report.WouldMove.Count, report.WouldAssignRole.Count,
-            report.Unplaceable.Count, report.Failed.Count, report.Unverified.Count, report.Changed, report.Deferred,
+            report.Unplaceable.Count, report.OtherRoles.Count, report.Failed.Count, report.Unverified.Count, report.Changed, report.Deferred,
             report.Skipped.Values.Sum(), report.UnflaggedInUnit.Count, context.Attempt, (long)duration.TotalMilliseconds,
             context.Trigger, context.RunId, context.CorrelationId);
 
@@ -266,6 +272,9 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
                 case PlacementDecision.Placed:
                     report.AlreadyPlaced++;
                     break;
+                case PlacementDecision.PlacedWithOtherRoles:
+                    report.OtherRoles.Add(user.Id);
+                    break;
                 case PlacementDecision.Move:
                 case PlacementDecision.AssignRole:
                     pending.Add((user, decision));
@@ -287,6 +296,20 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
                 "administrator decides. systemuserIds={Ids} correlationId={CorrelationId}",
                 LogPrefix, report.UnflaggedInUnit.Count, ExternalCollaboratorPlacement.BusinessUnitName,
                 string.Join(",", report.UnflaggedInUnit.Take(MaxListedIds)), context.CorrelationId);
+        }
+
+        if (report.OtherRoles.Count > 0)
+        {
+            // In the unit with THE role and another direct role: not placed. Alerted on every run (both modes) until an
+            // administrator removes the other role; the job never removes roles.
+            report.Status = StatusFailed;
+            _logger.LogCritical(
+                "{Prefix} ALERT {Count} flagged user(s) in '{Unit}' hold another direct role beside '{RoleName}'. After a move this " +
+                "means the move did not behave as spike S2 found (escalate); otherwise an administrator added the role. The job " +
+                "does not remove roles: remove the other role. systemuserIds={Ids} correlationId={CorrelationId}",
+                LogPrefix, report.OtherRoles.Count, ExternalCollaboratorPlacement.BusinessUnitName,
+                ExternalCollaboratorPlacement.RoleName, string.Join(",", report.OtherRoles.Take(MaxListedIds)),
+                context.CorrelationId);
         }
 
         if (!writes)
@@ -471,6 +494,7 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
         public List<Guid> WouldMove { get; } = [];
         public List<Guid> WouldAssignRole { get; } = [];
         public List<Guid> Unplaceable { get; } = [];
+        public List<Guid> OtherRoles { get; } = [];
         public List<Guid> Failed { get; } = [];
         public List<Guid> Unverified { get; } = [];
         public List<Guid> UnflaggedInUnit { get; } = [];
@@ -486,7 +510,7 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
         {
             StatusBlocked => $"{Unplaceable.Count} flagged user(s) cannot be placed: unit {Unit}, role {Role}.",
             StatusError => "The directory could not be read; nobody was moved.",
-            _ => $"{Failed.Count} placement(s) failed and {Unverified.Count} user(s) could not be re-read; retried next tick.",
+            _ => $"{Failed.Count} placement(s) failed, {Unverified.Count} user(s) could not be re-read and {OtherRoles.Count} placed user(s) hold another direct role; retried next tick.",
         };
 
         public object ToResult(int attempt) => new
@@ -502,6 +526,7 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
             wouldMove = Ids(WouldMove),
             wouldAssignRole = Ids(WouldAssignRole),
             unplaceable = Ids(Unplaceable),
+            otherRoles = Ids(OtherRoles),
             failed = Ids(Failed),
             unverified = Ids(Unverified),
             unflaggedInUnit = Ids(UnflaggedInUnit),
@@ -518,8 +543,11 @@ public sealed class FlaggedUserPlacementJob : IScheduledJob
 /// <summary>What <see cref="FlaggedUserPlacementJob.Classify"/> decides for one flagged user.</summary>
 internal enum PlacementDecision
 {
-    /// <summary>In the unit, holding the role: nothing to do.</summary>
+    /// <summary>In the unit, holding the role and no other direct role: nothing to do.</summary>
     Placed,
+
+    /// <summary>In the unit, holding the role AND another direct role: not placed; alerted every run, never repaired.</summary>
+    PlacedWithOtherRoles,
 
     /// <summary>Outside the unit: move it, then assign the role.</summary>
     Move,

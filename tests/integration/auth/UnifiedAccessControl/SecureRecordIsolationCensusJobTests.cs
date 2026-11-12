@@ -638,6 +638,68 @@ public class SecureRecordIsolationCensusJobTests
     }
 
     [Fact]
+    public async Task Placement_AFlaggedUserHoldingAPosition_IsCritical_UnderThePositionModel()
+    {
+        var holder = ProvisionExternalUnitWithAPlacedUser();
+        var other = PlacedFlaggedUser();
+        _directory.Set("organization", Organization, "ishierarchicalsecuritymodelenabled", true);
+        _directory.Set("organization", Organization, "usepositionhierarchy", true);
+        var position = Guid.NewGuid();
+        _directory.Set("systemuser", holder, "positionid", new EntityReference("position", position));
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.FlaggedManagerUnderHierarchySecurity).Should().ContainSingle()
+            .Which.Message.Should().Contain(holder.ToString()).And.Contain(position.ToString()).And.Contain("position model");
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical && e.Message.Contains(other.ToString()),
+            "a flagged user without a position is not reported");
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("ambiguous")]
+    public async Task Placement_WithoutExactlyOneExternalRoleInTheUnit_IsOneRoleUnresolvedFinding(string shape)
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        if (shape == "missing")
+            _directory.Set("role", ExternalRole, "name", "Renamed Role");
+        else
+            _directory.Role(Guid.NewGuid(), ExternalCollaboratorPlacement.RoleName, ExternalBu, ExternalRole);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.RoleUnresolved).Should().ContainSingle()
+            .Which.Message.Should().Contain(shape == "missing" ? "has no role" : "more than one role");
+    }
+
+    /// <summary>
+    /// Review finding 1: a lineage table the environment does not have (no privilege of it returned; querying it throws, as
+    /// Dataverse does for an unknown entity) is listed as ungraded at Error, and placement is still graded. Throwing instead
+    /// would fail the whole census on every run in such an environment, the secure half included.
+    /// </summary>
+    [Fact]
+    public async Task Placement_ALineageTableTheEnvironmentLacks_IsListedAsUngraded_AndTheRestIsStillGraded()
+    {
+        var user = ProvisionExternalUnitWithAPlacedUser();
+        _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_memo"]);
+        _directory.FailReadsOf("sprk_memo");
+        _directory.Add(new Entity("sprk_document", Guid.NewGuid()) { ["ownerid"] = new EntityReference("systemuser", user) });
+
+        var result = await RunAsync();
+
+        _log.Entries.Should().NotContain(e => e.Message.Contains("placement census could not be read"));
+        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.Message.Contains("PlacementTablesNotInEnvironment"))
+            .Which.Message.Should().Contain("sprk_memo");
+        Placement(PlacementDriftKind.LineageRowOwnedByFlaggedPrincipal).Should().ContainSingle()
+            .Which.Message.Should().Contain(user.ToString()).And.Contain("sprk_document");
+        using var json = System.Text.Json.JsonDocument.Parse(result.ResultJson!);
+        json.RootElement.GetProperty("placement").GetProperty("ungradedTables").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain("sprk_memo");
+    }
+
+    [Fact]
     public async Task Placement_TwoUnitsOfTheName_IsCritical()
     {
         ProvisionExternalUnitWithAPlacedUser();
