@@ -9,14 +9,16 @@ Status: **prep only, nothing live has run.** Rigor STANDARD; prescriptive steps;
 | 1 | Tasks 002–007 **merged to master** (POML gate; the BFF deploy is of a master SHA) | ✅ PR #2681 merged 2026-11-12 18:51Z as merge commit **`c53452bb0c`** (owner: "Merge after CI"; 45 checks pass, 0 fail). ebilling-r1 and uac-r2 told the SHA. |
 | 2 | `85fbba3f64` in the deployed SHA | ✅ in master already (and in the branch) |
 | 3 | **UAC review of task 002** (FR-08 routes, list `canCreate`, message gate refactor, delete-409 body) | ✅ uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1 (`notes/task-002-notes.md` "For uac-r2"). Merge order with ebilling-r1: whoever merges second re-runs the external-access and route-ledger arch tests |
-| 4 | Owner **"go BFF deploy &lt;master sha&gt;"** given directly in uac-r2's session | ❌ Deploy requested from uac-r2 2026-11-12 for a master SHA containing `c53452bb0c` (uac-r2 picks the SHA); owner's go pending |
+| 4 | Owner **"go BFF deploy &lt;master sha&gt;"** given directly in uac-r2's session | ✅ Not needed: live dev BFF **`4e64670ea0`** (uac-r2 deploy ~19:40Z 2026-11-12) already contains `c53452bb0c` (ancestry verified locally, `merge-base --is-ancestor` exit 0). ebilling-r1 confirmed it covers #2689/#2708/#2724/#2727 |
 | 5 | Peer OKs, Router green, content checks, ebilling schema verify, app settings | uac-r2 runs these (orchestrator); R4 gives its peer OK |
-| 6 | uac-r2 read-back + 30-minute gate PASS, 0 new 5xx on external routes | — |
+| 6 | uac-r2 read-back + 30-minute gate PASS, 0 new 5xx on external routes | ✅ read-back passed per uac-r2 (/healthz 200, /ping 200, anon MCP 401); uac-r2 watches external routes again after the SPA deploy |
 | 7 | Owner approval of the SPA deploy with rollback stated | ❌ after gate 6 |
 
 ## SPA deploy plan (for the owner's approval at step 4)
 
 - Workflow `.github/workflows/deploy-external-spa.yml`, `workflow_dispatch`, environment `dev`, ref = the merged master SHA.
+- `workflow_dispatch --ref` takes a branch or tag, not a SHA: deploy with `--ref master` (contains `c53452bb0c`); a
+  rollback needs a temporary tag at the rollback commit first.
 - **Rollback:** re-run the same workflow on **`b083d62183`** — the last dev SPA deploy (run 41233021759, 2026-10-31,
   success). Earlier: `96f1f6b675` (run 40989384010).
 - ⚠️ This is the **first SPA deploy since 2026-10-31**. It ships everything merged to master's `src/client/external-spa`
