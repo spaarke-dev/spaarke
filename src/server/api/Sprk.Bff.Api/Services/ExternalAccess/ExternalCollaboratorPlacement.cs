@@ -250,15 +250,6 @@ internal static class ExternalCollaboratorPlacement
 
         var humanIds = humans.Select(user => user.Id).ToArray();
 
-        // ── 1. Outside the unit ──
-        foreach (var user in humans.Where(user => user.BusinessUnitId != unitId))
-        {
-            findings.Add(new PlacementFinding(PlacementDriftKind.FlaggedUserOutsideExternalUnit, user.Id,
-                $"flagged systemuser {user.Id} is in business unit {Describe(user.BusinessUnitId)}, not '{BusinessUnitName}' " +
-                $"({unitId}): role depth and that unit's default team reach internal rows. {FlaggedUserPlacementJob.WritesEnabledConfigKey} " +
-                "on lets the placement job move it."));
-        }
-
         // ── Roles held: directly, and through every team the user is in (the unit's default team included) ──
         var directRoles = await ReadDirectRolesAsync(dataverse, humanIds, ct).ConfigureAwait(false);
         var memberships = await ReadMembershipsAsync(dataverse, humanIds, ct).ConfigureAwait(false);
@@ -267,6 +258,33 @@ internal static class ExternalCollaboratorPlacement
         var teamRoles = await ReadTeamRolesAsync(dataverse, teamIds, ct).ConfigureAwait(false);
         var roleIds = directRoles.Values.SelectMany(ids => ids).Concat(teamRoles.Values.SelectMany(ids => ids)).ToHashSet();
         var roles = await ReadRolesAsync(dataverse, roleIds, ct).ConfigureAwait(false);
+        var administrators = await AdministratorRoleIdsAsync(dataverse, ct).ConfigureAwait(false);
+
+        // ── 1. Outside the unit ──
+        // The job's own rule (FlaggedUserPlacementJob.Classify) decides whether turning writes on would move the user, so the
+        // census never promises a move the job will not make.
+        foreach (var user in humans.Where(user => user.BusinessUnitId != unitId))
+        {
+            var teamRoleIds = memberships.GetValueOrDefault(user.Id, [])
+                .SelectMany(teamId => teamRoles.GetValueOrDefault(teamId, []))
+                .ToList();
+            var decision = FlaggedUserPlacementJob.Classify(
+                user, unitId, role.RoleId, directRoles.GetValueOrDefault(user.Id, []), teamRoleIds, administrators);
+            var why = decision switch
+            {
+                PlacementDecision.SkipAdministrator => "administrator",
+                PlacementDecision.SkipAccessMode => "non-interactive",
+                PlacementDecision.SkipUnreadable => "unreadable",
+                _ => null,
+            };
+
+            findings.Add(new PlacementFinding(PlacementDriftKind.FlaggedUserOutsideExternalUnit, user.Id,
+                $"flagged systemuser {user.Id} is in business unit {Describe(user.BusinessUnitId)}, not '{BusinessUnitName}' " +
+                $"({unitId}): role depth and that unit's default team reach internal rows. " +
+                (why is null
+                    ? $"{FlaggedUserPlacementJob.WritesEnabledConfigKey} on lets the placement job move it."
+                    : $"The placement job never moves this user ({why}): clear the {IsExternalColumn} flag or the role.")));
+        }
 
         // ── 2. A role other than THE role from the unit, held directly ──
         foreach (var user in humans)

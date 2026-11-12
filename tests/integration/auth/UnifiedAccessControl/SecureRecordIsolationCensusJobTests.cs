@@ -416,6 +416,8 @@ public class SecureRecordIsolationCensusJobTests
         _directory.Role(ExternalRole, ExternalCollaboratorPlacement.RoleName, ExternalBu, ExternalRole);
         _directory.Depth(ExternalRole, PrivMatter, PrivilegeDepth.Basic);
         _directory.Privilege(PrivWriteUser, ExternalCollaboratorPlacement.WriteUserPrivilege);
+        _directory.Set("role", SysAdminRole, "roletemplateid",
+            new EntityReference("roletemplate", Sprk.Bff.Api.Infrastructure.ExternalAccess.SecuredColumnReadProof.SystemAdministratorRoleTemplateId));
         _directory.Add(new Entity("organization", Organization)
         {
             ["organizationid"] = Organization,
@@ -471,6 +473,56 @@ public class SecureRecordIsolationCensusJobTests
             .Which.Should().Match<(LogLevel Level, string Message)>(e => e.Level == LogLevel.Critical && e.Message.Contains(outside.ToString()));
         _log.Entries.Should().NotContain(e => e.Message.Contains("Flagged Partner") || e.Message.Contains("@example.test"),
             "a finding names the user by systemuser id only");
+
+        // Must-not-fire (second review F2): an ordinary flagged user keeps the "writes on moves it" text.
+        Placement(PlacementDriftKind.FlaggedUserOutsideExternalUnit).Single().Message
+            .Should().Contain($"{FlaggedUserPlacementJob.WritesEnabledConfigKey} on lets the placement job move it")
+            .And.NotContain("never moves this user");
+    }
+
+    /// <summary>
+    /// Second review F2 (must fire): a flagged user the job never moves (System Administrator directly or through a team,
+    /// the Administrative or a non-interactive access mode, an unreadable access mode) is still CRITICAL outside the unit,
+    /// but the finding says the job will not move it instead of promising that writes on will.
+    /// </summary>
+    [Theory]
+    [InlineData("admin-direct", "administrator")]
+    [InlineData("admin-team", "administrator")]
+    [InlineData("mode-1", "administrator")]
+    [InlineData("mode-5", "non-interactive")]
+    [InlineData("mode-unreadable", "unreadable")]
+    public async Task Placement_AFlaggedUserTheJobNeverMoves_IsCritical_AndSaysTheJobWillNotMoveIt(string shape, string why)
+    {
+        ProvisionExternalUnitWithAPlacedUser();
+        var user = Guid.NewGuid();
+        _directory.User(user, "Flagged Admin", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false,
+            shape == "admin-direct" ? new[] { SysAdminRole } : Array.Empty<Guid>());
+        _directory.Flag(user, true);
+        if (shape == "admin-team")
+        {
+            var adminTeam = Guid.NewGuid();
+            _directory.Team(adminTeam, "Administrators", SiblingBu, isDefault: false, teamType: 0);
+            _directory.AddTeamRole(adminTeam, SysAdminRole);
+            _directory.AddMember(adminTeam, user);
+        }
+
+        if (shape == "mode-1")
+            _directory.Set("systemuser", user, "accessmode", new OptionSetValue(1));
+        if (shape == "mode-5")
+            _directory.Set("systemuser", user, "accessmode", new OptionSetValue(5));
+        if (shape == "mode-unreadable")
+            _directory.Set("systemuser", user, "accessmode", null!);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Placement(PlacementDriftKind.FlaggedUserOutsideExternalUnit).Should().ContainSingle()
+            .Which.Should().Match<(LogLevel Level, string Message)>(e =>
+                e.Level == LogLevel.Critical
+                && e.Message.Contains(user.ToString())
+                && e.Message.Contains($"never moves this user ({why})")
+                && e.Message.Contains("clear the sprk_isexternal flag or the role")
+                && !e.Message.Contains("lets the placement job move it"));
     }
 
     /// <summary>

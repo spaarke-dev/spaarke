@@ -84,9 +84,15 @@ No unit yet: `inert`, one Warning with the flagged-user count, not a finding, ru
   interactively), matching what the job never moves. The reverse is not symmetric: a flagged System Administrator or a
   flagged user in access mode 1 or 5 IS graded (so stays a CRITICAL `FlaggedUserOutsideExternalUnit` every run) but is
   never moved by the job. That is deliberate drift for an administrator to resolve (clear the flag or the admin role).
+  Since the second review (F2) the census applies the job's own rule (`FlaggedUserPlacementJob.Classify`) to each
+  flagged user outside the unit: for one the job never moves (administrator, non-interactive or unreadable) the CRITICAL
+  finding says so and asks for the flag or the role to be cleared, instead of promising that writes on will move it.
+  Addition: a cancel between the move and the role assignment leaves the user with no role for up to one tick. That fails
+  closed (no role, no access) and the next tick assigns the role.
 - K-5 Before 191i creates the unit, placement is inert (Warning with the count), not a census failure (D-3).
 - K-6 Ownership: one 500-row page per owner chunk. An owner whose rows all fall after that page gets no finding until the
-  first owner's rows are fixed (the run is red either way, never clean).
+  first owner's rows are fixed (the run is red either way, never clean). Addition (with K-1): the "at least" marker is
+  set per table, not per owner chunk, so an exact count can be shown as "at least N".
 - K-7 The run bound (25) takes users in id order: 25 or more users that keep failing would hold every slot each tick.
   Each failure is its own Critical line, so this is visible.
 - K-8 The pre-write re-read covers the user and its direct roles, not its team roles; the role association after a move
@@ -96,6 +102,12 @@ No unit yet: `inert`, one Warning with the flagged-user count, not a finding, ru
   that decides the run's candidate list still throws.
 - K-10 Lineage tables the environment does not have (no privilege returned) are listed as `ungradedTables` at Error and
   skipped for ownership (fix-round 1, finding 1).
+- K-11 An administrator role held through an Entra-group team appears in `teammembership` only after the user signs in,
+  so a flagged administrator who has never signed in could be moved. Dataverse still strips its direct roles on the move.
+- K-12 The job assigns "Spaarke External Collaborator" without checking the role's depths: if someone widens the role,
+  every newly flagged user gets the wider role. The census catches it within 15 minutes (`LineageDepthAboveBasic`,
+  `WriteUserPrivilege`). Possible later hardening: refuse to assign when any lineage depth is above Basic or the role
+  holds `prvWriteUser`.
 
 ## 4.5 Review (one Opus adversarial pass, 2026-11-11)
 
@@ -112,7 +124,16 @@ No unit yet: `inert`, one Warning with the flagged-user count, not a finding, ru
 | 9 | Role missing or ambiguous gave no census finding | K | Fixed: one `RoleUnresolved` finding; test added |
 | 10 | Census double ignores ColumnSet; position-model branch untested; job-level app/admin-mode cases overlap the access-mode check | K | Position-model test added. ColumnSet: the job's double projects columns (privacy test pins the job's column list); census columns are not pinned (left as known limit). App/admin-mode: pinned by the pure `Classify` rule table |
 
-rework: fix-round-1 task 191e (findings 1, 2 fixed; 3, 9, 10-part fixed as cheap hardening).
+**Second adversarial pass (uac-r2 main session, on PR #2721):** no F1, F3 or F4. One F2, fixed: every
+`FlaggedUserOutsideExternalUnit` finding promised that writes on would move the user, including users the job never
+moves. The census now applies `FlaggedUserPlacementJob.Classify` (reused, not forked) and says "the placement job never
+moves this user (administrator / non-interactive / unreadable): clear the sprk_isexternal flag or the role"; still
+CRITICAL. Must-fire theory (admin direct, admin through a team, mode 1, mode 5, unreadable mode) and a must-not-fire
+assertion (an ordinary flagged user keeps the existing text). Mutation: dropping the administrator mapping fails the three
+administrator cases. Known limits K-11, K-12 and the K-1/K-6 and K-4 additions recorded above. Touched classes 92/92;
+ArchTests lookup-read and PII guards 68/68.
+
+rework: fix-round-2 task 191e (second review F2). Earlier: fix-round-1 task 191e (findings 1, 2 fixed; 3, 9, 10-part fixed as cheap hardening).
 
 ## 5. Dev metadata read (2026-11-11, read-only)
 
