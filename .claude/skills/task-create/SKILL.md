@@ -266,6 +266,8 @@ Tasks with hollow or missing justification are blocked at review: `code-review` 
 
 A task that adds a canonical component, or changes one's path or extension point, updates its row in `.claude/patterns/CAPABILITY-INDEX.md` in the same PR.
 
+When the project has `notes/reuse-scan.md` (design-to-spec Step 3 or project-pipeline Step 2), `<existing>` also cites that file's row for the capability, including its verdict (extend target, owner answer, or none found with the searches run).
+
 If a task adds new surface or materially grows an existing component, read `references/component-justification.md` before writing its `<justification>` — it holds the real anti-patterns this gate catches and the component-complexity check ([`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md): judge cohesion, not line count).
 
 ### Step 3.6: Add Deployment Tasks (REQUIRED)

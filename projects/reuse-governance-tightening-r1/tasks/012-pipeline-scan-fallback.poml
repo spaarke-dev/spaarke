@@ -4,7 +4,7 @@
     <title>Pipeline Step 2 scan fallback and task-create citation</title>
     <phase>2 Reuse scan</phase>
     <gate>blocked until 011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies two skill directives under explicit project constraints (FR-05)</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -30,7 +30,7 @@
       <file role="canonical-reference">.claude/skills/design-to-spec/SKILL.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="011" status="pending">The scan procedure to point at</dependency>
+      <dependency task="011" status="done">The scan procedure to point at</dependency>
     </dependencies>
   </context>
 
@@ -80,6 +80,8 @@
   </acceptance-criteria>
 
   <notes>Cancelled together with 011 on a no-go.</notes>
+
+  <completion-notes>Completed 2026-11-12. Precondition met (task 010 go). project-pipeline SKILL.md Step 2 Part 1 item 5: reuse-scan.md exists means cite its row per capability with no re-scan (an uncovered capability is a section 11 flag); missing means run the scan exactly as design-to-spec Step 3 defines it, and Part 2 writes the file to the design-to-spec Step 4 contract. 2+ candidates: interactive asks, autonomous stops; added to the Safety gates list and to references/interactive-mode.md Step 2 row (not named in the POML, needed so interactive mode actually asks). task-create Step 3.5.6: one added sentence, separate from the task 002 existing-line wording (no conflict, escalation trigger not fired). No lint, test or Validate-TaskPoml.ps1 change; no heading or step renumbered; 34 step citations intact. Skill-length guard 0 new; Test-InstructionPaths 0 new. CHANGELOG updated. Step 9.5 not run: STANDARD, documentation-only. rework: none task 012</completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

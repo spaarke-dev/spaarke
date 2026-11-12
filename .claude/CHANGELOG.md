@@ -13,7 +13,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 - **`design-to-spec`** Step 3: the "quick Grep/Glob" exception becomes one `code-mapper` agent (sonnet; `low` from its definition) that searches by concept, synonym and interface shape, starting from the capability index, and returns a fixed JSON schema. The orchestrator judges each capability: none found, one extend target, or 2+ (an owner question). Step 4 writes `notes/reuse-scan.md`; Step 5 asks the reuse questions and records them under Owner Clarifications. The Constraints line and the Step 3 scope limitation now name this scan as the single discovery pass; everything else stays in project-pipeline Step 2. No step renumbered.
 - **`references/spec-template.md`**: the §11 overlap column and Owner Clarifications point at `notes/reuse-scan.md`. No new heading.
-- **`project-pipeline`** Step 2: the sentence describing design-to-spec Step 3 is corrected. The fallback scan (task 012) is not yet added.
+- **`project-pipeline`** Step 2: the sentence describing design-to-spec Step 3 is corrected.
+- Task 012 (FR-05), same day: **`project-pipeline`** Step 2 item 5 cites `notes/reuse-scan.md` when it exists and runs the design-to-spec Step 3 scan only when it is missing (Part 2 writes the file). No partial re-scan. A capability with 2+ candidates is a safety gate: autonomous mode stops, interactive mode asks (`references/interactive-mode.md` Step 2 row). **`task-create`** Step 3.5.6: `<existing>` also cites the file's row for the capability. No lint or `Validate-TaskPoml.ps1` change.
 
 ###### 2026-11-12 — `power-page-deploy` skill archived (Power Pages deploy retired)
 

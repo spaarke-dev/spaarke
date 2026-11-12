@@ -8,7 +8,7 @@
 | 002 | Wire the capability index into the reuse gate | 1 | ✅ [done] | 001 | — (.claude, main) | STANDARD | sonnet / high |
 | 010 | Reuse-scan dry-run and owner go/no-go | 2 | ✅ [done] | 001 | — (main, owner gate) | STANDARD | opus / high |
 | 011 | Add the reuse scan to design-to-spec Step 3 (if go) | 2 | ✅ [done] | 010 | — (.claude, main) | STANDARD | opus / high |
-| 012 | Pipeline Step 2 scan fallback and task-create citation (if go) | 2 | 🔲 [open] | 011 | — (.claude, main) | STANDARD | sonnet / high |
+| 012 | Pipeline Step 2 scan fallback and task-create citation (if go) | 2 | ✅ [done] | 011 | — (.claude, main) | STANDARD | sonnet / high |
 | 020 | Weekly jscpd duplication sweep in nightly-health | 3 | 🔲 [open] | 001, 041 | Group B | STANDARD | sonnet / high |
 | 021 | Reviewer checks: capability duplication (F2) and requirements trace (F4) | 3 | 🔲 [open] | 001 | — (.claude, main) | STANDARD | opus / high |
 | 030 | Decision records for the 9 grandfathered packages | 4 | 🔲 [open] | none | — (main, owner gate) | STANDARD | opus / high |
