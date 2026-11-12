@@ -325,6 +325,55 @@ public class RecordOwnershipResolverTests
         resolution.OwningTeamId.Should().BeNull();
     }
 
+    // uac-r2 task 191c (#2179 §3.5): a user flagged external (stored sprk_isexternal = true) sits in the External Collaborators
+    // unit, whose default team every external user is a member of — an unfiled record of theirs is owned in the CUSTOMER's unit.
+
+    [Theory]
+    [InlineData(false)] // by systemuserid (the interactive path)
+    [InlineData(true)]  // by Entra oid (the background path)
+    public async Task ResolveOwner_WhenTheActingUserIsFlaggedExternal_OwnsTheUnfiledRecordInTheCustomerBusinessUnit(bool byObjectId)
+    {
+        var directory = Directory().WithExternalFlag(CallerUserId, flagged: true);
+        directory.CustomerBusinessUnitSetting = ChildBu.ToString();
+        var context = byObjectId
+            ? new RecordOwnershipContext { CallerObjectId = CallerOid }
+            : new RecordOwnershipContext { CallerSystemUserId = CallerUserId };
+
+        var resolution = await Build(directory).ResolveOwnerAsync(context, CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the customer's unit owns it, never the user's own (external) unit");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenTheActingUserIsFlaggedExternalAndNoCustomerUnitIsSet_Refuses()
+    {
+        var directory = Directory().WithExternalFlag(CallerUserId, flagged: true);
+        directory.CustomerBusinessUnitSetting = null;
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerSystemUserId = CallerUserId }, CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue("the external users' unit's team must never own the record");
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ActingUserUnresolved);
+        resolution.OwningTeamId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(false)] // stored false
+    [InlineData(null)]  // blank: internal (owner round 67) — never inferred from a UPN or domain
+    public async Task ResolveOwner_WhenTheActingUserIsNotFlaggedExternal_KeepsTheirOwnBusinessUnit(bool? flag)
+    {
+        var directory = Directory();
+        if (flag is { } stored)
+            directory.WithExternalFlag(CallerUserId, stored);
+        directory.CustomerBusinessUnitSetting = ChildBu.ToString();
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { CallerSystemUserId = CallerUserId }, CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam);
+    }
+
     // =====================================================================================
     // Refuse branch 2 — nothing to resolve from, or an ambiguous answer
     // =====================================================================================

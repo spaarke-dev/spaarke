@@ -640,6 +640,12 @@ public class RecordOwnerAssignmentCensusTests
             "Project spend snapshots — owned by the project's team."),
         new OwnerWriteEntry("SignalEvaluationService.cs", "UpsertSignalAsync", 1, OwnerWriteKind.Routed,
             "Owned by the matter's team."),
+        new OwnerWriteEntry("ExternalTeamShareSynchronizer.cs", "ReownAsync", 1, OwnerWriteKind.Routed,
+            "uac-r2 task 191c (design v2 §3.8): a row a user flagged sprk_isexternal = true owns is re-owned to the answer of "
+            + "its own I-6 question (ForExistingRowAsync over the row, the flagged owner as the acting user), conditional on the "
+            + "version read with the owner check and read back; never the External Collaborators team, never the Secure team "
+            + "(the secure reconciler's move), never an unfiled communication (146 E1). Off unless "
+            + "ExternalAccess:ExternalTeamShare:ReownWritesEnabled."),
         new OwnerWriteEntry("DataverseObservationMirror.cs", "MirrorAsync", 1, OwnerWriteKind.Routed,
             "ForChild over the mirrored analysis row."),
         new OwnerWriteEntry("GrantExternalAccessEndpoint.cs", "BuildGrantPayload", 1, OwnerWriteKind.Routed,
