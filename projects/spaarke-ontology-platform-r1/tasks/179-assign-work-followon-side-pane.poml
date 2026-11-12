@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="179" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Assign Work follow-on: Assigned Attorney / Paralegal / Outside Counsel use the side-pane lookup (F-R4-2)</title>
+    <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
+    <gate>after 178; Matter Type / Practice Area part gated on owner question 1, contact filter on question 6</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring an existing component through one config field into one step, with an exact reference (CreateProjectStep.tsx).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>178</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>The owner tested the Create Project wizard (UAT round 4, F-R4-2): in the Assign Work follow-on step the Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel fields are inline type-ahead lookups. They must use the existing side-pane lookup (`DataverseLookupField`), as the Matter and Project Enter Info steps already do.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
+  <goal>Every create wizard that shows the Assign Work follow-on (Matter, Project, Event, Invoice, Report Card) renders Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel with `DataverseLookupField` over the host navigationService; without a navigationService the step renders exactly as today.</goal>
+  <context>
+    <background>Review section 2.1 row 1 and section 2.3. The step is `WizardFollowOns/steps/AssignWorkFollowOnStep.tsx` (fields at :307, :328, :336; "Assign to me" at :316-326) and has no navigationService prop (:48-100). `CreateRecordWizard`'s config carries a navigationService only inside associateToStep / existingRecordPicker (`CreateRecordWizard/types.ts:46, 311`). Every host already builds `createXrmNavigationService()` and passes it to the wizards (`Wizard/InAppWizardHost.tsx:208`).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/AssignWorkFollowOnStep.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/types.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/CreateReportCardWizard.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectStep.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="178" status="pending">DataverseLookupField failure handling and filters</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="owner">Owner directive 2026-11-12, applies to every file this task touches: reuse the existing side-pane lookup (`DataverseLookupField` over `INavigationService.openLookup`) and the existing `EmailComposer`; never re-create either. A third rendering of the lookup pattern is a defect (review section 4 item 6).</constraint>
+    <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
+    <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
+    <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="project">Scope: the three Assigned fields only. Matter Type and Practice Area in this step change ONLY if the owner answers question 1 (review section 6) "side pane"; record the answer in task notes before touching them.</constraint>
+    <constraint source="project">The new config field is ONE optional top-level `navigationService?: INavigationService` on the CreateRecordWizard config; the existing associateToStep / existingRecordPicker fields are not changed.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataverseLookupField" location="src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx">The one side-pane lookup field for wizards: Select button opens INavigationService.openLookup, chip + clear once picked.</pattern>
+      <pattern name="Project Enter Info side-pane fields" location="src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectStep.tsx">Lines ~437-457: Project Type and Practice Area rendered with DataverseLookupField + navigationService + onSearch fallback. Copy this.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the owner answers to review section 6 questions 1 and 6 in notes/decisions.md or the task notes; if unanswered, convert only the three Assigned fields.</step>
+    <step order="2">Add the optional navigationService to the CreateRecordWizard config type and pass it from CreateRecordWizard.tsx (~441-466) to AssignWorkFollowOnStep.</step>
+    <step order="3">In AssignWorkFollowOnStep render the three Assigned fields with DataverseLookupField (entityType contact / contact / sprk_organization), keeping the existing search callbacks as onSearch; keep "Assign to me".</step>
+    <step order="4">Pass the navigationService the Matter, Project, Event, Invoice and Report Card wizards already receive into their config (Invoice ~403-427 and Report Card ~402-426 pass it to the step directly).</step>
+    <step order="5">Add tests and run the dev check.</step>
+    <step order="6">Run the tests named in the acceptance criteria, the touched folders' suites, `npx tsc --noEmit -p .` and ESLint on touched files in src/client/shared/Spaarke.UI.Components; all pass.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
+    <step order="8">Record any deviation from this POML, and the dev-check result, in projects/spaarke-ontology-platform-r1/notes/task-179-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If the side pane opens behind the wizard dialog on dev, STOP and escalate rather than adding a z-index or yieldToSidePane workaround (review section 4 risk 5).</trigger>
+  </escalation>
+  <justification>
+    <existing>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/types.ts:46, 311 (navigationService exists only inside associateToStep and existingRecordPicker).</existing>
+    <extension>Yes: one optional field on the existing config, read by the existing step; no new component.</extension>
+    <cost-of-doing-nothing>Without it the Assign Work step has no way to open the side pane, so F-R4-2 (owner UAT round 4) stays failed in five wizards.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Assigned Attorney opens the side pane in Create Project, Next steps → Assign Work">
+      <steps>
+        <step>Open Create Project, Next steps → Assign Work in the Console (in-app) on dev</step>
+        <step>Reach the step with Assigned Attorney; click its Select button</step>
+        <step>Pick a record; then reopen and cancel</step>
+        <step>Switch the Console to dark mode and repeat</step>
+      </steps>
+      <expected>The Dataverse side pane opens above the wizard; the pick shows as a chip; cancel keeps the prior value; all values already typed in the wizard are kept; no white surfaces in dark mode; no console errors.</expected>
+    </test>
+    <test name="Assigned Outside Counsel opens the side pane in Create Matter, Next steps → Assign Work">
+      <steps>
+        <step>Open Create Matter, Next steps → Assign Work in the Console (in-app) on dev</step>
+        <step>Reach the step with Assigned Outside Counsel; click its Select button</step>
+        <step>Pick a record; then reopen and cancel</step>
+        <step>Switch the Console to dark mode and repeat</step>
+      </steps>
+      <expected>The Dataverse side pane opens above the wizard; the pick shows as a chip; cancel keeps the prior value; all values already typed in the wizard are kept; no white surfaces in dark mode; no console errors.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Run jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/AssignWorkFollowOnStep.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/steps/__tests__/AssignWorkFollowOnStep.sidePane.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a navigationService, then Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel render no inline search input and open the pane for contact, contact and sprk_organization respectively.</criterion>
+    <criterion testable="true">Given a pick in each field, then the picked ids and names reach onFinish (the work assignment create) unchanged from today's shape (assignedAttorneyId/Name, assignedParalegalId/Name, assignedOutsideCounselId/Name).</criterion>
+    <criterion testable="true">"Assign to me" still fills Assigned Attorney.</criterion>
+    <criterion testable="true">Given no navigationService, the step renders exactly as today; the existing AssignWorkFollowOnStep.assignToMe test passes unchanged.</criterion>
+    <criterion testable="true">Each of the five wizards passes its navigationService into the config (one test per wizard asserting the captured config has it).</criterion>
+    <criterion testable="true">Dev check (Console in-app wizard AND one code-page dialog wizard): the side pane opens ABOVE the wizard; after a pick and after a cancel the wizard is usable and keeps every value already entered; light and dark themed (review section 4 risk 5).</criterion>
+    <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
+    <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
+  </acceptance-criteria>
+  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>

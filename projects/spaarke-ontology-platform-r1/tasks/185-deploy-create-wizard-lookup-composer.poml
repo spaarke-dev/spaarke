@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="185" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Deploy the create-wizard lookup and composer changes to dev and verify (Console, wizard code pages, SemanticSearchControl PCF)</title>
+    <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
+    <gate>after 184; deploys need the owner's go</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment-phase task (no code changes).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment steps with named skills; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment; ordered and owner-gated.</parallel-reason>
+    <deps>184</deps>
+    <tags>deploy, dataverse, pcf, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Ship tasks 178-184 to dev: the Console picks up the shared library from master automatically; the Create{Matter,Project,Todo,WorkAssignment,Event,Invoice,ReportCard} wizard code pages, SummarizeFiles, DocumentRelationshipViewer and the SemanticSearchControl PCF need their own builds and deploys. Then run the owner checks.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
+  <goal>Every host that renders the changed wizards runs the new code on dev, verified, and the deploy log records what was deployed from which master SHA.</goal>
+  <context>
+    <background>Review section 2.3 lists the hosts. Console: deploy-spaarke-ai.yml on master. Code pages: code-page-deploy skill (no tenant-wide publish; PublishXml for the web resource only). PCF: pcf-deploy skill (solution ZIP import, build:prod, version bump already done in 183).</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="owner">Owner directive 2026-11-12, applies to every file this task touches: reuse the existing side-pane lookup (`DataverseLookupField` over `INavigationService.openLookup`) and the existing `EmailComposer`; never re-create either. A third rendering of the lookup pattern is a defect (review section 4 item 6).</constraint>
+    <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
+    <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
+    <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="owner">No deploy without the owner's go for this deploy, given in chat; no tenant-wide publish (D-81).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code page deploy" location=".claude/skills/code-page-deploy/SKILL.md">Build and deploy one code page web resource; PublishXml for it only.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Confirm 178-184 are merged to master; note the master SHA.</step>
+    <step order="2">Confirm the Console deploy-spaarke-ai.yml run for that SHA succeeded.</step>
+    <step order="3">Ask the owner for the go to deploy the code pages and the PCF; wait for it.</step>
+    <step order="4">Deploy each affected code page with code-page-deploy, then the SemanticSearchControl PCF with pcf-deploy.</step>
+    <step order="5">Run every ui-test of tasks 179-183 on dev; record results in notes/deploy-log.md.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
+    <step order="7">Record any deviation from this POML, and the dev-check result, in projects/spaarke-ontology-platform-r1/notes/task-185-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If any deploy step fails or a host shows the old UI after deploy, STOP and report; do not retry with a tenant-wide publish.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="All hosts show the side pane and composer">
+      <steps>
+        <step>Run the ui-tests of tasks 179-183 on dev in each host</step>
+      </steps>
+      <expected>All pass; no console errors; light and dark themed.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Run jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-ontology-platform-r1/notes/deploy-log.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">notes/deploy-log.md names the master SHA, each host deployed and its version, and the result of every ui-test.</criterion>
+    <criterion testable="true">Negative: nothing was deployed before the owner's go; no tenant-wide publish was used.</criterion>
+  </acceptance-criteria>
+  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>

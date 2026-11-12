@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="178" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Harden DataverseLookupField before it carries ~30 more wizard fields (filters, hint, failure = cancel, single flight, tests)</title>
+    <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One existing component with a named reference implementation (ParameterFields.tsx) and a closed contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Prerequisite of 179-181 (they consume the props it adds).</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>`DataverseLookupField` is the existing side-pane lookup field for wizards. Before tasks 179-181 move ~30 inline lookups onto it, close its gaps: a failed pane is an unhandled rejection, it cannot pass a row filter, a second click can open a second pane, and its header comment describes a fallback the code does not have.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
+  <goal>`DataverseLookupField` accepts optional `filters` (passed through to `openLookup`) and an optional `hint`, treats a failed pane as a cancel (logged, value unchanged), opens at most one pane at a time, has a correct header comment, and has its own test file.</goal>
+  <context>
+    <background>Review section 1.1 and section 4 item 3. `handleOpenLookup` has try/finally and no catch (`DataverseLookupField.tsx:200-216`); the Xrm adapter throws when Xrm is missing (`utils/adapters/xrmNavigationServiceAdapter.ts:224-228`). `LookupOptions.filters` already exists on the contract (`types/serviceInterfaces.ts:204-242`). The decision wizard filters its contact pane to active contacts (`Spaarke.AI.Widgets/src/widgets/workspace/worklistLookup.ts:108`).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/LookupField/__tests__/DataverseLookupField.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="owner">Owner directive 2026-11-12, applies to every file this task touches: reuse the existing side-pane lookup (`DataverseLookupField` over `INavigationService.openLookup`) and the existing `EmailComposer`; never re-create either. A third rendering of the lookup pattern is a defect (review section 4 item 6).</constraint>
+    <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
+    <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
+    <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="project">This task changes only DataverseLookupField.tsx and adds its test file; the existing props keep their meaning and defaults, so the Matter, Project and Work Assignment steps that already use it behave the same.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataverseLookupField" location="src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx">The one side-pane lookup field for wizards: Select button opens INavigationService.openLookup, chip + clear once picked.</pattern>
+      <pattern name="Decision wizard failure-as-cancel" location="src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx">Lines ~99-123: single flight and a failed pane treated as a cancel. Copy the behaviour, not the rendering.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read DataverseLookupField.tsx and ParameterFields.tsx:99-123.</step>
+    <step order="2">Add optional `filters?: LookupOptions["filters"]` (passed unchanged to openLookup) and optional `hint?: string` (rendered as the Field hint).</step>
+    <step order="3">Wrap the pane call: a rejection is caught, logged with console.warn, and treated as a cancel; ignore clicks while a pane is open (single flight).</step>
+    <step order="4">Correct the header comment: with a navigationService the field never falls back to inline search; without one it renders the inline LookupField.</step>
+    <step order="5">Write DataverseLookupField.test.tsx covering the acceptance criteria.</step>
+    <step order="6">Run the tests named in the acceptance criteria, the touched folders' suites, `npx tsc --noEmit -p .` and ESLint on touched files in src/client/shared/Spaarke.UI.Components; all pass.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
+    <step order="8">Record any deviation from this POML, and the dev-check result, in projects/spaarke-ontology-platform-r1/notes/task-178-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If changing the props would alter the behaviour of the existing Matter, Project or Work Assignment uses, STOP and escalate (root CLAUDE.md section 6).</trigger>
+  </escalation>
+  <justification>
+    <existing>src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx:50-81 (current props; no filters/hint) and the contract field LookupOptions.filters (types/serviceInterfaces.ts:241).</existing>
+    <extension>Yes, and this task IS the extension: two optional props on the existing component; no new component.</extension>
+    <cost-of-doing-nothing>Without filters, task 181 cannot limit Law Firm Attorney to the chosen firm, and without failure handling a missing Xrm or a pane error leaves an unhandled promise rejection on every one of the ~30 fields tasks 179-181 convert.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Existing Matter Type field still works">
+      <steps>
+        <step>Open Create Matter in the Console on dev</step>
+        <step>Click Select on Matter Type, pick, then clear</step>
+      </steps>
+      <expected>Same behaviour as before this task: pane opens, chip shows, clear empties it; no console errors.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Run jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/LookupField/__tests__/DataverseLookupField.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a navigationService whose openLookup resolves one record, when Select is clicked, then onChange receives { id (clean GUID), name }.</criterion>
+    <criterion testable="true">Given openLookup resolves [], then onChange is not called and the prior value stays.</criterion>
+    <criterion testable="true">Given openLookup rejects, then onChange is not called, the prior value stays, the Select button is enabled again, and no unhandled rejection occurs (the test fails on an unhandled rejection).</criterion>
+    <criterion testable="true">Given a pane is already open, when Select is clicked again, then openLookup is called once in total.</criterion>
+    <criterion testable="true">Given `filters` is set, then openLookup receives exactly that filters value with the entityType; given it is not set, the options object has no filters key.</criterion>
+    <criterion testable="true">Given no navigationService, then the inline LookupField renders with the onSearch callback, as before.</criterion>
+    <criterion testable="true">The header comment no longer claims an inline fallback when the pane returns empty.</criterion>
+    <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
+    <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
+  </acceptance-criteria>
+  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>

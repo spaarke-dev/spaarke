@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="184" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Retire the old EmailStep and dead wizard steps; source-scan guard against inline lookups and EmailStep in wizard folders</title>
+    <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
+    <gate>after 179, 180, 181, 182, 183</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical retirement with an importer audit plus one source-scan test modelled on an existing guard.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs last: its guard baseline depends on what 179-183 converted.</parallel-reason>
+    <deps>179, 180, 181, 182, 183</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>After 179-183 no wizard should render the inline LookupField for a person/organization field or import the old EmailStep. Retire the dead code the review found and add a guard so the old patterns cannot come back (CLAUDE.md section 16 enforcement ladder).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
+  <goal>EmailStep/ and the unused steps are retired (moved, never deleted, after an importer audit); a source-scan test fails when a file under components/Create*Wizard/ or components/WizardFollowOns/ renders `&lt;LookupField` or imports EmailStep, with must-fire and must-not-fire controls and a ratchet baseline.</goal>
+  <context>
+    <background>Review section 4 item 7: EmailStep/LookupField.tsx duplicates the shared LookupField; two exports named SendEmailStep; no JSX consumer for CreateRecordWizard/steps/AssignResourcesStep.tsx, CreateMatterWizard/AssignResourcesStep.tsx, AssignCounselStep.tsx, DraftSummaryStep.tsx, RecipientField.tsx (exported from barrels). Guard model: src/client/shared/Spaarke.UI.Components/src/__tests__/noAccessEntryForm.test.ts.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailStep/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/__tests__/wizardLookupPatternGuard.test.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/__tests__/noAccessEntryForm.test.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="179" status="pending">conversions</dependency>
+      <dependency task="180" status="pending">conversions</dependency>
+      <dependency task="181" status="pending">conversions</dependency>
+      <dependency task="182" status="pending">composer swap</dependency>
+      <dependency task="183" status="pending">last EmailStep consumer</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="owner">Owner directive 2026-11-12, applies to every file this task touches: reuse the existing side-pane lookup (`DataverseLookupField` over `INavigationService.openLookup`) and the existing `EmailComposer`; never re-create either. A third rendering of the lookup pattern is a defect (review section 4 item 6).</constraint>
+    <constraint source="ADR-012">Every component changed in this task stays in `@spaarke/ui-components` and receives Dataverse access only through injected services (`INavigationService`, `IDataService`, `authenticatedFetch`).</constraint>
+    <constraint source="ADR-021">Every UI change in this task uses Fluent v9 and semantic tokens only; light and dark both fully themed.</constraint>
+    <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="owner">Move-never-delete (owner rule): retired files go to an archive location the repo already uses for retired code, with an importer audit (git grep across src/ and every package that consumes @spaarke/ui-components) recorded in task notes; anything with an importer is NOT retired.</constraint>
+    <constraint source="project">Reference-table fields the owner chose to keep inline (question 1) are listed in the guard baseline with the reason.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md</file>
+      <file>.claude/patterns/ui/wizard-side-pane-lookup-and-email-compose.md</file>
+    </files>
+    <patterns>
+      <pattern name="Source-scan guard" location="src/client/shared/Spaarke.UI.Components/src/__tests__/noAccessEntryForm.test.ts">Reads source files and fails on a forbidden pattern; copy its structure.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Audit importers of each candidate (EmailStep/, the five unused steps) across src/; record results.</step>
+    <step order="2">Retire the ones with no importer per the move-never-delete rule; update barrels.</step>
+    <step order="3">Write wizardLookupPatternGuard.test.ts with a must-fire control (a seeded string containing `&lt;LookupField` under a wizard path fails) and a must-not-fire control (DataverseLookupField passes), plus a ratchet baseline of remaining allowed files.</step>
+    <step order="4">Run the full shared-library test suite.</step>
+    <step order="5">Run the tests named in the acceptance criteria, the touched folders' suites, `npx tsc --noEmit -p .` and ESLint on touched files in src/client/shared/Spaarke.UI.Components; all pass.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
+    <step order="7">Record any deviation from this POML, and the dev-check result, in projects/spaarke-ontology-platform-r1/notes/task-184-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If a retirement candidate has an importer outside the shared library, STOP and keep it; list it in task notes.</trigger>
+  </escalation>
+  <justification>
+    <existing>src/client/shared/Spaarke.UI.Components/src/__tests__/noAccessEntryForm.test.ts (an existing source-scan guard for another rule).</existing>
+    <extension>No: that test guards a different rule; adding this rule to it would mix two unrelated guards in one file.</extension>
+    <cost-of-doing-nothing>Without a guard, a new or copied wizard step can reintroduce the inline lookup or the old email step, and the owner's UAT finding F-R4-2/F-R4-3 regresses silently.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Wizards still open after the retirement">
+      <steps>
+        <step>Open Create Matter, Create Project and Create Work Assignment in the Console on dev (after 185 deploys)</step>
+        <step>Reach the Next steps follow-ons (Assign Work, Send Email) in each</step>
+      </steps>
+      <expected>Every wizard and follow-on renders; no console errors about a missing module or export.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Run jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/__tests__/wizardLookupPatternGuard.test.ts</output>
+    <output type="docs">projects/spaarke-ontology-platform-r1/notes/task-184-notes.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">No file under components/Create*Wizard/ or components/WizardFollowOns/ renders `&lt;LookupField` or imports EmailStep, except files in the guard baseline (each with a reason).</criterion>
+    <criterion testable="true">The guard's must-fire control fails on a seeded violation; its must-not-fire control passes DataverseLookupField usage.</criterion>
+    <criterion testable="true">Every retired file had zero importers at retirement (audit in task notes); barrels compile; the full shared-library suite passes.</criterion>
+    <criterion testable="true">There is exactly one export named SendEmailStep in the package.</criterion>
+    <criterion testable="true">All existing tests pass; tsc clean; no new ESLint errors in touched files.</criterion>
+  </acceptance-criteria>
+  <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
+  </execution>
+</task>

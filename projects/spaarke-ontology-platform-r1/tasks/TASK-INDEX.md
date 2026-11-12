@@ -257,6 +257,14 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔄 175 | [Console: Invoice decisions card; billing Work Items open Invoice Review as a pop-up](175-worklist-invoice-decisions-card-and-invoice-review-popup.poml) | FULL | sonnet/high | 174 (contract) | P-207 | **D-207**; deploy after ebilling 112 puts the page on dev |
 | ✅ 176 | [Budget inquiry email and replies filed under the inquiry AND the matter, internal-only, matter thread, archived (D-216)](176-budget-inquiry-email-filed-under-matter.poml) | FULL | **opus**/high | 070, 160 | N | Owner UAT of 161 (2026-11-09); internal-only relayed by uac-r2 2026-11-10; uac-r2 reviews · **[uac]** |
 | ✅ 177 | [Every outgoing email filed to a record is archived as .eml; a record's Messages shows every message filed to it (D-217)](177-outgoing-email-archive-and-record-messages.poml) | FULL | **opus**/high | 176 | N | Owner UAT after 176 (2026-11-10); uac-r2 reviews the read change · **[uac]** |
+| 🔲 [open] 178 | [Harden `DataverseLookupField` (filters, hint, failure = cancel, single flight, tests)](178-harden-dataverselookupfield.poml) | FULL | sonnet/high | — | — | UAT round 4 (F-R4-2), owner 2026-11-12: reuse the existing side pane and composer. Review: `notes/create-wizard-lookup-composer-review.md`. Startable |
+| 🔲 [open] 179 | [Assign Work follow-on: Assigned Attorney / Paralegal / Outside Counsel use the side pane (F-R4-2)](179-assign-work-followon-side-pane.poml) | FULL | sonnet/high | 178 | M | Reference tables gated on owner Q1, contact filter on Q6 |
+| 🔲 [open] 180 | [Event, To Do, Invoice and Report Card Enter Info steps use the side pane](180-enter-info-steps-side-pane.poml) | FULL | sonnet/high | 178, 179 | — | Shares wizard files with 179; Event Type on Q1 |
+| 🔲 [open] 181 | [Work Assignment wizard on the side pane (Law Firm Attorney filtered by firm)](181-work-assignment-wizard-side-pane.poml) | FULL | sonnet/high | 178 | M | Parallel with 179 |
+| 🔲 [open] 182 | [Send Email follow-on uses `EmailComposer` compose-only (F-R4-3); fix "draft" wording and body format](182-send-email-followon-composer.poml) | FULL | **opus**/high | 179 | — | Reaches 8 wizards; sent-as, attachments, Cc/Bcc gated on owner Q2-Q4 |
+| 🔲 [open] 183 | [DocumentEmailWizard uses `EmailComposer` (SemanticSearchControl PCF + DocumentRelationshipViewer)](183-document-email-wizard-composer.poml) | FULL | sonnet/high | 182 | — | PCF version bump; React 16/17 host |
+| 🔲 [open] 184 | [Retire old `EmailStep` and dead steps; source-scan guard against inline lookups in wizards](184-retire-emailstep-and-guard.poml) | FULL | sonnet/high | 179-183 | — | Move-never-delete with importer audit; guard with must-fire/must-not-fire + ratchet |
+| 🔲 [open] 185 | [Deploy the create-wizard changes to dev and verify (Console, wizard code pages, PCF)](185-deploy-create-wizard-lookup-composer.poml) | STANDARD | sonnet/high | 184 | — | Owner go needed; no tenant-wide publish |
 
 ### Phase 5 — The worklist surface
 
@@ -401,6 +409,7 @@ build** before dispatching the next — `dotnet build src/server/api/Sprk.Bff.Ap
 | **I2** | 091 … 098, 099 | after wave I | own worktrees | ❌ no | Own-PR work; 099 is one line |
 | **R** | 065, 067 | 098 (067 also 081) | Briefing collector vs SmartTodo scorer | ❌ no (2 tasks) | Separate packages |
 | **J** | 123, 124, 125, 127, 128 | none | separate files; 123 on this branch, the rest own worktrees | ❌ no | No-parking repairs (D-81); independent surfaces |
+| **M** | 179, 181 | 178 | AssignWorkFollowOnStep + five Create* wizards vs Work Assignment wizard | ❌ no (2 tasks; owner questions gate parts) | Separate folders. Then serial: 180 → 182 → 183 → 184 → 185 (file overlap / dependency) |
 
 **Can start now, outside any wave**: 007 (serial, schema), **079** (refusals before 008's Secure Record Owner edit), 110 (main session), 099, 026 once 024 lands.
 
