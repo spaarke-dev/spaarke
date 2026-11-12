@@ -287,16 +287,16 @@ public class OfficeEditAccessServiceTests
         NoItemGrant();
     }
 
-    [Fact(DisplayName = "Task 191g: a caller whose flag cannot be read (the user read fails) gets no grant of any kind")]
+    [Fact(DisplayName = "Task 191g: a caller whose flag cannot be read (the user read fails) gets no grant of any kind — 503, never links that look usable")]
     public async Task UnreadableFlag_NoGrantOfAnyKind()
     {
         _settings[OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
         _entities.Setup(e => e.RetrieveAsync("systemuser", SystemUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
 
-        var result = await OpenAsFlagged();
+        var act = () => OpenAsFlagged();
 
-        result.Should().Be(new OfficeEditAccess(false, "unknown"));
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(503);
         NoItemGrant();
         NoContainerGrantOrRead();
     }

@@ -60,7 +60,8 @@ public sealed class SpeContainerMembershipSyncJob : IScheduledJob
         "and removes just-in-time Office-edit grants on secure containers (container roles, and flagged-external users' " +
         "one-file permissions) once the holder no longer has Write or the file is no longer externally visible. Only grants " +
         "this job (or the Office edit-open) created are removed, except that, when ExternalAccess:FlaggedOfficeEdit:Enabled " +
-        "is on, a flagged-external user's container role on a secure container is always removed.";
+        "is on, a flagged-external user's container role on a secure container is always removed; when it is off, every " +
+        "one-file permission is removed.";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)

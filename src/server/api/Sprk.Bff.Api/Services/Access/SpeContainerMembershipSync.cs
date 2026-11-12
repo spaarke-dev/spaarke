@@ -384,21 +384,27 @@ public class SpeContainerMembershipSync
                     if (jit.Count == 0 && items.Count == 0 && !sweepHere)
                         continue;
 
-                    var restricted = jit.Count > 0 || items.Count > 0
+                    var restricted = jit.Count > 0 || (items.Count > 0 && sweep)
                         ? await IsRestrictedAsync(entity, record.Id, ct).ConfigureAwait(false)
                         : null;
 
                     // Task 191g: item grants (flagged-external holders, one file each). Same rules as the container grants,
                     // plus "the document is no longer externally visible". The container roles are not read for them.
+                    // With the setting OFF the feature is off: every item grant goes (the edit-open reports view only, so a
+                    // grant left standing would be write access the API denies — turning the setting off is the kill switch).
                     if (items.Count > 0)
                     {
-                        var visibility = await DecideDocumentsAsync(items.Select(i => i.DocumentId).Distinct().ToList(), ct)
-                            .ConfigureAwait(false);
+                        var visibility = sweep
+                            ? await DecideDocumentsAsync(items.Select(i => i.DocumentId).Distinct().ToList(), ct).ConfigureAwait(false)
+                            : null;
                         foreach (var item in items)
                         {
                             itemSeen++;
-                            var holderVerdict = await JitVerdictAsync(item.SystemUserId, entitySet, record.Id, restricted, ct).ConfigureAwait(false);
-                            var verdict = Combine(holderVerdict, DocumentVerdict(visibility, item.DocumentId));
+                            var verdict = sweep
+                                ? Combine(
+                                    await JitVerdictAsync(item.SystemUserId, entitySet, record.Id, restricted, ct).ConfigureAwait(false),
+                                    DocumentVerdict(visibility, item.DocumentId))
+                                : Verdict.Remove;
                             if (verdict == Verdict.Keep) { kept++; continue; }
                             if (verdict == Verdict.Unknown)
                             {
@@ -407,7 +413,14 @@ public class SpeContainerMembershipSync
                                 continue;
                             }
 
-                            switch (await _membership.RemoveMarkedItemGrantAsync(container, item.MarkerKey, item.ItemId, item.PermissionId, ct).ConfigureAwait(false))
+                            if (await HolderObjectIdAsync(item.SystemUserId, ct).ConfigureAwait(false) is not { } holderObjectId)
+                            {
+                                failed++;
+                                problems.Add($"{entity} {record.Id}: item grant for user {item.SystemUserId} on document {item.DocumentId} is due for removal but the holder's Entra object id could not be read; kept, retried next pass");
+                                continue;
+                            }
+
+                            switch (await _membership.RemoveMarkedItemGrantAsync(container, item.MarkerKey, item.ItemId, holderObjectId, ct).ConfigureAwait(false))
                             {
                                 case SpeContainerMembershipService.MarkedRemovalOutcome.Removed: removed++; break;
                                 case SpeContainerMembershipService.MarkedRemovalOutcome.MarkerCleared: cleared++; break;
@@ -527,27 +540,44 @@ public class SpeContainerMembershipSync
     }
 
     /// <summary>One item-grant marker (task 191g), parsed.</summary>
-    private sealed record ItemGrant(string MarkerKey, Guid SystemUserId, Guid DocumentId, string ItemId, string PermissionId);
+    private sealed record ItemGrant(string MarkerKey, Guid SystemUserId, Guid DocumentId, string ItemId);
 
-    /// <summary>The item-grant markers on a container. A marker whose value cannot be read is reported and left alone.</summary>
+    /// <summary>The item-grant markers on a container. A marker whose value is malformed, or whose key is not the key its ids
+    /// derive (hand-edited, or another code's), is reported and left alone.</summary>
     private static List<ItemGrant> ParseItemMarkers(
         IReadOnlyDictionary<string, string> markers, List<string> problems, string entity, Guid recordId)
     {
         var items = new List<ItemGrant>();
         foreach (var (key, value) in markers)
         {
-            if (!SpeContainerMembershipService.TryParseItemMarkerKey(key, out var systemUserId, out var documentId))
+            if (!key.StartsWith(SpeContainerMembershipService.ItemWriterMarkerPrefix, StringComparison.Ordinal))
                 continue;
-            if (!SpeContainerMembershipService.TryParseItemMarkerValue(value, out var itemId, out var permissionId))
+            if (!SpeContainerMembershipService.TryParseItemMarker(key, value, out var systemUserId, out var documentId, out var itemId))
             {
-                problems.Add($"{entity} {recordId}: item-grant marker for user {systemUserId} on document {documentId} has no readable value; left alone");
+                problems.Add($"{entity} {recordId}: item-grant marker {key} is malformed or does not match its key; left alone");
                 continue;
             }
 
-            items.Add(new ItemGrant(key, systemUserId, documentId, itemId, permissionId));
+            items.Add(new ItemGrant(key, systemUserId, documentId, itemId));
         }
 
         return items;
+    }
+
+    /// <summary>The Entra object id of an item grant's holder — removal deletes only that identity's own plain write
+    /// (task 191g); <see langword="null"/> when the row or the id cannot be read (the grant is then kept and reported).</summary>
+    private async Task<Guid?> HolderObjectIdAsync(Guid systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            var user = await _dataverse.RetrieveAsync("systemuser", systemUserId, ["azureactivedirectoryobjectid"], ct).ConfigureAwait(false);
+            return user?.GetAttributeValue<Guid?>("azureactivedirectoryobjectid") is { } oid && oid != Guid.Empty ? oid : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "[SPE-MEMBERSHIP-SYNC] Item-grant holder {SystemUserId} could not be read; the grant is kept this run.", systemUserId);
+            return null;
+        }
     }
 
     /// <summary>
@@ -569,10 +599,10 @@ public class SpeContainerMembershipSync
     }
 
     /// <summary>
-    /// Task 191g: what the document's external visibility says about its item grant. Hidden → remove. Undecided because a
-    /// read failed (a faulted decision, or a reason that names a failed or partial read) → unknown: kept this run and reported,
-    /// so an outage never becomes a revocation. Any other Undecided is a definite "cannot be visible" (the row is gone, has no
-    /// root, is filed too deep, ...) → remove. Visible → keep.
+    /// Task 191g: what the document's external visibility says about its item grant. Hidden → remove. Undecided for a reason
+    /// a later read may answer (a faulted decision, or 191c's transient reasons: a failed read, a row not found this time, an
+    /// undecided parent, ...) → unknown: kept this run and reported, so an outage never becomes a revocation. Any other
+    /// Undecided is structural (no root, filed too deep, ...) → remove. Visible → keep.
     /// </summary>
     internal static Verdict DocumentVerdict(ExternalVisibilityResult? visibility, Guid documentId)
     {
@@ -583,11 +613,7 @@ public class SpeContainerMembershipSync
             return Verdict.Remove;                       // a positive answer, even inside a faulted decision (the 065 rule)
         if (decision.IsVisible && !visibility.Faulted)
             return Verdict.Keep;                         // Visible counts only from a decision that did not fault
-        return visibility.Faulted || decision.Reason is ExternalVisibilityReason.ReadFailed
-                   or ExternalVisibilityReason.RootUnreadable
-                   or ExternalVisibilityReason.DocumentUndecided
-                   or ExternalVisibilityReason.InvoiceUndecided
-                   or ExternalVisibilityReason.NotAsked
+        return visibility.Faulted || ExternalTeamShareSynchronizer.IsTransient(decision.Reason)
             ? Verdict.Unknown
             : Verdict.Remove;
     }

@@ -156,11 +156,12 @@ public class OfficeEditAccessService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Task 191g: the caller's sprk_isexternal cannot be read, so whether a container role is allowed is unknown —
-            // no grant of any kind (fail closed); the broker stays the view path.
+            // no grant of any kind (fail closed), and an honest 503 like the unresolved-user branch below (never links that
+            // look usable and that Office then refuses).
             _logger.LogWarning(ex,
                 "[OFFICE-EDIT] Document {DocumentId}: the caller's Dataverse user could not be read; no edit access is granted.",
                 documentId);
-            return new OfficeEditAccess(false, "unknown");
+            throw Unavailable(documentId, "the caller's Dataverse user could not be read");
         }
 
         var upn = user?.GetAttributeValue<string>("domainname");

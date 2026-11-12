@@ -654,39 +654,58 @@ public class SpeContainerMembershipService
                    || name.StartsWith(ItemWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>The item-grant marker key for <paramref name="systemUserId"/> on <paramref name="documentId"/> (task 191g).</summary>
-    public static string ItemMarkerKey(Guid systemUserId, Guid documentId)
-        => ItemWriterMarkerPrefix + systemUserId.ToString("N") + documentId.ToString("N");
+    // Task 191g marker shape (main session's option B, after the live test's marker PATCH answered 400 for a 71-character
+    // key with an `itemId|permissionId` value): the key has EXACTLY the live-proven profile of the SprkStd/SprkJit keys —
+    // 7-character prefix + 32 lowercase hex = 39 characters, letters and digits only — and the value is letters, digits and
+    // '.' only. The Graph docs state no limit on name or value (only "names must be valid property names"); the 191i
+    // deploy gate proves this shape live, and the grant fails closed (undone, 503) if the marker does not read back.
 
-    /// <summary>The holder and document an item-grant marker key names, when <paramref name="key"/> is one (task 191g).</summary>
-    public static bool TryParseItemMarkerKey(string? key, out Guid systemUserId, out Guid documentId)
+    /// <summary>
+    /// The item-grant marker key for <paramref name="systemUserId"/> on <paramref name="documentId"/> (task 191g):
+    /// <see cref="ItemWriterMarkerPrefix"/> + the first 128 bits of SHA-256 over both ids, as 32 lowercase hex characters.
+    /// One-way; the ids live in the value (<see cref="ItemMarkerValue"/>), and a reader re-derives the key to check them.
+    /// </summary>
+    public static string ItemMarkerKey(Guid systemUserId, Guid documentId)
+    {
+        Span<byte> hash = stackalloc byte[32];
+        System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.ASCII.GetBytes(systemUserId.ToString("N") + documentId.ToString("N")), hash);
+        return ItemWriterMarkerPrefix + Convert.ToHexStringLower(hash[..16]);
+    }
+
+    /// <summary>
+    /// An item-grant marker's value (task 191g): <c>{systemuserid:N}.{documentid:N}.{itemId}</c> — letters, digits and '.'
+    /// only. No permission id: removal finds the holder's own plain write on the item (item permission ids are
+    /// identity-derived, so the id would add nothing). <see langword="null"/> when <paramref name="itemId"/> is not purely
+    /// letters and digits (then no grant is made — the value could not be stored in the proven profile).
+    /// </summary>
+    public static string? ItemMarkerValue(Guid systemUserId, Guid documentId, string itemId)
+        => IsPlainToken(itemId) ? $"{systemUserId:N}.{documentId:N}.{itemId}" : null;
+
+    /// <summary>
+    /// The holder, document and drive item an item-grant marker records (task 191g) — only when the value is well-formed
+    /// AND <paramref name="key"/> is the key those ids derive (a hand-edited or mismatched marker is never acted on).
+    /// </summary>
+    public static bool TryParseItemMarker(string? key, string? value, out Guid systemUserId, out Guid documentId, out string itemId)
     {
         systemUserId = Guid.Empty;
         documentId = Guid.Empty;
-        return key is not null
-               && key.StartsWith(ItemWriterMarkerPrefix, StringComparison.Ordinal)
-               && key.Length == ItemWriterMarkerPrefix.Length + 64
-               && Guid.TryParseExact(key.AsSpan(ItemWriterMarkerPrefix.Length, 32), "N", out systemUserId)
-               && Guid.TryParseExact(key.AsSpan(ItemWriterMarkerPrefix.Length + 32, 32), "N", out documentId)
-               && systemUserId != Guid.Empty
-               && documentId != Guid.Empty;
-    }
-
-    /// <summary>An item-grant marker's value: the drive item and the item permission it records (task 191g).</summary>
-    public static string ItemMarkerValue(string itemId, string permissionId) => itemId + "|" + permissionId;
-
-    /// <summary>The drive item and item permission an item-grant marker value records (task 191g).</summary>
-    public static bool TryParseItemMarkerValue(string? value, out string itemId, out string permissionId)
-    {
         itemId = string.Empty;
-        permissionId = string.Empty;
-        var parts = value?.Split('|');
-        if (parts is not { Length: 2 } || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+        var parts = value?.Split('.');
+        if (parts is not { Length: 3 }
+            || !Guid.TryParseExact(parts[0], "N", out var sys) || sys == Guid.Empty
+            || !Guid.TryParseExact(parts[1], "N", out var doc) || doc == Guid.Empty
+            || !IsPlainToken(parts[2])
+            || !string.Equals(key, ItemMarkerKey(sys, doc), StringComparison.Ordinal))
+        {
             return false;
-        itemId = parts[0].Trim();
-        permissionId = parts[1].Trim();
+        }
+
+        (systemUserId, documentId, itemId) = (sys, doc, parts[2]);
         return true;
     }
+
+    private static bool IsPlainToken(string? s) => !string.IsNullOrEmpty(s) && s.All(char.IsAsciiLetterOrDigit);
 
     /// <summary>The marker key for <paramref name="systemUserId"/> under <paramref name="prefix"/>.</summary>
     public static string MarkerKey(string prefix, Guid systemUserId) => prefix + systemUserId.ToString("N");
@@ -871,6 +890,8 @@ public class SpeContainerMembershipService
 
         // Ownership before the try: a container this stamp does not own is refused (404), not reported as Failed (task 227d).
         var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
+        // uac-r2 191g review: from the POST to the marker the REQUEST's cancellation is not honoured (CancellationToken.None,
+        // bounded by the Graph client's timeout) — an abort after Graph made the role must not leave a role nothing records.
         string permissionId;
         try
         {
@@ -885,7 +906,7 @@ public class SpeContainerMembershipService
                             AdditionalData = new Dictionary<string, object> { ["userPrincipalName"] = userPrincipalName },
                         },
                     },
-                }, cancellationToken: ct)
+                }, cancellationToken: CancellationToken.None)
                 .ConfigureAwait(false);
 
             if (string.IsNullOrEmpty(created?.Id))
@@ -907,7 +928,7 @@ public class SpeContainerMembershipService
                 systemUserId, containerId);
             return MarkedGrantOutcome.AlreadyHeld;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)   // a Graph timeout is a failure, not a cancel
         {
             _logger.LogError(ex,
                 "[SPE-MEMBERSHIP] Granting writer on container {ContainerId} to user {SystemUserId} failed.",
@@ -918,9 +939,9 @@ public class SpeContainerMembershipService
         var key = MarkerKey(markerPrefix, systemUserId);
         try
         {
-            await WriteMarkerAsync(graphClient, containerId, key, permissionId, ct).ConfigureAwait(false);
+            await WriteMarkerAsync(graphClient, containerId, key, permissionId, CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             // An unrecorded grant could never be told apart from a hand-granted one, so it must not stand.
             _logger.LogError(ex,
@@ -1038,10 +1059,10 @@ public class SpeContainerMembershipService
     /// <summary>
     /// Grants the user <paramref name="userObjectId"/> a WRITE permission on drive item <paramref name="itemId"/> of container
     /// <paramref name="containerId"/> — never a container role — reads it back and records it under
-    /// <see cref="ItemMarkerKey"/>(<paramref name="systemUserId"/>, <paramref name="documentId"/>). A permission that cannot be
-    /// read back or recorded is deleted again (<see cref="ItemGrantOutcome.Failed"/>), so every item grant this code leaves
-    /// standing is removable. A container this stamp does not own is refused (<c>spe_container_not_owned</c>, 404) before
-    /// Graph is called.
+    /// <see cref="ItemMarkerKey"/>(<paramref name="systemUserId"/>, <paramref name="documentId"/>), then reads the record back.
+    /// A permission that cannot be read back, recorded, or whose record does not read back is deleted again
+    /// (<see cref="ItemGrantOutcome.Failed"/>), so every item grant this code leaves standing is removable. A container this
+    /// stamp does not own is refused (<c>spe_container_not_owned</c>, 404) before Graph is called.
     /// </summary>
     public virtual async Task<ItemGrantOutcome> GrantMarkedItemWriterAsync(
         string containerId,
@@ -1051,7 +1072,8 @@ public class SpeContainerMembershipService
         Guid userObjectId,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(containerId) || string.IsNullOrWhiteSpace(itemId)
+        var markerValue = ItemMarkerValue(systemUserId, documentId, itemId);
+        if (string.IsNullOrWhiteSpace(containerId) || markerValue is null
             || documentId == Guid.Empty || systemUserId == Guid.Empty || userObjectId == Guid.Empty)
         {
             return ItemGrantOutcome.Failed;
@@ -1063,8 +1085,6 @@ public class SpeContainerMembershipService
         string permissionId;
         try
         {
-            // 1. Our own marker: reuse a grant that still stands; a stale one (the permission is gone, or names another item)
-            //    is cleared before a new grant, so it can never block one.
             var markers = await ReadMarkersCoreAsync(graphClient, containerId, ct).ConfigureAwait(false);
             if (markers is null)
             {
@@ -1073,22 +1093,7 @@ public class SpeContainerMembershipService
                 return ItemGrantOutcome.Failed;
             }
 
-            if (markers.TryGetValue(key, out var recorded) && TryParseItemMarkerValue(recorded, out var markedItem, out var markedPermission))
-            {
-                var current = await ReadItemPermissionAsync(graphClient, containerId, markedItem, markedPermission, ct).ConfigureAwait(false);
-                var stillOurs = current is not null && IsPlainItemWriterFor(current, userObjectId);
-                if (stillOurs && string.Equals(markedItem, itemId, StringComparison.Ordinal))
-                    return ItemGrantOutcome.Reused;
-
-                // Stale: recorded against another item of this document (undo it — it is still exactly what we made), or gone,
-                // or changed by someone (a person's change is never undone here: item permission ids are identity-derived, so
-                // the id can name a permission a person re-made or downgraded). Either way the marker is cleared.
-                if (stillOurs)
-                    await DeleteItemPermissionAsync(graphClient, containerId, markedItem, markedPermission, ct).ConfigureAwait(false);
-                await WriteMarkerAsync(graphClient, containerId, key, value: null, ct).ConfigureAwait(false);
-            }
-
-            // 2. A permission the user already holds directly on the item is not ours: never recorded, never removed here.
+            // 1. The item's permissions, read to their end (a partial list proves nothing).
             var existing = await ReadItemPermissionsAsync(graphClient, containerId, itemId, ct).ConfigureAwait(false);
             if (!existing.EnumerationComplete)
             {
@@ -1098,16 +1103,35 @@ public class SpeContainerMembershipService
                 return ItemGrantOutcome.Failed;
             }
 
-            var held = existing.Permissions.Where(p => p.InheritedFrom is null && IsHolder(p, userObjectId)).ToList();
-            if (held.Count > 0)
+            var direct = existing.Permissions.Where(p => p.InheritedFrom is null && IsHolder(p, userObjectId)).ToList();
+
+            // 2. Our own marker: reuse the grant while the user still holds a plain write on THIS item; otherwise it is stale
+            //    (gone, changed by someone, or recorded against another item of this document) and is cleared — a grant on
+            //    another item is undone first — so it can never block a new grant.
+            if (markers.TryGetValue(key, out var recorded))
+            {
+                var ours = TryParseItemMarker(key, recorded, out _, out _, out var markedItem);
+                if (ours && string.Equals(markedItem, itemId, StringComparison.Ordinal) && direct.Any(IsPlainItemWriter))
+                    return ItemGrantOutcome.Reused;
+
+                if (ours && !string.Equals(markedItem, itemId, StringComparison.Ordinal))
+                    await DeletePlainItemWritesAsync(graphClient, containerId, markedItem, userObjectId, ct).ConfigureAwait(false);
+                await WriteMarkerAsync(graphClient, containerId, key, value: null, ct).ConfigureAwait(false);
+            }
+
+            // 3. A permission the user already holds directly on the item that we did not record is not ours: never recorded,
+            //    never removed here.
+            if (direct.Count > 0)
             {
                 _logger.LogInformation(
                     "[SPE-MEMBERSHIP] User {SystemUserId} already holds a permission on document {DocumentId}'s item; nothing granted.",
                     systemUserId, documentId);
-                return held.Any(CanEditItem) ? ItemGrantOutcome.HeldByOther : ItemGrantOutcome.HeldReadOnly;
+                return direct.Any(CanEditItem) ? ItemGrantOutcome.HeldByOther : ItemGrantOutcome.HeldReadOnly;
             }
 
-            // 3. The grant: app-only invite, no mail, sign-in required, the user's existing identity only.
+            // 4. The grant: app-only invite, no mail, sign-in required, the user's existing identity only. From here to the
+            //    marker the REQUEST's cancellation is not honoured (CancellationToken.None, bounded by the Graph client's own
+            //    timeout): a request aborted after Graph made the permission must not leave a write permission nothing records.
             var response = await graphClient.Drives[containerId].Items[itemId].Invite
                 .PostAsInvitePostResponseAsync(new Microsoft.Graph.Drives.Item.Items.Item.Invite.InvitePostRequestBody
                 {
@@ -1115,7 +1139,7 @@ public class SpeContainerMembershipService
                     Roles = [ItemWriteRole],
                     RequireSignIn = true,
                     SendInvitation = false,
-                }, cancellationToken: ct)
+                }, cancellationToken: CancellationToken.None)
                 .ConfigureAwait(false);
 
             var created = response?.Value?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Id));
@@ -1129,7 +1153,7 @@ public class SpeContainerMembershipService
 
             permissionId = created.Id;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)   // a Graph timeout is a failure, not a cancel
         {
             _logger.LogError(ex,
                 "[SPE-MEMBERSHIP] Granting write on document {DocumentId}'s item (container {ContainerId}) to user {SystemUserId} failed.",
@@ -1137,16 +1161,21 @@ public class SpeContainerMembershipService
             return ItemGrantOutcome.Failed;
         }
 
-        // 4. Read back, then record. Either failing undoes the grant: an unproven or unrecorded grant must not stand.
+        // 5. Read back, record, read the record back. Any of them failing undoes the grant: an unproven or unrecorded grant
+        //    must not stand (live 191g test: a marker PATCH can be refused).
         try
         {
-            var readBack = await ReadItemPermissionAsync(graphClient, containerId, itemId, permissionId, ct).ConfigureAwait(false);
+            var readBack = await ReadItemPermissionAsync(graphClient, containerId, itemId, permissionId, CancellationToken.None).ConfigureAwait(false);
             if (readBack is null || !IsPlainItemWriterFor(readBack, userObjectId))
                 throw new InvalidOperationException("The item permission did not read back as a write permission for the user.");
 
-            await WriteMarkerAsync(graphClient, containerId, key, ItemMarkerValue(itemId, permissionId), ct).ConfigureAwait(false);
+            await WriteMarkerAsync(graphClient, containerId, key, markerValue, CancellationToken.None).ConfigureAwait(false);
+
+            var recorded = await ReadMarkersCoreAsync(graphClient, containerId, CancellationToken.None).ConfigureAwait(false);
+            if (recorded is null || !recorded.TryGetValue(key, out var readValue) || !string.Equals(readValue, markerValue, StringComparison.Ordinal))
+                throw new InvalidOperationException("The item grant's marker did not read back as written.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             _logger.LogError(ex,
                 "[SPE-MEMBERSHIP] The item grant on document {DocumentId} for user {SystemUserId} could not be read back or recorded; undoing it.",
@@ -1173,40 +1202,34 @@ public class SpeContainerMembershipService
     }
 
     /// <summary>
-    /// Removes the item grant the marker <paramref name="markerKey"/> records (task 191g): deletes item permission
-    /// <paramref name="permissionId"/> on <paramref name="itemId"/> ONLY while it is still exactly what this code made (a direct
-    /// user permission whose roles are exactly <c>write</c>, like <see cref="RemoveMarkedGrantAsync"/>'s plain-writer rule),
-    /// then clears the marker. <see cref="MarkedRemovalOutcome.Removed"/> when a permission was deleted,
-    /// <see cref="MarkedRemovalOutcome.MarkerCleared"/> when it was already gone or someone changed it (then it is no longer
-    /// ours and is left alone), <see cref="MarkedRemovalOutcome.Failed"/> when nothing could be done (the marker is kept and
-    /// the next pass retries). A refusal (<c>spe_container_not_owned</c>) propagates.
+    /// Removes the item grant the marker <paramref name="markerKey"/> records (task 191g): lists drive item
+    /// <paramref name="itemId"/>'s permissions and deletes ONLY the holder's own plain write — direct (not inherited), not a
+    /// sharing link, held by <paramref name="holderObjectId"/> (the marked systemuser's Entra object id), roles exactly
+    /// <c>write</c>, like <see cref="RemoveMarkedGrantAsync"/>'s plain-writer rule — then clears the marker. Every other
+    /// permission (a link, an inherited role, another holder, a changed role) is left alone.
+    /// <see cref="MarkedRemovalOutcome.Removed"/> when a permission was deleted, <see cref="MarkedRemovalOutcome.MarkerCleared"/>
+    /// when there was none of ours left, <see cref="MarkedRemovalOutcome.Failed"/> when nothing could be proven or done (the
+    /// list could not be read to its end, a call failed: the marker is kept and the next pass retries). A refusal
+    /// (<c>spe_container_not_owned</c>) propagates.
     /// </summary>
     public virtual async Task<MarkedRemovalOutcome> RemoveMarkedItemGrantAsync(
         string containerId,
         string markerKey,
         string itemId,
-        string permissionId,
+        Guid holderObjectId,
         CancellationToken ct = default)
     {
+        if (holderObjectId == Guid.Empty || string.IsNullOrWhiteSpace(itemId))
+            return MarkedRemovalOutcome.Failed;
         try
         {
             var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
-            var current = await ReadItemPermissionAsync(graphClient, containerId, itemId, permissionId, ct).ConfigureAwait(false);
-            var deleted = false;
-            if (current is not null && IsPlainItemWriter(current))
-            {
-                deleted = await DeleteItemPermissionAsync(graphClient, containerId, itemId, permissionId, ct).ConfigureAwait(false);
-            }
-            else if (current is not null)
-            {
-                _logger.LogWarning(
-                    "[SPE-MEMBERSHIP] Item permission {PermissionId} on container {ContainerId} is no longer a plain write permission "
-                    + "(someone changed it); it is no longer treated as this code's grant — only its marker is cleared.",
-                    permissionId, containerId);
-            }
+            var deleted = await DeletePlainItemWritesAsync(graphClient, containerId, itemId, holderObjectId, ct).ConfigureAwait(false);
+            if (deleted is null)
+                return MarkedRemovalOutcome.Failed;
 
             await WriteMarkerAsync(graphClient, containerId, markerKey, value: null, ct).ConfigureAwait(false);
-            return deleted ? MarkedRemovalOutcome.Removed : MarkedRemovalOutcome.MarkerCleared;
+            return deleted > 0 ? MarkedRemovalOutcome.Removed : MarkedRemovalOutcome.MarkerCleared;
         }
         catch (Exception ex) when (ex is not OperationCanceledException
                                    && ex is not Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException
@@ -1215,10 +1238,41 @@ public class SpeContainerMembershipService
                                    })
         {
             _logger.LogError(ex,
-                "[SPE-MEMBERSHIP] Removing item grant {MarkerKey} (permission {PermissionId}) on container {ContainerId} failed.",
-                markerKey, permissionId, containerId);
+                "[SPE-MEMBERSHIP] Removing item grant {MarkerKey} on container {ContainerId} failed.",
+                markerKey, containerId);
             return MarkedRemovalOutcome.Failed;
         }
+    }
+
+    /// <summary>
+    /// Deletes the holder's plain write permissions on one item (direct, not a link, roles exactly <c>write</c>, held by
+    /// <paramref name="holderObjectId"/>); how many were deleted, or <see langword="null"/> when the item's permission list
+    /// could not be read to its end (nothing is deleted on a partial view). An item that no longer exists has none (0).
+    /// </summary>
+    private static async Task<int?> DeletePlainItemWritesAsync(
+        GraphServiceClient graphClient, string driveId, string itemId, Guid holderObjectId, CancellationToken ct)
+    {
+        PermissionReadResult list;
+        try
+        {
+            list = await ReadItemPermissionsAsync(graphClient, driveId, itemId, ct).ConfigureAwait(false);
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            return 0;   // the item is gone, and its permissions with it
+        }
+
+        if (!list.EnumerationComplete)
+            return null;
+
+        var deleted = 0;
+        foreach (var permission in list.Permissions.Where(p => !string.IsNullOrEmpty(p.Id) && IsPlainItemWriterFor(p, holderObjectId)))
+        {
+            if (await DeleteItemPermissionAsync(graphClient, driveId, itemId, permission.Id!, ct).ConfigureAwait(false))
+                deleted++;
+        }
+
+        return deleted;
     }
 
     /// <summary>

@@ -108,20 +108,33 @@ Absent, empty or unparseable = off. It stays off until the live test passes and 
 | Path | Setting off (default) | Setting on |
 |---|---|---|
 | Office edit-open, flagged caller (`sprk_isexternal = true`) | view only; never a container role (unconditional) | Write + not Restricted + document externally Visible (191c's `ExternalVisibilityDecider`, a faulted decision never counts) → one item write permission (`item-writer-jit`); anything else view only; a grant that cannot be made, read back or recorded → 503 |
-| Office edit-open, caller whose flag cannot be read | `(false, "unknown")`, no grant of any kind | same |
+| Office edit-open, caller whose flag cannot be read | 503 `edit_access_unavailable`, no grant of any kind | same |
 | Office edit-open, internal caller | unchanged (container JIT writer, task 171) | unchanged |
-| Sync: marked item grants (`SprkItm…`) | removed when the holder lost Write OR the document is no longer Visible (Hidden, or structurally undecidable); an unknown answer keeps the grant and reports it (round 70) | same |
-| Sync: a flagged user's container role on a secure container | untouched | removed with `Prefer: onlyRemoveContainerScopedPermission` (item grants stay), whoever granted it |
+| Sync: marked item grants (`SprkItm…`) | **all removed** (kill switch: the open reports view only, so no item grant may stand) | removed when the holder lost Write OR the document is no longer Visible (Hidden, or structurally undecidable); an unknown answer (incl. 191c's transient reasons, e.g. row not found this run) keeps the grant and reports it (round 70) |
+| Sync: a flagged user's container role on a secure container | untouched | removed with `Prefer: onlyRemoveContainerScopedPermission` (item grants stay), whoever granted it — a deliberate exception to "only remove what we made" (owner Q2 = b: a flagged user never holds a container role on a secure container) |
 
 **Ownership rule** (same as the container grants): only a permission that is still exactly what this code made (direct,
-not a link, one user, roles exactly `write`) is ever deleted; a changed one only has its marker cleared. Item permission
-ids are identity-derived, so a marker's id can name a permission a person re-made — never deleted.
+not a link, one user, roles exactly `write`) is ever deleted; a changed one (downgraded, upgraded, a role added, now
+inherited) only has its marker cleared. **Inherent limit:** item permission ids are identity-derived, so if a person
+removes our grant and then hand-grants the same user plain `write` on the same file, that permission is indistinguishable
+from ours and the sync may remove it.
+
+**Cancellation:** once the ownership and permission checks pass, the invite, read-back and marker write ignore the
+request's cancellation, so an aborted request never leaves an unrecorded write permission (the same fix is applied to
+the task-171 container grant, which had the same gap).
 
 **Known limits** (K-class; none holds a confirmed defect on a real path):
 - K1 — Two concurrent first opens of the same file by the same flagged user can both invite; Graph returns the same
   identity-derived permission id, so both record the same marker value (idempotent), but this is not live-proven.
 - K2 — With the setting off, a flagged user who still holds a leftover container role from before 191g edits through it
-  (the open reports view only, the role is not removed) until the setting is turned on and the sweep runs.
+  (the open reports view only, the role is not removed) until the setting is turned on and the sweep runs. Deploying
+  this build with the setting off is also a user-visible change: flagged users lose Office edit (view only) until the
+  setting is turned on.
+- K4 — If Graph's own timeout fires after it created the item permission but before answering the invite, the
+  permission id is never known: Failed is reported and the permission is unrecorded (LogError). Not reachable by a
+  request cancel (fixed above), only by a Graph-side timeout.
+- K5 — One custom property per user × document; markers are removed with their grants, but a container's
+  custom-property capacity is not documented (live test C6 proves one 71-character key only).
 - K3 — The item grant follows the document's CURRENT file; when a document's file is replaced, the old item's grant is
   undone at the next open of the new one (stale-marker path) or by the sync once Write or visibility goes.
 

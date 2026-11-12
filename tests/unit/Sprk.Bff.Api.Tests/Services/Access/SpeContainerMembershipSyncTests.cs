@@ -397,8 +397,11 @@ public class SpeContainerMembershipSyncTests
 
     /// <summary>A secure container carrying one item grant for <paramref name="holder"/> on <see cref="Doc"/>, and no JIT
     /// container grant.</summary>
-    private void SecureContainerWithItemGrant(Guid holder, bool restricted = false)
+    /// <summary>A secure container holding one marked item grant; the feature setting ON unless <paramref name="settingOn"/> says off.</summary>
+    private void SecureContainerWithItemGrant(Guid holder, bool restricted = false, bool settingOn = true)
     {
+        if (settingOn)
+            _settings[Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
         _secureProjects.Add(new Entity("sprk_project", SecureProject) { ["sprk_containerid"] = SecureContainer });
         var markers = new Dictionary<string, string> { [ItemKey(holder)] = Membership.ItemMarkerValue(ItemId, ItemPermission) };
         _membership.Setup(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>())).ReturnsAsync(markers);
@@ -435,7 +438,7 @@ public class SpeContainerMembershipSyncTests
         result.ItemGrantsSeen.Should().Be(1);
         result.Kept.Should().Be(1);
         _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
-            "an item grant is decided without the container's roles (sweep off)");
+            "an item grant is decided without the container's roles (no flagged user to sweep)");
     }
 
     [Fact(DisplayName = "Task 191g: an item grant is REMOVED when Dataverse positively answers the holder has no Write")]
@@ -477,7 +480,6 @@ public class SpeContainerMembershipSyncTests
     [Theory(DisplayName = "Task 191g: an item grant is REMOVED when the document is no longer externally visible (hidden, or structurally undecidable), even with Write")]
     [InlineData("Hidden", "DocumentHidden")]
     [InlineData("Hidden", "RootRestricted")]
-    [InlineData("Undecided", "RowNotFound")]
     [InlineData("Undecided", "NoRoot")]
     public async Task Item_DocumentNotVisible_IsRemoved(string verdict, string reason)
     {
@@ -498,6 +500,7 @@ public class SpeContainerMembershipSyncTests
     [InlineData("visibility-throws")]
     [InlineData("visibility-faulted")]
     [InlineData("visibility-read-failed")]
+    [InlineData("visibility-row-not-found")]
     public async Task Item_UnknownAnswer_IsKeptAndReported(string unknownBecause)
     {
         SecureContainerWithItemGrant(Alice);
@@ -509,6 +512,9 @@ public class SpeContainerMembershipSyncTests
             case "visibility-faulted": _visibility.Faulted = true; break;
             case "visibility-read-failed":
                 _visibility.Set("sprk_document", Doc, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed);
+                break;
+            case "visibility-row-not-found":   // 191c's transient reasons: a later read may answer
+                _visibility.Set("sprk_document", Doc, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.RowNotFound);
                 break;
         }
 
@@ -532,6 +538,26 @@ public class SpeContainerMembershipSyncTests
         result.Problems.Should().ContainSingle().Which.Should().Contain("no readable value");
         _membership.Verify(m => m.RemoveMarkedItemGrantAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>MUTATION: deciding item grants on Write + visibility whatever the setting says.</summary>
+    [Theory(DisplayName = "Task 191g: with the setting OFF (absent, false, unparseable) every item grant is removed — the kill switch — even with Write and visible")]
+    [InlineData(null)]
+    [InlineData("false")]
+    [InlineData("yes")]
+    public async Task Item_SettingOff_IsRemoved(string? setting)
+    {
+        SecureContainerWithItemGrant(Alice, settingOn: false);
+        if (setting is not null)
+            _settings[Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = setting;
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Read | AccessRights.Write);
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        ItemRemovalVerified(Alice, Times.Once());
+        result.Removed.Should().Be(1);
+        _visibility.Calls.Should().BeEmpty("the feature is off: nothing to decide");
     }
 
     // ── Task 191g: flagged users' container roles on secure containers (setting-gated sweep) ─────────────────────

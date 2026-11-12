@@ -282,6 +282,44 @@ public class SpeContainerMembershipServiceItemGrantTests
         _graph.Requests.Should().BeEmpty();
     }
 
+    /// <summary>MUTATION: passing the request's token to the invite, read-back or marker write (an abort after Graph made
+    /// the permission would leave a write permission nothing records, so nothing could ever remove it).</summary>
+    [Fact(DisplayName = "191g: a request cancelled once the invite is on the wire still reads back and RECORDS the grant — never an unrecorded write permission")]
+    public async Task Grant_CancelledAfterInvite_StillRecords()
+    {
+        FreshGrantRoutes();
+        using var cts = new CancellationTokenSource();
+        _graph.OnRequest = r => { if (r.Method == "POST") cts.Cancel(); };
+
+        var outcome = await Service().GrantMarkedItemWriterAsync(Container, Item, DocumentId, SystemUserId, ObjectId, cts.Token);
+
+        outcome.Should().Be(Membership.ItemGrantOutcome.Granted);
+        Writes.Should().Contain(r => r.Method == "PATCH" && r.Path == MarkerPatchPath);
+        Writes.Should().NotContain(r => r.Method == "DELETE");
+    }
+
+    /// <summary>MUTATION: the request's token on the task-171 container grant's POST or marker write (same gap, found in the
+    /// 191g review and fixed with it).</summary>
+    [Fact(DisplayName = "171/191g: a container JIT grant whose request is cancelled once the POST is on the wire is still RECORDED — never an unrecorded writer role")]
+    public async Task ContainerGrant_CancelledAfterPost_StillRecords()
+    {
+        _graph.Respond("POST", $"{ContainerPath}/permissions",
+            """{"id":"role-new","roles":["writer"],"grantedToV2":{"user":{"userPrincipalName":"u@contoso.example"}}}""",
+            HttpStatusCode.Created);
+        _graph.Respond("PATCH", MarkerPatchPath, "{}");
+        using var cts = new CancellationTokenSource();
+        _graph.OnRequest = r => { if (r.Method == "POST") cts.Cancel(); };
+
+        var outcome = await Service().GrantMarkedWriterAsync(
+            Container, Membership.JitWriterMarkerPrefix, SystemUserId, "u@contoso.example", cts.Token);
+
+        outcome.Should().Be(Membership.MarkedGrantOutcome.Granted);
+        var patch = Writes.Should().ContainSingle(r => r.Method == "PATCH").Subject;
+        MarkerPatch(patch).GetProperty(Membership.MarkerKey(Membership.JitWriterMarkerPrefix, SystemUserId))
+            .GetProperty("value").GetString().Should().Be("role-new");
+        Writes.Should().NotContain(r => r.Method == "DELETE");
+    }
+
     // ── The removal ────────────────────────────────────────────────────────────────────────────────────────────────
 
     private Task<Membership.MarkedRemovalOutcome> Remove()
@@ -381,6 +419,9 @@ public class SpeContainerMembershipServiceItemGrantTests
 
         public IReadOnlyList<Sent> Requests => _requests;
 
+        /// <summary>Runs after each request is recorded, before it is answered.</summary>
+        public Action<Sent>? OnRequest { get; set; }
+
         public Wire Respond(string method, string path, string body, HttpStatusCode status = HttpStatusCode.OK)
         {
             _routes[(method, path)] = (status, body);
@@ -396,6 +437,7 @@ public class SpeContainerMembershipServiceItemGrantTests
             var path = request.RequestUri!.AbsolutePath;
             var prefer = request.Headers.TryGetValues("Prefer", out var values) ? string.Join(",", values) : "";
             _requests.Add(new Sent(request.Method.Method, path, request.RequestUri.Query, body, prefer));
+            OnRequest?.Invoke(_requests[^1]);
 
             var (status, json) = _routes.TryGetValue((request.Method.Method, path), out var route)
                 ? route
