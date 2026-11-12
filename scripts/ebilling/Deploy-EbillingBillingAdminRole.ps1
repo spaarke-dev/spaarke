@@ -29,8 +29,10 @@
          invariants (ADR-002). Any other privilege held deeper than that stops a plain run (exit 2; it is never lowered).
          Never Delete, Assign or Share; on the Procedure tables only Read on sprk_procedure, at Deep (task 089e, owner
          2026-11-04: "Add to role file + apply on dev"; the depth of the rule-set Read), which the Procedure override removal
-         and preview ask of the caller. Nothing else on sprk_procedure, sprk_procedureversion or sprk_procedureassignment (task
-         121 adds the rest after uac-r2 task 191). Holding one of these stops the run (exit 2).
+         and preview ask of the caller, and Read on sprk_procedureversion and sprk_procedureassignment, at Deep (task 084f, owner
+         EB-D-220 2026-11-12, uac-r2 agreed), which the two record-level Procedure routes ask of the caller for every row they
+         expose. Nothing else on sprk_procedure, sprk_procedureversion or sprk_procedureassignment (task 121 adds the rest after
+         uac-r2 task 191). Holding one of these stops the run (exit 2).
       3. Spaarke Core User and Spaarke Basic User: prvReadsprk_ruleset is removed with RemovePrivilegeRole, one call per
          root role. That is the ONLY removal this script makes. If either role holds any OTHER privilege on sprk_ruleset, or
          holds the Read at a depth other than Deep (the depth the role source showed), the run stops before writing (exit 2).
@@ -206,8 +208,18 @@ try {
     if (-not $procedureRead) { throw "Privilege prvReadsprk_procedure not found." }
     if (-not $procedureRead.Deep) { throw [EscalationException]::new("$($procedureRead.Name) cannot be held at Deep. Nothing was changed.") }
     $wanted += [pscustomobject]@{ Name = $procedureRead.Name; Id = $procedureRead.Id; Depth = 'Deep' }
+    # Task 084f (EB-D-220, owner 2026-11-12; uac-r2 agreed): Read at Deep on sprk_procedureversion and sprk_procedureassignment too. The two
+    # record-level Procedure routes read their rows app-only, then ask the caller's own Read on every row they expose (EB-D-218).
+    $procedureAllowedIds = @($procedureRead.Id)
+    foreach ($t in 'sprk_procedureversion', 'sprk_procedureassignment') {
+        $r = $privs[$t]['Read']
+        if (-not $r) { throw "Privilege prvRead$t not found." }
+        if (-not $r.Deep) { throw [EscalationException]::new("$($r.Name) cannot be held at Deep. Nothing was changed.") }
+        $wanted += [pscustomobject]@{ Name = $r.Name; Id = $r.Id; Depth = 'Deep' }
+        $procedureAllowedIds += $r.Id
+    }
     $forbiddenForAdmin = @(foreach ($t in $AdminTables.Keys) { foreach ($v in $Verbs) { if ($AdminVerbs -notcontains $v) { $privs[$t][$v] } } }) +
-    @(foreach ($t in $ProcedureTables) { $privs[$t].Values | Where-Object { $_.Id -ne $procedureRead.Id } })
+    @(foreach ($t in $ProcedureTables) { $privs[$t].Values | Where-Object { $procedureAllowedIds -notcontains $_.Id } })
     $ruleSetPrivs = @($privs['sprk_ruleset'].Values)
     $stripPriv = $privs['sprk_ruleset']['Read']
     $rootBu = Get-RootBusinessUnitId
@@ -264,11 +276,11 @@ try {
 
     # --- 3. The role's privileges --------------------------------------------------------------------------------------
     Write-Host ""
-    Write-Host "3. $RoleName privileges (Read Deep; Create / Write / Append / AppendTo Basic; Read Deep on sprk_procedure)" -ForegroundColor Cyan
+    Write-Host "3. $RoleName privileges (Read Deep; Create / Write / Append / AppendTo Basic; Read Deep on sprk_procedure, sprk_procedureversion and sprk_procedureassignment)" -ForegroundColor Cyan
     $have = if ($roleExists) { Get-RolePrivilegeMap $RoleId } else { @{} }
     $forbidden = @($forbiddenForAdmin | Where-Object { $have.ContainsKey($_.Id) })
     if ($forbidden.Count) {
-        $msg = "$RoleName holds $(($forbidden | ForEach-Object { "$($_.Name) ($($have[$_.Id].Depth))" }) -join ', '): no Delete / Assign / Share on the rule-set and policy tables and nothing on the Procedure tables but Read on sprk_procedure (D-76, uac-r2 081, 089e)."
+        $msg = "$RoleName holds $(($forbidden | ForEach-Object { "$($_.Name) ($($have[$_.Id].Depth))" }) -join ', '): no Delete / Assign / Share on the rule-set and policy tables and nothing on the Procedure tables but Read on sprk_procedure, sprk_procedureversion and sprk_procedureassignment (D-76, uac-r2 081, 089e, 084f)."
         if ($Verify) { $Gaps.Add($msg) } else { throw [EscalationException]::new("$msg STOP: this script removes nothing from the role. Nothing further was changed.") }
     }
     # The one lowering (owner EB-D-162): a Read still held at Global, the task 120 depth, goes to Deep. RemovePrivilegeRole first,

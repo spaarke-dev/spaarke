@@ -28,7 +28,7 @@ namespace Spaarke.ArchTests;
 /// </list>
 /// <para>ebilling-r1 task 089d (option R, owner 2026-11-04 "use direct role approach") adds a third declared role that is NOT an
 /// owner role and that NO team holds: <c>config/billing-rule-readers-role.json</c>, the <c>Billing Rule Reader</c> role, Read at
-/// Deep on <c>sprk_policy</c>, <c>sprk_ruleset</c> and <c>sprk_procedure</c> only (the last two: task 089e fix round 2), assigned
+/// Deep on <c>sprk_policy</c>, <c>sprk_ruleset</c>, <c>sprk_procedure</c>, <c>sprk_procedureversion</c> and <c>sprk_procedureassignment</c> only (<c>sprk_ruleset</c> and <c>sprk_procedure</c>: task 089e fix round 2; the last two: task 084f, EB-D-220), assigned
 /// directly to each child-unit billing admin from the customer top unit's copy. Deep is
 /// measured from the unit of the copy a principal holds, so the holder reaches the top unit and its children and never Secure
 /// Record (a sibling); Global, or Deep from the root's copy, would reach Secure Record (D-123). Its file must say <c>Deep</c>,
@@ -108,14 +108,16 @@ public class RestrictedContentOwnerRoleGuardTests
     /// 089d: Read at Deep on <c>sprk_policy</c> (the Exclude route's caller check; <c>sprk_policyversion</c> is read there as the
     /// application, so it is not listed). 089e fix round 2 (owner 2026-11-04, "Approve role + dev apply"): and on <c>sprk_ruleset</c>
     /// (the rule-set by-id routes and list ask the caller's Read on the set) and <c>sprk_procedure</c> (Procedure override removal and
-    /// preview ask the caller's Read on the Procedure). No team; every holder must hold the billing-admin marker the BFF checks.
+    /// preview ask the caller's Read on the Procedure). 084f (owner EB-D-220, 2026-11-12; uac-r2 agreed): and on <c>sprk_procedureversion</c>
+    /// and <c>sprk_procedureassignment</c> (the two record-level Procedure routes ask the caller's Read on every row they expose).
+    /// No team; every holder must hold the billing-admin marker the BFF checks.
     /// </summary>
     internal static readonly DeclaredRole BillingRuleReaders = new(
         "billing-rule-readers-role.json",
         null,
         "no team (the role is assigned to users directly)",
-        ["sprk_policy", "sprk_ruleset", "sprk_procedure"],
-        "a table the billing routes check as the caller (sprk_policy, sprk_ruleset, sprk_procedure)",
+        ["sprk_policy", "sprk_ruleset", "sprk_procedure", "sprk_procedureversion", "sprk_procedureassignment"],
+        "a table the billing routes check as the caller (sprk_policy, sprk_ruleset, sprk_procedure, sprk_procedureversion, sprk_procedureassignment)",
         _ => null,
         BillingRuleReaderRoleName,
         Depth: "Deep",
@@ -686,8 +688,16 @@ public class RestrictedContentOwnerRoleGuardTests
         { "isinherited as text", Mutated(BillingRuleReaders, f => f["isinherited"] = "0") },
         { "an extra privilege (Read on sprk_policyversion)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_policyversion", "prvReadsprk_PolicyVersion"))) },
         { "an extra privilege (Write on sprk_policy)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_policy", "prvWritesprk_Policy"))) },
-        { "an extra table (sprk_procedureassignment)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_procedureassignment", "prvReadsprk_procedureassignment"))) },
-        { "an extra table (sprk_procedureversion)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_procedureversion", "prvReadsprk_procedureversion"))) },
+        // 084f (EB-D-220): Read on the Procedure Version and the Procedure Assignment is declared; any other privilege on them, or another Procedure-family table, is not.
+        { "an extra privilege (Write on sprk_procedureassignment)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_procedureassignment", "prvWritesprk_procedureassignment"))) },
+        { "an extra privilege (Write on sprk_procedureversion)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_procedureversion", "prvWritesprk_procedureversion"))) },
+        { "an extra privilege (Create on sprk_procedureversion)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_procedureversion", "prvCreatesprk_procedureversion"))) },
+        { "an extra table (sprk_storedfile)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_storedfile", "prvReadsprk_storedfile"))) },
+        { "sprk_procedureversion missing (084f)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedureversion"))) },
+        { "sprk_procedureassignment missing (084f)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedureassignment"))) },
+        { "a depth on the sprk_procedureversion entry (084f)", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_procedureversion")["depth"] = "Global") },
+        { "a depth on the sprk_procedureassignment entry (084f)", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_procedureassignment")["depth"] = "Global") },
+        { "sprk_procedureassignment's entry naming another table's Read (084f)", Mutated(BillingRuleReaders, f => EntryFor(f, "sprk_procedureassignment")["privilegeName"] = "prvReadsprk_procedureversion") },
         { "an extra privilege (Write on sprk_ruleset)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Add(Entry("sprk_ruleset", "prvWritesprk_ruleset"))) },
         { "sprk_ruleset missing (089e)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_ruleset"))) },
         { "sprk_procedure missing (089e)", Mutated(BillingRuleReaders, f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedure"))) },
@@ -749,6 +759,7 @@ public class RestrictedContentOwnerRoleGuardTests
             f => f.StartsWith("sprk_ruleset: a table the billing routes check as the caller", StringComparison.Ordinal));
         Assert.Contains(Of(f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedure"))),
             f => f.StartsWith("sprk_procedure: a table the billing routes check as the caller", StringComparison.Ordinal));
+        Assert.Contains(Of(f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedureversion"))), f => f.StartsWith("sprk_procedureversion: a table the billing routes check as the caller", StringComparison.Ordinal)); Assert.Contains(Of(f => f["tables"]!.AsArray().Remove(EntryFor(f, "sprk_procedureassignment"))), f => f.StartsWith("sprk_procedureassignment: a table the billing routes check as the caller", StringComparison.Ordinal)); Assert.Contains(Of(f => f["tables"]!.AsArray().Add(Entry("sprk_procedureversion", "prvWritesprk_procedureversion"))), f => f == "sprk_procedureversion: prvWritesprk_procedureversion is not this table's Read privilege");
         Assert.Contains(Of(f => f["tables"]!.AsArray().Add(Entry("sprk_policy", "prvWritesprk_Policy"))),
             f => f == "sprk_policy: prvWritesprk_Policy is not this table's Read privilege");
         Assert.Contains(Of(f => f["assignment"] = "team"), f => f == "assignment is 'team', not users (no team holds this role)");
@@ -1035,7 +1046,7 @@ public class RestrictedContentOwnerRoleGuardTests
         var file = JsonNode.Parse(LiveJson(BillingRuleReaders))!.AsObject();
         var depth = Enum.Parse<PrivilegeDepth>(Text(file, "depth")!);
         var privileges = file["tables"]!.AsArray().Select(e => Text(e!.AsObject(), "privilegeName")!).ToArray();
-        Assert.Equal(new[] { "prvReadsprk_Policy", "prvReadsprk_ruleset", "prvReadsprk_procedure" }, privileges);
+        Assert.Equal(new[] { "prvReadsprk_Policy", "prvReadsprk_ruleset", "prvReadsprk_procedure", "prvReadsprk_procedureversion", "prvReadsprk_procedureassignment" }, privileges);
 
         // D-123 shape: Secure Record sits directly under the root and inside no customer subtree.
         Assert.Equal(Root, Tree.Single(u => u.Id == Secure).ParentId);
@@ -1049,6 +1060,7 @@ public class RestrictedContentOwnerRoleGuardTests
         var censused = privileges.Where(graded.Contains).ToArray();
         Assert.Contains("prvReadsprk_ruleset", censused);   // non-vacuity: the census grades the new rule-set Read
         Assert.Contains("prvReadsprk_Policy", censused);
+        Assert.Contains("prvReadsprk_procedureassignment", censused);   // 084f non-vacuity: the census grades the Procedure Assignment Read too
 
         var rootRole = Guid.NewGuid();
         var adminRole = Guid.NewGuid();
