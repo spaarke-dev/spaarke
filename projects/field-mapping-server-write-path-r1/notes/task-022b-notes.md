@@ -7,8 +7,12 @@ Rigor: FULL. Branch `task/fm-022b` (from `work/field-mapping-server-write-path-r
 1. **Source predicate.** Whether a source table carries `sprk_accesspermission` comes from metadata the code already holds:
    `InheritedAccessPermission.Tables` (to-do, event, communication, document) plus every secure root whose server-owned columns
    name it (`SecureRootColumns`, from the table registry). `InheritedAccessPermission.CarriesColumn` / `TablesCarryingColumn`.
-   No list of its own. The value is read in step 3's one app-only source read (`MappingSourceAccessColumns`); a table without
-   the column is never asked for it. Held equal to the solution XML by `AccessPermissionTablesGuardTests` (ratchet baseline).
+   No list of its own. UAC-r2 (2026-11-12, Q1): `sprk_agreement` is declared in the SOURCE set only
+   (`InheritedAccessPermission.SourceOnlyTables`; `SourceCarriesColumn` / `SourceTablesCarryingColumn`), so the
+   Restricted-source check reads its `sprk_accesspermission` and fails closed on it. It adds no inheritance or enforcement on
+   agreements; it is a source check only. The value is read in step 3's one app-only source read (`MappingSourceAccessColumns`);
+   a table without the column is never asked for it. `AccessPermissionTablesGuardTests` holds the source set exactly equal to
+   the solution XML (no baseline).
 2. **Target answer** (`InCreateAccessPermissionAsync`), from the row as it ends (the stamp plan applied):
    - to-do, event, communication: the step-10 value (I-16) when every parent was read; a parentless row keeps its own value;
      parents that cannot be read decide nothing;
@@ -30,8 +34,11 @@ Rigor: FULL. Branch `task/fm-022b` (from `work/field-mapping-server-write-path-r
    - a source that is Restricted, or carries the column and its value cannot be read, maps only into a row known to end
      Restricted in this create;
    - otherwise the mapped values are removed (the caller's values stay), with warning `record_creation.mapping_source_restricted`;
-   - a source read as Standard or Limited, or a table without the column, maps unchanged (**for UAC-r2 to confirm**);
-   - a removed value that files the row refuses the create, as fix round 2 does;
+   - a source read as Standard or Limited, or a table without the column, maps unchanged (confirmed by UAC-r2, Q3);
+   - an empty source value counts as Standard; an unreadable one fails closed (confirmed, Q3);
+   - a removed value that files the row refuses the create, as fix round 2 does, with the same code
+     `record_creation.mapping_source_secure_filing` and Restricted wording (confirmed, Q3; the reuse is documented where the
+     code is defined, `RecordCreationRefusal.MappingSourceSecureFilingCode`);
    - the pre-write rules run again after a strip (the shared `StripMappedSourceValuesAsync`, extracted unchanged from fix
      round 2);
    - the step-10 answer is decided once on the item the check saw and handed to step 10; after a strip step 10 decides again
@@ -52,6 +59,7 @@ Rigor: FULL. Branch `task/fm-022b` (from `work/field-mapping-server-write-path-r
 | `OwnAccessPermissionOf`, `BindInCreateAccessPermission` | `PutServerValue` | `BindInCreateAccessPermission` is the one writer the writer guard lists | A document's value and record could be written apart |
 | `MappingSourceAccess`, `MappingSourceAccessColumns`, `MappingSourceAccessOf` | `MappingSourceCopyGate` (the secure predicate) | The copy gate answers "secure", a different column and rule | The Restricted value would not be read or classified |
 | `EnforceMappingSourceRestrictedAsync`, `MappingSourceRestrictedFilingRefused`, two message constants, `MappingSourceRestrictedCode` | `EnforceMappingSourceOwnerAsync` | Shares its strip (`StripMappedSourceValuesAsync`, extracted) | Restricted values would be written into rows that are not Restricted |
+| `InheritedAccessPermission.SourceOnlyTables`, `SourceTablesCarryingColumn`, `SourceCarriesColumn` | `TablesCarryingColumn`, `CarriesColumn` (the target set) | The target set must not gain the agreement: a source-only table takes no inheritance and no enforcement (UAC-r2 Q1) | An agreement source would not be checked for Restricted |
 | `AccessPermissionTablesGuardTests` (ArchTest) | `DocumentAccessPermissionWriterGuardTests` (writers, not tables) | Different subject | The code's table set could drift from the solution unseen |
 | `StampWorld.WithColumn` (test fixture) | `WithoutColumn` | Its counterpart | The seam world could not give the matter and children the column |
 
@@ -82,21 +90,40 @@ Run: the new and changed tests (`RestrictedSource`, `RestrictedMappingSource`, `
   before-run; it asserts the strip and its warning, which the switched-off build never produces.
 - The pure unit tests (`RestrictedMappingSourceTests`) do not compile against HEAD (the members are new).
 - The guard: `Disagreements_MustFireAndMustNotFire` seeds a table only one side names (fires) and equal sets (does not).
+- UAC-r2 Q1 (the agreement in the source set, no baseline): with `sprk_agreement` taken out of `SourceOnlyTables`,
+  `AccessPermissionTablesGuardTests` **1 failed, 1 passed**; restored, **2 passed**. `RestrictedMappingSourceTests.TheAgreement_IsASourceOnlyTable`
+  does not compile against the round before it (the members are new).
+
+## Held: a project's or work assignment's value in the create (UAC-r2 Q2), stopped
+
+UAC-r2 asked for the root's value AND its access record to be written in the create from `SecureRootInheritance`'s own
+decision, unchanged, with the stop condition "if it cannot give the access-record write as a reusable call without a rule
+change". It cannot, so this was not built:
+
+- The decision is reusable: `SecureRootInheritance.Decide(storedSecure, storedPermission, markerText, ancestry)` is pure.
+- The ancestry for a row that does not exist yet is read only inside `PlanCreateAsync` (the private `DecideParentsAsync` over
+  `Overlay`), and the plan returns only the secure parents, not the floor.
+- `PlanCreateAsync` refuses a create that carries the access record: "the access record is the cascade's alone; a create never
+  carries one" (task 175 fix round, verifier F1-1).
+- The cascade writes the access record only after `AccessRecordDistrustAsync` proves the column is field-secured and that the
+  BFF's read of it works, through `WriteMarkerAsync` (an update of an existing row, with a concurrency check). A create has
+  neither step; writing the record there would be a second writer without those guards.
+- `Decide` reads an empty stored secure flag as undetermined. An ordinary root create does not write the flag, so the create
+  would have to supply one the decision refuses to guess.
+
+So the target answer for a project or work assignment stays "the value written in the create", which is never Restricted on
+the caller path (see known limit 2).
 
 ## Known limits
 
-1. **Agreement.** The solution defines `sprk_accesspermission` on `sprk_agreement`; the code's set (the inheriting tables and the
-   secure roots) does not name it, so an agreement source is not read for Restricted and maps unchanged. Held in the guard's
-   ratchet baseline; needs a decision on where the agreement is declared. Not fail-closed for agreement sources.
-2. **Roots.** A caller's project or work-assignment create never writes the column (it is the server's on a root), so a root is
+1. **Roots.** A caller's project or work-assignment create never writes the column (it is the server's on a root), so a root is
    never Restricted in its create. A Restricted source therefore always strips into a project or work assignment, including
-   one filed under that Restricted matter (its parents raise it after the create). The "root created Restricted maps" case
-   cannot be reached on the caller path; the predicate supports it if a create ever writes the value.
-3. **A document filed only through the regarding pair** (no typed lookup) shows no parents before the create, so the decision
-   sees a parentless row: its own value only. A Restricted source then strips unless the caller narrowed it.
-4. **An empty source value counts as Standard** (the inheritance walk's own rule).
-5. **Refusal code reuse.** A removed value that files the row reuses `record_creation.mapping_source_secure_filing` (400) with
-   Restricted words, rather than a new code. For UAC-r2 to confirm.
+   one filed under that Restricted matter (its parents raise it after the create). Held above (Q2).
+2. **K: a document filed only through the regarding pair** (no typed lookup) shows no parents before the create, so the
+   decision sees a parentless row: its own value only. Accepted by UAC-r2 (Q4): the strip fails closed, a document's access
+   permission is a display copy with no enforcement of its own (round 81), and the reconcile brings it in step.
+3. **An agreement cannot be a mapping source on the caller path today.** The caller's read of it cannot be asked (no entity set
+   for it in the access map), so nothing is mapped from it (fail closed). The source check is in place for when it can be.
 
 ## Test doubles changed
 
@@ -109,7 +136,6 @@ Run: the new and changed tests (`RestrictedSource`, `RestrictedMappingSource`, `
 
 ## Found in passing
 
-- **Repair** (`RecordCreationService.Repair.cs`) and **field-mapping push** (`FieldMappingPushSourceGate`) apply the secure copy
-  gate but not the Restricted-source rule. Both can copy values from a Restricted source into a row that is not Restricted.
+- The Restricted-source rule for Repair and the field-mapping push is task 022c (#2738).
 - The existing I-16 walk reads a parent's value only when the column probe says the parent table has it; a parent table the
   probe does not list reads as Standard. Pre-existing; not changed here.
