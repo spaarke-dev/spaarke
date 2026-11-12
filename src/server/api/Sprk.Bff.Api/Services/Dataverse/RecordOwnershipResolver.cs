@@ -1232,17 +1232,44 @@ public sealed record RecordReparent
     private const string CommunicationTypeColumn = "sprk_communicationtype";
     private const string SystemUserTable = "systemuser";
 
-    /// <summary>An option value as a payload carries one, or <c>null</c>.</summary>
+    /// <summary>An option value as a payload carries one — an <see cref="OptionSetValue"/>, any CLR number, a JSON number, or a
+    /// numeric string (plain or in a JSON string) — as its integer value; <c>null</c> for anything that is not a whole number in
+    /// range.</summary>
     private static int? OptionValueOf(object? value) => value switch
     {
         OptionSetValue option => option.Value,
         int number => number,
-        long number when number is >= int.MinValue and <= int.MaxValue => (int)number,
+        long number => IntegerOf((decimal)number),
         short number => number,
-        string text when int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
-        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } element when element.TryGetInt32(out var parsed) => parsed,
+        byte number => number,
+        double number => IntegerOf(number),
+        float number => IntegerOf(number),
+        decimal number => IntegerOf(number),
+        string text => OptionValueOfText(text),
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } element =>
+            element.TryGetInt32(out var parsed) ? parsed
+            : element.TryGetDecimal(out var exact) ? IntegerOf(exact)
+            : element.TryGetDouble(out var approximate) ? IntegerOf(approximate)
+            : null,
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => OptionValueOfText(element.GetString()),
         _ => null,
     };
+
+    private static int? OptionValueOfText(string? text)
+    {
+        var trimmed = text?.Trim();
+        if (int.TryParse(trimmed, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+        return decimal.TryParse(trimmed, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var number)
+            ? IntegerOf(number)
+            : null;
+    }
+
+    private static int? IntegerOf(decimal number) =>
+        decimal.Truncate(number) == number && number is >= int.MinValue and <= int.MaxValue ? (int)number : null;
+
+    private static int? IntegerOf(double number) =>
+        double.IsFinite(number) && Math.Truncate(number) == number && number is >= int.MinValue and <= int.MaxValue ? (int)number : null;
 
     /// <summary>A systemuser a payload names: an <see cref="EntityReference"/> to one, or a bind
     /// (<c>/systemusers(&lt;id&gt;)</c>, relative or absolute); otherwise <c>null</c>.</summary>

@@ -671,6 +671,70 @@ public class RecordOwnershipResolverDirectUnfileTests
             .Should().BeEmpty();
     }
 
+    // ── Pass 3 (K): the type, in every shape a payload carries it ────────────────────────────────────────────────────────
+
+    public static TheoryData<string> TypeShapes => new()
+    {
+        "int", "long", "short", "double", "float", "decimal", "OptionSetValue", "JSON number", "JSON number with a zero fraction",
+        "numeric string", "numeric string with spaces", "numeric string with a zero fraction", "JSON numeric string",
+    };
+
+    [Theory]
+    [MemberData(nameof(TypeShapes))]
+    public void UnfileRuleColumnsWrittenIn_ReadsTheTypeAsItsIntegerValue(string shape)
+    {
+        const int message = (int)CommunicationType.Message;
+        object value = shape switch
+        {
+            "int" => message,
+            "long" => (long)message,
+            "short" => (short)7,
+            "double" => (double)message,
+            "float" => 7f,
+            "decimal" => (decimal)message,
+            "OptionSetValue" => new OptionSetValue(message),
+            "JSON number" => System.Text.Json.JsonSerializer.SerializeToElement(message),
+            "JSON number with a zero fraction" => System.Text.Json.JsonDocument.Parse($"{message}.0").RootElement.Clone(),
+            "numeric string" => message.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            "numeric string with spaces" => $" {message} ",
+            "numeric string with a zero fraction" => $"{message}.0",
+            _ => System.Text.Json.JsonSerializer.SerializeToElement(message.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+        };
+        var expected = shape is "short" or "float" ? 7 : message;
+
+        var written = RecordReparent.UnfileRuleColumnsWrittenIn("sprk_communication",
+            new Dictionary<string, object?> { ["sprk_communicationtype"] = value });
+
+        written["sprk_communicationtype"].Should().BeOfType<OptionSetValue>().Which.Value.Should().Be(expected);
+    }
+
+    public static TheoryData<string> UnreadableTypeShapes => new()
+    {
+        "text", "fraction", "JSON fraction", "NaN", "long out of range", "decimal out of range", "JSON true", "empty string",
+    };
+
+    [Theory]
+    [MemberData(nameof(UnreadableTypeShapes))]
+    public void UnfileRuleColumnsWrittenIn_ReadsATypeThatIsNoWholeNumber_AsNotSet(string shape)
+    {
+        object value = shape switch
+        {
+            "text" => "not a number",
+            "fraction" => 1.5d,
+            "JSON fraction" => System.Text.Json.JsonDocument.Parse("100000001.5").RootElement.Clone(),
+            "NaN" => double.NaN,
+            "long out of range" => long.MaxValue,
+            "decimal out of range" => decimal.MaxValue,
+            "JSON true" => System.Text.Json.JsonDocument.Parse("true").RootElement.Clone(),
+            _ => "",
+        };
+
+        var written = RecordReparent.UnfileRuleColumnsWrittenIn("sprk_communication",
+            new Dictionary<string, object?> { ["sprk_communicationtype"] = value });
+
+        written.Should().ContainKey("sprk_communicationtype").WhoseValue.Should().BeNull();
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Dictionary<string, object?> StampsTheRecipient() => new()
