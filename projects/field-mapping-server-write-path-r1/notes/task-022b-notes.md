@@ -17,10 +17,12 @@ Rigor: FULL. Branch `task/fm-022b` (from `work/field-mapping-server-write-path-r
    - to-do, event, communication: the step-10 value (I-16) when every parent was read; a parentless row keeps its own value;
      parents that cannot be read decide nothing;
    - document: the document decision (below);
-   - project, work assignment (UAC-r2 Q2, option c): Restricted when the caller's own value is Restricted, or when the
-     secure-root plan's Access Permission floor is Restricted (`SecureRootCreatePlan.AccessPermissionFloor`, below). Only parents
-     filed in the create count. An undecided floor is never Restricted and strips. The create writes nothing new: no Access
-     Permission and no access record (both stay the cascade's);
+   - project, work assignment (UAC-r2 Q2, option c): the secure-root plan's Access Permission floor alone decides
+     (`SecureRootCreatePlan.AccessPermissionFloor`, below): Restricted exactly when the floor is Restricted. The caller cannot
+     send `sprk_accesspermission` on a root (`RecordTableRules.RootServerOwnedColumns` refuses it at step 2, and the column is
+     mapping-protected). `RootAccessPermission` keeps its own-value branch as defence in depth only. Only parents filed in the
+     create count, for an ordinary plan and a plan into isolation alike. An undecided floor is never Restricted and strips. The
+     create writes nothing new: no Access Permission and no access record (both stay the cascade's);
    - a matter: its own value;
    - a table without the column: never Restricted.
    An answer that cannot be told is never Restricted. For a to-do, event or communication the three states are used as such
@@ -121,6 +123,11 @@ Run: the new and changed tests (`RestrictedSource`, `RestrictedMappingSource`, `
   Restored: **79 passed**.
 - **Review F1 (client)**, `webApiCreateError.test.ts`: the util at HEAD **1 failed, 49 passed** (the Restricted sentence is
   replaced by the secure one); changed **50 passed**.
+- **Adversarial pass 2, F3 (the isolated plan's floor)**, `RecordCreationServiceSecureRootSeamTests`, 13 tests. With the
+  `AccessPermissionFloor = …` initialiser removed from `PlanCreateAsync`'s isolated return: **1 failed, 12 passed** (the
+  project under a secure Restricted matter, created into isolation, whose mapped values map). Restored: **13 passed**. The
+  second new test (an isolated plan whose only gap is an unrepeated pair: floor undecided, the service's answer strips) passes
+  either way, since an undecided floor is also the property's default.
 
 ## The `SecureRootInheritance` edit (UAC-r2 Q2, option c) — for UAC-r2's separate review
 
@@ -150,8 +157,10 @@ refusals, undecided). Per-class runs of every test class on the plan pass (see t
    under a project whose stored value is not yet raised reads that project's stored value; anything not Restricted there
    strips (fail closed).
 3. **K: an unreadable parent refuses the create through the plan** (its existing rule), so the undecided-floor strip is reached
-   only where the plan proceeds with an unknown answer (an isolated create whose only gap is an unrepeated pair). Pinned on
-   `RootAccessPermission` in the unit suite.
+   only where the plan proceeds with an unknown answer (an isolated create whose only gap is an unrepeated pair). The unified
+   create refuses such a pair at its caller check (step 5) before the plan is asked, so this is pinned at the plan
+   (`PlanCreateAsync_AnIsolatedPlanWhoseOnlyGapIsAnUnrepeatedPair_HasAnUndecidedFloor_AndItsMappedValuesAreRemoved`, the real
+   plan over the provisioning fixture) and on `RootAccessPermission` in the unit suite.
 4. **K: a parent option value that is no known level** reads as Standard in the plan's floor (`FilingPermission.Rank`,
    unchanged). It can only make the floor not Restricted, so it strips; a Restricted parent beside it still decides.
 5. **K: a document's access permission is set from its typed filing lookups at create; one filed only through the regarding
@@ -162,6 +171,10 @@ refusals, undecided). Per-class runs of every test class on the plan pass (see t
 7. **K: the client shows the server's sentence for `record_creation.mapping_source_secure_filing`** (secure and Restricted
    refusals share the code). Through the child-record adapter, a body with no `detail` gives its `title` as the message, which
    would be shown; the BFF always sends a `detail` for this code.
+8. **K: deployment order.** The app-only source read asks for `sprk_accesspermission` from a static set of source tables
+   (`InheritedAccessPermission.SourceTablesCarryingColumn`, held equal to the solution by `AccessPermissionTablesGuardTests`).
+   In an environment whose solution does not yet have the column on a source table, that read faults: nothing is mapped and
+   the user is told (fail closed). Deploy the solution with the column before, or with, this BFF change.
 
 ## Test doubles changed
 
@@ -174,6 +187,9 @@ refusals, undecided). Per-class runs of every test class on the plan pass (see t
   maps nothing" test is replaced by the floor tests (UAC-r2 Q2); those give the plan a gate over matters it can read
   (`PlanReadingMatters`), where the harness default reads nothing.
 - `RestrictedMappingSourceTests`: "no read on a table without the column is NoColumn" now expects Unreadable (review K2).
+- `RecordCreationServiceSecureRootSeamTests` (adversarial pass 2, F3): `Service` and `AppCreatesIntoTheWorld` take an optional
+  field-mapping profile (the app-only reader's one profile); new helpers give the mapping source read, the caller's read of it
+  (`MappingSourceCallerReadDouble`) and a caller-rights probe answering Read and Write. Existing tests pass no profile, as before.
 
 ## Verification (after the Q2 and review-fix commits)
 
@@ -181,18 +197,9 @@ refusals, undecided). Per-class runs of every test class on the plan pass (see t
 - Filtered BFF suite (record creation, mapping source, child records, inherited access permission, core ancestor, secure root,
   repair, push, events, Office To Do, analysis, document; Office API classes excluded): 6879 passed, 1 skipped.
 - Per class, every class on the secure-root plan (18 classes, including the `SecureRootInheritance*` classes): all passed.
-- Office API classes one per run: all passed except one test in each of `OfficeQuickCreateContractTests` and
-  `OfficeQuickCreateProjectContractTests` (below).
+- Office API classes one per run: all passed (the two quick-create contract tests' expected source-read columns now include
+  `sprk_accesspermission`, commit `ea95e000b9`).
 - `webApiCreateError.test.ts`: 50 passed; ESLint clean on both files.
-
-## Open: two Office contract expectations (not edited: outside the KEEP test paths)
-
-`OfficeQuickCreateContractTests.Post_Matter_WithSourceContextAndProfile_AppliesEveryRule_ButNeverTheProtectedFields` (line ~231)
-and `OfficeQuickCreateProjectContractTests.Post_Project_WithSourceContextAndProfile_AppliesEveryRule_ButNeverTheProtectedFields`
-(line ~187) pin the source read's column list without `sprk_accesspermission`. Since this task's first commit the one app-only
-source read also asks for it on a source that carries it (a project here), so each test fails on the count (8, expected 7).
-The behaviour is the intended one; the fix is adding `"sprk_accesspermission"` to both expected lists, in
-`tests/integration/contract/Api/Office/`, which this task's brief keeps out of scope.
 
 ## Found in passing
 
