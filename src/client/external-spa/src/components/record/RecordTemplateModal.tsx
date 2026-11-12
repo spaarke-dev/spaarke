@@ -33,8 +33,8 @@
  * `RECORD_DETAIL_ENTITIES` description: the same id-filtered module fetch, the same columns. The caller's `/me` context
  * (who they are, their project levels) is read once per opening, as R3 did, and handed to every section. Refresh re-runs
  * the record read, keeps the record on screen until the new answer arrives, and changes `refreshSignal`, on which every
- * section re-reads. Copy link writes `{origin}{path}?record={token}:{id}`. Submit invoice stays hidden until task 006 wires it
- * (hide, don't disable).
+ * section re-reads. Copy link writes `{origin}{path}?record={token}:{id}`. Submit invoice has no handler or host yet, so it
+ * stays hidden (hide, don't disable) until task 007 (FR-10) wires it.
  *
  * ADR-021: Fluent UI v9 semantic tokens via `makeStyles` only; the modal inherits the host FluentProvider.
  */
@@ -66,6 +66,16 @@ import { useCallerContext } from '../../hooks/useCallerContext';
 import { formatDetailValue, getRecordDetailEntity, type DetailRecord } from '../detail/RecordDetailFields';
 import { recordLinkFor } from '../detail/record-targets';
 import { RECORD_ACTION_HOSTS } from './actions';
+import {
+  createRightsOf,
+  isCreateActionOffered,
+  isRecordCreateAction,
+  readOnlyNoteOf,
+  recordAccessFactsOf,
+  yourAccessOf,
+  type CreateRight,
+  type RecordSectionRightId,
+} from './recordAccess';
 import { useRecord, type RecordState } from './recordReads';
 import { RECORD_ACTION_TEXT, recordTemplateTitle, recordText } from './recordTemplates';
 import type {
@@ -248,6 +258,10 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const [hostActionCallbacks] = React.useState(
     () => new Map<RecordToolbarActionId, (action: RecordHostAction | null) => void>()
   );
+  // Rights a section reports without a toolbar action (the invoice Files list's Upload; task 006 fix round 1), and one
+  // stable reporter per right id. A list reports `null` on unmount, so paging to another record forgets the old answer.
+  const [sectionRights, setSectionRights] = React.useState<Partial<Record<RecordSectionRightId, CreateRight>>>({});
+  const [sectionRightCallbacks] = React.useState(() => new Map<RecordSectionRightId, (right: CreateRight) => void>());
   // Per-section re-read requests (an action asked one section to re-read), added to that section's `refreshSignal`.
   const [sectionSignals, setSectionSignals] = React.useState<Partial<Record<RecordSectionId, number>>>({});
   // The record on screen when Refresh was pressed, kept until the re-read answers (no flash of the loading state).
@@ -326,6 +340,26 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     [hostActionCallbacks]
   );
 
+  const sectionRightCallbackFor = React.useCallback(
+    (rightId: RecordSectionRightId): ((right: CreateRight) => void) => {
+      let callback = sectionRightCallbacks.get(rightId);
+      if (!callback) {
+        callback = (right: CreateRight) =>
+          setSectionRights(prev => {
+            if (right === null && !(rightId in prev)) return prev;
+            if (prev[rightId] === right) return prev;
+            const next = { ...prev };
+            if (right === null) delete next[rightId];
+            else next[rightId] = right;
+            return next;
+          });
+        sectionRightCallbacks.set(rightId, callback);
+      }
+      return callback;
+    },
+    [sectionRightCallbacks]
+  );
+
   const refreshSection = React.useCallback(
     (section: RecordSectionId) => setSectionSignals(prev => ({ ...prev, [section]: (prev[section] ?? 0) + 1 })),
     []
@@ -379,16 +413,28 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
 
   // The modal's own actions: Refresh (hidden while an operation holds the view, so its result is never replaced) and Copy
   // link. An action with a host, or one a section offers (Upload, New message, Add to-do, Add event: task 004), is shown
-  // while its owner offers it; the rest are hidden, not disabled. Task 006 changes who may be offered what.
+  // while its owner offers it; the rest are hidden, not disabled.
   const handlers: Partial<Record<RecordToolbarActionId, () => void | Promise<void>>> = {
     ...(holdNavigation ? {} : { refresh: handleRefresh }),
     copyLink: handleCopyLink,
   };
+  // Task 006 (FR-06 / FR-07): the rights the record's lists reported with their create offers. A create action is shown
+  // only when its list offers it AND reported its right as `true` (`isCreateActionOffered`); the header's "Your access"
+  // and the sections' read-only lines are derived from the same answers (recordAccess.ts), never from the entity type.
+  // A section's right without a toolbar action (the invoice Files list's Upload) counts for "Your access" and its own
+  // section's line, and adds nothing to the toolbar.
+  const createRights = createRightsOf(config.toolbar, hostActions, sectionRights);
+  // The record's route root (its read description's documents root) tells `recordAccessFactsOf` whether `/me` has a level
+  // for it, and whether that level is an answer or only the fail-safe guess (no entry for the project).
+  const accessFacts = recordAccessFactsOf(detail.documentsRoot, id ?? '', callerContext);
+  const yourAccess = yourAccessOf(accessFacts, createRights);
   const actions: RecordCommandBarAction[] = config.toolbar.map(actionId => {
     const Icon = RECORD_ACTION_ICONS[actionId];
     const handler = handlers[actionId];
     const hosted = hostActions[actionId];
-    const offered = handler !== undefined || hosted?.visible === true;
+    const offered =
+      handler !== undefined ||
+      (isRecordCreateAction(actionId) ? isCreateActionOffered(hosted) : hosted?.visible === true);
     return {
       id: actionId,
       label: RECORD_ACTION_TEXT[actionId].label,
@@ -424,6 +470,9 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     onBusyChange: busyCallbackFor(`section:${section}`),
     // A section that owns a create dialog offers its toolbar action here, only if this record's toolbar lists it (FR-03).
     offerAction: actionId => (config.toolbar.includes(actionId) ? hostActionCallbackFor(actionId) : undefined),
+    // Task 006 (FR-07): why this section is read-only, from the rights its lists reported (none while unknown).
+    readOnlyNote: readOnlyNoteOf(section, createRights, accessFacts),
+    reportRight: sectionRightCallbackFor,
   });
 
   const hostContext = (actionId: RecordToolbarActionId, row: DetailRecord, rowId: string): RecordActionHostContext => ({
@@ -563,7 +612,8 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
               name={name ?? config.label}
               typeLabel={config.label}
               facts={config.headerFacts.map(fact => ({ label: fact.label, value: formatDetailValue(record, fact) }))}
-              // "Your access" (FR-07) is filled by task 006.
+              // "Your access" (FR-07, task 006): only what the BFF answered for this record; nothing while unknown.
+              access={yourAccess ?? undefined}
             />
             {tabs.length > 0 && (
               <TabList

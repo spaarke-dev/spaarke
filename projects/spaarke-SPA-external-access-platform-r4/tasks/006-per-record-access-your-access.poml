@@ -4,7 +4,7 @@
     <title>Per-record access, hide-don't-disable, "Your access" — remove both ViewOnly hard-codes (FR-06, FR-07)</title>
     <phase>1 Record template and actions</phase>
     <gate>after 002 and 004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-driven UI behaviour across .ts/.tsx files (tags frontend, authorization, integration-test)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -152,7 +152,10 @@
     <criterion testable="true">Test scope: cover the stated contract (both access levels × matter/work assignment × to-dos/events, plus documents and messages visibility, the fail-closed cases and the header text). Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-06, FR-07, NFR-04; spec §Affected Areas lists only the two hard-codes — the `EventsCalendar.tsx:588-592` gate and the project-only create clients were found on 2026-11-10 and are in scope here because FR-06 cannot be met without them. Two adversarial-review passes (authorization).</notes>
+  <notes>Spec FR-06, FR-07, NFR-04; spec §Affected Areas lists only the two hard-codes — the `EventsCalendar.tsx:588-592` gate and the project-only create clients were found on 2026-11-10 and are in scope here because FR-06 cannot be met without them. Two adversarial-review passes (authorization).
+
+Completed 2026-11-11: implemented by an Opus sub-agent; two Opus adversarial passes + one scoped Sonnet re-check; fix round 1 closed every F-class finding. Out-of-scope findings filed: D-9 #2716 (ProjectPage offers creates the list refused; owner question), D-10 #2717 (no server answer for the to-do PATCH right; toggle hidden in the record view), D-11 #2718 (label copies). Details: notes/task-006-notes.md.
+rework: fix-round-1 task 006</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

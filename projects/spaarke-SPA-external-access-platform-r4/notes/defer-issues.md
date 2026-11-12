@@ -14,6 +14,9 @@ marker with the issue number.
 | D-6 | 2026-11-11, task 004 (pre-existing) | Create Event dialog collects an event type that is never sent | Defect (user-visible) | #2703 |
 | D-7 | 2026-11-11, task 004 (shared library gap) | SprkModal presets give no focus return for a controlled child dialog | Component gap (shared) | #2707 |
 | D-8 | 2026-11-11, task 004 review (K-class, pre-existing) | A child dialog opened within ~250 ms of its parent modal is left aria-hidden | Accessibility (shared) | #2704 |
+| D-9 | 2026-11-11, task 006 review (F1, pre-existing, owner question) | ProjectPage offers creates the project list refused (workforce ceiling → 403) | Defect (user-visible) | #2716 |
+| D-10 | 2026-11-11, task 006 | No server answer for the to-do PATCH right; status toggle hidden in the record view | Feature gap (BFF) | #2717 |
+| D-11 | 2026-11-11, task 006 review pass 2 (F2, out of scope) | Access-level label switch duplicated in five places | Maintainability | #2718 |
 
 ## D-1 — External event create does not write the ADR-024 resolver fields
 
@@ -157,3 +160,39 @@ before opening a child and assert the child is not aria-hidden.
 
 **Fix shape.** Confirm in a real browser (task 018 ui-tests); if reproducible, fix in the shared SprkModal with a test that
 an immediately opened child is not aria-hidden.
+
+## D-9 — ProjectPage offers creates the project list refused
+
+**Where.** The standalone ProjectPage's own create buttons: `src/client/external-spa/src/components/EventsCalendar.tsx` and `SmartTodo.tsx` (standalone rule `levelAllows ?? listCanCreate === true`), `DocumentLibrary.tsx` (`uploadFromList` is `null` for a level-decided project caller), and the to-do status toggle in `SmartTodo.tsx`. Same gate at the commit before task 006.
+
+**What.** For a project caller without `writeAccessPerRecord`, ProjectPage offers Create Event / Add Task / Upload / the status toggle on the `/me` level alone. The BFF's create and PATCH routes also apply the workforce role ceiling (`WorkforceRoleCeilingGate`), which the `/me` level does not reflect. Since task 002 each project list returns `canCreate` equal to the POST's decision, and ProjectPage ignores a `canCreate: false`.
+
+**Effect.** A workforce contact at Collaborate on a project whose role lacks Create on `sprk_event` sees "Create Event" on ProjectPage; the POST answers 403. Same for Add Task, Upload and the toggle with their own ceilings. A CIAM partner is unaffected (Collaborate maps to Create, so level and list agree). Violates R4 FR-07 / NFR-04 "no action the UI offers may answer 403". The record view (task 006) is not affected.
+
+**Why deferred.** Task 006's POML says both "ProjectPage behaviour is unchanged; its tests pass unchanged" and "[the /me level] must agree with the list when both exist" — conflicting; owner decision needed.
+
+**Fix shape.** Apply the record view's rule (`createRightOf` in `record/recordAccess.ts`) in standalone mode too: offer only when the level allows AND the list's `canCreate` is true. Updates ProjectPage tests. The toggle needs a server PATCH answer (D-10) or stays level-only with the ceiling gap.
+
+## D-10 — No server answer for the to-do PATCH right
+
+**Where.** `src/client/external-spa/src/components/SmartTodo.tsx` (status toggle); BFF `PATCH /api/v1/external/todos/{id}` in `Api/ExternalAccess/ExternalProjectDataEndpoints.cs` (ceiling `WorkforceRoleCeilingGate.UpdateTodo`, Ambiguous-root refusal).
+
+**What.** No server answer tells the SPA whether the caller may PATCH a to-do (no list- or row-level flag). Task 006 therefore keeps the to-do status toggle hidden inside the record view on every root (project, matter, work assignment), so it is never offered to fail.
+
+**Effect.** In the record view nobody can mark a to-do complete, even callers the PATCH would admit. ProjectPage still offers it on the `/me` level (see D-9).
+
+**Why deferred.** Adding the answer is a UAC-reviewed BFF change (task 006 escalation rule: a new server answer is a new task).
+
+**Fix shape.** Add `canUpdate` to the to-do list response (same evaluation as the PATCH: rights + Dataverse confirmation + `UpdateTodo` ceiling; per row if the Ambiguous-root case matters), contract tests list = PATCH, then show the toggle when it is true.
+
+## D-11 — Access-level label switch duplicated in five places
+
+**Where.** The access-level → label switch exists in five places in `src/client/external-spa/src`: `pages/ProjectPage.tsx` ~:177, `components/ContactsOrganizations.tsx` ~:74, `components/OutsideCounselDashboard.tsx` ~:293, `components/InviteUserDialog.tsx` ~:79, and task 006's `components/record/recordAccess.ts` (now exported).
+
+**What.** The same View Only / Collaborate / Full Access labels are hand-written in each.
+
+**Effect.** No user-visible effect today; a label change (or a new level) must be made five times and drifts otherwise.
+
+**Why deferred.** Outside task 006's files.
+
+**Fix shape.** Use the label map exported from `record/recordAccess.ts` (or move it next to `mapAccessLevelString` in `hooks/useAccessLevel.ts`) in all five places; no behaviour change.

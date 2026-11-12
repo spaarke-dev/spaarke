@@ -11,8 +11,11 @@
  * Props:
  *   projectId   — Dataverse GUID of the record whose events to list: a sprk_project unless `root` says otherwise
  *   root        — which kind of record that is (task 057): 'projects' (default), 'matters' or 'workassignments'. Reads
- *                 GET /api/v1/external/{root}/{id}/events; Create is a project-only action and is never offered otherwise.
- *   accessLevel — The authenticated user's access level (determines create visibility)
+ *                 GET /api/v1/external/{root}/{id}/events; Create posts to the same record's route (`createRootEvent`,
+ *                 R4 task 006 - every root has one since task 002).
+ *   accessLevel — The caller's `/me` level, passed only for a record `/me` carries a level for (a project): it decides
+ *                 create for a caller without `writeAccessPerRecord`. Without one, the list's `canCreate` decides and a
+ *                 missing one is "cannot" (FR-06; inside the record template the rule is `createRightOf`).
  *   caller      — The signed-in principal (task 054, FR-26): an event the caller CREATED shows Delete (asks first;
  *                 a refusal shows an error and the event stays). Independent of accessLevel; none without `caller`.
  *
@@ -43,7 +46,7 @@ import { FormModal } from '@spaarke/ui-components/components/SprkModal';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import {
   getRootEvents,
-  createEvent,
+  createRootEvent,
   deleteOwnEvent,
   ODataEvent,
   CreateEventPayload,
@@ -54,6 +57,7 @@ import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
 import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from './createAction';
+import { levelVerdictOf, listCreateRightOf } from './record/recordAccess';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel, ApiError } from '../types';
 import { problemMessage } from '../auth/bff-client';
@@ -355,7 +359,9 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast, canDelete, onDelete 
 // ---------------------------------------------------------------------------
 
 interface CreateEventDialogProps {
-  projectId: string;
+  /** Which kind of record the event is created under, and its id (POST /api/v1/external/{root}/{id}/events). */
+  root: EventsTodosRoot;
+  recordId: string;
   open: boolean;
   onClose: () => void;
   onCreated: (event: ODataEvent) => void;
@@ -363,7 +369,14 @@ interface CreateEventDialogProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
-const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, onClose, onCreated, onBusyChange }) => {
+const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
+  root,
+  recordId,
+  open,
+  onClose,
+  onCreated,
+  onBusyChange,
+}) => {
   const styles = useStyles();
 
   const [title, setTitle] = React.useState<string>('');
@@ -430,10 +443,10 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
         ...(dueDate ? { sprk_duedate: dueDate } : {}),
         // sprk_status omitted: the BFF creates the event Open (statuscode 659490001) — task 097 review F9.
         // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
-        'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`, // R5 002: PascalCase nav prop (metadata-verified)
+        // The parent comes from the route (task 006); `createRootEvent` keeps the project route's body as it was.
       };
 
-      const created = await createEvent(projectId, payload);
+      const created = await createRootEvent(root, recordId, payload);
       onCreated(created);
       onClose();
     } catch (err) {
@@ -532,8 +545,11 @@ export interface EventsCalendarProps {
   projectId: string;
   /** Which kind of record `projectId` is (task 057). Defaults to a project. */
   root?: EventsTodosRoot;
-  /** The authenticated user's access level — determines create visibility */
-  accessLevel: AccessLevel;
+  /**
+   * The caller's `/me` level for this record. Pass it only for a record `/me` carries a level for (a project); omit it for
+   * a matter or work assignment, whose create follows the list's `canCreate` (task 006).
+   */
+  accessLevel?: AccessLevel;
   /**
    * The caller's write access is decided per record (`/me` `writeAccessPerRecord`, task 036 fix round 1): "create" then
    * follows the BFF's `canCreate` on the project's event list instead of `accessLevel`.
@@ -594,18 +610,28 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // Access level check
   // -------------------------------------------------------------------------
 
-  // Creating an event is a project-only route (the matter and work assignment routes are read-only). Task 036 fix round
-  // 1: with per-record write access the project's list `canCreate` decides (null = not said, read as "cannot").
+  // Every root has an event create route (task 002). Task 006 (FR-06): the create rule lives in recordAccess.ts
+  // (`listCreateRightOf`, shared with SmartTodo). The `/me` level decides when there is one that decides (a level the host
+  // has - a project - for a caller whose write access is not per record); otherwise the list's `canCreate` (task 036 fix
+  // round 1; null = not said, read as "cannot"). In the record template the right must be known `true` (the list has
+  // answered, and a level must agree with it); outside it (the project page) the rule is unchanged.
   const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
-  const canCreate =
-    root === 'projects' &&
-    (writeAccessPerRecord
-      ? listCanCreate === true
-      : accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess);
-  // In the record template the toolbar's Add event replaces this list's button (task 004): offered under the same rule (the
-  // main view is showing and the caller may create), and the dialog stays here.
-  const ownCreateButton = onCreateActionChange === undefined;
-  useOfferCreateAction(onCreateActionChange, canCreate && !loading && !accessFailure && !loadError, createDialog.show);
+  const inRecordTemplate = onCreateActionChange !== undefined;
+  const { right, allowed: canCreate } = listCreateRightOf({
+    inRecordTemplate,
+    loaded: !loading && !accessFailure && !loadError,
+    listCanCreate,
+    levelAllows: levelVerdictOf(accessLevel, writeAccessPerRecord),
+  });
+  // In the record template the toolbar's Add event replaces this list's button (task 004): offered exactly when the right
+  // is known to be `true` (the main view is showing), and the dialog stays here. The right goes with the offer.
+  const ownCreateButton = !inRecordTemplate;
+  useOfferCreateAction(
+    onCreateActionChange,
+    canCreate && !loading && !accessFailure && !loadError,
+    createDialog.show,
+    right
+  );
 
   // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataEvent>({
@@ -777,10 +803,12 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
 
       <DeleteOwnConfirm del={del} />
 
-      {/* Create event dialog — rendered only for Collaborate/Full Access */}
+      {/* Create event dialog — rendered only while the caller may create here (`listCreateRightOf`: the list's
+          `canCreate`, and the `/me` level where it decides) */}
       {canCreate && (
         <CreateEventDialog
-          projectId={projectId}
+          root={root}
+          recordId={projectId}
           open={createDialog.open}
           onClose={createDialog.hide}
           onCreated={handleEventCreated}

@@ -9,6 +9,9 @@
  * thread offers it through `offerAction('newMessage')` (available exactly when its inline compose box would have been
  * shown, which it then does not draw) and renders the compose box in a `FormModal` inside this section, so the dialog is a
  * descendant of the record modal.
+ *
+ * WHO MAY POST (task 006, FR-06 / FR-07). The thread offers New message only when its read answered `canCreate: true`;
+ * otherwise the card shows the template's read-only line (`readOnlyNote`, from `recordAccess.ts`).
  */
 import * as React from 'react';
 import { messageRootFor } from '../../../api/messages-client';
@@ -22,11 +25,12 @@ export const MessagesSection: React.FC<RecordSectionContext> = ({
   onBusyChange,
   refreshSignal,
   offerAction,
+  readOnlyNote,
 }) => {
   // A document has no thread (the server answers 404 for it): no section and no read.
   if (!messageRootFor(detail.entity)) return null;
   return (
-    <RecordSectionCard id="messages">
+    <RecordSectionCard id="messages" note={readOnlyNote}>
       <RecordMessages
         entity={detail.entity}
         recordId={recordId}

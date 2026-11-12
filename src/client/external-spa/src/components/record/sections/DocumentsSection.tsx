@@ -11,12 +11,17 @@
  * offers it through `offerAction('upload')` (shown under the same rule as its own button, which it then does not draw) and
  * renders the upload dialog (a `FormModal`) itself, inside this section, so the dialog is a descendant of the record
  * modal. An upload in flight holds browsing, Close and Refresh (`onBusyChange`).
+ *
+ * WHO MAY UPLOAD (task 006, FR-06 / FR-07). Inside the template the library offers Upload only when `createRightOf`
+ * (recordAccess.ts) says `true`: the list's `canCreate`, and for a level-decided project caller the `/me` level
+ * (`uploadOverride`) agreeing with it. Otherwise the card shows the template's read-only line (`readOnlyNote`).
  */
 import * as React from 'react';
 import type { CallerIdentity } from '../../../api/delete-own';
 import type { DocumentRoot } from '../../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../../auth/bff-client';
-import { canUpload as levelCanUpload, mapAccessLevelString } from '../../../hooks/useAccessLevel';
+import { canUpload as levelCanUpload } from '../../../hooks/useAccessLevel';
+import { decidingLevelOf } from '../recordAccess';
 import { DocumentLibrary } from '../../DocumentLibrary';
 import type { CreateActionReporter } from '../../createAction';
 import type { RecordSectionContext } from '../recordTemplate.types';
@@ -33,11 +38,11 @@ export function uploadOverride(
   id: string,
   context: ExternalUserContextResponse | null
 ): boolean | undefined {
-  if (root !== 'projects') return undefined;
-  // Task 036 fix round 1: a per-record caller's level says only what they may see; the list's `canCreate` decides.
-  if (context?.writeAccessPerRecord === true) return undefined;
-  const entry = context?.projects.find(p => p.projectId.toLowerCase() === id.toLowerCase());
-  return levelCanUpload(mapAccessLevelString(entry?.accessLevel));
+  // Task 036 fix round 1: a per-record caller's level says only what they may see; the list's `canCreate` decides. Task
+  // 006: the level is the one `decidingLevelOf` finds (shared with the to-do and event lists; unchanged rule: an unknown
+  // `/me` or a missing entry is View Only); with none (not a project, a per-record caller) the list decides.
+  const level = decidingLevelOf(root, id, context);
+  return level === undefined ? undefined : levelCanUpload(level);
 }
 
 export interface RecordDocumentListProps {
@@ -50,6 +55,8 @@ export interface RecordDocumentListProps {
   onCreateActionChange?: CreateActionReporter;
   /** Report an upload in flight, so the record modal holds. */
   onBusyChange?: (busy: boolean) => void;
+  /** Tell the template the Upload right without offering a toolbar action (the invoice Files list; task 006 fix round 1). */
+  onUploadRightChange?: (right: boolean | null) => void;
 }
 
 /** The R3 documents block: `DocumentLibrary` with R3's props, under R3's test id. Shared by Documents and (P1) Files. */
@@ -61,6 +68,7 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
   refreshSignal,
   onCreateActionChange,
   onBusyChange,
+  onUploadRightChange,
 }) => (
   <div data-testid="record-detail-documents">
     <DocumentLibrary
@@ -73,6 +81,7 @@ export const RecordDocumentList: React.FC<RecordDocumentListProps> = ({
       writeAccessPerRecord={callerContext?.writeAccessPerRecord === true}
       onCreateActionChange={onCreateActionChange}
       onBusyChange={onBusyChange}
+      onUploadRightChange={onUploadRightChange}
     />
   </div>
 );
@@ -85,11 +94,12 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
   refreshSignal,
   onBusyChange,
   offerAction,
+  readOnlyNote,
 }) => {
   // A record with no documents route has no Documents section (no config lists one; this keeps a wrong config inert).
   if (!detail.documentsRoot) return null;
   return (
-    <RecordSectionCard id="documents">
+    <RecordSectionCard id="documents" note={readOnlyNote}>
       <RecordDocumentList
         root={detail.documentsRoot}
         recordId={recordId}

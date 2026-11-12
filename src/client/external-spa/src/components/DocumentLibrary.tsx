@@ -86,6 +86,7 @@ import {
   type CreateActionReporter,
 } from './createAction';
 import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
+import { createRightOf, type CreateRight } from './record/recordAccess';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -698,6 +699,12 @@ export type DocumentLibraryProps = DocumentLibraryTarget & {
   onCreateActionChange?: CreateActionReporter;
   /** Called with `true` while an upload is in flight and `false` otherwise (and on unmount), so the host can hold. */
   onBusyChange?: (busy: boolean) => void;
+  /**
+   * Record template, a list that keeps its own Upload button (the invoice Files list; task 006 fix round 1): told the
+   * Upload right as the shared rule reads it (`createRightOf`: `true` / `false`, `null` while unknown, and `null` on
+   * unmount), so the record's "Your access" and the Files card's read-only line follow it. Changes nothing on screen here.
+   */
+  onUploadRightChange?: (right: CreateRight) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -732,6 +739,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   writeAccessPerRecord = false,
   onCreateActionChange,
   onBusyChange,
+  onUploadRightChange,
 }) => {
   const styles = useStyles();
   // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
@@ -767,10 +775,29 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
   // follows `canCreate` like every other record, and a missing one reads as "cannot".
   const uploadFromList = root === 'projects' ? (writeAccessPerRecord ? (listCanCreate ?? false) : null) : listCanCreate;
   const showUpload = canUpload ?? uploadFromList ?? canUploadOrDownload(accessLevel);
-  // In the record template the toolbar's Upload replaces this list's button (task 004): offered under the same rule (the
-  // list has loaded and the caller may upload), and the dialog stays here.
+  // In the record template the toolbar's Upload replaces this list's button (task 004): offered exactly when the right is
+  // known to be `true` (task 006, FR-06: `createRightOf`, the rule every list in the template shares), and the dialog
+  // stays here. A host's `canUpload` is the level's verdict there (a project, a level-decided caller: `uploadOverride`),
+  // which must also agree with the list's answer; with none, the list's `canCreate` decides. The list must have answered
+  // (a re-read after an upload keeps the last answer, so the action does not blink out).
   const ownUploadButton = onCreateActionChange === undefined;
-  useOfferCreateAction(onCreateActionChange, showUpload && !error && (!loading || loadedOnce), upload.show);
+  const right = createRightOf({ loaded: loadedOnce && !error, listCanCreate, levelAllows: canUpload });
+  useOfferCreateAction(onCreateActionChange, right === true, upload.show, right);
+  // The same right, told to a host that wants it without a toolbar action (the invoice Files list). Read through a ref, so
+  // a new callback identity never re-reports; unmount reports "unknown".
+  const onUploadRightChangeRef = React.useRef(onUploadRightChange);
+  onUploadRightChangeRef.current = onUploadRightChange;
+  React.useEffect(() => {
+    onUploadRightChangeRef.current?.(right);
+  }, [right]);
+  React.useEffect(
+    () => () => {
+      onUploadRightChangeRef.current?.(null);
+    },
+    []
+  );
+  // Whether Upload is available at all: the list's own button outside the template, the toolbar's inside it.
+  const uploadAvailable = ownUploadButton ? showUpload : right === true;
   // Download / version history need only Read on the record (the server checks it). A per-record caller's level says only
   // what they may SEE, and the list rendering at all proves that Read, so they are offered (task 036 fix round 2).
   const canActOnDocuments = canDownload ?? (writeAccessPerRecord || canUploadOrDownload(accessLevel));
@@ -1043,7 +1070,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
           </MessageBar>
         )}
         {/* Toolbar — show upload button even when empty so users can add their first doc */}
-        {showUpload && (
+        {uploadAvailable && (
           <div className={styles.toolbar}>
             <div className={styles.toolbarLeft}>
               <Text size={300} className={styles.emptyStateText}>
@@ -1068,7 +1095,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
               No Documents
             </Text>
             <Text size={300} className={styles.emptyStateText}>
-              {showUpload
+              {uploadAvailable
                 ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
                 : `No documents have been uploaded to this ${noun} yet.`}
             </Text>

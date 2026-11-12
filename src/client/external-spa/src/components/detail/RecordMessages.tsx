@@ -34,6 +34,12 @@
  * error text, and a sent message closes it and re-reads the thread. Without `onCreateActionChange` (R3's own page) the
  * inline box is unchanged.
  *
+ * WHO MAY POST (R4 task 006, FR-06 / NFR-04). In the record template New message is offered only when the thread's read
+ * answered `canCreate: true` (task 002: the POST's own decision for this caller); anything else hides it, and a `false`
+ * gives the section its read-only line instead. A re-read that fails (other than a sign-in failure, which ends the
+ * thread) keeps the messages shown but withdraws New message: the right is no longer known. The inline box of a host without a toolbar keeps R3's rule (no such host in
+ * the app since the template replaced R3's modal).
+ *
  * ADR-021: Fluent UI v9 semantic tokens only (no hard-coded colours) — the section inherits the host FluentProvider, so
  * light, dark and the Teams themes work. ADR-012: composes Fluent primitives and the shared sanitizer; the shared
  * EmailComposer / NewThreadModal are internal-plane and Xrm-bound, so only their look is mirrored.
@@ -67,6 +73,7 @@ import { ApiError } from '../../types';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from '../auth/BffAccessState';
 import { TruncatedListNotice } from '../TruncatedListNotice';
 import { useChildDialog, useOfferCreateAction, type CreateActionReporter } from '../createAction';
+import { createRightOf } from '../record/recordAccess';
 
 // ---------------------------------------------------------------------------
 // Copy
@@ -76,6 +83,8 @@ const UNKNOWN_SENDER = 'Unknown sender';
 const OWN_SENDER = 'You';
 const EMPTY_TEXT = 'No messages yet. Write the first one below.';
 const EMPTY_TEXT_DIALOG = 'No messages yet. Use New message in the toolbar to write the first one.';
+/** Template, New message not offered: the section's read-only line (task 006) says why. */
+const EMPTY_TEXT_READ_ONLY = 'No messages yet.';
 const LOAD_FAILED = 'The existing messages could not be loaded just now.';
 const NOT_AVAILABLE = 'Messages are not available for this record.';
 const DENIED_TEXT = 'You do not have permission to view messages on this record.';
@@ -93,7 +102,7 @@ const GENERIC_DENIED_DETAIL = 'Access denied';
 
 type ThreadState =
   | { status: 'loading' }
-  | { status: 'ready'; messages: ExternalMessage[]; truncated: boolean }
+  | { status: 'ready'; messages: ExternalMessage[]; truncated: boolean; canCreate: boolean | null }
   | { status: 'error' }
   | { status: 'unavailable' }
   | { status: 'access'; failure: BffAccessFailure };
@@ -355,7 +364,13 @@ const MessageThread: React.FC<MessageThreadProps> = ({
       try {
         const result = await listMessages(root, recordId);
         if (seq !== readSeq.current) return;
-        setThread({ status: 'ready', messages: result.value ?? [], truncated: result.truncated === true });
+        setThread({
+          status: 'ready',
+          messages: result.value ?? [],
+          truncated: result.truncated === true,
+          // Task 006: the POST's own decision for this caller (task 002); a missing one is "not said", never "can".
+          canCreate: typeof result.canCreate === 'boolean' ? result.canCreate : null,
+        });
         setRefreshFailed(false);
       } catch (err: unknown) {
         if (seq !== readSeq.current) return;
@@ -366,10 +381,14 @@ const MessageThread: React.FC<MessageThreadProps> = ({
             setThread({ status: 'access', failure });
             return;
           }
-          // The message was sent; only the re-read failed. Whatever is on screen stays, and the notice says so. A
-          // refresh that overtook the initial read must not leave the spinner up for ever: that read is dropped.
+          // Only the re-read failed. The messages on screen stay, and the notice says so; but the posting right they
+          // came with is no longer known (task 006 fix round 1: a 403 here may mean it was withdrawn), so it is
+          // forgotten and New message withdrawn until a read answers again. A refresh that overtook the initial read
+          // must not leave the spinner up for ever: that read is dropped.
           setRefreshFailed(true);
-          setThread(t => (t.status === 'loading' ? { status: 'error' } : t));
+          setThread(t =>
+            t.status === 'loading' ? { status: 'error' } : t.status === 'ready' ? { ...t, canCreate: null } : t
+          );
           return;
         }
         if (failure) setThread({ status: 'access', failure });
@@ -425,10 +444,18 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   const showCompose = thread.status !== 'access' && thread.status !== 'unavailable';
   const overBy = text.length - MAX_MESSAGE_BODY_LENGTH;
 
-  // In the record template the toolbar's New message replaces the inline box: offered under the same rule (the thread
-  // has not been refused or found unavailable), and the dialog stays here. The draft is kept when it is cancelled.
+  // In the record template the toolbar's New message replaces the inline box, and the dialog stays here; the draft is kept
+  // when it is cancelled. Task 006 (FR-06): it is offered only when the LATEST thread read answered `canCreate: true` (the
+  // POST's own decision, task 002). Not loaded yet, failed, refused, unavailable or silent = not offered (fail closed);
+  // a failed re-read keeps the messages on screen but forgets the right, so New message is withdrawn until a read answers
+  // again. The right goes with the offer, for "Your access" and the read-only line.
   const composeInDialog = onCreateActionChange !== undefined;
-  useOfferCreateAction(onCreateActionChange, showCompose, composeDialog.show);
+  const right = createRightOf({
+    loaded: thread.status === 'ready',
+    listCanCreate: thread.status === 'ready' ? thread.canCreate : null,
+  });
+  const offered = right === true;
+  useOfferCreateAction(onCreateActionChange, offered, composeDialog.show, right);
   const closeCompose = (): void => {
     if (sendLock.current) return;
     composeDialog.hide();
@@ -438,8 +465,8 @@ const MessageThread: React.FC<MessageThreadProps> = ({
   // record dialog, the toolbar button having gone) instead of leaving it on the page body.
   const { open: composeOpen, hide: hideCompose } = composeDialog;
   React.useEffect(() => {
-    if (composeInDialog && !showCompose && composeOpen) hideCompose();
-  }, [composeInDialog, showCompose, composeOpen, hideCompose]);
+    if (composeInDialog && !offered && composeOpen) hideCompose();
+  }, [composeInDialog, offered, composeOpen, hideCompose]);
 
   const counter = (
     <Text
@@ -527,7 +554,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
           <TruncatedListNotice truncated={thread.truncated} shown={thread.messages.length} noun="messages" />
           {thread.messages.length === 0 && !thread.truncated ? (
             <div className={styles.empty} role="status" data-testid="record-messages-empty">
-              {composeInDialog ? EMPTY_TEXT_DIALOG : EMPTY_TEXT}
+              {composeInDialog ? (offered ? EMPTY_TEXT_DIALOG : EMPTY_TEXT_READ_ONLY) : EMPTY_TEXT}
             </div>
           ) : (
             <ul className={styles.list} aria-label="Message thread" data-testid="record-messages-list">
@@ -560,7 +587,7 @@ const MessageThread: React.FC<MessageThreadProps> = ({
 
       {/* The record template's New message (task 004): a FormModal, Cancel left, Send right. Esc does nothing (modal
           standard: an explicit dialog keeps a draft). */}
-      {composeInDialog && showCompose && (
+      {composeInDialog && offered && (
         <FormModal
           open={composeDialog.open}
           onClose={closeCompose}
@@ -601,8 +628,8 @@ export interface RecordMessagesProps {
   embedded?: boolean;
   /**
    * Record template only (task 004, FR-03): the toolbar's New message is the entry point. The thread then draws no inline
-   * compose box, offers the action through this callback (available exactly when the inline box would have been shown) and
-   * renders the compose box in a `FormModal` of its own. Omit it for R3's own page.
+   * compose box, offers the action through this callback (task 006: only once the thread's read answered
+   * `canCreate: true`) and renders the compose box in a `FormModal` of its own. Omit it for R3's own page.
    */
   onCreateActionChange?: CreateActionReporter;
 }

@@ -292,14 +292,19 @@ describe.each([
     SLOW
   );
 
+  // R4 task 006: these lists send no `canCreate`, so nothing may be offered (fail closed); a list that answers `canCreate`
+  // is covered in RecordTemplateAccess.test.tsx. The status toggle is never offered on these roots (no PATCH answer).
   it(
-    'read-only: no create or status toggle is offered, whatever the rows are',
+    'lists that send no canCreate: no create or status toggle is offered, whatever the rows are',
     async () => {
       installNet(key, { events: { value: [event(1, 'Hearing')] }, todos: { value: [todo(1, 'Draft the response')] } });
       const dialog = await openDetail(key);
       await within(dialog).findByText('Hearing');
       await within(dialog).findByText('Draft the response');
 
+      // The record template's entry points (the toolbar) and the lists' own buttons.
+      expect(within(dialog).queryByRole('button', { name: 'Add event' })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Add to-do' })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create new task|add task/i })).toBeNull();
       // The status toggle is the same gate: a read-only list has no checkbox-style control on its rows.
@@ -562,7 +567,9 @@ describe('the other detail views', () => {
       expect(listCalls('events')).toEqual([`/api/v1/external/projects/${PROJECT}/events`]);
       expect(listCalls('todos')).toEqual([`/api/v1/external/projects/${PROJECT}/todos`]);
       expect(bffApiCall.mock.calls.some(c => /\/(matters|workassignments)\//.test(String(c[0])))).toBe(false);
-      // Read-only in the detail view, as before.
+      // Nothing offered here: /me has no level for this project and its lists send no canCreate (task 006, fail closed).
+      expect(within(dialog).queryByRole('button', { name: /add event/i })).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: /add to-do/i })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create new task|add task/i })).toBeNull();
     },
@@ -602,14 +609,16 @@ describe('the other detail views', () => {
 // ---------------------------------------------------------------------------
 
 describe('root-aware EventsCalendar and SmartTodo', () => {
+  // R4 task 006 (FR-06): a matter or work assignment has no `/me` level, so no level is passed and the list's `canCreate`
+  // decides (the old rule kept these lists read-only whatever the server said). A list that says nothing is "cannot".
   it(
-    'a matter or work assignment list is read-only even at Collaborate; a project at Collaborate can still create',
+    'a matter or work assignment list follows its canCreate (absent = cannot); a project at Collaborate can still create',
     async () => {
       bffApiCall.mockImplementation(async () => ({ value: [] }));
-      const { rerender } = render(
+      const matter = render(
         <FluentProvider theme={webLightTheme}>
-          <EventsCalendar projectId={MATTER} root="matters" accessLevel={AccessLevel.Collaborate} caller={asContact} />
-          <SmartTodo projectId={MATTER} root="matters" accessLevel={AccessLevel.Collaborate} caller={asContact} />
+          <EventsCalendar projectId={MATTER} root="matters" caller={asContact} />
+          <SmartTodo projectId={MATTER} root="matters" caller={asContact} />
         </FluentProvider>
       );
       await screen.findByText('No events yet');
@@ -617,8 +626,23 @@ describe('root-aware EventsCalendar and SmartTodo', () => {
       expect(screen.queryByRole('button', { name: /create event/i })).toBeNull();
       expect(screen.queryByRole('button', { name: /create new task/i })).toBeNull();
       expect(screen.queryByText(/Use the Create Event button/)).toBeNull();
+      matter.unmount();
 
-      rerender(
+      // The same lists, when the server says the caller may create on this work assignment: offered.
+      bffApiCall.mockImplementation(async () => ({ value: [], canCreate: true }));
+      const wa = render(
+        <FluentProvider theme={webLightTheme}>
+          <EventsCalendar projectId={WORK_ASSIGNMENT} root="workassignments" caller={asContact} />
+          <SmartTodo projectId={WORK_ASSIGNMENT} root="workassignments" caller={asContact} />
+        </FluentProvider>
+      );
+      await screen.findByRole('button', { name: /create event/i });
+      await screen.findByRole('button', { name: /create new task/i });
+      wa.unmount();
+
+      // A project keeps its level rule (the project page's, unchanged): Collaborate creates whatever the list says.
+      bffApiCall.mockImplementation(async () => ({ value: [] }));
+      render(
         <FluentProvider theme={webLightTheme}>
           <EventsCalendar projectId={PROJECT} accessLevel={AccessLevel.Collaborate} caller={asContact} />
           <SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} caller={asContact} />

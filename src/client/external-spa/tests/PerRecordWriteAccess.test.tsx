@@ -297,9 +297,12 @@ describe('per-record write access: SmartTodo status toggle (fix round 2, F1)', (
     expect(screen.queryByText(/Failed to fetch/)).toBeNull();
   });
 
-  it('a matter to-do list stays read-only for a per-record caller (task 057)', async () => {
+  // R4 task 006 (FR-06): a matter has no `/me` level, so its host passes none (the ViewOnly it used to receive was the
+  // hard-code task 006 removed). No list or row says whether the caller may PATCH a matter's to-do, so the toggle is not
+  // offered there, for a per-record caller too.
+  it('a matter to-do list offers no status toggle to a per-record caller: nothing says they may PATCH (task 006)', async () => {
     answerTodos(() => undefined);
-    inFluent(<SmartTodo projectId="m-036" root="matters" accessLevel={AccessLevel.ViewOnly} writeAccessPerRecord />);
+    inFluent(<SmartTodo projectId="m-036" root="matters" writeAccessPerRecord />);
     await screen.findByText('Review brief');
 
     expect(screen.queryByRole('button', { name: 'Mark task complete' })).toBeNull();

@@ -298,7 +298,8 @@ function installNetwork(): void {
       const key = `${cond.attribute}:${cond.value}`;
       if (body.entityName === 'sprk_invoice') return { entities: mocks.invoices[key] ?? [], moreRecords: false };
     }
-    if (/\/messages$/.test(path)) return { value: [] };
+    // Task 006: the thread says the caller may post, so the toolbar offers New message.
+    if (/\/messages$/.test(path)) return { value: [], canCreate: true };
     if (/\/(projects|matters|workassignments)\/[^/]+\/events$/.test(path)) return { value: mocks.events };
     if (/\/(projects|matters|workassignments)\/[^/]+\/todos$/.test(path)) return { value: mocks.todos };
     throw new Error(`unexpected BFF call ${options?.method ?? 'GET'} ${path}`);
@@ -538,7 +539,8 @@ describe('browsing', () => {
         finishPost = resolve;
       });
       bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (path.endsWith('/messages')) return options?.method === 'POST' ? inFlight : { value: [] };
+        // Task 006: the thread says the caller may post, so the toolbar offers New message.
+        if (path.endsWith('/messages')) return options?.method === 'POST' ? inFlight : { value: [], canCreate: true };
         if (sideReads(path) !== undefined) return sideReads(path);
         const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
         const detail = detailReadOf(body);

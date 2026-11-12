@@ -125,6 +125,18 @@ export interface RecordSectionContext extends RecordViewContext {
    * button. The stable reporter per action id is the action hosts' one (`onActionChange`).
    */
   offerAction: (actionId: RecordToolbarActionId) => ((action: RecordHostAction | null) => void) | undefined;
+  /**
+   * Task 006 (FR-07). The one short line saying why this section is read-only for the caller (`readOnlyNoteOf` in
+   * `recordAccess.ts`), or null/absent when it is not read-only or that is not known yet.
+   */
+  readOnlyNote?: string | null;
+  /**
+   * Task 006 fix round 1 (FR-07). For a section whose list has a create right WITHOUT a toolbar action (the invoice Files
+   * list's own Upload, `'filesUpload'`): the stable reporter through which it tells the template that right (`true` /
+   * `false`, or `null` while unknown and on unmount), so "Your access" and its read-only line follow it. It adds nothing
+   * to the toolbar.
+   */
+  reportRight?: (id: 'filesUpload') => (right: boolean | null) => void;
 }
 
 /** A toolbar action an action host offers: hidden unless `visible` (hide, don't disable). */
@@ -133,6 +145,11 @@ export interface RecordHostAction {
   onClick: () => void;
   /** Overrides the action's default tooltip (= accessible name); must contain the action's label (WCAG 2.5.3). */
   tooltip?: string;
+  /**
+   * Task 006 (FR-06). A create action (Upload, New message, Add to-do, Add event) reports the right behind it from the
+   * BFF's answers: `true` / `false`, or `null` while unknown. The toolbar shows a create action only when it is `true`.
+   */
+  right?: boolean | null;
 }
 
 /**

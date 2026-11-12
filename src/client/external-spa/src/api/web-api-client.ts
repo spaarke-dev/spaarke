@@ -254,9 +254,10 @@ interface ODataCollectionResponse<T> {
   truncated?: boolean;
   /**
    * Whether the caller may create under the record the list is scoped to: the answer that record's create route gives.
-   * Document lists always carry it (task 054 review: the upload route's Create). To-do lists and a project's event list
-   * carry it only for a caller whose write access is decided per record (`/me` `writeAccessPerRecord`,
-   * unified-access-control-r2 task 036 fix round 1); absent otherwise.
+   * Document lists always carry it (task 054 review: the upload route's Create). Since R4 task 002 (FR-06) the to-do and
+   * event lists of a project, matter or work assignment carry it for every caller too (it was only for a caller whose
+   * write access is decided per record before, unified-access-control-r2 task 036 fix round 1). A BFF that predates that
+   * may still omit it: absent is "not said", never "can".
    */
   canCreate?: boolean;
 }
@@ -707,25 +708,43 @@ export interface CreateEventPayload {
 }
 
 /**
- * Create a new Event record in Dataverse via the Power Pages Web API.
+ * Create an Event regarding a project, matter or work assignment: `POST /api/v1/external/{root}/{id}/events`
+ * (spaarke-SPA-external-access-platform-r4 task 006, FR-06; the matter and work-assignment routes are task 002's).
  *
- * Requires the authenticated user to have Create table permission on
- * sprk_event for their web role.
+ * The server takes the parent from the ROUTE only (`CreateExternalEventRequest` has `sprk_name`, `sprk_duedate` and
+ * `sprk_status`, and no regarding member), so a matter or work-assignment event sends the payload as given. The project
+ * route keeps the body it has always been sent, the project bind included (the server skips that member), byte for byte.
  *
- * The Bearer token is automatically included by `bffApiCall`.
+ * @param root      Which kind of record `recordId` is
+ * @param recordId  Dataverse GUID of the record
+ * @param payload   Event fields to set on creation
+ * @returns         The created ODataEvent record (with system fields populated)
+ */
+export async function createRootEvent(
+  root: EventsTodosRoot,
+  recordId: string,
+  payload: CreateEventPayload
+): Promise<ODataEvent> {
+  const body: CreateEventPayload =
+    root === 'projects'
+      ? {
+          ...payload,
+          // Bind to the project using the OData navigation property (PascalCase SchemaName).
+          'sprk_RegardingProject@odata.bind': `/sprk_projects(${recordId})`,
+        }
+      : payload;
+  return createRecord<CreateEventPayload, ODataEvent>(rootEventsPath(root, recordId), body);
+}
+
+/**
+ * Create a new Event regarding a Secure Project (`createRootEvent` for the project root).
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param payload    Event fields to set on creation
  * @returns          The created ODataEvent record (with system fields populated)
  */
 export async function createEvent(projectId: string, payload: CreateEventPayload): Promise<ODataEvent> {
-  const body: CreateEventPayload = {
-    ...payload,
-    // Bind to the project using the OData navigation property (PascalCase SchemaName).
-    'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`,
-  };
-
-  return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);
+  return createRootEvent('projects', projectId, payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -784,17 +803,33 @@ export interface UpdateTodoPayload {
 }
 
 /**
- * Create a new To-Do record via the BFF.
+ * Create a To-Do regarding a project, matter or work assignment: `POST /api/v1/external/{root}/{id}/todos`
+ * (task 006, FR-06; the matter and work-assignment routes are unified-access-control-r2 task 029's).
  *
- * The BFF applies the regarding-project lookup + 4 ADR-024 resolver fields
- * server-side using `{projectId}` from the route.
+ * The BFF applies the regarding lookup + 4 ADR-024 resolver fields server-side using `{id}` from the route.
+ *
+ * @param root      Which kind of record `recordId` is
+ * @param recordId  Dataverse GUID of the record
+ * @param payload   To-Do fields to set on creation
+ * @returns         The created ODataTodo record (with system + resolver fields populated)
+ */
+export async function createRootTodo(
+  root: EventsTodosRoot,
+  recordId: string,
+  payload: CreateTodoPayload
+): Promise<ODataTodo> {
+  return createRecord<CreateTodoPayload, ODataTodo>(rootTodosPath(root, recordId), payload);
+}
+
+/**
+ * Create a new To-Do regarding a Secure Project (`createRootTodo` for the project root).
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param payload    To-Do fields to set on creation
  * @returns          The created ODataTodo record (with system + resolver fields populated)
  */
 export async function createTodo(projectId: string, payload: CreateTodoPayload): Promise<ODataTodo> {
-  return createRecord<CreateTodoPayload, ODataTodo>(`/api/v1/external/projects/${projectId}/todos`, payload);
+  return createRootTodo('projects', projectId, payload);
 }
 
 /**

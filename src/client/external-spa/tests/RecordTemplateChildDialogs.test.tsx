@@ -7,9 +7,9 @@
  * (see `installLayout`).
  *
  * The record under test is a SERVICE REQUEST opened by its requester: its toolbar offers Upload and New message (form
- * dialogs) and Delete request (a confirm dialog), all reachable today. Add to-do and Add event are not offered inside the
- * template yet (their lists still receive `AccessLevel.ViewOnly` until task 006 changes the rule source), so those two
- * dialogs are proven through the lists' own `onCreateActionChange` seam (the last describe block).
+ * dialogs) and Delete request (a confirm dialog), all reachable today. Add to-do and Add event are not in a service
+ * request's toolbar, so those two dialogs are proven through the lists' own `onCreateActionChange` seam (the last describe
+ * block); task 006's `RecordTemplateAccess.test.tsx` drives them from a matter's and a work assignment's toolbar.
  *
  * THE FOCUS / ESC CONTRACT, and how each assertion can fail:
  *   - Tab wraps inside the child (last -> first, Shift+Tab first -> last). Control: the same probe against a non-blocking
@@ -121,7 +121,8 @@ function installNet(net: Net): void {
         return net.onPostMessage(path, JSON.parse(String(options?.body)));
       }
       if (net.onReadMessages) return net.onReadMessages();
-      return { value: net.messages };
+      // Task 006: New message is offered only when the thread says the caller may post (the requester may).
+      return { value: net.messages, canCreate: true };
     }
     throw new Error(`unexpected BFF call ${method} ${path}`);
   });
@@ -545,19 +546,18 @@ describe('New message: Esc and the thread read', () => {
   );
 
   it(
-    'a thread read that is refused while New message is open closes the dialog properly: focus stays in the record, Esc closes it, and the dialog does not reappear when the thread comes back',
+    'a thread re-read that withdraws the right while New message is open closes the dialog properly: focus stays in the record, Esc closes it, and the dialog does not reappear when the thread comes back',
     async () => {
-      let refuseFirstRead: () => void = () => undefined;
+      // Task 006: New message is offered only once the thread has answered `canCreate: true`, so it can no longer be
+      // opened before the first read (the race task 004's F2 test used). The same orphan risk now comes from a RE-read
+      // that withdraws the right while the dialog is open: read 1 may post, read 2 (Refresh) may not, read 3 may again.
       let reads = 0;
       installNet({
         documents: [],
         messages: [],
-        // The first read stays pending until the test refuses it with a 403; the later read succeeds.
         onReadMessages: () => {
           reads += 1;
-          if (reads === 1)
-            return new Promise((_resolve, reject) => (refuseFirstRead = () => reject(new ApiError(403, ''))));
-          return { value: [] };
+          return { value: [], canCreate: reads !== 2 };
         },
       });
       const onClose = vi.fn();
@@ -565,13 +565,17 @@ describe('New message: Esc and the thread read', () => {
       const { child } = await openChild('New message', 'New message');
       expect(reads).toBe(1);
 
-      await act(async () => refuseFirstRead());
-      // The offer is withdrawn (denied thread) and the dialog goes with it, through hide(): open state reset, focus moved
-      // into the record (the toolbar button that held it is gone), not left on the page body.
+      // Refresh (behind the open child, so read with `hidden`) re-reads the thread, which now says "cannot post". The read
+      // resolves outside act, as a real one does (fix round 1 F: the act wrapper that used to hide the focus race is gone):
+      // the dialog closes in one render and the toolbar button goes in another.
+      fireEvent.click(within(parent).getByRole('button', { name: 'Refresh', hidden: true }));
+      // The offer is withdrawn and the dialog goes with it, through hide(): open state reset, focus on the record dialog
+      // (the toolbar button that held it is gone), not left on the page body.
       await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New message' })).toBeNull());
-      expect(screen.queryByRole('button', { name: 'New message', hidden: true })).toBeNull();
-      await waitFor(() => expect(parent.contains(document.activeElement)).toBe(true));
-      expect(document.activeElement).not.toBe(document.body);
+      expect(reads).toBe(2);
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'New message', hidden: true })).toBeNull());
+      await settle(100);
+      expect(document.activeElement).toBe(parent);
       expect(child.isConnected).toBe(false);
 
       // No orphan open state: re-reading the thread brings the offer back, and the dialog stays closed.
@@ -579,11 +583,40 @@ describe('New message: Esc and the thread read', () => {
       expect(await within(parent).findByRole('button', { name: 'New message' })).toBeTruthy();
       await settle(350);
       expect(screen.queryByRole('dialog', { name: 'New message' })).toBeNull();
-      expect(reads).toBe(2);
+      expect(reads).toBe(3);
 
       // Esc, pressed where focus is now, closes the record.
       fireEvent.keyDown(document.activeElement as Element, { key: 'Escape' });
       await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    },
+    SLOW
+  );
+
+  it(
+    'a thread re-read that FAILS (500) while New message is open withdraws it the same way: the dialog closes and focus is on the record dialog',
+    async () => {
+      // Fix round 1 E: a failed re-read forgets the posting right, so this path is now reachable from a plain Refresh.
+      let reads = 0;
+      installNet({
+        documents: [],
+        messages: [],
+        onReadMessages: () => {
+          reads += 1;
+          if (reads === 2) throw new ApiError(500, JSON.stringify({ status: 500, title: 'broken' }));
+          return { value: [], canCreate: true };
+        },
+      });
+      const parent = await openRecord();
+      const { child } = await openChild('New message', 'New message');
+
+      fireEvent.click(within(parent).getByRole('button', { name: 'Refresh', hidden: true }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New message' })).toBeNull());
+      expect(reads).toBe(2);
+      await within(parent).findByTestId('record-messages-refresh-failed');
+      await waitFor(() => expect(screen.queryByRole('button', { name: 'New message', hidden: true })).toBeNull());
+      await settle(100);
+      expect(document.activeElement).toBe(parent);
+      expect(child.isConnected).toBe(false);
     },
     SLOW
   );
@@ -621,6 +654,44 @@ describe('focus return when the control that opened a dialog is gone', () => {
     // Neither on screen: nothing to focus, nothing thrown.
     record.remove();
     expect(() => restoreFocusTo(detached)).not.toThrow();
+  });
+
+  it('goes to the dialog when the control is still there as the child closes but is removed right after (fix round 1 F)', async () => {
+    render(
+      <div role="dialog" aria-label="Record" data-testid="record">
+        <button>Open</button>
+        <button>Other</button>
+      </div>
+    );
+    const record = screen.getByTestId('record');
+    const open = within(record).getByRole('button', { name: 'Open' });
+    open.focus();
+    const target = currentFocusTarget();
+    within(record).getByRole('button', { name: 'Other' }).focus();
+
+    // The control gets focus back (it is still connected when the deferred move runs) ...
+    restoreFocusTo(target);
+    await waitFor(() => expect(document.activeElement).toBe(open));
+    // ... and is then removed (the withdrawn toolbar action's render lands later): focus must not fall to the page body.
+    open.remove();
+    await waitFor(() => expect(document.activeElement).toBe(record));
+  });
+
+  it('goes to the dialog when the control cannot take focus any more (disabled)', async () => {
+    render(
+      <div role="dialog" aria-label="Record" data-testid="record">
+        <button>Open</button>
+      </div>
+    );
+    const record = screen.getByTestId('record');
+    const open = within(record).getByRole('button', { name: 'Open' });
+    open.focus();
+    const target = currentFocusTarget();
+    open.blur();
+    open.setAttribute('disabled', '');
+
+    restoreFocusTo(target);
+    await waitFor(() => expect(document.activeElement).toBe(record));
   });
 });
 
