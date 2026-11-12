@@ -382,7 +382,10 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         bool BackedOff(Guid id) => attempts.TryGetValue(id, out var a) && a.RetryAt is { } retryAt && retryAt > startedAt;
 
         // ── Listing: recently changed messages and content rows, oldest change first ──
-        var recent = new List<Guid>();
+        // #2731: each message's earliest change in the window, across its own row and its content rows. The recent messages are
+        // worked oldest change first across every table, so a carry past its cap drops the NEWEST changes, and the watermark can
+        // move to the earliest of those (below) instead of being held over messages this pass already finished.
+        var firstChange = new Dictionary<Guid, DateTimeOffset>();
         var horizons = new List<DateTimeOffset?>();
         string? failure = null;
         try
@@ -391,8 +394,13 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             listings.AddRange(DirectMessageParticipantShares.ContentRows.Select(c => (c.Table, (string?)c.MessageLookup)));
             foreach (var (table, messageLookup) in listings)
             {
-                var (ids, horizon, capped) = await ListAsync(dataverse, table, messageLookup, team, since, ct).ConfigureAwait(false);
-                recent.AddRange(ids);
+                var (rows, horizon, capped) = await ListAsync(dataverse, table, messageLookup, team, since, ct).ConfigureAwait(false);
+                foreach (var (id, changedAt) in rows)
+                {
+                    if (!firstChange.TryGetValue(id, out var seen) || changedAt < seen)
+                        firstChange[id] = changedAt;
+                }
+
                 if (capped)
                     horizons.Add(horizon);
             }
@@ -404,6 +412,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                 "listed again next run.", runId);
         }
 
+        var recent = firstChange.OrderBy(c => c.Value).ThenBy(c => c.Key).Select(c => c.Key).ToList();
         var listingCapped = horizons.Count > 0;
         if (listingCapped)
         {
@@ -505,34 +514,41 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         // ── Carry, watermark, cursor ──
         var carry = incomplete.Concat(leftOver).Concat(deferred).Distinct().ToList();
         var carryOverflow = carry.Count > MaxDirectCarried;
+
+        // #2731: the messages a carry past its cap drops are its tail — the newest changes, as recent is worked oldest first.
+        // Those this run listed bound the next window's start, so they are listed again. One it did not list changed before
+        // `since` (no listing was capped short of it), so listing again would not find it either: only the sweep reaches it.
+        // Holding the whole window instead re-listed every message already finished, so the carry overflowed again each run.
+        var dropped = carryOverflow
+            ? carry.Skip(MaxDirectCarried).Where(firstChange.ContainsKey).Select(id => firstChange[id]).ToList()
+            : [];
         if (carryOverflow)
         {
-            _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Carry} messages to carry, past the cap of {Cap}; the watermark is held, so " +
-                "the window is listed again.", runId, carry.Count, MaxDirectCarried);
+            _logger.LogWarning("[DIRECT-SHARES] run={RunId}: {Carry} messages to carry, past the cap of {Cap}; the watermark moves only " +
+                "to the earliest change among the {Dropped} listed message(s) not carried, so those are listed again.", runId, carry.Count,
+                MaxDirectCarried, dropped.Count);
         }
 
         DateTimeOffset? watermark = null;
-        if (failure is null && !carryOverflow)
+        if (failure is null)
         {
-            if (!listingCapped)
-            {
-                watermark = startedAt - DirectOverlap;
-            }
-            else if (horizons.All(h => h is not null))
-            {
-                // The capped listings were read oldest change first: everything before the earliest last-row is listed.
-                var horizon = horizons.Min()!.Value;
-                if (horizon <= since)
-                {
-                    // Every listed row of a capped listing carries the window's own start: listing again would return the
-                    // same rows. Step past it; the rolling sweep reaches the rows that share that instant.
-                    horizon = since.AddTicks(1);
-                    _logger.LogWarning("[DIRECT-SHARES] run={RunId}: a capped listing did not move past {Since:o}; the watermark steps " +
-                        "past it, and the sweep reaches the rows changed at that instant.", runId, since);
-                }
+            // The capped listings were read oldest change first: everything before the earliest last-row is listed.
+            DateTimeOffset? next = !listingCapped
+                ? startedAt - DirectOverlap
+                : horizons.All(h => h is not null) ? horizons.Min() : null;
+            if (next is { } bound && dropped.Count > 0 && dropped.Min() < bound)
+                next = dropped.Min();
 
-                watermark = horizon;
+            if (next is { } start && (listingCapped || dropped.Count > 0) && start <= since)
+            {
+                // Every row left to list carries the window's own start: listing again would return the same rows. Step past it;
+                // the rolling sweep reaches the rows that share that instant.
+                next = since.AddTicks(1);
+                _logger.LogWarning("[DIRECT-SHARES] run={RunId}: the listing did not move past {Since:o}; the watermark steps past it, " +
+                    "and the sweep reaches the rows changed at that instant.", runId, since);
             }
+
+            watermark = next;
         }
 
         int carriedOut;
@@ -578,7 +594,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
     /// <see cref="MaxDirectListedPerTable"/> rows. <c>Capped</c> when the cap was reached; <c>Horizon</c> is then the last listed
     /// row's <c>modifiedon</c> (null when it carries none). A fault propagates (the caller holds the window).
     /// </summary>
-    private static async Task<(List<Guid> Ids, DateTimeOffset? Horizon, bool Capped)> ListAsync(
+    private static async Task<(List<(Guid Id, DateTimeOffset ChangedAt)> Rows, DateTimeOffset? Horizon, bool Capped)> ListAsync(
         Spaarke.Dataverse.IGenericEntityService dataverse, string table, string? messageLookup, Guid team, DateTimeOffset since,
         CancellationToken ct)
     {
@@ -596,14 +612,19 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         query.AddOrder(table + "id", Microsoft.Xrm.Sdk.Query.OrderType.Ascending);
         var rows = ((await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities
             ?? Enumerable.Empty<Microsoft.Xrm.Sdk.Entity>()).ToList();
-        var ids = messageLookup is null
-            ? rows.Select(e => e.Id).Where(id => id != Guid.Empty).ToList()
-            : rows.Select(e => e.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(messageLookup)?.Id ?? Guid.Empty)
-                .Where(id => id != Guid.Empty).ToList();
+        // A row without modifiedon (Dataverse always returns it) counts as changed at the window's start: the earliest it can be.
+        DateTimeOffset ChangedAt(Microsoft.Xrm.Sdk.Entity e) => e.GetAttributeValue<DateTime?>("modifiedon") is { } at
+            ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc))
+            : since;
+        var listed = rows
+            .Select(e => (Id: messageLookup is null ? e.Id : e.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(messageLookup)?.Id ?? Guid.Empty,
+                ChangedAt: ChangedAt(e)))
+            .Where(r => r.Id != Guid.Empty)
+            .ToList();
         var capped = rows.Count >= MaxDirectListedPerTable;
         DateTimeOffset? horizon = capped && rows[^1].GetAttributeValue<DateTime?>("modifiedon") is { } last
             ? new DateTimeOffset(DateTime.SpecifyKind(last, DateTimeKind.Utc))
             : null;
-        return (ids, horizon, capped);
+        return (listed, horizon, capped);
     }
 }

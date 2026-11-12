@@ -680,7 +680,7 @@ public class SecureChildShareReconciliationJobDirectPassTests
     [Theory]
     [InlineData(Job.MaxDirectCarried, false)]
     [InlineData(Job.MaxDirectCarried + 1, true)]
-    public async Task ExecuteAsync_ACarryPastItsCap_CarriesOnlyTheCap_HoldsTheWatermark_AndWarns(int toCarry, bool overflows)
+    public async Task ExecuteAsync_ACarryPastItsCap_CarriesOnlyTheCap_MovesTheWatermarkOnlyToTheEarliestDroppedChange_AndWarns(int toCarry, bool overflows)
     {
         // An inherent multi-record arrange: the carry cap is 1,000 messages, reached in one run without capping any one listing
         // (at most MaxDirectListedPerTable - 1 rows each), across the messages' own rows and two content tables.
@@ -711,7 +711,7 @@ public class SecureChildShareReconciliationJobDirectPassTests
         if (overflows)
             overflowWarnings.Should().ContainSingle().Which.Should().Match<LogEntry>(e =>
                 Equals(e.Properties["Carry"], toCarry) && Equals(e.Properties["Cap"], Job.MaxDirectCarried)
-                && Equals(e.Properties["RunId"], context.RunId));
+                && Equals(e.Properties["Dropped"], toCarry - Job.MaxDirectCarried) && Equals(e.Properties["RunId"], context.RunId));
         else
             overflowWarnings.Should().BeEmpty("exactly the cap is carried without overflow");
 
@@ -719,9 +719,11 @@ public class SecureChildShareReconciliationJobDirectPassTests
         var second = await RunAsync(job);
 
         Since(second).Should().Be(overflows
-            ? (T0 - Job.DirectOverlap).UtcDateTime
+            ? recently
             : (T0 + TimeSpan.FromMinutes(2) - Job.DirectOverlap).UtcDateTime,
-            overflows ? "a carry past its cap drops messages, so the watermark is held" : "a run within the cap moves the watermark");
+            overflows
+                ? "#2731: a carry past its cap moves the watermark only to the earliest change it dropped, so that message is listed again"
+                : "a run within the cap moves the watermark");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
