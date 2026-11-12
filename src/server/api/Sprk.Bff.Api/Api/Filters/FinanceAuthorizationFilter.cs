@@ -200,6 +200,20 @@ public enum FinanceDenial
     UniformNotFoundFailClosed,
 }
 
+/// <summary>The answer of <see cref="FinanceAuthorizationFilter.EvaluateCheckForCallerAsync"/> for one check (ebilling-r1 task 084g).</summary>
+/// <remarks><see cref="Faulted"/> is the zero value, so <c>default</c> is never <see cref="Allowed"/>.</remarks>
+public enum FinanceCheckVerdict
+{
+    /// <summary>No answer: no caller, a missing service, a check that threw, or a system failure.</summary>
+    Faulted = 0,
+
+    /// <summary>Answered, and the caller does not hold it.</summary>
+    Denied = 1,
+
+    /// <summary>Answered, and the caller holds it.</summary>
+    Allowed = 2,
+}
+
 /// <summary>Which authorization path a <see cref="FinanceAuthorizationCheck"/> takes.</summary>
 public enum FinanceCheckPath
 {
@@ -561,6 +575,66 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     {
         var snapshot = await authorizationService.GetCallerRecordAccessAsync(userId, entitySetName, recordId, callerToken, ct);
         return OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, operation);
+    }
+
+    /// <summary>
+    /// The check half of this filter, for code that is not this filter (ebilling-r1 task 084g, EB-D-221: the record read routes report the
+    /// caller's write permissions). It evaluates ONE check for the caller of <paramref name="httpContext"/> through the same
+    /// <see cref="EvaluateAsync"/> the filter's loop runs: the caller's own token, the same Record, Privilege and Document paths and the
+    /// same allow rule, no app-only branch. It runs in the <see cref="FinanceDenial.UniformNotFoundFailClosed"/> mode, whose only difference
+    /// from <see cref="FinanceDenial.Forbidden"/> in <see cref="EvaluateAsync"/> is that a table-privilege question with no complete answer is
+    /// reported as a system failure instead of a denial (the same question is asked, and only <see cref="CallerPrivilegeAnswer.Held"/> allows
+    /// in both), so a fault can be told apart and logged. It does not run step 0 or a target declaration and renders no response; the
+    /// caller's route has run step 0 already.
+    /// Never throws except on a cancelled request: no caller, a missing service, a check that threw or a system failure is
+    /// <see cref="FinanceCheckVerdict.Faulted"/>, logged at Warning.
+    /// </summary>
+    internal static async Task<FinanceCheckVerdict> EvaluateCheckForCallerAsync(
+        HttpContext httpContext, FinanceAuthorizationCheck check, ILogger? logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        ArgumentNullException.ThrowIfNull(check);
+
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
+        var services = httpContext.RequestServices;
+        var authService = services.GetService<AuthorizationService>();
+        if (string.IsNullOrEmpty(userId) || authService is null)
+        {
+            logger?.LogWarning(
+                "Finance check {Operation} on {EntitySet} [{Source}] could not run (caller resolved: {HasCaller}); answered as faulted",
+                check.Operation, check.EntitySetName, check.Source, !string.IsNullOrEmpty(userId));
+            return FinanceCheckVerdict.Faulted;
+        }
+
+        var evaluator = new FinanceAuthorizationFilter(
+            authService, static _ => FinanceAuthorizationTargets.Authorize(), FinanceDenial.UniformNotFoundFailClosed,
+            services.GetService<CallerRecordAccessProbe>());
+        string? reason;
+        try
+        {
+            reason = await evaluator.EvaluateAsync(check, userId, TokenHelper.ExtractBearerTokenOrNull(httpContext), httpContext, logger, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex,
+                "Finance check {Operation} on {EntitySet} [{Source}] faulted for caller {UserId}; answered as faulted",
+                check.Operation, check.EntitySetName, check.Source, userId);
+            return FinanceCheckVerdict.Faulted;
+        }
+
+        if (reason == SystemFailureReasonCode)
+        {
+            logger?.LogWarning(
+                "Finance check {Operation} on {EntitySet} [{Source}] had no answer for caller {UserId}; answered as faulted",
+                check.Operation, check.EntitySetName, check.Source, userId);
+            return FinanceCheckVerdict.Faulted;
+        }
+
+        return reason is null ? FinanceCheckVerdict.Allowed : FinanceCheckVerdict.Denied;
     }
 
     /// <summary>Returns <c>null</c> when allowed, otherwise the deny reason code.</summary>

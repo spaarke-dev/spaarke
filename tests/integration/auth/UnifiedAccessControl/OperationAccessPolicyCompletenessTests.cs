@@ -155,7 +155,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.link_invoice")] // task 130 (owner G5): Operation = "…" initialiser, confirm's document check
     [InlineData("finance.submit_invoice")] // ebilling-r1 task 044: Operation = "…" initialiser in InvoiceSubmissionEndpoints' resolver
     [InlineData("ebilling.invoice.decide")] // ebilling-r1 task 100: literal in AddFinanceAuthorizationFilter("…") (InvoiceLineReviewEndpoints' decide routes)
-    [InlineData("ebilling.record.override")] // ebilling-r1 task 089b: literal in AddFinanceAuthorizationFilter("…") (ProcedureAssignmentEndpoints)
+    [InlineData("ebilling.record.override")] // ebilling-r1 task 089b; since 084g the Operation = "…" initializer in ProcedureAssignmentEndpoints.RecordWriteCheck
     [InlineData("ebilling.invoice.assign_firm")] // ebilling-r1 task 095d-1b: literal in AddFinanceAuthorizationFilter("…") (InvoiceApprovalEndpoints' Set firm)
     [InlineData("event.attach_regarding")] // task 159: literal in AddRecordRouteAccessAuthorizationFilter("…") (EventEndpoints POST /)
     [InlineData("entity.associate_document")]

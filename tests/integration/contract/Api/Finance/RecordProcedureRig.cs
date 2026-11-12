@@ -447,6 +447,32 @@ internal sealed class RecordProcedureRig
 
         public IEnumerable<(string EntitySet, Guid RecordId)> Asked => Batches.SelectMany(b => b);
 
+        /// <summary>Task 084g: the table privileges the caller holds (none by default, so the write permissions are false).</summary>
+        public HashSet<string> Held { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Task 084g: privileges whose question gets no answer (<see cref="CallerPrivilegeAnswer.Faulted"/>).</summary>
+        public HashSet<string> PrivilegeFaults { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Task 084g: when set, every privilege question throws it.</summary>
+        public Exception? PrivilegeThrows { get; set; }
+
+        /// <summary>Task 084g: every privilege asked, in order, with whether the caller's token came with it.</summary>
+        public List<(string Privilege, bool HasToken)> PrivilegeCalls { get; } = new();
+
+        public override Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            PrivilegeCalls.Add((privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
+            if (PrivilegeThrows is not null)
+            {
+                return Task.FromException<CallerPrivilegeAnswer>(PrivilegeThrows);
+            }
+
+            return Task.FromResult(
+                string.IsNullOrEmpty(callerBearerToken) || PrivilegeFaults.Contains(privilegeName) ? CallerPrivilegeAnswer.Faulted
+                : Held.Contains(privilegeName) ? CallerPrivilegeAnswer.Held
+                : CallerPrivilegeAnswer.NotHeld);
+        }
+
         public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
         {
             CallerLookups++;
