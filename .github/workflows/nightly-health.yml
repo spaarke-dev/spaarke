@@ -1378,16 +1378,23 @@ jobs:
           }
 
           # Most likely CAPABILITY-INDEX row: one whose canonical-component cell names
-          # the file itself, else its folder. Empty when none.
+          # the file itself; else a path in the SAME folder; else a folder path (no
+          # extension) that contains the file. Empty when none. Plain prefix matching
+          # of file paths is wrong (Api/X.cs is not Api/FieldMappings/Y.cs).
           row_for() {
             awk -F'|' -v f="$1" '
               /^\| *[0-9]+ *\|/ {
-                n=$2; gsub(/ /,"",n); cap=$3; gsub(/^ +| +$/,"",cap); comp=$5
-                if (index(comp, "`" f "`")) { print "row " n " (" cap ")"; found=1; exit }
+                n=$2; gsub(/ /,"",n); cap=$3; gsub(/^ +| +$/,"",cap); s=$5
                 d=f; sub(/\/[^\/]*$/,"",d)
-                if (dirhit=="" && (index(comp, "`" d "/") || index(comp, "`" d "`"))) dirhit="row " n " (" cap ")"
+                while (match(s, /`[^`]+`/)) {
+                  p=substr(s, RSTART+1, RLENGTH-2); s=substr(s, RSTART+RLENGTH)
+                  if (p==f) { print "row " n " (" cap ")"; found=1; exit }
+                  pd=p; sub(/\/[^\/]*$/,"",pd); last=p; sub(/^.*\//,"",last)
+                  if (dirhit=="" && pd==d) dirhit="row " n " (" cap ")"
+                  if (foldhit=="" && last !~ /\.(ts|tsx|js|jsx|cs|md|json|ps1)$/ && index(f, p "/")==1) foldhit="row " n " (" cap ")"
+                }
               }
-              END { if (!found && dirhit!="") print dirhit }' "$INDEX" 2>/dev/null | head -n 1
+              END { if (!found) { if (dirhit!="") print dirhit; else if (foldhit!="") print foldhit } }' "$INDEX" 2>/dev/null | head -n 1
           }
 
           git log --since=7.days --name-only --pretty=format: | sed '/^$/d' | sort -u > "$tmp/changed.txt"
