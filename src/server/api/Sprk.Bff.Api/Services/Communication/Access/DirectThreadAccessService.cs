@@ -447,9 +447,20 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         }
 
         await using var scope = _scopes.CreateAsyncScope();
+        AppOnlyExternalVisibility? seam;
+        try
+        {
+            seam = scope.ServiceProvider.GetService<AppOnlyExternalVisibility>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // The seam could not be built: no flagged participant is granted here (every row defers), and the grant goes on.
+            _logger.LogWarning(ex, "Message {CommunicationId}: the external visibility decision could not be created.", communicationId);
+            seam = null;
+        }
+
         return await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
-            scope.ServiceProvider.GetService<Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility>(), communicationId,
-            rows, directTeamOwnedWithPair, _logger, ct);
+            seam, communicationId, rows, directTeamOwnedWithPair, _logger, ct);
     }
 
     /// <summary>
