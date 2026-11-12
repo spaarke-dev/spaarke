@@ -493,7 +493,7 @@ public class DataverseRecordShareWireTests
             new OfflineService(new ScriptedHandler(_ => Status(status, code))));
         var sync = new Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync(
             rows.Object, membership.Object, registry.Object, rights,
-            new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityDeciderStub().Decider, new ConfigurationBuilder().Build(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeamStub().Seam, new ConfigurationBuilder().Build(),
             NullLogger<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync>.Instance);
 
         var result = await sync.RemoveRevokedJitGrantsAsync(CancellationToken.None);

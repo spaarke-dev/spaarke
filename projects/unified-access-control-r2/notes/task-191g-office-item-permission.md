@@ -4,7 +4,7 @@
 > gets a role on a secure container; Office edit is a just-in-time write permission on the one file. Design §3.12, AC-8,
 > §3.19 step 1. Ids in this note are truncated; full ids live only in the operator's scratch folder.
 
-## 1. Live-test plan (design §3.19 step 1) — GO GIVEN (Route A), RUN BY THE OWNER
+## 1. Live-test plan (design §3.19 step 1) — RUN BY THE OWNER 2026-11-12 (Route A); results in §2
 
 **Status:** the owner gave the go for Route A (relayed by the uac-r2 main session, 2026-11-12). The owner pastes the
 script into the dev BFF's SSH console after the coordinator's dev deploy and does the browser checks; the agent runs
@@ -96,28 +96,67 @@ The 5-minute `SpeContainerMembershipSyncJob` in the DEPLOYED dev build (without 
 item permissions or `SprkItm` properties (it parses only `SprkStd`/`SprkJit` keys), so it cannot confound C7 or remove
 the probe early. (This branch's sync does read `SprkItm` keys; it is not deployed during the test.)
 
-## 2. Results
+## 2. Results (run by the owner, Route A, dev BFF build 6dbe69b9e2, 2026-11-12)
 
-Not run yet.
+| Step | Check | Result |
+|---|---|---|
+| phase0 | snapshot | PASS — test user held no container role, no item permission; `Sprk…` property baseline recorded |
+| 1 | C1 app-only item invite (`write`, no mail, sign-in required, by object id) on a secure container | **PASS** — one permission (`aTowIy5m…`), read back as `write` for the test user |
+| 2 | C2 not a container role | **PASS** |
+| 2 | C3 sibling not shared | **PASS** |
+| 3 | C6 71-character `SprkItm` key, value `itemId\|permissionId` | **FAIL — PATCH answered 400** (Graph's error text was not captured) |
+| browser | C4 Word for the web edits the test file as the flagged B2B guest | **PASS** — typed `191g`, Word showed "Saved" |
+| browser | C5 sibling refused | **PASS** — access denied |
+| 5 | C7 removal | **PASS** — DELETE 204, read-back 404 at 14:16:38Z |
+| 5 | C7 a new private window as the test user is refused | **PASS** — on the first re-check, within 10 minutes |
+| undo | §1.6 | **UNDO-VERIFIED** (item permissions, container roles, sibling and `Sprk…` properties equal the step-0 snapshot) |
 
-## 3. Code (built behind a setting while the live test waits — allowed by the main session)
+**Left behind (accepted, test record):** one content edit — the text `191g` — on the dev test file (`3ff21ca8…`); the
+owner did not delete it (§1.5 step 4 asked for it to be deleted). Nothing else.
+
+**Findings** (ids only):
+- **F-1 Marker 400 (fixed in code).** The documented API states no rule the 71-character key or the `|` value broke, so
+  the cause is not known. Decision (main session, 2026-11-12): **option B** (§3) — the marker copies the live-proven
+  `SprkStd`/`SprkJit` profile, is read back after writing and fails closed; the 191i gate proves it and runs the §4 probe
+  if it fails.
+- **K6 Guest MFA on first sign-in.** The B2B guest had to register MFA in the Spaarke directory on first sign-in. Every
+  flagged B2B user meets this on their first Office open — an onboarding note, not a defect.
+- **K7 No Spaarke add-in for the guest in Word for the web.** Expected: the add-in is deployed to directory members only.
+
+## 3. Code (behind a setting, default off)
 
 **Setting:** `ExternalAccess:FlaggedOfficeEdit:Enabled` (app setting `ExternalAccess__FlaggedOfficeEdit__Enabled`).
-Absent, empty or unparseable = off. It stays off until the live test passes and the owner turns it on.
+Absent, empty or anything but `true` = off. It stays off until the 191i gate turns it on.
 
 | Path | Setting off (default) | Setting on |
 |---|---|---|
-| Office edit-open, flagged caller (`sprk_isexternal = true`) | view only; never a container role (unconditional) | Write + not Restricted + document externally Visible (191c's `ExternalVisibilityDecider`, a faulted decision never counts) → one item write permission (`item-writer-jit`); anything else view only; a grant that cannot be made, read back or recorded → 503 |
+| Office edit-open, flagged caller (`sprk_isexternal = true`) | view only; never a container role (unconditional) | Write + not Restricted + document externally Visible (191h's public seam `AppOnlyExternalVisibility`; Visible from a faulted decision never counts) → one item write permission (`item-writer-jit`); anything else view only; a grant that cannot be made, read back, recorded, or whose record does not read back → undone, 503 |
 | Office edit-open, caller whose flag cannot be read | 503 `edit_access_unavailable`, no grant of any kind | same |
 | Office edit-open, internal caller | unchanged (container JIT writer, task 171) | unchanged |
-| Sync: marked item grants (`SprkItm…`) | **all removed** (kill switch: the open reports view only, so no item grant may stand) | removed when the holder lost Write OR the document is no longer Visible (Hidden, or structurally undecidable); an unknown answer (incl. 191c's transient reasons, e.g. row not found this run) keeps the grant and reports it (round 70) |
-| Sync: a flagged user's container role on a secure container | untouched | removed with `Prefer: onlyRemoveContainerScopedPermission` (item grants stay), whoever granted it — a deliberate exception to "only remove what we made" (owner Q2 = b: a flagged user never holds a container role on a secure container) |
+| Sync: marked item grants (`SprkItm…`) | **all removed** (kill switch: the open answers view only, so no item grant may stand) | removed when the holder lost Write OR the document is no longer Visible (Hidden, or structurally undecidable); an answer that may change (a faulted decision, 191c's transient reasons such as a row not found this run) keeps the grant and reports it (round 70) |
+| Sync: a flagged user's container role on a secure container | untouched | removed with `Prefer: onlyRemoveContainerScopedPermission` (item grants stay), whoever granted it — a deliberate exception to "only remove what we made" (owner Q2 = b) |
 
-**Ownership rule** (same as the container grants): only a permission that is still exactly what this code made (direct,
-not a link, one user, roles exactly `write`) is ever deleted; a changed one (downgraded, upgraded, a role added, now
-inherited) only has its marker cleared. **Inherent limit:** item permission ids are identity-derived, so if a person
-removes our grant and then hand-grants the same user plain `write` on the same file, that permission is indistinguishable
-from ours and the sync may remove it.
+**Marker (option B, main session 2026-11-12).** The Graph docs for container custom properties state no limit on a
+property's name length, characters, value length or count, and no reason for a 400 beyond "names must be valid property
+names" (the Graph dictionary pattern). So the marker copies the live-proven `SprkStd`/`SprkJit` profile:
+- key `SprkItm` + the first 128 bits of SHA-256 over (systemuserid, documentid) as 32 lowercase hex — **39 characters,
+  letters and digits only**, the profile of the live keys;
+- value `{systemuserid:N}.{documentid:N}.{itemId}` — letters, digits and `.` only, no `|`, no permission id; **about 100
+  characters, which is LONGER than the live `SprkJit` values** (a container permission id; no record in the repo states
+  their exact length) — the 191i gate proves it (K8);
+- a reader acts on a marker only when its key is the key the value's ids derive; a hand-edited or mismatched marker is
+  reported and left alone;
+- the marker is READ BACK after it is written; if the write is refused (the live 400) or does not stick, the item
+  permission is deleted and the open answers 503 — no grant stands without its record. Add answers 200 or 201, delete
+  204 or 200, everywhere.
+
+**Removal (option B).** The sync reads the holder's Entra object id (systemuser) and lists the item's permissions; it
+deletes ONLY the holder's plain write — direct (not inherited), not a sharing link, held by that object id, roles exactly
+`write` — and nothing when the list cannot be read to its end. Never deleted: a link, an inherited permission, another
+holder's permission, a changed role (downgraded, owner, a role added). An unreadable object id keeps the grant and reports
+it. **Inherent limit:** a plain `write` a person hand-grants the same user on the same file is indistinguishable from
+ours and is removed with the marker; and an open finds such a hand grant first and reports `HeldByOther`, so it is not
+marked in the first place unless ours was made first.
 
 **Cancellation:** once the ownership and permission checks pass, the invite, read-back and marker write ignore the
 request's cancellation, so an aborted request never leaves an unrecorded write permission (the same fix is applied to
@@ -125,18 +164,46 @@ the task-171 container grant, which had the same gap).
 
 **Known limits** (K-class; none holds a confirmed defect on a real path):
 - K1 — Two concurrent first opens of the same file by the same flagged user can both invite; Graph returns the same
-  identity-derived permission id, so both record the same marker value (idempotent), but this is not live-proven.
-- K2 — With the setting off, a flagged user who still holds a leftover container role from before 191g edits through it
-  (the open reports view only, the role is not removed) until the setting is turned on and the sweep runs. Deploying
-  this build with the setting off is also a user-visible change: flagged users lose Office edit (view only) until the
-  setting is turned on.
-- K4 — If Graph's own timeout fires after it created the item permission but before answering the invite, the
-  permission id is never known: Failed is reported and the permission is unrecorded (LogError). Not reachable by a
-  request cancel (fixed above), only by a Graph-side timeout.
-- K5 — One custom property per user × document; markers are removed with their grants, but a container's
-  custom-property capacity is not documented (live test C6 proves one 71-character key only).
-- K3 — The item grant follows the document's CURRENT file; when a document's file is replaced, the old item's grant is
-  undone at the next open of the new one (stale-marker path) or by the sync once Write or visibility goes.
+  identity-derived permission and the marker is deterministic, so the second is idempotent, but this is not live-proven.
+- K2 — Deploying this build with the setting off is a user-visible change: flagged users get view only (no Office edit)
+  until the setting is on. A flagged user who still holds a container role from before 191g edits through it until the
+  setting is on and the sweep runs.
+- K3 — The item grant follows the document's CURRENT file; when the file is replaced, the old item's grant is undone at
+  the next open (stale-marker path) or by the sync once Write or visibility goes.
+- K4 — If Graph's own timeout fires after it created the item permission but before answering the invite, the permission
+  id is never known: Failed is reported and the permission is unrecorded (logged). Reachable only by a Graph-side
+  timeout, not by a request cancel.
+- K5 — One custom property per user × document; markers go with their grants, but a container's custom-property
+  capacity is not documented.
+- K6, K7 — guest MFA on first sign-in; no Spaarke add-in for guests in Word for the web (§2).
+- K8 — The marker value (about 100 characters) is longer than any live-proven marker value; proven at the 191i gate.
+- K9 — A systemuser whose Entra object id cannot be read (deleted or disabled user) keeps its item grant; reported every
+  run until an operator removes it.
 
-**Deviation:** the code was built before the live test passed (main session's explicit allowance); the PR waits for the
-live-test output.
+**Deviations:** the code was built while the live test waited (main session's explicit allowance); the task-171
+cancellation fix is in scope (same gap); `ExternalRowVisibility.MayAnswerLater` is added to 191h's answer type (the sync
+needs "not visible for now" vs "not visible", and the transient set already lives in 191c).
+
+## 4. 191i marker gate and probe (under the 191i owner go, BEFORE the setting goes on)
+
+**Gate (191i step 10, first half):** in the dev BFF's SSH console, write ONE marker in the option-B shape (39-character `SprkItm…`
+key, a ~100-character `hex.hex.ITEMID` value, `isSearchable: false`) to the test container, read it back, then set it to
+`null` and verify it is gone. Pass = 200/201 on the write, the value reads back exactly, 204/200 on the delete. Pass → the
+setting on (191i step 10, second half).
+
+**If the gate fails, run the probe before the setting goes on** — five throwaway `SprkPrb…` properties on the same test
+container, each written, read back and removed, printing the HTTP status and Graph's error code and message (no ids),
+then a final `UNDO-VERIFIED` line (no `SprkPrb` property remains). The paste template is in the operator's scratch folder
+(`c191g/probe-paste.txt`), not in the repo.
+
+| Case | Key | Value | Answers |
+|---|---|---|---|
+| P1 control | 39 characters (`SprkPrb` + 32 hex) | `x1` | the proven profile still works |
+| P2 | 71 characters | `x1` | is key length the cause? |
+| P3 | 39 characters | ~130 characters with a `\|` (the 191g live value shape) | is the old value the cause? |
+| P4 | 71 characters | ~130 characters with a `\|` | the 191g live failure itself |
+| P5 | 39 characters | ~100 characters `hex.hex.ITEMID` (option B) | the shape this code writes |
+
+The first failing case names the cause; the code's key/value shape then moves to the largest passing profile (a code
+change and a new PR, not a setting), with the read-back (§3) as the safety net either way. The setting stays off until
+P5 or its replacement passes.

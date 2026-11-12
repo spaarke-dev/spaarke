@@ -76,11 +76,11 @@ public class SpeContainerMembershipSyncTests
             .ReturnsAsync(Membership.MarkedRemovalOutcome.Removed);
     }
 
-    private readonly ExternalVisibilityDeciderStub _visibility = new();
+    private readonly ExternalVisibilitySeamStub _visibility = new();
     private readonly Dictionary<string, string?> _settings = [];
 
     private SpeContainerMembershipSync Sut(Membership? membership = null, ILogger<SpeContainerMembershipSync>? logger = null) => new(
-        _dataverse.Object, membership ?? _membership.Object, _registry.Object, _rights.Object, _visibility.Decider,
+        _dataverse.Object, membership ?? _membership.Object, _registry.Object, _rights.Object, _visibility.Seam,
         new ConfigurationBuilder().AddInMemoryCollection(_settings).Build(),
         logger ?? NullLogger<SpeContainerMembershipSync>.Instance);
 
@@ -275,7 +275,7 @@ public class SpeContainerMembershipSyncTests
 
     private void Holder(Guid id, bool disabled = false, bool? external = null)
         => _dataverse.Setup(d => d.RetrieveAsync("systemuser", id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("systemuser", id) { ["isdisabled"] = disabled, ["sprk_isexternal"] = external });
+            .ReturnsAsync(new Entity("systemuser", id) { ["isdisabled"] = disabled, ["sprk_isexternal"] = external, ["azureactivedirectoryobjectid"] = OidOf(id) });
 
     [Fact(DisplayName = "Task 171: a JIT grant is REMOVED once Dataverse answers that the holder has no Write (unshare / No Access)")]
     public async Task Jit_HolderWithoutWrite_IsRemoved()
@@ -390,10 +390,12 @@ public class SpeContainerMembershipSyncTests
     // ── Task 191g: item grants (flagged-external holders, one file) ───────────────────────────────────────────────
 
     private static readonly Guid Doc = Guid.Parse("191a0000-0000-4000-8000-0000000000e1");
-    private const string ItemId = "item-191g";
-    private const string ItemPermission = "perm-item";
+    private const string ItemId = "016ITEM191G";
 
     private string ItemKey(Guid holder) => Membership.ItemMarkerKey(holder, Doc);
+
+    /// <summary>A deterministic Entra object id per holder (the removal deletes only that identity's plain write).</summary>
+    private static Guid OidOf(Guid systemUserId) => new(systemUserId.ToByteArray().Reverse().ToArray());
 
     /// <summary>A secure container carrying one item grant for <paramref name="holder"/> on <see cref="Doc"/>, and no JIT
     /// container grant.</summary>
@@ -403,12 +405,12 @@ public class SpeContainerMembershipSyncTests
         if (settingOn)
             _settings[Sprk.Bff.Api.Services.Documents.OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
         _secureProjects.Add(new Entity("sprk_project", SecureProject) { ["sprk_containerid"] = SecureContainer });
-        var markers = new Dictionary<string, string> { [ItemKey(holder)] = Membership.ItemMarkerValue(ItemId, ItemPermission) };
+        var markers = new Dictionary<string, string> { [ItemKey(holder)] = Membership.ItemMarkerValue(holder, Doc, ItemId)! };
         _membership.Setup(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>())).ReturnsAsync(markers);
         _membership.Setup(m => m.ReadAccessAsync(SecureContainer, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Membership.ContainerAccess([], true, markers));
         _membership.Setup(m => m.RemoveMarkedItemGrantAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Membership.MarkedRemovalOutcome.Removed);
         _dataverse.Setup(d => d.RetrieveAsync("sprk_project", SecureProject, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_project", SecureProject)
@@ -423,7 +425,7 @@ public class SpeContainerMembershipSyncTests
 
     private void ItemRemovalVerified(Guid holder, Times times)
         => _membership.Verify(m => m.RemoveMarkedItemGrantAsync(
-            SecureContainer, ItemKey(holder), ItemId, ItemPermission, It.IsAny<CancellationToken>()), times);
+            SecureContainer, ItemKey(holder), ItemId, OidOf(holder), It.IsAny<CancellationToken>()), times);
 
     [Fact(DisplayName = "Task 191g: an item grant is KEPT while the flagged holder has Write and the document is visible")]
     public async Task Item_WriteAndVisible_IsKept()
@@ -525,19 +527,19 @@ public class SpeContainerMembershipSyncTests
         result.Problems.Should().ContainSingle().Which.Should().Contain(Doc.ToString()).And.Contain("kept this run");
     }
 
-    [Fact(DisplayName = "Task 191g: a malformed item marker value is reported and left alone")]
+    [Fact(DisplayName = "Task 191g: a malformed item marker, or one whose key is not the key its ids derive, is reported and left alone")]
     public async Task Item_MalformedMarkerValue_IsReportedAndLeftAlone()
     {
         SecureContainerWithItemGrant(Alice);
         _membership.Setup(m => m.ReadMarkersAsync(SecureContainer, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Dictionary<string, string> { [ItemKey(Alice)] = "no-separator" });
+            .ReturnsAsync(new Dictionary<string, string> { [ItemKey(Alice)] = "no-separator", [Membership.ItemMarkerKey(Bob, Doc)] = Membership.ItemMarkerValue(Alice, Doc, ItemId)! });
 
         var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
 
         result.ItemGrantsSeen.Should().Be(0);
-        result.Problems.Should().ContainSingle().Which.Should().Contain("no readable value");
+        result.Problems.Should().HaveCount(2).And.OnlyContain(p => p.Contains("malformed or does not match its key"));
         _membership.Verify(m => m.RemoveMarkedItemGrantAsync(
-            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     /// <summary>MUTATION: deciding item grants on Write + visibility whatever the setting says.</summary>
@@ -665,19 +667,42 @@ public class SpeContainerMembershipSyncTests
         result.Problems.Should().Contain(p => p.Contains("flagged-external users could not be listed"));
     }
 
-    [Fact(DisplayName = "Task 191g: an item marker key round-trips holder and document, and no container prefix parses it")]
-    public void ItemMarkerKey_RoundTrips_AndIsNotAContainerMarker()
+    [Fact(DisplayName = "Task 191g (option B): the item marker has the live-proven profile — a 39-character key of letters and digits, a value of letters, digits and '.' — and round-trips only with its own key")]
+    public void ItemMarker_HasTheProvenProfile_AndRoundTripsOnlyWithItsKey()
     {
         var key = Membership.ItemMarkerKey(Alice, Doc);
+        var value = Membership.ItemMarkerValue(Alice, Doc, ItemId)!;
 
-        Membership.TryParseItemMarkerKey(key, out var holder, out var doc).Should().BeTrue();
-        (holder, doc).Should().Be((Alice, Doc));
-        Membership.TryParseMarkerKey(key, Membership.JitWriterMarkerPrefix, out _).Should().BeFalse();
-        Membership.TryParseMarkerKey(key, Membership.StandingWriterMarkerPrefix, out _).Should().BeFalse();
-        Membership.TryParseItemMarkerKey(Membership.MarkerKey(Membership.JitWriterMarkerPrefix, Alice), out _, out _).Should().BeFalse();
+        key.Should().HaveLength(Membership.MarkerKey(Membership.JitWriterMarkerPrefix, Alice).Length, "the same length as the live SprkJit keys")
+            .And.StartWith(Membership.ItemWriterMarkerPrefix)
+            .And.MatchRegex("^[A-Za-z0-9]+$");
+        value.Should().MatchRegex(@"^[A-Za-z0-9.]+$").And.NotContain("|");
+        Membership.ItemMarkerKey(Alice, Doc).Should().Be(key, "deterministic");
+        Membership.ItemMarkerKey(Bob, Doc).Should().NotBe(key);
+
+        Membership.TryParseItemMarker(key, value, out var holder, out var doc, out var item).Should().BeTrue();
+        (holder, doc, item).Should().Be((Alice, Doc, ItemId));
+        Membership.TryParseItemMarker(Membership.ItemMarkerKey(Bob, Doc), value, out _, out _, out _).Should().BeFalse("a value under another key is not acted on");
+        Membership.TryParseItemMarker(key, value + ".x", out _, out _, out _).Should().BeFalse();
+        Membership.ItemMarkerValue(Alice, Doc, "item|perm").Should().BeNull("an item id outside the profile makes no grant");
         Membership.IsGrantMarkerName(key).Should().BeTrue("the SPE admin property editor must not show or change it");
-        Membership.TryParseItemMarkerValue(Membership.ItemMarkerValue(ItemId, ItemPermission), out var item, out var perm).Should().BeTrue();
-        (item, perm).Should().Be((ItemId, ItemPermission));
+    }
+
+    [Fact(DisplayName = "Task 191g: an item grant due for removal whose holder's Entra object id cannot be read is kept, failed and reported — never a removal by a guessed identity")]
+    public async Task Item_HolderObjectIdUnreadable_IsKeptAndFailed()
+    {
+        SecureContainerWithItemGrant(Alice);
+        Holder(Alice, external: true);
+        HolderRights(Alice, AccessRights.Read);
+        _dataverse.Setup(d => d.RetrieveAsync("systemuser", Alice, It.Is<string[]>(c => c.Length == 1 && c[0] == "azureactivedirectoryobjectid"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("systemuser", Alice));
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        _membership.Verify(m => m.RemoveMarkedItemGrantAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        result.Failed.Should().Be(1);
+        result.Problems.Should().Contain(p => p.Contains("Entra object id could not be read"));
     }
 
     private static SdapProblemException NotOwned() => new(

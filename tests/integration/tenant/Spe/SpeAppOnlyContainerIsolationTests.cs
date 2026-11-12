@@ -234,7 +234,7 @@ public class SpeAppOnlyContainerIsolationTests
                     Array.Empty<SpeContainerMembershipService.ContainerUserRole>(), true, new Dictionary<string, string>())),
             "MembershipGrantItem" => () => membership.GrantMarkedItemWriterAsync(
                 ForeignContainer, "item", Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()),
-            "MembershipRemoveItem" => () => membership.RemoveMarkedItemGrantAsync(ForeignContainer, "marker", "item", "perm"),
+            "MembershipRemoveItem" => () => membership.RemoveMarkedItemGrantAsync(ForeignContainer, "marker", "item", Guid.NewGuid()),
             "MembershipRemoveFlaggedRole" => () => membership.RemoveFlaggedUserContainerRoleAsync(ForeignContainer, "perm"),
             _ => throw new ArgumentOutOfRangeException(nameof(path), path, null),
         };

@@ -56,11 +56,11 @@ public class OfficeEditAccessServiceTests
             .ReturnsAsync(new EntityCollection());
     }
 
-    private readonly ExternalVisibilityDeciderStub _visibility = new();
+    private readonly ExternalVisibilitySeamStub _visibility = new();
     private readonly Dictionary<string, string?> _settings = [];
 
     private Sut Build(OwningSecureRecord? secureOwner, AccessRights rights)
-        => new(secureOwner, new StubProbe(rights, SystemUserId), _membership.Object, _entities.Object, _visibility.Decider,
+        => new(secureOwner, new StubProbe(rights, SystemUserId), _membership.Object, _entities.Object, _visibility.Seam,
             new ConfigurationBuilder().AddInMemoryCollection(_settings).Build());
 
     private static DefaultHttpContext Http()
@@ -456,7 +456,7 @@ public class OfficeEditAccessServiceTests
     public async Task UnclassifiableContainer_GrantsNothing()
     {
         var sut = new Sut(new InvalidOperationException("Dataverse down"), new StubProbe(AccessRights.Write, SystemUserId),
-            _membership.Object, _entities.Object, _visibility.Decider, new ConfigurationBuilder().Build());
+            _membership.Object, _entities.Object, _visibility.Seam, new ConfigurationBuilder().Build());
 
         var result = await sut.PrepareAsync(DocumentId, SecureDrive, Http());
 
@@ -470,13 +470,13 @@ public class OfficeEditAccessServiceTests
         private readonly Exception? _fault;
 
         public Sut(OwningSecureRecord? owner, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities,
-            Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider visibility, IConfiguration configuration)
+            AppOnlyExternalVisibility visibility, IConfiguration configuration)
             : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities, visibility, configuration,
                 NullLogger<OfficeEditAccessService>.Instance)
             => _owner = owner;
 
         public Sut(Exception fault, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities,
-            Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider visibility, IConfiguration configuration)
+            AppOnlyExternalVisibility visibility, IConfiguration configuration)
             : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities, visibility, configuration,
                 NullLogger<OfficeEditAccessService>.Instance)
             => _fault = fault;

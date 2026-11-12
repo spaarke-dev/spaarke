@@ -41,7 +41,7 @@ public sealed record OfficeEditAccess(bool CanEdit, string Role);
 /// <para><b>A flagged-external caller never gets a container role</b> (uac-r2 task 191g, owner Q2 = b, design §3.12). A
 /// caller whose stored <c>sprk_isexternal</c> is true is routed to <see cref="PrepareFlaggedAsync"/>: with Write on the
 /// secure record, the record not Restricted (effective through filing) and the document externally visible
-/// (<see cref="ExternalVisibility"/>, through 191c's <see cref="ExternalVisibilityDecider"/>), the caller is granted a WRITE
+/// (<see cref="ExternalVisibility"/>, through 191h's public seam <see cref="AppOnlyExternalVisibility"/>), the caller is granted a WRITE
 /// permission on that ONE file (<see cref="SpeContainerMembershipService.GrantMarkedItemWriterAsync"/>), read back and
 /// recorded; otherwise view only. The item grant is off unless <see cref="FlaggedOfficeEditEnabledConfigKey"/> is true;
 /// off, a flagged caller gets view only (never a container role either way). A caller whose flag cannot be read gets no
@@ -68,16 +68,16 @@ public class OfficeEditAccessService
     private readonly CallerRecordAccessProbe _probe;
     private readonly SpeContainerMembershipService _membership;
     private readonly IGenericEntityService _entities;
-    private readonly Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider _visibility;
+    private readonly AppOnlyExternalVisibility _visibility;
     private readonly IConfiguration _configuration;
     private readonly ILogger<OfficeEditAccessService> _logger;
 
-    internal OfficeEditAccessService(
+    public OfficeEditAccessService(
         RecordContainerResolver containerResolver,
         CallerRecordAccessProbe probe,
         SpeContainerMembershipService membership,
         IGenericEntityService entities,
-        Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider visibility,
+        AppOnlyExternalVisibility visibility,
         IConfiguration configuration,
         ILogger<OfficeEditAccessService> logger)
     {
@@ -238,13 +238,11 @@ public class OfficeEditAccessService
             return new OfficeEditAccess(false, "none");
         }
 
-        ExternalVisibilityDecision decision;
-        bool faulted;
+        ExternalRowVisibility visibility;
+        (string Table, Guid Id)[] row = [("sprk_document", documentId)];
         try
         {
-            var result = await _visibility([("sprk_document", documentId)], ct).ConfigureAwait(false);
-            decision = result.For("sprk_document", documentId);
-            faulted = result.Faulted;
+            visibility = await _visibility(row, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -254,11 +252,11 @@ public class OfficeEditAccessService
         }
 
         // Only a decision that did not fault counts as Visible (a faulted one makes every row ReadFailed; trust nothing else in it).
-        if (faulted || !decision.IsVisible)
+        if (visibility.Faulted || !visibility.IsVisible("sprk_document", documentId))
         {
             _logger.LogInformation(
-                "[OFFICE-EDIT] Document {DocumentId}: not externally visible ({Verdict}, {Reason}, faulted={Faulted}); no item grant (view only).",
-                documentId, decision.Verdict, decision.Reason, faulted);
+                "[OFFICE-EDIT] Document {DocumentId}: not externally visible ({Summary}, faulted={Faulted}); no item grant (view only).",
+                documentId, visibility.Summary(row), visibility.Faulted);
             return new OfficeEditAccess(false, "none");
         }
 

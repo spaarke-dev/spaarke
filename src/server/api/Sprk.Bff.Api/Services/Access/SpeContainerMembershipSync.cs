@@ -32,7 +32,7 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <item><b>Item grants on secure containers</b> (uac-r2 task 191g, owner Q2 = b). The same pass also reads every
 /// <see cref="SpeContainerMembershipService.ItemWriterMarkerPrefix"/> marker (a flagged-external caller's write permission on
 /// ONE file) and removes it on the same positive answers, plus "the document is no longer externally visible"
-/// (<see cref="ExternalVisibility"/> through 191c's <see cref="ExternalVisibilityDecider"/>; Hidden, or an Undecided that is not
+/// (<see cref="ExternalVisibility"/> through 191h's public seam <see cref="AppOnlyExternalVisibility"/>; Hidden, or an Undecided that is not
 /// a failed read). An unknown answer keeps the grant this run and reports it. With
 /// <c>ExternalAccess:FlaggedOfficeEdit:Enabled</c> on, it also removes ANY container role a flagged-external user holds on a
 /// secure container (container-scoped, so their item grants stay).</item>
@@ -65,16 +65,16 @@ public class SpeContainerMembershipSync
     private readonly SpeContainerMembershipService _membership;
     private readonly ISecurableEntityRegistry _securableEntities;
     private readonly IDataverseRecordShareService _rights;
-    private readonly ExternalVisibilityDecider _visibility;
+    private readonly AppOnlyExternalVisibility _visibility;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SpeContainerMembershipSync> _logger;
 
-    internal SpeContainerMembershipSync(
+    public SpeContainerMembershipSync(
         IGenericEntityService dataverse,
         SpeContainerMembershipService membership,
         ISecurableEntityRegistry securableEntities,
         IDataverseRecordShareService rights,
-        ExternalVisibilityDecider visibility,
+        AppOnlyExternalVisibility visibility,
         IConfiguration configuration,
         ILogger<SpeContainerMembershipSync> logger)
     {
@@ -584,7 +584,7 @@ public class SpeContainerMembershipSync
     /// The external visibility of the documents item grants were made for (one batched decision), or <see langword="null"/>
     /// when the decision itself threw (every document is then unknown, never removed).
     /// </summary>
-    private async Task<ExternalVisibilityResult?> DecideDocumentsAsync(IReadOnlyList<Guid> documentIds, CancellationToken ct)
+    private async Task<ExternalRowVisibility?> DecideDocumentsAsync(IReadOnlyList<Guid> documentIds, CancellationToken ct)
     {
         try
         {
@@ -604,18 +604,16 @@ public class SpeContainerMembershipSync
     /// undecided parent, ...) → unknown: kept this run and reported, so an outage never becomes a revocation. Any other
     /// Undecided is structural (no root, filed too deep, ...) → remove. Visible → keep.
     /// </summary>
-    internal static Verdict DocumentVerdict(ExternalVisibilityResult? visibility, Guid documentId)
+    internal static Verdict DocumentVerdict(ExternalRowVisibility? visibility, Guid documentId)
     {
         if (visibility is null)
             return Verdict.Unknown;
-        var decision = visibility.For("sprk_document", documentId);
-        if (decision.IsHidden)
-            return Verdict.Remove;                       // a positive answer, even inside a faulted decision (the 065 rule)
-        if (decision.IsVisible && !visibility.Faulted)
+        var visible = visibility.IsVisible("sprk_document", documentId);
+        if (!visible && !visibility.IsUndecided("sprk_document", documentId))
+            return Verdict.Remove;                       // Hidden: a positive answer, even inside a faulted decision (the 065 rule)
+        if (visible && !visibility.Faulted)
             return Verdict.Keep;                         // Visible counts only from a decision that did not fault
-        return visibility.Faulted || ExternalTeamShareSynchronizer.IsTransient(decision.Reason)
-            ? Verdict.Unknown
-            : Verdict.Remove;
+        return visibility.MayAnswerLater("sprk_document", documentId) ? Verdict.Unknown : Verdict.Remove;
     }
 
     /// <summary>Remove on ANY positive answer; otherwise unknown if either is unknown; keep only when both keep.</summary>
