@@ -330,9 +330,12 @@ internal static class WorkforceRoleCeilingGate
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(required);
+        // An empty set is the callers' deny state (their `_ => Array.Empty<…>()` fallbacks), so it is refused before the
+        // ceiling is read — otherwise a caller the ceiling does not apply to (a systemuser, a CIAM partner) would be admitted.
+        if (required.Count == 0) return false;
         var ceiling = await CeilingForAsync(principal, privileges, ct).ConfigureAwait(false);
         return ceiling is null
-               || (ceiling.IsAvailable && required.Count > 0 && required.All(r => ceiling.Holds(r.Table, r.Rights)));
+               || (ceiling.IsAvailable && required.All(r => ceiling.Holds(r.Table, r.Rights)));
     }
 
     /// <summary>

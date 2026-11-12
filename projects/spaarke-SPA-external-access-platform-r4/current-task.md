@@ -10,7 +10,7 @@
 | **Task** | 018 — P1 deploy + E2E (`tasks/018-p1-deploy-dev-e2e.poml`) — PREP ONLY, nothing live |
 | **Step** | — |
 | **Status** | 001–007 ✅; Phase 1 code complete. Next is 018 (live: BFF deploy via uac-r2 + SPA dev deploy + E2E) |
-| **Next Action** | Gates in `notes/task-018-notes.md`: (1) owner decides PR #2681 ready + merge to master; (2) uac-r2's task-002 review (requested 2026-11-12); then the uac-r2 deploy request for the master SHA. SPA rollback target `b083d62183` |
+| **Next Action** | Gates in `notes/task-018-notes.md`: (1) owner decides PR #2681 ready + merge to master (UAC review done: uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1); then the uac-r2 deploy request for the master SHA. SPA rollback target `b083d62183` |
 
 ### Critical Context
 - Record view: `components/record/RecordTemplateModal.tsx`; sections in `record/sections/`, action hosts in `record/actions/`.
@@ -28,7 +28,6 @@
 - D-4 #2693: should Copy link carry `?customer={activeKey}`?
 - D-1 #2686: R4 follow-up task, or hand to the event/write-path owner?
 - D-2 #2687: the `Location` header contract choice.
-- 002 UAC review requested from uac-r2 2026-11-12 (four items); answer pending.
 - PR #2681: mark ready and merge to master (gate for 018)?
 
 ## Quick Reference

@@ -2,7 +2,7 @@
 
 - **Rigor:** FULL (tags bff-api, endpoints, authorization; `.cs` changes). **Model:** Opus @ high (sub-agent).
 - **Status:** completed 2026-11-11. Uncommitted — the main session verifies the build and commits after wave P1-A.
-- **UAC review: PENDING** (uac-r2 reviews FR-08 before any deploy; see "For uac-r2" below).
+- **UAC review: uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1** (see "For uac-r2" below).
 
 ## What changed
 
@@ -69,7 +69,16 @@ Results (2026-11-11, final source):
 - K1 the message GET handler's reader pass-through is not HTTP-tested (no HTTP fixture serves the message GET); the core is tested over the wire.
 - Defer D-1/D-2/D-3 (`notes/defer-issues.md`) — **GitHub issues PENDING, main session to file**.
 
-## For uac-r2 (review draft — PENDING)
+## For uac-r2 (review — PASS 2026-11-12, after F4-1)
+
+**Result:** uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1. **F4-1:** `WorkforceRoleCeilingGate.AdmitsAsync` admitted an
+empty requirement set for callers the ceiling does not apply to (systemuser, CIAM partner), so the three
+`_ => Array.Empty<…>()` deny fallbacks in `ExternalProjectDataEndpoints.cs` gave `canCreate: true`. Fixed: an empty set
+returns false before the ceiling read. Test pair in `WorkforceCeilingEndpointFilterTests` (`AdmitsAsync_EmptySetForASystemuser_ReturnsFalse`
+must-fire, `AdmitsAsync_NonEmptySetForASystemuser_ReturnsTrue` must-not-fire); mutation-checked (removing the guard fails
+the must-fire test). Re-run: external-access unit tests 6373/6373, ceiling/route-ledger arch tests 104/104.
+
+Items reviewed:
 
 1. The two new routes `POST /api/v1/external/{matters|workassignments}/{id}/events`: filters, `RightsForRootWriteAsync` with `CreateEventPrivilege`, ceilings `CreateMatterEvent` / `CreateWorkAssignmentEvent` (sprk_event Create + root AppendTo), owner resolution, 503 path.
 2. `canCreate` for every caller on the to-do, event, message and documents lists — including the workforce-ceiling read on each list and that each list uses its own create route's ceiling.

@@ -8,7 +8,7 @@ Status: **prep only, nothing live has run.** Rigor STANDARD; prescriptive steps;
 |---|------|-----------------|
 | 1 | Tasks 002–007 **merged to master** (POML gate; the BFF deploy is of a master SHA) | ❌ PR #2681 is a draft; mergeable; 28 checks pass, 14 pending, 0 failing at prep time. Branch 2 behind / 42 ahead of master. Needs the owner's call to mark ready + merge (`/merge-to-master`). |
 | 2 | `85fbba3f64` in the deployed SHA | ✅ in master already (and in the branch) |
-| 3 | **UAC review of task 002** (FR-08 routes, list `canCreate`, message gate refactor, delete-409 body) | ❌ PENDING — review request sent to uac-r2 on 2026-11-12 (four items, `notes/task-002-notes.md` "For uac-r2") |
+| 3 | **UAC review of task 002** (FR-08 routes, list `canCreate`, message gate refactor, delete-409 body) | ✅ uac-r2 PASS (FR-08, FR-24), 2026-11-12, after F4-1 (`notes/task-002-notes.md` "For uac-r2"). Merge order with ebilling-r1: whoever merges second re-runs the external-access and route-ledger arch tests |
 | 4 | Owner **"go BFF deploy &lt;master sha&gt;"** given directly in uac-r2's session | ❌ needs the merge SHA first |
 | 5 | Peer OKs, Router green, content checks, ebilling schema verify, app settings | uac-r2 runs these (orchestrator); R4 gives its peer OK |
 | 6 | uac-r2 read-back + 30-minute gate PASS, 0 new 5xx on external routes | — |
