@@ -28,6 +28,26 @@ internal static class AssignedAccessTestDoubles
     internal const string TestTenant = "00000000-0000-0000-0000-0000000000aa";
     internal static readonly DateOnly Today = new(2026, 10, 3);
 
+    /// <summary>
+    /// Task 193: who a contact represents, through the ONE production rule (<see cref="ContactUserRepresentation"/>) over
+    /// <paramref name="links"/>. The personal To Do assignee's rigs seed only the link, so by default every contact reads as
+    /// ACTIVE with no oid binding (a contact never onboarded) — the world those rigs describe. A test about the contact
+    /// itself (inactive, oid-bound) passes its own <paramref name="identities"/>.
+    /// </summary>
+    internal static ContactUserRepresentation Representation(AssignedAccessStore links, IContactIdentityStore? identities = null)
+        => new(identities ?? ActiveContactsWithoutBinding(), links,
+            new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None));
+
+    /// <summary>An identity store whose every contact is active and carries no oid binding.</summary>
+    internal static IContactIdentityStore ActiveContactsWithoutBinding()
+    {
+        var identities = new Moq.Mock<IContactIdentityStore>();
+        identities
+            .Setup(i => i.GetContactAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((Guid id, CancellationToken _) => Task.FromResult(ContactLookup.Of(new ContactBindingRow(id, 0, null, null))));
+        return identities.Object;
+    }
+
     /// <summary>A fixed clock (UTC noon on <see cref="Today"/>).</summary>
     internal sealed class FixedTimeProvider : TimeProvider
     {
@@ -637,6 +657,31 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 114 verifier V3: a root-owner read fails (every other query still answers).</summary>
         public bool FailRootOwnerQueries { get; set; }
 
+        /// <summary>Task 193: every query selecting EXACTLY these columns throws (e.g. the share list's name read).</summary>
+        public string? FailQueriesSelecting { get; set; }
+
+        /// <summary>
+        /// Task 193 G1: the internal user each grant row is PAIRED with (<c>sprk_pairedsystemuser</c>) — written by a create's or
+        /// an update's <c>sprk_PairedSystemUser@odata.bind</c>, answered to a read that selects the column. Kept beside the rows
+        /// (not on <see cref="ExternalGrantRow"/>), as production reads it only in its own one-column read.
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> PairedUsers { get; } = new();
+
+        /// <summary>Task 193 G1: the pairing column is not provisioned — a grant read selecting it answers 400, as Dataverse does.</summary>
+        public bool PairingColumnMissing { get; set; }
+
+        /// <summary>Task 193 G1: a grant read selecting the pairing column fails for another reason (503).</summary>
+        public bool FailPairingReads { get; set; }
+
+        /// <summary>
+        /// Master's fix round 3g rule: a pairing read answers its rows WITHOUT the pairing column (not returned, rather than
+        /// null). An absent lookup is unreadable, never "not paired".
+        /// </summary>
+        public bool OmitPairingColumn { get; set; }
+
+        /// <summary>Task 193 G2: every grant-row DEACTIVATION (an update to statecode 1) fails (503) and changes nothing.</summary>
+        public bool FailDeactivations { get; set; }
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -735,6 +780,9 @@ internal static class AssignedAccessTestDoubles
             if (FailQueries)
                 throw new HttpRequestException("Simulated Dataverse query failure.");
 
+            if (FailQueriesSelecting is { } failing && select == failing)
+                throw new HttpRequestException("Simulated Dataverse query failure for this select.");
+
             // As the Web API client does: a cancelled token ends the read.
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -743,6 +791,37 @@ internal static class AssignedAccessTestDoubles
                 lock (_gate)
                     GrantQueryTops.Add(top);
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
+
+                if (select is not null && select.Contains(ExternalGrantLifecycle.PairedSystemUserValueProperty, StringComparison.Ordinal))
+                {
+                    if (PairingColumnMissing)
+                        throw new HttpRequestException(
+                            "Simulated 400: Could not find a property named 'sprk_pairedsystemuser'.", null, System.Net.HttpStatusCode.BadRequest);
+                    if (FailPairingReads)
+                        throw new HttpRequestException(
+                            "Simulated Dataverse read failure.", null, System.Net.HttpStatusCode.ServiceUnavailable);
+
+                    // Task 193 G2: "… and _sprk_pairedsystemuser_value eq {user}" keeps the rows paired with that user.
+                    var pairedFilter = filter is null ? null : Regex.Match(filter,
+                        ExternalGrantLifecycle.PairedSystemUserValueProperty + @" eq ([0-9a-fA-F-]{36})");
+                    var paired = MatchGrants(filter)
+                        .Where(r => pairedFilter is not { Success: true }
+                                    || (PairedUsers.TryGetValue(r.Id, out var pu) && pu == Guid.Parse(pairedFilter.Groups[1].Value)))
+                        .Select(r =>
+                        {
+                            var row = new Dictionary<string, object?>
+                            {
+                                ["sprk_externalrecordaccessid"] = r.Id,
+                                [ExternalGrantLifecycle.PairedSystemUserValueProperty] = PairedUsers.TryGetValue(r.Id, out var u) ? u : null,
+                                ["statecode"] = r.StateCode,
+                            };
+                            if (OmitPairingColumn)
+                                row.Remove(ExternalGrantLifecycle.PairedSystemUserValueProperty);
+                            return row;
+                        })
+                        .ToList();
+                    return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(paired))!);
+                }
             }
 
             if (FailSystemUserQueries && entitySetName == "systemusers")
@@ -894,12 +973,17 @@ internal static class AssignedAccessTestDoubles
                 Creates.Add((entitySetName, JsonSerializer.Serialize(payload)));
             }
 
+            if (BoundId(payload, $"{ExternalGrantLifecycle.PairedSystemUserNavigationProperty}@odata.bind") is { } pairedWith)
+                PairedUsers[row.Id] = pairedWith;
+
             return Task.FromResult(row.Id);
         }
 
         public override Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default)
         {
             var json = JsonSerializer.Serialize(entity);
+            if (FailDeactivations && entitySetName == GrantSet && json.Contains("\"statecode\":1", StringComparison.Ordinal))
+                throw new HttpRequestException("Simulated Dataverse write failure.", null, System.Net.HttpStatusCode.ServiceUnavailable);
             lock (_gate)
             {
                 Updates.Add((entitySetName, id, json));
@@ -915,6 +999,12 @@ internal static class AssignedAccessTestDoubles
                 var expiry = Regex.Match(json, @"""sprk_expiresdate"":""(\d{4}-\d{2}-\d{2})""");
                 if (expiry.Success)
                     row.ExpiresDate = DateOnly.ParseExact(expiry.Groups[1].Value, "yyyy-MM-dd", CultureInfo.InvariantCulture);
+                var paired = Regex.Match(json, @"""sprk_PairedSystemUser@odata.bind"":""/systemusers\(([0-9a-fA-F-]{36})\)""");
+                if (paired.Success)
+                    PairedUsers[id] = Guid.Parse(paired.Groups[1].Value);
+                // Task 193 G4a: a confirmed paired end clears the pairing (an unbind).
+                if (json.Contains("\"sprk_PairedSystemUser@odata.bind\":null", StringComparison.Ordinal))
+                    PairedUsers.TryRemove(id, out _);
             }
 
             return Task.CompletedTask;
@@ -1295,7 +1385,25 @@ internal static class AssignedAccessTestDoubles
 
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
-            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Ownership, OwnerPrivileges, Scopes);
+            Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Invites, Notifier, Ownership, OwnerPrivileges, Scopes,
+            HostServices);
+
+        /// <summary>
+        /// Task 193 G3a: the host scope's provider the materializer resolves the grant revoke from (as production gives a scoped
+        /// service its scope's); <c>null</c> (no host) by default.
+        /// </summary>
+        public IServiceProvider? HostServices { get; set; }
+
+        /// <summary>
+        /// Task 193: the PRODUCTION share-or-grant decision /grant and /invite-and-grant take for a contact grantee, over this
+        /// harness's identity store, ledger store (who a contact represents), flags, share table, cache, child synchronizer
+        /// and No Access guard. A contact the harness links to a user is shared with, so seed that user in
+        /// <see cref="GrantTable.SystemUsers"/> (<see cref="SystemUser"/>) for the share core to read.
+        /// </summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare ContactShare => new(
+            new ContactUserRepresentation(Identities, Store, Participations), SharesOverride ?? Shares, Cache.Mock.Object,
+            Children, Guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
+            Identities, Ownership, OwnerPrivileges, Time, WorkforceIdentity);
 
         /// <summary>Task 181: every <c>appnotification</c> the grant notifier wrote through task 100's NotificationService.</summary>
         public ConcurrentQueue<Microsoft.Xrm.Sdk.Entity> SentNotifications { get; } = new();
@@ -1386,7 +1494,42 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public RestrictedExternalShareRemover RestrictedRemover => new(
             Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease, WorkforceIdentity,
-            NullLogger<RestrictedExternalShareRemover>.Instance);
+            NullLogger<RestrictedExternalShareRemover>.Instance, PairedGrants);
+
+        /// <summary>Task 193 G2b: the grant revoke the Restricted remover is given; none by default (the shares alone, as before).</summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService? PairedGrants { get; set; }
+
+        /// <summary>
+        /// Task 193 G2b: the PRODUCTION grant revoke over this harness's grant table, flags and materializer, for a record on
+        /// the shared business-unit container (no SPE permission of its own to remove).
+        /// </summary>
+        /// <param name="containers">Task 193 G4a: the container resolver the revoke's file step uses (default: the record is on
+        /// the shared business-unit container, so the file step has nothing to remove). A throwing one makes the file step
+        /// undecidable (<c>SpeContainerRevokeOutcome.Failed</c>).</param>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService PairedGrantRevokeFor(
+            string logicalName, Guid rootId, ILogger? logger = null,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver? containers = null) => new(
+            Grants,
+            new SpeContainerMembershipService(
+                TestInfrastructure.TestSpeOwnership.AllowAll(Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
+                NullLogger<SpeContainerMembershipService>.Instance),
+            Participations, Materializer, containers ?? TestRecordContainerResolver.ForNonSecureRecord(logicalName, rootId), Time, null,
+            logger ?? NullLogger.Instance);
+
+        /// <summary>
+        /// Task 193 G2b/G3a: a host scope whose provider resolves ONE <see cref="PairedGrantRevokeFor"/> for the pass (the
+        /// materializer reaches the grant revoke through its scope's provider, as in production); <paramref name="logger"/>
+        /// is the revoke's.
+        /// </summary>
+        public void HostResolvingPairedGrantRevoke(string logicalName, Guid rootId, ILogger? logger = null)
+        {
+            var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+            Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(
+                services, _ => PairedGrantRevokeFor(logicalName, rootId, logger));
+            var root = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+            HostServices = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(root).CreateScope().ServiceProvider;
+        }
 
         /// <summary>r3 task 048: the customer home directories the remover also clears root sets under (none by default).</summary>
         public IOptionsMonitor<WorkforceIdentityOptions> WorkforceIdentity { get; set; } = IdentityBindingTestKit.Tenants();
@@ -1468,6 +1611,12 @@ internal static class AssignedAccessTestDoubles
     /// represents anyone, and a share's notification is written to an entity seam nobody reads. It never throws.
     /// </summary>
     internal static Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier InertNotifier() => new Harness().Notifier;
+
+    /// <summary>
+    /// Task 193: the share-or-grant decision over an EMPTY world, for handler tests whose contacts live in another store: no
+    /// contact is found, so none represents anyone and the grant path answers, as it does for an unlinked contact.
+    /// </summary>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.ContactInternalUserShare InertContactShare() => new Harness().ContactShare;
 
     /// <summary>
     /// Task 185 slice E: an invite service over an EMPTY world, for handler tests that are not about the invite: no contact

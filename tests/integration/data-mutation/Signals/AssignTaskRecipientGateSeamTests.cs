@@ -273,7 +273,9 @@ public sealed class AssignTaskRecipientGateSeamTests
         identities.Setup(i => i.GetContactAsync(Contact, It.IsAny<CancellationToken>())).ReturnsAsync(ContactLookup.Of(ExternalContact()));
         var sets = Grants(false, Matter);
         var service = data.NewService();
-        var gate = Gate(accessibleSet: sets.Object, portalData: service, identities: identities.Object);
+        var gate = Gate(accessibleSet: sets.Object, portalData: service, identities: identities.Object,
+            participations: new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(
+                Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.None)); // task 193: ContactUserRepresentation needs it
         var core = new DecisionCoreRecord("sprk_matter", Matter);
 
         (await gate.DecideAsync(Contact, core, alsoSecure, null, CancellationToken.None))

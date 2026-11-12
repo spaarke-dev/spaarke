@@ -32,7 +32,7 @@ if (-not ('EscalationException' -as [type])) {
 # Pull the functions under test out of the script (it cannot be dot-sourced: it runs on load).
 $errs = $null; $tokens = $null
 $script:Ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptPath, [ref]$tokens, [ref]$errs)
-foreach ($name in 'Get-FilingCores', 'Get-CascadeDeleteOnly', 'Get-CascadeNone', 'Test-KnownCascadeDrift', 'Get-CascadeFixBody', 'Get-ParentalPlanProblems', 'Get-ParentalProblems', 'Get-OtherParentalRelationships', 'Assert-NoOtherParental', 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedDelete', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'New-CreatorSpec', 'Resolve-Plan', 'Get-RequiredColumnSpecs', 'Get-RequiredLevelProblem', 'Get-PublishEntities', 'Get-MissingOptionValue') {
+foreach ($name in 'Get-FilingCores', 'Get-CascadeDeleteOnly', 'Get-CascadeNone', 'Test-KnownCascadeDrift', 'Get-CascadeFixBody', 'Get-ParentalPlanProblems', 'Get-ParentalProblems', 'Get-OtherParentalRelationships', 'Assert-NoOtherParental', 'New-LookupSpec', 'Get-NewTableRel', 'Get-ExpectedDelete', 'Get-ExpectedCascade', 'Get-CascadeMismatches', 'New-CreatorSpec', 'Resolve-Plan', 'Get-RequiredColumnSpecs', 'Get-RequiredLevelProblem', 'Get-PublishEntities', 'Get-MissingOptionValue', 'Get-MarkerColumnTexts', 'Get-DescriptionProblem', 'Get-MemoProblem') {
     $fn = $script:Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true) | Select-Object -First 1
     Invoke-Expression $fn.Extent.Text
 }
@@ -195,17 +195,17 @@ Describe 'Resolve-Plan (the plan follows the parsed list)' {
         $keys = @($threeSecured | ForEach-Object { "$($_.Table).$($_.Column)" })
         foreach ($k in 'sprk_ruleset.sprk_matter', 'sprk_ruleset.sprk_project', 'sprk_ruleset.sprk_workassignment', 'sprk_ruleset.sprk_scope', 'sprk_ruleset.sprk_firm', 'sprk_ruleset.sprk_procedure',
             'sprk_procedure.sprk_appliesto', 'sprk_procedure.sprk_firm', 'sprk_procedure.sprk_status',
-            'sprk_procedureversion.sprk_effectivefrom', 'sprk_procedureversion.sprk_effectiveto', 'sprk_procedureversion.sprk_status', 'sprk_procedureversion.sprk_notconverted') {
+            'sprk_procedureversion.sprk_effectivefrom', 'sprk_procedureversion.sprk_effectiveto', 'sprk_procedureversion.sprk_status', 'sprk_procedureversion.sprk_notconverted', 'sprk_procedureversion.sprk_notconvertedlist') {
             ($keys -contains $k) | Should Be $true
         }
     }
-    It 'secures the five columns ontology F1-1 added, and the secured set is exactly 18 + one per core table beyond the three' {
+    It 'secures the five columns ontology F1-1 added, and the secured set is exactly 19 (EB-D-211 added the list memo) + one per core table beyond the three' {
         $keys = @($threeSecured | ForEach-Object { "$($_.Table).$($_.Column)" })
         foreach ($k in 'sprk_procedure.sprk_area', 'sprk_procedure.sprk_proceduretype', 'sprk_policyversion.sprk_procedureversion', 'sprk_policyversion.sprk_publishstate', 'sprk_ratecard.sprk_procedureversion') {
             ($keys -contains $k) | Should Be $true
         }
-        $keys.Count | Should Be 18
-        @($keys | Select-Object -Unique).Count | Should Be 18
+        $keys.Count | Should Be 19
+        @($keys | Select-Object -Unique).Count | Should Be 19
     }
     It 'secures only columns the plan creates (with the right kind) plus the two existing rule set columns sprk_scope and sprk_firm' {
         foreach ($sec in $threeSecured) {
@@ -276,6 +276,60 @@ Describe 'Get-CascadeMismatches (the verify comparison)' {
     It 'fires when a member cannot be read back (must-fire)' {
         $actual = $exact.Clone(); $actual.Remove('Share')
         @(Get-CascadeMismatches $actual $exact).Count | Should Be 1
+    }
+}
+
+Describe 'EB-D-211 drafted marker and not-converted list (task 116)' {
+    $script:Fixture = @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+    Resolve-Plan @('sprk_matter', 'sprk_project', 'sprk_workassignment')
+    $m = Get-MarkerColumnTexts
+    It 'plans sprk_notconvertedlist as a memo on the Procedure Version, field-secured like sprk_notconverted' {
+        @($script:Columns | Where-Object { $_.Table -eq 'sprk_procedureversion' -and $_.Column -eq 'sprk_notconvertedlist' -and $_.Type -eq 'Memo' }).Count | Should Be 1
+        @($script:Secured | Where-Object { $_.Table -eq 'sprk_procedureversion' -and $_.Column -eq 'sprk_notconvertedlist' -and $_.Kind -eq 'Memo' }).Count | Should Be 1
+        @($script:Secured | Where-Object { $_.Table -eq 'sprk_procedureversion' -and $_.Column -eq 'sprk_notconverted' -and $_.Kind -eq 'Boolean' }).Count | Should Be 1
+    }
+    It 'keeps the marker Two Options (never retyped to memo)' {
+        (@($script:Columns | Where-Object { $_.Column -eq 'sprk_notconverted' } | ForEach-Object { $_.Type }) -join ',') | Should Be 'Boolean'
+    }
+    It 'caps the list at 100000 characters, like sprk_ruleset.sprk_notconverted' {
+        $m.ListMax | Should Be 100000
+    }
+    It 'describes the marker as drafted and written last, and the list as written before it' {
+        ($m.Marker -match 'Drafted marker') | Should Be $true
+        ($m.Marker -match 'writes Yes LAST') | Should Be $true
+        ($m.Marker -match 'sprk_notconvertedlist') | Should Be $true
+        ($m.List -match 'before the drafted marker') | Should Be $true
+        ($m.Marker -match 'could not convert part') | Should Be $false
+    }
+    It 'the script creates the memo with these texts and sets the marker Description on an existing column' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text.Contains("Add-Column 'sprk_notconvertedlist' (New-MemoDef 'sprk_NotConvertedList' 'Not Converted List' `$marker.List `$marker.ListMax) 'Memo'") | Should Be $true
+        $text.Contains("Set-ColumnDescription `$Version 'sprk_notconverted' 'Boolean' `$marker.Marker") | Should Be $true
+        $text.Contains("`$_ -like 'description *'") | Should Be $true
+    }
+    It 'the verify reads both columns back' {
+        $text = Get-Content -LiteralPath $script:ScriptPath -Raw
+        $text.Contains("Get-DescriptionProblem `$Version 'sprk_notconverted' `$marker.Marker") | Should Be $true
+        $text.Contains("Get-MemoProblem `$Version 'sprk_notconvertedlist' `$marker.ListMax `$marker.List") | Should Be $true
+    }
+    Context 'Get-DescriptionProblem / Get-MemoProblem (verify comparisons)' {
+        $ok = [pscustomobject]@{ MaxLength = 100000; Description = [pscustomobject]@{ UserLocalizedLabel = [pscustomobject]@{ Label = $m.List } } }
+        It 'is silent on the wanted memo (must-not-fire)' {
+            (Get-MemoProblem 'sprk_procedureversion' 'sprk_notconvertedlist' 100000 $m.List $ok) | Should BeNullOrEmpty
+        }
+        It 'fires on another MaxLength (must-fire)' {
+            $short = [pscustomobject]@{ MaxLength = 2000; Description = $ok.Description }
+            ((Get-MemoProblem 'sprk_procedureversion' 'sprk_notconvertedlist' 100000 $m.List $short) -match 'MaxLength is 2000') | Should Be $true
+        }
+        It 'fires on a missing column (must-fire)' {
+            (Get-MemoProblem 'sprk_procedureversion' 'sprk_notconvertedlist' 100000 $m.List $null) | Should Not BeNullOrEmpty
+        }
+        It 'fires on the old marker Description (must-fire) and is silent on the new one (must-not-fire)' {
+            $old = [pscustomobject]@{ Description = [pscustomobject]@{ UserLocalizedLabel = [pscustomobject]@{ Label = 'Yes when drafting could not convert part of this version''s document into rules.' } } }
+            $new = [pscustomobject]@{ Description = [pscustomobject]@{ UserLocalizedLabel = [pscustomobject]@{ Label = $m.Marker } } }
+            (Get-DescriptionProblem 'sprk_procedureversion' 'sprk_notconverted' $m.Marker $old) | Should Not BeNullOrEmpty
+            (Get-DescriptionProblem 'sprk_procedureversion' 'sprk_notconverted' $m.Marker $new) | Should BeNullOrEmpty
+        }
     }
 }
 

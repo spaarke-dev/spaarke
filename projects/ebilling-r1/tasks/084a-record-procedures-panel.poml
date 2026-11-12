@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084a" project="ebilling-r1">
+  <metadata>
+    <title>Procedures on the record (B1): the read-only Billing-tab panel, with firm and date pickers, both lists, filters, marks and the gap bar</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
+    <gate>084 merged into work (its routes and DTO notes are the contract this panel renders).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New React code page (.tsx) with fluent-ui tags.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single code page following a finished prototype and an existing form-embedded code page (InvoiceFiles).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>084b–084d extend the same new code page; they run after it in order.</parallel-reason>
+    <deps>084</deps>
+    <tags>frontend, react, typescript, fluent-ui, testing</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build a new code page, hosted on the Billing tab of the matter, project and work assignment main forms, that shows the record's Procedures and rules in force from 084's routes, read-only, matching the prototype's panel. The wizards (084b–084d) come later; in this task a row click opens nothing.</prompt>
+
+  <role>SPAARKE platform developer. Expert in React code pages with Fluent UI v9 and @spaarke/ui-components.</role>
+
+  <goal>On any of the three core records, a user with Read sees the Procedures card: firm picker (billing firm first, then firms that have invoiced the record), work-date picker (default today), the gap bar when an invoice for that firm and date would be held, and two tabs, Procedures (n) and Rules in force (n), each with count cards that filter and rows that carry one state badge. Excluded and displaced rows are dimmed. A caller who cannot read the record sees the same not-available message as for a missing record.</goal>
+
+  <context>
+    <background>EB-D-217 (owner, 2026-11-11). The prototype is the visual and behavioural spec: spaarke-prototype/projects/ebilling.r1, README "Procedure review on a record (O-14), first cut", src/procedures/ProceduresPanel.tsx, parts.tsx, types.ts, screenshots/procedures/p01–p20. The prototype's resolve.ts is a client-side stand-in and is NOT ported: every list comes from 084's routes. Never import from the prototype repo.</background>
+    <relevant-files>
+      <file role="new">src/solutions/RecordProcedures/ (package.json, vite.config.ts, index.html, src/main.tsx, src/components/ProceduresPanel.tsx, src/components/ProcedureList.tsx, src/components/RuleList.tsx, src/services/recordProceduresApi.ts, src/__tests__/)</file>
+      <file role="canonical-reference">src/solutions/InvoiceFiles/ (form-embedded code page: setup, auth, record id from the form, tests)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/ (count cards that filter)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx (one badge per state)</file>
+      <file role="canonical-reference">src/solutions/RuleReview/src/components/RuleSetListView.tsx (list layout, tokens)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="084" status="pending">The two read routes and their DTO notes (questions a–g).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021, ADR-012">Every component in src/solutions/RecordProcedures uses Fluent v9 semantic tokens (dark mode) and shared components first (ConsoleKit count cards, StatusBadge); no new npm package; npm install --legacy-peer-deps --no-audit --no-fund.</constraint>
+    <constraint source="ADR-028, DATA-ACCESS-DECISION-CRITERIA">Every read goes through 084's BFF routes with @spaarke/auth authenticatedFetch; no Xrm.WebApi reads of Procedure, override or rule tables.</constraint>
+    <constraint source="project (root CLAUDE.md §17, SPAARKE-SIDE-PANE-NAVIGATION)">Read docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md before creating the code page and apply its standard code-page build step.</constraint>
+    <constraint source="project (CLAUDE.md §3, 2026-10-15 pipeline rule)">This task does not edit src/dataverse/solutions/SpaarkeMaster/**. Placing the web resource on the three forms' Billing tab is task 112's (deploy); record the web resource name and the form placement 112 needs in notes/084-procedure-review-ui.md.</constraint>
+    <constraint source="project">The panel is read-only in this task: no route of 089 is called, and rows have no buttons (the prototype's row-click opens the wizard in 084b).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/ebilling-r1/notes/084-procedure-review-ui.md (084's DTO notes)</file>
+    </files>
+    <patterns>
+      <pattern name="Form-embedded code page" location="src/solutions/InvoiceFiles/src/main.tsx">Record id from the form, auth bootstrap, theme.</pattern>
+      <pattern name="Count cards that filter" location="src/client/shared/Spaarke.UI.Components/src/components/ConsoleKit/">The Console shape the prototype uses.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Scaffold src/solutions/RecordProcedures from InvoiceFiles; API client for 084's routes.</step>
+    <step order="2">Panel: pickers, gap bar with Show filter, two tabs with count cards, rows with one badge each; not-available state; 503 procedures.unavailable shown as "Procedures cannot be shown right now", never a partial list.</step>
+    <step order="3">Tests (jest) for list rendering, filters, the not-available and unavailable states; npm run build.</step>
+    <step order="4">Record the web resource name and the form placement 112 needs in notes/084-procedure-review-ui.md.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If 084's DTOs lack a field the prototype's panel shows, STOP and amend 084's routes in a fix commit (with 084's tests) rather than computing it client-side.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>RuleReview (src/solutions/RuleReview) lists rule sets for billing admins, without a record; InvoiceReview shows findings per invoice; no surface shows a record's Procedures or rules in force.</existing>
+    <extension>No: RuleReview is an admin page keyed by rule set, and this panel is hosted on three core-record forms keyed by the record; both share the same shared components instead.</extension>
+    <cost-of-doing-nothing>089's pins, exclusions and rule changes stay invisible to users, so O-3 and O-9 fail: no one can see which rules will judge a record's invoices.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Procedures list">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={matter-id}</url>
+      <steps><step>Open a matter with sprk_billingfirm set and one manual assignment pinned to an older version; open the Billing tab</step></steps>
+      <expected>The firm's and all-records Procedures and the manual one are listed with their source; the pinned one shows "pinned to vN, vM available"; no console errors</expected>
+    </test>
+    <test name="Rules in force marks and filters">
+      <steps><step>Pick the firm and a date; open Rules in force on a record with an excluded rule and a changed rule; click the Excluded and Changed here count cards</step></steps>
+      <expected>Excluded shows an Excluded badge (dimmed row), the record rule a Changed badge, a record rule whose base has a newer version a Stale badge; each count card filters to its rows</expected>
+    </test>
+    <test name="Gap bar">
+      <steps><step>Open the work assignment filed under two parents with conflicting pins</step></steps>
+      <expected>The gap bar shows the conflicting-pins gap; Show filters to the Procedure that causes it</expected>
+    </test>
+    <test name="No access">
+      <steps><step>Sign in as a user without Read on the record and open the Billing tab</step></steps>
+      <expected>The same not-available message as for a missing record; no Procedure data appears</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark theme; repeat the first two tests</step></steps>
+      <expected>All colours from Fluent v9 semantic tokens; badges and text legible</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install, build, test</tool>
+    <tool name="ui-test">browser checks after 112 deploys</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/RecordProcedures/**</output>
+    <output type="test">src/solutions/RecordProcedures/src/__tests__/**</output>
+    <output type="docs">projects/ebilling-r1/notes/084-procedure-review-ui.md (web resource name, form placement for 112)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With 084's routes mocked, the panel renders both lists with counts, and each count card filters its tab to exactly its rows.</criterion>
+    <criterion testable="true">Changing firm or date re-reads both routes with the new firmId and date; the firm picker offers the billing firm first, then firms that have invoiced the record.</criterion>
+    <criterion testable="true">A 404 from either route shows the not-available message; a 503 procedures.unavailable shows the unavailable message; neither shows any list rows (negative).</criterion>
+    <criterion testable="true">No row has a button and no 089 route is called (negative).</criterion>
+    <criterion testable="true">npm run build succeeds with no new package; no SpaarkeMaster file is changed.</criterion>
+    <criterion testable="true">The ui-tests above pass after 112 deploys, including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prototype mock records (Matter 2026-LIT-4471, Project PRJ-20418, WA-30552) list every case of §6–7; mirror them as jest fixtures. Deployment: 112 (it now depends on 084 and 084a–084d).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

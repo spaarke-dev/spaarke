@@ -297,7 +297,7 @@ When adding a new `INodeExecutor`:
 ### Cross-references
 
 - **Requirement**: spec.md FR-16 (typed schemas) + Invariant 5 (executor-as-schema-authority)
-- **ADRs**: [ADR-010 DI Minimalism](../adr/ADR-010-di-minimalism.md) (singleton schemas, zero DI deps), [ADR-013 BFF AI Architecture](../adr/ADR-013-bff-ai-architecture.md) (endpoint placement on BFF, not a separate AI microservice)
+- **ADRs**: [ADR-010 DI Minimalism](../adr/ADR-010-di-minimalism.md) (singleton schemas, zero DI deps), [ADR-013 BFF AI Architecture](../adr/ADR-013-ai-architecture.md) (endpoint placement on BFF, not a separate AI microservice)
 - **Pattern**: [`.claude/patterns/ai/node-executor-authoring.md`](../../.claude/patterns/ai/node-executor-authoring.md) — full executor authoring pointer
 - **Consumer (Wave 8 task 083)**: `src/client/code-pages/PlaybookBuilder/src/**` — canvas loads schemas at mount, caches in-memory for the session, renders typed forms per node configuration
 - **Design history**: [`projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md`](../../projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md)
@@ -312,7 +312,7 @@ When adding a new `INodeExecutor`:
 
 ## Scope Resolution
 
-> **Moved**: scope resolution methods, scope types, ownership prefixes, and `$choices` resolution detail have been moved. Runtime semantics (advisory-not-enforcing) live in [`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md) §6. Config-bag boundary (where scopes belong: Home D N:N relationships, not inline JSON) lives in [`ai-architecture-actions-nodes-scopes.md`](ai-architecture-actions-nodes-scopes.md). `$choices` schema reference lives in [`ai-guide-jps-authoring.md`](../guides/ai-guide-jps-authoring.md).
+> **Moved**: scope resolution methods, scope types, ownership prefixes, and `$choices` resolution detail have been moved. Runtime semantics (advisory-not-enforcing) live in [`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md) §6. Config-bag boundary (where scopes belong: Home D N:N relationships, not inline JSON) lives in [`ai-architecture-actions-nodes-scopes.md`](ai-architecture-actions-nodes-scopes.md). `$choices` schema reference lives in [`ai-guide-jps-authoring.md`](../guides/JPS-AUTHORING-GUIDE.md).
 
 ---
 

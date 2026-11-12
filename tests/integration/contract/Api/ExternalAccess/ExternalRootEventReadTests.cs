@@ -442,7 +442,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                         .Build(),
                     new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
                     NullLogger<ExternalDataService>.Instance,
-                    Data.FilingReader));
+                    Data.FilingReader,
+                    visibility: Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible));
             });
         }
     }
@@ -767,7 +768,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// narrowed (the fail-closed default).
         /// </summary>
         public ExternalDataService NewService(
-            bool withFilingReader = true, Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null) => new(
+            bool withFilingReader = true, Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility? visibility = null) => new(
             new HttpClient(this),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
@@ -776,7 +778,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             NullLogger<ExternalDataService>.Instance,
             withFilingReader ? FilingReader : null,
             columns: null,
-            identity: identity);
+            identity: identity,
+            visibility: visibility ?? Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible);
 
         /// <summary>
         /// Task 188: seeds a communication as the 065 rule reads it: <c>sprk_isinternalonly</c> (<c>null</c> stays null, which

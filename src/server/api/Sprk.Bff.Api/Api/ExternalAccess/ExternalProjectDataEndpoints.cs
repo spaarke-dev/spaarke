@@ -2734,6 +2734,19 @@ public static class ExternalProjectDataEndpoints
                 return DenyTodoWrite();
         }
 
+        // uac-r2 task 191h fix round 1 (F1): the same rule for THE external visibility predicate. A to-do the external lists hide
+        // (about an internal-only communication, under a Restricted root, Undecided) is refused with the same response; a decision
+        // that could not be made is the 503. An internal systemuser is not asked.
+        switch (await dataService.CheckExternalVisibilityAsync(ExternalDataService.DeletableKind.Todo, id, callerContext, ct))
+        {
+            case ExternalDataService.LiveParentDecision.Readable:
+                break;
+            case ExternalDataService.LiveParentDecision.Unavailable:
+                return TodoWriteUnavailable();
+            default:
+                return DenyTodoWrite();
+        }
+
         // ebilling-r1 task 130-0 fix round 2 (F1): a caller cannot change what it cannot see. A to-do that links to an invoice the caller
         // may not see (any invoice link column, InvoiceLinks) is refused with the same response, and nothing is written; a decision that
         // could not be made is the 503. Asked only after the rights and live-parent checks, so neither answer is an existence oracle. The
@@ -2915,6 +2928,25 @@ public static class ExternalProjectDataEndpoints
                     return DeleteOwnUnavailable();
                 default:
                     logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: a live parent is under a secure record the caller cannot read",
+                        kind, id);
+                    return DenyDeleteOwn();
+            }
+        }
+
+        // (3b) uac-r2 task 191h fix round 1 (F1): a to-do or event the external lists hide (THE external visibility predicate) is
+        //      refused with the same 403; a decision that could not be made is the 503, nothing deleted. Internal systemusers are
+        //      not asked.
+        if (kind is ExternalDataService.DeletableKind.Todo or ExternalDataService.DeletableKind.Event)
+        {
+            switch (await dataService.CheckExternalVisibilityAsync(kind, id, caller, ct))
+            {
+                case ExternalDataService.LiveParentDecision.Readable:
+                    break;
+                case ExternalDataService.LiveParentDecision.Unavailable:
+                    logger.LogWarning("[EXT-DELETE] {Kind} {Id}: its external visibility could not be decided; nothing deleted", kind, id);
+                    return DeleteOwnUnavailable();
+                default:
+                    logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: hidden from the caller by the external visibility predicate",
                         kind, id);
                     return DenyDeleteOwn();
             }

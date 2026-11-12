@@ -4,7 +4,7 @@
 
 Declarative agents use the same infrastructure, orchestrator, foundation model, and security controls as Microsoft 365 Copilot, which ensures a consistent and familiar user experience.
 
-![Declarative agent architecture diagram. At the very basis there is the foundational model of Microsoft 365 Copilot, as well as the same orchestrator. The agent provides also custom knowledge and grounding data, and custom skills as actions, triggers, and workflows.. The user experience is available in Microsoft 365 Copilot.](../../assets/images/m365-declarative-agent.png)
+*(image not included in this snapshot: Declarative agent architecture diagram. At the very basis there is the foundational model of Microsoft 365 Copilot, as well as the same orchestrator. The agent provides also custom knowledge and grounding data, and custom skills as actions, triggers, and workflows.. The user experience is available in Microsoft 365 Copilot.)*
 
 ## What you're going to do
 
@@ -19,6 +19,6 @@ This advanced assistant will be equipped with security features, including authe
 | **Authentication**                 | Contains all auth-related labs as sub-items.            |
 | **Integration**                    | Expands capability with Copilot connectors, etc.                |
 
-## [Start here](./00-prerequisites) with Lab E0, where you'll set up development your environment
+## [Start here](./00-prerequisites.md) with Lab E0, where you'll set up development your environment
 
 <img src="https://m365-visitor-stats.azurewebsites.net/copilot-camp/extend-m365-copilot/index" />

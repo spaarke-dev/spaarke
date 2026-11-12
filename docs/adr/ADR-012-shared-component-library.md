@@ -15,7 +15,7 @@
 **AI-Optimized Versions** (load these for efficient context):
 - [ADR-012 Concise](../../.claude/adr/ADR-012-shared-components.md) - ~150 lines, decision + constraints + service architecture
 - [PCF Constraints](../../.claude/constraints/pcf.md) - MUST/MUST NOT rules for PCF development
-- [React Hooks Pattern](../../.claude/patterns/pcf/react-hooks.md) - Shared hooks examples
+- React Hooks Pattern - Shared hooks examples
 
 **When to load this full ADR**: Component examples, directory structure, governance model, service portability details
 

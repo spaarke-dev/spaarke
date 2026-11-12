@@ -13,7 +13,7 @@
 > **Status**: Legacy (retires Phase F of spaarke-datagrid-framework-r1)
 > **Created**: 2026-02-05
 > **Domain**: UI Components / PCF / React Code Pages
-> **Related ADRs**: [ADR-012](../adr/ADR-012-shared-components.md), [ADR-021](../adr/ADR-021-fluent-ui-design-system.md), [ADR-022](../adr/ADR-022-pcf-platform-libraries.md)
+> **Related ADRs**: [ADR-012](../adr/ADR-012-shared-component-library.md), [ADR-021](../adr/ADR-021-fluent-ui-design-system.md), [ADR-022](../adr/ADR-022-pcf-platform-libraries.md)
 
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
@@ -157,7 +157,7 @@ Per ADR-021:
 | [ADR-012: Shared Components](../../.claude/adr/ADR-012-shared-components.md) | Shared component library architecture |
 | [ADR-021: Fluent Design System](../../.claude/adr/ADR-021-fluent-design-system.md) | Fluent UI v9 requirements |
 | [ADR-022: PCF Platform Libraries](../../.claude/adr/ADR-022-pcf-platform-libraries.md) | React 16 API requirements |
-| [KM-UX-FLUENT-DESIGN-V9-STANDARDS.md](../standards/KM-UX-FLUENT-DESIGN-V9-STANDARDS.md) | Detailed design standards |
+| KM-UX-FLUENT-DESIGN-V9-STANDARDS.md | Detailed design standards |
 
 ---
 

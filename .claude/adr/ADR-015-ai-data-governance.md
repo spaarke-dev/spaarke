@@ -59,7 +59,7 @@ Apply **data minimization** and **logging hygiene** to all AI operations. Never 
 - Full prompts or model responses
 - Secrets or tokens
 
-**See**: [AI Logging Pattern](../patterns/ai/logging.md)
+**See**: AI Logging Pattern
 
 ---
 

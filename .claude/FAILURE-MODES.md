@@ -178,7 +178,7 @@ Changed `TaskCompleted` (not a real event) to `Stop`. Commit: `8ca796ab`.
 
 **Classification**: Anti-pattern (contract was "valid" — the field is genuinely optional for some callers — but the wizard treated it as not-needed when in fact it was load-bearing for the downstream UX)
 
-**What happened**: The BFF endpoint's [`FileIndexRequest.DocumentId`](../../src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs) is typed `string?` and the Dataverse tracking-field write at `RagEndpoints.cs:480` is gated on `if (!string.IsNullOrEmpty(request.DocumentId))`. The wizard's `triggerRagIndexing` at [`uploadOrchestrator.ts:447`](../../src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.ts) sent `{ driveId, itemId, fileName, tenantId }` only. `record.recordId` was available in the caller's scope but never threaded through. The endpoint responded 200, chunks landed in the index without `documentId` or `parentEntityType`, and the user-facing affordances that join chunks back to Dataverse (Search Indexed toggle, Find Similar, Open from search results, DocumentRelationshipViewer graph) all silently failed.
+**What happened**: The BFF endpoint's [`FileIndexRequest.DocumentId`](../src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs) is typed `string?` and the Dataverse tracking-field write at `RagEndpoints.cs:480` is gated on `if (!string.IsNullOrEmpty(request.DocumentId))`. The wizard's `triggerRagIndexing` at [`uploadOrchestrator.ts:447`](../src/solutions/DocumentUploadWizard/src/services/uploadOrchestrator.ts) sent `{ driveId, itemId, fileName, tenantId }` only. `record.recordId` was available in the caller's scope but never threaded through. The endpoint responded 200, chunks landed in the index without `documentId` or `parentEntityType`, and the user-facing affordances that join chunks back to Dataverse (Search Indexed toggle, Find Similar, Open from search results, DocumentRelationshipViewer graph) all silently failed.
 
 **Root cause**:
 1. **Two entry points, one contract, asymmetric callers.** The "Send to Index" ribbon was built by the team that knew it needed `documentId` (it looks the doc up to construct the request anyway). The Document Upload Wizard was built by a different work stream that thought of indexing as a fire-and-forget "send file bytes" call.
@@ -214,7 +214,7 @@ Both chunks were correctly indexed and linked — but the Find Similar lookup qu
 
 **Root cause**:
 - The wizard uses the Dataverse Web API client (`createCodePageDataverseClient`), which returns lowercase GUIDs.
-- The ribbon at [`sprk_DocumentOperations.js:2146`](../../src/client/webresources/js/sprk_DocumentOperations.js) uses `Xrm.Page` / `getId()`, which returns `{UPPERCASE}`. It strips braces but doesn't normalize case.
+- The ribbon at [`sprk_DocumentOperations.js:2146`](../src/client/webresources/js/sprk_DocumentOperations.js) uses `Xrm.Page` / `getId()`, which returns `{UPPERCASE}`. It strips braces but doesn't normalize case.
 - The BFF passes whatever it receives through to the index unchanged.
 - Azure AI Search `Edm.String` equality is case-sensitive (vector search, full-text search, and `search.ismatch` are not — but `eq` is).
 

@@ -103,7 +103,7 @@ When onboarding a new tenant or environment:
 
 ## Conventions
 
-- SPE file ops live behind `SpeFileStore` in `src/server/api/Sprk.Bff.Api/Infrastructure/SpeFileStore/`
+- SPE file ops live behind `SpeFileStore` in `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs`
 - Graph client factory: `Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs`
 - Container type IDs: stored in environment config, never hardcoded
 - PowerShell registration scripts: `infrastructure/spe/Register-*.ps1`

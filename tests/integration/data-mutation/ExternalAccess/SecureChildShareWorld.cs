@@ -724,21 +724,22 @@ internal sealed class SecureChildShareWorld
         Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
-        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null,
+        ExternalTeamShareSynchronizer? externalTeam = null, IConfiguration? configuration = null)
     {
         var entities = EntitiesOver(current).Object;
-        var configuration = Configuration();
+        configuration ??= Configuration();
         var resolver = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
             entities, configuration, NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance);
         var synchronizer = new SecureChildShareSynchronizer(
             entities, shares, noAccessGuard ?? NobodyWalled(), configuration,
-            sharesLogger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
+            sharesLogger ?? NullLogger<SecureChildShareSynchronizer>.Instance, externalTeam); // uac-r2 191c: the L1 hooks' engine, when a test composes it
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
             accessCacheInvalidator, threads, ownerPrivileges, relocator,
             coreAncestors: CoreAncestorsOver(current), // 194b: a Signal's or Decision Record's subject stamps
-            links: links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore(), // 194b F1-c: the To Do job's predicate (nobody linked)
+            people: AssignedAccessTestDoubles.Representation(links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore()), // 194b F1-c: the To Do job's predicate (nobody linked); task 193: through ContactUserRepresentation
             recordShares: shares, // uac-r2 task 198 Part D: the Restricted filing bar's share seam, as the host composes it
             directMessageOwnerTeam: directMessageOwnerTeam); // task 198 Part C: the Direct participants' re-grant after a re-file
     }
@@ -1004,6 +1005,8 @@ internal sealed class SecureChildShareWorld
             // (every row a test does not touch) never matches.
             ConditionOperator.GreaterEqual => actual is DateTime at && condition.Values.Single() is DateTime since && at >= since,
             // Task 173: the Access Permission sweep pages by id (rows are answered in id order, as Dataverse orders them).
+            // Task 191c: the recent-changes key set ((modifiedon > At) OR (modifiedon = At AND id > AfterId)).
+            ConditionOperator.GreaterThan when actual is DateTime at && condition.Values.Single() is DateTime since => at > since,
             ConditionOperator.GreaterThan => actual is Guid a && condition.Values.Single() is Guid after && a.CompareTo(after) > 0,
             _ => throw new NotSupportedException($"The test world does not evaluate {condition.Operator}."),
         };

@@ -184,8 +184,9 @@ SPA/Teams (036 read set asks Dataverse) and AI tools: same Dataverse answer + th
   1. no linked root is Restricted, effective through filing (`EffectiveRootFlags`); a child's I-16 copy is never trusted;
   2. its own marker passes;
   3. **taint closure** (owner Q3): no lineage parent through any registry lookup is hidden by 1 or 2. It is bounded like
-     the lineage walk, keeps task 188's 3 hops on the document chain, and treats a cycle, a too-deep chain or an
-     unreadable value as hidden.
+     the lineage walk, keeps task 188's 3 hops on the document chain, and treats a too-deep chain or an unreadable value
+     as hidden. A cycle is decided by the rows on it: a document and its current version name each other, so every
+     versioned document is on one. A closure that reaches no root is undecided (task 191b, amended 2026-11-11).
   The multi-root rule (`ExternalMultiRootRule`) stays where it is, on the per-user side (secure roots). The team share
   never touches a secure row.
 - **Callers**: the team-share job, the secure-child mirror and the Direct-message writer for flagged principals, task
@@ -251,7 +252,7 @@ existing r1c cursor and watermark rules (ADR-052 §5).
 
 | Fault | Result |
 |---|---|
-| The predicate cannot decide a row (unreadable flag, thread, chain; cycle; too deep) | No grant; an existing team or flagged-user share is revoked; the row is carried and retried; ids and counts logged |
+| The predicate cannot decide a row (unreadable flag, thread, chain; too deep; no root; a document chain cycle per task 188) | No grant; an existing team or flagged-user share is revoked; the row is carried and retried; ids and counts logged |
 | A principal's `sprk_isexternal` is unreadable | Treated as external for grants (no child grant); never moved by the placement job (it moves only on a definite true) |
 | A share read or write fails | Nothing written for that row; carried |
 | Job down or behind | No new grants. Out-of-product revocations wait (fail open within the window); heartbeat and census report it |

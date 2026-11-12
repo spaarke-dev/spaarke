@@ -173,6 +173,7 @@ internal sealed class OwnershipDirectory
         {
             ["SecureRecord:BusinessUnitName"] = SecureBuName,
             ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
+            ["ExternalAccess:CustomerBusinessUnitId"] = CustomerBusinessUnitSetting,
         }).Build();
 
         return new RecordOwnershipResolver(entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance);
@@ -470,6 +471,40 @@ internal sealed class OwnershipDirectory
         return this;
     }
 
+    /// <summary>uac-r2 191c: the systemusers whose stored <c>sprk_isexternal</c> reads true / false (absent: blank).</summary>
+    private readonly Dictionary<Guid, bool> _externalFlags = new();
+
+    /// <summary>uac-r2 191c: <c>ExternalAccess:CustomerBusinessUnitId</c> as the resolver reads it (null: unset).</summary>
+    public string? CustomerBusinessUnitSetting { get; set; }
+
+    /// <summary>uac-r2 191c: the External Collaborators unit (191e's name, a child of the root) and its default owner team.</summary>
+    public static readonly Guid ExternalCollaboratorsBu = Guid.Parse("0e5c0e5c-0191-4191-8191-0000000000e1");
+    public static readonly Guid ExternalCollaboratorsTeam = Guid.Parse("0e5c0e5c-0191-4191-8191-0000000000e2");
+
+    /// <summary>uac-r2 191c: adds the External Collaborators unit and its default team, and moves <paramref name="systemUserId"/>
+    /// into it (as 191e's placement does).</summary>
+    public OwnershipDirectory WithUserInExternalCollaborators(Guid systemUserId)
+    {
+        if (_businessUnits.All(b => b.BusinessUnitId != ExternalCollaboratorsBu))
+        {
+            WithBusinessUnit(ExternalCollaboratorsBu,
+                Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName, parent: GeneralBu);
+            WithTeam(ExternalCollaboratorsTeam, ExternalCollaboratorsBu, isDefault: true, teamType: 0,
+                Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName);
+        }
+
+        var index = _users.FindIndex(u => u.SystemUserId == systemUserId);
+        _users[index] = _users[index] with { BusinessUnit = ExternalCollaboratorsBu };
+        return this;
+    }
+
+    /// <summary>uac-r2 191c: store <c>sprk_isexternal</c> on a seeded systemuser.</summary>
+    public OwnershipDirectory WithExternalFlag(Guid systemUserId, bool flagged)
+    {
+        _externalFlags[systemUserId] = flagged;
+        return this;
+    }
+
     public OwnershipDirectory WithTeam(Guid teamId, Guid businessUnit, bool isDefault, int teamType, string name = "")
     {
         _teams.Add((teamId, businessUnit, isDefault, teamType, name));
@@ -524,7 +559,7 @@ internal sealed class OwnershipDirectory
 
         IEnumerable<Entity> rows = query.EntityName switch
         {
-            "systemuser" => UsersMatching(conditions),
+            "systemuser" => UsersMatching(conditions, query.ColumnSet),
             "team" => _teams
                 .Where(t => Matches(conditions, "teamid", t.TeamId)
                             && Matches(conditions, "businessunitid", t.BusinessUnit)
@@ -540,9 +575,10 @@ internal sealed class OwnershipDirectory
             "businessunit" => _businessUnits
                 .Where(b => MatchesName(conditions, b.Name) && Matches(conditions, "businessunitid", b.BusinessUnitId)
                             && (!rootOnly || b.Parent is null))
+                // uac-r2 191c: with its name, as Dataverse returns it (191e's unit lookup re-checks the name).
                 .Select(b => b.Parent is { } parent
-                    ? new Entity("businessunit", b.BusinessUnitId) { ["parentbusinessunitid"] = new EntityReference("businessunit", parent) }
-                    : new Entity("businessunit", b.BusinessUnitId)),
+                    ? new Entity("businessunit", b.BusinessUnitId) { ["name"] = b.Name, ["parentbusinessunitid"] = new EntityReference("businessunit", parent) }
+                    : new Entity("businessunit", b.BusinessUnitId) { ["name"] = b.Name }),
             "teammembership" => _memberships
                 .Where(m => Matches(conditions, "teamid", m.TeamId))
                 .Select(m => new Entity("teammembership", Guid.NewGuid()) { ["systemuserid"] = m.SystemUserId }),
@@ -564,7 +600,7 @@ internal sealed class OwnershipDirectory
         return RecordsMatching(query.EntityName, conditions);
     }
 
-    private IEnumerable<Entity> UsersMatching(IReadOnlyDictionary<string, object> conditions)
+    private IEnumerable<Entity> UsersMatching(IReadOnlyDictionary<string, object> conditions, ColumnSet columns)
     {
         // The KEY condition (systemuserid or azureactivedirectoryobjectid) plus, optionally, isdisabled (issue #1576),
         // which Dataverse evaluates against the row like any column. Anything else is not a query this fake answers.
@@ -573,9 +609,17 @@ internal sealed class OwnershipDirectory
         return _users
             .Where(u => column == "systemuserid" ? u.SystemUserId.Equals(key) : u.ObjectId.Equals(key))
             .Where(u => Matches(conditions, "isdisabled", u.Disabled))
-            .Select(u => new Entity("systemuser", u.SystemUserId)
+            .Select(u =>
             {
-                ["businessunitid"] = new EntityReference("businessunit", u.BusinessUnit),
+                var row = new Entity("systemuser", u.SystemUserId)
+                {
+                    ["businessunitid"] = new EntityReference("businessunit", u.BusinessUnit),
+                };
+                // Only when asked for, as Dataverse answers: a resolver that forgot the column reads it blank (not flagged).
+                if ((columns.AllColumns || columns.Columns.Contains("sprk_isexternal", StringComparer.OrdinalIgnoreCase))
+                    && _externalFlags.TryGetValue(u.SystemUserId, out var flagged))
+                    row["sprk_isexternal"] = flagged;
+                return row;
             });
     }
 

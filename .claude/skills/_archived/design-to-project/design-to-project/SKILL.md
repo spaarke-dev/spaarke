@@ -2,7 +2,7 @@
 
 > **⚠️ THIS SKILL IS ARCHIVED**
 >
-> **Use instead**: [`project-pipeline`](../project-pipeline/SKILL.md) (RECOMMENDED)
+> **Use instead**: [`project-pipeline`](../../../project-pipeline/SKILL.md) (RECOMMENDED)
 >
 > **Archived date**: December 18, 2024
 
@@ -35,18 +35,18 @@ This skill was superseded by a cleaner two-tier architecture:
 ## Full Documentation
 
 See archived skill documentation with complete migration guide:
-- **Archived location**: [.claude/skills/_archived/design-to-project/](../_archived/design-to-project/)
-- **ARCHIVED.md**: [Full archival explanation](../_archived/design-to-project/ARCHIVED.md)
-- **Original SKILL.md**: [Historical reference](../_archived/design-to-project/SKILL.md)
+- **Archived location**: [.claude/skills/_archived/design-to-project/](../)
+- **ARCHIVED.md**: [Full archival explanation](../ARCHIVED.md)
+- **Original SKILL.md**: [Historical reference](../SKILL.md)
 
 ---
 
 ## Recommended Reading
 
-- [project-pipeline SKILL.md](../project-pipeline/SKILL.md) - **Start here**
-- [project-setup SKILL.md](../project-setup/SKILL.md) - For advanced users
-- [SKILL-INTERACTION-GUIDE.md](../SKILL-INTERACTION-GUIDE.md) - Full skill ecosystem guide
-- [INDEX.md](../INDEX.md) - Skills registry
+- [project-pipeline SKILL.md](../../../project-pipeline/SKILL.md) - **Start here**
+- [project-setup SKILL.md](../../../project-setup/SKILL.md) - For advanced users
+- [SKILL-INTERACTION-GUIDE.md](../../../SKILL-INTERACTION-GUIDE.md) - Full skill ecosystem guide
+- [INDEX.md](../../../INDEX.md) - Skills registry
 
 ---
 

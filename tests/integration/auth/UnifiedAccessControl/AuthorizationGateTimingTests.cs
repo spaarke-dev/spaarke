@@ -163,6 +163,80 @@ public class AuthorizationGateTimingTests
     // refusal text was identical. Each test runs the PRODUCTION filter / handler step over the TimingProbe and asserts
     // the unknown and the denied record take the same work: the same asks and the same recorded waits.
 
+    /// <summary>
+    /// Task 193 (#2334 at the share core): /share-user's caller-rights probe asks the gate question, so its 403
+    /// caller_cannot_grant for a record that does not exist and for one the caller cannot see take the same work. The same
+    /// core serves /grant's share for a contact that represents an internal user.
+    /// </summary>
+    [Fact]
+    public async Task ShareUserCallerRights_AnUnknownAndADeniedRecord_AreTheSame403_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await ShareUser(unknown, Unknown);
+        var b = await ShareUser(denied, Denied);
+
+        StatusOf(a).Should().Be(StatusCodes.Status403Forbidden);
+        StatusOf(b).Should().Be(StatusCodes.Status403Forbidden);
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    /// <summary>
+    /// Task 193 (#2334 at the grantor ceiling): /grant's and /invite-and-grant's ceiling probe asks the gate question, so a
+    /// record that does not exist and one the caller cannot see both become a "none" ceiling (403 caller_cannot_grant) after
+    /// the same work.
+    /// </summary>
+    [Fact]
+    public async Task GrantorCeilingProbe_AnUnknownAndADeniedRecord_AreTheSameNoneCeiling_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.ProbeGrantorCeilingAsync(
+            unknown, InternalUserShareCoreTests.Rig.Caller(), ExternalGrantRootType.Matter, Unknown, CancellationToken.None);
+        var b = await Sprk.Bff.Api.Api.ExternalAccess.GrantExternalAccessEndpoint.ProbeGrantorCeilingAsync(
+            denied, InternalUserShareCoreTests.Rig.Caller(), ExternalGrantRootType.Matter, Denied, CancellationToken.None);
+
+        b.Should().BeEquivalentTo(a, "both are the \"none\" ceiling");
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    /// <summary>
+    /// #2334 at the delegation filter: every Manage Access route behind <c>AddDelegationRuleFilter()</c> (/grant,
+    /// /invite-and-grant, /share-user, /revoke, ...) denies an unknown record and one the caller cannot see with the same
+    /// 403, after the same work.
+    /// </summary>
+    [Fact]
+    public async Task DelegationFilter_AnUnknownAndADeniedRecord_AreTheSame403_AfterTheSameWork()
+    {
+        var unknown = new TimingProbe();
+        var denied = new TimingProbe();
+
+        var a = await Delegation(unknown, Unknown);
+        var b = await Delegation(denied, Denied);
+
+        StatusOf(a.Result).Should().Be(StatusCodes.Status403Forbidden);
+        StatusOf(b.Result).Should().Be(StatusCodes.Status403Forbidden);
+        a.NextCalled.Should().BeFalse();
+        b.NextCalled.Should().BeFalse();
+        denied.Waits.Should().Equal(unknown.Waits).And.Equal(NotFoundSchedule);
+        denied.Asks.Should().Be(unknown.Asks).And.Be(3);
+    }
+
+    private static async Task<(object? Result, bool NextCalled)> Delegation(TimingProbe probe, Guid recordId)
+    {
+        // A grant request names its record in the body; resolving it reads nothing from Dataverse.
+        var client = (DataverseWebApiClient)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+            typeof(DataverseWebApiClient));
+        var filter = new Sprk.Bff.Api.Api.ExternalAccess.DelegationRuleFilter(
+            probe, client, NullLogger<Sprk.Bff.Api.Api.ExternalAccess.DelegationRuleFilter>.Instance);
+        return await RunFilter(filter, new Sprk.Bff.Api.Api.ExternalAccess.Dtos.GrantAccessRequest(
+            Guid.NewGuid(), Guid.Empty, ExternalAccessLevel.ViewOnly, null, null, "matter", recordId));
+    }
+
     [Fact]
     public async Task QuickCreateSourceCheck_AnUnknownAndADeniedSource_AreTheSame403_AfterTheSameWork()
     {
@@ -303,6 +377,16 @@ public class AuthorizationGateTimingTests
     }
 
     private static int? StatusOf(object? result) => (result as IStatusCodeHttpResult)?.StatusCode;
+
+    /// <summary>/share-user through the PRODUCTION share core, over an enabled person and an ordinary record.</summary>
+    private static async Task<object?> ShareUser(TimingProbe probe, Guid recordId)
+    {
+        var rig = new InternalUserShareCoreTests.Rig();
+        var user = Guid.NewGuid();
+        rig.Users.SeedPerson(user, "Ada Lovelace");
+        var shared = await rig.ShareAsync(recordId, user, ExternalAccessLevel.ViewOnly, probe, InternalUserShareCoreTests.Rig.Caller());
+        return shared.Result;
+    }
 
     /// <summary>The production probe with its wire steps answered from memory and its waits recorded, never slept.</summary>
     private sealed class TimingProbe : CallerRecordAccessProbe

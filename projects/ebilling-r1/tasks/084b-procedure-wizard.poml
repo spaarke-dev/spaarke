@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084b" project="ebilling-r1">
+  <metadata>
+    <title>Procedures on the record (B2): the Procedure wizard (follow latest, pin, exclude here, remove) and rule Exclude, on 089's routes</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
+    <gate>084a merged into work.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend code (.tsx) that writes overrides through BFF routes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wizard steps follow the prototype and the existing WizardShell usage in InvoiceReview; the write routes exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends 084a's code page; 084c and 084d extend this wizard.</parallel-reason>
+    <deps>084a</deps>
+    <tags>frontend, react, typescript, fluent-ui, testing</tags>
+    <estimated-effort>3 days</estimated-effort>
+  </metadata>
+
+  <prompt>A row click (or Enter) in 084a's lists opens the row in the shared WizardShell with ‹ › through the filtered list and an explicit close. The Procedure wizard (Procedure → On this record → Impact → Confirm) offers As set on the parent, Follow latest, Pin a version, Exclude here, and Remove from this record; the Rule wizard offers Run the published rule and Exclude here (with firm scope and reason). Writes go through 089's existing routes; the Impact step uses 089's removal preview where a removal is involved and otherwise states what changes from the row's own data.</prompt>
+
+  <role>SPAARKE platform developer. Expert in React code pages, Fluent UI v9, WizardShell and @spaarke/ui-components.</role>
+
+  <goal>A user allowed by 089's routes can pin, follow latest, exclude or remove a Procedure on the record, and exclude a rule, from the panel; every change ends with the O-21 line and both lists re-read. A user without the privilege sees the same wizards read-only. "Change for this record" (084c) and the full before/after Impact (084d) are not in this task.</goal>
+
+  <context>
+    <background>EB-D-217. Prototype: src/procedures/ProcedureWizard.tsx, RuleWizard.tsx, store.tsx; README "Procedure wizard" and "Rule wizard". P-1/P-2 (notes/084-prototype-questions.md) define when "Follow latest" needs a stored row and that "As set on the parent" deletes the d0 row. P-3 (owner, 2026-10-21): a child cannot lift a parent's rule exclusion; the control stays disabled.</background>
+    <relevant-files>
+      <file role="new">src/solutions/RecordProcedures/src/components/wizards/ProcedureWizard.tsx, RuleWizard.tsx, steps.tsx; src/solutions/RecordProcedures/src/services/overridesApi.ts</file>
+      <file role="modify">src/solutions/RecordProcedures/src/components/ProcedureList.tsx, RuleList.tsx (row click opens the wizard)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs (request/response shapes: procedure-assignments, rule-overrides/exclude, overrides/{id}/removal-preview, DELETE overrides/{id})</file>
+      <file role="canonical-reference">src/solutions/InvoiceReview/src/components/decision/InvoiceDecisionWizard.tsx (WizardShell steps, confirm, error handling)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="084a" status="pending">The panel and API client.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021, ADR-012, ADR-050">Every wizard in this task uses the shared WizardShell, Fluent v9 semantic tokens and shared components; no new npm package.</constraint>
+    <constraint source="project (D-27, EB-D-148)">Every write goes through 089's BFF routes; no Xrm.WebApi write. The client never decides authorization: a refusal from the route is shown with its ProblemDetails title, and the read-only state comes from the route's answer, not a client role check.</constraint>
+    <constraint source="project (P-3)">On a child record, a rule excluded by a parent shows Exclude as applied and offers no "Run the published rule" there (disabled, with the reason).</constraint>
+    <constraint source="project (O-20)">A firm-named rule's Exclude is fixed to its own firm.</constraint>
+    <constraint source="project">No "Change for this record" path and no dry-run Impact in this task: the Change choice is absent until 084c, and Impact shows the removal preview (removals) or the row's own before/after (pins, follow latest, excludes).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 6.2–6.5, 15)</file>
+      <file>projects/ebilling-r1/notes/084-prototype-questions.md (P-1 to P-3)</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="WizardShell decision flow" location="src/solutions/InvoiceReview/src/components/decision/InvoiceDecisionWizard.tsx">Steps, confirm, ProblemDetails display.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Overrides API client for 089's routes; row click opens the wizard with ‹ › through the filtered list.</step>
+    <step order="2">Procedure wizard: the four steps and five choices; Rule wizard: Run published and Exclude here (firm scope, reason).</step>
+    <step order="3">Impact and Confirm: removal preview for removals; O-21 line on every change; re-read both lists after a write.</step>
+    <step order="4">Tests (jest); npm run build.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a wizard choice has no matching 089 route or request field, STOP and escalate (root CLAUDE.md §6) rather than adding a route in this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>089's routes (ProcedureAssignmentEndpoints.cs) accept the writes but no UI calls them; InvoiceReview's decision wizard is the nearest WizardShell flow.</existing>
+    <extension>No: the wizards live in 084a's code page because their subject is the record's Procedures, not an invoice; they reuse WizardShell and InvoiceReview's step pattern.</extension>
+    <cost-of-doing-nothing>Pins, follow-latest and exclusions can only be made by direct API calls, so billing admins cannot manage a record's Procedures (O-9 fails).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Pin a version">
+      <steps><step>On a matter, open a firm Procedure with two versions; choose Pin a version, pick the older one, confirm</step></steps>
+      <expected>The row shows "pinned to vN, vM available"; the O-21 line was shown; no console errors</expected>
+    </test>
+    <test name="Exclude and remove">
+      <steps><step>Exclude a Procedure with a reason; then open it again and remove the override</step></steps>
+      <expected>Excluded shows struck through with its reason; the removal shows the preview's affected-invoice count, then the row returns to its source state</expected>
+    </test>
+    <test name="Rule exclude on a child">
+      <steps><step>Open the work assignment and a rule excluded on its parent matter</step></steps>
+      <expected>Exclude shows as inherited; Run the published rule is disabled with the reason (P-3)</expected>
+    </test>
+    <test name="Read-only user">
+      <steps><step>Sign in as a user without the billing-admin privilege; open a Procedure</step></steps>
+      <expected>The wizard opens read-only; no write choice is enabled</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark theme; repeat the first test</step></steps>
+      <expected>All colours from Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install, build, test</tool>
+    <tool name="ui-test">browser checks after 112 deploys</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/RecordProcedures/src/components/wizards/**, src/services/overridesApi.ts</output>
+    <output type="test">src/solutions/RecordProcedures/src/__tests__/** (wizards)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the five Procedure choices and the rule Exclude sends the request 089's route expects (asserted against the route's request shape) and re-reads both lists on success.</criterion>
+    <criterion testable="true">A ProblemDetails refusal (403, 404, 409, 422) is shown with its title and the wizard stays open; nothing is re-read (negative).</criterion>
+    <criterion testable="true">A removal shows 089's removal preview (affected invoices) before Confirm; every confirmed change shows the O-21 line.</criterion>
+    <criterion testable="true">P-3 and O-20 behave as constrained above.</criterion>
+    <criterion testable="true">No Change choice and no dry-run read exist in this task (negative).</criterion>
+    <criterion testable="true">npm run build succeeds with no new package; the ui-tests pass after 112 deploys, including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deployment: 112.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

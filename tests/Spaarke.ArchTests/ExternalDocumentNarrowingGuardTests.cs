@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Xunit;
 
@@ -318,10 +319,84 @@ public class ExternalDocumentNarrowingGuardTests
             ? $"ExternalCallerCommunicationGuard.{method.Name}"
             : null;
 
+    // ── uac-r2 task 191h: THE external visibility predicate on every lineage surface ──────────────────────────────────
+
+    /// <summary>
+    /// The surfaces that return root or lineage-child rows to a caller who may be external and must ask THE external visibility
+    /// predicate (<see cref="AppOnlyExternalVisibility"/>): the assistant's three read tools (#2189), the AI retrieval trim (an
+    /// external caller's document keys, #2369 part 2) and the external SPA's to-do and event lists (#2179 design §3.3).
+    /// </summary>
+    private static readonly string[] VisibilitySurfaces =
+    {
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler::ExecuteChatAsync",
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler::ExecuteChatAsync",
+        "Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler::DescribeRecordAsync",
+        "Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim::TrimByRecordAsync",
+        "Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService::GetTodosAsync",
+        "Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService::GetEventsAsync",
+        // Fix round 1 (F1): the single to-do / event writes (PATCH, delete-own) refuse a row the lists hide.
+        "Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints::UpdateTodo",
+        "Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints::AuthorizeDeleteOwnAsync",
+    };
+
+    [Fact(DisplayName = "uac-r2 191h: every lineage surface reaches THE external visibility predicate, and so does every use of IsVisibilityGuarded")]
+    public void EveryLineageSurface_ReachesTheVisibilityPredicate()
+    {
+        var scan = Scan(BffTypes.Value, IsVisibilityDecision, VisibilitySurfacePrimitive);
+
+        foreach (var surface in VisibilitySurfaces)
+            Assert.True(scan.Reaches.Contains(surface), $"{surface} should reach THE external visibility predicate (AppOnlyExternalVisibility).");
+        // Non-vacuity: the three tools are seen testing a lineage table.
+        foreach (var surface in VisibilitySurfaces.Take(3))
+            Assert.True(scan.Surfaces.ContainsKey(surface), $"{surface} should be seen testing IsVisibilityGuarded — the scan lost its signal.");
+
+        var problems = scan.Surfaces.Keys.Where(k => !scan.Reaches.Contains(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"NEW lineage surface without THE predicate: {k} (uses {string.Join(", ", scan.Surfaces[k].Order())})")
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "A surface that tests ExternalCallerCommunicationGuard.IsVisibilityGuarded returns root or lineage-child rows to an " +
+            "external caller and must hide those THE external visibility predicate does not show: ask " +
+            "ExternalCallerCommunicationGuard.NotVisibleRowsAsync / NotVisibleIdsAsync (uac-r2 task 191h):\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "uac-r2 191h: negative control — a lineage read that skips the predicate is found; one that asks it (directly or through a helper) is not")]
+    public void VisibilityDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(VisibilityGuardControlSkipsThePredicate), typeof(VisibilityGuardControlAsksThroughAHelper),
+            typeof(VisibilityGuardControlAsksTheSeamDirectly), typeof(NarrowingGuardControlNoDocuments),
+        };
+        var scan = Scan(fixtures.SelectMany(IlCallScan.WithNested), IsVisibilityDecision, VisibilitySurfacePrimitive);
+
+        var flagged = scan.Surfaces.Keys.Where(k => !scan.Reaches.Contains(k)).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(new[] { $"{typeof(VisibilityGuardControlSkipsThePredicate).FullName}::ReadAsync" }, flagged);
+        Assert.Contains($"{typeof(VisibilityGuardControlAsksThroughAHelper).FullName}::ReadAsync", scan.Reaches);
+        Assert.Contains($"{typeof(VisibilityGuardControlAsksTheSeamDirectly).FullName}::ReadAsync", scan.Reaches);
+    }
+
+    private static bool IsVisibilityDecision(MethodBase method) =>
+        method.DeclaringType is { } declaring
+        && ((declaring == typeof(AppOnlyExternalVisibility) && method.Name == nameof(AppOnlyExternalVisibility.Invoke))
+            || (declaring == typeof(ExternalCallerCommunicationGuard)
+                && method.Name is nameof(ExternalCallerCommunicationGuard.NotVisibleRowsAsync)
+                    or nameof(ExternalCallerCommunicationGuard.NotVisibleIdsAsync)));
+
+    private static string? VisibilitySurfacePrimitive(MethodBase method) =>
+        method.DeclaringType == typeof(ExternalCallerCommunicationGuard)
+        && method.Name == nameof(ExternalCallerCommunicationGuard.IsVisibilityGuarded)
+            ? "ExternalCallerCommunicationGuard.IsVisibilityGuarded"
+            : null;
+
     // ── K7: the consumers of the app-only narrowing seams are an allow-list ────────────────────────────────────────
 
     /// <summary>The app-only narrowing seams (CLAUDE.md §6.5 path B, owner round 111: a hide decision only).</summary>
-    private static readonly Type[] NarrowingSeams = { typeof(AppOnlyDocumentNarrowing), typeof(InternalRouteDocumentNarrowing) };
+    private static readonly Type[] NarrowingSeams =
+    {
+        typeof(AppOnlyDocumentNarrowing), typeof(InternalRouteDocumentNarrowing),
+        // uac-r2 task 191h: THE external visibility predicate, app-only by id, hide-only (the same shape).
+        typeof(AppOnlyExternalVisibility),
+    };
 
     /// <summary>
     /// Every BFF type allowed to hold, resolve, invoke or build an app-only narrowing seam, with its reason. A new consumer
@@ -331,17 +406,25 @@ public class ExternalDocumentNarrowingGuardTests
     private static readonly IReadOnlyDictionary<string, string> AllowedSeamConsumers = new Dictionary<string, string>
     {
         ["Sprk.Bff.Api.Infrastructure.DI.ExternalAccessModule"] =
-            "The ONE registrar: binds both seams to ExternalDataService.ReadAndNarrowDocumentsAsync (app-only).",
+            "The ONE registrar: binds both document seams to ExternalDataService.ReadAndNarrowDocumentsAsync (app-only), and " +
+            "(191h) the visibility seam to 191c's ExternalVisibilityDecider over the app-only readers.",
         ["Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyDocumentNarrowingExtensions"] =
             "Slice C: the hide-only overload (returns the hidden id set; no rows, no reasons).",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseReadQueryHandler"] =
-            "Assistant tool (path B): hides sprk_document rows and rows derived from a document from the user's own read.",
+            "Assistant tool (path B): hides sprk_document rows, rows derived from a document, and (191h) root and lineage-child " +
+            "rows THE visibility predicate does not show, from the user's own read.",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseSearchDataHandler"] =
-            "Assistant tool (path B): drops document hits and hits derived from a document from the user's own search.",
+            "Assistant tool (path B): drops document hits, hits derived from a document, and (191h) root and lineage-child hits " +
+            "THE visibility predicate does not show, from the user's own search.",
         ["Sprk.Bff.Api.Services.Ai.Handlers.DataverseDescribeHandler"] =
-            "Assistant tool (path B): answers a hidden sprk_document record like not-found.",
+            "Assistant tool (path B): answers a hidden sprk_document record, and (191h) a root or lineage-child record THE " +
+            "visibility predicate does not show, like not-found.",
+        ["Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.ExternalCallerCommunicationGuard"] =
+            "191h: NotVisibleRowsAsync / NotVisibleIdsAsync ask the visibility seam by id and return the not-visible id set " +
+            "(a fault throws); no rows, no reasons.",
         ["Sprk.Bff.Api.Services.Ai.PublicContracts.RetrievalAccessTrim"] =
-            "Slice A (F1-A): withholds an external caller's hidden document keys from AI retrieval.",
+            "Slice A (F1-A): withholds an external caller's hidden document keys from AI retrieval; (191h, #2369 part 2) also " +
+            "those THE visibility predicate does not show.",
         ["Sprk.Bff.Api.Api.Filters.InternalPlaneDocumentNarrowing"] =
             "Slice B: the internal plane's document filter, bulk download and container lists refuse or drop hidden documents.",
         // Round 4b (K7 hardening): direct callers of the app-only reader's narrowing entry points count as consumers.
@@ -349,6 +432,9 @@ public class ExternalDocumentNarrowingGuardTests
             "External plane (round 1): the documents module fetch drops the rows ExternalDataService.NarrowDocumentsAsync hides.",
         ["Sprk.Bff.Api.Api.ExternalAccess.ExternalProjectDataEndpoints"] =
             "External plane (round 1): download and versions refuse a document ExternalDataService.IsDocumentVisibleAsync hides.",
+        ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility"] =
+            "uac-r2 191b: THE external visibility predicate asks the seam for a document's hide decision only (its verdict, " +
+            "never a row) and returns Visible / Hidden / Undecided; every reader it takes is app-only.",
     };
 
     [Fact(DisplayName = "Task 188 r3 C (K7): the app-only narrowing seams have only listed consumers")]
@@ -476,7 +562,11 @@ public class ExternalDocumentNarrowingGuardTests
 
     private const string AllVisibleDouble = "AllVisibleDocumentNarrowing";
 
-    private static bool ReferencesTheAllVisibleDouble(string source) => source.Contains(AllVisibleDouble, StringComparison.Ordinal);
+    /// <summary>uac-r2 191h: the visibility seam's doubles (all visible, faulted, ...) live in this test-only class.</summary>
+    private const string VisibilityDoubles = "ExternalVisibilitySeams";
+
+    private static bool ReferencesTheAllVisibleDouble(string source) =>
+        source.Contains(AllVisibleDouble, StringComparison.Ordinal) || source.Contains(VisibilityDoubles, StringComparison.Ordinal);
 
     [Fact(DisplayName = "Task 188 r3 (Option A, condition 2): the all-visible narrowing double is never referenced from src/, and production builds the real seams")]
     public void TheAllVisibleTestDouble_NeverReachesProduction()
@@ -509,6 +599,7 @@ public class ExternalDocumentNarrowingGuardTests
     {
         Assert.True(ReferencesTheAllVisibleDouble("services.UseAllVisibleDocumentNarrowing();"));
         Assert.True(ReferencesTheAllVisibleDouble("services.AddSingleton(AllVisibleDocumentNarrowing.Instance);"));
+        Assert.True(ReferencesTheAllVisibleDouble("services.AddSingleton(ExternalVisibilitySeams.AllVisible);"));
         Assert.False(ReferencesTheAllVisibleDouble(
             "services.AddScoped<InternalRouteDocumentNarrowing>(sp => (ids, ct) => sp.GetRequiredService<ExternalDataService>().ReadAndNarrowDocumentsAsync(ids, ct));"));
     }
@@ -1136,8 +1227,9 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
             "Writes only sprk_filestatus (StoredFileSchema.Status, Servable) on sprk_storedfile, a literal key, under the row's own " +
             "version (UpdateIfRowVersionMatchesAsync); never a document.",
-        // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go.
-        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawForUndoAsync"] =
+        // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go. Task 116
+        // moved the write into the shared WithdrawRowsAsync (WithdrawForUndoAsync, and ReplaceForCallerAsync for a version's earlier file).
+        ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawRowsAsync"] =
             "Writes only sprk_filestatus (StoredFileSchema.Status, Removed) on sprk_storedfile, a literal key, under the row's own " +
             "version (UpdateIfRowVersionMatchesAsync); never a document.",
         ["Sprk.Bff.Api.Services.ScorecardCalculatorService::UpdateEntityGradesAsync"] =
@@ -1167,6 +1259,9 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid (the team the row's parents resolve to), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::ReleaseOwnSecureWriteAsync"] =
             "Writes only ownerid (the ordinary team the fresh parents give), conditioned on the row version.",
+        ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer::ReownAsync"] =
+            "uac-r2 task 191c: writes only ownerid (the team a flagged owner's row's own I-6 question gives), conditioned on the " +
+            "row version read with the owner check; never a link column.",
         ["Sprk.Bff.Api.Services.RecordCreation.RecordCreationService::CreateAsync"] =
             "Creates only (step 11, a fresh Guid upserted; an isolated root too): a link set in a create can only HIDE the new " +
             "row (D7 narrows, never widens), and no existing document is re-pointed or un-linked.",
@@ -1468,6 +1563,117 @@ public class ExternalDocumentNarrowingGuardTests
 
         return problems;
     }
+
+    // ── uac-r2 191b: the lineage registry is the ONE table → external-marker map ─────────────────────────────────────
+
+    /// <summary>
+    /// Types whose STATIC initializer names a communication-content table (<see cref="SecureChildLineage.NeverExternalTables"/>)
+    /// for a purpose other than external visibility, each with its reason (the 191b ratchet: a new type fails until it is
+    /// reviewed and listed here, or derives its list from the registry; an entry that stops naming one is stale).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> OtherTableListsNamingNeverTables = new Dictionary<string, string>
+    {
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
+            "Task 198: the content rows of a Direct-team-owned message that are granted to its participants (table → its " +
+            "message lookup); a share list, not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission"] =
+            "#2253: the access-deciding columns per table that an app-only generic write refuses; a write guard, not an " +
+            "external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordFamilyEdges"] =
+            "The record-family edge registry (child → parent per lookup) and its display-only DetailTables; edges, not an " +
+            "external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordFamilyReader"] =
+            "The display-name column of each family table (display data only); not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar"] =
+            "A message's content rows (table → its message lookup), the same set task 198 Part B grants, barred on a " +
+            "Restricted filing; a share bar, not an external-visibility map.",
+        ["Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson"] =
+            "Task 146: the child tables the BFF creates as the application that carry the creator column; a stamp list, not " +
+            "an external-visibility map.",
+    };
+
+    [Fact(DisplayName = "uac-r2 191b: no type but the lineage registry lists the communication-content (Never) tables, except the listed other-purpose lists")]
+    public void NoSecondTableToInternalOnlyMap_OutsideTheRegistry()
+    {
+        var found = NeverTableListers(BffTypes.Value);
+
+        var problems = found.Keys.Where(k => !OtherTableListsNamingNeverTables.ContainsKey(k)).Order(StringComparer.Ordinal)
+            .Select(k => $"NEW list of Never tables in {k} ({string.Join(", ", found[k].Order())}): derive it from " +
+                         "SecureChildLineage (ExternalMarker / NeverExternalTables), or list it with its reason if it is not about " +
+                         "external visibility.")
+            .Concat(OtherTableListsNamingNeverTables.Keys.Where(k => !found.ContainsKey(k)).Order(StringComparer.Ordinal)
+                .Select(k => $"STALE entry {k}: it no longer names a Never table — remove it (the ratchet)."))
+            .ToList();
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "uac-r2 191b: negative control — a static list naming a Never table is found; a registry-derived list and an instance method's mention are not")]
+    public void NeverTableListDetector_MustFireAndMustNotFire()
+    {
+        var fixtures = new[]
+        {
+            typeof(NeverTableControlStaticList), typeof(NeverTableControlDerivedFromTheRegistry),
+            typeof(NeverTableControlInstanceMention),
+        };
+
+        var found = NeverTableListers(fixtures.SelectMany(IlCallScan.WithNested));
+
+        Assert.Equal(new[] { typeof(NeverTableControlStaticList).FullName }, found.Keys.ToArray());
+        Assert.Contains("sprk_emailartifact", found[typeof(NeverTableControlStaticList).FullName!]);
+    }
+
+    [Fact(DisplayName = "uac-r2 191b: the AI guard's two lists ARE the registry's (Never markers; document-text markers)")]
+    public void TheGuardsLists_AreDerivedFromTheRegistry()
+    {
+        Assert.Same(SecureChildLineage.NeverExternalTables, ExternalCallerCommunicationGuard.RefusedContentTables);
+        Assert.Equal(
+            SecureChildLineage.DocumentTextTables.Keys.Order(StringComparer.Ordinal),
+            ExternalCallerCommunicationGuard.DocumentDerivedTablesForTest.Keys.Order(StringComparer.Ordinal));
+        Assert.All(SecureChildLineage.Children.Values, table => Assert.NotNull(table.External));
+    }
+
+    /// <summary>
+    /// Every outermost BFF type (other than the registry) whose STATIC constructor loads the name of a
+    /// <see cref="SecureChildLineage.NeverExternalTables"/> table: a static table list that includes communication content,
+    /// the shape a second "internal-only" map takes. Case-insensitive.
+    /// </summary>
+    private static IReadOnlyDictionary<string, HashSet<string>> NeverTableListers(IEnumerable<Type> types)
+    {
+        var found = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var (caller, method, value) in IlCallScan.StringLoads(types))
+        {
+            if (method is not ConstructorInfo { IsStatic: true } || !SecureChildLineage.NeverExternalTables.Contains(value))
+                continue;
+            var key = IlCallScan.Outermost(caller).FullName!;
+            if (key == typeof(SecureChildLineage).FullName)
+                continue;
+            if (!found.TryGetValue(key, out var names))
+                found[key] = names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            names.Add(value.ToLowerInvariant());
+        }
+
+        return found;
+    }
+}
+
+// ── uac-r2 191b: compiled control fixtures for NeverTableListDetector_MustFireAndMustNotFire (never run; IL only) ──
+
+/// <summary>MUST FIRE (191b): a static set naming a communication-content table: a second internal-only map.</summary>
+internal static class NeverTableControlStaticList
+{
+    internal static readonly IReadOnlySet<string> Hidden = new HashSet<string> { "sprk_emailartifact", "sprk_todo" };
+}
+
+/// <summary>MUST NOT FIRE (191b): the same list derived from the registry.</summary>
+internal static class NeverTableControlDerivedFromTheRegistry
+{
+    internal static readonly IReadOnlySet<string> Hidden = SecureChildLineage.NeverExternalTables;
+}
+
+/// <summary>MUST NOT FIRE (191b): an instance method that names a table (a query, not a static list).</summary>
+internal sealed class NeverTableControlInstanceMention
+{
+    internal string Set() => "sprk_emailartifact";
 }
 
 // Compiled control fixtures for ExternalDocumentNarrowingGuardTests.Detector_MustFireAndMustNotFire. Top-level types (the
@@ -1593,6 +1799,30 @@ internal sealed class DerivedGuardControlNarrowsThroughAHelper(
     }
 
     private Task<IReadOnlySet<Guid>> HiddenAsync(IEnumerable<Guid> ids, CancellationToken ct) => narrow.HiddenDocumentIdsAsync(ids, ct);
+}
+
+/// <summary>MUST FIRE (191h): tests a lineage table and returns its rows without asking THE visibility predicate.</summary>
+internal sealed class VisibilityGuardControlSkipsThePredicate
+{
+    internal Task<bool> ReadAsync(string table, Guid id, CancellationToken ct) =>
+        Task.FromResult(ExternalCallerCommunicationGuard.IsVisibilityGuarded(table) && id != Guid.Empty);
+}
+
+/// <summary>MUST NOT FIRE (191h): tests a lineage table and asks the predicate through the guard, in a helper.</summary>
+internal sealed class VisibilityGuardControlAsksThroughAHelper(AppOnlyExternalVisibility visibility)
+{
+    internal async Task<bool> ReadAsync(string table, Guid id, CancellationToken ct) =>
+        ExternalCallerCommunicationGuard.IsVisibilityGuarded(table) && !(await NotVisibleAsync(table, id, ct)).Contains(id);
+
+    private Task<IReadOnlySet<Guid>> NotVisibleAsync(string table, Guid id, CancellationToken ct) =>
+        ExternalCallerCommunicationGuard.NotVisibleIdsAsync(visibility, table, new[] { id }, ct);
+}
+
+/// <summary>MUST NOT FIRE (191h): tests a lineage table and invokes the seam itself.</summary>
+internal sealed class VisibilityGuardControlAsksTheSeamDirectly(AppOnlyExternalVisibility visibility)
+{
+    internal async Task<bool> ReadAsync(string table, Guid id, CancellationToken ct) =>
+        ExternalCallerCommunicationGuard.IsVisibilityGuarded(table) && (await visibility(new[] { (table, id) }, ct)).IsVisible(table, id);
 }
 
 /// <summary>MUST FIRE (K7): takes the assistant's seam.</summary>

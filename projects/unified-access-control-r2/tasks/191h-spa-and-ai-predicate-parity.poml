@@ -4,7 +4,7 @@
     <title>T191h: the SPA lists, the AI derived-table filter and the retrieval trim use the same ExternalVisibility predicate (#2189, #2369)</title>
     <phase>Session 28: UAC task 191 build (owner D-13 and the 2026-11-11 answers)</phase>
     <gate>blocked: 191b merged</gate>
-    <status>not-started</status>
+    <status>completed (PR open, not merged; stacked on 191c #2723)</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what external callers see on the SPA and AI surfaces; security parity with Dataverse.</rigor-reason>
     <model-tier>opus</model-tier>

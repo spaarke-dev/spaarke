@@ -44,7 +44,9 @@ public class InvoicePdfWriterGuardTests
         [$"{Service}::BuildRow"] =
             "The ONE Stored File row constructor (a create: purpose, parent, source, SHA, owner, Not yet servable). Its callers are pinned.",
         [$"{Service}::FlipToServableAsync"] = "Status only (Servable), conditioned on the row version: never a purpose or a parent.",
-        [$"{Service}::WithdrawForUndoAsync"] = "Status only (Removed; the submission undo), conditioned on the row version.",
+        [$"{Service}::WithdrawRowsAsync"] =
+            "Status only (Removed), conditioned on the row version: the one withdraw, behind WithdrawForUndoAsync (the submission undo) " +
+            "and ReplaceForCallerAsync (task 116: a Procedure Version's earlier source file, or the new one when that withdraw fails).",
         ["Sprk.Bff.Api.Services.Finance.Submission.SubmissionCommitGate::CompensateAsync"] =
             "Seen for its DeleteRequests of the invoice's Stored File rows (the undo) next to its update of the SUBMISSION row; it " +
             "never creates or updates a Stored File.",

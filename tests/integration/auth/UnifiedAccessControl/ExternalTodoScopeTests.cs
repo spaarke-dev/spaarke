@@ -119,6 +119,31 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             "the write must target the to-do named in the route, not a substitute");
     }
 
+    // uac-r2 task 191h fix round 1 (F1): a to-do the external lists hide (THE external visibility predicate) is not written. Hidden
+    // and Undecided are the SAME 403 as a to-do that does not exist (NFR-01); a decision that could not be made is the 503.
+    [Theory]
+    [InlineData(ExternalDataService.LiveParentDecision.Withheld, HttpStatusCode.Forbidden)]
+    [InlineData(ExternalDataService.LiveParentDecision.Unavailable, HttpStatusCode.ServiceUnavailable)]
+    public async Task Task191h_PatchExternalTodo_TheListsHide_IsRefused_AndNothingIsWritten(
+        ExternalDataService.LiveParentDecision decision, HttpStatusCode expected)
+    {
+        _fixture.Reset();
+        _fixture.Principal = PrincipalWith((InScopeProject, ExternalAccessLevel.Collaborate));
+        using var client = _fixture.CreateAuthenticatedClient();
+        var missing = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch()); // no to-do: the deny
+        var missingBody = await missing.Content.ReadAsStringAsync();
+
+        _fixture.Data.TodoLookupResult = (ExternalDataService.TodoRootKind.Project, InScopeProject, "Existing to-do");
+        _fixture.Data.ExternalVisibility = decision;
+        var response = await client.PatchAsJsonAsync($"/api/v1/external/todos/{TodoId}", ValidPatch());
+
+        response.StatusCode.Should().Be(expected);
+        if (expected == HttpStatusCode.Forbidden)
+            (await response.Content.ReadAsStringAsync()).Should().Be(missingBody, "hidden reads exactly as absent (NFR-01)");
+        _fixture.Data.ExternalVisibilityChecks.Should().Be(1);
+        _fixture.Data.UpdateCallCount.Should().Be(0, "nothing is written");
+    }
+
     [Fact]
     public async Task PatchExternalTodo_WhenCallerHasFullAccess_AppliesTheUpdate()
     {
@@ -2019,6 +2044,19 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             return Task.FromResult(LiveParents);
         }
 
+        /// <summary>uac-r2 task 191h fix round 1: what the external visibility write gate answers (Readable unless a test says so;
+        /// the gate itself is pinned by <c>ExternalListVisibilityTests</c> over the real predicate).</summary>
+        public ExternalDataService.LiveParentDecision ExternalVisibility { get; set; } = ExternalDataService.LiveParentDecision.Readable;
+
+        public int ExternalVisibilityChecks { get; private set; }
+
+        public override Task<ExternalDataService.LiveParentDecision> CheckExternalVisibilityAsync(
+            ExternalDataService.DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default)
+        {
+            ExternalVisibilityChecks++;
+            return Task.FromResult(ExternalVisibility);
+        }
+
         /// <summary>ebilling-r1 task 130-0 fix round 2 (F1): the PATCH reads the to-do's invoice links through the delete-own row read;
         /// here the to-do links to no invoice (the invoice rule's own tests are <c>ExternalInvoiceLinkedWriteTests</c>).</summary>
         public override Task<ExternalDataService.DeleteTarget?> GetDeleteTargetAsync(
@@ -2052,6 +2090,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             ThrowOnLookup = false;
             LiveParents = ExternalDataService.LiveParentDecision.Readable;
             LiveParentChecks = 0;
+            ExternalVisibility = ExternalDataService.LiveParentDecision.Readable;
+            ExternalVisibilityChecks = 0;
             UpdateCallCount = 0;
             LastUpdatedTodoId = null;
             LastRequest = null;
