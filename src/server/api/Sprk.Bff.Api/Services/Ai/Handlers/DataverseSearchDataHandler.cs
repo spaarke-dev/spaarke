@@ -51,6 +51,9 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// one: line, approval, submission, correction, external identifier, Stored File, Signal, Decision Record) whose invoice the
 /// (a') predicate hides. Same shape as the narrowing seam: it reads by id app-only and returns only a hide decision, so it can
 /// only HIDE a row the user's own search returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
+/// uac-r2 task 191h (#2189): a THIRD hide-only app-only seam, <see cref="AppOnlyExternalVisibility"/> (THE external visibility
+/// predicate), drops an external caller's hit on any root or lineage-child table the predicate does not show. Same shape: by
+/// id, a hide decision only.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries query LENGTH + entity filter + result count +
@@ -84,6 +87,8 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
     private readonly AppOnlyDocumentNarrowing _narrowDocuments;
     /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
     private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
+    /// <summary>Task 191h: THE external visibility predicate, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyExternalVisibility _externalVisibility;
 
     public DataverseSearchDataHandler(
         IDataverseUserClient dataverse,
@@ -92,7 +97,8 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
         AppOnlyDocumentNarrowing narrowDocuments,
-        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily,
+        AppOnlyExternalVisibility externalVisibility)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -101,6 +107,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
         _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
+        _externalVisibility = externalVisibility ?? throw new ArgumentNullException(nameof(externalVisibility));
     }
 
     /// <inheritdoc />
@@ -295,6 +302,7 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             var hiddenDerivedSources = new List<Guid>();
             var hiddenInvoiceFamilyRows = 0;
             var hiddenInvoiceLinkedRows = 0;
+            var hiddenByVisibility = 0;
             var blankedRootLinkHits = 0;
             DocumentNarrowingResult? narrowing = null;
             var value = FindResultsArray(response.Body);
@@ -379,8 +387,30 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     }
                 }
 
+                // uac-r2 task 191h (#2189, #2179 design §3.3): for an external caller, a hit on a root or lineage-child table that
+                // THE external visibility predicate does not show (Hidden or Undecided: a Restricted root, an internal-only
+                // communication or a hidden document it is filed under or about, through ANY registry lookup) is dropped silently,
+                // on top of the checks above. One app-only call for the page; a decision that could not be made throws into the
+                // error result below (no data).
+                IReadOnlySet<(string Table, Guid Id)>? notVisibleHits = null;
+                var guardedHits = hits.Where(h => ExternalCallerCommunicationGuard.IsVisibilityGuarded(h.EntityName)).ToList();
+                if (guardedHits.Count > 0 && await IsExternalCallerAsync().ConfigureAwait(false))
+                {
+                    notVisibleHits = await ExternalCallerCommunicationGuard.NotVisibleRowsAsync(
+                        _externalVisibility, guardedHits.Select(h => (h.EntityName, h.RecordId)), cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 foreach (var (hit, entityName, recordId) in hits)
                 {
+                    if (notVisibleHits is not null &&
+                        ExternalCallerCommunicationGuard.IsVisibilityGuarded(entityName) &&
+                        notVisibleHits.Contains((entityName.ToLowerInvariant(), recordId)))
+                    {
+                        hiddenByVisibility++;
+                        continue;
+                    }
+
                     var blankRootLink = false;
                     if (hiddenFamily.TryGetValue(entityName, out var hiddenRows) && hiddenRows.Contains(recordId))
                     {
@@ -501,6 +531,13 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                     "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
                     "document-derived",
                     ExternalCallerCommunicationGuard.DerivedHiddenSummary(hiddenDerivedSources), context.DecisionId);
+            }
+            if (hiddenByVisibility > 0)
+            {
+                // ADR-015: a reason code and a count only — never the query, ids or hit content.
+                _logger.LogInformation(
+                    "[dataverse.search_data] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason} decisionId={DecisionId}",
+                    "lineage", $"external_visibility_hidden={hiddenByVisibility}", context.DecisionId);
             }
 
             stopwatch.Stop();

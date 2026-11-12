@@ -47,6 +47,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
     private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.ChildTablesShown;
 
+    /// <summary>Task 191h: THE external visibility predicate seam (a test about it sets the real predicate or a fault).</summary>
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible;
+
     public DataverseReadQueryHandlerTests()
     {
         // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
@@ -60,12 +63,87 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
 
     private DataverseReadQueryHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseReadQueryHandler>(), _httpContextAccessor,
-            _callerResolverOverride ?? _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily);
+            _callerResolverOverride ?? _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily, _externalVisibility);
 
     private void AsExternalCaller() =>
         _identityResolver
             .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // uac-r2 task 191h (#2189): THE external visibility predicate on every root and lineage-child row
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The model's query of <c>sprk_analysis</c> returns the leak world's three analyses, none with a source document
+    /// (the 188 derived leg passes them).</summary>
+    private Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld ArrangeLeakAnalyses()
+    {
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+        SetupDerivedMetadata("sprk_analysis", "sprk_analysises", "sprk_analysisid");
+        foreach (var id in new[] { leak.AnalysisAboutTheEmail, leak.PlainAnalysis, leak.AnalysisUnderTheRestrictedMatter })
+            _userSourceLinks["sprk_analysises"][id] = null;
+        CaptureDerivedReads("sprk_analysises", DocRows(
+            AnalysisRow(leak.AnalysisAboutTheEmail), AnalysisRow(leak.PlainAnalysis), AnalysisRow(leak.AnalysisUnderTheRestrictedMatter)));
+        return leak;
+    }
+
+    private Task<ToolResult> ReadAnalysesAsync() => CreateHandler().ExecuteChatAsync(
+        BuildChatInvocationContext(toolArgumentsJson: Args("SELECT sprk_name FROM sprk_analysis")), BuildReadQueryTool(), CancellationToken.None);
+
+    [Fact(DisplayName = "191h read_query must fire (#2189): an analysis filed only to an internal-only email, and one under a Restricted matter, are hidden from an external caller; the 188 legs alone leave them")]
+    public async Task ExecuteChatAsync_191h_TheVisibilityPredicate_HidesLineageRows_TheControlKeepsThem()
+    {
+        AsExternalCaller();
+        var leak = ArrangeLeakAnalyses();
+
+        // Control (perturbation): without THE predicate, the 188 derived leg alone returns all three (#2189).
+        var before = await ReadAnalysesAsync();
+        before.Success.Should().BeTrue(before.ErrorMessage);
+        AnalysisRowIds(before).Should().HaveCount(3);
+
+        var asked = new List<IReadOnlyCollection<(string Table, Guid Id)>>();
+        _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Recording(asked, leak.Seam);
+        var result = await ReadAnalysesAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AnalysisRowIds(result).Should().Equal(new[] { leak.PlainAnalysis.ToString("D") },
+            "taint through sprk_regardingcommunication and a Restricted root hide the other two");
+        asked.Should().ContainSingle("ONE predicate call for the page").Which.Should().HaveCount(3);
+        result.Warnings.Should().Contain(DataverseReadQueryHandler.RowsLeftOutNote);
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains("entity=sprk_analysis") && m.FormattedMessage.Contains("external_visibility_hidden=2"));
+        AssertTelemetryRespectsAdr015(leak.AnalysisAboutTheEmail.ToString("D"), $"Analysis {leak.AnalysisAboutTheEmail:N}");
+    }
+
+    [Fact(DisplayName = "191h read_query must not fire: an internal systemuser's rows are unchanged and the predicate is never asked")]
+    public async Task ExecuteChatAsync_191h_AnInternalCaller_IsUnchanged_AndThePredicateIsNotAsked()
+    {
+        ArrangeLeakAnalyses();
+        _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        var result = await ReadAnalysesAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        AnalysisRowIds(result).Should().HaveCount(3, "an internal caller is not narrowed (a predicate call would fail the tool)");
+        result.Warnings.Should().NotContain(DataverseReadQueryHandler.RowsLeftOutNote);
+    }
+
+    [Theory(DisplayName = "191h read_query must fire: a predicate that faults or throws fails the tool call with no data (fail closed)")]
+    [InlineData("faulted")]
+    [InlineData("throws")]
+    public async Task ExecuteChatAsync_191h_APredicateFault_FailsTheCall(string fault)
+    {
+        AsExternalCaller();
+        ArrangeLeakAnalyses();
+        _externalVisibility = fault == "faulted"
+            ? Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Faulted
+            : Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        var result = await ReadAnalysesAsync();
+
+        result.Success.Should().BeFalse();
+        result.Data.Should().BeNull();
+    }
 
     private static AnalysisTool BuildReadQueryTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseReadQueryHandler), name: "SYS-Dataverse Read Query");
@@ -1593,8 +1671,8 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         OnlyRow(await ReadAsync($"{RootQuery} {clause}"));
     }
 
-    [Fact(DisplayName = "130-0b R1: an external caller on a root (no seam that leaves rows out) keeps the raw row-cap rule and gets no note")]
-    public async Task ExecuteChatAsync_R1_ExternalRoot_KeepsTheRawRule_AndNoNote()
+    [Fact(DisplayName = "130-0b R1 as amended by uac-r2 191h: an external caller on a root is decided by THE visibility predicate (a Restricted root leaves the page), so the visible-row cap rule and the one fixed note apply")]
+    public async Task ExecuteChatAsync_R1_ExternalRoot_GetsTheVisibleRowRule_AndTheNote()
     {
         AsExternalCaller();
         await using var firms = new Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyFirmWorld(CallerSystemUserId);
@@ -1606,8 +1684,9 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         var result = await ReadAsync(RootQuery.Replace("SELECT ", "SELECT TOP 1 ", StringComparison.Ordinal));
 
         OnlyRow(result);
-        result.Warnings.Should().Contain(w => w.Contains("reached the row cap (1)"), "a root row is never left out, so the raw page decides");
-        result.Warnings.Should().NotContain(DataverseReadQueryHandler.RowsLeftOutNote);
+        result.Warnings.Should().Contain(w => w.Contains("reached the row cap (1)"), "the one visible row reaches TOP");
+        result.Warnings.Should().Contain(DataverseReadQueryHandler.RowsLeftOutNote,
+            "191h: a root row can be left out (a Restricted root), so the seam is active and the fixed note is added");
     }
 
     [Fact(DisplayName = "130-0b fix round 1 F1-2 read_query must not fire: an internal caller's WHERE and ORDER BY on the root link are served")]

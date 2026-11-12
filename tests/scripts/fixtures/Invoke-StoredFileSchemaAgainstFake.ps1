@@ -150,10 +150,10 @@ function global:Invoke-RestMethod {
         $a = $attrs["$($Matches[1]).$($Matches[2])"]
         if (-not $a -or -not $a.Secured) { return [pscustomobject]@{ value = @() } }
         $rows = @(
-            [pscustomobject]@{ canread = 4; cancreate = 4; canupdate = 4; fieldsecurityprofileid = [pscustomobject]@{ name = 'Spaarke BFF-Managed Field Writers' } }
-            [pscustomobject]@{ canread = 4; cancreate = 4; canupdate = 4; fieldsecurityprofileid = [pscustomobject]@{ name = 'System Administrator' } }
+            [pscustomobject]@{ canread = 4; cancreate = 4; canupdate = 4; fieldsecurityprofileid = [pscustomobject]@{ fieldsecurityprofileid = 'p-writer'; name = 'Spaarke BFF-Managed Field Writers' } }
+            [pscustomobject]@{ canread = 4; cancreate = 4; canupdate = 4; fieldsecurityprofileid = [pscustomobject]@{ fieldsecurityprofileid = '572329c1-a042-4e22-be47-367c6374ea45'; name = 'System Administrator' } }
         )
-        if ($Matches[2] -ne 'sprk_blobpath') { $rows += [pscustomobject]@{ canread = 4; cancreate = 0; canupdate = 0; fieldsecurityprofileid = [pscustomobject]@{ name = 'Spaarke BFF-Managed Field Readers' } } }
+        if ($Matches[2] -ne 'sprk_blobpath') { $rows += [pscustomobject]@{ canread = 4; cancreate = 0; canupdate = 0; fieldsecurityprofileid = [pscustomobject]@{ fieldsecurityprofileid = 'p-reader'; name = 'Spaarke BFF-Managed Field Readers' } } }
         return [pscustomobject]@{ value = $rows }
     }
     throw "FAKE: unexpected GET $p"

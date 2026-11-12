@@ -1,19 +1,24 @@
 # Current Task State
 
-> **Last Updated**: 2026-11-11 (session `ebilling-r1`, Claude Desktop; the only writer to this worktree). The previous long version is `notes/handoff-history/current-task-2026-11-11a.md`; read it for history.
-> **State at 2026-11-11 evening:**
-> - **#2689 MERGED** to master as `2fc434c912` (head `60628550fb`).
-> - **Dev:** uac-r2 deployed the dev BFF `b3ca99cad5`, a local merge of master `ddae82fa90` with mcp-r1's spike `755987b385`, never pushed. Every later dev deploy must include the spike.
-> - **164 ribbon `-Apply`:** done on dev; `-Verify` PASS; uac-r2 notified before and after.
-> - **116:** merged into work (`cd9d90aaa0`, pushed). Not on master yet.
-> - **Follow-up PR #2708 MERGED** (`654e39c685`; owner: "Merge on green"). It fixed the hard-deny child test pin and added the Tier 2 shard `api-ai-finance-external`. Worktree `C:\wtfx2689` can be removed with `Remove-WorktreeSafe.ps1`.
-> - **096b invoice side APPLIED on dev** (owner go, 2026-11-11), together with task 029's 7 Activate/Deactivate hides (owner approved restoring them). SecureChild `-Verify` exits 0. Record: `notes/096b-close-direct-create.md` "Dev apply". uac-r2 re-runs its `-Verify`.
+> **Last Updated**: 2026-11-12 (session `ebilling-r1`, Claude Desktop; the only writer to this worktree). The previous long version is `notes/handoff-history/current-task-2026-11-11a.md`; read it for history.
+> **State at 2026-11-12:**
+> - **#2689, #2708 and #2724 (116) MERGED** to master. #2724 merged at 05:25Z (merge commit, auto-merge, owner "Yes proceed").
+> - **Dev:** BFF `6dbe69b9e2` (deployed by uac-r2 2026-11-12; a local merge of master `a654da59c4` and mcp-r1's spike `755987b385`; carries #2724 (116), #2708, #2695, #2719, #2721, #2723; every later dev deploy must include the spike). 164 and 096b ribbons applied (with 029's hides); SecureChild `-Verify` exits 0.
+> - **116's column `sprk_procedureversion.sprk_notconvertedlist` IS on dev** (Memo, secured, audited, created 2026-11-10 14:35 by 116's own run of 080's script). A 2026-11-12 `-WhatIf` of `Deploy-EbillingProcedureSchema.ps1` reported 0 created, 0 changed; no write was made. The earlier "not on dev" note was wrong; uac-r2 and provisioning-r1 were told so. #2724 may go into a dev deploy. **Stamps** still need SpaarkeMaster 1.3.1.0 (which adds the column to source) before they get a BFF carrying 116.
+> - **SpaarkeMaster 1.3.1.0** (Build over the published 1.3.0.0, `d53d67f604`) is committed locally as `4085149e85`, NOT pushed. It contains:
+>   - the version bump and 116's memo in source, with `sprk_notconverted`'s grants and the EB-D-211 Description;
+>   - a release-history row in `docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`;
+>   - `spaarkemaster-1.3.1.0.json`.
+>
+>   ArchTests 2505/2505; agreement and procedure tests 551/551. Publishing (`publish-dataverse-solutions-manifest.yml`, `publish: true`, from master) is the owner's step after merge. provisioning-r1 is waiting for the published version, because its H7b S26 stops new runs until 166's lock ships.
+> - **#2725 (profile matched by name):** our three scripts are fixed locally as `f7240c397b` (not pushed). The other 15 sites belong to uac-r2 and R3.
 > - **Next:**
->   - 116 to master: open a PR from work, then tell uac-r2, who folds it into the next dev deploy with #2695 and #2708.
->   - ontology K4 comment fix.
+>   - The owner's go to apply 080's column on dev, then tell uac-r2.
+>   - Push and open the PR for 1.3.1.0 plus #2725; the owner publishes after merge.
+>   - The ontology K4 comment fix.
 >   - Deferred issue: Invoice Review doesn't poll while `firmNeeded`.
->   - **084: owner chose "Full prototype" (EB-D-217, 2026-11-11).** Split into 084 (Part A routes), 084a (panel, new code page `src/solutions/RecordProcedures`), 084b (Procedure wizard and rule Exclude), 084c (typed Change editor plus an agreement ArchTest), and 084d (dry-run Impact and Assign; opus; ontology-r1 is told before the build). The POMLs pass `Validate-TaskPoml`. TASK-INDEX is updated, and 112 now depends on 084–084d. Start 084 via task-execute after the 116 PR.
-> - **word-add-in-r1 is unreachable:** it is still owed the dev sha `b3ca99cad5` (095a and the others are live).
+>   - 084 via task-execute (split per EB-D-217: 084 → 084a → 084b → 084c; 084d after 084 and 084b, opus, its design to ontology-r1 first).
+> - **word-add-in-r1** is owed the dev sha `6dbe69b9e2` (a superset of `b3ca99cad5`); it was not reachable on 2026-11-12, so send it when it is.
 
 ## Quick recovery
 

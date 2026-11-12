@@ -312,8 +312,10 @@ foreach ($s in $specs) {
 
 # ── (c) every OTHER writer ──────────────────────────────────────────────────────────────────────────────────
 Write-Host "`n(c) Other writers"
-$otherWriters = @((Invoke-DvGet "fieldpermissions?`$select=canupdate,cancreate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$Table' and attributelogicalname eq '$Column' and (canupdate eq 4 or cancreate eq 4)").value |
-    Where-Object { $_.fieldsecurityprofileid.name -notin $WriterProfileName, 'System Administrator' })
+# The writer and the platform System Administrator profile (572329c1-..., fixed in every environment), matched by id (#2725).
+$excused = @('572329c1-a042-4e22-be47-367c6374ea45', "$writerId".ToLowerInvariant()) | Where-Object { $_ }
+$otherWriters = @((Invoke-DvGet "fieldpermissions?`$select=canupdate,cancreate&`$expand=fieldsecurityprofileid(`$select=fieldsecurityprofileid,name)&`$filter=entityname eq '$Table' and attributelogicalname eq '$Column' and (canupdate eq 4 or cancreate eq 4)").value |
+    Where-Object { $_.fieldsecurityprofileid.fieldsecurityprofileid.ToString().ToLowerInvariant() -notin $excused })
 foreach ($o in $otherWriters) { Report 'FAIL' "profile '$($o.fieldsecurityprofileid.name)' can also write $Table.$Column - only the Ontology Service writer may" }
 if ($otherWriters.Count -eq 0) { Report 'OK' "no profile besides '$WriterProfileName' and System Administrator can write $Table.$Column" }
 foreach ($role in @((Invoke-DvGet "roles?`$select=roleid&`$filter=name eq 'System Administrator'").value)) {

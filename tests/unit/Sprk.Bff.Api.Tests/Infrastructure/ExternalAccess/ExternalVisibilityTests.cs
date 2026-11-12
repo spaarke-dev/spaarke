@@ -874,7 +874,7 @@ public sealed class ExternalVisibilityTests
     /// An in-memory Dataverse: SDK rows for the lineage walk (each read recorded by table and projected through its column set)
     /// and OData rows for the documents, communications and threads (each read projected through its <c>$select</c>).
     /// </summary>
-    private sealed class World
+    internal sealed class World
     {
         private readonly Dictionary<(string Table, Guid Id), Entity> _entities = new();
         private readonly Dictionary<Guid, RootRecordFlags> _rootFlags = new();
