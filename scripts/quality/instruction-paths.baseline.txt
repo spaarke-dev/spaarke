@@ -15,8 +15,6 @@
 .claude/skills/azure-deploy/SKILL.md|infrastructure/bicep/stacks/model1-shared.bicep
 .claude/skills/jps-scope-refresh/SKILL.md|src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorType.cs
 .claude/skills/office-addins-deploy/SKILL.md|src/client/office-addins/dist
-.claude/skills/power-page-deploy/SKILL.md|scripts/Deploy-ExternalWorkspaceSpa.ps1
-.claude/skills/power-page-deploy/SKILL.md|src/client/external-spa/powerpages.config.json
 .claude/skills/provision-environment/SKILL.md|scripts/canonical-app-settings/manifest.yaml
 .claude/skills/ribbon-edit/SKILL.md|docs/_archive/articles/document-ribbon-example.xml
 .claude/skills/ribbon-edit/SKILL.md|docs/_archive/articles/RIBBON-COMMAND-BAR-MODIFICATIONS.md

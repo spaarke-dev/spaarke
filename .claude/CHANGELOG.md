@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-12 — `power-page-deploy` skill archived (Power Pages deploy retired)
+
+The owner confirmed the Power Pages Code Site deploy for the external SPA is retired; the SPA deploys to Azure Static Web Apps through `.github/workflows/deploy-external-spa.yml` (ISS-003, #2713, found by `reuse-governance-tightening-r1`).
+
+- **`power-page-deploy`** moved to `.claude/archive/2026-11-12/skills/power-page-deploy/` (restore with `git mv`; see `.claude/archive/README.md`). Its two instruction-path baseline lines are removed.
+- **`.claude/skills/INDEX.md`**: row removed. **`azure-deploy`**, **`deploy-new-release`**, **`office-addins-deploy`** now point at the Static Web Apps workflow.
+- Docs: `docs/architecture/client-resources-inventory.md` §9, `docs/procedures/AI-CODING-PROCEDURES-GUIDE.md`, `knowledge/sharepoint-embedded/NOTES.md`.
+
 ###### 2026-11-11 — The reuse gate starts at the capability index
 
 `reuse-governance-tightening-r1` task 002 (FR-02). The `<existing>` answer in the component-justification gate now starts at `.claude/patterns/CAPABILITY-INDEX.md` (concept → canonical component, task 001), then Grep.
