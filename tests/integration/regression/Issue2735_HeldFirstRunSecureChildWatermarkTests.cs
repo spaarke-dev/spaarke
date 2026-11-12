@@ -121,6 +121,35 @@ public class Issue2735_HeldFirstRunSecureChildWatermarkTests
         }
     }
 
+    /// <summary>
+    /// Review F1: the secure-record listing runs before every pass and is not caught, so a fault there (or the page bound)
+    /// makes the whole first run throw before any pass is reached. Every pass's first window must already be stored by then;
+    /// the re-file pass most of all, since no catch-up walks documents.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_AfterAFirstRunThatThrewListingTheSecureRecords_EveryPassListsFromTheFirstRunsWindowStart()
+    {
+        var harness = new Harness(this);
+        _world.FailingQueriesOf("sprk_workassignment"); // a table the secure-record listing reads
+
+        var first = () => harness.RunAsync(recentWrites: true, ordinaryWrites: true);
+        await first.Should().ThrowAsync<InvalidOperationException>("the secure-record listing is not caught: the run throws");
+
+        _world.ClearQueryFaults();
+        _time.Advance(Gap);
+        var second = await harness.RunAsync(recentWrites: true, ordinaryWrites: true);
+
+        using var scope = new FluentAssertions.Execution.AssertionScope();
+        foreach (var pass in Enum.GetValues<Pass>())
+        {
+            Since(second, pass).Should().Be((T0 - Job.InitialRecentChangesLookback).UtcDateTime,
+                $"the {pass} pass lists from the window start the thrown first run stored, not from the second run's own look-back");
+        }
+
+        _world.OwnerOf("sprk_todo", _todo).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+            "the recent-changes listing reaches a to-do changed inside the first run's window");
+    }
+
     [Theory]
     [InlineData(Pass.RecentChanges)]
     [InlineData(Pass.OrdinaryMoves)]

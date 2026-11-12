@@ -311,6 +311,24 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // it, so a record made secure while a slow listing ran (paging, throttling) is still inside the next run's window.
         var startedAt = _timeProvider.GetUtcNow();
 
+        // #2735 (the #2709 pattern): every pass's first window is stored HERE, before anything can fail — before the secure
+        // records are listed (a Dataverse fault or the page bound throws there) and before the secure reconcile loop, which
+        // a lost lease, MaxRunDuration or shutdown can cancel before the later passes run. A run that holds a pass's
+        // watermark, or never reaches the pass, then leaves the next run listing from here; recomputing the look-back from
+        // each later run's own start would slide the window past what was never listed. A report-only run stores it too
+        // (owner, option A), except the ordinary-move pass's, which only a writing run stores (see that pass).
+        var ordinaryWrites = recentWrites
+                             && bool.TryParse(_configuration[OrdinaryMovesWritesEnabledConfigKey], out var ordinaryEnabled)
+                             && ordinaryEnabled;
+        lock (_cursorGate)
+        {
+            _recentChangesWatermark ??= startedAt - InitialRecentChangesLookback;
+            _accessPermissionWatermark ??= startedAt - InitialRecentChangesLookback;
+            _refileWatermark ??= startedAt - InitialRecentChangesLookback;
+            if (ordinaryWrites)
+                _ordinaryMovesWatermark ??= startedAt - InitialRecentChangesLookback;
+        }
+
         // The secure records, in a fixed order. A listing that cannot complete decides nothing: ADR-036 A1 rule 4.
         var listing = await ListSecureRootsAsync(dataverse, cancellationToken).ConfigureAwait(false);
         var roots = listing.Roots;
@@ -325,12 +343,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         IReadOnlyList<(string Table, Guid Id)> retryRows;
         lock (_cursorGate)
         {
-            // #2735 (the #2709 pattern): the first run's window start is stored before anything can fail, and by a report-only
-            // run too (owner, option A). A run that holds the watermark (a failed listing, a carry past its cap, writes off)
-            // then leaves the next run listing from here; recomputing the look-back from each later run's own start would
-            // slide the window past what was never listed.
-            _recentChangesWatermark ??= startedAt - InitialRecentChangesLookback;
-            since = _recentChangesWatermark.Value;
+            // #2735: the first window was stored above, before the secure records were listed.
+            since = _recentChangesWatermark!.Value;
             // Task 147 r1 (verifier item 4): what the previous runs could not finish is looked at again in EVERY run until
             // it is finished — never reported once and then left to the capped sweep (or, for a row the walk could not
             // place, never revisited at all).
@@ -1011,7 +1025,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// ahead of it. A report-only run, which keeps no carry, resumes after the last listed root the previous report-only run
     /// reached and wraps around (the report-only cursor, per instance: a restart starts its window from the first root).</para>
     /// <para><b>Window and carry</b> (the secure pass's rule): the watermark moves only in a run that WROTE and listed
-    /// completely, so a report-only run looks back <see cref="InitialRecentChangesLookback"/> every time. With writes on, a
+    /// completely, and only a writing run stores its first window (#2735). So a report-only run looks back
+    /// <see cref="InitialRecentChangesLookback"/> from its own start until a writing run has stored the watermark, and reads
+    /// that held watermark after (without moving it). With writes on, a
     /// root left incomplete, stopped by the write cap, or past the root cap is carried and looked at first next run (at most
     /// <see cref="MaxCarriedRows"/>; beyond that the watermark stays). Per instance, like every window of this job: a restart
     /// looks back <see cref="InitialRecentChangesLookback"/>.</para>
@@ -1049,13 +1065,13 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         (DateTime ModifiedOn, string Table, Guid Id)? reportAfter;
         lock (_cursorGate)
         {
-            // #2735 (the #2709 pattern): a WRITING run stores the first window's start before anything can fail, so one that
-            // holds the watermark (a failed listing, a carry past MaxCarriedRows) leaves the next run listing from here rather
-            // than from its own start. A report-only run does not store it: this pass is report-only by default, and a stored
-            // start that only a writing run moves would grow its window without bound. A switch to writes starts the
-            // catch-up sweep over (F4-a), which walks every ordinary root, the ones the report-only runs listed included.
-            if (writes)
-                _ordinaryMovesWatermark ??= startedAt - InitialRecentChangesLookback;
+            // #2735: a WRITING run stored the first window in ExecuteAsync, before anything could fail, so one that holds the
+            // watermark (a failed listing, a carry past MaxCarriedRows, a run that never got here) leaves the next run listing
+            // from there. A report-only run does not store it (pending owner sign-off; not covered by option A): this pass is
+            // report-only by default and only a writing run moves its watermark, so a start a report-only run stored would
+            // never move and its window would grow without bound. Until a writing run has stored the watermark, a report-only
+            // run looks back from its own start; after that it reads the held watermark (and does not move it). A switch to
+            // writes starts the catch-up sweep over (F4-a), which walks every ordinary root.
             since = _ordinaryMovesWatermark ?? startedAt - InitialRecentChangesLookback;
             runNumber = ++_ordinaryRunNumber;
 
@@ -1435,11 +1451,8 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         (string Table, Guid Id)? sweepAfter;
         lock (_cursorGate)
         {
-            // #2735 (the #2709 pattern): the first run's window start is stored before anything can fail, and by a report-only
-            // run too (owner, option A). A run that holds the watermark (a fault, a carry past its cap, the write cap, writes
-            // off) then leaves the next run listing from here, not from its own start less the look-back.
-            _accessPermissionWatermark ??= startedAt - InitialRecentChangesLookback;
-            since = _accessPermissionWatermark.Value;
+            // #2735: the first window was stored in ExecuteAsync, before anything could fail.
+            since = _accessPermissionWatermark!.Value;
             carried = _accessPermissionPending.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).ToList();
             sweepAfter = _accessPermissionSweepComplete
                 ? null
@@ -1837,12 +1850,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         Dictionary<Guid, int> undecidableRuns;
         lock (_cursorGate)
         {
-            // #2735 (the #2709 pattern): the first run's window start is stored before anything can fail, and by a report-only
-            // run too (owner, option A). A run that holds the watermark (a failed listing, a window that did not drain, a carry
-            // past its cap, a cancellation, writes off) then leaves the next run listing from here, not from its own start
-            // less the look-back. With no watermark there is no cursor yet, so `startedAt` is this window's start.
-            _refileWatermark ??= startedAt - InitialRecentChangesLookback;
-            since = _refileWatermark.Value;
+            // #2735: the first window was stored in ExecuteAsync, before anything could fail (nothing else walks documents, so
+            // a slid window would leave a re-filed document's file where it was).
+            since = _refileWatermark!.Value;
             // F1-a: the ordinary pass's hand-offs are carried rows too (read by id whatever their modifiedon).
             carried = _refilePending.Union(_ordinaryHandOffs).OrderBy(id => id).ToList();
             after = _refileCursor;
