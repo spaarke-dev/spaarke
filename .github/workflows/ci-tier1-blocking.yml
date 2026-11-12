@@ -243,8 +243,8 @@ jobs:
   # --------------------------------------------------------------------------
   # Job 1 — compile (Debug only, no -warnaserror)
   # WarningsAsErrors policy lives in Directory.Build.props
-  # (TreatWarningsAsErrors=true + WarningsNotAsErrors=CS0109;CS0618;CS1998;
-  # CS8601;CS8604), so the CLI does NOT pass -warnaserror — see
+  # (TreatWarningsAsErrors=true; WarningsNotAsErrors is empty, CS0618 included),
+  # so the CLI does NOT pass -warnaserror — see
   # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
   #
   # SCOPE = THE WHOLE SOLUTION (widened 2026-08-31; was `Sprk.Bff.Api.csproj`
