@@ -7,6 +7,13 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-11-12 — `adversarial-reviewer` checks capability duplication and traces acceptance criteria
+
+`reuse-governance-tightening-r1` task 021 (FR-07).
+
+- **`.claude/agents/adversarial-reviewer.md`**: two checks. **Capability duplication** against `.claude/patterns/CAPABILITY-INDEX.md` is F2 for a second implementation of an indexed capability, K-class for a judgment call. **Requirements trace**: given a task POML or `spec.md`, each acceptance criterion is reported met (file:line + test), not met (F4 in scope) or not verifiable from the diff (K-class). A new Input section tells callers to pass those paths. The Output class list now matches the task-execute Step 9.5 table; it had described F1–F4 differently (silent failure, a test that proves nothing, a contract break). Frontmatter unchanged.
+- **`task-execute`** Step 9.5, review-scope rule 3: launch the reviewer with the task POML path, and `spec.md` when one exists. No step renumbered.
+
 ###### 2026-11-12 — `design-to-spec` runs one reuse scan in Step 3
 
 `reuse-governance-tightening-r1` task 011 (FR-04), after the task 010 dry-run caught both known duplicates at `low` (about 36k tokens per scan) and the owner said go.

@@ -4,7 +4,7 @@
     <title>Reviewer checks: capability duplication (F2) and requirements trace (F4)</title>
     <phase>3 Sweep and reviewer checks</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies an agent definition and task-execute under explicit project constraints (FR-07)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -30,7 +30,7 @@
       <file role="canonical-reference">.claude/patterns/CAPABILITY-INDEX.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">The index the duplication check reads</dependency>
+      <dependency task="001" status="done">The index the duplication check reads</dependency>
     </dependencies>
   </context>
 
@@ -82,6 +82,8 @@
   </acceptance-criteria>
 
   <notes>Lands in the items 1-3 PR (task 080).</notes>
+
+  <completion-notes>Completed 2026-11-12. adversarial-reviewer.md: capability-duplication check (F2 for a second implementation of an indexed capability, K-class for a judgment call, row named either way); new Input section telling callers to pass the task POML and spec.md paths; requirements trace (met with file:line plus test / not met = F4 in scope / not verifiable from the diff = K-class with reason). Found and fixed in the same file: the Output class list described F1-F4 differently from the task-execute table (silent failure, a test that proves nothing, a contract break); it now names the table and its classes. Frontmatter unchanged. task-execute Step 9.5 review-scope rule 3 now launches the reviewer with the POML and spec paths. Deviation (directional): task-execute had no reviewer-launch line near 463; rule 3 is the only verifier-pass instruction, so the change went there. No other skill launches the reviewer. Verification run (adversarial-reviewer, fable, 88,744 tokens) on task 042 commit 9456083c78 with its POML and spec: per-criterion trace of 7 criteria (4 met, 1 met with a caveat, 2 not verifiable from the diff, with K4 reasons), capability duplication reported none, classes from the table. It found an F2 in merged task 042 (two live comments still saying CS0618 is downgraded); fixed on the branch with an optional K4 (SPRK001 example), and one K4 known limit recorded, see notes/042-cs0618.md. No step renumbered; skill-length guard 0 new; Test-InstructionPaths 0 new. rework: none task 021</completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
