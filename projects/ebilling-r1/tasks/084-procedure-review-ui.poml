@@ -4,7 +4,7 @@
     <title>Procedures and rules in force on the record (Part A): the two caller-read routes of model 6.6</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-E</phase>
     <gate>startable: 081, 089 and 082 are merged (on master since #2689). The UI is now 084a–084d (EB-D-217).</gate>
-    <status>completed</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF routes exposing internal-only Procedure and override content (step 0, caller reads).</rigor-reason>
     <model-tier>sonnet</model-tier>
