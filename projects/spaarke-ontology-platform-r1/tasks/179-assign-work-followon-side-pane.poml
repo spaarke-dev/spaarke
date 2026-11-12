@@ -4,7 +4,7 @@
     <title>Assign Work follow-on: Assigned Attorney / Paralegal / Outside Counsel use the side-pane lookup (F-R4-2)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>after 178</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -18,7 +18,7 @@
   </metadata>
   <prompt>The owner tested the Create Project wizard (UAT round 4, F-R4-2): in the Assign Work follow-on step the Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel fields are inline type-ahead lookups. They must use the existing side-pane lookup (`DataverseLookupField`), as the Matter and Project Enter Info steps already do.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React, Fluent UI v9 and the @spaarke/ui-components wizard framework (CreateRecordWizard, WizardShell).</role>
-  <goal>Every create wizard that shows the Assign Work follow-on (Matter, Project, Event, Invoice, Report Card) renders Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel with `DataverseLookupField` over the host navigationService; without a navigationService the step renders exactly as today.</goal>
+  <goal>Every create wizard that shows the Assign Work follow-on (Matter, Project, Event, Report Card; amended 2026-11-12: CreateInvoiceWizard has no Assign Work step) renders Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel with `DataverseLookupField` over the host navigationService; without a navigationService the step renders exactly as today.</goal>
   <context>
     <background>Review section 2.1 row 1 and section 2.3. The step is `WizardFollowOns/steps/AssignWorkFollowOnStep.tsx` (fields at :307, :328, :336; "Assign to me" at :316-326) and has no navigationService prop (:48-100). `CreateRecordWizard`'s config carries a navigationService only inside associateToStep / existingRecordPicker (`CreateRecordWizard/types.ts:46, 311`). Every host already builds `createXrmNavigationService()` and passes it to the wizards (`Wizard/InAppWizardHost.tsx:208`).</background>
     <relevant-files>
@@ -28,7 +28,6 @@
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx</file>
-      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceWizard.tsx</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/CreateReportCardWizard.tsx</file>
       <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectStep.tsx</file>
     </relevant-files>
@@ -72,7 +71,7 @@
     <step order="1">Read notes/decisions.md D-219 and review section 2.1 rows for AssignWorkFollowOnStep.tsx (:249, :257, :307, :328, :336).</step>
     <step order="2">Add the optional navigationService to the CreateRecordWizard config type and pass it from CreateRecordWizard.tsx (~441-466) to AssignWorkFollowOnStep.</step>
     <step order="3">In AssignWorkFollowOnStep render Matter Type, Practice Area, Assigned Attorney, Assigned Paralegal and Assigned Outside Counsel with DataverseLookupField, keeping the existing search callbacks as onSearch; the two contact fields pass the active-contacts filter; keep "Assign to me".</step>
-    <step order="4">Pass the navigationService the Matter, Project, Event, Invoice and Report Card wizards already receive into their config (Invoice ~403-427 and Report Card ~402-426 pass it to the step directly).</step>
+    <step order="4">Pass the navigationService the Matter, Project, Event and Report Card wizards already receive into their config (Report Card ~402-426 passes it to the step directly).</step>
     <step order="5">Add tests and run the dev check.</step>
     <step order="6">Run the tests named in the acceptance criteria, the touched folders' suites, `npx tsc --noEmit -p .` and ESLint on touched files in src/client/shared/Spaarke.UI.Components; all pass.</step>
     <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
@@ -84,7 +83,7 @@
   <justification>
     <existing>src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/types.ts:46, 311 (navigationService exists only inside associateToStep and existingRecordPicker).</existing>
     <extension>Yes: one optional field on the existing config, read by the existing step; no new component.</extension>
-    <cost-of-doing-nothing>Without it the Assign Work step has no way to open the side pane, so F-R4-2 (owner UAT round 4) stays failed in five wizards.</cost-of-doing-nothing>
+    <cost-of-doing-nothing>Without it the Assign Work step has no way to open the side pane, so F-R4-2 (owner UAT round 4) stays failed in four wizards.</cost-of-doing-nothing>
   </justification>
   <ui-tests>
     <test name="Assigned Attorney opens the side pane in Create Project, Next steps → Assign Work">
@@ -120,7 +119,7 @@
     <criterion testable="true">Given a pick in each field, then the picked ids and names reach onFinish (the work assignment create) unchanged from today's shape (assignedAttorneyId/Name, assignedParalegalId/Name, assignedOutsideCounselId/Name).</criterion>
     <criterion testable="true">"Assign to me" still fills Assigned Attorney.</criterion>
     <criterion testable="true">Given no navigationService, the step renders exactly as today; the existing AssignWorkFollowOnStep.assignToMe test passes unchanged.</criterion>
-    <criterion testable="true">Each of the five wizards passes its navigationService into the config (one test per wizard asserting the captured config has it).</criterion>
+    <criterion testable="true">Each of the four wizards passes its navigationService into the config (one test per wizard asserting the captured config has it).</criterion>
     <criterion testable="true">Dev check (Console in-app wizard AND one code-page dialog wizard): the side pane opens ABOVE the wizard; after a pick and after a cancel the wizard is usable and keeps every value already entered; light and dark themed (review section 4 risk 5).</criterion>
     <criterion testable="true">Negative (closed set, every task): no new lookup component, no new email form, no change to the behaviour of the inline `LookupField.tsx`, and no `Xrm` import added to any component file (the host injects `INavigationService`; ADR-012).</criterion>
     <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
