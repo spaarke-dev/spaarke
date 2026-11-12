@@ -4440,7 +4440,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             if (secureBuId is { } secure && owningUnit == secure)
                 return "is owned in the Secure Record business unit";
             // A secure root's EMPTY flag fails closed (task 150); on another row only a stored true counts.
-            if (isRoot ? row.GetAttributeValue<bool?>(IsSecureColumn) ?? true : row.GetAttributeValue<bool?>(IsSecureColumn) == true)
+            var flag = row.GetAttributeValue<bool?>(IsSecureColumn);
+            if (isRoot ? flag != false : flag == true)
                 return "is Secure";
             if (row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value == InheritedAccessPermission.Restricted)
                 return "is Restricted";
