@@ -305,3 +305,53 @@ Review findings W1 to W5 and S1 to S2 fixed; the rest recorded below as known li
   - S6: `buildCountCards` may duplicate InvoiceReview's. Check before 084b.
   - S7: the dependency list was copied from InvoiceFiles for the shared barrel.
   - S8 to S10: minor, not worked.
+
+## 084b: the Procedure wizard and the rule Exclude
+
+Branch `task/ebilling-084b`, from `6d786b335c`. Folder `src/solutions/RecordProcedures/`. Rigor FULL. No BFF file changed, no new package, no `src/dataverse/solutions/SpaarkeMaster/**` file changed. Every write is one of 089's routes (`ProcedureAssignmentEndpoints.cs`); no `Xrm.WebApi` write.
+
+### What was built
+
+| File | Purpose |
+|---|---|
+| `src/services/overridesApi.ts` | The five calls: `POST procedure-assignments`, `POST rule-overrides/exclude`, `GET overrides/{id}/removal-preview`, `DELETE overrides/{id}`, and 081's `GET /api/finance/procedures/{id}` (the Pin picker's versions). Bodies are exactly 089's request shapes (blank fields dropped, reasons trimmed). A refusal becomes `WriteFailure` (status, `errorCode`, title, detail, field problems). A 2xx whose body is not what the route returns is a failure, never a reported change. |
+| `src/components/wizards/plan.ts` | Pure. A choice becomes ordered steps (`remove`, `assign`, `excludeRule`); `executePlan` runs them and stops at the first refusal. Also: which choices a row offers, which is current, the P-3 and O-20 rules. |
+| `src/components/wizards/WizardFrame.tsx` | The shared `WizardShell` with the four steps Procedure or Rule, On this record, Impact, Confirm. Owns the removal-preview fetch and the write. A refusal is thrown out of `onFinish`, so the shell shows the title and stays open; nothing is re-read. |
+| `src/components/wizards/ProcedureWizard.tsx`, `RuleWizard.tsx`, `steps.tsx`, `words.ts` | The two wizards, the shared step contents (choice list, Impact, Confirm, the O-21 line) and the words. |
+| `src/components/rowOpen.ts` | Row click or Enter or Space opens the wizard; rows are tab stops. |
+| `ProceduresPanel.tsx`, `ProcedureList.tsx`, `RuleList.tsx`, `main.tsx`, `model.ts` | The panel owns the open row, the "N of M" nav over the FILTERED list, and a silent re-read of both lists (same firm and date) after a write; `main.tsx` builds the client. |
+| `src/__tests__/` | `plan.test.ts`, `overridesApi.test.ts`, `Wizards.test.tsx` (new); `wizardHarness.tsx`, `testKit.ts`, the seam and `ProceduresPanel.test.tsx` extended. |
+
+Choices. Procedure: As set on the parent, Follow latest, Pin a version, Exclude here, Remove from this record. Rule: Run the published rule, Exclude here (firm and reason). There is no Change choice and no dry-run read; Impact shows 089's removal preview where an override is removed, otherwise the row's own before and after. Every Impact step, Confirm step and success screen carries the O-21 line.
+
+### Decisions and deviations
+
+1. **Read-only state: not resolved by any route (deviation, owner decision needed).** None of the read routes (084) or write routes (089) answers "may this caller write"; the only signal is the refusal of the write itself. As the brief directs: no client-side role check was invented, no BFF field was added. The wizards open with every choice enabled whoever the caller is; a refusal shows the ProblemDetails title and the wizard stays open. A test pins that the wizard offers every choice and never inspects the caller. **The ui-test "Read-only user" ("the wizard opens read-only; no write choice is enabled") and the goal's last sentence cannot pass as written.** Either reword them to "the write is refused and its title is shown, the wizard stays open", or add a `canWrite` field to the read DTO in a separate BFF task. This is the one place the task cannot meet its text.
+2. **Switching an override is two calls.** 089 refuses a second row for the same subject (409 `assignment.duplicate`), so changing an existing override (pin to exclude, parent's to own) is: preview of the removal, `DELETE` the row, then `POST` the new one, in that order. The Confirm step says so ("current override is removed, then the new one is saved"). If the removal succeeds and the create is refused, the wizard stays open, says "the record's earlier override was removed but the new one was not saved", and re-reads the lists because the record did change. This is the only case where a refusal re-reads.
+3. **Pin versions** come from 081's `GET /api/finance/procedures/{id}` (084's view lists only the version in force and the newer one). Active and Superseded versions are offered (EB-D-155); Draft is not.
+4. **Remove from this record** is offered for a manually assigned Procedure that has an override row of its own on this record and no parent override (with a parent override, "As set on the parent" is the removal). For a Procedure that is not manual, removing the record's override is "Follow latest".
+5. **Exclude on a rule** is blocked on a rule changed on this record (and on a record rule): remove the change first (Run the published rule), then exclude. A message says so.
+6. **A BaseRetired record rule has no override row id in 084's mark**, so it cannot be removed from here. Gap for 084c, which owns Change.
+7. **P-3.** A rule a parent excluded or changed shows "As set on the parent" selected; "Run the published rule" is disabled with "Not available: the parent's rule exclusion applies to this record. Change it on the parent." A disabled choice also cannot be chosen by an event (guard in `ChoiceGroup`, found by a test: jsdom let a click through a disabled radio).
+8. **O-20.** A rule that names one firm is excluded for that firm only: the firm field is fixed to it and its id is sent. A rule with no firm offers "All firms" and the firms the panel already knows (billing firm, rules' firms, invoiced firms).
+9. **S4 (keyboard access to the row)** from 084a fix round 1 is addressed for the rows: they are tab stops and open the wizard on Enter or Space, and the wizard lists every source of the row. The "and n more" tooltip itself is unchanged.
+10. **S6** (`buildCountCards` vs InvoiceReview): not worked, no new count card was added.
+
+### Verification
+
+- `npm run build` in `src/solutions/RecordProcedures`: succeeds (`check-html-css-reset` ok; `tsc-surface-gate`: 0 errors in the page's own files, 98 pre-existing in shared libs); `dist/sprk_recordprocedures.html` 1,283,563 bytes (was 1,181,939 in 084a: the shared `WizardShell` bundle). No new package.
+- `npx jest`: 8 suites, 180 tests, all pass (5 suites and 107 tests before this task; 084a's "rows are inert" assertions were rewritten because this task makes rows open the wizard).
+- Mutation proof (changes made together, then restored): (a) the refusal path re-reading both lists, (b) the success screen without the O-21 line, (c) the disabled-choice guard removed. 20 of the 36 wizard tests fail, including each of the refusal tests, the O-21 test and the P-3 test; restored, all pass.
+- The negatives: no `Change for this record` text, no choice labelled Change on any of the six fixture rows, no call on a route outside the five (the harness classifies any other route as `other` and fails), a scan of the wizard sources (comments stripped) for `rule-overrides/change`, dry-run and change helpers, and a scan that the only HTTP writes in the page are in `overridesApi.ts`. Each scan has a must-fire control.
+- `npm run lint`: not run (eslint is not a dependency of this package, as in 084a).
+
+### For task 112 (ui-tests after deploy)
+
+- **Pin a version.** On a firm Procedure with two versions, pin the older one: the row shows "pinned to v1, v2 available", the O-21 line was on Impact and on the success screen, no console errors.
+- **Exclude and remove.** Exclude with a reason, open it again and remove the override: the preview shows the affected-invoice count (or "closes no findings") before Confirm, then the row returns to its source state.
+- **Switch.** Pin then Exclude on one Procedure: two calls, and the lists show Excluded. Check the 409 path never appears in the normal case.
+- **Rule exclude on a child.** On the work assignment, a rule its parent matter excluded: "As set on the parent" is selected, "Run the published rule" is disabled with the reason.
+- **O-20.** A rule that names a firm: the firm field is fixed and the row afterwards shows the exclusion for that firm.
+- **Refusal.** The "Read-only user" test as reworded in decision 1: a caller 089 refuses sees the ProblemDetails title in the wizard's error bar, the wizard still open, and no list reloaded. Use a user and record where the route answers 403 or 404.
+- **Nav.** Click a row, use the arrows through a filtered list ("N of M" follows the count card's filter); the form starts from each row's own state.
+- **Dark theme.** Repeat the first test; all colours are Fluent tokens (a test scans the wizard files for colour literals).
