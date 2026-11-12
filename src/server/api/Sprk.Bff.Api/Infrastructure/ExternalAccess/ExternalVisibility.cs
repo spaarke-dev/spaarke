@@ -159,7 +159,7 @@ internal static class ExternalVisibility
                 decided.Values.Count(d => d.Verdict == ExternalVisibilityVerdict.Hidden),
                 decided.Values.Count(d => d.Verdict == ExternalVisibilityVerdict.Undecided),
                 ExternalVisibilityResult.Summary(decided.Values));
-            return new ExternalVisibilityResult(decided, faulted: false);
+            return new ExternalVisibilityResult(decided, faulted: false) { RootsReached = run.RootsReached };
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -281,9 +281,15 @@ internal static class ExternalVisibility
                 frontier = next;
             }
 
+            RootsReached = subjects.ToDictionary(s => s.Node, s => (IReadOnlyCollection<Node>)s.Roots.ToArray());
             var (own, narrowed) = await OwnVerdictsAsync(subjects).ConfigureAwait(false);
             return subjects.ToDictionary(s => s.Node, s => Combine(s, own, narrowed));
         }
+
+        /// <summary>uac-r2 191c: the roots each asked row's closure reached (a root reaches itself), for a caller that must also
+        /// keep a secure family out (the External-team share); empty until <see cref="DecideAsync"/> has walked.</summary>
+        internal IReadOnlyDictionary<Node, IReadOnlyCollection<Node>> RootsReached { get; private set; } =
+            new Dictionary<Node, IReadOnlyCollection<Node>>();
 
         /// <summary>One row's parents, queued (or decided: a root, an undecidable parent).</summary>
         private async Task ExpandAsync(State state, List<State> next)
@@ -695,6 +701,19 @@ internal sealed class ExternalVisibilityResult
 
     /// <summary>Whether the row is visible (only <see cref="ExternalVisibilityVerdict.Visible"/> is).</summary>
     internal bool IsVisible(string table, Guid id) => For(table, id).IsVisible;
+
+    /// <summary>uac-r2 191c: the roots the row's closure reached when it was decided without a fault (a root reaches itself);
+    /// <c>null</c> when they are not known (a faulted decision, a row not asked). A caller that needs them treats <c>null</c> as
+    /// "the family cannot be told" (fail closed).</summary>
+    internal IReadOnlyCollection<(string Table, Guid Id)>? RootsOf(string table, Guid id) =>
+        !Faulted && id != Guid.Empty && !string.IsNullOrWhiteSpace(table)
+        && RootsReached.TryGetValue(new ExternalVisibility.Node(table, id), out var roots)
+            ? roots.Select(r => (r.Table, r.Id)).ToArray()
+            : null;
+
+    /// <summary>uac-r2 191c: set by <see cref="ExternalVisibility.DecideAsync"/> on a decision that did not fault.</summary>
+    internal IReadOnlyDictionary<ExternalVisibility.Node, IReadOnlyCollection<ExternalVisibility.Node>> RootsReached { get; init; } =
+        new Dictionary<ExternalVisibility.Node, IReadOnlyCollection<ExternalVisibility.Node>>();
 
     /// <summary>The not-visible count per reason code (one log line; codes and counts only).</summary>
     internal static string Summary(IEnumerable<ExternalVisibilityDecision> decisions) =>

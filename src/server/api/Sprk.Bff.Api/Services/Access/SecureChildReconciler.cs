@@ -594,7 +594,42 @@ public sealed class SecureChildReconciler
                 "the record's related records could not be read");
         }
 
-        return await pass.RunAsync().ConfigureAwait(false);
+        var report = await pass.RunAsync().ConfigureAwait(false);
+
+        // Task 191c (L1): a Make Secure / Unsecure transition brings the External Collaborators team's shares on the root and its
+        // family into line now (a record that became Secure loses them at once). The sweep is left to the two-minute pass, which
+        // covers the same rows. Best effort; only with that engine's writes on.
+        if (mode == SecureChildReconcileMode.Apply && trigger != SecureChildPassTrigger.Sweep)
+            await SyncExternalTeamFamilyAsync(rootTable, rootId, "secure-transition", ct).ConfigureAwait(false);
+
+        return report;
+    }
+
+    /// <summary>
+    /// Task 191c (L1): the External Collaborators team's shares on a row and everything filed under it, now. Never throws
+    /// (cancellation aside): a fault is logged and the two-minute share job re-decides the same rows. Nothing when the engine is
+    /// not composed or its writes are off.
+    /// </summary>
+    private async Task SyncExternalTeamFamilyAsync(string table, Guid id, string trigger, CancellationToken ct)
+    {
+        var engine = _shares.ExternalTeam;
+        if (engine is null || !engine.WritesEnabled)
+            return;
+
+        try
+        {
+            var result = await engine.SyncFamilyAsync(table, id, trigger, ct).ConfigureAwait(false);
+            if (result.Status is ExternalTeamShareStatus.Failed or ExternalTeamShareStatus.Incomplete)
+            {
+                _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares are " +
+                    "{Status} ({Detail}); the two-minute share job finishes them.", table, id, trigger, result.Status, result.Detail);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares could " +
+                "not be updated; the two-minute share job finishes them.", table, id, trigger);
+        }
     }
 
     /// <summary>
@@ -1336,6 +1371,11 @@ public sealed class SecureChildReconciler
                 await RecordDescendantReleasesAsync(childLogicalName.Trim(), childId, descendants, permit, ct).ConfigureAwait(false);
             }
         }
+
+        // Task 191c (L1): the re-filed row and everything filed under it get the External Collaborators team's shares the
+        // predicate answers for their new place, now. Before the communication steps (whose gate step stays last); what they
+        // change afterwards (a Direct-message owner) the two-minute share job re-decides. Never thrown.
+        await SyncExternalTeamFamilyAsync(childLogicalName.Trim().ToLowerInvariant(), childId, "refile", ct).ConfigureAwait(false);
 
         if (string.Equals(childLogicalName.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {

@@ -318,20 +318,30 @@ public sealed class SecureChildShareSynchronizer
     private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SecureChildShareSynchronizer> _logger;
+    private readonly ExternalTeamShareSynchronizer? _externalTeam;
 
+    /// <param name="externalTeam">uac-r2 task 191c: the External-team mode (#2179 design §3.4, §3.5): the predicate and the
+    /// stored <c>sprk_isexternal</c> flags the mirror asks before it gives a flagged system user a right on a child. Optional so
+    /// the test compositions keep compiling; the host registers it. Without it the mirror behaves as before task 191c.</param>
     public SecureChildShareSynchronizer(
         IGenericEntityService dataverse,
         IDataverseRecordShareService recordShare,
         SecureShareNoAccessGuard noAccessGuard,
         IConfiguration configuration,
-        ILogger<SecureChildShareSynchronizer> logger)
+        ILogger<SecureChildShareSynchronizer> logger,
+        ExternalTeamShareSynchronizer? externalTeam = null)
     {
         _dataverse = dataverse;
         _recordShare = recordShare;
         _noAccessGuard = noAccessGuard;
         _configuration = configuration;
         _logger = logger;
+        _externalTeam = externalTeam;
     }
+
+    /// <summary>uac-r2 task 191c: the External-team mode this synchronizer was composed with, if any (the L1 hooks reach it
+    /// through here).</summary>
+    internal ExternalTeamShareSynchronizer? ExternalTeam => _externalTeam;
 
     /// <summary>
     /// Brings every secure child of ONE root into line with the root's current shares — the fan-out after a share,
@@ -2326,7 +2336,12 @@ public sealed class SecureChildShareSynchronizer
                     row.Ref, lineage.Undetermined, revokes.Count, modifies.Count);
             }
 
-            if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0)
+            // uac-r2 task 191c: a child already at its mirror can still hold a flagged user's share the predicate takes away
+            // (FilterFlaggedAsync below), so with the External-team engine composed it is not left early while a system user
+            // holds a share on it. The filter reads each user's flag once per run and asks the predicate only for a child a
+            // flagged user holds.
+            if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0
+                && (_owner._externalTeam is null || !have.Keys.Any(p => p.Kind == DataversePrincipalKind.SystemUser)))
                 return heldBack ? ChildOutcome.Held : ChildOutcome.Unchanged;
 
             var failed = false;
@@ -2403,6 +2418,15 @@ public sealed class SecureChildShareSynchronizer
                 }
             }
 
+            // uac-r2 task 191c (#2179 design §3.4, §3.5, §3.8): a flagged system user gets a right on a secure child only when
+            // the predicate shows the child. Adding: a stored sprk_isexternal = true, or a flag that cannot be read, is refused
+            // on a child the predicate does not show (Hidden or Undecided). With the External-team writes on, a share a
+            // flagged user (stored true only) already holds on such a child is revoked, whatever made it.
+            var (flagFilterDecided, flagFiltered) = await FilterFlaggedAsync(row.Ref, have, grants, revokes, modifies)
+                .ConfigureAwait(false);
+            modifies = flagFiltered;
+            failed |= !flagFilterDecided;
+
             if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0)
                 return failed ? ChildOutcome.NotUpdated : heldBack ? ChildOutcome.Held : ChildOutcome.Unchanged;
 
@@ -2411,6 +2435,112 @@ public sealed class SecureChildShareSynchronizer
             if (failed)
                 return ChildOutcome.NotUpdated;
             return heldBack ? ChildOutcome.Held : ChildOutcome.Updated;
+        }
+
+        // uac-r2 task 191c: the stored sprk_isexternal flags (null: the user's row did not come back or the read faulted) and
+        // the predicate's answer per child, read at most once per run.
+        private readonly Dictionary<Guid, bool?> _externalFlags = new();
+        private readonly Dictionary<RowRef, bool> _childVisible = new();
+
+        /// <summary>
+        /// uac-r2 task 191c (#2179 design §3.4, §3.5, §3.8): the flagged-principal filter of the mirror. A system user whose stored
+        /// <c>sprk_isexternal</c> is <c>true</c>, or whose flag cannot be read, is given nothing on a child the predicate does not
+        /// show (Hidden or Undecided): its grant is dropped and its widening keeps only the narrowing part. With the External-team
+        /// writes on (<see cref="ExternalTeamShareSynchronizer.WritesEnabledConfigKey"/>), a share a user flagged <c>true</c>
+        /// already holds on such a child is revoked; with them off it is kept and logged. Teams and internal users are untouched.
+        /// Returns <c>false</c> as its first item when a flag or the predicate could not be read (the child is then not updated
+        /// this run, and nothing is added for any user whose flag is unknown).
+        /// </summary>
+        private async Task<(bool Decided, List<(DataversePrincipalRef Principal, int Mask)> Modifies)> FilterFlaggedAsync(
+            RowRef child, IReadOnlyDictionary<DataversePrincipalRef, int> have,
+            List<(DataversePrincipalRef Principal, int Mask)> grants, List<DataversePrincipalRef> revokes,
+            List<(DataversePrincipalRef Principal, int Mask)> modifies)
+        {
+            if (_owner._externalTeam is not { } external)
+                return (true, modifies);
+
+            var writesOn = external.WritesEnabled;
+            var adding = grants.Select(g => g.Principal)
+                .Concat(modifies.Where(m => (m.Mask & ~have[m.Principal]) != 0).Select(m => m.Principal))
+                .Where(p => p.Kind == DataversePrincipalKind.SystemUser)
+                .Distinct()
+                .ToList();
+            var holding = have.Keys
+                .Where(p => p.Kind == DataversePrincipalKind.SystemUser && !revokes.Contains(p))
+                .ToList();
+            var users = adding.Concat(holding).Select(p => p.Id).Distinct().ToList();
+            if (users.Count == 0)
+                return (true, modifies);
+
+            var flagFault = false;
+            var unread = users.Where(u => !_externalFlags.ContainsKey(u)).ToList();
+            if (unread.Count > 0)
+            {
+                try
+                {
+                    var read = await external.ReadExternalFlagsAsync(unread, _ct).ConfigureAwait(false);
+                    foreach (var user in unread)
+                        _externalFlags[user] = read.TryGetValue(user, out var flag) ? flag : null;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
+                {
+                    Log.LogWarning(ex, "[SECURE-CHILD-SHARES] the sprk_isexternal flags of {Count} user(s) could not be read for {Child}; " +
+                        "nothing is added for them there.", unread.Count, child);
+                    flagFault = true; // not cached: the next child asks again
+                }
+            }
+
+            // A flag that could not be read is external for a GRANT (design §3.8), never for a revoke.
+            bool FlaggedOrUnknown(DataversePrincipalRef p) => !_externalFlags.TryGetValue(p.Id, out var f) || f is not false;
+            bool Flagged(DataversePrincipalRef p) => _externalFlags.TryGetValue(p.Id, out var f) && f is true;
+
+            var addingFlagged = adding.Where(FlaggedOrUnknown).ToHashSet();
+            var holdingFlagged = holding.Where(Flagged).ToList();
+            if (addingFlagged.Count == 0 && holdingFlagged.Count == 0)
+                return (true, modifies);
+
+            // Undecided until the predicate answers: nothing is added for a flagged or unverifiable user meanwhile.
+            var decided = !(flagFault && addingFlagged.Count > 0);
+            if (!_childVisible.TryGetValue(child, out var visible))
+            {
+                var answer = await external.DecideAsync([(child.Table, child.Id)], _ct).ConfigureAwait(false);
+                visible = answer.IsVisible(child.Table, child.Id);
+                if (answer.Faulted)
+                    decided &= addingFlagged.Count == 0;
+                else
+                    _childVisible[child] = visible;
+            }
+
+            if (visible)
+                return (decided, modifies);
+
+            if (addingFlagged.Count > 0)
+            {
+                grants.RemoveAll(g => addingFlagged.Contains(g.Principal));
+                modifies = NarrowingPartOnly(modifies, have, addingFlagged.Contains, revokes);
+                Log.LogInformation("[SECURE-CHILD-SHARES] {Child} is not shown to external users (the predicate); nothing is added " +
+                    "there for {Count} flagged or unverifiable user(s).", child, addingFlagged.Count);
+            }
+
+            if (holdingFlagged.Count > 0 && writesOn)
+            {
+                foreach (var principal in holdingFlagged.Where(p => !revokes.Contains(p)))
+                {
+                    modifies.RemoveAll(m => m.Principal == principal);
+                    revokes.Add(principal);
+                }
+
+                Log.LogInformation("[SECURE-CHILD-SHARES] {Child} is not shown to external users (the predicate); {Count} flagged " +
+                    "user share(s) on it are revoked.", child, holdingFlagged.Count);
+            }
+            else if (holdingFlagged.Count > 0)
+            {
+                Log.LogInformation("[EXTERNAL-TEAM-SHARE] report-only table={Table} secureChild={Id} flaggedUserRevokes={Count}: " +
+                    "flagged user share(s) on a secure child the predicate does not show would be revoked ({Key} is off).",
+                    child.Table, child.Id, holdingFlagged.Count, ExternalTeamShareSynchronizer.WritesEnabledConfigKey);
+            }
+
+            return (decided, modifies);
         }
 
         /// <summary>

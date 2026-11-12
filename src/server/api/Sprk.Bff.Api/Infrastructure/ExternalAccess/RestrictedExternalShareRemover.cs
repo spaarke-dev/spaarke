@@ -284,6 +284,12 @@ public sealed class RestrictedExternalShareRemover
             }
         }
 
+        // ── Task 191c (L1): the External Collaborators team's shares under a record that has just become Restricted end now,
+        //    not at the next two-minute pass. Only when this call removed something (the job calls this for every Restricted
+        //    root in its window; an unchanged Restricted root is left to the two-minute pass), and only with the writes on. ──
+        if (report.Removed.Count > 0)
+            await SyncExternalTeamAsync(logical, recordId, ct).ConfigureAwait(false);
+
         // ── Task 193 G2b (owner F1-b): each removed user's PAIRED grant ends with the share — the share first, then the grant ──
         report = await EndPairedGrantsAsync(rootType, logical, recordId, report, ct).ConfigureAwait(false);
 
@@ -292,6 +298,34 @@ public sealed class RestrictedExternalShareRemover
             "external owner {Owner}, failures {Failures}.", logical, recordId, report.Removed.Count, report.NoInternalReader,
             report.OwnerIsExternal?.ToString() ?? "none", report.Failures.Count);
         return report;
+    }
+
+    /// <summary>
+    /// Task 191c (L1): bring the External Collaborators team's shares on the record and everything filed under it into line
+    /// with the visibility predicate now. Best effort: a fault is logged and left to the two-minute pass, which re-decides the
+    /// same rows; it never fails the Restricted removal. Nothing when the engine is not composed or its writes are off.
+    /// </summary>
+    private async Task SyncExternalTeamAsync(string logical, Guid recordId, CancellationToken ct)
+    {
+        var engine = _secureChildShares.ExternalTeam;
+        if (engine is null || !engine.WritesEnabled)
+            return;
+
+        try
+        {
+            var result = await engine.SyncFamilyAsync(logical, recordId, "restricted", ct).ConfigureAwait(false);
+            if (result.Status is ExternalTeamShareStatus.Failed or ExternalTeamShareStatus.Incomplete)
+            {
+                _logger.LogWarning(
+                    "[RESTRICTED-EXTERNAL] {Type} {RecordId}: the External Collaborators team's shares under it are {Status} " +
+                    "({Detail}); the two-minute pass finishes them.", logical, recordId, result.Status, result.Detail);
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[RESTRICTED-EXTERNAL] {Type} {RecordId}: the External Collaborators team's shares under it " +
+                "could not be updated; the two-minute pass finishes them.", logical, recordId);
+        }
     }
 
     /// <summary>
