@@ -695,6 +695,8 @@ public class DirectUnfileGenericPathTests
             .Setup(a => a.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
             .Callback<Guid, ThreadAssignment, CancellationToken>((_, assignment, _) => _calls.Add("grant " + assignment.Audience))
             .Returns(Task.CompletedTask);
-        return new DirectMessageOwnerStep(access.Object, dataverse.Object, lookup, NullLogger<DirectMessageOwnerStep>.Instance);
+        return new DirectMessageOwnerStep(
+            access.Object, dataverse.Object, lookup, NullLogger<DirectMessageOwnerStep>.Instance,
+            configuration: new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
     }
 }

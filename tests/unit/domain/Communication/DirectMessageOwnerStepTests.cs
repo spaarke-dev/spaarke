@@ -45,6 +45,7 @@ public class DirectMessageOwnerStepTests
     private readonly List<string> _calls = new();
     private readonly HashSet<Guid> _refusedWrites = new();
     private readonly HashSet<Guid> _changedRows = new();
+    private readonly List<Guid> _secureUnits = new() { SecureUnit };
 
     public DirectMessageOwnerStepTests()
     {
@@ -707,6 +708,52 @@ public class DirectMessageOwnerStepTests
     }
 
     [Theory]
+    [InlineData("it is now in the Secure Record business unit")]
+    [InlineData("its owning unit did not come back")]
+    [InlineData("the Secure Record business unit is ambiguous")]
+    [InlineData("the step has no configuration to name the Secure Record business unit")]
+    public async Task AfterReparent_WhenTheOwnerReadBackIsSecureOrCannotBeTold_ButTheDecisionSaidItWasNot_GrantsNothing_MovesNothing_AndLogsTheError(
+        string shape)
+    {
+        UnfiledFromRecordTeam();
+        var row = _rows[("sprk_communication", MessageId)];
+        switch (shape)
+        {
+            case "it is now in the Secure Record business unit":
+                row["owningbusinessunit"] = new EntityReference("businessunit", SecureUnit);
+                break;
+            case "its owning unit did not come back":
+                row.Attributes.Remove("owningbusinessunit");
+                break;
+            case "the Secure Record business unit is ambiguous":
+                _secureUnits.Add(Guid.NewGuid());
+                break;
+        }
+
+        await Step(Resolved(), withConfiguration: shape != "the step has no configuration to name the Secure Record business unit")
+            .AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        _calls.Should().BeEmpty("nothing is granted or written when the owner is not the one the decision saw");
+        OwningTeam("sprk_communication", MessageId).Should().Be(RecordTeam, "the unfile stands; 054c is the recovery");
+        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(RecordTeam);
+        OwningTeam("sprk_document", OwnDocument).Should().Be(RecordTeam);
+        _log.Errors.Should().ContainSingle(e => e.Event.Id == 5415 && e.Message.Contains("owner changed after the unfile was decided"));
+    }
+
+    [Fact]
+    public async Task AfterReparent_WhenThereIsNoSecureRecordBusinessUnit_AndTheDecisionSaidNotSecure_StillMoves()
+    {
+        UnfiledFromRecordTeam();
+        _secureUnits.Clear();
+        _rows[("sprk_communication", MessageId)].Attributes.Remove("owningbusinessunit");
+
+        await Step(Resolved()).AfterReparentAsync(MessageId, Due(leavesSecureOwner: false), CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam, "an environment with no Secure Record unit has none to be in");
+        _log.Errors.Should().BeEmpty();
+    }
+
+    [Theory]
     [InlineData("sprk_communication", true, true, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.UnfiledCommunication)]
     [InlineData("sprk_communication", true, false, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator)]
     [InlineData("sprk_communication", false, true, Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.ActingUserTeam)]
@@ -718,6 +765,8 @@ public class DirectMessageOwnerStepTests
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static readonly Guid RecordTeam = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000021");
+    private static readonly Guid SecureUnit = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000022");
+    private static readonly Guid OrdinaryUnit = Guid.Parse("a1a1a1a1-0000-0000-0000-000000000023");
 
     /// <summary>The decision before an unfile: <paramref name="message"/> as read before the change, unfiled by clearing its matter
     /// (<see cref="Unfiled"/>) unless <paramref name="unfile"/> is false (the row is already the row after the change).</summary>
@@ -748,6 +797,7 @@ public class DirectMessageOwnerStepTests
         var row = DirectMessage();
         row["ownerid"] = new EntityReference("team", RecordTeam);
         row["owningteam"] = new EntityReference("team", RecordTeam);
+        row["owningbusinessunit"] = new EntityReference("businessunit", OrdinaryUnit);
         Store(row);
         Store(Content("sprk_communicationattachment", Attachment, "sprk_communication", new EntityReference("team", RecordTeam)));
         Store(Content("sprk_document", OwnDocument, "sprk_relatedcommunication", new EntityReference("team", RecordTeam)));
@@ -759,7 +809,9 @@ public class DirectMessageOwnerStepTests
             DirectUnfile = new DirectUnfileDue(ThreadId, leavesSecureOwner),
         };
 
-    private DirectMessageOwnerStep Step(DirectMessageOwnerTeam lookup) => new(_access.Object, _dataverse.Object, lookup, _log);
+    private DirectMessageOwnerStep Step(DirectMessageOwnerTeam lookup, bool withConfiguration = true) =>
+        new(_access.Object, _dataverse.Object, lookup, _log,
+            configuration: withConfiguration ? new ConfigurationBuilder().Build() : null);
 
     private static DirectMessageOwnerTeam Resolved() => new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam).Lookup();
 
@@ -837,6 +889,9 @@ public class DirectMessageOwnerStepTests
 
     private EntityCollection Query(QueryExpression q)
     {
+        if (q.EntityName == "businessunit")
+            return new EntityCollection(_secureUnits.Select(id => new Entity("businessunit", id)).ToList());
+
         var condition = q.Criteria.Conditions.Single();
         var value = (Guid)condition.Values.Single();
         var rows = condition.AttributeName == q.EntityName + "id"

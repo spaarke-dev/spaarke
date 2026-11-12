@@ -199,6 +199,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 calls?.Add("grant");
             })
             .Returns(Task.CompletedTask);
-        return new DirectMessageOwnerStep(access.Object, dataverse.Object, lookup, NullLogger<DirectMessageOwnerStep>.Instance);
+        return new DirectMessageOwnerStep(
+            access.Object, dataverse.Object, lookup, NullLogger<DirectMessageOwnerStep>.Instance,
+            configuration: new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
     }
 }

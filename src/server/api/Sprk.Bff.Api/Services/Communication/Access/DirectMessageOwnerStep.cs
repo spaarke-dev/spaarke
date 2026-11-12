@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -72,6 +73,7 @@ public sealed class DirectMessageOwnerStep
     private const string TypeColumn = "sprk_communicationtype";
     private const string OwnerColumn = "ownerid";
     private const string OwningTeamColumn = "owningteam";
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string VersionColumn = "versionnumber";
     private const string EvictionReason = "direct-message-owner-step";
 
@@ -85,13 +87,18 @@ public sealed class DirectMessageOwnerStep
     private readonly IDataverseRecordShareService? _recordShares;
     private readonly ILogger<DirectMessageOwnerStep> _logger;
 
+    /// <summary>Names the Secure Record business unit (<c>SecureRecord:BusinessUnitName</c>) for the check an unfile makes on the owner
+    /// it reads back (<see cref="WhyOwnerLeftSecureSinceDecidedAsync"/>). Without it that check cannot be made, so such an unfile is refused.</summary>
+    private readonly IConfiguration? _configuration;
+
     public DirectMessageOwnerStep(
         IDirectThreadAccessService access,
         IGenericEntityService dataverse,
         DirectMessageOwnerTeam lookup,
         ILogger<DirectMessageOwnerStep> logger,
         IMembershipCacheInvalidator? cacheInvalidator = null,
-        IDataverseRecordShareService? recordShares = null)
+        IDataverseRecordShareService? recordShares = null,
+        IConfiguration? configuration = null)
     {
         _access = access ?? throw new ArgumentNullException(nameof(access));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
@@ -99,6 +106,7 @@ public sealed class DirectMessageOwnerStep
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cacheInvalidator = cacheInvalidator;
         _recordShares = recordShares;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -194,7 +202,7 @@ public sealed class DirectMessageOwnerStep
 
         try
         {
-            if (await ConfirmDirectMoveAsync(communicationId, due.ThreadId, unfile: true, ct).ConfigureAwait(false) is not { } move)
+            if (await ConfirmDirectMoveAsync(communicationId, due.ThreadId, unfile: true, ct, due.LeavesSecureOwner).ConfigureAwait(false) is not { } move)
                 return;
 
             var assignment = ThreadAssignment.Direct(due.ThreadId);
@@ -482,7 +490,12 @@ public sealed class DirectMessageOwnerStep
     /// <param name="unfile">Piece 3b: the message was just unfiled (<see cref="AfterReparentAsync"/>), so it is owned by the team
     /// of the record it left rather than by a user, and it is judged by <see cref="WhyNotAnEligibleUnfile"/>. <c>false</c> at a
     /// join.</param>
-    private async Task<DirectMove?> ConfirmDirectMoveAsync(Guid communicationId, Guid threadId, bool unfile, CancellationToken ct)
+    /// <param name="leavesSecureOwner">Piece 3b, with <paramref name="unfile"/>: the answer before the write said the message was NOT
+    /// owned in the Secure Record business unit (<see cref="DirectUnfileDue.LeavesSecureOwner"/> <c>false</c>), so its content rows
+    /// move here. The owner read back must still be outside that unit; if it is in it, or cannot be told, nothing is granted or moved
+    /// (<see cref="WhyOwnerLeftSecureSinceDecidedAsync"/>). Ignored at a join.</param>
+    private async Task<DirectMove?> ConfirmDirectMoveAsync(
+        Guid communicationId, Guid threadId, bool unfile, CancellationToken ct, bool leavesSecureOwner = false)
     {
         var resolution = await _lookup.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
         if (resolution.IsNotConfigured && resolution.Fault is null)
@@ -539,7 +552,41 @@ public sealed class DirectMessageOwnerStep
             return null;
         }
 
+        // Piece 3b: the content rows of a message decided as NOT Secure-owned move with it here; one that is Secure-owned now (or whose
+        // owner cannot be told) is the secure-child reconcile's, which was not told, so it is not moved at all. The unfile stands;
+        // Migrate-DirectMessagesToOwnerTeam.ps1 (054c) is the recovery.
+        if (unfile && !leavesSecureOwner
+            && await WhyOwnerLeftSecureSinceDecidedAsync(message, ct).ConfigureAwait(false) is { } changed)
+        {
+            _logger.LogError(MessageNotMovedEvent,
+                "Message {CommunicationId} was unfiled and keeps its owner: the owner changed after the unfile was decided ({Reason}). " +
+                "Nothing was granted or moved.", communicationId, changed);
+            return null;
+        }
+
         return new DirectMove(communicationId, version, message.GetAttributeValue<EntityReference>(OwnerColumn)!, teamId);
+    }
+
+    /// <summary>
+    /// Piece 3b: why the owner read back after an unfile is in the Secure Record business unit, or cannot be told to be outside it,
+    /// although the answer before the write said the message was not Secure-owned; <c>null</c> when it is outside it. The same
+    /// reading as that answer: an owning unit that did not come back counts as Secure, and an environment with no Secure Record
+    /// business unit has none for a message to be in. A unit that cannot be decided (two carry its name, or no configuration was
+    /// given) is a reason too. A fault reading the unit propagates to <see cref="AfterReparentAsync"/>, which logs it.
+    /// </summary>
+    private async Task<string?> WhyOwnerLeftSecureSinceDecidedAsync(Entity message, CancellationToken ct)
+    {
+        if (_configuration is null)
+            return "the Secure Record business unit cannot be read";
+
+        var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+            return "the Secure Record business unit cannot be decided";
+
+        var owningUnit = message.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+        return secureBu.Id is { } secureId && (owningUnit is null || owningUnit == Guid.Empty || owningUnit == secureId)
+            ? "it is owned in the Secure Record business unit, or its owning unit is not known"
+            : null;
     }
 
     /// <summary>
