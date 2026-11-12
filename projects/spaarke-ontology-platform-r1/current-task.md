@@ -24,8 +24,10 @@
 - **177 smoke PASSED on dev 2026-11-11** (owner, Assign Work task email): Outgoing, internal-only, `sprk_regardingmatter` set, .eml document on the same matter, shows in Messages + Documents. Sent to uac-r2.
 - **176 smoke NOT RUN:** no open Revise-budget Work Item on dev to send a Budget inquiry from; verify `sprk_regardingmatter` + `sprk_regardingservicerequest`, internal-only, Private thread, .eml on the matter, Messages. Note: after #2695 deploys, inquiry replies auto-file (Resolved) instead of Suggested; `ConfirmSuggestedAssociationAsync` then no-ops (owner-approved).
 - UAT still open: 161 (Revise budget on REAL-2026-123456.02), 162 (uploads in Create Work Assignment / Project / Invoice), 111 row 4, 114, 105, #2394 (project create as Core User), check 6 (composer); then close 114, 158–163, 166. **090 held.**
-- 3 zz- communication deletes need the owner's yes: `c73b1661-5dda-f111-84e8-00224829aef9`, `c93b1661-5dda-f111-84e8-00224829aef9`, `16613093-2fdb-f111-84e7-000d3a9c9c16`.
-- DEF-059 (#2635, ebilling's): owner leans option C (new read-only role); our position recorded in the archived checkpoint.
+- 160 + 161 were exercised by the owner 2026-11-09 22:14Z (DR-1167 on REAL-2026-123456.02: Send budget inquiry Done, Revise budget Done, Approve variance Skipped) but no verdict is recorded in `notes/uat-v4-log.md`; that inquiry predates 176 on dev, so the 176 smoke still needs a NEW fee/scope item (none open on dev 2026-11-12: SIG-1467 and SIG-1468 both Resolved).
+- 3 zz- communication deletes: the owner's condition ("after the Revise budget test") is met (DR-1167); the delete call still needs the explicit yes: `c73b1661-5dda-f111-84e8-00224829aef9`, `c93b1661-5dda-f111-84e8-00224829aef9`, `16613093-2fdb-f111-84e7-000d3a9c9c16`.
+- DEF-059 (#2635) is DONE (closed 2026-11-09): option C, a one-privilege Decision Record reader role on the BFF identity only, live on dev; customer environments go to customer-provisioning-orchestration-r1. Nothing owed by the owner.
+- F-R3-1 footer fix is on dev (in `a654da59c4`): owner can confirm an Assign Task notification footer shows no logical name or GUID.
 
 **uac-r2 (`uac-r2`)**
 - #2670 (198, Direct 1:1 participant access) merged to master `c71414c7a0`, not deployed. Our post-merge review found **F-198-1** (race in `ReownToDirectAsync`); their fix **#2673** (`2bb9f25ee6`) **re-checked and approved by us** — they merge on green. K1–K5 recorded in their 198 notes §7.8.
