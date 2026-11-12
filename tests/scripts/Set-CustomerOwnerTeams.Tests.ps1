@@ -489,8 +489,8 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $global:SetCustomerOwnerTeamsTest_BillingRoleName = $billing.roleName
         $global:SetCustomerOwnerTeamsTest_HolderPrivilege = $billing.holderPrivilege
         $global:SetCustomerOwnerTeamsTest_PolicyReadId = '00000000-0000-4000-8000-000000000014'
-        # 089e fix round 2: the file's Read privileges, table -> name and id, in file order (sprk_policy, sprk_ruleset, sprk_procedure).
-        $ids = @{ sprk_policy = $global:SetCustomerOwnerTeamsTest_PolicyReadId; sprk_ruleset = '00000000-0000-4000-8000-000000000017'; sprk_procedure = '00000000-0000-4000-8000-000000000018' }
+        # 089e fix round 2, 084f: the file's Read privileges, table -> name and id, in file order (sprk_policy, sprk_ruleset, sprk_procedure, sprk_procedureversion, sprk_procedureassignment).
+        $ids = @{ sprk_policy = $global:SetCustomerOwnerTeamsTest_PolicyReadId; sprk_ruleset = '00000000-0000-4000-8000-000000000017'; sprk_procedure = '00000000-0000-4000-8000-000000000018'; sprk_procedureversion = '00000000-0000-4000-8000-000000000019'; sprk_procedureassignment = '00000000-0000-4000-8000-00000000001a' }
         $global:SetCustomerOwnerTeamsTest_ReadPrivs = [ordered]@{}
         foreach ($t in @($billing.tables)) { $global:SetCustomerOwnerTeamsTest_ReadPrivs[$t.logicalName] = @{ Name = $t.privilegeName; Id = $ids[$t.logicalName] } }
         # The role as the file declares it: each Read at Deep (a test changes one entry's depth, or leaves one out).
@@ -694,18 +694,21 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         }
     }
 
-    It 'must not fire: the shipped shape verifies (org setting on, isinherited 0, Deep Read on sprk_policy, sprk_ruleset and sprk_procedure only, one billing admin homed in a child unit holding the top unit''s copy)' {
+    It 'must not fire: the shipped shape verifies (org setting on, isinherited 0, Deep Read on sprk_policy, sprk_ruleset, sprk_procedure, sprk_procedureversion and sprk_procedureassignment only, one billing admin homed in a child unit holding the top unit''s copy)' {
         $r = Invoke-Billing -Verify
         $r.ExitCode | Should -Be 0 -Because $r.Output
         $r.Output | Should -Match 'VERIFY PASS'
         $r.Output | Should -Match "Org setting : EnableOwnershipAcrossBusinessUnits = 'true'"
         $r.Output | Should -Match 'isinherited=0'
-        $r.Output | Should -Match 'Declared    : Read at Deep on sprk_policy, sprk_ruleset, sprk_procedure;'
-        $r.Output | Should -Match 'privileges=3'
+        $r.Output | Should -Match 'Declared    : Read at Deep on sprk_policy, sprk_ruleset, sprk_procedure, sprk_procedureversion, sprk_procedureassignment;'
+        $r.Output | Should -Match 'privileges=5'
         # One row for each declared privilege, at its depth (089e fix round 2).
         $r.Output | Should -Match 'Privilege   : prvReadsprk_Policy at Deep'
         $r.Output | Should -Match 'Privilege   : prvReadsprk_procedure at Deep'
         $r.Output | Should -Match 'Privilege   : prvReadsprk_ruleset at Deep'
+        # 084f (EB-D-220): Read at Deep on the Procedure Version and the Procedure Assignment.
+        $r.Output | Should -Match 'Privilege   : prvReadsprk_procedureversion at Deep'
+        $r.Output | Should -Match 'Privilege   : prvReadsprk_procedureassignment at Deep'
         $r.Output | Should -Match 'Holders     : 1 of the Customer One copy; team holders \(any copy\): 0; root-copy holders: 0'
         $r.Output | Should -Match "Holder      : 'holder 1' .* homed in 'Customer One Litigation' .*prvWritesprk_ruleset: yes"
         $global:SetCustomerOwnerTeamsTest_Writes.Count | Should -Be 0
@@ -757,7 +760,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $dry = Invoke-Billing
         $dry.ExitCode | Should -Be 0 -Because $dry.Output
         $dry.Output | Should -Match "create the role 'Billing Rule Reader' in the root business unit with isinherited 0"
-        $dry.Output | Should -Match "add Read at Deep to 'Billing Rule Reader': prvReadsprk_Policy, prvReadsprk_ruleset, prvReadsprk_procedure"
+        $dry.Output | Should -Match "add Read at Deep to 'Billing Rule Reader': prvReadsprk_Policy, prvReadsprk_ruleset, prvReadsprk_procedure, prvReadsprk_procedureversion, prvReadsprk_procedureassignment"
         $dry.Output | Should -Match 'and nothing in Secure Record'
         $dry.Output | Should -Match 're-run with -AssignBillingRuleReader'
     }
@@ -824,14 +827,26 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $r = Invoke-Billing -Verify
         $r.ExitCode | Should -Be 1
         $r.Output | Should -Match 'PRIVILEGE OUTSIDE THE FILE: .* holds prvReadsprk_PolicyVersion at Deep'
+        # 084f: only Read is declared on the Procedure Version and Assignment; a Write on either is outside the file.
+        foreach ($extra in 'prvWritesprk_procedureversion', 'prvWritesprk_procedureassignment') {
+            $global:SetCustomerOwnerTeamsTest_Held = @(SetCustomerOwnerTeamsTest_DeclaredHeld) + @(@{ Name = $extra; Id = '00000000-0000-4000-8000-00000000001b'; Depth = 'Basic' })
+            $r = Invoke-Billing -Verify
+            $r.ExitCode | Should -Be 1 -Because $extra
+            $r.Output | Should -Match ('PRIVILEGE OUTSIDE THE FILE: .* holds ' + $extra + ' at Basic')
+        }
     }
 
-    It '089e must fire: Read on sprk_ruleset or sprk_procedure missing, or at another depth, fails -Verify naming it; the dry run plans adding it at Deep' {
+    It '089e/084f must fire: Read on sprk_ruleset, sprk_procedure, sprk_procedureversion or sprk_procedureassignment missing, or at another depth, fails -Verify naming it; the dry run plans adding it at Deep' {
         foreach ($case in @(
                 @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld -Without 'sprk_ruleset'); Line = 'PRIVILEGE MISSING: prvReadsprk_ruleset \(sprk_ruleset\)'; Plan = 'prvReadsprk_ruleset' }
                 @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld -Without 'sprk_procedure'); Line = 'PRIVILEGE MISSING: prvReadsprk_procedure \(sprk_procedure\)'; Plan = 'prvReadsprk_procedure' }
                 @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld @{ sprk_ruleset = 'Global' }); Line = 'PRIVILEGE DEPTH: prvReadsprk_ruleset \(sprk_ruleset\) at Global, expected Deep'; Plan = 'prvReadsprk_ruleset' }
                 @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld @{ sprk_procedure = 'Local' }); Line = 'PRIVILEGE DEPTH: prvReadsprk_procedure \(sprk_procedure\) at Local, expected Deep'; Plan = 'prvReadsprk_procedure' }
+                # 084f (EB-D-220): the same for the Procedure Version and the Procedure Assignment.
+                @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld -Without 'sprk_procedureversion'); Line = 'PRIVILEGE MISSING: prvReadsprk_procedureversion \(sprk_procedureversion\)'; Plan = 'prvReadsprk_procedureversion' }
+                @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld -Without 'sprk_procedureassignment'); Line = 'PRIVILEGE MISSING: prvReadsprk_procedureassignment \(sprk_procedureassignment\)'; Plan = 'prvReadsprk_procedureassignment' }
+                @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld @{ sprk_procedureversion = 'Global' }); Line = 'PRIVILEGE DEPTH: prvReadsprk_procedureversion \(sprk_procedureversion\) at Global, expected Deep'; Plan = 'prvReadsprk_procedureversion' }
+                @{ Held = (SetCustomerOwnerTeamsTest_DeclaredHeld @{ sprk_procedureassignment = 'Local' }); Line = 'PRIVILEGE DEPTH: prvReadsprk_procedureassignment \(sprk_procedureassignment\) at Local, expected Deep'; Plan = 'prvReadsprk_procedureassignment' }
             )) {
             $global:SetCustomerOwnerTeamsTest_Held = $case.Held
             $r = Invoke-Billing -Verify
@@ -933,7 +948,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $r.Output | Should -Not -Match 'does not hold the Customer One copy after the assignment'
     }
 
-    It 'F3 -Apply with the role missing: creates it in the root with isinherited 0, adds Read at Deep on the file''s three privileges, then takes off the privilege the platform added on create' {
+    It 'F3 -Apply with the role missing: creates it in the root with isinherited 0, adds Read at Deep on the file''s five privileges, then takes off the privilege the platform added on create' {
         $global:SetCustomerOwnerTeamsTest_RoleExists = $false
         $global:SetCustomerOwnerTeamsTest_AllowRoleWrites = $true
         $r = Invoke-Billing -Apply
@@ -949,15 +964,15 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $create.'businessunitid@odata.bind' | Should -Be "/businessunits($($global:SetCustomerOwnerTeamsTest_RootId))"
         $w[1] | Should -Be "Post $roles($rootCopy)/Microsoft.Dynamics.CRM.AddPrivilegesRole"
         $add = $global:SetCustomerOwnerTeamsTest_WriteBodies[1] | ConvertFrom-Json
-        @($add.Privileges).Count | Should -Be 3
-        @($add.Privileges | ForEach-Object PrivilegeName) | Should -Be @('prvReadsprk_Policy', 'prvReadsprk_ruleset', 'prvReadsprk_procedure')
+        @($add.Privileges).Count | Should -Be 5
+        @($add.Privileges | ForEach-Object PrivilegeName) | Should -Be @('prvReadsprk_Policy', 'prvReadsprk_ruleset', 'prvReadsprk_procedure', 'prvReadsprk_procedureversion', 'prvReadsprk_procedureassignment')
         @($add.Privileges | ForEach-Object PrivilegeId) | Should -Be @($global:SetCustomerOwnerTeamsTest_ReadPrivs.Values | ForEach-Object { $_.Id })
-        @($add.Privileges | ForEach-Object Depth) | Should -Be @('Deep', 'Deep', 'Deep')
+        @($add.Privileges | ForEach-Object Depth) | Should -Be @('Deep', 'Deep', 'Deep', 'Deep', 'Deep')
         # The strip: the outside privilege the platform added on create comes off, after the add.
         $w[2] | Should -Be "Post $roles($rootCopy)/Microsoft.Dynamics.CRM.RemovePrivilegeRole"
         ($global:SetCustomerOwnerTeamsTest_WriteBodies[2] | ConvertFrom-Json).Privilege.privilegeid | Should -Be $global:SetCustomerOwnerTeamsTest_PlatformPrivilegeId
-        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Name) | Should -Be @('prvReadsprk_Policy', 'prvReadsprk_ruleset', 'prvReadsprk_procedure')
-        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Depth) | Should -Be @('Deep', 'Deep', 'Deep')
+        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Name) | Should -Be @('prvReadsprk_Policy', 'prvReadsprk_ruleset', 'prvReadsprk_procedure', 'prvReadsprk_procedureversion', 'prvReadsprk_procedureassignment')
+        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Depth) | Should -Be @('Deep', 'Deep', 'Deep', 'Deep', 'Deep')
     }
 
     It 'F3 -Apply -AssignBillingRuleReader: an outside privilege on the role comes off BEFORE the user assignment write' {
@@ -971,7 +986,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $w[0] | Should -Match 'roles\([^)]+\)/Microsoft\.Dynamics\.CRM\.RemovePrivilegeRole$'
         ($global:SetCustomerOwnerTeamsTest_WriteBodies[0] | ConvertFrom-Json).Privilege.privilegeid | Should -Be $global:SetCustomerOwnerTeamsTest_PlatformPrivilegeId
         $w[1] | Should -Match 'systemusers\([^)]+\)/systemuserroles_association/\$ref$'
-        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Name) | Should -Be @('prvReadsprk_Policy', 'prvReadsprk_ruleset', 'prvReadsprk_procedure')
+        @($global:SetCustomerOwnerTeamsTest_Held | ForEach-Object Name) | Should -Be @('prvReadsprk_Policy', 'prvReadsprk_ruleset', 'prvReadsprk_procedure', 'prvReadsprk_procedureversion', 'prvReadsprk_procedureassignment')
     }
 
     It 'K1 must fire: Secure Record placed under the customer top unit refuses in every mode, before any write' {

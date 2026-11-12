@@ -4,7 +4,7 @@
     <title>Billing admins can read Procedure Versions and Procedure Assignments (EB-D-220): role source, reader role, until-191 guard</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217, EB-D-220)</phase>
     <gate>startable: EB-D-220 decided (owner, 2026-11-12). uac-r2 reviews the role diff before merge.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security role privilege change (access), plus ArchTest guard and provisioning script changes.</rigor-reason>
     <model-tier>sonnet</model-tier>
