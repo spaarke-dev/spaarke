@@ -104,6 +104,32 @@ public sealed class ExternalVisibilityTests
         (await DecideOne("sprk_matter", matter)).Verdict.Should().Be(expected);
     }
 
+    // uac-r2 191c (adversarial F1): the roots a decision reached, and which are Secure by their EFFECTIVE flags (Secure folded
+    // from the ancestors), for the External-team share engine.
+    [Fact]
+    public async Task ARowUnderARootSecureThroughFiling_ReachesAnEffectivelySecureRoot()
+    {
+        var workAssignment = _world.Root("sprk_workassignment", secure: true);
+        var todo = _world.Add("sprk_todo", ("sprk_regardingworkassignment", workAssignment));
+
+        var result = await Decide(("sprk_todo", todo));
+
+        result.RootsOf("sprk_todo", todo).Should().Equal(("sprk_workassignment", workAssignment));
+        result.ReachesEffectivelySecureRoot("sprk_todo", todo).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ARowUnderAnOrdinaryRoot_ReachesNoEffectivelySecureRoot_AndAnUnaskedRowFailsClosed()
+    {
+        var matter = _world.Root();
+        var todo = _world.Add("sprk_todo", ("sprk_regardingmatter", matter));
+
+        var result = await Decide(("sprk_todo", todo));
+
+        result.ReachesEffectivelySecureRoot("sprk_todo", todo).Should().BeFalse();
+        result.ReachesEffectivelySecureRoot("sprk_todo", Guid.NewGuid()).Should().BeTrue("roots not known fail closed");
+    }
+
     [Fact]
     public async Task ARowUnderARootWhoseFlagsCannotBeRead_IsUndecided()
     {
@@ -848,7 +874,7 @@ public sealed class ExternalVisibilityTests
     /// An in-memory Dataverse: SDK rows for the lineage walk (each read recorded by table and projected through its column set)
     /// and OData rows for the documents, communications and threads (each read projected through its <c>$select</c>).
     /// </summary>
-    private sealed class World
+    internal sealed class World
     {
         private readonly Dictionary<(string Table, Guid Id), Entity> _entities = new();
         private readonly Dictionary<Guid, RootRecordFlags> _rootFlags = new();
@@ -953,12 +979,12 @@ public sealed class ExternalVisibilityTests
 
         public Entity Entity(string table, Guid id) => _entities[(table, id)];
 
-        public Guid Root(string table = "sprk_matter", bool restricted = false, bool limited = false, bool unreadable = false)
+        public Guid Root(string table = "sprk_matter", bool restricted = false, bool limited = false, bool unreadable = false, bool secure = false)
         {
             var id = Guid.NewGuid();
             _rootFlags[id] = unreadable
                 ? RootRecordFlags.Unreadable
-                : new RootRecordFlags(IsSecure: false, IsRestricted: restricted, IsLimited: limited);
+                : new RootRecordFlags(IsSecure: secure, IsRestricted: restricted, IsLimited: limited);
             _ = table; // the root's table is the lookup's target; its flags are keyed by id
             return id;
         }

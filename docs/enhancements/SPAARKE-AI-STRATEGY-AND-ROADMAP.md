@@ -411,7 +411,7 @@ What remains is how Spaarke charges that attributable cost onward:
 ## References
 
 - [Azure AI Foundry Documentation](https://learn.microsoft.com/azure/ai-foundry/)
-- [Microsoft Agent Framework](https://github.com/microsoft/agentframework)
+- [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
 - [Azure OpenAI Documentation](https://learn.microsoft.com/en-us/azure/ai-services/openai/)
 - [Azure AI Search Documentation](https://learn.microsoft.com/en-us/azure/search/)
 - [Azure Document Intelligence](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/)

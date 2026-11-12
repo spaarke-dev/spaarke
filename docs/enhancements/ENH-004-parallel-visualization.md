@@ -4,7 +4,7 @@
 > **Status**: Pending
 > **Priority**: Low
 > **Effort**: 2-3 days
-> **Related**: [design.md](../../projects/ai-playbook-node-builder-r2/design.md)
+> **Related**: [design.md](../../projects/x-ai-playbook-node-builder-r2/design.md)
 
 ---
 

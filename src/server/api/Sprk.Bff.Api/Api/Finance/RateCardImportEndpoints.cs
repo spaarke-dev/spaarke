@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -9,6 +10,7 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Files;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 
 namespace Sprk.Bff.Api.Api.Finance;
@@ -71,17 +73,22 @@ public static class RateCardImportEndpoints
             .RequireWriteOnTheVersionsProcedure() // 085 (I-P5): and Write on the Procedure the version belongs to
             .DisableAntiforgery() // multipart upload; auth is the JWT + the caller's table privileges, not a form token
             .Accepts<IFormFile>("multipart/form-data")
+            // 116 fix round 1: the body cap of the submission routes (the configurable ceiling plus the envelope), above Kestrel's 30 MB default.
+            .WithMetadata(new RequestSizeLimitAttribute(InvoiceSubmissionHttp.MaxRequestBodyBytes))
             .WithName("ImportRateCard")
             .WithSummary("Import a rate card and timekeepers from a workbook as a Draft")
             .WithDescription(
-                "Validates every row and returns all invalid rows (sheet, row, column, message) with nothing written; otherwise stores " +
-                "the workbook in the Procedure Library and creates a Draft rate card with its rates and Pending timekeepers.")
+                "Validates every row and returns all invalid rows (sheet, row, column, message) with nothing written; otherwise creates a " +
+                "Draft rate card with its rates and Pending timekeepers and stores the workbook as the Procedure Version's source file. " +
+                "A refused file write removes the rows and answers as the version file route does (403, 409, 503).")
             .Produces<RateCardImportResult>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // POST /api/finance/ratecards/{rateCardId}/publish — Draft to Published
@@ -129,8 +136,11 @@ public static class RateCardImportEndpoints
     /// 085 (I-P5): the import also needs the caller's own Write on the Procedure the named version belongs to: the Record-path "write" check on
     /// <c>sprk_procedures</c> the Procedure routes declare, asked of Dataverse as the caller (<see cref="CallerReadCheck"/>, which keeps "denied" apart
     /// from "no answer"). The Procedure is read server-side from the stored version. Added AFTER the route's <c>AddFinanceAuthorizationFilter</c>
-    /// (step 0 and the table privileges run first). An unreadable or unknown version is passed on: the service answers 400
-    /// <c>ratecard.procedure_version_invalid</c>. A fault reading the version is a 403 <c>system_failure</c> (fail closed).
+    /// (step 0 and the table privileges run first). Task 116 fix round 2: before that, the caller's own rights on the VERSION are asked as the
+    /// user for every id (<see cref="ProcedureEndpoints.CallerVersionRefusalAsync"/>): an unknown version, one with no Procedure and one the caller
+    /// cannot read are the same 404 <c>procedure.version_not_found</c>; Read without Write is 403. Only then the Procedure check and the handler
+    /// (whose 400 <c>ratecard.procedure_version_invalid</c> covers a readable version that is not a Draft of a rate card Procedure). A fault
+    /// reading the version is a 403 <c>system_failure</c> (fail closed).
     /// </summary>
     /// <remarks>§11: <i>Existing</i> — <c>BillingAdminAuthorization.RequireWriteOnTheRuleSetsProcedure</c> asks this question from a rule set's id.
     /// <i>Extension</i> — it is keyed to the <c>ruleSetId</c> route value and the rule set service; this route carries a version id in the query, so
@@ -145,6 +155,12 @@ public static class RateCardImportEndpoints
                 return await next(context); // the handler answers the 400
             }
 
+            // 116 fix round 2: the caller's own rights on the VERSION, asked as the user, before any answer that depends on the version, for
+            // every id (an unknown one too): a missing or unreadable version is the same 404, Read without Write 403. Then the Procedure check.
+            var denied = await ProcedureEndpoints.CallerVersionRefusalAsync(
+                http.RequestServices.GetRequiredService<StoredFileService>(), versionId, ProcedureEndpoints.VersionNotFoundForDraft, http,
+                http.RequestServices.GetService<ILogger<FinanceAuthorizationFilter>>() ?? (ILogger)Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                http.RequestAborted);
             var read = await ReadVersionsProcedureAsync(http, versionId);
             if (read.Faulted)
             {
@@ -153,7 +169,12 @@ public static class RateCardImportEndpoints
 
             if (read.ProcedureId is not { } id || id == Guid.Empty)
             {
-                return await next(context);
+                return ProcedureEndpoints.VersionNotFound(ProcedureEndpoints.VersionNotFoundForDraft, http);
+            }
+
+            if (denied is not null)
+            {
+                return denied;
             }
 
             return await CheckCallerWriteOnProcedureAsync(http, id, $"Rate card import: caller write on the Procedure of version {versionId}")
@@ -342,6 +363,12 @@ public static class RateCardImportEndpoints
             return FileTooLarge(ebilling.CurrentValue.MaxSubmissionFileSizeMb);
         }
 
+        // 116 fix round 1: a chunked body has no Content-Length; the server stops reading it at the configured limit (413 below).
+        if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } cap)
+        {
+            cap.MaxRequestBodySize = maxBytes + (1024 * 1024);
+        }
+
         // A malformed multipart body (e.g. a section without Content-Disposition) is a CLIENT error: 400, not the parser's exception as a
         // 500 (as ChatDocumentEndpoints answers). The parser's message can echo request content, so it is not returned. Cancellation is
         // deliberately not caught here.
@@ -349,6 +376,11 @@ public static class RateCardImportEndpoints
         try
         {
             form = await request.ReadFormAsync(ct);
+        }
+        catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            // The server's body cap (a chunked body has no Content-Length to check above).
+            return FileTooLarge(ebilling.CurrentValue.MaxSubmissionFileSizeMb);
         }
         catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException)
         {
@@ -378,16 +410,40 @@ public static class RateCardImportEndpoints
         Guid? callerOid = Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null;
 
         var outcome = await service.ImportAsync(
-            new RateCardImportRequest(firmId, name, procedureVersionId, callerOid), bytes, ct);
+            new RateCardImportRequest(firmId, name, procedureVersionId, callerOid, http.User, TokenHelper.ExtractBearerTokenOrNull(http)), bytes, ct);
 
         return outcome.Kind switch
         {
             RateCardOutcomeKind.Done => Results.Created($"{Route}/{outcome.Value!.RateCardId}", outcome.Value),
             RateCardOutcomeKind.Invalid => InvalidProblem(outcome.Errors),
             RateCardOutcomeKind.OwnerRefused => ProblemDetailsHelper.RecordOwnerRefused(outcome.OwnerRefusal!, "rate card", http.TraceIdentifier),
+            RateCardOutcomeKind.FileRefused => FileRefused(outcome.FileRefusal!, http),
             _ => Refused(outcome.StatusCode, outcome.ErrorCode!, outcome.Detail!),
         };
     }
+
+    /// <summary>
+    /// Task 116: the file store refused the workbook (the rows were removed). Mapped as <c>ProcedureEndpoints.PutVersionFile</c> maps a refused
+    /// caller write: step 0 is a 403 <c>system_failure</c>, no Write on the version a 403 <c>insufficient_rights</c>, no owner the 409 owner code,
+    /// a store that is not configured 503, a request the store does not accept 400, anything else 500 <c>ratecard.import_failed</c>.
+    /// </summary>
+    private static IResult FileRefused(StoredFileCreateResult refusal, HttpContext http) => refusal.RefusalCode switch
+    {
+        StoredFileRefusal.CallerNotInternal => ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier),
+        StoredFileRefusal.NoWriteOnParent => ProblemDetailsHelper.Forbidden(
+            FinanceAuthorizationFilter.InsufficientRightsReasonCode, detail: "You need Write on this Procedure Version.", traceId: http.TraceIdentifier),
+        StoredFileRefusal.OwnerUnresolved => Results.Problem(
+            statusCode: StatusCodes.Status409Conflict, detail: "The workbook could not be given an owner; nothing was imported.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = refusal.OwnerRefusalCode ?? StoredFileRefusal.OwnerUnresolved }),
+        StoredFileRefusal.NotConfigured => Refused(
+            StatusCodes.Status503ServiceUnavailable, StoredFileRefusal.NotConfigured, "The file store is not configured in this environment."),
+        StoredFileRefusal.InvalidRequest => InvalidProblem(new[] { new RateCardImportError(null, null, "file", "The workbook was not accepted by the file store.") }),
+        StoredFileRefusal.ParentNoLongerAccepts => Refused(
+            StatusCodes.Status409Conflict, RuleSetService.CodeVersionNotDraft, "The Procedure Version is no longer a Draft; nothing was imported."),
+        _ => Refused(
+            StatusCodes.Status500InternalServerError, RateCardImportService.CodeImportFailed,
+            "The rate card could not be imported and nothing was saved. Try again; if it keeps failing, contact support."),
+    };
 
     internal static async Task<IResult> PublishRateCard(Guid rateCardId, HttpContext http, RateCardImportService service, CancellationToken ct)
     {

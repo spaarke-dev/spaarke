@@ -1380,6 +1380,7 @@ public sealed class InvoiceSubmissionAfterSteps : IInvoiceSubmissionAfterSteps
             return (null, "without_a_version_in_force");
         }
 
+        // all versions: the system policy belongs to no rule set (D-125), so it has no billing drafts and a redraft never deactivates its versions.
         var versionQuery = new QueryExpression(BillingFactLoader.VersionEntity)
         {
             ColumnSet = new ColumnSet("sprk_policy", "sprk_versionnumber", "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_shortheadline",

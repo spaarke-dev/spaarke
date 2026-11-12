@@ -281,11 +281,10 @@ public class RecordOwnerAssignmentCensusTests
             + "communication, handed to the filing walk, which reads its columns; it is never written, so there is no row to own.",
             WaiverKind.Permanent),
         // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; task 089a narrowed it to Procedure rule sets and made
-        // it Permanent, model 5.2): the census keys on (file, table), so the one waiver is three entries with one text: sprk_ruleset (1
-        // site: CreateAsync's upload; ProcedureService's Procedure set is an UnscannedWriter), sprk_policy (1 site: CreateDraftRuleAsync's
-        // policy) and sprk_policyversion (3 sites: CreateDraftRuleAsync's first version, EditAsync's edit-path version created with the
-        // caller-chosen id VersionIdFor, and the copy-forward version).
-        new CensusEntry("RuleSetService.cs", "sprk_ruleset", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        // it Permanent, model 5.2): the census keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1
+        // site: CreateDraftRuleAsync's policy) and sprk_policyversion (3 sites: CreateDraftRuleAsync's first version, EditAsync's edit-path
+        // version created with the caller-chosen id VersionIdFor, and the copy-forward version). Task 116 retired RuleSetService.CreateAsync
+        // (the uploaded rule set), so RuleSetService.cs creates no sprk_ruleset; a Procedure's set is ProcedureService's UnscannedWriter below.
         new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
         new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
         // ebilling-r1 task 086 (procedure model 5.2/9.1): the invoice Stored File joins the secure family as a leaf child of sprk_invoice.
@@ -640,6 +639,12 @@ public class RecordOwnerAssignmentCensusTests
             "Project spend snapshots — owned by the project's team."),
         new OwnerWriteEntry("SignalEvaluationService.cs", "UpsertSignalAsync", 1, OwnerWriteKind.Routed,
             "Owned by the matter's team."),
+        new OwnerWriteEntry("ExternalTeamShareSynchronizer.cs", "ReownAsync", 1, OwnerWriteKind.Routed,
+            "uac-r2 task 191c (design v2 §3.8): a row a user flagged sprk_isexternal = true owns is re-owned to the answer of "
+            + "its own I-6 question (ForExistingRowAsync over the row, the flagged owner as the acting user), conditional on the "
+            + "version read with the owner check and read back; never the External Collaborators team, never the Secure team "
+            + "(the secure reconciler's move), never an unfiled communication (146 E1). Off unless "
+            + "ExternalAccess:ExternalTeamShare:ReownWritesEnabled."),
         new OwnerWriteEntry("DataverseObservationMirror.cs", "MirrorAsync", 1, OwnerWriteKind.Routed,
             "ForChild over the mirrored analysis row."),
         new OwnerWriteEntry("GrantExternalAccessEndpoint.cs", "BuildGrantPayload", 1, OwnerWriteKind.Routed,
@@ -2441,9 +2446,10 @@ public class RecordOwnerAssignmentCensusTests
     {
         var files = ServerFiles();
 
-        // Not vacuous: the waived file holds the three rule-table entries, and every listed unscanned writer is in UnscannedWriters.
+        // Not vacuous: the waived file holds the two rule-table entries (task 116 retired its sprk_ruleset create; a new one fails the
+        // census), and every listed unscanned writer is in UnscannedWriters.
         Assert.Equal(
-            new[] { "sprk_policy", "sprk_policyversion", "sprk_ruleset" },
+            new[] { "sprk_policy", "sprk_policyversion" },
             Census.Where(e => e.FileName == "RuleSetService.cs" && e.Disposition == Disposition.Waived)
                 .Select(e => e.Table).OrderBy(t => t, StringComparer.Ordinal).ToArray());
         Assert.All(ProcedureRuleSetUnscannedFiles, f => Assert.Contains(UnscannedWriters, w => w.FileName == f));

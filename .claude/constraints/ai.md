@@ -138,9 +138,9 @@ var key = DistributedCacheExtensions.CreateKey(
 | ADR | Focus | When to Load |
 |-----|-------|--------------|
 | [ADR-013](../adr/ADR-013-ai-architecture.md) | AI architecture | New AI features |
-| [ADR-014](../adr/ADR-014-ai-caching-and-reuse-policy.md) | AI caching | Cache implementation |
+| [ADR-014](../adr/ADR-014-ai-caching.md) | AI caching | Cache implementation |
 | [ADR-015](../adr/ADR-015-ai-data-governance.md) | Data governance | Logging, persistence |
-| [ADR-016](../adr/ADR-016-ai-cost-rate-limit-and-backpressure.md) | Rate limiting | Throttling implementation |
+| [ADR-016](../adr/ADR-016-ai-rate-limits.md) | Rate limiting | Throttling implementation |
 
 ---
 

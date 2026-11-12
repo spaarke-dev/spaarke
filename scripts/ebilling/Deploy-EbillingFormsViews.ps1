@@ -95,7 +95,7 @@ $Spec = [ordered]@{
     }
     sprk_ratecard          = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_sourcedocument', 'ownerid' })
+        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_firm', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'ownerid' })
         Subgrids = @(@{ Name = 'rates'; Label = 'Rates'; Target = 'sprk_ratecardrate'; Relationship = 'sprk_ratecard_ratecardrate_ratecard' })
         View = 'sprk_name', 'sprk_firm', 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_effectivefrom', 'sprk_effectiveto'
     }
@@ -118,8 +118,9 @@ $Spec = [ordered]@{
     }
     sprk_ruleset           = @{
         Form = 'Replace'; FormName = 'Information'
-        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_domain', 'sprk_scope', 'sprk_firm', 'sprk_visibletofirms', 'sprk_effectivefrom', 'sprk_effectiveto', 'sprk_sourcedocument', 'statuscode', 'ownerid' }
-            @{ Name = 'notconverted'; Label = 'Source clauses not converted'; Cols = 'sprk_notconverted' })
+        Sections = @(@{ Name = 'general'; Label = 'General'; Cols = 'sprk_name', 'sprk_domain', 'sprk_scope', 'sprk_firm', 'sprk_visibletofirms', 'sprk_effectivefrom', 'sprk_effectiveto', 'statuscode', 'ownerid' })
+        # Task 116 fix round 1: no not-converted section. Since 116 the list is the Procedure Version's (sprk_procedureversion.sprk_notconvertedlist);
+        # nothing writes sprk_ruleset.sprk_notconverted any more.
         View = 'sprk_name', 'sprk_domain', 'sprk_scope', 'sprk_firm', 'sprk_visibletofirms', 'sprk_effectivefrom', 'sprk_effectiveto', 'statuscode'
     }
     sprk_invoicesubmission = @{

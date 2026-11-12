@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084c" project="ebilling-r1">
+  <metadata>
+    <title>Procedures on the record (B3): "Change for this record", with a typed parameter form per billing rule type</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
+    <gate>084b merged into work.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend code (.tsx) that writes record rules through a BFF route, plus a client/server agreement test.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Typed forms per closed rule type, each with a server JSON Schema to mirror and the prototype's form as the visual spec.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends 084b's Rule wizard (same files).</parallel-reason>
+    <deps>084b</deps>
+    <tags>frontend, react, typescript, fluent-ui, testing</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add "Change for this record" to the Rule wizard: Rule → On this record → New values → Impact → Confirm. New values is a typed form for the rule's billing type, prefilled from the published values (or, for a stale rule, an explicit "Start from the published values"), with firm scope and reason, saved through 089's rule-overrides/change route, whose server validation (RuleBodySchemaValidator, PolicyVersionValidator) is the authority.</prompt>
+
+  <role>SPAARKE platform developer. Expert in React code pages, Fluent UI v9 forms and JSON Schema.</role>
+
+  <goal>A billing admin can change a rule's values for one record and firm scope from the panel; the form offers exactly the fields the server schema accepts for that rule type; a server refusal shows its field errors on the form; rate cards offer no Change and say why (pin the Procedure version instead).</goal>
+
+  <context>
+    <background>EB-D-217. D-27: rules are closed typed templates with JSON parameters. Server schemas: Services/Signals/RuleBodySchemaValidator.cs (closed switch per RuleType) and Services/Signals/Billing/BillingRuleCatalogue.cs. Prototype: src/procedures/RuleWizard.tsx "New values"; AddedFee's "Not allowed" and "Allowed after N days" are listed but disabled because the validator refuses them for now (model 6.3). Model section 15: removing a changed rule closes the rule it changed.</background>
+    <relevant-files>
+      <file role="new">src/solutions/RecordProcedures/src/components/wizards/ruleForms/ (one form per billing rule type, plus index.ts mapping type to form)</file>
+      <file role="modify">src/solutions/RecordProcedures/src/components/wizards/RuleWizard.tsx, steps.tsx; src/services/overridesApi.ts (change route)</file>
+      <file role="new">tests/Spaarke.ArchTests/RecordProceduresRuleFormAgreementTests.cs (client form field set per type equals the server schema's properties)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodySchemaValidator.cs</file>
+      <file role="canonical-reference">tests/integration/data-mutation/FinanceSubmission/InvoiceReviewDetailScriptAgreementTests.cs (a client/server agreement test that reads source)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="084b" status="pending">The Rule wizard and overrides client.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="D-27, project">Every form in ruleForms/ is for one billing RuleType and offers only that type's schema properties; the server's validation is the authority and the client never accepts a value the server would refuse silently (a refusal is shown, field by field).</constraint>
+    <constraint source="project (model 6.3)">AddedFee's "Not allowed" and "Allowed after N days" stay listed but disabled with the reason while the validator refuses them.</constraint>
+    <constraint source="project">Rate-card rules offer no Change: the wizard says why and points to pinning the Procedure version.</constraint>
+    <constraint source="project">No change to Services/Signals/** in this task (ontology-r1-reviewed). If a form needs a schema the server does not expose, STOP (escalation).</constraint>
+    <constraint source="ADR-021, ADR-012">Fluent v9 semantic tokens and shared form components; no new npm package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 6.3, 15)</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Client/server agreement test" location="tests/integration/data-mutation/FinanceSubmission/InvoiceReviewDetailScriptAgreementTests.cs">Read both sources and assert they agree.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">One typed form per billing RuleType from RuleBodySchemaValidator's schemas; prefill and "Start from the published values".</step>
+    <step order="2">Wire New values into the Rule wizard; save through the change route; show field errors from a refusal.</step>
+    <step order="3">The agreement ArchTest (must-fire: a property added to a server schema and not to its form fails it).</step>
+    <step order="4">Tests (jest and ArchTests); npm run build; dotnet test the ArchTests.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a billing rule type's parameters cannot be read from RuleBodySchemaValidator as a closed set (for example a schema built at run time), STOP and escalate rather than guessing the fields.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>089's ChangeRuleAsync (ProcedureAssignmentService.cs ~478) accepts and validates new values; no UI builds them; RuleReview edits whole policy versions for admins, not per-record values.</existing>
+    <extension>No: RuleReview's editor writes a policy version, while a record change writes a record rule through 089's route with firm scope and reason; the typed forms are new because no per-type form exists.</extension>
+    <cost-of-doing-nothing>A record that needs a different cap or limit (the prototype's HOURS changed to 12 h) can only be changed by an API call, and the stale-rule refresh has no surface.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Change a limit">
+      <steps><step>On a matter, open a limit rule (for example daily hours); choose Change for this record, set a value, firm scope and reason, confirm</step></steps>
+      <expected>The rule shows a Changed badge with the new value; the O-21 line was shown; no console errors</expected>
+    </test>
+    <test name="Server refusal">
+      <steps><step>Enter a value the server schema refuses</step></steps>
+      <expected>The field shows the server's error; nothing is saved</expected>
+    </test>
+    <test name="Rate card">
+      <steps><step>Open a rate-card rule</step></steps>
+      <expected>No Change choice; the reason and the pin hint are shown</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark theme; repeat the first test</step></steps>
+      <expected>All colours from Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install, build, test</tool>
+    <tool name="dotnet">ArchTests</tool>
+    <tool name="ui-test">browser checks after 112 deploys</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/RecordProcedures/src/components/wizards/ruleForms/**</output>
+    <output type="test">tests/Spaarke.ArchTests/RecordProceduresRuleFormAgreementTests.cs; jest tests for the forms</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every billing RuleType has exactly one form, and the agreement test passes; a seeded extra server property fails it (must-fire), then is removed.</criterion>
+    <criterion testable="true">A valid change sends 089's change request with values, firm scope and reason, and re-reads both lists.</criterion>
+    <criterion testable="true">A 422 refusal shows its field errors on the matching fields; nothing is re-read (negative).</criterion>
+    <criterion testable="true">Rate cards offer no Change; AddedFee's two refused modes are disabled with the reason (negative).</criterion>
+    <criterion testable="true">npm run build succeeds with no new package; ArchTests pass; the ui-tests pass after 112 deploys, including dark mode.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deployment: 112.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
