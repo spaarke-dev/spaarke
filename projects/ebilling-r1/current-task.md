@@ -19,7 +19,7 @@
 >   - **uac-r2 condition 2: DONE.** 112 step 9 runs the private check (session memory `eb-d-218-access-invariant-check.md`); message uac-r2 only on FAIL.
 >   - ISS-015 (#2743, eBilling pages not linted) filed.
 >   - Agent worktrees to remove with Remove-WorktreeSafe once done: `agent-afdaef28d1031b1cf` (locked by its pid), `agent-adeafd262169b50f5` (084a), `agent-ae189e2e785c30cb8` (084 r4), `agent-a63ad511b8b772864` (084f), `agent-ae6525e6c0d46e864` if it exists.
->   - Owner step: publish SpaarkeMaster 1.3.1.0, then tell provisioning-r1. ontology-r1 note (DEF-059 role) still owed. word-add-in-r1's #2552 waits on the owner.
+>   - Owner step: publish SpaarkeMaster 1.3.1.0, then tell provisioning-r1. ontology-r1 note (DEF-059 role) still owed. word-add-in-r1's #2552 MERGED to master `14b600192f` (2026-11-12) and on the dev add-in site; owner retests a no-firm submit there.
 >   - **Next tasks:** 084b → 084c; 084d after 084b; 084e (opus; ontology-r1 reviews Signals; now also extracts the episode filter) after uac-r2 signs off 084.
 
 ## Quick recovery
@@ -74,7 +74,7 @@
    - the 164 `-Apply`, plus read-backs to uac-r2;
    - one message to provisioning-r1 (master SHA + SpaarkeMaster version for DEF-059, 166 and 089d option R; the 166 field-security grants with `-Verify`; 116's `sprk_procedureversion.sprk_notconvertedlist` reader/writer line; the writer-unit team needs no grant);
    - word-add-in-r1 (session-move notice done 2026-11-11):
-     - the master SHA carrying 095c-2..4 (it releases pane PR #2552);
+     - the master SHA carrying 095c-2..4 (delivered: #2552 merged as `14b600192f`);
      - the 095a/095b/151e PR plus SHA;
      - **the dev SHA that carries 095a**, so the owner can retest the already-submitted banner;
      - the 151e SHA.
