@@ -29,7 +29,7 @@
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs</file>
       <file role="new">src/server/api/Sprk.Bff.Api/Api/Finance/RecordProcedureEndpoints.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs, EndpointMappingExtensions.cs (shared append points); tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
-      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/RecordProcedureReadServiceTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/Finance/RecordProcedureEndpointsTests.cs</file>
+      <file role="new">tests/integration/contract/Api/Finance/RecordProcedureEndpointsContractTests.cs, RecordProcedureReadModelContractTests.cs, RecordProcedureRig.cs (contract tests, KEEP per ADR-038; compiled into the Sprk.Bff.Api.Tests project)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs (per-core-record routes, step-0 flag, Record path, uniform 404)</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs (ReadAsync, line ~885)</file>
     </relevant-files>
@@ -64,7 +64,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">RecordProcedureReadService over ProcedureResolver with a caller-identity row source; the two routes per core record; ledger entry.</step>
+    <step order="1">RecordProcedureReadService over ProcedureResolver: one app-only read, then one batched caller-rights check over every exposed row (EB-D-218); the two routes per core record; ledger entry.</step>
     <step order="2">Tests (criteria); dotnet build and test; publish-size delta.</step>
     <step order="3">Answer questions a–g in notes/084-procedure-review-ui.md (DTO notes) and correct spaarke-prototype's types.ts assumptions there, for 084a.</step>
     <step order="4">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
@@ -77,8 +77,8 @@
   </escalation>
 
   <justification>
-    <existing>No route lists a record's Procedures or rules in force; RuleSetEndpoints lists rule sets for billing admins without a record; ProcedureResolver (082) computes the same sources for evaluation.</existing>
-    <extension>The read service is a thin caller-identity wrapper over 082's resolver (no second selection); a new endpoints file because the routes are reads keyed by core record, while 089's file holds the override writes.</extension>
+    <existing>No route lists a record's Procedures or rules in force (git grep -nE '/procedures"|rules-in-force' afe78f9d01 -- src/server/api/Sprk.Bff.Api/Api: no matches); RuleSetEndpoints.cs lists rule sets for billing admins without a record; ProcedureResolver.ReadAsync (Services/Signals/Billing/ProcedureResolver.cs, 082) computes the same sources for evaluation; CallerRecordAccessProbe.GetCallerRightsForRecordsOrUnknownAsync (Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs:431) is the existing batched caller-rights check.</existing>
+    <extension>The read service is a thin wrapper over 082's resolver (no second selection) that reads app-only and then gates the whole answer on one caller-rights check (EB-D-218); a new endpoints file because the routes are reads keyed by core record, while 089's ProcedureAssignmentEndpoints.cs holds the override writes.</extension>
     <cost-of-doing-nothing>O-3 and O-9 fail: the rules that apply to a record are not visible or reviewable, so an override cannot be checked before an invoice is judged, and 084a–084d have nothing to render.</cost-of-doing-nothing>
   </justification>
 
