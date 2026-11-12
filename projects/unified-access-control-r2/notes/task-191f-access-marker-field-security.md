@@ -177,6 +177,10 @@ The raw output stays outside the repo, because it lists System Administrator hol
 
 ## 7. Live steps for 191i (owner go; agents never run -Apply)
 
+> **R1 gate (main session, 2026-11-11):** the separate R1 PR ("uac-r2 191f R1: email draft omits the access marker on
+> caller-written creates", branch `fix/uac-191f-r1-draft-marker`) must be MERGED and DEPLOYED before step 5. Only then
+> may `-BffOmitsMarkersFromCallerCreates` be passed.
+
 1. Deploy a BFF that no longer puts a marker in a caller create (R1).
 2. Run `scripts/Set-ExternalCollaboratorRole.ps1 -Apply` (191d): it creates the External Collaborators unit and role.
 3. Run `scripts/Set-RecordCreatorPersonSchema.ps1 -Apply`: it puts the reader on the new unit's default team.
@@ -187,5 +191,24 @@ The raw output stays outside the repo, because it lists System Administrator hol
 7. Run the placement job (191e), then the live AC-3 gate: a flagged user's PATCH of a marker is refused, and an internal
    user's PATCH is accepted. Also check K6.
 
-**Order relative to imports:** run steps 4 to 6 after the release's last SpaarkeMaster import. After any later import,
+## 8. Follow-up: provisioning wiring (R3/K2, main session files it as 191j for the provisioning project)
+
+- **Rule: never export the lock into the solution source.**
+  - Do not export IsSecured for the markers, or the "Spaarke Access Marker Writers" profile, into
+    `src/dataverse/solutions/SpaarkeMaster`.
+  - A profile's team members never travel with a solution. An environment built from such an export would get the
+    markers secured with nobody on the reader.
+- **Scripts that provisioning must run, in this order, for every new environment and every new business unit:**
+  1. `scripts/Set-RecordCreatorPersonSchema.ps1 -Apply` gives every default team the reader, "Spaarke BFF-Managed Field
+     Readers".
+  2. `scripts/Set-ExternalCollaboratorRole.ps1 -Apply` creates the External Collaborators unit and role. It runs once
+     per environment.
+  3. `scripts/Set-AccessMarkerFieldSecurity.ps1 -BffOmitsMarkersFromCallerCreates -Apply` creates the writer, adds its
+     members, and secures and grants the columns.
+  4. `scripts/Set-AccessMarkerFieldSecurity.ps1 -Verify` must exit 0.
+  - Today `Provision-Customer.ps1` runs none of them.
+- **Managed SpaarkeMaster (K7):** in a customer environment, step 3 cannot create the writer profile inside the managed
+  solution. Decide where the profile lives before wiring this.
+
+**Order of the §7 live steps relative to imports:** run steps 4 to 6 after the release's last SpaarkeMaster import. After any later import,
 run `-Verify` again, and run `-Apply` if it reports a column unsecured (K2).
