@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Writes to the shared dev environment (BFF app service, Dataverse rows, web resources) and to SpaarkeMaster source.</parallel-reason>
-    <deps>084, 084a, 084b, 084c, 084d, 084e, 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118, 119</deps>
+    <deps>084, 084a, 084b, 084c, 084d, 084e, 084f, 052, 100, 101, 102, 103, 104, 105, 106, 107, 110, 111, 079, 095, 096, 097, 113, 114, 118, 119</deps>
     <tags>deploy, bff, code-page</tags>
     <estimated-effort>1 day</estimated-effort>
   </metadata>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084f" project="ebilling-r1">
+  <metadata>
+    <title>Billing admins can read Procedure Versions and Procedure Assignments (EB-D-220): role source, reader role, until-191 guard</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217, EB-D-220)</phase>
+    <gate>startable: EB-D-220 decided (owner, 2026-11-12). uac-r2 reviews the role diff before merge.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security role privilege change (access), plus ArchTest guard and provisioning script changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive privilege entries following 089e (c564ab0709) and 089d's reader role exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only role source, the reader-role config and its script and tests; no file 084, 084a or 084e touches.</parallel-reason>
+    <deps>084</deps>
+    <tags>dataverse, solution, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Grant Read at Deep on sprk_procedureversion and sprk_procedureassignment to the Spaarke Billing Administrator role (solution source) and to the Billing Rule Reader role (config/billing-rule-readers-role.json and its provisioning script), and allow exactly those grants in ProcedureRolePrivilegeGuardTests.AllowedBeforeTask191. No live change in this task.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse security role source XML and Spaarke's role guards.</role>
+
+  <goal>A billing admin, homed in the top unit or in a child unit, can Read every row 084's two routes expose, so the routes answer 200 for billing admins; every other role is unchanged, and the until-191 guard still refuses any other privilege on the Procedure tables.</goal>
+
+  <context>
+    <background>EB-D-220 in notes/decisions-log.md; uac-r2 finding F-C on 084 (notes/084-procedure-review-ui.md, "Fix round 3"). 089e (commit c564ab0709) added prvReadsprk_procedure at Deep to the Billing Administrator role and to AllowedBeforeTask191; 089d added the Billing Rule Reader role (config/billing-rule-readers-role.json, scripts/Set-CustomerOwnerTeams.ps1) for child-unit billing admins, and 089e fix round 2 added sprk_ruleset and sprk_procedure to it.</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/SpaarkeMaster/Roles/Spaarke Billing Administrator.xml</file>
+      <file role="modify">config/billing-rule-readers-role.json; scripts/Set-CustomerOwnerTeams.ps1 (only if the table list is not read from the json); tests/scripts/Set-CustomerOwnerTeams.Tests.ps1</file>
+      <file role="modify">tests/Spaarke.ArchTests/ProcedureRolePrivilegeGuardTests.cs (AllowedBeforeTask191); tests/Spaarke.ArchTests/RestrictedContentOwnerRoleGuardTests.cs if it pins the reader role's privilege set</file>
+      <file role="canonical-reference">commit c564ab0709 (089e: the same change for sprk_procedure)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="EB-D-220, uac-r2">Exactly two new privileges per role, prvRead on sprk_procedureversion and on sprk_procedureassignment, at Deep. No Create, Write, Delete, Append, AppendTo, Assign or Share; no other role; no change to Basic or Core User.</constraint>
+    <constraint source="ProcedureRolePrivilegeGuardTests">The until-191 rule stays on (UntilTask191 = true); AllowedBeforeTask191 gains exactly the new (role, privilege, Deep) entries with the comment "uac-r2 agreed 2026-11-12 (EB-D-220)"; the guard still fails for any other privilege on the Procedure tables (must-fire test).</constraint>
+    <constraint source="projects/ebilling-r1/CLAUDE.md section 5">No live Dataverse change, no role assignment and no script run against an environment in this task. The dev apply is task 112's, with the owner's OK typed in session and uac-r2 notices before and after.</constraint>
+    <constraint source="public repository">Notes and commits name the roles and privileges only; no membership, identity or access-gap detail.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/ebilling-r1/notes/decisions-log.md (EB-D-218, EB-D-220)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Copy 089e's change shape (c564ab0709) for the two privileges in the Billing Administrator role XML (privilege names as Dataverse spells them in the existing XML).</step>
+    <step order="2">Add the two tables to the Billing Rule Reader role definition and whatever reads it; update its tests.</step>
+    <step order="3">Add the AllowedBeforeTask191 entries; must-fire test that a third privilege on these tables still fails.</step>
+    <step order="4">dotnet test tests/Spaarke.ArchTests/; Pester tests for the script; record the dev apply steps 112 needs in notes/084-procedure-review-ui.md (section "084f").</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the privilege names for these two tables do not exist in the solution's privilege set (table not in SpaarkeMaster, or a different schema spelling), STOP and report rather than inventing names.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>089e's prvReadsprk_procedure grant (c564ab0709) and 089d's Billing Rule Reader role cover sprk_procedure, sprk_ruleset and sprk_policy; nothing grants Read on sprk_procedureversion or sprk_procedureassignment except System Administrator.</existing>
+    <extension>Yes: two privilege entries in the existing roles and two allow-list entries; no new role.</extension>
+    <cost-of-doing-nothing>Under EB-D-218 every record with an in-force Procedure answers 503 procedures.unavailable to billing admins, so 084a–084d show "unavailable" everywhere outside System Administrator.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Billing Administrator role source holds prvRead on sprk_procedureversion and sprk_procedureassignment at Deep and nothing else new; the Billing Rule Reader role definition holds the same two.</criterion>
+    <criterion testable="true">ArchTests pass; ProcedureRolePrivilegeGuardTests still fails (must-fire) for any other privilege on the Procedure tables or another role.</criterion>
+    <criterion testable="true">The reader-role script tests pass, including the new tables.</criterion>
+    <criterion testable="true">No live change; the 112 apply steps are recorded.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-11-12 from EB-D-220 (owner). Deployment: 112.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
