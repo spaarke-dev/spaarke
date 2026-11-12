@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Communication;
@@ -224,14 +225,22 @@ public class RegistrationEmailService
         var request = BuildCiamInviteRequest(
             templateHtml, recipientEmail, firstName, portalUrl, inviteUrl, DateTime.UtcNow.Year, FromMailbox,
             subject: "Welcome to the Spaarke Portal — Set Your Password",
-            correlationId: $"reg-ciam-onboarding-{recipientEmail}");
+            correlationId: $"reg-ciam-onboarding-{InviteSendCorrelation()}");
 
+        // Never the invitee's email (it is the recipient): the trace id ties this line to the invite's own log lines.
         _logger.LogInformation(
-            "Sending CIAM onboarding email | Recipient: {Recipient}",
-            recipientEmail);
+            "Sending CIAM onboarding email | Trace: {TraceId}",
+            Activity.Current?.TraceId.ToString() ?? "(none)");
 
         await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
     }
+
+    /// <summary>
+    /// The CIAM invite emails' send correlation: the trace id (a new id when there is none), never the recipient's email —
+    /// the communication pipeline logs it on every line of the send.
+    /// </summary>
+    private static string InviteSendCorrelation() =>
+        Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
 
     /// <summary>
     /// Sends the "sign in with your existing account" email (unified-access-control-r2 task 184): the invite found that the
@@ -254,11 +263,12 @@ public class RegistrationEmailService
         var request = BuildCiamInviteRequest(
             templateHtml, recipientEmail, firstName, portalUrl, inviteUrl, DateTime.UtcNow.Year, FromMailbox,
             subject: "You've Been Invited to the Spaarke Portal — Sign In With Your Existing Account",
-            correlationId: $"reg-ciam-existing-account-{recipientEmail}");
+            correlationId: $"reg-ciam-existing-account-{InviteSendCorrelation()}");
 
+        // Never the invitee's email (it is the recipient): the trace id ties this line to the invite's own log lines.
         _logger.LogInformation(
-            "Sending CIAM existing-account invite email | Recipient: {Recipient}",
-            recipientEmail);
+            "Sending CIAM existing-account invite email | Trace: {TraceId}",
+            Activity.Current?.TraceId.ToString() ?? "(none)");
 
         await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
     }

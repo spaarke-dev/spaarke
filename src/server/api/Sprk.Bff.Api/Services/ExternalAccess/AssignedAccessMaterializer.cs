@@ -218,6 +218,7 @@ public sealed class AssignedAccessMaterializer
     private readonly ExternalParticipationService _participations;
     private readonly IAccessibleRecordSetService _accessibleRecords;
     private readonly IContactIdentityStore _identities;
+    private readonly ContactUserRepresentation _representation;
     private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly IDataverseRecordShareService _recordShare;
 
@@ -233,6 +234,14 @@ public sealed class AssignedAccessMaterializer
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AssignedAccessMaterializer> _logger;
     private readonly IServiceScopeFactory? _scopes;
+
+    /// <summary>
+    /// Task 193 G3a: THIS scope's provider (a scoped service is given its scope's), through which the grant revoke is
+    /// resolved when a removed share may carry a paired grant. Not a constructor dependency: the revoke depends on this class.
+    /// Resolved from the same scope, not a new one, so the request or job pass shares ONE revoke — one pairing-column check
+    /// and one Warning per pass (<see cref="Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService"/>).
+    /// </summary>
+    private readonly IServiceProvider? _services;
 
     /// <summary>Task 185 (§12 I-9): the ONE invite core the grant flows share — an internal assignment of an unbound
     /// contact with an email sends the invite, as <c>/grant</c> does.</summary>
@@ -272,9 +281,11 @@ public sealed class AssignedAccessMaterializer
         GrantAccessNotifier notifier,
         IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker ownerPrivileges,
-        IServiceScopeFactory? scopes = null)
+        IServiceScopeFactory? scopes = null,
+        IServiceProvider? services = null)
     {
         _scopes = scopes;
+        _services = services;
         // A singleton, registered unconditionally (DataverseServiceExtensions); it depends on nothing here.
         _ownerPrivileges = ownerPrivileges ?? throw new ArgumentNullException(nameof(ownerPrivileges));
         // A singleton, registered unconditionally (MetadataServiceExtensions); it depends on nothing here.
@@ -287,6 +298,8 @@ public sealed class AssignedAccessMaterializer
         _participations = participations;
         _accessibleRecords = accessibleRecords;
         _identities = identities;
+        // Task 193: the ONE contact -> user rule, over the stores this class already holds (no new dependency).
+        _representation = new ContactUserRepresentation(identities, store, participations);
         _noAccessGuard = noAccessGuard;
         _recordShare = recordShare;
         // Both Scoped and unconditionally registered (ExternalAccessModule); no cycle — the synchronizer never depends on
@@ -700,6 +713,59 @@ public sealed class AssignedAccessMaterializer
         }
     }
 
+    /// <summary>
+    /// Task 193 G2b (owner F1-b: the paired grant follows the share): <paramref name="user"/>'s share on the root is gone —
+    /// this rule removed it (confirmed by read-back, not put back to an earlier level), or it was already gone when an ended
+    /// assignment's row was decided. An "Add person" share at the level this rule wrote reads as this rule's, so the share
+    /// removed may be the one a grant is PAIRED with: every such grant on the root is ended through the one grant revoke, the
+    /// same call <c>/unshare-user</c> makes, resolved from this scope (the revoke depends on this class, so it cannot be a
+    /// constructor dependency), as a SYSTEM removal (task 193 G4a, owner ruling 2026-10-28: no operator decline). The share
+    /// first, then the grant, then the row. <c>false</c> when one was not confirmed ended: a failure
+    /// (<c>paired-grant-not-ended</c>), so the run is not complete, and the caller leaves the ledger row live so the next pass
+    /// tries again (task 193 G4a, A-F1). In a report-only job pass (<see cref="AssignedAccessRequest.RevokeOnChange"/> false)
+    /// nothing is ended: a pairing still on the root is reported (<see cref="AssignedAccessAction.WouldRevoke"/>) and the row
+    /// stays live. A pairing column that is not provisioned is the revoke's Warning.
+    /// </summary>
+    private async Task<bool> EndPairedGrantsAsync(
+        Run run, AssignedSubject subject, IReadOnlyList<string> fields, Guid user, CancellationToken ct)
+    {
+        if (!run.Request.RevokeOnChange)
+        {
+            var read = await ExternalGrantLifecycle.ReadUserPairingsOnRecordAsync(
+                    _dataverse, run.Request.RootType, run.RootId, user, top: 1, ct).ConfigureAwait(false);
+            if (read.Status == GrantPairingReadStatus.ColumnMissing || (read.Status == GrantPairingReadStatus.Read && read.Rows.Count == 0))
+                return true;
+
+            run.Entry(subject, fields, user, AssignedAccessState.Shared, PairedGrantNotEndedKind,
+                AssignedAccessAction.WouldRevoke);
+            return false;
+        }
+
+        if (_services?.GetService<Sprk.Bff.Api.Api.ExternalAccess.ExternalGrantRevocationService>() is not { } pairedGrants)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: {User}'s share was removed; no host scope to end a grant paired with it.",
+                run.Logical, run.RootId, user);
+            return true;
+        }
+
+        var paired = await pairedGrants
+            .RevokePairedWithAsync(run.Request.RootType, run.RootId, user, Sprk.Bff.Api.Api.ExternalAccess.GrantEndCause.System, ct)
+            .ConfigureAwait(false);
+        if (paired.PairedGrantEnded is false)
+        {
+            run.Fail(subject, PairedGrantNotEndedKind,
+                $"The automatic share of user {user} was removed, but the external access paired with it could not be confirmed " +
+                $"ended ({paired.Outcome}). The next Assigned-To pass on this record tries again.");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Task 193 G2b: the failure kind of a paired grant that was not ended after its share was removed.</summary>
+    internal const string PairedGrantNotEndedKind = "paired-grant-not-ended";
+
     /// <summary>The assigned subjects (registry order) and the fields that name each.</summary>
     private static Dictionary<AssignedSubject, List<string>> Desired(
         IReadOnlyList<(string Field, AssignedSubjectKind Kind)> registry, AssignedRootSnapshot root)
@@ -926,6 +992,17 @@ public sealed class AssignedAccessMaterializer
             return false; // a malformed row: decide fresh
 
         var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
+        if (current == 0 && ours.Reason == AssignedAccessReason.ShareEndedPairedGrantPending)
+        {
+            // Task 193 G4b (owner rule (b)): this rule removed the share when the assignment ended, and the row stayed live
+            // only to retry ending its paired grant. The subject is assigned again: a new assignment, decided fresh, never an
+            // operator's removal. A paired grant still active pairs with the new share again; the next removal ends both.
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: {Subject} is assigned again after this rule removed {User}'s share; decided " +
+                "fresh.", run.Logical, run.RootId, subject, user);
+            return false;
+        }
+
         if (current == 0 && target.Kind == TargetKind.Skip && target.SkipReason == AssignedAccessReason.Restricted
             && target.SystemUserId == user)
         {
@@ -1498,6 +1575,13 @@ public sealed class AssignedAccessMaterializer
             run.Entry(subject, fields, row.SystemUserId, AssignedAccessState.Revoked, reason, action);
         }
 
+        // Task 193 G4b: the share is gone and its paired grant is not confirmed ended, so the row stays live (Shared) for the
+        // next pass to retry. It says why: a subject assigned again before that retry is decided fresh (ContinueOursAsync),
+        // never read as an operator's removal of the share (owner rule (b)).
+        Task KeepForPairedGrantRetryAsync() =>
+            UpdateRowAsync(run, row,
+                new AssignedAccessLedgerWrite(AssignedAccessState.Shared, AssignedAccessReason.ShareEndedPairedGrantPending), ct);
+
         switch (row.State)
         {
             case AssignedAccessState.Granted:
@@ -1618,6 +1702,15 @@ public sealed class AssignedAccessMaterializer
                     var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
                     if (current == 0)
                     {
+                        // Task 193 G4a (A-F1): the share is already gone — removed elsewhere, or by an earlier pass whose end of
+                        // the grant paired with it did not complete. That grant is ended BEFORE the row; one not ended leaves
+                        // the row live (the failure recorded), so the next pass tries again.
+                        if (!await EndPairedGrantsAsync(run, subject, fields, user, ct).ConfigureAwait(false))
+                        {
+                            await KeepForPairedGrantRetryAsync().ConfigureAwait(false);
+                            return;
+                        }
+
                         await EndAsync(AssignedAccessReason.AssignmentEnded, AssignedAccessAction.Ledger).ConfigureAwait(false);
                         return;
                     }
@@ -1646,6 +1739,14 @@ public sealed class AssignedAccessMaterializer
                     var restoreTo = TryParsePrior(row.Reason, AssignedAccessReason.RaisedFromMaskPrefix, out var priorMask) ? priorMask : 0;
                     if (!await RemoveOrRestoreShareAsync(run, subject, user, restoreTo, ct).ConfigureAwait(false))
                         return; // failure recorded
+
+                    // Task 193 G4a (A-F1): the grant paired with a removed share ends BEFORE the row; one not ended leaves the
+                    // row live (the failure recorded), so the next pass — which finds the share gone — tries again.
+                    if (restoreTo == 0 && !await EndPairedGrantsAsync(run, subject, fields, user, ct).ConfigureAwait(false))
+                    {
+                        await KeepForPairedGrantRetryAsync().ConfigureAwait(false);
+                        return;
+                    }
 
                     await EndAsync(restoreTo != 0 ? AssignedAccessReason.PriorLevelRestored : AssignedAccessReason.AccessRemoved,
                         restoreTo != 0 ? AssignedAccessAction.Restored : AssignedAccessAction.Revoked).ConfigureAwait(false);
@@ -1706,38 +1807,31 @@ public sealed class AssignedAccessMaterializer
             };
         }
 
-        // The contact, status-first (task 141's store — never IIdentityNormalizationService, whose "never an exception"
-        // contract would turn a faulted read into "unlinked" and grant a contact row to an internal user).
-        var contact = await _identities.GetContactAsync(subject.Id, ct).ConfigureAwait(false);
-        if (contact.Status != LookupStatus.Read)
-            return Target.Skip(AssignedAccessReason.LinkUnreadable);
-
-        var row = contact.Rows.FirstOrDefault(r => r.ContactId == subject.Id);
-        if (row is null)
-            return Target.Skip(AssignedAccessReason.SubjectNotFound);
-        if (!row.IsActive)
-            return Target.Skip(AssignedAccessReason.SubjectInactive);
-
-        Guid? boundOid = Guid.TryParse(row.RawOid?.Trim(), out var oid) && oid != Guid.Empty ? oid : null;
-
-        IReadOnlyList<AssignedLinkCandidate> candidates;
-        try
+        // Task 193: the ONE contact -> user rule (ContactUserRepresentation), status-first — never
+        // IIdentityNormalizationService, whose "never an exception" contract would turn a faulted read into "unlinked" and
+        // grant a contact row to an internal user. A missing binding column is unreadable here (FailClosed), as before. The
+        // oid-only user is now confirmed through the binder's oid decision (the read path's answer), a deliberate correction.
+        var representation = await _representation.ResolveAsync(
+            subject.Id, flags.IsRestricted, BindingColumnMissingPolicy.FailClosed, ct).ConfigureAwait(false);
+        switch (representation.Status)
         {
-            candidates = await _store.ReadLinkCandidatesAsync(subject.Id, boundOid, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(ex, "[ASSIGNED-ACCESS] The systemusers contact {ContactId} represents could not be read.", subject.Id);
-            return Target.Skip(AssignedAccessReason.LinkUnreadable);
+            case ContactRepresentationStatus.Read:
+                break;
+            case ContactRepresentationStatus.NotFound:
+                return Target.Skip(AssignedAccessReason.SubjectNotFound);
+            case ContactRepresentationStatus.Inactive:
+                return Target.Skip(AssignedAccessReason.SubjectInactive);
+            default:
+                if (representation.Fault is not null)
+                {
+                    _logger.LogWarning(representation.Fault,
+                        "[ASSIGNED-ACCESS] The systemusers contact {ContactId} represents could not be read.", subject.Id);
+                }
+
+                return Target.Skip(AssignedAccessReason.LinkUnreadable);
         }
 
-        // Task 141 §2/§5: the link (sprk_primarycontact) is honoured as it is; a user with NO link is represented by the
-        // contact bound to its oid. A user linked to ANOTHER contact is not this contact's, whatever the oid says.
-        var represented = candidates
-            .Where(c => c.Represents(subject.Id, boundOid))
-            .GroupBy(c => c.SystemUserId)
-            .Select(g => g.First())
-            .ToList();
+        var represented = representation.Users;
 
         if (represented.Count == 0)
             return new Target(TargetKind.ContactGrant);
@@ -1754,11 +1848,10 @@ public sealed class AssignedAccessMaterializer
         // Verifier V4: the ONE "barred on Restricted" predicate is asked FIRST — a DISABLED or non-person user flagged external
         // on a Restricted record is Restricted (the remover's known cause), never Ineligible (which would turn the remover's
         // removal into a sticky Declined and keep the share away after Restricted is lifted and the user re-enabled).
-        if (InternalShareEndpoints.IsBarredOnRestricted(user.IsExternal, flags.IsRestricted))
+        if (user.BarredOnRestricted)
             return Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId);
 
-        return InternalShareEndpoints.ClassifyEligibility(
-                user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, flags.IsRestricted) switch
+        return user.Eligibility switch
         {
             InternalShareEndpoints.ShareEligibility.Eligible => new Target(TargetKind.Share, null, user.SystemUserId),
             InternalShareEndpoints.ShareEligibility.ExternalOnRestricted => Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId),
@@ -2167,6 +2260,22 @@ public sealed class AssignedAccessMaterializer
         => MarkAsync(rootType, rootId, r => r.SystemUserId == systemUserId,
             r => r.State != AssignedAccessState.Revoked && r.State != AssignedAccessState.Adopted,
             new AssignedAccessLedgerWrite(AssignedAccessState.Adopted, AssignedAccessReason.ManualGrant, null, systemUserId), ct);
+
+    /// <summary>
+    /// Task 193 (#2338): a <c>/grant</c> on a contact was answered with a CONFIRMED share to the user that contact represents.
+    /// The contact's suggestions on this root (<see cref="AssignedAccessState.PendingConfirmation"/> only) become Adopted,
+    /// stamped with that user. <see cref="MarkShareAdoptedAsync"/> matches rows by user, so it cannot find a suggestion
+    /// written before the contact was linked to the user (no user on the row); without this, that suggestion stays
+    /// offered after the share. Never throws: a failed write is logged and the share stands.
+    /// </summary>
+    public Task<int> MarkContactShareAdoptedAsync(
+        ExternalGrantRootType rootType, Guid rootId, Guid contactId, Guid systemUserId, CancellationToken ct)
+    {
+        var subject = new AssignedSubject(AssignedSubjectKind.Contact, contactId);
+        return MarkAsync(rootType, rootId, r => r.Subject == subject,
+            r => r.State == AssignedAccessState.PendingConfirmation,
+            new AssignedAccessLedgerWrite(AssignedAccessState.Adopted, AssignedAccessReason.ManualGrant, null, systemUserId), ct);
+    }
 
     /// <summary>
     /// Dismiss a suggestion (owner A3: Dismiss = Declined): the entry's subject, on its root, if it is
