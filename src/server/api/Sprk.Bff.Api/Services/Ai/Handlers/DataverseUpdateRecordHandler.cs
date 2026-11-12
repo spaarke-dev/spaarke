@@ -435,7 +435,9 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
             // Task 147 r1c (round 36), AFTER the re-stamp (the stamps on the rows filed under it are lookups the ownership rule
             // reads): the re-filed row's mirror and task 148's pass over everything filed under it.
-            if (refile.Written && children is not null && wasIsolated is not null)
+            // #2091 / fm 054 piece 3b: not when the reparent moved none of the row's parents (ParentsUnchanged — a clear of a link
+            // that files nothing, a re-bind onto the record a column already holds): written, but no re-file, as on the route.
+            if (refile.Written && refile.Resolution?.ParentsUnchanged != true && children is not null && wasIsolated is not null)
             {
                 // #2143 round 7 (F1): with the caller the re-file's F3 check acted for, so the thread that follows moves on it.
                 // #2159 slice 2: with the reparent's answer (its F3 permission), so a re-filed document's file release is recorded.

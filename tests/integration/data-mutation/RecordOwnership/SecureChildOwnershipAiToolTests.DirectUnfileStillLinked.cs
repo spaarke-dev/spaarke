@@ -98,6 +98,81 @@ public sealed partial class SecureChildOwnershipAiToolTests
         calls.Should().Equal("grant", "assign sprk_communication", "grant", "step after the re-file");
     }
 
+    [Fact(DisplayName = "fm 054 piece 3b pass 3: the chat update tool clearing the contact of an email moves none of its parents, so no step after a re-file runs")]
+    public async Task ChatUpdate_ClearingTheContactOfAnEmail_RunsNoStepAfterARefile()
+    {
+        _world.WithMessageLinkedOnlyToAContact(Directory.ChildBu, Directory.ChildTeam, CommunicationType.Email);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectUnfileTeam).Lookup();
+        var calls = new List<string>();
+        var threads = StepAfterRefileRecorded(calls);
+
+        var result = await ChatUpdateWithStepAfterRefile(lookup, threads.Object, calls, ("sprk_regardingperson", JsonNull));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _world.Row("sprk_communication", DirectUnfileMessage).GetAttributeValue<EntityReference>("sprk_regardingperson").Should().BeNull();
+        calls.Should().BeEmpty("no thread reconcile, no Restricted bar, no grant and no owner write");
+        _world.Assignments.Should().BeEmpty();
+        _world.Row("sprk_communication", DirectUnfileMessage).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(Directory.ChildTeam);
+    }
+
+    [Fact(DisplayName = "fm 054 piece 3b pass 3: the chat update tool clearing the last contact of a Direct message returns it to the Direct team, then runs the step after a re-file")]
+    public async Task ChatUpdate_ClearingTheLastContactOfADirectMessage_MovesIt_ThenRunsTheStepAfterARefile()
+    {
+        _world.WithMessageLinkedOnlyToAContact(Directory.ChildBu, Directory.ChildTeam);
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectUnfileTeam).Lookup();
+        var calls = new List<string>();
+        var threads = StepAfterRefileRecorded(calls);
+
+        var result = await ChatUpdateWithStepAfterRefile(lookup, threads.Object, calls, ("sprk_regardingperson", JsonNull));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _world.Row("sprk_communication", DirectUnfileMessage).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(DirectUnfileTeam);
+        calls.Should().Equal("grant", "assign sprk_communication", "grant", "step after the re-file");
+    }
+
+    private static Mock<IThreadResolver> StepAfterRefileRecorded(List<string> calls)
+    {
+        var threads = new Mock<IThreadResolver>();
+        threads
+            .Setup(t => t.ReconcileThreadForFilingAsync(
+                It.IsAny<Guid>(), It.IsAny<FilingReconcileHost>(), It.IsAny<Sprk.Bff.Api.Services.Access.SecureRemovalCaller?>(),
+                It.IsAny<Func<CancellationToken, Task>?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => calls.Add("step after the re-file"))
+            .Returns(Task.CompletedTask);
+        return threads;
+    }
+
+    /// <summary>The chat update tool with the Direct step and a scope that resolves the REAL reconciler over the share world,
+    /// its thread reconcile recorded.</summary>
+    private Task<Sprk.Bff.Api.Services.Ai.ToolResult> ChatUpdateWithStepAfterRefile(
+        DirectMessageOwnerTeam lookup, IThreadResolver threads, List<string> calls, params (string Column, JsonElement Value)[] item)
+    {
+        var services = new ServiceCollection();
+        services.AddScoped(_ => Children(threads));
+        var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+
+        return new Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler(
+                _user,
+                new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
+                NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance,
+                _world.Resolver(directMessageOwnerTeam: lookup),
+                SecureRootFilingGateFixtures.NothingSecure(),
+                scopes,
+                directOwner: DirectUnfileStep(lookup, new List<Guid>(), calls))
+            .ExecuteChatAsync(
+                BuildChatInvocationContext(
+                    toolArgumentsJson: JsonSerializer.Serialize(new
+                    {
+                        tablename = "sprk_communication",
+                        recordId = DirectUnfileMessage,
+                        item = item.ToDictionary(i => i.Column, i => i.Value),
+                    })) with
+                { UserId = Guid.NewGuid().ToString() },
+                BuildAnalysisTool(nameof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler)), CancellationToken.None);
+    }
+
     /// <summary>The real step over the directory: rows read by id, grants recorded.</summary>
     private DirectMessageOwnerStep DirectUnfileStep(DirectMessageOwnerTeam lookup, List<Guid> grants, List<string>? calls = null)
     {
