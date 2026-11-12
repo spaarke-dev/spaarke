@@ -63,7 +63,7 @@ public class WriterBuilderOwnershipParityTests
 
     private async Task<ExistingRowOwnership> QuestionAsync(Entity row) =>
         await RecordOwnershipContext.ForExistingRowAsync(
-            row, new ExistingRowReads(Entities, CoreAncestors, new AssignedAccessTestDoubles.FakeAssignedAccessStore()),
+            row, new ExistingRowReads(Entities, CoreAncestors, AssignedAccessTestDoubles.Representation(new AssignedAccessTestDoubles.FakeAssignedAccessStore())),
             CancellationToken.None);
 
     private async Task<IReadOnlyList<RecordOwnershipParent>> ExistingParentsAsync(Entity row)

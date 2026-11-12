@@ -154,7 +154,7 @@ public class SecureChildReconcilerDirectUnfileCascadeTests
             entities, resolver, synchronizer, _users, configuration, NullLogger<SecureChildReconciler>.Instance,
             new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
             coreAncestors: SecureChildShareWorld.CoreAncestorsOver(() => _world),
-            links: new AssignedAccessTestDoubles.FakeAssignedAccessStore(),
+            people: AssignedAccessTestDoubles.Representation(new AssignedAccessTestDoubles.FakeAssignedAccessStore()),
             recordShares: _shares,
             directMessageOwnerTeam: lookup);
     }

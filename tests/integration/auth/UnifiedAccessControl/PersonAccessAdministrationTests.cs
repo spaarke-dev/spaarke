@@ -95,7 +95,7 @@ public class PersonAccessAdministrationTests
             new GrantAccessRequest(contactId, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new RecordOwnershipResolverDouble(), new TeamPrivilegeCheckerDouble(),
             new EverythingProbe(), _h.Materializer, _h.Notifier, _h.Invites, GranterContext(), NullLogger<Program>.Instance, _h.Time,
-            CancellationToken.None);
+            CancellationToken.None, _h.ContactShare);
 
 
     private Task<AssignedAccessOutcome> Sync() => _h.SyncAsync(Matter, _matter);

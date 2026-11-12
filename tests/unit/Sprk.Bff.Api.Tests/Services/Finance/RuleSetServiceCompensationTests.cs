@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Xunit;
@@ -45,14 +46,19 @@ public sealed class RuleSetServiceCompensationTests
     }
 
     /// <summary>A run that stored its rules and died before it wrote the completion marker.</summary>
-    private static async Task<Guid> EarlierRun(Harness h, params DraftedRule[] rules)
+    /// <remarks>Task 116: on a Draft version of a Billing Procedure (or a further version of <paramref name="procedure"/>); the version's memo
+    /// and Yes/No marker are removed again, as a run that died before them left them.</remarks>
+    private static async Task<Harness.Drafting> EarlierRun(Harness h, params DraftedRule[] rules) => await EarlierRun(h, null, rules);
+
+    private static async Task<Harness.Drafting> EarlierRun(Harness h, Guid? procedure, params DraftedRule[] rules)
     {
-        var id = h.RuleSet();
-        var outcome = await h.Service().AddDraftsAsync(id, rules, None, CallerOid, CancellationToken.None);
+        var d = procedure is { } p ? h.DraftVersion(procedure: p, number: 2) : h.DraftVersion();
+        var outcome = await h.Service().AddDraftsAsync(d.Version, rules, None, CallerOid, CancellationToken.None);
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
-        h.Row("sprk_ruleset", id).Attributes.Remove("sprk_notconverted");
+        h.Row(ProcedureEntity.VersionEntity, d.Version).Attributes.Remove(RuleSetService.VersionDraftedColumn);
+        h.Row(ProcedureEntity.VersionEntity, d.Version).Attributes.Remove(RuleSetService.VersionNotConvertedListColumn);
         h.Writes.Clear();
-        return id;
+        return d;
     }
 
     private static (Guid Policy, Guid Version) Find(Harness h, string quote)
@@ -71,44 +77,44 @@ public sealed class RuleSetServiceCompensationTests
     public async Task Compensate_RemovesEveryUntouchedDraftOfTheEarlierRun_EachVersionBeforeItsPolicy()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
+        var d = await EarlierRun(h, Increment(), Cap(10));
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value.Should().Be(new DraftsCompensated(Removed: 2, Kept: 0));
         h.Rows["sprk_policy"].Should().BeEmpty();
         h.Rows["sprk_policyversion"].Should().BeEmpty();
-        h.DeleteAttempts.Select(d => d.Entity).Should().Equal("sprk_policyversion", "sprk_policy", "sprk_policyversion", "sprk_policy");
+        h.DeleteAttempts.Select(x => x.Entity).Should().Equal("sprk_policyversion", "sprk_policy", "sprk_policyversion", "sprk_policy");
     }
 
     [Fact]
     public async Task Compensate_ThenDraftAgain_WithDifferentModelOutput_LeavesExactlyOneSet()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
+        var d = await EarlierRun(h, Increment(), Cap(10));
         var firstRunIds = h.Rows["sprk_policy"].Select(p => p.Id).ToList();
         var service = h.Service();
 
-        (await service.RemoveUntouchedDraftsAsync(id, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done);
-        var redraft = await service.AddDraftsAsync(id, new[] { Increment(), Cap(12) }, None, CallerOid, CancellationToken.None);
+        (await service.RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+        var redraft = await service.AddDraftsAsync(d.Version, new[] { Increment(), Cap(12) }, None, CallerOid, CancellationToken.None);
 
         redraft.Value!.Stored.Should().Be(2);
         h.Rows["sprk_policy"].Should().HaveCount(2, "one set, not the first run's rules beside the second's");
         h.Rows["sprk_policy"].Select(p => p.Id).Should().NotIntersectWith(firstRunIds);
         h.Rows["sprk_policyversion"].Select(v => v.GetAttributeValue<string>("sprk_rulebody")).Should().Contain(b => b!.Contains("\"maxHoursPerDay\":12"))
             .And.NotContain(b => b!.Contains("\"maxHoursPerDay\":10"));
-        h.Row("sprk_ruleset", id).GetAttributeValue<string>("sprk_notconverted").Should().NotBeNull("the marker is written last");
+        h.Row(ProcedureEntity.VersionEntity, d.Version).GetAttributeValue<bool>(RuleSetService.VersionDraftedColumn).Should().BeTrue("the marker is written last");
     }
 
     [Fact]
     public async Task Compensate_APolicyWithNoVersion_LeftByARunThatDied_IsRemoved()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment());
+        var d = await EarlierRun(h, Increment());
         h.Rows["sprk_policyversion"].Clear(); // the version create failed and the policy could not be removed either
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         outcome.Value.Should().Be(new DraftsCompensated(1, 0));
         h.Rows["sprk_policy"].Should().BeEmpty();
@@ -118,11 +124,11 @@ public sealed class RuleSetServiceCompensationTests
     public async Task Compensate_ARowThatIsAlreadyGone_CountsAsDeleted()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
+        var d = await EarlierRun(h, Increment(), Cap(10));
         var gone = Find(h, Q1).Version;
         h.OnDelete = (entity, rowId) => rowId == gone ? NotFound() : null;
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value!.Removed.Should().Be(2);
@@ -133,12 +139,12 @@ public sealed class RuleSetServiceCompensationTests
     public async Task Compensate_ADeleteFault_IsAFailure_StopsThere_AndTheNextPassFinishesTheJob()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
+        var d = await EarlierRun(h, Increment(), Cap(10));
         var (firstPolicy, _) = Find(h, Q1);
         h.OnDelete = (entity, rowId) => rowId == firstPolicy ? new InvalidOperationException("simulated Dataverse 429") : null;
         var service = h.Service();
 
-        var failed = await service.RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var failed = await service.RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         failed.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         failed.StatusCode.Should().Be(500);
@@ -148,7 +154,7 @@ public sealed class RuleSetServiceCompensationTests
 
         // The next delivery compensates again and finishes, including the policy whose version already went.
         h.OnDelete = null;
-        var again = await service.RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var again = await service.RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
         again.Kind.Should().Be(RuleSetOutcomeKind.Done);
         h.Rows["sprk_policy"].Should().BeEmpty();
         h.Rows["sprk_policyversion"].Should().BeEmpty();
@@ -158,10 +164,10 @@ public sealed class RuleSetServiceCompensationTests
     public async Task Compensate_WhenTheIdentityCannotBeResolved_FailsClosed_AndDeletesNothing()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment());
+        var d = await EarlierRun(h, Increment());
         h.FailIdentity = true;
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         outcome.StatusCode.Should().Be(500);
@@ -186,6 +192,9 @@ public sealed class RuleSetServiceCompensationTests
         "policy created by another user",
         "policy code is not a drafted code",
         "a second version someone else added",
+        "task 116: version under another Procedure Version",
+        "task 116: version under no Procedure Version",
+        "task 116: version publish state not Draft",
     };
 
     private static void Spoil(Harness h, string how, Guid policy, Guid version)
@@ -231,6 +240,15 @@ public sealed class RuleSetServiceCompensationTests
             case "a second version someone else added":
                 h.AddVersion(policy, 2, ProposalState.Proposed);
                 break;
+            case "task 116: version under another Procedure Version":
+                h.Row("sprk_policyversion", version)[RuleSetService.ProcedureVersionColumn] = new EntityReference(ProcedureEntity.VersionEntity, Guid.NewGuid());
+                break;
+            case "task 116: version under no Procedure Version":
+                h.Row("sprk_policyversion", version).Attributes.Remove(RuleSetService.ProcedureVersionColumn);
+                break;
+            case "task 116: version publish state not Draft":
+                h.Row("sprk_policyversion", version)[RuleSetService.PublishStateColumn] = new OptionSetValue(RuleSetService.PublishStateDraft + 1);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(how), how, null);
         }
@@ -241,19 +259,19 @@ public sealed class RuleSetServiceCompensationTests
     public async Task Compensate_NeverDeletesADraftThatFailsAnyOneCriterion_ButStillClearsTheUntouchedOnes(string how)
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
+        var d = await EarlierRun(h, Increment(), Cap(10));
         var (policy, version) = Find(h, Q1);
         var (otherPolicy, otherVersion) = Find(h, Q2);
         Spoil(h, how, policy, version);
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         outcome.Value.Should().Be(new DraftsCompensated(Removed: 1, Kept: 1));
         h.Rows["sprk_policy"].Select(p => p.Id).Should().Equal(policy);
         h.Rows["sprk_policyversion"].Select(v => v.GetAttributeValue<EntityReference>("sprk_policy").Id).Should().OnlyContain(p => p == policy);
         h.Rows["sprk_policyversion"].Select(v => v.Id).Should().Contain(version);
-        h.DeleteAttempts.Select(d => d.Id).Should().BeEquivalentTo(new[] { otherPolicy, otherVersion }, "only the untouched rule was ever deleted");
+        h.DeleteAttempts.Select(x => x.Id).Should().BeEquivalentTo(new[] { otherPolicy, otherVersion }, "only the untouched rule was ever deleted");
     }
 
     [Fact]
@@ -261,30 +279,30 @@ public sealed class RuleSetServiceCompensationTests
     {
         var h = new Harness();
         var other = await EarlierRun(h, Increment("A clause of another rule set."));
-        var id = await EarlierRun(h, Cap(10));
+        var d = await EarlierRun(h, Cap(10));
         // Even a draft of another rule set that carries this set's code prefix (the lookup, not the code, decides) stays.
-        var lookalike = h.Rows["sprk_policy"].Single(p => p.GetAttributeValue<EntityReference>("sprk_ruleset").Id == other);
-        lookalike["sprk_policycode"] = $"BRD-{id:N}-050";
-        var ontologyPolicy = h.Rule(id, code: $"BRD-{id:N}-009", domain: null).Policy;
+        var lookalike = h.Rows["sprk_policy"].Single(p => p.GetAttributeValue<EntityReference>("sprk_ruleset").Id == other.RuleSet);
+        lookalike["sprk_policycode"] = $"BRD-{d.RuleSet:N}-050";
+        var ontologyPolicy = h.Rule(d.RuleSet, code: $"BRD-{d.RuleSet:N}-009", domain: null).Policy;
         h.SetCreatedBy(ontologyPolicy, h.Identity);
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         outcome.Value!.Removed.Should().Be(1);
         h.Rows["sprk_policy"].Select(p => p.Id).Should().Contain(ontologyPolicy, "an Ontology-domain policy is not a billing rule and is never read as one");
-        h.Rows["sprk_policy"].Should().Contain(p => p.GetAttributeValue<EntityReference>("sprk_ruleset").Id == other, "another rule set's drafts stay");
-        h.DeleteAttempts.Should().NotContain(d => d.Id == ontologyPolicy);
-        h.DeleteAttempts.Should().NotContain(d => d.Id == lookalike.Id);
+        h.Rows["sprk_policy"].Should().Contain(p => p.GetAttributeValue<EntityReference>("sprk_ruleset").Id == other.RuleSet, "another rule set's drafts stay");
+        h.DeleteAttempts.Should().NotContain(x => x.Id == ontologyPolicy);
+        h.DeleteAttempts.Should().NotContain(x => x.Id == lookalike.Id);
     }
 
     [Fact]
-    public async Task Compensate_ARuleSetWithTheCompletionMarker_DeletesNothing()
+    public async Task Compensate_AVersionWithTheCompletionMarker_DeletesNothing()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
-        h.Row("sprk_ruleset", id)["sprk_notconverted"] = "[]";
+        var d = await EarlierRun(h, Increment(), Cap(10));
+        h.Row(ProcedureEntity.VersionEntity, d.Version)[RuleSetService.VersionDraftedColumn] = true;
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None);
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Refused);
         outcome.StatusCode.Should().Be(409);
@@ -294,18 +312,51 @@ public sealed class RuleSetServiceCompensationTests
     }
 
     [Theory]
-    [InlineData(false, 404, "ruleset.not_found")]
-    [InlineData(true, 409, "ruleset.retired")]
-    public async Task Compensate_AnUnknownOrRetiredRuleSet_IsRefused_AndDeletesNothing(bool retired, int status, string code)
+    [InlineData("unknown", 404, "procedure.version_not_found")]
+    [InlineData("retired set", 409, "ruleset.retired")]
+    [InlineData("not a Draft", 409, "procedure_version.not_draft")]
+    [InlineData("Ontology", 400, "procedure.not_billing")]
+    public async Task Compensate_ARefusedTarget_IsRefused_AndDeletesNothing(string scenario, int status, string code)
     {
         var h = new Harness();
-        var id = retired ? h.RuleSet(status: RuleSetService.RuleSetRetired) : Guid.NewGuid();
+        var version = scenario switch
+        {
+            "unknown" => Guid.NewGuid(),
+            "retired set" => h.DraftVersion(setStatus: RuleSetService.RuleSetRetired).Version,
+            "not a Draft" => h.DraftVersion(versionStatus: ProcedureEntity.VersionStatusActive).Version,
+            _ => h.DraftVersion(area: RuleDomains.PolicyDomainOntology).Version,
+        };
 
-        var outcome = await h.Service().RemoveUntouchedDraftsAsync(id, CancellationToken.None);
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(version, CancellationToken.None);
 
         outcome.StatusCode.Should().Be(status);
         outcome.ErrorCode.Should().Be(code);
         h.DeleteAttempts.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 116: compensation is per version — another version's untouched draft and a copy-forward draft (a policy with a current version) stay")]
+    public async Task Compensate_KeepsAnotherVersionsDrafts_AndCopyForwardDrafts()
+    {
+        var h = new Harness();
+        var v1 = await EarlierRun(h, Increment("A clause of version 1."));
+        h.Row(ProcedureEntity.VersionEntity, v1.Version)[ProcedureEntity.VersionStatusColumn] = new OptionSetValue(ProcedureEntity.VersionStatusActive);
+        var v2 = await EarlierRun(h, v1.Procedure, Cap(10));
+        var v1Policy = Find(h, "A clause of version 1.").Policy;
+        // 081's copy-forward: a published rule whose new working version is a Draft under version 2.
+        var (published, publishedV1) = h.Rule(v1.RuleSet, code: $"BRD-{v1.RuleSet:N}-077", current: true);
+        h.SetCreatedBy(published, h.Identity);
+        h.SetCreatedBy(publishedV1, h.Identity);
+        var copy = h.AddVersion(published, 2, ProposalState.Proposed);
+        h.SetCreatedBy(copy, h.Identity);
+        h.Row("sprk_policyversion", copy)[RuleSetService.ProcedureVersionColumn] = new EntityReference(ProcedureEntity.VersionEntity, v2.Version);
+        h.Row("sprk_policyversion", copy)[RuleSetService.PublishStateColumn] = new OptionSetValue(RuleSetService.PublishStateDraft);
+
+        var outcome = await h.Service().RemoveUntouchedDraftsAsync(v2.Version, CancellationToken.None);
+
+        outcome.Value.Should().Be(new DraftsCompensated(Removed: 1, Kept: 2));
+        h.Rows["sprk_policy"].Select(p => p.Id).Should().BeEquivalentTo(new[] { v1Policy, published });
+        h.Rows["sprk_policyversion"].Select(v => v.Id).Should().Contain(copy);
+        h.DeleteAttempts.Should().NotContain(x => x.Id == v1Policy || x.Id == published || x.Id == copy);
     }
 
     // ── what the rules that survive do to the next draft ────────────────────────────────────────
@@ -314,15 +365,15 @@ public sealed class RuleSetServiceCompensationTests
     public async Task AddDrafts_AfterTheCompensation_DoesNotStoreASecondRuleForAClauseAKeptRuleCovers_ItListsIt()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
+        var d = await EarlierRun(h, Increment(), Cap(10));
         var (policy, version) = Find(h, Q1);
         h.ConcurrentWrite("sprk_policyversion", version, new Dictionary<string, object> { ["sprk_shortheadline"] = "Edited by an admin" });
         var service = h.Service();
-        (await service.RemoveUntouchedDraftsAsync(id, CancellationToken.None)).Value.Should().Be(new DraftsCompensated(1, 1));
+        (await service.RemoveUntouchedDraftsAsync(d.Version, CancellationToken.None)).Value.Should().Be(new DraftsCompensated(1, 1));
 
         // The model words the first clause differently this time (case and spacing) and caps the second at twelve hours.
         var redraft = await service.AddDraftsAsync(
-            id, new[] { Cap(9, "TIME must be billed   in tenth-hour increments."), Cap(12) }, None, CallerOid, CancellationToken.None);
+            d.Version, new[] { Cap(9, "TIME must be billed   in tenth-hour increments."), Cap(12) }, None, CallerOid, CancellationToken.None);
 
         redraft.Value!.Stored.Should().Be(1, "only the clause nothing covers is drafted again");
         h.Rows["sprk_policy"].Should().HaveCount(2);
@@ -336,9 +387,9 @@ public sealed class RuleSetServiceCompensationTests
     public async Task AddDrafts_AnIdenticalRuleThatAlreadyExists_IsStillSkippedQuietly_NotListed()
     {
         var h = new Harness();
-        var id = await EarlierRun(h, Increment(), Cap(10));
+        var d = await EarlierRun(h, Increment(), Cap(10));
 
-        var redraft = await h.Service().AddDraftsAsync(id, new[] { Increment(), Cap(10) }, None, CallerOid, CancellationToken.None);
+        var redraft = await h.Service().AddDraftsAsync(d.Version, new[] { Increment(), Cap(10) }, None, CallerOid, CancellationToken.None);
 
         redraft.Value!.Stored.Should().Be(0);
         redraft.Value.AlreadyPresent.Should().Be(2);

@@ -37,7 +37,7 @@
  * (ADR-012), receiving candidates/grants/search/classification via callback
  * props backed by `context.webAPI` (host-context Dataverse reads, per
  * `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`). BFF writes (grant /
- * invite-and-grant / revoke) go through `@spaarke/auth`'s `authenticatedFetch`
+ * invite / revoke / share-user) go through `@spaarke/auth`'s `authenticatedFetch`
  * (bootstrapped in `init()` via `authInit.ts`, same pattern as
  * `SemanticSearchControl`).
  *
@@ -123,11 +123,54 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
- * v1.0.56 (#2513, Family view fixes): no change in this file's logic. The bundled `RecordFamilyModal` shows no selection
+ * v1.0.62 (task 193, master merge 2026-11-11): no change in this file's logic. Both lines of work are bundled: task
+ *   193's one "Add person" entry and paired workforce-app grant (v1.0.55 to v1.0.61 on the task-193 branch, below) and
+ *   master's Family tool (v1.0.55 and v1.0.56 on master, below). The two lines each used 1.0.55 and 1.0.56; 1.0.62 is
+ *   above both.
+ *
+ * v1.0.61 (task 193 G4b): no change in this file's logic. In the bundled modal, removing a share reads the server's
+ *   `pairedGrant` answer: when the paired workforce app access was not confirmed ended, the notice says it may still be
+ *   active and offers Try again. A share row's note says when its paired grant is blocked by the No Access list or the
+ *   record is Restricted. A user add sends the record's Expiration for the paired grant, and same-name people show a
+ *   distinguishing detail.
+ *
+ * v1.0.60 (task 193 G3e): no change in this file's logic. In the bundled modal, a workforce-app grant counts as paired
+ *   only while its share is listed. One whose share is not listed reads "Workforce app access for {name} · granted
+ *   {date}", and its revoke confirmation and notice no longer say the share stays.
+ *
+ * v1.0.59 (task 193 G3d): no change in this file's logic. In the bundled modal, `pairedGrantEnded: false` no longer
+ *   promises a timing (the daily clean-up ends the grant only when its writes are on). It says the workforce app access
+ *   could not be removed just now and is still listed under Current Access, where it can be revoked; a paired grant
+ *   whose share is gone stays listed as its own row with Revoke.
+ *
+ * v1.0.58 (task 193 G3b): `fetchExistingGrants` maps a grant's `pairedWith` (`kind: 'share'`, the user's
+ *   `systemUserId`) — the share an "Add person" workforce-app grant goes with. In the bundled modal, Add person says
+ *   whether the record shows in the colleague's workforce app (until when, or why not) and that the share itself has no
+ *   end date; Current Access lists a share and its paired grant together, the revoke confirmations say what each removes
+ *   (the share removes both; the grant alone keeps the share), and `pairedGrantEnded: false` adds "Workforce-app access
+ *   will be removed within a day."
+ *
+ * v1.0.57 (task 193 F-final): no change in this file's logic. In the bundled modal, a user picked directly and a user
+ *   suggestion (`/share-user`) are shares too, so their notices also lead with "Shared with X" (pending related records
+ *   included), with the same count of the other items.
+ *
+ * v1.0.56 (task 193 V-fix): no change in this file's logic. In the bundled modal, a contact the server answered with a
+ *   share leads its notice with "Shared with X" (never "Granted access"), and a share whose related records are still
+ *   pending also names the colleague and says when the Expiration was not applied.
+ *
+ * v1.0.55 (task 193, unified-access-control-r2 — #2338): Manage Access has ONE "Add person" entry. `pickPerson` opens
+ *   the native lookup over contact and systemuser together (users only, none flagged external, on a Restricted
+ *   record) and replaces `pickContact` and `pickUser`; `isInternalContact` is removed, because the server decides: a
+ *   contact goes to `/grant`, which shares with the internal user it represents or grants the contact. The bundled
+ *   modal names who a contact was shared with ("your colleague" when the name cannot be read), says shares with
+ *   colleagues have no end date when an Expiration was sent, and stops offering a role candidate whose represented
+ *   user holds a share.
+ *
+ * v1.0.56 on master (#2513, Family view fixes): no change in this file's logic. The bundled `RecordFamilyModal` shows no selection
  *   checkboxes here (this host passes no `onAction`), labels the Details pane as the focused record, and keeps the "This
  *   record" badge from overlapping a truncated name.
  *
- * v1.0.55 (field-mapping-server-write-path-r1 task 074, FR-33): the Family tool. The shared toolbar gains an opt-in
+ * v1.0.55 on master (field-mapping-server-write-path-r1 task 074, FR-33): the Family tool. The shared toolbar gains an opt-in
  *   Family icon (`onOpenFamily`, same pattern as `onOpenGrantModal` / `onOpenEmailMembers`); clicking it opens the shared
  *   `RecordFamilyModal` for this form's record (`context.page.entityTypeName` + `entityId`, the same host reads the
  *   grant modal uses), reading `GET /api/v1/records/{table}/{id}/family` through `authenticatedFetchGated` (ADR-028: the
@@ -301,8 +344,8 @@ import {
   type IExistingGrantsRead,
   type IContactSearchResult,
   type IOrganizationPick,
-  type IUserPick,
-  type IUserPickOptions,
+  type IPersonPick,
+  type IPersonPickOptions,
   type ISecureOwnerInfo,
   type IContactOrganizationMembership,
   type ExternalGrantRootType,
@@ -322,7 +365,7 @@ import {
 import { resolveThemeWithUserPreference, setupThemeListener } from '@spaarke/ui-components/dist/utils/themeStorage';
 // Shared side-pane Advanced Lookup (task 071) — adopted as-is per §11: the PCF
 // host wires INavigationService.openLookup (→ Xrm.Utility.lookupObjects) and
-// passes plain pickContact/pickOrganization callbacks into the Xrm-free modal.
+// passes plain pickPerson/pickOrganization callbacks into the Xrm-free modal.
 import { createXrmNavigationService } from '@spaarke/ui-components/dist/utils/adapters';
 import type { INavigationService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
@@ -423,6 +466,8 @@ interface IRecordGrantDto {
   /** Date Only, `yyyy-MM-dd`; null on a legacy unbounded grant. */
   expiresDate?: string | null;
   isExpired?: boolean;
+  /** Task 193 G2: the share this workforce-app grant goes with (`kind: 'share'`, the user's systemUserId); absent otherwise. */
+  pairedWith?: { id?: unknown; kind?: unknown } | null;
 }
 // Back-compat default when the host entity is unknown/unavailable (e.g. a
 // harness environment where `context.page` isn't populated) — preserves the
@@ -1245,6 +1290,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         expiresDate: g.expiresDate ?? undefined,
         isExpired: g.isExpired === true,
         provenance: isOrgGrant ? ('organization' as const) : undefined,
+        // Task 193 G3b: the share an "Add person" grant goes with — Current Access lists the two together.
+        pairedWith:
+          g.pairedWith?.kind === 'share' && typeof g.pairedWith.id === 'string' && g.pairedWith.id
+            ? { id: g.pairedWith.id, kind: 'share' as const }
+            : undefined,
       };
     });
     return { grants, truncated: body.truncated === true };
@@ -1283,35 +1333,71 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }));
   };
 
-  /** Opens the SHARED side-pane Advanced Lookup for a single Contact (task 071 —
-   * INavigationService.openLookup → Xrm.Utility.lookupObjects) and enriches the
-   * pick with the contact's email via a host-context read, so the modal's
-   * external-vs-internal grant routing (which keys off email) stays correct.
-   * Returns `null` when the user cancels. The GUID is already `cleanGuid`-
-   * normalized by the adapter, so it is safe to send in an `@odata.bind`. */
-  private pickContact = async (): Promise<IContactSearchResult | null> => {
+  /** Opens the SHARED side-pane Advanced Lookup for ONE person — a Contact or a `systemuser` (task 193, #2338: the
+   * modal's one "Add person" entry, which replaced "+ Contact" and "+ User"). `INavigationService.openLookup` (task 071)
+   * wraps `Xrm.Utility.lookupObjects` and passes `entityTypes` straight through, so both types are offered in one
+   * lookup. The modal asks for users only on a Restricted record (`includeContacts: false`, which admits no
+   * contact-based access). With `excludeExternal` (task 114, a Restricted record) the lookup leaves out users flagged
+   * `sprk_isexternal = true` — blank counts as internal, hence the `null` branch (FetchXML `ne` drops nulls). The
+   * lookup's "recent records" list may not apply the filter, so `/share-user` still refuses such a user and the modal
+   * names them. The pick is enriched with the person's email via a host-context read (shown beside the name); a failed
+   * read still returns the pick, named as the lookup named it. The modal never asks whether a contact is an internal
+   * user — the server decides when it is granted. Returns `null` when the user cancels, and for any other entity type
+   * the lookup answers (fail closed: nothing is staged). The GUID is already `cleanGuid`-normalized by the adapter. */
+  private pickPerson = async (options: IPersonPickOptions): Promise<IPersonPick | null> => {
+    const entityTypes = options.includeContacts ? ['contact', 'systemuser'] : ['systemuser'];
     const results = await this.getNavService().openLookup({
-      entityType: 'contact',
-      entityTypes: ['contact'],
+      entityType: entityTypes[0],
+      entityTypes,
       allowMultiSelect: false,
+      filters: options.excludeExternal
+        ? [
+            {
+              entityLogicalName: 'systemuser',
+              filterXml:
+                '<filter type="or"><condition attribute="sprk_isexternal" operator="ne" value="1" />' +
+                '<condition attribute="sprk_isexternal" operator="null" /></filter>',
+            },
+          ]
+        : undefined,
     });
     const picked = results[0];
     if (!picked) return null;
-    try {
-      const rec = (await this.context.webAPI.retrieveRecord(
-        'contact',
-        picked.id,
-        '?$select=fullname,emailaddress1'
-      )) as unknown as { fullname?: string; emailaddress1?: string };
-      return {
-        contactId: picked.id,
-        fullName: rec?.fullname ?? picked.name,
-        email: rec?.emailaddress1 ?? undefined,
-      };
-    } catch {
-      // Email enrichment failed — still return the pick (routes as grant-only).
-      return { contactId: picked.id, fullName: picked.name };
+    if (picked.entityType === 'contact' && options.includeContacts) {
+      try {
+        const rec = (await this.context.webAPI.retrieveRecord(
+          'contact',
+          picked.id,
+          '?$select=fullname,emailaddress1'
+        )) as unknown as { fullname?: string; emailaddress1?: string };
+        return {
+          kind: 'contact',
+          contact: {
+            contactId: picked.id,
+            fullName: rec?.fullname ?? picked.name,
+            email: rec?.emailaddress1 ?? undefined,
+          },
+        };
+      } catch {
+        return { kind: 'contact', contact: { contactId: picked.id, fullName: picked.name } };
+      }
     }
+    if (picked.entityType === 'systemuser') {
+      try {
+        const rec = (await this.context.webAPI.retrieveRecord(
+          'systemuser',
+          picked.id,
+          '?$select=fullname,internalemailaddress'
+        )) as unknown as { fullname?: string; internalemailaddress?: string };
+        return {
+          kind: 'user',
+          user: { id: picked.id, name: rec?.fullname ?? picked.name, email: rec?.internalemailaddress ?? undefined },
+        };
+      } catch {
+        return { kind: 'user', user: { id: picked.id, name: picked.name } };
+      }
+    }
+    return null;
   };
 
   /** Opens the SHARED side-pane Advanced Lookup for a single `sprk_organization`
@@ -1326,54 +1412,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     });
     const picked = results[0];
     return picked ? { id: picked.id, name: picked.name } : null;
-  };
-
-  /** Opens the SHARED side-pane Advanced Lookup for a single `systemuser`
-   * (task 065, FR-29) — the "+ User" internal system-user share picker,
-   * mirroring {@link pickContact}/{@link pickOrganization} exactly.
-   * `INavigationService.openLookup` (task 071) wraps `Xrm.Utility.lookupObjects`
-   * generically by `entityType`/`entityTypes` with no per-entity allow-list, so
-   * `systemuser` works with no adapter change — verified against
-   * `xrmNavigationServiceAdapter.ts`'s `openLookup`, which passes
-   * `entityTypes` straight through. Returns `null` when the user cancels.
-   *
-   * Task 114 (owner test feedback 2026-10-07): with `excludeExternal` (a Restricted record) the lookup leaves out
-   * users flagged `sprk_isexternal = true` — blank counts as internal, hence the `null` branch (FetchXML `ne` drops
-   * nulls). The lookup's "recent records" list may not apply the filter, so `/share-user` still refuses such a user
-   * and the modal names them. The pick is enriched with the user's email, like {@link pickContact}. */
-  private pickUser = async (options?: IUserPickOptions): Promise<IUserPick | null> => {
-    const results = await this.getNavService().openLookup({
-      entityType: 'systemuser',
-      entityTypes: ['systemuser'],
-      allowMultiSelect: false,
-      filters: options?.excludeExternal
-        ? [
-            {
-              entityLogicalName: 'systemuser',
-              filterXml:
-                '<filter type="or"><condition attribute="sprk_isexternal" operator="ne" value="1" />' +
-                '<condition attribute="sprk_isexternal" operator="null" /></filter>',
-            },
-          ]
-        : undefined,
-    });
-    const picked = results[0];
-    if (!picked) return null;
-    try {
-      const rec = (await this.context.webAPI.retrieveRecord(
-        'systemuser',
-        picked.id,
-        '?$select=fullname,internalemailaddress'
-      )) as unknown as { fullname?: string; internalemailaddress?: string };
-      return {
-        id: picked.id,
-        name: rec?.fullname ?? picked.name,
-        email: rec?.internalemailaddress ?? undefined,
-      };
-    } catch {
-      // Email enrichment failed — still return the pick, named as the lookup named it.
-      return { id: picked.id, name: picked.name };
-    }
   };
 
   /** Task 067: which of the given contacts hold an ACTIVE membership in which of the given (walled) organizations —
@@ -1449,15 +1487,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     } catch {
       return null;
     }
-  };
-
-  /** Classifies a contact internal-workforce (has a linked `systemuser` via
-   * `sprk_primarycontact`) vs external — drives `AccessGrantModal`'s
-   * invite-and-grant vs grant-only routing decision. */
-  private isInternalContact = async (contactId: string): Promise<boolean> => {
-    const options = `?$filter=_sprk_primarycontact_value eq ${contactId}&$select=systemuserid&$top=1`;
-    const result = await this.context.webAPI.retrieveMultipleRecords('systemuser', options);
-    return result.entities.length > 0;
   };
 
   /** Reads the record's STANDING-grant members (task 073 UAT #2): the record's
@@ -1572,7 +1601,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.56 • Built 2026-11-02',
+      versionText: 'v1.0.62 • Built 2026-11-11',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
@@ -1715,16 +1744,15 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     searchContacts: this.searchContacts,
                     searchOrganizations: this.searchOrganizations,
                     // NATIVE advanced-lookup pickers (task 073 UAT v1.0.24 #1/#4) —
-                    // "+ Contact"/"+ Organization" open Xrm.Utility.lookupObjects (the
+                    // "Add person"/"+ Organization" open Xrm.Utility.lookupObjects (the
                     // same advanced-find surface the wizards use). The modal is
                     // nonBlocking so the lookup pane isn't covered by a backdrop.
-                    pickContact: this.pickContact,
+                    // Task 193 (#2338): ONE "Add person" over contacts and users; the
+                    // server decides a contact's share-or-grant (no isInternalContact).
+                    pickPerson: this.pickPerson,
                     pickOrganization: this.pickOrganization,
-                    // "+ User" native picker (task 065, FR-29) — mirrors pickContact/pickOrganization.
-                    pickUser: this.pickUser,
                     // Contact-name link → open the Contact record (task 073 UAT v1.0.24 #6).
                     onOpenContact: this.openContactRecord,
-                    isInternalContact: this.isInternalContact,
                     // Access-Permission sharing gate (task 043, FR-14 Option A; task 138) —
                     // the bound field's raw value folded with the record's Secure flag,
                     // failing closed; see mapAccessPermissionToState()'s doc comment.

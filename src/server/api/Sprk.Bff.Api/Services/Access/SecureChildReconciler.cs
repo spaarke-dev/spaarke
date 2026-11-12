@@ -440,9 +440,10 @@ public sealed class SecureChildReconciler
     /// (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>), the same derivation their writers use.</summary>
     private readonly CoreAncestorResolver? _coreAncestors;
 
-    /// <summary>UAC task 194b fix round (F1-c): the To Do assignee links, so a no-core Signal's or Decision Record's question
-    /// asks the To Do job's own predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
-    private readonly Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? _links;
+    /// <summary>UAC task 194b fix round (F1-c): the To Do assignee rule's contact → user read (uac-r2 task 193:
+    /// <c>ContactUserRepresentation</c>), so a no-core Signal's or Decision Record's question asks the To Do job's own
+    /// predicate (<c>TodoAssigneeOwnerReconciliationJob.SelectsAsync</c>).</summary>
+    private readonly Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? _people;
 
     /// <summary>uac-r2 task 198 Part D: the one share seam the Restricted filing bar reads and revokes through
     /// (<see cref="RestrictedFilingShareBar"/>). Optional so the test compositions keep compiling; the host registers it
@@ -473,9 +474,11 @@ public sealed class SecureChildReconciler
     /// question names the same stamps its writer did (<see cref="RecordOwnershipContext.ForExistingRowAsync"/>). Optional so the
     /// test compositions keep compiling; the host registers it unconditionally (<c>AddCoreAncestorResolver</c>). Without it such
     /// a row with a core record is not decided (fail closed).</param>
-    /// <param name="links">UAC task 194b fix round (F1-c): the To Do assignee links, so whether the To Do job keeps a no-core
-    /// row is asked with that job's own predicate. Optional so the test compositions keep compiling; the host registers it
-    /// (<c>AddScoped&lt;AssignedAccessStore&gt;</c>). Without it a no-core row about a To Do is not decided (fail closed).</param>
+    /// <param name="people">UAC task 194b fix round (F1-c): the To Do assignee rule's contact → user read, so whether the To Do
+    /// job keeps a no-core row is asked with that job's own predicate (uac-r2 task 193: the same
+    /// <c>ContactUserRepresentation</c> the job reads through). Optional so the test compositions keep compiling; the host
+    /// registers it (<c>AddScoped&lt;ContactUserRepresentation&gt;</c>). Without it a no-core row about a To Do is not decided
+    /// (fail closed).</param>
     public SecureChildReconciler(
         IGenericEntityService dataverse,
         IRecordOwnershipResolver ownership,
@@ -489,7 +492,7 @@ public sealed class SecureChildReconciler
         Sprk.Bff.Api.Services.Dataverse.Privileges.IDataversePrivilegeChecker? ownerPrivileges = null,
         DocumentContainerRelocator? relocator = null,
         CoreAncestorResolver? coreAncestors = null,
-        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
+        Sprk.Bff.Api.Services.ExternalAccess.ContactUserRepresentation? people = null,
         IDataverseRecordShareService? recordShares = null,
         Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
@@ -497,7 +500,7 @@ public sealed class SecureChildReconciler
         _directMessageOwnerTeam = directMessageOwnerTeam;
         _relocator = relocator;
         _coreAncestors = coreAncestors;
-        _links = links;
+        _people = people;
         _threads = threads;
         _ownerPrivileges = ownerPrivileges;
         _gateDecisionRecords = gateDecisionRecords ?? throw new ArgumentNullException(nameof(gateDecisionRecords));
@@ -591,7 +594,42 @@ public sealed class SecureChildReconciler
                 "the record's related records could not be read");
         }
 
-        return await pass.RunAsync().ConfigureAwait(false);
+        var report = await pass.RunAsync().ConfigureAwait(false);
+
+        // Task 191c (L1): a Make Secure / Unsecure transition brings the External Collaborators team's shares on the root and its
+        // family into line now (a record that became Secure loses them at once). The sweep is left to the two-minute pass, which
+        // covers the same rows. Best effort; only with that engine's writes on.
+        if (mode == SecureChildReconcileMode.Apply && trigger != SecureChildPassTrigger.Sweep)
+            await SyncExternalTeamFamilyAsync(rootTable, rootId, "secure-transition", ct).ConfigureAwait(false);
+
+        return report;
+    }
+
+    /// <summary>
+    /// Task 191c (L1): the External Collaborators team's shares on a row and everything filed under it, now. Never throws
+    /// (cancellation included, so the caller's next step runs): a fault is logged and the two-minute share job re-decides the same rows. Nothing when the engine is
+    /// not composed or its writes are off.
+    /// </summary>
+    private async Task SyncExternalTeamFamilyAsync(string table, Guid id, string trigger, CancellationToken ct)
+    {
+        var engine = _shares.ExternalTeam;
+        if (engine is null || !engine.WritesEnabled)
+            return;
+
+        try
+        {
+            var result = await engine.SyncFamilyAsync(table, id, trigger, ct, ExternalTeamShareSynchronizer.MaxInlineFamilyRows).ConfigureAwait(false);
+            if (result.Status is ExternalTeamShareStatus.Failed or ExternalTeamShareStatus.Incomplete)
+            {
+                _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares are " +
+                    "{Status} ({Detail}); the two-minute share job finishes them.", table, id, trigger, result.Status, result.Detail);
+            }
+        }
+        catch (Exception ex) // never throws, not even for cancellation: the caller's next step (the gate) must run (F4)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares could " +
+                "not be updated; the two-minute share job finishes them.", table, id, trigger);
+        }
     }
 
     /// <summary>
@@ -1334,6 +1372,11 @@ public sealed class SecureChildReconciler
             }
         }
 
+        // Task 191c (L1): the re-filed row and everything filed under it get the External Collaborators team's shares the
+        // predicate answers for their new place, now. Before the communication steps (whose gate step stays last); what they
+        // change afterwards (a Direct-message owner) the two-minute share job re-decides. Never thrown.
+        await SyncExternalTeamFamilyAsync(childLogicalName.Trim().ToLowerInvariant(), childId, "refile", ct).ConfigureAwait(false);
+
         if (string.Equals(childLogicalName.Trim(), CommunicationTable, StringComparison.OrdinalIgnoreCase))
         {
             // 198 pass 2 item 6 (ontology R-b): the two UAC steps run in a try whose finally is the gate step, so a caller's real
@@ -1771,7 +1814,7 @@ public sealed class SecureChildReconciler
         // per pass.
         private ExistingRowReads? _reads;
 
-        private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._links);
+        private ExistingRowReads Reads => _reads ??= new ExistingRowReads(_owner._dataverse, _owner._coreAncestors, _owner._people);
 
         public Pass(
             SecureChildReconciler owner, SecureChildReconcileMode mode, RecordOwnershipParent root, bool rootIsolated,

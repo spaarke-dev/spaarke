@@ -69,6 +69,17 @@ public class DirectMessageOwnerStepGuardTests
             "uac-r2 task 198: lists the messages the resolved Direct team owns, to re-grant their participants.", NoWrites),
         ["src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs"] = new(
             "registers the lookup in DI.", NoWrites),
+        ["src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs"] = new(
+            "uac-r2 task 191c: passes the lookup to ExternalTeamShareSynchronizer.", NoWrites),
+        ["src/server/api/Sprk.Bff.Api/Services/Access/ExternalTeamShareSynchronizer.cs"] = new(
+            "uac-r2 task 191c: compares a row's owning team with the resolved Direct team, to report Direct message rows it leaves " +
+            "to DirectMessageParticipantShares.",
+            new Dictionary<string, string>
+            {
+                ["ReownAsync"] = "re-owns a flagged user's row to the team its own I-6 question answers (RecordOwnershipResolver).",
+            },
+            ("the owner written is the ownership resolver's answer, never a team it chose",
+                static (write, _) => write.Text.Contains("resolution.OwningTeamId", StringComparison.Ordinal))),
         ["src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs"] = new(
             "uac-r2 task 198: asks whether a message's owning team is the Direct team, to choose its participant grant.",
             new Dictionary<string, string>

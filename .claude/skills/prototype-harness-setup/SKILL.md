@@ -26,7 +26,7 @@ Scaffold a new **production component harness** (Mode 2) in `c:/code_files/spaar
 - `prototype-harness-extend` — add a new entity factory + preset to existing `_infra/seed/`
 - `prototype-experiment-init` — scaffold a **Mode 1** standalone UX experiment (no production source yet)
 
-**Reference**: [PROTOTYPE-UI-SYSTEM-GUIDE.md](../../../c:/code_files/spaarke-prototype/docs/PROTOTYPE-UI-SYSTEM-GUIDE.md) in the prototype repo.
+**Reference**: `spaarke-prototype/docs/PROTOTYPE-UI-SYSTEM-GUIDE.md` in the separate prototype repo (not in this repository).
 
 ---
 

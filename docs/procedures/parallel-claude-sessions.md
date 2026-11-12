@@ -544,9 +544,9 @@ The conflict detection system (Steps 1.5 and 10.6) provides early warning, but *
 
 ## Related Documentation
 
-- [Worktree Setup Skill](.claude/skills/worktree-setup/SKILL.md) - Detailed worktree commands
-- [Conflict Check Skill](.claude/skills/conflict-check/SKILL.md) - On-demand conflict detection
-- [Push to GitHub Skill](.claude/skills/push-to-github/SKILL.md) - Commit and PR workflow
+- [Worktree Setup Skill](../../.claude/skills/worktree-setup/SKILL.md) - Detailed worktree commands
+- [Conflict Check Skill](../../.claude/skills/conflict-check/SKILL.md) - On-demand conflict detection
+- [Push to GitHub Skill](../../.claude/skills/push-to-github/SKILL.md) - Commit and PR workflow
 - [Context Recovery Procedure](context-recovery.md) - Recovering state in new sessions
 
 ---

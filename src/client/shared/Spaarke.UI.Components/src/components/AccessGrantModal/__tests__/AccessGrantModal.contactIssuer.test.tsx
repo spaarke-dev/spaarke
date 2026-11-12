@@ -51,7 +51,6 @@ function props(): IAccessGrantModalProps {
     fetchCandidates: jest.fn(async () => []),
     fetchExistingGrants: jest.fn(async () => [CONTACT_ISSUED, SYSTEMUSER_ISSUED]),
     searchContacts: jest.fn(async () => []),
-    isInternalContact: jest.fn(async () => false),
     canGrantAccess: true,
   };
 }

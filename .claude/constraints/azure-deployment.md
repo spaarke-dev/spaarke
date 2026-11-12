@@ -216,9 +216,9 @@ After deploying:
 
 ## Source Code References
 
-- CORS validation: [Program.cs:731-736](src/server/api/Sprk.Bff.Api/Program.cs#L731)
-- ServiceBus check: [Program.cs:593-600](src/server/api/Sprk.Bff.Api/Program.cs#L593)
-- Publish exclusion: [Sprk.Bff.Api.csproj](src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj)
+- CORS validation: [Program.cs:731-736](../../src/server/api/Sprk.Bff.Api/Program.cs)
+- ServiceBus check: [Program.cs:593-600](../../src/server/api/Sprk.Bff.Api/Program.cs)
+- Publish exclusion: [Sprk.Bff.Api.csproj](../../src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj)
 
 ---
 

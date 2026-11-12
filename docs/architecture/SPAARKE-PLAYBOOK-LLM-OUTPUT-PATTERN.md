@@ -4,7 +4,7 @@
 > **⚠️ SCOPE NOTE (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: the orchestrator-side Layer-1 mechanics below belong to the FROZEN node-graph engine (Insights family only; OQ-2/D11 — no new capability lands on it) and `IInvokePlaybookAi` (referenced under Related) was DELETED at task 044. Layer 2 (`PromptSchemaRenderer` `## Input` section) remains fully current — the prompted executor (`ActionRunner`) uses the same renderer. New narrative-output capabilities ship as Action + Binding ([`docs/guides/ai-guide-consumer-wiring.md`](../guides/ai-guide-consumer-wiring.md)) or coded `ICodedWorkflow` composites (shipped reference: `DailyBriefingCompositeService`).
 > **Audience**: BFF + AI platform developers building new narrative-output consumers (Daily Briefing, Insight Engine, work assignment briefings, project status updates, document review summaries, and any future Workspace UX feature that needs an LLM to produce structured output from runtime data).
 > **Last Updated**: 2026-06-29 (R7 Wave 11 task 111a — operator-required for Insights Engine and other narrative consumers)
-> **Source ADRs**: [ADR-013](../adr/ADR-013-bff-ai-architecture.md) (BFF AI Architecture), [ADR-037](../adr/ADR-037-multinode-output-composition.md) (Multinode Output Composition), [ADR-010](../adr/ADR-010-di-minimalism.md) (DI Minimalism)
+> **Source ADRs**: [ADR-013](../adr/ADR-013-ai-architecture.md) (BFF AI Architecture), [ADR-037](../adr/ADR-037-multinode-output-composition.md) (Multinode Output Composition), [ADR-010](../adr/ADR-010-di-minimalism.md) (DI Minimalism)
 
 ---
 
@@ -219,7 +219,7 @@ Worked example: `DAILY-BRIEFING-NARRATE.GenerateTldr` node.
 
 ## 10. ADR + constraint pointers
 
-- **[ADR-013 BFF AI Architecture](../adr/ADR-013-bff-ai-architecture.md)** — IInvokePlaybookAi triangle stays canonical; orchestrator is internal AI service
+- **[ADR-013 BFF AI Architecture](../adr/ADR-013-ai-architecture.md)** — IInvokePlaybookAi triangle stays canonical; orchestrator is internal AI service
 - **[ADR-037 Multinode Output Composition](../adr/ADR-037-multinode-output-composition.md)** — composeStrategy semantics; fan-out iteration belongs in orchestrator (Wave 11 T114)
 - **[ADR-010 DI Minimalism](../adr/ADR-010-di-minimalism.md)** — no new abstractions; ITemplateEngine constructor-injected only
 - **[ADR-029 BFF Publish Hygiene](../adr/ADR-029-bff-publish-hygiene.md)** — per-task publish-size + CVE on BFF-touching tasks
@@ -232,7 +232,7 @@ Worked example: `DAILY-BRIEFING-NARRATE.GenerateTldr` node.
 - **[`AI-ARCHITECTURE.md`](AI-ARCHITECTURE.md)** — overall BFF AI subsystem architecture
 - **[`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md)** — playbook runtime contract (executor dispatch, scope resolution, node lifecycle)
 - **[`ai-architecture-actions-nodes-scopes.md`](ai-architecture-actions-nodes-scopes.md)** — Actions vs Nodes vs Scopes vs Skills/Knowledge — config-home decision tree
-- **[`ai-architecture-consumer-routing.md`](ai-architecture-consumer-routing.md)** — Path A.5 dispatch via `IConsumerRoutingService` → `IInvokePlaybookAi`
+- **[`ai-architecture-playbook-consumer-routing.md`](ai-architecture-playbook-consumer-routing.md)** — Path A.5 dispatch via `IConsumerRoutingService` → `IInvokePlaybookAi`
 - **[`JPS-AUTHORING-GUIDE.md`](../guides/JPS-AUTHORING-GUIDE.md)** — Action JPS body authoring
 - **[`PLAYBOOK-AUTHOR-GUIDE.md`](../guides/PLAYBOOK-AUTHOR-GUIDE.md)** — Playbook node + scope authoring
 - **[`ai-guide-playbook-deploy-recipe.md`](../guides/ai-guide-playbook-deploy-recipe.md)** — Deploy-Playbook.ps1 contract
