@@ -12,7 +12,7 @@
 >   - 116 to master: open a PR from work, then tell uac-r2, who folds it into the next dev deploy with #2695 and #2708.
 >   - ontology K4 comment fix.
 >   - Deferred issue: Invoice Review doesn't poll while `firmNeeded`.
->   - 084 scope: awaiting the owner.
+>   - **084: owner chose "Full prototype" (EB-D-217, 2026-11-11).** Split into 084 (Part A routes), 084a (panel, new code page `src/solutions/RecordProcedures`), 084b (Procedure wizard and rule Exclude), 084c (typed Change editor plus an agreement ArchTest), and 084d (dry-run Impact and Assign; opus; ontology-r1 is told before the build). The POMLs pass `Validate-TaskPoml`. TASK-INDEX is updated, and 112 now depends on 084–084d. Start 084 via task-execute after the 116 PR.
 > - **word-add-in-r1 is unreachable:** it is still owed the dev sha `b3ca99cad5` (095a and the others are live).
 
 ## Quick recovery
@@ -35,7 +35,9 @@
    The deploy itself goes through uac-r2's session, coordinated with mcp-r1 (dev carries mcp-r1's spike `755987b385`). uac-r2 may want the owner's go typed in its own session; tell the owner if so.
 3. **DEF-060 column `sprk_firmdescription`: YES.** Add it on dev when the DEF-060 build reaches that step (after 116). Send notices to uac-r2 and ontology-r1 before and after.
 4. **164 ribbon `-Apply`: YES.** Run it once our ribbon source removal is on master; afterwards send the read-backs to uac-r2 (`notes/164-add-line.md`).
-5. **084 part B (procedures and rules in force on the record): the owner wants to discuss bringing it into R1.** Lay out the requirements, what exists and what must be built. *In progress:* `084-procedure-review-ui.poml` and `notes/084-prototype-questions.md` have been read; the prototype first cut is in `spaarke-prototype/projects/ebilling.r1` (README "Procedure review on a record (O-14), first cut", `src/procedures/types.ts`). Part A (back end) is not started either.
+5. **084: DECIDED, "Full prototype" (EB-D-217).** The tasks are 084 and 084a–084d (see the state block above).
+7. **096b on dev: YES**, plus restoring 029's seven Activate/Deactivate hides. Done 2026-11-11.
+8. **#2708: "Merge on green".** Merged.
 6. **Peers:** use cross-session messages; tell the owner if one fails.
 
 ## Agents running

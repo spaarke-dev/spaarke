@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084d" project="ebilling-r1">
+  <metadata>
+    <title>Procedures on the record (B4): the before/after Impact dry-run read for any proposed override, and the Assign Procedure wizard</title>
+    <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
+    <gate>084 and 084b merged into work. ontology-r1 is told before the dry-run read is built (it reviews any change under Services/Signals/**).</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF route over the evaluation resolver plus frontend code; FULL review.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The dry run must resolve a proposed override through the same resolver as evaluation without writing, which touches ontology-reviewed code and has a high blast radius if it diverges.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends 084b's wizards (same files) and shares append points with 084.</parallel-reason>
+    <deps>084, 084b</deps>
+    <tags>bff-api, api, endpoints, frontend, react, typescript, fluent-ui, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add a caller-read dry-run route that resolves a record's Procedures and rules in force with one proposed override applied (pin, follow latest, exclude, remove, rule exclude, rule change, assign), without writing, and returns Now → After for both lists, which firms' invoices it reaches and the count of open invoices the caller can see that are affected. Use it in every wizard's Impact step (replacing 084b's interim impact), with the D-170 and section 15 warnings, and add the Assign Procedure wizard (billing admin only): Choose → On this record (Follow latest or Pin) → Impact → Confirm, on 089's procedure-assignments route.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, the Finance authorization filter, and React code pages with WizardShell.</role>
+
+  <goal>Every wizard's Impact shows exactly what the lists will show after the change, computed by the evaluation's own resolver; nothing is written by the dry run; a billing admin can assign a Procedure to the record.</goal>
+
+  <context>
+    <background>EB-D-217. Prototype: README "Impact (both wizards)" and "Assign Procedure"; src/procedures/resolve.ts is the client-side stand-in this route replaces. D-170: a change that switches a rule off closes its open findings. Model section 15: removing a changed rule closes the rule it changed and removes pending decisions on active invoices. O-21: nothing is re-checked; affected open invoices show the "procedures changed" banner. 089's AffectedInvoiceCounter counts affected invoices for the removal preview.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs (084): a dry-run entry point taking a proposed override</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Finance/RecordProcedureEndpoints.cs (084): the dry-run route per core record; tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs ONLY if the resolver cannot take an overlay of proposed rows; ontology-r1 reviews that diff</file>
+      <file role="new">src/solutions/RecordProcedures/src/components/wizards/AssignProcedureWizard.tsx, ImpactStep.tsx</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Finance/Procedures/RecordProcedureDryRunTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/AffectedInvoiceCounter.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="084" status="pending">The read service and routes this extends.</dependency>
+      <dependency task="084b" status="pending">The wizards whose Impact step this replaces.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="model 6.6, 5.3 (uac-r2 C5)">The dry-run route carries the same step-0 flag, Record path, uniform 404 and caller-identity reads as 084's routes, and the caller must also pass the authorization 089's matching write route requires (a dry run never reveals what the caller could not do).</constraint>
+    <constraint source="project">The dry run writes nothing: proposed rows are an in-memory overlay on the resolver's row source; a test asserts no Dataverse create, update or delete.</constraint>
+    <constraint source="project">Now → After must equal what 084's lists return after the same change is written (asserted by a test that writes through 089's service in the fake world and compares).</constraint>
+    <constraint source="project (ontology-r1 ownership)">Any diff under Services/Signals/** is sent to ontology-r1 for review before merge; prefer a row-source overlay that leaves ProcedureResolver.cs unchanged.</constraint>
+    <constraint source="ADR-001, ADR-008, ADR-019, .claude/constraints/bff-extensions.md">ProblemDetails with stable codes; ledger entry; no new package; publish-size delta recorded.</constraint>
+    <constraint source="ADR-021, ADR-012, ADR-050">Assign Procedure uses WizardShell, semantic tokens and shared components; no new npm package.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/ebilling-r1/notes/procedure-and-file-model.md (sections 6, 7.1, 15)</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Removal preview" location="src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs (PreviewRemovalAsync ~1213)">Read-only preview with the affected-invoice count.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Tell ontology-r1 the dry-run design (overlay on the row source) before building it.</step>
+    <step order="2">Dry-run service entry point and route; tests including the write-then-compare agreement and the no-write assertion.</step>
+    <step order="3">ImpactStep in every wizard (D-170 and section 15 warnings, O-21 line); Assign Procedure wizard.</step>
+    <step order="4">dotnet build and test; npm run build and test; publish-size delta.</step>
+    <step order="5">Update TASK-INDEX.md: this task's status cell to "✅ [done]".</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the dry run cannot be built without changing ProcedureResolver.cs's selection logic (as opposed to its row source), STOP and raise 🔔 Human Input Required with ontology-r1's view; do not fork a second resolver.</trigger>
+    <trigger>If the dry-run authorization cannot match the write route's for some override kind, STOP and escalate (uac-r2 reviews access) rather than loosening it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>089's PreviewRemovalAsync previews removals only; AffectedInvoiceCounter counts affected invoices; no read resolves a proposed pin, exclude, change or assignment.</existing>
+    <extension>Yes, partly: the dry run extends 084's RecordProcedureReadService and routes file instead of a new service; the only new surface is one route and the Assign wizard.</extension>
+    <cost-of-doing-nothing>A billing admin confirms a pin, exclusion or rule change without seeing which rules and invoices it changes, so a change that closes open findings (D-170) is made blind.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Impact of a pin">
+      <steps><step>On a matter, open a firm Procedure; choose Pin a version; reach Impact</step></steps>
+      <expected>Now → After lists the rules that change, the firms reached and the affected open invoice count</expected>
+    </test>
+    <test name="D-170 warning">
+      <steps><step>Exclude a rule that has open findings; reach Impact</step></steps>
+      <expected>The D-170 warning that open findings close is shown</expected>
+    </test>
+    <test name="Assign Procedure">
+      <steps><step>As billing admin, Assign Procedure on a project, Follow latest, confirm</step></steps>
+      <expected>The Procedure appears with source Manual d0; a non-admin sees no Assign</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark theme; repeat the first test</step></steps>
+      <expected>All colours from Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">build, test</tool>
+    <tool name="npm">install, build, test</tool>
+    <tool name="ui-test">browser checks after 112 deploys</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">RecordProcedureReadService.cs, RecordProcedureEndpoints.cs (dry run); AssignProcedureWizard.tsx, ImpactStep.tsx</output>
+    <output type="test">RecordProcedureDryRunTests.cs; endpoint tests; ledger; jest tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each override kind (pin, follow latest, exclude, remove, rule exclude, rule change, assign), the dry run's After equals 084's lists after the same change is written in the fake world.</criterion>
+    <criterion testable="true">The dry run writes nothing (no create, update or delete in the tests).</criterion>
+    <criterion testable="true">A caller without the matching write route's authorization, a flagged-external caller and a caller without Read get the same answers as on 084's routes or the write route (negative); a refused or faulted row read is 503 procedures.unavailable.</criterion>
+    <criterion testable="true">Every wizard's Impact step uses the dry run and shows the D-170, section 15 and O-21 texts where they apply.</criterion>
+    <criterion testable="true">Assign Procedure is offered to billing admins only and writes through 089's procedure-assignments route.</criterion>
+    <criterion testable="true">Ledger entry; publish-size delta recorded; no package; any Services/Signals/** diff approved by ontology-r1.</criterion>
+    <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deployment: 112.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
