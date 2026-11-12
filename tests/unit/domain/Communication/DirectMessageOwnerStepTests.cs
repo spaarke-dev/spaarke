@@ -50,9 +50,9 @@ public class DirectMessageOwnerStepTests
     {
         Store(DirectMessage());
         Store(Thread());
+        // Rows that exist before the join (an attachment and its document uploaded with the message). The participant index and
+        // the review logs are written by the path after the join: WriteContentAfterJoin.
         Store(Content("sprk_communicationattachment", Attachment, "sprk_communication", Owner(AppUser)));
-        Store(Content("sprk_communicationparticipant", Participant, "sprk_communication", Owner(AppUser)));
-        Store(Content("sprk_emailreviewlog", ReviewLog, "sprk_communication", Owner(AppUser)));
         Store(Content("sprk_document", OwnDocument, "sprk_relatedcommunication", Owner(AppUser)));
         // A document related to the message but owned by another team (it is filed elsewhere): it is not the message's to move.
         Store(Content("sprk_document", FiledDocument, "sprk_relatedcommunication", new EntityReference("team", OtherTeam)));
@@ -88,9 +88,12 @@ public class DirectMessageOwnerStepTests
     [Fact]
     public async Task Resolved_ContentRowsOwnedLikeTheMessage_FollowIt_AndARowOwnedElsewhereStays()
     {
-        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+        var step = Step(Resolved());
+        var join = await step.GrantAtJoinAsync(MessageId, Direct(), CancellationToken.None);
+        WriteContentAfterJoin();
+        await step.OwnDirectAfterContentAsync(join!, CancellationToken.None);
 
-        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(DirectTeam);
+        OwningTeam("sprk_communicationattachment", Attachment).Should().Be(DirectTeam, "a row that existed before the join moves too");
         OwningTeam("sprk_communicationparticipant", Participant).Should().Be(DirectTeam);
         OwningTeam("sprk_emailreviewlog", ReviewLog).Should().Be(DirectTeam);
         OwningTeam("sprk_document", OwnDocument).Should().Be(DirectTeam);
@@ -99,11 +102,42 @@ public class DirectMessageOwnerStepTests
     }
 
     [Fact]
+    public async Task GrantAtJoin_GrantsOnly_AndTheOwnerPartRunsOnlyWhenCalled()
+    {
+        var step = Step(Resolved());
+
+        var join = await step.GrantAtJoinAsync(MessageId, Direct(), CancellationToken.None);
+
+        join.Should().NotBeNull();
+        join!.CommunicationId.Should().Be(MessageId);
+        _calls.Should().Equal("grant DirectParticipants");
+        OwningTeam("sprk_communication", MessageId).Should().BeNull("the owner part waits for the path's content rows");
+
+        await step.OwnDirectAfterContentAsync(join, CancellationToken.None);
+
+        OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam);
+        _calls.Last().Should().Be("grant DirectParticipants");
+    }
+
+    [Fact]
+    public async Task GrantAtJoin_AnAnchoredJoin_HasNoOwnerPart()
+    {
+        var join = await Step(Resolved()).GrantAtJoinAsync(
+            MessageId, new ThreadAssignment(ThreadId, ThreadGrantAudience.AnchorRecordMembers), CancellationToken.None);
+
+        join.Should().BeNull();
+        _calls.Should().Equal("grant AnchorRecordMembers");
+    }
+
+    [Fact]
     public async Task Resolved_AContentRowRefused_StaysWithAnError_TheOthersAndTheMessageStillMove()
     {
         _refusedWrites.Add(Participant);
 
-        await Step(Resolved()).GrantThenOwnDirectAsync(MessageId, Direct(), CancellationToken.None);
+        var step = Step(Resolved());
+        var join = await step.GrantAtJoinAsync(MessageId, Direct(), CancellationToken.None);
+        WriteContentAfterJoin();
+        await step.OwnDirectAfterContentAsync(join!, CancellationToken.None);
 
         OwningTeam("sprk_communication", MessageId).Should().Be(DirectTeam, "an owner already set is never rolled back");
         OwningTeam("sprk_communicationparticipant", Participant).Should().BeNull();
@@ -459,6 +493,14 @@ public class DirectMessageOwnerStepTests
     };
 
     private void Store(Entity row) => _rows[(row.LogicalName, row.Id)] = row;
+
+    /// <summary>The rows the path writes after the join and before the owner part (the participant index, the review logs), owned
+    /// by their creator as the message is.</summary>
+    private void WriteContentAfterJoin()
+    {
+        Store(Content("sprk_communicationparticipant", Participant, "sprk_communication", Owner(AppUser)));
+        Store(Content("sprk_emailreviewlog", ReviewLog, "sprk_communication", Owner(AppUser)));
+    }
 
     private Guid? OwningTeam(string table, Guid id) => _rows[(table, id)].GetAttributeValue<EntityReference>("owningteam")?.Id;
 

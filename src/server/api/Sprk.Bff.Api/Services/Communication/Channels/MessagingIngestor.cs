@@ -111,6 +111,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         // sprk_communicationthread lookup. Same shared seam the email inbound + outbound paths call. A
         // resolver failure MUST NOT fail the persist — the message already exists (without a thread).
         Guid? resolvedThreadId = null;
+        Access.DirectOwnerJoin? directJoin = null;
         if (_threadResolver is not null)
         {
             try
@@ -134,10 +135,11 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                 // the impersonated read (task 050) unless explicitly shared. Best-effort inside
                 // GrantMessageAccessAsync itself (no-op for a non-Direct thread; failures logged + swallowed).
                 // #1629: the audience is the one the join fixed, never a re-read of the thread.
-                // fm 054 piece 3a: through the owner step (grant first, then the Direct team for a Direct message filed under nothing).
+                // fm 054 piece 3a: through the owner step. Its grant runs here, at the join; its owner part (the Direct team for a
+                // Direct message filed under nothing) runs after the participant index and the enrichment below (fm 054, F1).
                 if (assignment is not null && _directMessageOwnerStep is not null)
                 {
-                    await _directMessageOwnerStep.GrantThenOwnDirectAsync(communicationId, assignment, cancellationToken);
+                    directJoin = await _directMessageOwnerStep.GrantAtJoinAsync(communicationId, assignment, cancellationToken);
                 }
                 else if (assignment is not null && _directThreadAccess is not null)
                 {
@@ -209,6 +211,24 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                 ex,
                 "Enrichment failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
                 communicationId, request.CorrelationId);
+        }
+
+        // ── Direct owner (fm task 054, F1) — BEST-EFFORT, NON-FATAL ──
+        // The owner part of a Direct join, once the participant rows and the enrichment rows exist, so they move with the message
+        // to the Direct team and its second grant covers them. Caught like every other post-create step: the row exists.
+        if (directJoin is not null && _directMessageOwnerStep is not null)
+        {
+            try
+            {
+                await _directMessageOwnerStep.OwnDirectAfterContentAsync(directJoin, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Direct owner step failed (non-fatal) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                    communicationId, request.CorrelationId);
+            }
         }
 
         // ── communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal ──

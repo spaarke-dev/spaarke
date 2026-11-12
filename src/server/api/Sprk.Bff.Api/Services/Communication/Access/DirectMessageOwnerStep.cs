@@ -16,6 +16,10 @@ namespace Sprk.Bff.Api.Services.Communication.Access;
 /// (<see cref="CheckBeforeSendAsync"/>).
 /// </summary>
 /// <remarks>
+/// <para><b>When.</b> Step 1 runs at the join (<see cref="GrantAtJoinAsync"/>). Steps 2 to 8 (<see cref="OwnDirectAfterContentAsync"/>)
+/// run once the path has written the message's content rows (the send and the inbound capture: after the participant index and
+/// the enrichment), so those rows move with the message and the second grant covers them. A content row created later is owned
+/// by the record ownership resolver's Direct rule, never by a business unit's default team.</para>
 /// <para><b>Order.</b> (1) The grant (<see cref="IDirectThreadAccessService.GrantMessageAccessAsync"/>) while the message is still
 /// owned by its creator, so its participants read it whatever happens next. (2) Only a <see cref="ThreadGrantAudience.DirectParticipants"/>
 /// join goes on. (3) The lookup: <see cref="DirectMessageOwnerTeamRefusal.NotConfigured"/> stops here with nothing written and nothing
@@ -91,9 +95,22 @@ public sealed class DirectMessageOwnerStep
 
     /// <summary>
     /// Grants <paramref name="communicationId"/> to the audience its join fixed, then (Direct joins only) assigns it and its content
-    /// rows to the Direct message owner team. Never throws for a Dataverse fault; cancellation of <paramref name="ct"/> propagates.
+    /// rows to the Direct message owner team: <see cref="GrantAtJoinAsync"/> then <see cref="OwnDirectAfterContentAsync"/>, for a
+    /// join with no content rows still to write. Never throws for a Dataverse fault; cancellation of <paramref name="ct"/> propagates.
     /// </summary>
     public async Task GrantThenOwnDirectAsync(Guid communicationId, ThreadAssignment assignment, CancellationToken ct)
+    {
+        if (await GrantAtJoinAsync(communicationId, assignment, ct).ConfigureAwait(false) is { } join)
+            await OwnDirectAfterContentAsync(join, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Step 1 of the class remarks, at the join: grants <paramref name="communicationId"/> to the audience its join fixed, while it is
+    /// still owned by its creator. Returns the join a <see cref="ThreadGrantAudience.DirectParticipants"/> join hands to
+    /// <see cref="OwnDirectAfterContentAsync"/> once the path has written the message's content rows; <c>null</c> for any other join.
+    /// Never throws for a Dataverse fault; cancellation of <paramref name="ct"/> propagates.
+    /// </summary>
+    public async Task<DirectOwnerJoin?> GrantAtJoinAsync(Guid communicationId, ThreadAssignment assignment, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(assignment);
 
@@ -103,8 +120,19 @@ public sealed class DirectMessageOwnerStep
             "Message {CommunicationId}: grant attempted for its thread's {Audience} audience (ThreadId={ThreadId}).",
             communicationId, assignment.Audience, assignment.ThreadId);
 
-        if (assignment.Audience != ThreadGrantAudience.DirectParticipants)
-            return;
+        return assignment.Audience == ThreadGrantAudience.DirectParticipants ? new DirectOwnerJoin(communicationId, assignment) : null;
+    }
+
+    /// <summary>
+    /// Steps 2 to 8 of the class remarks, the one entry to the owner write: a join whose grant ran (<see cref="GrantAtJoinAsync"/>
+    /// is the only maker of <paramref name="join"/>). A path calls it after it has written the message's content rows (the
+    /// participant index, the review logs), so they move with the message and the second grant covers them. Never throws for a
+    /// Dataverse fault; cancellation of <paramref name="ct"/> propagates.
+    /// </summary>
+    public async Task OwnDirectAfterContentAsync(DirectOwnerJoin join, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(join);
+        var (communicationId, assignment) = (join.CommunicationId, join.Assignment);
 
         try
         {
@@ -475,6 +503,25 @@ public sealed class DirectMessageOwnerStep
             return writeFault is null ? $"the read-back failed ({ex.Message})" : $"Dataverse refused the write ({writeFault})";
         }
     }
+}
+
+/// <summary>
+/// A Direct join whose grant ran (<see cref="DirectMessageOwnerStep.GrantAtJoinAsync"/>), waiting for its owner part
+/// (<see cref="DirectMessageOwnerStep.OwnDirectAfterContentAsync"/>). Only the step makes one, so the owner part always follows a grant.
+/// </summary>
+public sealed class DirectOwnerJoin
+{
+    internal DirectOwnerJoin(Guid communicationId, ThreadAssignment assignment)
+    {
+        CommunicationId = communicationId;
+        Assignment = assignment;
+    }
+
+    /// <summary>The message that joined.</summary>
+    public Guid CommunicationId { get; }
+
+    /// <summary>The join's assignment (its thread and its Direct audience).</summary>
+    public ThreadAssignment Assignment { get; }
 }
 
 /// <summary>The pre-send check of a 1:1 message (<see cref="DirectMessageOwnerStep.CheckBeforeSendAsync"/>).</summary>

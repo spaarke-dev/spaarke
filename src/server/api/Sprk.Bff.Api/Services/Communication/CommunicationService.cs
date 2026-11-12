@@ -1005,9 +1005,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // strategy can group by it now (find-or-create sprk_communicationthread + channel-ref row).
             // Task 054a piece 2b: an outbound Direct send is filed into its pair's Direct thread when its one recipient maps
             // to one eligible systemuser; otherwise, and on any fault of that step, the path above runs unchanged.
+            Access.DirectOwnerJoin? directJoin = null;
             if (communicationId.HasValue)
             {
-                await ResolveSentMessageThreadAsync(
+                directJoin = await ResolveSentMessageThreadAsync(
                     communicationId.Value, request, preparedRecord, senderParticipant.RecordId,
                     sendResult.ProviderThreadId, correlationId, ct);
             }
@@ -1041,6 +1042,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderEmail, senderParticipant,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // fm task 054 (F1): the owner part of a Direct join, after the enrichment rows and the participant index, so they move
+                // with the message to the Direct team and its second grant covers them. The join's grant ran at the join.
+                await OwnDirectAfterContentAsync(directJoin, correlationId, ct);
 
                 // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
                 // AFTER thread resolution + participant index so the fan-out junction + thread lookup are populated
@@ -1793,12 +1798,44 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// fm task 054 piece 3a: the one step after a message joins a thread (<see cref="Access.DirectMessageOwnerStep.GrantThenOwnDirectAsync"/>).
     /// A construction without the step keeps the bare grant.
     /// </summary>
-    private async Task GrantThenOwnDirectAsync(Guid communicationId, ThreadAssignment assignment, CancellationToken ct)
+    /// <param name="deferOwner">A path that still writes the message's content rows (the Message send): only the join's grant runs
+    /// here, and its Direct join is added to this list for <see cref="OwnDirectAfterContentAsync"/>. <c>null</c>: the whole step runs
+    /// now.</param>
+    private async Task GrantThenOwnDirectAsync(
+        Guid communicationId, ThreadAssignment assignment, CancellationToken ct, List<Access.DirectOwnerJoin>? deferOwner = null)
     {
-        if (_directMessageOwnerStep is not null)
+        if (_directMessageOwnerStep is not null && deferOwner is not null)
+        {
+            if (await _directMessageOwnerStep.GrantAtJoinAsync(communicationId, assignment, ct) is { } join)
+                deferOwner.Add(join);
+        }
+        else if (_directMessageOwnerStep is not null)
             await _directMessageOwnerStep.GrantThenOwnDirectAsync(communicationId, assignment, ct);
         else if (_directThreadAccess is not null)
             await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
+    }
+
+    /// <summary>
+    /// fm task 054 (F1): the owner part of the step for a Message send's Direct join (<see cref="Access.DirectMessageOwnerStep.OwnDirectAfterContentAsync"/>),
+    /// once the send has written its enrichment rows and its participant index, so they move with the message and its second
+    /// grant covers them. Best-effort, non-fatal (NFR-02): the message is already sent and persisted.
+    /// </summary>
+    private async Task OwnDirectAfterContentAsync(Access.DirectOwnerJoin? join, string correlationId, CancellationToken ct)
+    {
+        if (join is null || _directMessageOwnerStep is null)
+            return;
+
+        try
+        {
+            await _directMessageOwnerStep.OwnDirectAfterContentAsync(join, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Direct owner step failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                correlationId, join.CommunicationId);
+        }
     }
 
     /// <summary>
@@ -1810,11 +1847,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// Direct thread of exactly that pair, and otherwise refuses before any write (one Information
     /// <see cref="PairFilingRefusedEventCode"/>). Every other send, an outbound Direct send that does not resolve, and a refused
     /// join take <see cref="ResolveOutboundMessageThreadAsync"/> unchanged. Never throws.
+    /// <para>fm task 054 (F1): the join grants only. Its Direct join is returned for <see cref="OwnDirectAfterContentAsync"/>, which
+    /// the send runs once its content rows are written; <c>null</c> when the message joined no Direct audience.</para>
     /// </summary>
-    private async Task ResolveSentMessageThreadAsync(
+    private async Task<Access.DirectOwnerJoin?> ResolveSentMessageThreadAsync(
         Guid communicationId, SendCommunicationRequest request, DataverseEntity preparedRecord, Guid senderSystemUserId,
         string? acsThreadId, string correlationId, CancellationToken ct)
     {
+        var deferOwner = new List<Access.DirectOwnerJoin>(1);
         if (IsOutboundDirectSend(request, preparedRecord)
             && await FindDirectPairThreadAsync(communicationId, request, senderSystemUserId, correlationId, ct) is { } pair)
         {
@@ -1822,8 +1862,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 await AssignExplicitThreadAsync(
                     communicationId, pair.ThreadId, correlationId, ct, filing: "outbound Direct pair thread",
-                    expected: new Access.ExpectedDirectPair(senderSystemUserId, pair.Recipient));
-                return;
+                    expected: new Access.ExpectedDirectPair(senderSystemUserId, pair.Recipient), deferOwner: deferOwner);
+                return deferOwner.LastOrDefault();
             }
             catch (Access.DirectPairFilingRefusedException refused)
             {
@@ -1839,7 +1879,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             }
         }
 
-        await ResolveOutboundMessageThreadAsync(communicationId, request, acsThreadId, correlationId, ct);
+        await ResolveOutboundMessageThreadAsync(communicationId, request, acsThreadId, correlationId, ct, deferOwner: deferOwner);
+        return deferOwner.LastOrDefault();
     }
 
     /// <summary>
@@ -2017,14 +2058,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <paramref name="requireOpenDefaultThread"/> (D8; the external thread post only) makes the record-default-thread
     /// step join only an EXPLICITLY Open default thread, else find-or-create a new Open one. Returns the resolved thread id (or null
     /// on failure/no resolver) so the caller can chain the task-043 Direct-thread message access grant.
+    /// <paramref name="deferOwner"/>: see <see cref="GrantThenOwnDirectAsync"/>.
     /// </summary>
     private async Task<Guid?> ResolveOutboundMessageThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct,
-        CommunicationDirection direction = CommunicationDirection.Outgoing, bool requireOpenDefaultThread = false)
+        CommunicationDirection direction = CommunicationDirection.Outgoing, bool requireOpenDefaultThread = false,
+        List<Access.DirectOwnerJoin>? deferOwner = null)
     {
         if (request.ThreadId.HasValue)
         {
-            return await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct);
+            return await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct, deferOwner: deferOwner);
         }
 
         if (_threadResolver is null)
@@ -2054,9 +2097,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // app-only identity, so a Direct-thread message is invisible to BOTH participants under the
             // impersonated read (task 050) unless explicitly shared. Best-effort inside GrantMessageAccessAsync
             // itself (failures are logged and swallowed). #1629: the audience is the one the join fixed.
-            // fm 054 piece 3a: the owner step grants first, then assigns a Direct message filed under nothing to the Direct team.
+            // fm 054 piece 3a: the owner step grants first, then assigns a Direct message filed under nothing to the Direct team
+            // (for a Message send, after its content rows: deferOwner).
             if (assignment is not null)
-                await GrantThenOwnDirectAsync(communicationId, assignment, ct);
+                await GrantThenOwnDirectAsync(communicationId, assignment, ct, deferOwner);
 
             return assignment?.ThreadId;
         }
@@ -2082,10 +2126,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// exactly that pair, as its own read shows; otherwise it writes and grants nothing and
     /// <see cref="Access.DirectPairFilingRefusedException"/> propagates to the caller, which files the message by today's path.
     /// Every other fault is caught here as before. A respond passes neither.</para>
+    /// <para><paramref name="deferOwner"/>: see <see cref="GrantThenOwnDirectAsync"/>.</para>
     /// </summary>
     private async Task<Guid?> AssignExplicitThreadAsync(
         Guid communicationId, Guid threadId, string correlationId, CancellationToken ct,
-        string filing = "respond-into-thread", Access.ExpectedDirectPair? expected = null)
+        string filing = "respond-into-thread", Access.ExpectedDirectPair? expected = null,
+        List<Access.DirectOwnerJoin>? deferOwner = null)
     {
         try
         {
@@ -2113,8 +2159,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's audience as the
             // stamp read it (#1629: Direct two-party list, the anchor record's grantees, or nobody; never re-read).
-            // fm 054 piece 3a: through the owner step (grant first, then the Direct team for a Direct message filed under nothing).
-            await GrantThenOwnDirectAsync(communicationId, assignment, ct);
+            // fm 054 piece 3a: through the owner step (grant first, then the Direct team for a Direct message filed under nothing;
+            // for a Message send, after its content rows: deferOwner).
+            await GrantThenOwnDirectAsync(communicationId, assignment, ct, deferOwner);
 
             return threadId;
         }

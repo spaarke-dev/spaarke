@@ -454,7 +454,8 @@ public partial class DirectMessageRecipientStampTests
         IThreadKeyStrategy? resolver,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.IContactIdentityStore? identities = null,
         bool directAccess = true,
-        DirectMessageOwnerStep? ownerStep = null)
+        DirectMessageOwnerStep? ownerStep = null,
+        CommunicationParticipantIndexer? participantIndexer = null)
     {
         var options = new CommunicationOptions { ApprovedSenders = Array.Empty<ApprovedSenderConfig>(), DefaultMailbox = "noreply@contoso.com" };
         var senderValidator = new ApprovedSenderValidator(
@@ -489,14 +490,16 @@ public partial class DirectMessageRecipientStampTests
             directThreadAccess: directAccess ? _directAccess.Object : null,
             recordShares: _shares.Object,
             contactIdentities: identities,
-            directMessageOwnerStep: ownerStep);
+            directMessageOwnerStep: ownerStep,
+            participantIndexer: participantIndexer);
     }
 
-    private IncomingMessagingJobHandler InboundHandler(IThreadKeyStrategy strategy, DirectMessageOwnerStep? ownerStep = null)
+    private IncomingMessagingJobHandler InboundHandler(
+        IThreadKeyStrategy strategy, DirectMessageOwnerStep? ownerStep = null, CommunicationParticipantIndexer? participantIndexer = null)
     {
         var ingestor = new MessagingIngestor(
             _entities.Object, Mock.Of<ICommunicationEnrichmentService>(), NullLogger<MessagingIngestor>.Instance,
-            Resolver(strategy), _directAccess.Object, directMessageOwnerStep: ownerStep);
+            Resolver(strategy), _directAccess.Object, participantIndexer: participantIndexer, directMessageOwnerStep: ownerStep);
         var dispatcher = new CommunicationChannelDispatcher(
             senders: Enumerable.Empty<ICommunicationChannelSender>(),
             archivers: Enumerable.Empty<ICommunicationArchiver>(),

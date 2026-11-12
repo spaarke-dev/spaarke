@@ -207,6 +207,141 @@ public partial class DirectMessageRecipientStampTests
         _messageOwnerTeam.Should().Be(team);
     }
 
+    // ── fm 054 (F1): the participant rows the path itself writes move with the message ───────────────────────────────────
+
+    [Fact]
+    public async Task SendJoin_WithAResolvedLookup_TheParticipantRowsTheSendWrites_AreOwnedByTheDirectTeam()
+    {
+        var team = ArrangeTheOwnerStepWorld();
+        ArrangeTheParticipantIndex();
+
+        await Service(Join(DirectThread), ownerStep: OwnerStep(new DirectMessageOwnerTeamDouble().WithDirectTeam(team).Lookup()),
+                participantIndexer: ParticipantIndexer())
+            .SendAsync(MessageRequest(), Caller(), CancellationToken.None);
+
+        _messageOwnerTeam.Should().Be(team);
+        _participantRows.Should().NotBeEmpty("the send writes its participant index");
+        _participantRows.Values.Should().OnlyContain(r => OwningTeamOf(r) == team,
+            "the participant rows are written before the message moves, so they move with it");
+    }
+
+    [Fact]
+    public async Task InboundJoin_WithAResolvedLookup_TheParticipantRowsTheCaptureWrites_AreOwnedByTheDirectTeam()
+    {
+        var team = ArrangeTheOwnerStepWorld();
+        ArrangeTheParticipantIndex();
+        _messageRow = MessageRow(sentBy: null);
+
+        await InboundHandler(Join(DirectThread), OwnerStep(new DirectMessageOwnerTeamDouble().WithDirectTeam(team).Lookup()),
+                ParticipantIndexer())
+            .ProcessAsync(InboundJob(SenderChatId), CancellationToken.None);
+
+        _messageOwnerTeam.Should().Be(team);
+        _participantRows.Should().NotBeEmpty("the capture writes its participant index");
+        _participantRows.Values.Should().OnlyContain(r => OwningTeamOf(r) == team);
+    }
+
+    [Fact]
+    public async Task SendJoin_GrantsAtTheJoin_AndGrantsAgainAfterTheParticipantIndexAndTheOwnerMove()
+    {
+        var team = ArrangeTheOwnerStepWorld();
+        ArrangeTheParticipantIndex();
+        _directAccess
+            .Setup(a => a.GrantMessageAccessAsync(MessageId, It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
+            .Callback(() => _sequence.Add("grant"))
+            .Returns(Task.CompletedTask);
+
+        await Service(Join(DirectThread), ownerStep: OwnerStep(new DirectMessageOwnerTeamDouble().WithDirectTeam(team).Lookup()),
+                participantIndexer: ParticipantIndexer())
+            .SendAsync(MessageRequest(), Caller(), CancellationToken.None);
+
+        _sequence.First().Should().Be("grant", "the first grant runs at the join, while the message is its creator's");
+        var lastIndex = _sequence.LastIndexOf("index");
+        var owner = _sequence.IndexOf("owner");
+        lastIndex.Should().BeGreaterThan(0);
+        owner.Should().BeGreaterThan(lastIndex, "the message moves after its participant rows exist");
+        _sequence.LastIndexOf("grant").Should().BeGreaterThan(owner, "the second grant follows the move and covers the participant rows");
+    }
+
+    /// <summary>The participant rows the run created, by id, as stored (their owner follows every owner write that landed).</summary>
+    private readonly Dictionary<Guid, Entity> _participantRows = new();
+
+    /// <summary>The order of the grants, the participant-row creates and the message's owner write.</summary>
+    private readonly List<string> _sequence = new();
+
+    private static Guid? OwningTeamOf(Entity row) => row.GetAttributeValue<EntityReference>("owningteam")?.Id;
+
+    /// <summary>
+    /// The participant index as stored: each row the indexer creates gets its own id and is owned by its creator (the application
+    /// user) until an owner write moves it; reads by the message lookup or by id answer the stored rows; an owner write conditional
+    /// on the stored version lands.
+    /// </summary>
+    private void ArrangeTheParticipantIndex()
+    {
+        _entities
+            .Setup(e => e.CreateAsync(It.Is<Entity>(x => x.LogicalName == "sprk_communicationparticipant"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity entity, CancellationToken _) =>
+            {
+                var id = Guid.NewGuid();
+                var stored = new Entity("sprk_communicationparticipant", id) { ["sprk_communicationparticipantid"] = id };
+                foreach (var attribute in entity.Attributes)
+                    stored[attribute.Key] = attribute.Value;
+                if (!stored.Contains("ownerid"))
+                    stored["ownerid"] = new EntityReference("systemuser", AppUser);
+                stored["versionnumber"] = 1L;
+                _participantRows[id] = stored;
+                _sequence.Add("index");
+                return id;
+            });
+        _entities
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationparticipant"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                var condition = q.Criteria.Conditions.Single();
+                var value = (Guid)condition.Values.Single();
+                return new EntityCollection(_participantRows.Values
+                    .Where(r => condition.AttributeName == "sprk_communicationparticipantid"
+                        ? r.Id == value
+                        : r.GetAttributeValue<EntityReference>(condition.AttributeName)?.Id == value)
+                    .ToList());
+            });
+        _entities
+            .Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                "sprk_communicationparticipant", It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid id, string version, Dictionary<string, object> fields, CancellationToken _) =>
+            {
+                var row = _participantRows[id];
+                version.Should().Be("1");
+                row["ownerid"] = fields["ownerid"];
+                row["owningteam"] = fields["ownerid"];
+                return Task.CompletedTask;
+            });
+        _entities
+            .Setup(e => e.UpdateIfRowVersionMatchesAsync(
+                "sprk_communication", MessageId, "5", It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string, Dictionary<string, object>, CancellationToken>((_, _, _, fields, _) =>
+            {
+                _messageOwnerTeam = fields["ownerid"] is EntityReference { LogicalName: "team" } owner ? owner.Id : null;
+                _sequence.Add("owner");
+            })
+            .Returns(Task.CompletedTask);
+    }
+
+    /// <summary>
+    /// The real participant indexer. Its owner question for an unfiled message that its creator owns answers "keep the creator",
+    /// as the record ownership resolver does (task 146 E1).
+    /// </summary>
+    private CommunicationParticipantIndexer ParticipantIndexer() => new(
+        Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
+        _entities.Object,
+        new RecordOwnershipResolverDouble
+        {
+            AnswerFor = context => context.KeepCreatorUnlessTargetIsTeamOwned
+                ? Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Unchanged("an unfiled message's content keeps its creator")
+                : null,
+        },
+        Microsoft.Extensions.Logging.Abstractions.NullLogger<CommunicationParticipantIndexer>.Instance);
+
     /// <summary>
     /// The rows the owner step reads, as stored: the message is its create plus every filing update that landed (so its pair is
     /// the one the join stamped), owned by the application user until the step's conditional owner write moves it; the thread is
