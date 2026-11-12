@@ -373,7 +373,7 @@ Azure AI Search now offers a **native Purview integration** (preview, `2025-11-0
 - At query time, AI Search checks the label against Purview policies — only users with `READ` usage rights see the document
 - This is **complementary** to this pipeline's custom ACL approach: native handles label-level enforcement, the pipeline handles RMS permission intersection (which the native feature does not do)
 
-See [purview-rms-explained.md](purview-rms-explained.md#native-purview-sensitivity-label-integration-in-azure-ai-search-preview) for a detailed comparison and the recommended hybrid approach.
+See purview-rms-explained.md for a detailed comparison and the recommended hybrid approach.
 
 ---
 
@@ -488,4 +488,4 @@ agent = project_client.agents.create(
 - [Create a Knowledge Base](https://learn.microsoft.com/azure/search/agentic-retrieval-how-to-create-knowledge-base)
 - [Remote SharePoint Knowledge Source](https://learn.microsoft.com/azure/search/agentic-knowledge-source-how-to-sharepoint-remote)
 - [Tutorial: End-to-End Agentic Retrieval Pipeline](https://learn.microsoft.com/azure/search/agentic-retrieval-how-to-create-pipeline)
-- [Purview/RMS in This Project](purview-rms-explained.md)
+- Purview/RMS in This Project
