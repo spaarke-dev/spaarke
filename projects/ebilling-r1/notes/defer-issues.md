@@ -536,6 +536,27 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 **Fails without it**: a rare double delivery over a source changed without a new row version is undone instead of retried.
 
 ---
+### ISS-015 — eBilling code pages are not linted (lint script without eslint, outside client-lint CI)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-12 |
+| **Source** | ebilling-r1 task 084a quality gate (the Step 9.5 lint check could not run) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2743 |
+
+**Description**: `src/solutions/{InvoiceFiles,InvoiceReview,CreateInvoiceWizard,RuleReview,RecordProcedures}` declare `"lint": "eslint src --ext .ts,.tsx"` but none lists `eslint` as a dependency, so `npm run lint` fails. CI `client-lint.yml` path filters cover only the shared lib, DocumentUploadWizard, SpaarkeAi, LegalWorkspace, Reporting and SemanticSearch. These pages are linted nowhere.
+
+**Entry-points**: the five `package.json` files; `.github/workflows/client-lint.yml` lines 28-37 and the pull-request filter; `scripts/quality/client-lint/**`.
+
+**Suggested fix**: add the folders to client-lint's filters and package list; fix or ratchet the errors found.
+
+**Fails without it**: hooks-rule and unused-code errors in these pages reach master unchecked.
+
+**Estimated effort**: half a day plus errors found. **Blockers**: none. **Related**: #780, #1966.
+
+---
 ### ISS-014 — Invoice Review does not notice the firm gate opening while firmNeeded
 
 | Field | Value |
