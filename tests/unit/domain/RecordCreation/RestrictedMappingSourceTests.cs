@@ -112,7 +112,15 @@ public class RestrictedMappingSourceTests
         var read = new Entity("sprk_invoice", Id) { [InheritedAccessPermission.Column] = new OptionSetValue(InheritedAccessPermission.Restricted) };
 
         RecordCreationService.MappingSourceAccessOf("sprk_invoice", read).Should().Be(RecordCreationService.MappingSourceAccess.NoColumn);
-        RecordCreationService.MappingSourceAccessOf("sprk_invoice", null).Should().Be(RecordCreationService.MappingSourceAccess.NoColumn);
+    }
+
+    /// <summary>Review K2: a mapped value with no source read is checked as not told before the table is looked at — even a
+    /// table without the column — and an unknown source table (never the target's) is the same.</summary>
+    [Fact]
+    public void NoRead_IsUnreadable_BeforeTheTableIsLookedAt_AndAnUnknownSourceTableToo()
+    {
+        RecordCreationService.MappingSourceAccessOf("sprk_invoice", null).Should().Be(RecordCreationService.MappingSourceAccess.Unreadable);
+        RecordCreationService.MappingSourceAccessOf(null, null).Should().Be(RecordCreationService.MappingSourceAccess.Unreadable);
     }
 
     // ── The row's own payload value ────────────────────────────────────────────────────────────────────────────────────
@@ -167,6 +175,64 @@ public class RestrictedMappingSourceTests
         undetermined.NoRestrictedAncestor.Should().BeFalse();
         empty.Unknown.Should().BeTrue();
         empty.NoRestrictedAncestor.Should().BeFalse();
+    }
+
+    /// <summary>Review F2: a found value that is no known level is Unknown, never "no Restricted ancestor".</summary>
+    [Theory]
+    [InlineData(5)]
+    [InlineData(100000099)]
+    public void AFoundAnswerWithAnUnknownLevel_IsUnknown_NeverNoRestrictedAncestor(int value)
+    {
+        var answer = new InheritedAccessPermission.Answer(ParentTopsStatus.Found, value, [], null);
+
+        answer.Unknown.Should().BeTrue();
+        answer.NoRestrictedAncestor.Should().BeFalse();
+    }
+
+    // ── Review F2: a To Do's, Event's or Communication's answer, from the three states ───────────────────────────────
+
+    [Fact]
+    public void AChild_UnderAnUnknownAnswer_WritesNothing_AndIsNeverRestricted()
+    {
+        foreach (var answer in new[]
+                 {
+                     InheritedAccessPermission.Answer.Undetermined("a parent could not be read"),
+                     new InheritedAccessPermission.Answer(ParentTopsStatus.Found, null, [], null),
+                     new InheritedAccessPermission.Answer(ParentTopsStatus.Found, 100000099, [], null),
+                 })
+        {
+            var access = RecordCreationService.ChildAccessPermission(answer, ownReadable: true, ownRestricted: true);
+
+            access.Write.Should().BeNull("a value that is no known level is never written");
+            access.EndsRestricted.Should().BeFalse();
+            access.Undetermined.Should().BeTrue();
+        }
+    }
+
+    [Theory]
+    [InlineData(InheritedAccessPermission.Standard, false)]
+    [InlineData(InheritedAccessPermission.Limited, false)]
+    [InlineData(InheritedAccessPermission.Restricted, true)]
+    public void AChild_UnderAKnownLevel_WritesIt(int level, bool endsRestricted)
+    {
+        var access = RecordCreationService.ChildAccessPermission(
+            new InheritedAccessPermission.Answer(ParentTopsStatus.Found, level, [], null), true, false);
+
+        access.Write.Should().Be(level);
+        access.EndsRestricted.Should().Be(endsRestricted);
+        access.Undetermined.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void AParentlessChild_KeepsItsOwnValue(bool ownRestricted, bool endsRestricted)
+    {
+        var access = RecordCreationService.ChildAccessPermission(InheritedAccessPermission.Answer.NoParent, true, ownRestricted);
+
+        access.Write.Should().BeNull();
+        access.EndsRestricted.Should().Be(endsRestricted);
+        access.Undetermined.Should().BeFalse();
     }
 
     // ── UAC-r2 Q2: a project's or work assignment's answer, by the secure-root plan's floor ───────────────────────────

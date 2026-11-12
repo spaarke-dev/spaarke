@@ -397,6 +397,56 @@ public sealed partial class RecordCreationServiceMappingSeamTests
         outcome.MappingWarnings.Should().NotBeEmpty("the source mapped nothing, and the create says so");
     }
 
+    // ── Review F4: a parentless To Do keeps its own value ─────────────────────────────────────────────────────────────
+
+    private RecordCreationRequest AParentlessToDo(int? ownLevel)
+    {
+        _user.Columns["sprk_todo"] = new()
+        {
+            ["sprk_name"] = ("String", true),
+            ["sprk_description"] = ("Memo", true),
+            [InheritedAccessPermission.Column] = ("Picklist", true),
+        };
+        Profile("sprk_matter", "sprk_todo", Rule("sprk_matterdescription", "sprk_description", Memo));
+        var body = new Dictionary<string, object?> { ["sprk_name"] = "Call the client" };
+        if (ownLevel is { } level)
+            body[InheritedAccessPermission.Column] = level;
+        return Request("sprk_todo", body, mappingSource: ("sprk_matter", RestrictedMatter));
+    }
+
+    /// <summary>Review F4 (must fire): a parentless To Do from an explicit Restricted source, with no value of its own, is not
+    /// Restricted once created: the values are removed with the Restricted words.</summary>
+    [Fact]
+    public async Task RestrictedSource_AParentlessToDo_FromAnExplicitRestrictedSource_IsStripped()
+    {
+        TheRestrictedMatter();
+
+        var outcome = await Service().CreateAsync(AParentlessToDo(ownLevel: null), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_description");
+        StringOf(fields, "sprk_name").Should().Be("Call the client");
+        var warning = outcome.MappingWarnings.Should().ContainSingle().Subject;
+        warning.Code.Should().Be(RecordCreationWarning.MappingSourceRestrictedCode);
+        warning.Detail.Should().Be(RecordCreationService.MappingSourceRestrictedStripped);
+    }
+
+    /// <summary>Review F4 (must not fire): the same create with the caller's own value Restricted maps (round 81: a
+    /// parentless row keeps its own value).</summary>
+    [Fact]
+    public async Task RestrictedSource_AParentlessToDo_WhoseOwnValueIsRestricted_Maps()
+    {
+        TheRestrictedMatter();
+
+        var outcome = await Service().CreateAsync(
+            AParentlessToDo(InheritedAccessPermission.Restricted), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        StringOf(_creates.Should().ContainSingle().Subject.Fields, "sprk_description").Should().Be("From the restricted matter");
+        outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.MappingSourceRestrictedCode);
+    }
+
     /// <summary>AC1: a target table without the column is never Restricted — even filed under the Restricted source.</summary>
     [Fact]
     public async Task RestrictedSource_IntoATableWithoutTheColumn_IsStripped_EvenFiledUnderTheRestrictedSource()

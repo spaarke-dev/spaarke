@@ -567,8 +567,9 @@ internal sealed partial class RecordCreationService
             item = mapped.Item ?? callerItem;
             mappedValues = mapped.Values;
             stepThreeMappedColumns = mapped.Values.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            // A mapped value with no gate read is checked as "not told" (fail closed), never skipped.
-            mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(table, null) : null;
+            // A mapped value with no gate read is checked as "not told" (fail closed), never skipped. Task 022b (review K2): its
+            // source is unknown, never taken to be the target table.
+            mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(null, null) : null;
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Ran,
                 $"{mappedValues.Count} column(s) mapped (fill-only), {mappingWarnings.Count} warning(s)");
         }
@@ -1178,14 +1179,24 @@ internal sealed partial class RecordCreationService
         }
 
         var answer = await _restamper.ResolveInheritedAccessPermissionAsync(table, filed, ct).ConfigureAwait(false);
-        return answer switch
-        {
-            { Status: ParentTopsStatus.Found, Value: { } level } =>
-                new InCreateAccessPermission(level, null, level == InheritedAccessPermission.Restricted, false, "I-16 set"),
-            { Status: ParentTopsStatus.NoParent } =>
-                new InCreateAccessPermission(null, null, ownRestricted, !ownReadable, "no I-16 before the create"),
-            _ => new InCreateAccessPermission(null, null, false, true, "no I-16 before the create"),
-        };
+        return ChildAccessPermission(answer, ownReadable, ownRestricted);
+    }
+
+    /// <summary>
+    /// Task 022b: a To Do's, Event's or Communication's answer from what its parents give (the three states). Cannot be told
+    /// (<see cref="InheritedAccessPermission.Answer.Unknown"/>, a found value that is no known level included): nothing written,
+    /// never Restricted. No parent: the row keeps its own value (round 81). Otherwise the known level is written, and the row
+    /// is Restricted exactly when it is not <see cref="InheritedAccessPermission.Answer.NoRestrictedAncestor"/>. Pure.
+    /// </summary>
+    internal static InCreateAccessPermission ChildAccessPermission(
+        InheritedAccessPermission.Answer answer, bool ownReadable, bool ownRestricted)
+    {
+        if (answer.Unknown)
+            return new InCreateAccessPermission(null, null, false, true, "no I-16 before the create");
+        if (answer.Status == ParentTopsStatus.NoParent)
+            return new InCreateAccessPermission(null, null, ownRestricted, !ownReadable, "no I-16 before the create");
+
+        return new InCreateAccessPermission(answer.Value, null, !answer.NoRestrictedAncestor, false, "I-16 set");
     }
 
     /// <summary>

@@ -573,13 +573,16 @@ internal static class InheritedAccessPermission
     /// <summary>What a row's parents give it.</summary>
     internal sealed record Answer(ParentTopsStatus Status, int? Value, IReadOnlyList<ParentTop> Tops, string? Reason)
     {
-        /// <summary>Task 022b: the row has no parent, or every parent was read and none gives Restricted.</summary>
+        /// <summary>Task 022b: the row has no parent, or every parent was read and what they give is a KNOWN level other than
+        /// Restricted (Standard or Limited).</summary>
         internal bool NoRestrictedAncestor =>
-            Status == ParentTopsStatus.NoParent || (Status == ParentTopsStatus.Found && Value is { } value && value != Restricted);
+            Status == ParentTopsStatus.NoParent || (Status == ParentTopsStatus.Found && Value is Standard or Limited);
 
         /// <summary>Task 022b: what the parents give cannot be told (a value that cannot be read, a record that did not come back,
-        /// or a fault). Never read as "no Restricted ancestor".</summary>
-        internal bool Unknown => Status == ParentTopsStatus.Undetermined || (Status == ParentTopsStatus.Found && Value is null);
+        /// a fault, or a found value that is no known level). Never read as "no Restricted ancestor".</summary>
+        internal bool Unknown =>
+            Status == ParentTopsStatus.Undetermined
+            || (Status == ParentTopsStatus.Found && Value is not (Standard or Limited or Restricted));
 
         /// <summary>Task 022b: <paramref name="reason"/> as an answer that cannot be told.</summary>
         internal static Answer Undetermined(string reason) => new(ParentTopsStatus.Undetermined, null, [], reason);

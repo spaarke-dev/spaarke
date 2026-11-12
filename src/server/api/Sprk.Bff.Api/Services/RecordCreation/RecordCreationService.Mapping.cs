@@ -89,8 +89,9 @@ internal sealed partial class RecordCreationService
     /// <summary>One target column as the table's metadata declares it (read as the caller).</summary>
     private sealed record TargetAttribute(string Type, bool ValidForCreate);
 
-    /// <summary>A mapping source's table and its app-only read, holding at least <see cref="MappingSourceCopyGate.SourceGateColumns"/>.</summary>
-    private sealed record MappedSourceGate(string SourceTable, Entity? Read);
+    /// <summary>A mapping source's table and its app-only read, holding at least <see cref="MappingSourceCopyGate.SourceGateColumns"/>.
+    /// Task 022b (review K2): with no read, the table may be unknown (<see langword="null"/>); it is never the target's.</summary>
+    private sealed record MappedSourceGate(string? SourceTable, Entity? Read);
 
     /// <summary>The words for a secure source whose fields are not copied (step 3): the create is neither secure from creation
     /// nor filed by the caller under that source.</summary>
@@ -418,12 +419,12 @@ internal sealed partial class RecordCreationService
         MappedSourceGate gate, EntityReference? rowOwner,
         Func<CancellationToken, Task<(Guid? TeamId, string? Refusal)>> secureOwnerTeam, CancellationToken ct)
     {
-        if (gate.Read is not { } read)
+        if (gate.Read is not { } read || gate.SourceTable is not { } sourceTable)
             return MappingSourceCopyDecision.Unknown(MappingSourceCopyGate.ReasonSourceOwnerMissing);
 
         try
         {
-            return await MappingSourceCopyGate.DecideAsync(gate.SourceTable, read, rowOwner, secureOwnerTeam, ct).ConfigureAwait(false);
+            return await MappingSourceCopyGate.DecideAsync(sourceTable, read, rowOwner, secureOwnerTeam, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -599,16 +600,17 @@ internal sealed partial class RecordCreationService
 
     /// <summary>
     /// Task 022b: the source's Access Permission from step 3's app-only read (<paramref name="read"/>, which holds
-    /// <see cref="MappingSourceAccessColumns"/>). A table without the column is <see cref="MappingSourceAccess.NoColumn"/>
-    /// whatever the read holds; no read, a value of another type, or an option that is not Standard, Limited or Restricted is
-    /// <see cref="MappingSourceAccess.Unreadable"/> (fail closed). Pure.
+    /// <see cref="MappingSourceAccessColumns"/>). No read is <see cref="MappingSourceAccess.Unreadable"/> before the table is
+    /// looked at (review K2: the source may be unknown, and is never taken to be the target). Otherwise a table without the
+    /// column is <see cref="MappingSourceAccess.NoColumn"/> whatever the read holds; a value of another type, or an option
+    /// that is not Standard, Limited or Restricted, is <see cref="MappingSourceAccess.Unreadable"/> (fail closed). Pure.
     /// </summary>
-    internal static MappingSourceAccess MappingSourceAccessOf(string sourceTable, Entity? read)
+    internal static MappingSourceAccess MappingSourceAccessOf(string? sourceTable, Entity? read)
     {
+        if (read is null || sourceTable is null)
+            return MappingSourceAccess.Unreadable;
         if (!InheritedAccessPermission.SourceCarriesColumn(sourceTable))
             return MappingSourceAccess.NoColumn;
-        if (read is null)
-            return MappingSourceAccess.Unreadable;
         if (!read.Attributes.TryGetValue(InheritedAccessPermission.Column, out var value) || value is null)
             return MappingSourceAccess.NotRestricted;
 
