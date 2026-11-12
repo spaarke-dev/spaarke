@@ -55,7 +55,8 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = _dataverse.ServiceUrl })
             .Build();
-        _sut = new ExternalDataService(new HttpClient(), configuration, new FakeCredential(), _logger);
+        _sut = new ExternalDataService(new HttpClient(), configuration, new FakeCredential(), _logger,
+            visibility: Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible);
     }
 
     public void Dispose() => _dataverse.Dispose();
@@ -149,7 +150,8 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         }
     }
 
-    private static string IdFor(int i) => $"00000000-0000-0000-0000-{i:D12}";
+    // uac-r2 191h: never the empty GUID (row 0 was), which no Dataverse row has and the external visibility predicate hides.
+    private static string IdFor(int i) => $"00000000-0000-0000-0963-{i:D12}";
 
     // ── Acceptance criteria ────────────────────────────────────────────────────────────────────────────────────
 

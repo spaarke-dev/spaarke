@@ -802,6 +802,14 @@ public static class ExternalAccessModule
                 return ExternalVisibility.DecideAsync(rows, readers, ct);
             };
         });
+        // unified-access-control-r2 task 191h (#2179 design §3.3 "Callers", §3.10; #2189; #2369 part 2): the same decider as a
+        // public HIDE decision for the external SPA's to-do and event lists (ExternalDataService), the assistant's dataverse.* read
+        // tools and the AI retrieval trim. A binding of the decider above, not a second predicate: the tools and the trim are
+        // public classes and cannot take the internal decider. Resolved per call, so a request that never decides builds nothing.
+        // Its consumers are an allow-list (ExternalDocumentNarrowingGuardTests, K7). §10/§11: notes/task-191h-spa-and-ai-parity.md.
+        services.AddScoped<AppOnlyExternalVisibility>(sp => async (rows, ct) =>
+            new ExternalRowVisibility(await sp.GetRequiredService<Sprk.Bff.Api.Services.Access.ExternalVisibilityDecider>()(rows, ct)
+                .ConfigureAwait(false)));
         services.AddScoped(sp => new Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer(
             sp.GetRequiredService<IGenericEntityService>(),
             sp.GetRequiredService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(),
