@@ -42,6 +42,21 @@ Each change was reverted afterwards.
 | The flag check is disabled | The flagged-secure message test fails |
 | The Restricted check is removed | The Restricted tests fail |
 
+## Adversarial pass 1 (Opus): fixed
+
+| Finding | Fix | Proof |
+|---|---|---|
+| F1: a regarding-only clear moved a message still linked to another record (for example, one of two contacts cleared) | `ReadUnfiledFactsAsync` first asks the Direct rule's own test, `DirectMessageOwnerStep.WhyFiledUnderARecord`, of the row as the change leaves it. Still linked → Keep, with no read. This applies on both paths, so a matter cleared from an email still linked to a contact keeps its owner too. | 2 tests; removing the check fails both |
+| F1: a path (a) settle failure answered an error for a change already saved, and a retry could not repair it | Catch everything but cancellation, keep the former owner, log a Warning with ids only, and return Unchanged with `ParentsUnchanged = false` | 1 test (the owner write faults); removing the catch fails it |
+| F3: the parent `sprk_issecure` check had no test | Two parent cases: flagged secure in an ordinary unit, and an empty flag (task 150) | Accepting an empty flag fails 1; ignoring the parent flag fails 2 |
+| Doc drift | Moved the `DirectUnfileAnswerAsync` summary back onto its method; replaced the "Unchanged pending #2722" text in `DirectMessageOwnerStep` and the four writers | — |
+
+Pass-1 known limits that were kept:
+- **The settle reuses the facts read before the change.** A message made Secure or Restricted concurrently, between the decision and the settle, is not re-checked. A concurrent move into the Secure unit is still caught by `WouldLeaveSecureBusinessUnitAsync`.
+- **Direct parents only.** Their Restricted state is read directly. A grandparent's state reaches the message only through the message's own inherited Access Permission value.
+- **The creator is read through field security.** If the app user cannot read `sprk_createdbyperson`, the unfile keeps its owner (safe).
+- **A fault while reading the facts logs twice:** a Warning and then an Information entry.
+
 ## #2728: root cause (for 197a-2)
 
 The issue's premise is false: `sprk_relatedcommunication` is already a document link. It is in `DocumentLinkFields.All` (Models.cs), and it is not in `SecureChildLineage.DocumentLinksThatAreNotFiling`, so it counts as filing.
@@ -56,4 +71,4 @@ The fix is option (a): skip the demotion only when the communication's owner is 
 
 - **Stale document owner after a #2722 move.** When an unfiled non-Direct communication moves to its creator's team, a document filed under it keeps its previous non-secure owner. That team keeps access it no longer needs (a stale owner, not a leak to anyone outside the earlier audience). Option (b), making the document follow, was rejected for now; the coordinator files the issue.
 - **No recorded creator.** A message created where `sprk_createdbyperson` is not stamped (for example, directly in the model-driven app) keeps its former owner on unfile, by owner decision: never fall back to `createdby`.
-- **Path (a) settle failure.** If the settle on a regarding-only clear fails, the failure propagates: the link change is written and the former owner is kept. No filing exists to put back.
+- **Path (a) settle failure.** If the settle on a regarding-only clear fails, the link change stays written and the former owner is kept, logged with ids only (5420, Warning). The change is not refused: it has landed, and a retry would clear no link, so it could not move the owner either. The owner is not retried later.

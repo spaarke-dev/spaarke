@@ -170,7 +170,8 @@ public sealed class DirectMessageOwnerStep
     /// Piece 3b, the ONE choice every re-file writer makes for what an unfile does (<see cref="RecordReparent.WhenUnfiled"/>):
     /// a <c>sprk_communication</c> re-filed for a person takes <see cref="UnfiledOwnership.UnfiledCommunication"/>: an eligible
     /// Direct message returns to the Direct message owner team (decided by <see cref="DecideUnfileAsync"/> before the write,
-    /// moved by <see cref="AfterReparentAsync"/> after it), and any other communication is Unchanged pending #2722. Without the
+    /// moved by <see cref="AfterReparentAsync"/> after it); any other communication linked to nothing goes to its creator's team or
+    /// keeps its owner (uac-r2 197a, #2722, decided by the record ownership resolver). Without the
     /// step to move it, <see cref="UnfiledOwnership.KeepCreator"/>. A write that acts for nobody (app-only) and every other
     /// table keep <see cref="UnfiledOwnership.ActingUserTeam"/>, so their refusal when no person is named stays as it is.
     /// </summary>
@@ -643,8 +644,8 @@ public sealed class DirectMessageOwnerStep
     }
 
     /// <summary>Why <paramref name="message"/> is filed under a record (an ownership parent or a typed regarding lookup), or
-    /// <c>null</c> when it is linked to none (the join and the unfile).</summary>
-    private static string? WhyFiledUnderARecord(Entity message) =>
+    /// <c>null</c> when it is linked to none (the join and the unfile; uac-r2 197a: the non-Direct unfile asks the same).</summary>
+    internal static string? WhyFiledUnderARecord(Entity message) =>
         Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(message).Count > 0
         || DirectMessageRecipient.CarriesATypedRegarding(message)
             ? "it is filed under a record"
@@ -865,7 +866,7 @@ public sealed class DirectOwnerJoin
 /// <summary>Piece 3b: what an unfile does with a communication's owner (<see cref="DirectMessageOwnerStep.DecideUnfileAsync"/>).</summary>
 public enum DirectUnfileVerdict
 {
-    /// <summary>It keeps its owner: not an eligible Direct message, or the Direct owner rule is off. Unchanged pending #2722.</summary>
+    /// <summary>It keeps its owner: not an eligible Direct message, or the Direct owner rule is off. The record ownership resolver then decides it (#2722).</summary>
     KeepOwner,
 
     /// <summary>An eligible Direct message, and the Direct team resolved: it returns to the Direct team after the write.</summary>

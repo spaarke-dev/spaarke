@@ -41,6 +41,7 @@ Split in two PRs.
 
   <acceptance-criteria>
     - A normal non-secure unfile (both paths) is written to the creator's business-unit team by the settle's conditional write; an External Collaborators creator follows the 191c rule.
+    - A communication still linked to a record after the change (an ownership parent or a typed regarding lookup) is not unfiled and keeps its owner. A settle that fails after a regarding-only clear keeps the former owner and does not refuse the written change.
     - Keep the former owner, with no owner write and no refusal, when: the message leaves a Secure, Restricted or Secure-unit-owned parent; the message is itself Secure-unit owned, flagged secure, Restricted, or has no readable owning unit; a parent read faults or returns nothing; sprk_createdbyperson is empty; or the creator is disabled, unknown, or external with no customer unit.
     - The unfile codes 409 record_owner_direct_team_unusable and 503 record_owner_direct_team_unavailable are unchanged; the Direct unfile tests pass unchanged except for one renamed test.
     - The guard fails when the settle drops the facts (perturbation recorded in the notes).

@@ -383,7 +383,7 @@ internal sealed class UpdateRecordActionCore
                     ParentChanges = parentChanges,
                     CallerSystemUserId = input.ImpersonateSystemUserId,
                     // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
-                    // to the Direct team; any other communication is Unchanged pending #2722). An update that impersonates
+                    // to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722). An update that impersonates
                     // nobody keeps the acting-user rule, so with no person named it is refused as before.
                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                         input.EntityLogicalName, actsForAPerson: input.ImpersonateSystemUserId is not null, directOwner),

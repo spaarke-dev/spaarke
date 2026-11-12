@@ -28,6 +28,8 @@ public class RecordOwnershipResolverUnfileOwnerTests
     private static readonly Guid SecureMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a2");
     private static readonly Guid RestrictedMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a3");
     private static readonly Guid SecureOwnedUnflaggedMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a4");
+    private static readonly Guid FlaggedOrdinaryMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a5");
+    private static readonly Guid MaskedFlagMatterId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000a6");
     private static readonly Guid CreatorId = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000c1");
     private static readonly Guid CreatorOid = Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000c2");
     private const int Restricted = 100000002;
@@ -91,7 +93,10 @@ public class RecordOwnershipResolverUnfileOwnerTests
 
     // ── Must not fire: what it leaves ────────────────────────────────────────────────────────────────────────────────────
 
-    public static TheoryData<string> ParentsItMayNotLeaveLooser => new() { "secure", "restricted", "owned by the Secure team" };
+    public static TheoryData<string> ParentsItMayNotLeaveLooser => new()
+    {
+        "secure", "restricted", "owned by the Secure team", "flagged secure in an ordinary unit", "secure flag empty (task 150)",
+    };
 
     [Theory]
     [MemberData(nameof(ParentsItMayNotLeaveLooser))]
@@ -101,6 +106,8 @@ public class RecordOwnershipResolverUnfileOwnerTests
         {
             "secure" => SecureMatterId,
             "restricted" => RestrictedMatterId,
+            "flagged secure in an ordinary unit" => FlaggedOrdinaryMatterId,
+            "secure flag empty (task 150)" => MaskedFlagMatterId,
             _ => SecureOwnedUnflaggedMatterId,
         };
         // The message is still owned in an ordinary unit (a stale owner), so only the parent can keep it.
@@ -171,6 +178,74 @@ public class RecordOwnershipResolverUnfileOwnerTests
         _log.Entries.Should().Contain(e => e.Event.Id == RecordOwnershipResolver.UnfileKeepsOwnerEvent.Id);
     }
 
+    // ── Must not fire: still linked after the change (adversarial pass 1) ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ClearingOneOfTwoLinks_LeavesTheEmailLinked_SoItIsNotUnfiled_AndKeepsItsOwner()
+    {
+        var directory = World()
+            .WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam, CommunicationType.Email)
+            .WithRecordedCreator();
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["sprk_regardingorganization"] = new EntityReference("sprk_organization", Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000b1")),
+        });
+        var request = Unfile() with
+        {
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_regardingperson"] = null },
+        };
+
+        var resolution = await Resolver(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        Owner(directory).Should().Be(FakeDirectory.ChildTeam, "it is still linked to an organization: not unfiled");
+        directory.ConditionalWrites.Should().BeEmpty();
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ClearingTheMatter_OfAnEmailStillLinkedToAContact_IsNotAnUnfile_AndKeepsItsOwner()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator();
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["sprk_regardingperson"] = new EntityReference("contact", Guid.Parse("d1d1d1d1-0197-4197-8197-0000000000b2")),
+        });
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.Reason.Should().Contain("still linked");
+        Owner(directory).Should().Be(FakeDirectory.ChildTeam);
+        directory.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClearingTheLastContact_WhenTheSettleFails_KeepsTheChangeAndTheFormerOwner_NeverRefused()
+    {
+        var directory = World()
+            .WithMessageLinkedOnlyToAContact(FakeDirectory.ChildBu, FakeDirectory.ChildTeam, CommunicationType.Email)
+            .WithRecordedCreator();
+        directory.AssignmentFault = new InvalidOperationException("Test: the owner write faulted.");
+        var request = Unfile() with
+        {
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_regardingperson"] = null },
+        };
+
+        var resolution = await Resolver(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.ParentsUnchanged.Should().BeFalse("the change was written; the writer still runs the step after a re-file");
+        Owner(directory).Should().Be(FakeDirectory.ChildTeam);
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson").Should().BeNull();
+        _log.Entries.Should().Contain(e => e.Event.Id == RecordOwnershipResolver.UnfileKeepsOwnerEvent.Id && e.Level == LogLevel.Warning
+                                           && e.Message.Contains(MessageId.ToString()));
+    }
+
     // ── Must not fire: who created it ────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -228,7 +303,9 @@ public class RecordOwnershipResolverUnfileOwnerTests
         .WithRecord("sprk_matter", RestrictedMatterId, FakeDirectory.ChildBu, isSecure: false, owningTeam: FakeDirectory.ChildTeam,
             extra: new() { ["sprk_accesspermission"] = new OptionSetValue(Restricted) })
         .WithRecord("sprk_matter", SecureOwnedUnflaggedMatterId, FakeDirectory.SecureBu, isSecure: false,
-            owningTeam: FakeDirectory.SecureNamedTeam);
+            owningTeam: FakeDirectory.SecureNamedTeam)
+        .WithRecord("sprk_matter", FlaggedOrdinaryMatterId, FakeDirectory.ChildBu, isSecure: true, owningTeam: FakeDirectory.ChildTeam)
+        .WithMaskedSecureFlag("sprk_matter", MaskedFlagMatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
 
     /// <summary>The unfile a writer sends: the matter cleared, for a person, with the unfiled-communication rule.</summary>
     private static RecordReparent Unfile(Guid? _ = null) => new()
