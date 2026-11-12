@@ -14,6 +14,7 @@ import {
   mapRowToEmailCardItem,
   deriveEmailWorkspaceVisibleState,
   toWorkspaceRecordState,
+  replyParentAssociations,
   EMAIL_TRACKING_FIELDS,
   EMAIL_VISIBLE_SNIPPET_CAP_CHARS,
   type EmailWorkspaceRecordState,
@@ -29,6 +30,69 @@ describe('Access Permission is inherited, never read from the communication (tas
     expect(state).not.toHaveProperty('accessPermission');
     expect(Object.values(EMAIL_TRACKING_FIELDS)).not.toContain('sprk_accesspermission');
     expect(state.monitor).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ontology task 176, review round 3 (R3-2): the reply's associations put the record's denormalized primary FIRST, because
+// the send signs its tracking footer from associations[0]. Driven from the raw no-$select record, as the workspace reads it.
+// ---------------------------------------------------------------------------
+
+const INQUIRY_MATTER = '17600000-0000-4000-8000-000000000002';
+const INQUIRY_REQUEST = '17600000-0000-4000-8000-000000000001';
+
+function filedRecord(primaryId: string | null): Record<string, unknown> {
+  return {
+    _sprk_regardingmatter_value: INQUIRY_MATTER,
+    '_sprk_regardingmatter_value@OData.Community.Display.V1.FormattedValue': 'Acme v. Roe',
+    _sprk_regardingservicerequest_value: INQUIRY_REQUEST,
+    '_sprk_regardingservicerequest_value@OData.Community.Display.V1.FormattedValue': 'Budget inquiry: Q3',
+    ...(primaryId === null ? {} : { sprk_regardingrecordid: primaryId }),
+  };
+}
+
+describe('replyParentAssociations — the denormalized primary signs the reply footer (task 176 R3-2)', () => {
+  it('must-fire: a reply to an inquiry-thread message (service request primary, matter also filed) lists the service request FIRST, once', () => {
+    const reply = replyParentAssociations(toWorkspaceRecordState(filedRecord(INQUIRY_REQUEST)));
+
+    expect(reply.map(a => a.entityType)).toEqual(['sprk_servicerequest', 'sprk_matter']);
+    expect(reply[0].recordId).toBe(INQUIRY_REQUEST);
+    expect(reply.filter(a => a.recordId === INQUIRY_REQUEST)).toHaveLength(1);
+  });
+
+  it('must-fire: the primary id is matched however Dataverse cased or braced it', () => {
+    const reply = replyParentAssociations(toWorkspaceRecordState(filedRecord(`{${INQUIRY_REQUEST.toUpperCase()}}`)));
+
+    expect(reply.map(a => a.entityType)).toEqual(['sprk_servicerequest', 'sprk_matter']);
+  });
+
+  it('must-not-fire: an ordinary matter email (matter primary) keeps the matter first', () => {
+    const reply = replyParentAssociations(toWorkspaceRecordState(filedRecord(INQUIRY_MATTER)));
+
+    expect(reply.map(a => a.entityType)).toEqual(['sprk_matter', 'sprk_servicerequest']);
+  });
+
+  it('must-not-fire: a message with no primary keeps the field order', () => {
+    const reply = replyParentAssociations(toWorkspaceRecordState(filedRecord(null)));
+
+    expect(reply.map(a => a.entityType)).toEqual(['sprk_matter', 'sprk_servicerequest']);
+  });
+
+  it('must-not-fire: a primary that is none of the filed lookups keeps the field order (never invented)', () => {
+    const reply = replyParentAssociations(toWorkspaceRecordState(filedRecord('99999999-0000-4000-8000-000000000000')));
+
+    expect(reply.map(a => a.entityType)).toEqual(['sprk_matter', 'sprk_servicerequest']);
+  });
+
+  it('the record state itself keeps the global field order (only the reply is reordered)', () => {
+    const state = toWorkspaceRecordState(filedRecord(INQUIRY_REQUEST));
+
+    expect(state.regardingRecordId).toBe(INQUIRY_REQUEST);
+    expect(state.filedAssociations.map(a => a.entityType)).toEqual(['sprk_matter', 'sprk_servicerequest']);
+  });
+
+  it('nothing selected yields no associations', () => {
+    expect(replyParentAssociations(null)).toEqual([]);
   });
 });
 
@@ -81,6 +145,7 @@ function buildRecordState(overrides: Partial<EmailWorkspaceRecordState> = {}): E
     regardingRecordName: null,
     regardingRecordNumber: null,
     regardingRecordType: null,
+    regardingRecordId: null,
     associationStatus: null,
     associationProvenanceJson: null,
     filedAssociations: [],

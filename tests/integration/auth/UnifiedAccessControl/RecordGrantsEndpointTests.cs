@@ -87,6 +87,31 @@ public class RecordGrantsEndpointTests : IClassFixture<DelegationRuleTestFixture
     }
 
     /// <summary>
+    /// Fix round 3g, must fire: a row the read returned WITHOUT its contact (or organization) column would list as a grant to
+    /// nobody. It is withheld like a row without an id; the readable rows are still listed.
+    /// </summary>
+    [Theory]
+    [InlineData("_sprk_contact_value")]
+    [InlineData("_sprk_organization_value")]
+    public async Task GetRecordGrants_WithholdsARowThatDidNotCarryItsContactOrOrganizationColumn(string omitted)
+    {
+        var recordId = Guid.NewGuid();
+        var readable = Row(ExternalGrantRootType.Matter, recordId, contactId: Guid.NewGuid(), expires: new DateOnly(2099, 1, 31));
+        var node = JsonSerializer.SerializeToNode(Row(ExternalGrantRootType.Matter, recordId, contactId: Guid.NewGuid(), expires: null))!.AsObject();
+        node.Remove(omitted);
+        var unread = JsonSerializer.Deserialize<ExternalGrantRow>(node.ToJsonString())!;
+        _fixture.SeedRootGrantRows(recordId, readable, unread);
+        using var client = _fixture.CreateClientWithRights(Delegator);
+
+        var response = await client.GetAsync($"{GrantsPath}?recordType=matter&recordId={recordId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("grants").EnumerateArray().Select(g => g.GetProperty("accessRecordId").GetGuid())
+            .Should().Equal(readable.Id);
+    }
+
+    /// <summary>
     /// The read is the grant core's own row read, aimed at THIS record: the root lookup of the record the client named plus
     /// <c>statecode eq 0</c>, and nothing narrower — an expiry predicate copied from the read path would hide the lapsed
     /// grants the user needs to see. It also selects the grant date the list shows.
@@ -290,6 +315,11 @@ public class RecordGrantsEndpointTests : IClassFixture<DelegationRuleTestFixture
             Id = Guid.NewGuid(),
             ContactId = contactId,
             OrganizationId = organizationId,
+            ProjectId = null,
+            MatterId = null,
+            WorkAssignmentId = null,
+            GrantedBySystemUserId = null,
+            GrantedByContactId = null,
             AccessLevel = 100000001,
             StateCode = 0,
             ExpiresDate = expires,

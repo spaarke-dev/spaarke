@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Services.Finance.Submission;
 
 namespace Sprk.Bff.Api.Services.Finance;
@@ -24,7 +25,8 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// No nightly mass write is added to refresh them (D-61).</para>
 /// <para><b>The rules</b> (copied from <see cref="FinanceRollupService"/>, which now calls this class): spend = the sum of each
 /// invoice's <see cref="SpendAmount"/> (the approved total, else the billed total; owner decision D-130) over the parent's invoices
-/// whose status is one of <see cref="CountedInvoiceStatuses"/>; budget = the sum of <c>sprk_budget.sprk_totalbudget</c> over the parent's budgets;
+/// whose status is one of <see cref="CountedInvoiceStatuses"/> AND that have their approve Decision Record (task 165b-4, EB-D-208: decided only
+/// from server-written sources, <see cref="ReadCountedInvoicesAsync"/>); budget = the sum of <c>sprk_budget.sprk_totalbudget</c> over the parent's budgets;
 /// utilization = <c>spend / budget * 100</c> (a PERCENT: 100 means fully spent) when budget is above zero, otherwise undefined
 /// (<see cref="FinanceRollupService"/> stores 0; the evaluator treats it as a missing input).</para>
 /// <para>§11: <i>Existing</i> - the same sums and formula lived privately in <see cref="FinanceRollupService"/>. <i>Extension</i> -
@@ -38,7 +40,7 @@ public static class FinanceBaseValues
 
     public const string InvoiceEntity = "sprk_invoice";
     public const string InvoiceTotalAmount = "sprk_totalamount";
-    /// <summary>The invoice's approved (payable) total: the billed total minus the reviewer's line and invoice adjustments. Negative
+    /// <summary>The invoice's approved (payable) total: the billed total plus reviewer-added lines as the approved total counts them (EB-D-199), minus the reviewer's line and invoice adjustments. Negative
     /// on a credit memo (D-127). Empty until the totals service has computed it. Same column as <c>InvoiceTotalsService.InvoiceApprovedTotal</c>.</summary>
     public const string InvoiceApprovedTotal = "sprk_approvedtotal";
     /// <summary>The invoice status column: <c>statuscode</c>, never <c>statecode</c> (Paid is Inactive and still counts). The
@@ -72,8 +74,8 @@ public static class FinanceBaseValues
     /// (payable) total, <c>sprk_approvedtotal</c>, when that has a value, otherwise its billed total, <c>sprk_totalamount</c>; when
     /// neither has a value it is 0. "Has a value" is not-null, so an approved total of 0 (every charge disallowed) counts as 0 and
     /// does NOT fall back to the billed total. Signed: a credit memo's negative approved total lowers spend (D-127). A reviewer's
-    /// disallowances and reductions therefore lower spend. The grouped FetchXML cannot coalesce per row, so it is split into the two
-    /// parts of <see cref="SpendAmountPart"/> and summed by the reader; both must stay equal to this rule.
+    /// disallowances and reductions therefore lower spend, and reviewer-added lines raise it as the approved total counts them (EB-D-199, EB-D-205). Every spend reader applies it per row
+    /// (task 165b-4: the grouped two-part sums are retired).
     /// </summary>
     public static decimal SpendAmount(Entity invoice)
     {
@@ -86,40 +88,28 @@ public static class FinanceBaseValues
     /// <summary>The sum of <see cref="SpendAmount"/> over <paramref name="invoices"/>.</summary>
     public static decimal SumSpend(IEnumerable<Entity> invoices) => invoices.Sum(SpendAmount);
 
-    /// <summary>The two halves of <see cref="SpendAmount"/> as grouped aggregates: the approved total of invoices that have one, and
-    /// the billed total of invoices that do not. Each invoice falls in exactly one half, so the halves never overlap.</summary>
-    public enum SpendAmountPart
-    {
-        /// <summary>Sum of <c>sprk_approvedtotal</c> over invoices where it is not null.</summary>
-        ApprovedTotal,
-        /// <summary>Sum of <c>sprk_totalamount</c> over invoices where <c>sprk_approvedtotal</c> is null.</summary>
-        BilledWhereNoApprovedTotal,
-    }
-
-    /// <summary>The parts in the order the reader first runs them: billed fallback, then approved. The reader then runs the billed
-    /// part a THIRD time and compares it with the first read (see <see cref="ReadSpendPartsAsync"/>).
-    /// <para><b>Why the re-read.</b> The two parts are two queries, so a write between them can move the sum EITHER way, under every
-    /// operator. An invoice's approved total going from empty to set between the two is counted twice (once billed, once approved),
-    /// and the double count can LOWER spend when the invoice is a credit memo (negative); for a <c>le</c> / <c>lt</c> Threshold an
-    /// over-count is the harmful direction, and for <c>ge</c> / <c>gt</c> an under-count is. A status change or a new invoice can
-    /// likewise be seen by one part and missed by the other. Any of these changes the invoice's membership in the billed part, so
-    /// the third read (billed again) differs from the first, and the reader retries once and then throws rather than return a sum no
-    /// single moment of the data ever held. An approved total never goes back to empty, so a stable billed part across the approved
-    /// read means no invoice moved between the parts.</para></summary>
-    internal static readonly IReadOnlyList<SpendAmountPart> SpendAmountPartsInReadOrder =
-        new[] { SpendAmountPart.BilledWhereNoApprovedTotal, SpendAmountPart.ApprovedTotal };
-
     /// <summary>The columns the derived Threshold reads, as (entity, column), stated ONCE so a guard can check them all. The
-    /// evaluator reads these org-wide with its own identity, so none may be field-secured: a secured column would read as empty for
-    /// the evaluator and silently fall back (the approved total) or read as 0 (the others). Checked live by
+    /// evaluator reads these org-wide with its own identity, so a field-secured column would read as empty for it and silently fall
+    /// back (the approved total) or read as 0 (the others). None may be secured unless it is in the reviewed exception list
+    /// (<c>DerivedBaseColumnSecurityExceptions</c>, tests/integration/Shared), whose columns are secured on purpose and readable by the
+    /// evaluator's identity. Checked live by
     /// <c>SignalPredicateTests.AuthorableColumns_ExistAndAreNotFieldSecured_OnTheLiveSchema</c> and offline against the SpaarkeMaster
-    /// Entity.xml by <c>DerivedBaseColumnsFieldSecurityTests</c>. The submission columns are the held anti-join pending spend reads.
-    /// <para>It lists every attribute the grouped queries group by, filter on, sum or join on (except each table's primary key), the
-    /// parent lookups <c>sprk_matter</c> and <c>sprk_project</c> included: a secured group key reads as null, the row is skipped and
-    /// spend reads 0 with no guard failing (ontology-r1 re-check K1, 2026-10-19). <c>SpendHeldAndPendingTests</c> builds the real
-    /// queries and fails when a column they use is missing here.</para></summary>
+    /// Entity.xml by <c>DerivedBaseColumnsFieldSecurityTests</c>. The submission columns are the unsecured hold sources pending spend reads.
+    /// <para>It lists every attribute the spend and budget queries select, filter on, sum or join on (except each table's primary key), the
+    /// parent lookups <c>sprk_matter</c> and <c>sprk_project</c> included: a secured parent lookup reads as null, the row is skipped and
+    /// spend reads 0 with no guard failing (ontology-r1 re-check K1, 2026-10-19). Task 165b-4 adds the approve-record match
+    /// (<see cref="InvoiceApproveRecord"/>): the Decision Record's invoice lookup, action code and key (<c>sprk_steps</c>), the portion's invoice
+    /// lookup, and <c>createdby</c> / <c>createdonbehalfby</c> (listed for completeness). An unreadable one would drop every match and read
+    /// counted spend as 0. The field-secured hold source is listed apart, in <see cref="HoldSourceColumns"/>. <c>SpendHeldAndPendingTests</c>
+    /// builds the real queries and fails when a column they use is missing from both lists.</para></summary>
     public static readonly IReadOnlyList<(string Entity, string Column)> DerivedBaseColumns = new (string, string)[]
     {
+        (InvoiceReviewReadService.DecisionRecordEntity, InvoiceApproveRecord.InvoiceLookup),
+        (InvoiceReviewReadService.DecisionRecordEntity, InvoiceApproveRecord.ActionCodeColumn),
+        (InvoiceReviewReadService.DecisionRecordEntity, InvoiceLineOrigin.RecordSteps),
+        (InvoiceReviewReadService.DecisionRecordEntity, Signals.DecisionRecordWriter.CreatedByColumn),
+        (InvoiceReviewReadService.DecisionRecordEntity, Signals.WriterCreatedRecord.CreatedOnBehalfByColumn),
+        (EligibleApproverResolver.ApprovalEntity, EligibleApproverResolver.ApprovalInvoice),
         (InvoiceEntity, InvoiceTotalAmount),
         (InvoiceEntity, InvoiceApprovedTotal),
         (InvoiceEntity, InvoiceStatusCodeColumn),
@@ -132,6 +122,11 @@ public static class FinanceBaseValues
         (SubmissionEntity, SubmissionReasonColumn),
         (SubmissionEntity, SubmissionInvoiceLookup),
     };
+
+    /// <summary>Task 165b-4 (ontology-r1 O4): the field-secured hold sources pending spend reads, listed apart from
+    /// <see cref="DerivedBaseColumns"/>: secured, and readable by the BFF application identity through its field-security profile
+    /// (<see cref="InvoiceBlockedHold.HoldSourceColumns"/>, the one list).</summary>
+    public static IReadOnlyList<(string Entity, string Column)> HoldSourceColumns => InvoiceBlockedHold.HoldSourceColumns;
 
     /// <summary>The parent column that stores Pending Spend (matter and project; ebilling-r1 owner decision D-104). Written only by
     /// <see cref="FinanceRollupService"/>. It is NOT in <see cref="IsDerived"/> yet: a Threshold cannot name it until ontology-r1
@@ -161,7 +156,8 @@ public static class FinanceBaseValues
     /// <c>sprk_outcomereasoncode</c> = <see cref="BlockedReasonCode"/> - a blocked internal submission awaiting Override or Return.
     /// Override releases the invoice by setting the submission to Accepted; Return moves the invoice out of In Review. No column is
     /// added to the invoice: the hold is the state the Override / Return flow already keeps on the submission. This is the ONE
-    /// definition; both pending-spend paths (the rollup query and the grouped FetchXML) build their exclusion from it.
+    /// definition of the column check; <see cref="InvoiceBlockedHold"/> applies it (check 1) with its server-written sources, and pending
+    /// spend leaves out what <see cref="InvoiceBlockedHold"/> holds (task 165b-4).
     /// </summary>
     /// <remarks>
     /// Why Processing counts as well as Rejected: the persist transaction (D-130(a)) writes the blocked reason code and moves the
@@ -170,11 +166,8 @@ public static class FinanceBaseValues
     /// already a blocked one, and the invoice must not count as pending spend in that window. Override moves the submission to
     /// Accepted, which leaves the set.
     /// Counted spend adds NO held predicate: a held invoice is In Review, which D-103 does not count. Only pending spend needs it.
-    /// The exclusion is an anti-join written as a LEFT OUTER link with these conditions INSIDE the link plus a null check on the
-    /// linked key in the where clause. An invoice can have several linked submissions (resubmissions); a plain join would repeat the
-    /// invoice's amount once per linked row, but here a linked row exists only when it is a blocking one, and that invoice is then
-    /// excluded, so no amount is ever counted twice. Every condition is an <c>in</c> over its values (one value for the reason
-    /// code), so both paths spell the set the same way.
+    /// Pending spend reads each invoice once (a row read) and its linked submissions in one batch, so an invoice with several linked
+    /// submissions (resubmissions) is never counted twice (task 165b-4: the earlier anti-join is retired).
     /// </remarks>
     public static IReadOnlyList<(string Column, IReadOnlyList<object> Values)> HeldSubmissionConditions { get; } =
         new (string, IReadOnlyList<object>)[]
@@ -182,9 +175,6 @@ public static class FinanceBaseValues
             (SubmissionStatusColumn, new object[] { (int)InvoiceSubmissionStatus.Processing, (int)InvoiceSubmissionStatus.Rejected }),
             (SubmissionReasonColumn, new object[] { BlockedReasonCode }),
         };
-
-    /// <summary>The alias of the held-submission link in both pending-spend queries.</summary>
-    internal const string HeldAlias = "held";
 
     /// <summary>Parent ids per grouped query. Matches <c>PredicateCompiler.MaxInListLength</c>: the size of an <c>in</c> list
     /// the Signal code already sends to Dataverse.</summary>
@@ -252,22 +242,33 @@ public static class FinanceBaseValues
     }
 
     /// <summary>
-    /// The base values of <paramref name="parentIds"/> read with GROUPED aggregate queries: per chunk of
-    /// <see cref="ParentChunkSize"/> parents, three queries for the invoices (when spend is needed: the two parts of
-    /// <see cref="SpendAmount"/> plus a re-read of the billed part, which must match the first read; see <see cref="ReadSpendPartsAsync"/>) and one for the budgets (when budget is needed), never one query per parent. A parent with no rows has spend/budget 0 (a sum of nothing, as the rollup
-    /// computes). A Dataverse failure propagates: the caller must treat the value as unknown.
+    /// The base values of <paramref name="parentIds"/>, per chunk of <see cref="ParentChunkSize"/> parents, never one query per parent: spend
+    /// (when needed) is the sum of <see cref="SpendAmount"/> per parent over <see cref="ReadCountedInvoicesAsync"/>'s rows (the counted invoices
+    /// that have their approve record; one row read and two keyed reads), and budget (when needed) is one grouped aggregate over the budgets. A
+    /// parent with no rows has spend/budget 0 (a sum of nothing, as the rollup computes). A Dataverse failure propagates: the caller must treat
+    /// the value as unknown.
     /// </summary>
+    /// <param name="writerUserId">Task 165b-4 (ontology-r1 O1; round 2): the provider of the writer identity whose approve records count
+    /// (<c>OntologyWriterDataverseClient.GetWriterUserIdAsync</c>). Called lazily, at most once per call, and only when
+    /// <paramref name="needSpend"/> and a chunk has counted invoice rows (<see cref="ReadCountedInvoicesAsync"/>): with none, spend is 0 and it
+    /// is never called. A fault, or <see cref="Guid.Empty"/>, then throws (spend unknown, never "no record, so 0 counted spend").</param>
     public static async Task<IReadOnlyDictionary<Guid, (decimal Spend, decimal Budget)>> ReadAsync(
         IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds,
-        bool needSpend, bool needBudget, CancellationToken ct, ILogger? logger = null)
+        bool needSpend, bool needBudget, Func<CancellationToken, Task<Guid>> writerUserId, CancellationToken ct, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(parentIds);
+        ArgumentNullException.ThrowIfNull(writerUserId);
+
+        // Once per call: a later chunk reuses the first answer.
+        Guid? resolved = null;
+        async Task<Guid> WriterOnce(CancellationToken token) => resolved ??= await writerUserId(token).ConfigureAwait(false);
+
         var result = new Dictionary<Guid, (decimal, decimal)>(parentIds.Count);
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
             var spend = needSpend
-                ? await ReadSpendPartsAsync(entities, part => BuildGroupedSpendFetchXml(parentEntity, part, chunk), chunk.Length, logger, ct).ConfigureAwait(false)
+                ? SumSpendByParent(parentEntity, await ReadCountedInvoicesAsync(entities, parentEntity, chunk, WriterOnce, ct, logger: logger).ConfigureAwait(false))
                 : new Dictionary<Guid, decimal>();
             var budget = needBudget
                 ? ReadGroupedSums(await entities.RetrieveMultipleAsync(
@@ -279,153 +280,227 @@ public static class FinanceBaseValues
             }
         }
 
+        logger?.LogDebug("Read the finance base values of {ParentCount} {ParentEntity} parent(s).", result.Count, parentEntity);
         return result;
     }
 
     /// <summary>
-    /// The live PENDING spend (D-104) of <paramref name="parentIds"/>: per chunk of <see cref="ParentChunkSize"/> parents, three
-    /// grouped queries (the two parts of <see cref="SpendAmount"/>, D-130, and the billed re-read) over the In Review invoices that are not held. A parent with no such invoice has 0. A Dataverse failure or a
-    /// result of a shape <see cref="ReadGroupedSums"/> does not know propagates: pending spend is never read as zero by default.
+    /// The live PENDING spend (D-104) of <paramref name="parentIds"/>: per chunk of <see cref="ParentChunkSize"/> parents, the sum of
+    /// <see cref="SpendAmount"/> (D-130) over the In Review invoices that <see cref="InvoiceBlockedHold"/> does not hold. Read 1 is a paged row
+    /// read of the In Review invoices (the snapshot); read 2 is ONE paged read of their linked submissions
+    /// (<see cref="InvoiceBlockedHold.CheckBatchAsync"/>), and the hold rule is applied in memory, so the count does not grow with the invoices.
+    /// Only <see cref="InvoiceBlockedHold"/>'s hold leaves pending (ontology-r1 Q5: a firm hold stays pending; <c>sprk_firmhold</c> is not read).
+    /// An In Review invoice with no linked originating submission is held, so it leaves pending (EB-D-201); their count is logged. A parent with
+    /// no such invoice has 0. A Dataverse failure, or a hold source this identity cannot read (the canary in
+    /// <see cref="InvoiceBlockedHold.CheckBatchAsync"/>), propagates: pending spend is never read as zero by default.
     /// </summary>
-    /// <remarks><b>Call it only with an application identity</b> (ontology-r1 review K2, 2026-10-19). The held exclusion is an
-    /// outer join to the user-owned <c>sprk_invoicesubmission</c>, and row security applies to the joined rows: a caller who cannot
-    /// read the blocking submission would see a held invoice counted as pending (fail open). The ontology evaluator calls it with its
-    /// own app identity; there is no user-identity caller.</remarks>
+    /// <remarks><b>Call it only with an application identity</b> (ontology-r1 review K2, 2026-10-19): the hold source
+    /// <c>sprk_findingsjson</c> is field-secured to the BFF application identity (<see cref="InvoiceBlockedHold.HoldSourceColumns"/>), and row
+    /// security applies to the submissions. The rollup is the production caller; it reads with the BFF application identity.</remarks>
     public static async Task<IReadOnlyDictionary<Guid, decimal>> ReadPendingSpendAsync(
         IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, CancellationToken ct, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(parentIds);
         var result = new Dictionary<Guid, decimal>(parentIds.Count);
+        var unlinked = 0;
         foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
         {
-            var pending = await ReadSpendPartsAsync(entities, part => BuildGroupedPendingSpendFetchXml(parentEntity, part, chunk), chunk.Length, logger, ct).ConfigureAwait(false);
             foreach (var id in chunk)
             {
-                result[id] = pending.GetValueOrDefault(id);
+                result[id] = 0m;
             }
+
+            // Read 1: the snapshot of the In Review invoices. Read 2: their linked submissions, the hold decided in memory (InvoiceBlockedHold).
+            var rows = Distinct(await InvoiceReviewReadService.ReadPagedAsync(
+                entities, InvoiceRowQuery(parentEntity, PendingInvoiceStatuses, chunk), ct).ConfigureAwait(false));
+            if (rows.Count == 0)
+            {
+                continue;
+            }
+
+            var verdicts = await InvoiceBlockedHold.CheckBatchAsync(
+                entities, parentEntity, chunk, PendingInvoiceStatuses, rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
+            var open = new List<Entity>(rows.Count);
+            foreach (var row in rows)
+            {
+                var verdict = verdicts[row.Id];
+                if (!verdict.Held)
+                {
+                    open.Add(row);
+                }
+                else if (verdict.ReasonCode == InvoiceBlockedHold.HeldOwnSubmissionUnlinked)
+                {
+                    unlinked++;
+                }
+            }
+
+            foreach (var (parent, amount) in SumSpendByParent(parentEntity, open))
+            {
+                if (result.ContainsKey(parent))
+                {
+                    result[parent] += amount;
+                }
+            }
+        }
+
+        if (unlinked > 0)
+        {
+            // EB-D-201 (ontology-r1 Q7): an In Review invoice with no linked originating submission is held, so it leaves pending spend.
+            logger?.LogWarning(
+                "Pending spend left out {UnlinkedCount} In Review invoice(s) that have no linked originating submission ({ReasonCode}).",
+                unlinked, InvoiceBlockedHold.HeldOwnSubmissionUnlinked);
         }
 
         return result;
     }
 
+    /// <summary>
+    /// The COUNTED invoices of <paramref name="parentIds"/> (task 165b-4, EB-D-208; ontology-r1 option (b)): the parents' invoices whose status is
+    /// one of <see cref="CountedInvoiceStatuses"/> AND that have their approve Decision Record (<see cref="InvoiceApproveRecord"/>: writer-created,
+    /// under the approval's own key). Every spend reader sums or buckets these rows (<see cref="ReadAsync"/>, <see cref="FinanceRollupService"/>,
+    /// the finance tool), so the readers cannot disagree. Each row carries the parent lookup, the two <see cref="SpendAmountColumns"/> and
+    /// <paramref name="extraColumns"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>One snapshot.</b> Per chunk of <see cref="ParentChunkSize"/> parents: read 1 is a paged row read of the invoices and is the
+    /// snapshot every amount comes from (one row per invoice, so <see cref="SpendAmount"/> coalesces per row and an invoice with two approve
+    /// records is counted once). Reads 2 and 3 (the portions and the writer's approve records, <see cref="InvoiceApproveRecord.MatchedInvoicesAsync(IGenericEntityService, string, IReadOnlyCollection{Guid}, IReadOnlyList{int}, IReadOnlySet{Guid}, Guid, CancellationToken)"/>)
+    /// only FILTER it: an allow-list can remove an invoice from read 1, never add one. So no re-read check is needed.
+    /// <b>K1 (known limit):</b> an invoice approved after read 1 is left out until the next run.</para>
+    /// <para><b>Reads.</b> Three per chunk (read 2 and 3 are skipped when the chunk has no counted invoice; paging adds a read per 5,000 rows),
+    /// never one per invoice, and the same number for 1 invoice as for 50.</para>
+    /// <para><b>The writer id (round 2, ontology-r1).</b> <paramref name="writerUserId"/> is a provider, called lazily: only once read 1 has
+    /// returned counted rows, and then once per call. With no counted rows counted spend is truthfully empty: no writer-id call and no read 2
+    /// or 3. With counted rows and no usable writer id (the provider faults, for example because
+    /// <see cref="OntologyWriterCredentialFactory.ConfigKey"/> is not set, or WhoAmI fails, or it answers
+    /// <see cref="Guid.Empty"/>) counted spend is unknown: a Warning naming that setting is logged and the call throws, never "no record, so
+    /// 0 counted spend".</para>
+    /// <para>A read fault propagates.</para>
+    /// </remarks>
+    public static async Task<IReadOnlyList<Entity>> ReadCountedInvoicesAsync(
+        IGenericEntityService entities, string parentEntity, IReadOnlyCollection<Guid> parentIds, Func<CancellationToken, Task<Guid>> writerUserId,
+        CancellationToken ct, IReadOnlyCollection<string>? extraColumns = null, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(entities);
+        ArgumentNullException.ThrowIfNull(parentIds);
+        ArgumentNullException.ThrowIfNull(writerUserId);
+
+        var counted = new List<Entity>();
+        Guid? writer = null;
+        foreach (var chunk in parentIds.Distinct().Chunk(ParentChunkSize))
+        {
+            // Read 1: the snapshot.
+            var rows = Distinct(await InvoiceReviewReadService.ReadPagedAsync(
+                entities, InvoiceRowQuery(parentEntity, CountedInvoiceStatuses, chunk, extraColumns), ct).ConfigureAwait(false));
+            if (rows.Count == 0)
+            {
+                continue;
+            }
+
+            // Reads 2 and 3: the keyed allow-list; they only filter read 1. The writer id is needed only from here.
+            writer ??= await CountedSpendWriterAsync(writerUserId, rows.Count, parentEntity, logger, ct).ConfigureAwait(false);
+            var matched = await InvoiceApproveRecord.MatchedInvoicesAsync(
+                entities, parentEntity, chunk, CountedInvoiceStatuses, rows.Select(r => r.Id).ToHashSet(), writer.Value, ct).ConfigureAwait(false);
+            counted.AddRange(rows.Where(r => matched.Contains(r.Id)));
+        }
+
+        return counted;
+    }
+
+    /// <summary>
+    /// Task 165b-4 round 2: the writer id for counted rows that need it. A fault, or <see cref="Guid.Empty"/>, makes counted spend unknown: it is
+    /// logged as a Warning that names <see cref="OntologyWriterCredentialFactory.ConfigKey"/> (an absent setting is the
+    /// misconfiguration an operator can fix) and thrown. The caller's own cancellation is not logged.
+    /// </summary>
+    private static async Task<Guid> CountedSpendWriterAsync(
+        Func<CancellationToken, Task<Guid>> writerUserId, int countedRows, string parentEntity, ILogger? logger, CancellationToken ct)
+    {
+        Guid writer;
+        try
+        {
+            writer = await writerUserId(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger?.LogWarning(ex, WriterUnavailableMessage, countedRows, parentEntity, OntologyWriterCredentialFactory.ConfigKey);
+            throw;
+        }
+
+        if (writer == Guid.Empty)
+        {
+            var empty = new InvalidOperationException("The writer identity is unknown (empty), so no invoice can be shown to have its approve record.");
+            logger?.LogWarning(empty, WriterUnavailableMessage, countedRows, parentEntity, OntologyWriterCredentialFactory.ConfigKey);
+            throw empty;
+        }
+
+        return writer;
+    }
+
+    private const string WriterUnavailableMessage =
+        "Counted spend is unknown for {CountedRows} counted {ParentEntity} invoice(s): the Decision Record writer's identity is unavailable. "
+        + "Check that {ConfigKey} is set on this host (and that the writer's connection and WhoAmI work); spend is not reported as 0.";
+
+    /// <summary>
+    /// The paged row read of the parents' invoices of <paramref name="statuses"/>: the invoice key, the parent lookup, the two
+    /// <see cref="SpendAmountColumns"/> (a column left out would read as empty and the approved total would fall back to the billed total) and
+    /// <paramref name="extraColumns"/>. Filtered on <c>statuscode</c> only (Paid is Inactive and still counts). Ordered for stable paging.
+    /// </summary>
+    internal static QueryExpression InvoiceRowQuery(
+        string parentEntity, IReadOnlyList<int> statuses, IEnumerable<Guid> parentIds, IReadOnlyCollection<string>? extraColumns = null)
+    {
+        var lookup = ParentLookup(parentEntity);
+        var query = new QueryExpression(InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(new[] { lookup }.Concat(SpendAmountColumns).Concat(extraColumns ?? []).Distinct(StringComparer.Ordinal).ToArray()),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 },
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(lookup, ConditionOperator.In, parentIds.Cast<object>().ToArray());
+        query.Criteria.AddCondition(InvoiceStatusCodeColumn, ConditionOperator.In, statuses.Cast<object>().ToArray());
+        query.AddOrder(InvoiceKeyColumn, OrderType.Ascending);
+        return query;
+    }
+
+    /// <summary>One row per invoice id (a row without an id is dropped): an amount is never taken twice.</summary>
+    private static List<Entity> Distinct(IEnumerable<Entity> rows)
+    {
+        var seen = new HashSet<Guid>();
+        return rows.Where(r => r.Id != Guid.Empty && seen.Add(r.Id)).ToList();
+    }
+
+    /// <summary>The sum of <see cref="SpendAmount"/> per parent (the parent lookup of <paramref name="parentEntity"/>) over <paramref name="rows"/>.</summary>
+    internal static Dictionary<Guid, decimal> SumSpendByParent(string parentEntity, IEnumerable<Entity> rows)
+    {
+        var lookup = ParentLookup(parentEntity);
+        var sums = new Dictionary<Guid, decimal>();
+        foreach (var row in rows)
+        {
+            if (row.GetAttributeValue<EntityReference>(lookup)?.Id is { } parent && parent != Guid.Empty)
+            {
+                sums[parent] = sums.GetValueOrDefault(parent) + SpendAmount(row);
+            }
+        }
+
+        return sums;
+    }
+
     internal const string ParentAlias = "parent";
     internal const string SumAlias = "total";
 
-    /// <summary>Runs the two parts of <see cref="SpendAmount"/> (billed fallback, then approved) and RE-READS the billed part;
-    /// the parts are added per parent only when the two billed reads agree. Each result goes through <see cref="ReadGroupedSums"/>,
-    /// so a row of a shape it does not know throws from any read: a half-read spend never comes back as a smaller number.</summary>
-    /// <remarks>
-    /// The three reads are not one snapshot. A write between them can move the sum either way (see
-    /// <see cref="SpendAmountPartsInReadOrder"/>). A mismatch between the first and the re-read billed sums means an invoice
-    /// entered or left the billed part meanwhile, so the whole three-read attempt is retried ONCE (a single concurrent write then
-    /// costs one extra read, not a failed run) and a Warning is logged with the parent count only, never the amounts (ADR-015). If
-    /// the second attempt also differs the read throws: fail closed, and the caller retries on its next run.
-    /// </remarks>
-    /// <exception cref="InvalidOperationException">The billed sums differed on two consecutive attempts.</exception>
-    private static async Task<Dictionary<Guid, decimal>> ReadSpendPartsAsync(
-        IGenericEntityService entities, Func<SpendAmountPart, string> fetchXmlFor, int parentCount, ILogger? logger, CancellationToken ct)
-    {
-        const int attempts = 2;
-        for (var attempt = 1; attempt <= attempts; attempt++)
-        {
-            var billed = await ReadPartAsync(entities, fetchXmlFor, SpendAmountPart.BilledWhereNoApprovedTotal, ct).ConfigureAwait(false);
-            var approved = await ReadPartAsync(entities, fetchXmlFor, SpendAmountPart.ApprovedTotal, ct).ConfigureAwait(false);
-            var recheck = await ReadPartAsync(entities, fetchXmlFor, SpendAmountPart.BilledWhereNoApprovedTotal, ct).ConfigureAwait(false);
-            if (SameSums(billed, recheck))
-            {
-                var total = new Dictionary<Guid, decimal>(billed);
-                foreach (var (parent, amount) in approved)
-                {
-                    total[parent] = total.GetValueOrDefault(parent) + amount;
-                }
-
-                return total;
-            }
-
-            if (attempt < attempts)
-            {
-                logger?.LogWarning(
-                    "Spend read raced a write: the billed-fallback sums changed between two reads of {ParentCount} parent(s); re-reading once.",
-                    parentCount);
-            }
-        }
-
-        throw new InvalidOperationException(
-            "Spend could not be read consistently: invoices changed while the grouped spend queries ran, on two consecutive attempts. "
-            + "Failing closed rather than returning a sum no single moment of the data held; the caller retries on its next run.");
-    }
-
-    private static async Task<Dictionary<Guid, decimal>> ReadPartAsync(
-        IGenericEntityService entities, Func<SpendAmountPart, string> fetchXmlFor, SpendAmountPart part, CancellationToken ct) =>
-        ReadGroupedSums(await entities.RetrieveMultipleAsync(new FetchExpression(fetchXmlFor(part)), ct).ConfigureAwait(false));
-
-    private static bool SameSums(Dictionary<Guid, decimal> first, Dictionary<Guid, decimal> second) =>
-        first.Keys.Union(second.Keys).All(id => first.GetValueOrDefault(id) == second.GetValueOrDefault(id));
-
-    /// <summary>One grouped aggregate query for counted spend: the <paramref name="part"/> of <see cref="SpendAmount"/> over the
-    /// parents' invoices in <see cref="CountedInvoiceStatuses"/>, grouped by the parent lookup, over the given parents. The two parts
-    /// together are the counted spend (<see cref="ReadAsync"/> adds them).</summary>
-    internal static string BuildGroupedSpendFetchXml(string parentEntity, SpendAmountPart part, IEnumerable<Guid> parentIds) =>
-        BuildGroupedFetchXml(parentEntity, InvoiceEntity, part, parentIds, CountedInvoiceStatuses, excludeHeld: false);
-
     /// <summary>The grouped aggregate query for the sum of the budget totals, grouped by the parent lookup, over the given parents.</summary>
-    internal static string BuildGroupedBudgetFetchXml(string parentEntity, IEnumerable<Guid> parentIds) =>
-        BuildGroupedFetchXml(parentEntity, BudgetEntity, part: null, parentIds, statuses: null, excludeHeld: false);
-
-    /// <summary>One grouped aggregate query for PENDING spend (D-104): the <paramref name="part"/> of <see cref="SpendAmount"/> over
-    /// the parents' invoices whose status is in <see cref="PendingInvoiceStatuses"/> and that are not held
-    /// (<see cref="HeldSubmissionConditions"/>), grouped by the parent lookup. D-130: the same amount rule as counted spend.</summary>
-    internal static string BuildGroupedPendingSpendFetchXml(string parentEntity, SpendAmountPart part, IEnumerable<Guid> parentIds) =>
-        BuildGroupedFetchXml(parentEntity, InvoiceEntity, part, parentIds, PendingInvoiceStatuses, excludeHeld: true);
-
-    private static string BuildGroupedFetchXml(
-        string parentEntity, string entityName, SpendAmountPart? part, IEnumerable<Guid> parentIds, IReadOnlyList<int>? statuses, bool excludeHeld)
+    internal static string BuildGroupedBudgetFetchXml(string parentEntity, IEnumerable<Guid> parentIds)
     {
         var lookup = ParentLookup(parentEntity);
-        var sumColumn = part switch
-        {
-            null => BudgetTotalBudget,
-            SpendAmountPart.ApprovedTotal => InvoiceApprovedTotal,
-            SpendAmountPart.BilledWhereNoApprovedTotal => InvoiceTotalAmount,
-            _ => throw new ArgumentOutOfRangeException(nameof(part), part, "Unknown spend amount part."),
-        };
-        var entity = new XElement("entity", new XAttribute("name", entityName),
+        var entity = new XElement("entity", new XAttribute("name", BudgetEntity),
             new XElement("attribute",
-                new XAttribute("name", sumColumn),
+                new XAttribute("name", BudgetTotalBudget),
                 new XAttribute("alias", SumAlias), new XAttribute("aggregate", "sum")),
-            new XElement("attribute", new XAttribute("name", lookup), new XAttribute("alias", ParentAlias), new XAttribute("groupby", "true")));
-        var filter = new XElement("filter", new XAttribute("type", "and"),
-            new XElement("condition", new XAttribute("attribute", lookup), new XAttribute("operator", "in"),
-                parentIds.Select(id => new XElement("value", id.ToString("D", CultureInfo.InvariantCulture)))));
-        if (part is { } p)
-        {
-            // Which half of SpendAmount this query sums: invoices WITH an approved total (sum it) or WITHOUT one (sum the billed total).
-            filter.Add(new XElement("condition", new XAttribute("attribute", InvoiceApprovedTotal),
-                new XAttribute("operator", p == SpendAmountPart.ApprovedTotal ? "not-null" : "null")));
-        }
-
-        if (statuses is not null)
-        {
-            filter.Add(new XElement("condition", new XAttribute("attribute", InvoiceStatusCodeColumn), new XAttribute("operator", "in"),
-                statuses.Select(s => new XElement("value", s.ToString(CultureInfo.InvariantCulture)))));
-        }
-
-        if (excludeHeld)
-        {
-            // LEFT OUTER link to the blocking submissions, then keep only the invoices that found none (see HeldSubmissionConditions).
-            entity.Add(new XElement("link-entity",
-                new XAttribute("name", SubmissionEntity), new XAttribute("from", SubmissionInvoiceLookup), new XAttribute("to", InvoiceKeyColumn),
-                new XAttribute("link-type", "outer"), new XAttribute("alias", HeldAlias),
-                new XElement("filter", new XAttribute("type", "and"),
-                    HeldSubmissionConditions.Select(c => new XElement("condition",
-                        new XAttribute("attribute", c.Column), new XAttribute("operator", "in"),
-                        c.Values.Select(v => new XElement("value", Convert.ToString(v, CultureInfo.InvariantCulture)!)))))));
-            filter.Add(new XElement("condition",
-                new XAttribute("entityname", HeldAlias), new XAttribute("attribute", SubmissionKeyColumn), new XAttribute("operator", "null")));
-        }
-
-        entity.Add(filter);
+            new XElement("attribute", new XAttribute("name", lookup), new XAttribute("alias", ParentAlias), new XAttribute("groupby", "true")),
+            new XElement("filter", new XAttribute("type", "and"),
+                new XElement("condition", new XAttribute("attribute", lookup), new XAttribute("operator", "in"),
+                    parentIds.Select(id => new XElement("value", id.ToString("D", CultureInfo.InvariantCulture))))));
         return new XElement("fetch", new XAttribute("aggregate", "true"), entity).ToString(SaveOptions.DisableFormatting);
     }
 

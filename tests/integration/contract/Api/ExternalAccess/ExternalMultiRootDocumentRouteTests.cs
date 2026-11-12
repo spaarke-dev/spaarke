@@ -254,7 +254,7 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
             case "throws": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagReadThrows = true; break;
             case "fault": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagFault = HttpStatusCode.InternalServerError; break;
             case "flag-null": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, Hidden, isSecure: null); break;
-            // "missing": the matter record does not exist.
+                // "missing": the matter record does not exist.
         }
 
         var id = _fixture.Data.AddDocument("projects", RecordA, "Unknown secure state", ("_sprk_matter_value", Hidden));
@@ -447,7 +447,12 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
     {
         var caller = Principal("projects", RecordA);
         var none = SecureRootFlags.None;
-        var projectOnly = new ExternalDataService.DocumentRootLinks(RecordA.ToString(), null, null, null, null, null);
+        // Fix round 3c: a document read that selected every live-parent column and found none set (an explicit null each).
+        var projectOnly = new ExternalDataService.DocumentRootLinks(RecordA.ToString(), null, null, null, null, null)
+        {
+            Row = ExternalMultiRootRule.LiveParentSelect("sprk_document").ToDictionary(
+                c => c, _ => System.Text.Json.JsonSerializer.SerializeToElement<object?>(null)),
+        };
         var withHidden = projectOnly with { RelatedMatter = Hidden.ToString() };
 
         new ExternalDataService.DocumentScopeRead(RecordA, "x", projectOnly).IsReadableUnder(RecordA, caller, none).Should().BeTrue();

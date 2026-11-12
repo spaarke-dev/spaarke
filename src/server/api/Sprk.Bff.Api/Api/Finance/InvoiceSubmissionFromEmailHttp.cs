@@ -228,10 +228,8 @@ internal static class InvoiceSubmissionFromEmailHttp
             }
         }
 
-        if (request.FirmId is null)
-        {
-            errors["firmId"] = new[] { "firmId is required." };
-        }
+        // Task 095c-2 (owner 2026-11-03): firmId may be null or absent (no firm). The handler decides whether that is accepted now (the
+        // tracking-scope phase) and, for a Correction, whether the replaced invoice has no firm either; it is no longer a body-shape error.
 
         if (request.FirmInvoiceNumber?.Trim() is { Length: > TrackingNumberAllocator.MaxFirmInvoiceNumberLength })
         {
@@ -269,7 +267,7 @@ internal static class InvoiceSubmissionFromEmailHttp
             SaveEntityType = saveEntityType,
             Email = request.Email!,
             Marks = request.Marks!,
-            FirmId = request.FirmId!.Value,
+            FirmId = request.FirmId,
             FirmInvoiceNumber = request.FirmInvoiceNumber,
             PoNumber = request.PoNumber,
             Mode = request.Mode!,
@@ -284,7 +282,8 @@ internal static class InvoiceSubmissionFromEmailHttp
     /// <summary>
     /// The from-email targets, after step 0: a body-shape error is the ValidationProblem 400 with no rights query made; otherwise Read and
     /// AppendTo on the core record (<c>finance.submit_invoice</c>, as the internal submit route, D-24) and AppendTo on the firm
-    /// (<c>finance.attach_invoice</c>). An empty firm id adds no firm check: the handler answers 400 firm_invalid.
+    /// (<c>finance.attach_invoice</c>). An empty firm id adds no firm check: the handler answers 400 firm_invalid. Task 095c-2: no firm (null
+    /// or absent) adds no firm check either; there is no firm record to authorize, and the handler decides whether no firm is accepted.
     /// </summary>
     internal static FinanceAuthorizationTargets ResolveFromEmailTargets(EndpointFilterInvocationContext context)
     {
@@ -312,13 +311,13 @@ internal static class InvoiceSubmissionFromEmailHttp
             },
         };
 
-        if (input.FirmId != Guid.Empty)
+        if (input.FirmId is { } firmId && firmId != Guid.Empty)
         {
             checks.Add(new FinanceAuthorizationCheck
             {
                 Path = FinanceCheckPath.Record,
                 EntitySetName = FinanceAuthorizationFilter.VendorOrganizationEntitySet,
-                RecordId = input.FirmId,
+                RecordId = firmId,
                 Operation = "finance.attach_invoice",
                 Source = "body.firmId",
             });
@@ -588,26 +587,29 @@ internal static class InvoiceSubmissionFromEmailHttp
             return FinanceAuthorizationFilter.UniformRecordNotFound(http);
         }
 
+        // Task 095c-2 (contract section 10, agreed with word-add-in-r1 2026-11-03): an invoice with no firm (a from-email submission taken
+        // without one) is prefilled with "firm": null, never refused for it; the intake corrects it only without a firm (CorrectionKeepsFirm).
         var firmId = invoice.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id;
         var single = Services.Finance.EligibleApproverResolver.SingleCoreOf(Services.Finance.FinanceBaseValues.InvoiceEntity, invoice);
-        if (firmId is not { } firm || firm == Guid.Empty || single is not { } found
+        if (firmId == Guid.Empty || single is not { } found
             || InvoiceSubmissionService.CoreRecordKindOfTable(found.Entity) is not { } kind)
         {
             // The intake refuses such an invoice too (different_firm / different_core_record); there is nothing coherent to prefill.
-            logger.LogWarning("Correction prefill: invoice {InvoiceId} names no single firm and core record", invoiceId);
+            logger.LogWarning("Correction prefill: invoice {InvoiceId} names no single core record (or an empty firm)", invoiceId);
             return PrefillUnavailable();
         }
 
         var core = new InvoiceCoreRecord(kind, found.Id);
-        var judgement = await submissions.JudgeCorrectionPrefillAsync(invoice, core, firm, ct);
+        var judgement = await submissions.JudgeCorrectionPrefillAsync(invoice, core, firmId, ct);
         if (judgement is null)
         {
             return PrefillUnavailable();
         }
 
-        var firmName = await ReadNameAsync(entities, InvoiceSubmissionService.OrganizationEntity, firm, logger, ct);
+        // No firm: no name to read. A firm whose name cannot be read is still the 503 (never a partial answer).
+        var firmName = firmId is { } firm ? await ReadNameAsync(entities, InvoiceSubmissionService.OrganizationEntity, firm, logger, ct) : null;
         var coreName = await ReadNameAsync(entities, core.EntityLogicalName, core.RecordId, logger, ct);
-        if (firmName is null || coreName is null)
+        if ((firmId is not null && firmName is null) || coreName is null)
         {
             return PrefillUnavailable();
         }
@@ -621,7 +623,7 @@ internal static class InvoiceSubmissionFromEmailHttp
 
         return Results.Ok(new CorrectionPrefillResponse(
             invoiceId,
-            new CorrectionPrefillFirm(firm, firmName),
+            firmId is { } prefillFirm ? new CorrectionPrefillFirm(prefillFirm, firmName!) : null,
             new CorrectionPrefillCoreRecord(CoreTypeName(kind), core.RecordId, coreName),
             status?.ToString(),
             string.IsNullOrWhiteSpace(tracking) ? null : tracking,

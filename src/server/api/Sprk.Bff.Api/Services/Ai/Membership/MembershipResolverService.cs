@@ -103,6 +103,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// carry rows matched on a forged <c>sprk_createdbyperson</c> and be served for up to <see cref="CacheTtl"/>.
     /// </para>
     /// <para>
+    /// <b>Bumped 7 → 8 by task 032b-1b</b> — the "bump REQUIRED" case below: the options hash is unchanged, but the
+    /// people-targeting query now also binds an invoice's <c>sprk_assignedto1/2</c> (<c>TargetingOnlyColumns</c>), so a
+    /// pre-deploy entry would be served for up to <see cref="CacheTtl"/> without those invoices.
+    /// </para>
+    /// <para>
     /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
     /// question came up and the answer was non-obvious). This constant and
     /// <see cref="HashOptions"/> defend against two DIFFERENT failure modes, and only one of them needs
@@ -125,7 +130,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// authorization decision.
     /// </para>
     /// </summary>
-    internal const int CacheVersion = 7;
+    internal const int CacheVersion = 8;
 
     /// <summary>
     /// Per-user cache TTL: 2 minutes (was 5) — task 132, owner rounds 3 R3/R4 (access changes take effect in
@@ -884,6 +889,15 @@ public sealed class MembershipResolverService : IMembershipResolverService
                     contactColumns.Add(column.Field.Trim());
                 }
             }
+        }
+
+        // Task 032b-1b (owner decision 2026-11-08): the TARGETING-ONLY Contact columns — an invoice's sprk_assignedto1/2.
+        // They select records FOR the person their contact represents, exactly like a registry Contact column, and confer
+        // NO access: this is the only reader of the list (TargetingOnlyColumnsGuardTests); FilterToAccessConferringRoles
+        // above never sees it.
+        if (MembershipOptionsDefaults.TargetingOnlyColumns.TryGetValue(entityType, out var targetingOnly))
+        {
+            contactColumns.UnionWith(targetingOnly);
         }
 
         var result = new List<MembershipDescriptor>(discovered.Count + 2);

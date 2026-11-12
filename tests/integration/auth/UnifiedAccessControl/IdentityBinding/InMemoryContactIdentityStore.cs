@@ -386,8 +386,16 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
                 : null);
         var c = new Contact
         {
-            Id = id, Email = email, Oid = oid, KeyMirror = mirror, Plane = plane is { } p ? (int)p : null,
-            StateCode = stateCode, Flag = flag, InvitedOn = invitedOn, InviteCodeHash = inviteCodeHash, Version = NextVersion(),
+            Id = id,
+            Email = email,
+            Oid = oid,
+            KeyMirror = mirror,
+            Plane = plane is { } p ? (int)p : null,
+            StateCode = stateCode,
+            Flag = flag,
+            InvitedOn = invitedOn,
+            InviteCodeHash = inviteCodeHash,
+            Version = NextVersion(),
         };
         Contacts[id] = c;
         return c;
@@ -416,9 +424,17 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     {
         var u = new SystemUser
         {
-            Id = id, Oid = oid, Email = email, DomainName = domainName ?? email, PrimaryContactId = primaryContactId,
-            IsDisabled = disabled, AccessMode = accessMode, ApplicationId = applicationId, Version = NextVersion(),
-            FirstName = "First", LastName = email?.Split('@')[0] ?? "Last",
+            Id = id,
+            Oid = oid,
+            Email = email,
+            DomainName = domainName ?? email,
+            PrimaryContactId = primaryContactId,
+            IsDisabled = disabled,
+            AccessMode = accessMode,
+            ApplicationId = applicationId,
+            Version = NextVersion(),
+            FirstName = "First",
+            LastName = email?.Split('@')[0] ?? "Last",
         };
         SystemUsers[id] = u;
         return u;
@@ -1107,9 +1123,17 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             var id = Guid.NewGuid();
             Contacts[id] = new Contact
             {
-                Id = id, Oid = oid.ToString("D"), KeyMirror = oid.ToString("D"), Plane = (int)plane, Email = details.Email,
-                FirstName = details.FirstName, LastName = details.LastName, StateCode = 0, Version = NextVersion(),
-                ExternalTenantId = details.ExternalTenantId?.ToString("D"), Department = details.Department,
+                Id = id,
+                Oid = oid.ToString("D"),
+                KeyMirror = oid.ToString("D"),
+                Plane = (int)plane,
+                Email = details.Email,
+                FirstName = details.FirstName,
+                LastName = details.LastName,
+                StateCode = 0,
+                Version = NextVersion(),
+                ExternalTenantId = details.ExternalTenantId?.ToString("D"),
+                Department = details.Department,
                 OwnerTeamId = details.OwningTeamId,
             };
             Writes.Add(("create", id, $"{oid:D}|{plane}|{details.Email}|{details.LastName}"));
@@ -1226,7 +1250,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         var row = new ContactBindingRow(c.Id, MaskStateCode ? null : c.StateCode, MaskBindingColumn ? null : c.Oid,
             MaskIdentityColumns ? null : c.Plane, $"W/\"{c.Version}\"", c.Email,
             MaskIdentityColumns || MaskCollisionColumns ? null : c.Flag,
-            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId) { RemovedOn = c.RemovedOn };
+            c.KeyMirror, MaskHomeColumns ? null : c.ExternalTenantId)
+        { RemovedOn = c.RemovedOn };
         return DataverseContactIdentityStore.WithRemovedMarkerProof(
             DataverseContactIdentityStore.WithIdentityColumnsProof(
                 ContactLookup.Of(row), BindingColumnsProof, CollisionColumnsProof),

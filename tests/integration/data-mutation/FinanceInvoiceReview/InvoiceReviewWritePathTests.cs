@@ -261,11 +261,11 @@ public class InvoiceReviewWritePathTests
         _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
         TheIntakeHolds(request.DocumentId);
         using var cancel = new CancellationTokenSource();
-        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                 It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            .ReturnsAsync((Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
             {
-                _intake.Allocations.Add((id, firm, number, fields));
+                _intake.Allocations.Add((id, firm!.Value, number, fields));
                 cancel.Cancel(); // the caller goes away once the submission is created
                 return TrackingNumberResult.Created("INV-42.1", 1);
             });
@@ -286,11 +286,11 @@ public class InvoiceReviewWritePathTests
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
         TheIntakeHolds(request.DocumentId);
-        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                 It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-            .Returns(async (Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            .Returns(async (Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
             {
-                _intake.Allocations.Add((id, firm, number, fields));
+                _intake.Allocations.Add((id, firm!.Value, number, fields));
                 // The reject read the document before the submission existed (its submission read finds none), and writes now.
                 await Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = request.DocumentId, Notes = "statement" }, "corr-r");
                 return TrackingNumberResult.Created("INV-42.1", 1);
@@ -350,11 +350,11 @@ public class InvoiceReviewWritePathTests
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
         TheIntakeHolds(request.DocumentId);
-        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+        _intake.Allocator.Setup(a => a.CreateSubmissionAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<string>(),
                 It.IsAny<IReadOnlyDictionary<string, object>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, Guid firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
+            .ReturnsAsync((Guid id, Guid? firm, string number, IReadOnlyDictionary<string, object>? fields, CancellationToken _) =>
             {
-                _intake.Allocations.Add((id, firm, number, fields));
+                _intake.Allocations.Add((id, firm!.Value, number, fields));
                 _records.Remove("sprk_document", request.DocumentId);
                 return TrackingNumberResult.Created("INV-42.1", 1);
             });

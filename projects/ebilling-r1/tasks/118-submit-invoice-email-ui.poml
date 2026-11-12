@@ -4,7 +4,7 @@
     <title>Submit Invoice in the email UI: toolbar button (replaces Link Invoice), flagged attachments, Email Review Invoice tab</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148), wave W3-12</phase>
     <gate>094 merged (the from-document route) and 118a merged (the shared marking component, split out 2026-10-27, EB-D-159)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in two shared client libraries used by several surfaces, and replaces an existing toolbar action.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>P3-F</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>094, 118a</deps>
+    <deps>094, 118a, 118b</deps>
     <tags>frontend, react, fluent-ui, pcf, testing</tags>
     <estimated-effort>2 days</estimated-effort>
   </metadata>
@@ -51,6 +51,11 @@
     <constraint source="owner 2026-10-21">The flag is sprk_documenttype = Invoice on the attachment's document, read in the existing single sprk_document query of CommunicationAttachmentsService (no per-row query, no BFF call, no new AI call). Not yet profiled → no badge (the action is still available from the toolbar and the tab). The badge is a hint; any PDF can be marked Invoice.</constraint>
     <constraint source="owner 2026-10-21">The Invoice tab appears in the Email Review dialog only when the selected email has at least one PDF attachment; its content is the same flow component as the toolbar's.</constraint>
     <constraint source="ADR-021, ADR-012">Fluent v9 tokens only, dark mode via the host FluentProvider; no Xrm, MSAL or BFF URL inside the shared components (injected, as the existing actions are).</constraint>
+    <constraint source="main session 2026-11-03 (after run 1's escalation)">
+      (1) Supporting IS offered. Task 118b adds `supportingDocumentIds` to POST from-document. This task sends the marked Supporting documents in that field. 118 starts after 118b is merged.
+      (2) The CommunicationActions PCF's "Link Invoice" button (src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx ~697-705, and suggestedCreates at :140) ALSO becomes Submit Invoice, through the same shared flow. launchCreate('invoice') opens the standard sprk_invoice form today, which is a client-side create that ADR-002 forbids. So launchCreate drops the 'invoice' kind, and its tests and jest.setup are updated.
+      The PCF is in scope: follow PCF-DEPLOYMENT-GUIDE.md version bumping, and build with `npm run build:prod` through scripts/Invoke-PcfBuildProd.ps1.
+    </constraint>
   </constraints>
 
   <knowledge>

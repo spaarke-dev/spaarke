@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
@@ -134,11 +135,18 @@ public sealed record DraftsCompensated(int Removed, int Kept);
 /// <summary>One problem with one field of one rule (or of the request when <see cref="PolicyId"/> is null).</summary>
 public sealed record RuleSetError(Guid? PolicyId, string? RuleName, string Field, string Message, string? Reason);
 
-/// <summary>What a firm may be shown of a rule's clause. Both members are null when the rule set's flag is off (D-66, D-79).</summary>
-/// <remarks>There is deliberately no member for the source document or any link to it (D-63): a firm never gets one.</remarks>
-public sealed record FirmClauseText(string? Quote, string? SectionReference)
+/// <summary>
+/// What a firm may be shown of a rule's clause. Every member is null when nothing may be shown (D-66, D-79; ebilling-r1 task 083).
+/// <paramref name="FirmFacingName"/> labels the clause: the Procedure's firm-facing name (its name when that is blank), or the neutral
+/// "Billing instructions for this record" for a record rule; null for a legacy rule set, which has no Procedure.
+/// </summary>
+/// <remarks>
+/// There is deliberately no member for the source document or any link to it (D-63), and none for the Procedure's internal name, its id, its
+/// version id, an override reason or any other basis member (model 7.4): a firm never gets one.
+/// </remarks>
+public sealed record FirmClauseText(string? Quote, string? SectionReference, string? FirmFacingName = null)
 {
-    public static FirmClauseText None { get; } = new(null, null);
+    public static FirmClauseText None { get; } = new(null, null, null);
 }
 
 /// <summary>
@@ -148,13 +156,21 @@ public sealed record FirmClauseText(string? Quote, string? SectionReference)
 public static class RuleSetClauseVisibility
 {
     /// <summary>
-    /// With the rule set's "visible to firms" flag on, the quote and the section reference; with it off, nothing at all (the firm sees the
-    /// rule name and reason only). Fails closed: a missing flag is off, and blank text is returned as null.
+    /// With the rule set's "visible to firms" flag on, the quote and the section reference (and <paramref name="firmFacingName"/> with them);
+    /// with it off, nothing at all (the firm sees the rule name and reason only). Fails closed: a missing flag is off, blank text is returned
+    /// as null, and a clause with neither a quote nor a section reference is no text (a label alone is not a clause).
     /// </summary>
-    public static FirmClauseText ForFirm(bool? ruleSetVisibleToFirms, string? clauseQuote, string? clauseLocation) =>
-        ruleSetVisibleToFirms == true
-            ? new FirmClauseText(NullIfBlank(clauseQuote), NullIfBlank(clauseLocation))
-            : FirmClauseText.None;
+    public static FirmClauseText ForFirm(bool? ruleSetVisibleToFirms, string? clauseQuote, string? clauseLocation, string? firmFacingName = null)
+    {
+        if (ruleSetVisibleToFirms != true)
+        {
+            return FirmClauseText.None;
+        }
+
+        var quote = NullIfBlank(clauseQuote);
+        var location = NullIfBlank(clauseLocation);
+        return quote is null && location is null ? FirmClauseText.None : new FirmClauseText(quote, location, NullIfBlank(firmFacingName));
+    }
 
     private static string? NullIfBlank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text;
 }
@@ -259,6 +275,10 @@ public class RuleSetService
     internal const string CodeInForce = "ruleset.proposal_in_force";
     internal const string CodeContainerNotConfigured = "ruleset.container_not_configured";
     internal const string CodeResultTruncated = "ruleset.result_truncated";
+
+    /// <summary>The detail of <see cref="CodeResultTruncated"/> when the list holds more rule sets than one pass reads (also the list route's, task 089e K2).</summary>
+    internal const string TooManyRuleSetsMessage = "There are more rule sets than can be listed in one pass.";
+
     internal const string CodeWriteFailed = "ruleset.write_failed";
     internal const string CodeSourceMissing = "ruleset.source_missing";
     internal const string CodeAlreadyDrafted = "ruleset.already_drafted";
@@ -353,11 +373,13 @@ public class RuleSetService
         RowVersionColumn, RejectionReasonColumn, ProcedureVersionColumn, PublishStateColumn,
     };
 
-    private static readonly string[] RuleSetColumns =
+    // Task 089c (089a K1): the core-record lookups are read too, so every read here can refuse a record-scoped set
+    // (RecordRuleSet.IsRecordScoped: a record scope OR a core lookup).
+    private static readonly string[] RuleSetColumns = new[]
     {
         "sprk_name", "sprk_scope", "sprk_firm", "sprk_visibletofirms", "sprk_effectivefrom", "sprk_effectiveto", "sprk_sourcedocument",
         "sprk_notconverted", "statuscode", RuleDomains.PolicyDomainColumn, ProcedureColumn,
-    };
+    }.Concat(InvoiceFamilyCoreRecordGuard.FilingCoreTables).ToArray();
 
     private readonly IGenericEntityService _entities;
     private readonly IDocumentDataverseService _documents;
@@ -504,6 +526,7 @@ public class RuleSetService
                 row["sprk_firm"] = new EntityReference(FirmEntity, firmId);
             }
 
+            RecordRuleSet.RequireOneHome(row); // task 089c (089a K1): a legacy set has no record and no Procedure
             ruleSetOwner.ApplyTo(row);
             var ruleSetId = await _entities.CreateAsync(row, ct);
             created.Add((RuleSetEntity, ruleSetId));
@@ -568,10 +591,11 @@ public class RuleSetService
         if (sets.MoreRecords)
         {
             return RuleSetOutcome<IReadOnlyList<RuleSetSummary>>.Refused(
-                StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, "There are more rule sets than can be listed in one pass.");
+                StatusCodes.Status422UnprocessableEntity, CodeResultTruncated, TooManyRuleSetsMessage);
         }
 
-        var rows = sets.Entities.Where(RuleDomains.IsBillingRow).ToList();
+        // Task 089c: a record-scoped set is its record's secure child, changed only through the record's override routes; never listed here.
+        var rows = sets.Entities.Where(r => RuleDomains.IsBillingRow(r) && !RecordRuleSet.IsRecordScoped(r)).ToList();
         var counts = new Dictionary<Guid, int>();
         foreach (var batch in rows.Select(r => (object)r.Id).Chunk(MaxInValues))
         {
@@ -1398,7 +1422,11 @@ public class RuleSetService
 
             var newWorking = merged with
             {
-                Id = newId, Number = number, State = (int)ProposalState.Proposed, InForceFrom = null, InForceTo = null,
+                Id = newId,
+                Number = number,
+                State = (int)ProposalState.Proposed,
+                InForceFrom = null,
+                InForceTo = null,
             };
             var versions = rule.Versions.Append(newWorking).ToList();
             _logger.LogInformation("Rule {PolicyId} of rule set {RuleSetId}: new draft version {Number} {VersionId} (predecessor {Predecessor} untouched)",
@@ -2129,6 +2157,7 @@ public class RuleSetService
             if (value is not DBNull) row[column] = value;
         }
 
+        RecordRuleSet.RequireOneHome(row); // task 089c (089a K1): a Procedure's set never carries a core-record lookup or a record scope
         return row;
     }
 
@@ -2376,34 +2405,83 @@ public class RuleSetService
     // ───────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// What the invoice's law firm (<paramref name="invoiceFirmId"/>) may be shown of one rule version's clause: resolves the version's
-    /// billing policy and rule set and applies <see cref="RuleSetClauseVisibility.ForFirm"/>. A firm sees a rule set assigned to the
-    /// client default or to itself, never another firm's (FR-49). Fails closed: no text when no firm is given, when the version, its billing
-    /// policy or its rule set cannot be read, when the rule set is not Published or is assigned to no one or to another firm, or when the
-    /// version was never in force (a draft's clause is never shown).
+    /// ebilling-r1 task 083 (model 3.2, 7.4, 8.1; D-66, D-79): what the invoice's law firm may be shown of one rule version's clause.
+    /// <b>A firm sees a clause only for a policy version its invoice's evaluation snapshot applied</b>: the snapshot is the
+    /// <c>procedureSnapshot</c> member of the invoice's own submission findings, read app-only; it is never re-resolved, so a Procedure
+    /// published, changed or retired after the invoice was judged does not change the answer for that invoice. There is no scope switch and no
+    /// "in force" rule here: the snapshot already says which versions judged the invoice, for this invoice's firm.
+    /// <para>Fails closed, with no throw: no text when the invoice or its firm cannot be read, when the invoice has no snapshot (a row judged
+    /// before the snapshot existed, a snapshot a patch dropped, an unknown snapshot version, a damaged one), when the snapshot does not list
+    /// the version as applied (displaced, excluded or absent), when the version, its billing policy or its rule set cannot be read, when the rule
+    /// set is not Published or Retired, when a Procedure rule set's Procedure cannot be named, when the rule set's visible-to-firms flag is off
+    /// (the last step, <see cref="RuleSetClauseVisibility.ForFirm"/>), and on any read fault.</para>
+    /// <para>The result names the clause with <see cref="FirmClauseText.FirmFacingName"/> only: the Procedure's firm-facing name (its name when
+    /// that is blank), or the neutral record label for a record rule. Never the Procedure's name when a firm-facing name is set, an id or an
+    /// override reason; nothing here logs one.</para>
     /// </summary>
     /// <param name="policyVersionId">The rule version the finding was evaluated against.</param>
-    /// <param name="invoiceFirmId">
-    /// <b>Caller contract (130 / 131 / 133 / 134 / 135).</b> The firm of the INVOICE the finding belongs to: the invoice's
-    /// <c>sprk_vendororg</c>, read server-side, and passed only after the route's own firm-membership check has established that the caller
-    /// may see that invoice. Never a value from the request (body, query or route) and never the SPA identity's firm: a CIAM caller may
-    /// belong to several firms (130), so "the caller's firm" is not one value, and internal callers (131, 133) have no SPA identity at all.
-    /// <see cref="Guid.Empty"/> (the invoice has no firm) returns no text.
+    /// <param name="invoiceId">
+    /// <b>Caller contract (130 / 131 / 133 / 134 / 135).</b> The invoice the finding belongs to, passed only after the route's own
+    /// firm-membership check has established that the caller may see that invoice, and read server-side. Never a value from the request (body,
+    /// query or route) and never derived from the SPA identity's firm: a CIAM caller may belong to several firms (130), and internal callers
+    /// (131, 133) have no SPA identity at all. The invoice's firm (<c>sprk_vendororg</c>) is read here; <see cref="Guid.Empty"/> or an invoice
+    /// without a firm returns no text.
     /// </param>
-    public virtual async Task<FirmClauseText> GetFirmClauseAsync(Guid policyVersionId, Guid invoiceFirmId, CancellationToken ct)
+    public virtual async Task<FirmClauseText> GetFirmClauseAsync(Guid policyVersionId, Guid invoiceId, CancellationToken ct)
     {
-        if (invoiceFirmId == Guid.Empty)
+        if (policyVersionId == Guid.Empty || invoiceId == Guid.Empty)
         {
             return FirmClauseText.None;
         }
 
+        try
+        {
+            return await ReadFirmClauseAsync(policyVersionId, invoiceId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Information and above carry the exception type only (a Dataverse fault message can name ids and records), plus the invoice and
+            // policy version ids as structured parameters so a fault can be traced to its read. No other id, and never the exception itself.
+            _logger.LogWarning(
+                "A firm clause read faulted ({ExceptionType}) for invoice {InvoiceId}, policy version {PolicyVersionId}; no clause is shown",
+                ex.GetType().Name, invoiceId, policyVersionId);
+            _logger.LogDebug(ex, "Firm clause read fault detail");
+            return FirmClauseText.None;
+        }
+    }
+
+    private async Task<FirmClauseText> ReadFirmClauseAsync(Guid policyVersionId, Guid invoiceId, CancellationToken ct)
+    {
+        // (1) The invoice and its firm. No firm, no text.
+        var invoiceQuery = new QueryExpression(FinanceBaseValues.InvoiceEntity)
+        {
+            ColumnSet = new ColumnSet(InvoiceContextService.InvoiceFirm),
+            Criteria = { Conditions = { new ConditionExpression("sprk_invoiceid", ConditionOperator.Equal, invoiceId) } },
+            TopCount = 1,
+        };
+        var invoice = (await _entities.RetrieveMultipleAsync(invoiceQuery, ct)).Entities.FirstOrDefault(r => r.Id == invoiceId);
+        if (invoice?.GetAttributeValue<EntityReference>(InvoiceContextService.InvoiceFirm)?.Id is not { } firmId || firmId == Guid.Empty)
+        {
+            return FirmClauseText.None;
+        }
+
+        // (2) The invoice's evaluation snapshot (app-only; the invoice's own submission), and the version must be one it applied.
+        // A missing, null, unknown-version or damaged snapshot reads as no snapshot. Nothing is re-resolved.
+        var submission = await InvoiceBlockedHold.ReadOwnSubmissionAsync(_entities, invoiceId, [InvoiceSubmissionPersister.SubmissionFindingsJson], ct);
+        var snapshot = ProcedureSnapshot.Read(submission?.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson));
+        if (snapshot is null || !snapshot.AppliedPolicyVersionIds.Contains(policyVersionId))
+        {
+            return FirmClauseText.None;
+        }
+
+        // (3) The version, its Billing policy and its rule set.
         var versionQuery = new QueryExpression(VersionEntity)
         {
-            ColumnSet = new ColumnSet("sprk_policy", "sprk_clausereference", "sprk_clauselocation", "sprk_inforceto", PublishStateColumn),
+            ColumnSet = new ColumnSet("sprk_policy", "sprk_clausereference", "sprk_clauselocation"),
             Criteria = { Conditions = { new ConditionExpression("sprk_policyversionid", ConditionOperator.Equal, policyVersionId) } },
             TopCount = 1,
         };
-        var version = (await _entities.RetrieveMultipleAsync(versionQuery, ct)).Entities.FirstOrDefault();
+        var version = (await _entities.RetrieveMultipleAsync(versionQuery, ct)).Entities.FirstOrDefault(r => r.Id == policyVersionId);
         if (version?.GetAttributeValue<EntityReference>("sprk_policy")?.Id is not { } policyId)
         {
             return FirmClauseText.None;
@@ -2416,33 +2494,59 @@ public class RuleSetService
             return FirmClauseText.None;
         }
 
-        // Task 081 (model 7.2): a version published under a Procedure Version was in force for its window, whatever the pointer says
-        // (sprk_currentversion is "latest published", display only); a Draft one never was.
-        var wasInForce = policy.GetAttributeValue<EntityReference>("sprk_currentversion")?.Id == policyVersionId
-            || version.GetAttributeValue<DateTime?>("sprk_inforceto") is not null
-            || version.GetAttributeValue<OptionSetValue>(PublishStateColumn)?.Value == PublishStatePublished;
-        if (!wasInForce)
+        // A record rule's set is record-scoped (the other readers of a set refuse it); a Published set holds a version that judged, and a Retired
+        // one still holds the versions that judged earlier invoices. A draft or any other state holds none.
+        var set = await LoadBillingRuleSetAsync(ruleSetId, ct);
+        if (set is null || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value is not (RuleSetPublished or RuleSetRetired))
         {
             return FirmClauseText.None;
         }
 
-        var set = await LoadRuleSetAsync(ruleSetId, ct);
-        if (set is null || set.GetAttributeValue<OptionSetValue>("statuscode")?.Value != RuleSetPublished)
+        // (4) The label: neutral for a record rule, else the Procedure's firm-facing name; a legacy set has no Procedure and no label.
+        string? label;
+        if (RecordRuleSet.IsRecordScoped(set))
         {
-            return FirmClauseText.None;
+            label = RecordRuleSet.Name;
+        }
+        else if (set.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id is { } procedureId)
+        {
+            label = await FirmFacingNameOfAsync(procedureId, ct);
+            if (label is null)
+            {
+                return FirmClauseText.None;
+            }
+        }
+        else
+        {
+            label = null;
         }
 
-        var scope = set.GetAttributeValue<OptionSetValue>("sprk_scope")?.Value;
-        var assignedToThisFirm = scope == (int)RuleSetScope.Firm && set.GetAttributeValue<EntityReference>("sprk_firm")?.Id == invoiceFirmId;
-        if (scope != (int)RuleSetScope.ClientDefault && !assignedToThisFirm)
-        {
-            return FirmClauseText.None;
-        }
-
+        // (5) The visible-to-firms flag decides last.
         return RuleSetClauseVisibility.ForFirm(
             set.GetAttributeValue<bool>("sprk_visibletofirms"),
             version.GetAttributeValue<string>("sprk_clausereference"),
-            version.GetAttributeValue<string>("sprk_clauselocation"));
+            version.GetAttributeValue<string>("sprk_clauselocation"),
+            label);
+    }
+
+    /// <summary>The Procedure's firm-facing name, or its name when that is blank; null when the Procedure cannot be read or has neither.</summary>
+    private async Task<string?> FirmFacingNameOfAsync(Guid procedureId, CancellationToken ct)
+    {
+        var query = new QueryExpression(ProcedureEntity.Entity)
+        {
+            ColumnSet = new ColumnSet(ProcedureEntity.FirmFacingNameColumn, ProcedureEntity.NameColumn),
+            Criteria = { Conditions = { new ConditionExpression("sprk_procedureid", ConditionOperator.Equal, procedureId) } },
+            TopCount = 1,
+        };
+        var procedure = (await _entities.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault(r => r.Id == procedureId);
+        if (procedure is null)
+        {
+            return null;
+        }
+
+        var firmFacing = procedure.GetAttributeValue<string>(ProcedureEntity.FirmFacingNameColumn);
+        var name = string.IsNullOrWhiteSpace(firmFacing) ? procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn) : firmFacing;
+        return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -2499,7 +2603,31 @@ public class RuleSetService
     internal virtual async Task<Guid?> ProcedureOfRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
         (await LoadRuleSetAsync(ruleSetId, ct))?.GetAttributeValue<EntityReference>(ProcedureColumn)?.Id;
 
-    private async Task<Entity?> LoadRuleSetAsync(Guid ruleSetId, CancellationToken ct)
+    /// <summary>
+    /// ebilling-r1 task 089e: the record a record-scoped billing rule set is filed under, read app-only for the by-id routes' authorization
+    /// (<c>RuleSetEndpoints.RequireAccessToTheRuleSet</c>), which asks it only AFTER the caller's own Read on the set. Null when there is no
+    /// billing set at this id or the set is not record-scoped (the route then continues as before). A record-scoped set with no single core
+    /// lookup has a null <see cref="RecordRuleSetHome.CoreTable"/>, which the filter denies. A read fault throws (the filter denies).
+    /// </summary>
+    internal virtual async Task<RecordRuleSetHome?> RecordHomeOfRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
+        await LoadBillingRuleSetAsync(ruleSetId, ct) is { } set ? RecordRuleSet.HomeOf(set) : null;
+
+    /// <summary>The uniform not found of every by-id route here (the same bytes for a missing set and, since 089e, an unreadable one).</summary>
+    internal static RuleSetOutcome<T> RuleSetNotFound<T>() where T : class =>
+        RuleSetOutcome<T>.Refused(StatusCodes.Status404NotFound, CodeNotFound, "The rule set was not found.");
+
+    /// <summary>
+    /// The one read of a rule set by id, under every route and plan here. Task 089c (089a K1): a record-scoped set reads as no set. It is
+    /// its record's secure child, changed only through the record's override routes (<c>ProcedureAssignmentService</c>), so every mutation
+    /// and read here answers it as the uniform not found. Task 089e: on the by-id routes the route filter answers such a set first (the
+    /// uniform 404 unless the caller can Read the set and its record, then 409 <c>ruleset.record_scoped</c>); this stays the backstop for
+    /// every other caller (plans, the firm clause read).
+    /// </summary>
+    private async Task<Entity?> LoadRuleSetAsync(Guid ruleSetId, CancellationToken ct) =>
+        await LoadBillingRuleSetAsync(ruleSetId, ct) is { } set && !RecordRuleSet.IsRecordScoped(set) ? set : null;
+
+    /// <summary>The billing rule set at this id, record-scoped or not, or null.</summary>
+    private async Task<Entity?> LoadBillingRuleSetAsync(Guid ruleSetId, CancellationToken ct)
     {
         if (ruleSetId == Guid.Empty)
         {
@@ -2741,7 +2869,8 @@ public class RuleSetService
     /// columns (consequence, headline, template). Task 073 (FR-26, I-5, D-89): the validator also gets the consequence, so a rule whose
     /// type may not carry it (Reject on an AiObservation rule, say) is refused on every one of these paths, publish included.
     /// </summary>
-    private List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version)
+    /// <remarks>Internal for task 089c: a record rule (<c>ProcedureAssignmentService.ChangeRuleAsync</c>) is validated by this same method.</remarks>
+    internal List<RuleSetError> ValidateRule(PolicyRow policy, string? ruleTypeRaw, VersionRow version)
     {
         var errors = new List<RuleSetError>();
         void Add(string field, string message, string? reason = null) =>

@@ -1935,7 +1935,11 @@ public class SecureChildShareMirrorTests
     // Task 149 r1 — F3: thread participants are never granted a SECURE message (DirectThreadAccessService)
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-    private DirectThreadAccessService MessageAccess(SecureChildShareWorld world, params Guid[] participants)
+    private DirectThreadAccessService MessageAccess(SecureChildShareWorld world, params Guid[] participants) =>
+        MessageAccess(world, Sprk.Bff.Api.Tests.TestInfrastructure.DirectMessageOwnerTeamDouble.Unconfigured(), participants);
+
+    private DirectThreadAccessService MessageAccess(
+        SecureChildShareWorld world, Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam directOwnerTeam, params Guid[] participants)
     {
         var entities = SecureChildShareWorld.EntitiesOver(() => world);
         entities
@@ -1969,7 +1973,11 @@ public class SecureChildShareMirrorTests
 
         return new DirectThreadAccessService(
             entities.Object, _shares, new Lazy<IThreadMembershipDerivationService>(() => derivation.Object),
-            SecureChildShareWorld.Configuration(), NullLogger<DirectThreadAccessService>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing);
+            SecureChildShareWorld.Configuration(), NullLogger<DirectThreadAccessService>.Instance, new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing,
+            directOwnerTeam,
+            // uac-r2 task 198 R3: the user reader and core-ancestor resolver the host always injects (the record-anchored
+            // grant's Restricted bar). No record here is Restricted, so the grant is exactly as before.
+            new Sprk.Bff.Api.Tests.TestInfrastructure.UserFlagDirectoryDouble(), SecureChildShareWorld.CoreAncestorsOver(() => world));
     }
 
     private static readonly Guid ThreadId = Guid.Parse("7e7e0000-0000-4000-8000-000000000001");
@@ -2125,6 +2133,10 @@ public class SecureChildShareMirrorTests
 
         run.ResultJson.Should().Contain("\"hardDenyWiderThanRead\":1").And.Contain("\"hardDenyUnchecked\":1");
         _shares.MaskOf("sprk_policy", PolicyOfMatter, User(UserA)).Should().Be(ViewOnly);
+        // #1821: an unchecked hard-deny row is named in the error the scheduler records.
+        run.Success.Should().BeFalse();
+        run.ErrorMessage.Should().Be(
+            "1 child(ren) not updated and 0 held; 0 hard-deny row(s) not narrowed to Read and 1 unchecked; the next run retries.");
     }
 
     [Fact]
@@ -2136,7 +2148,9 @@ public class SecureChildShareMirrorTests
         var run = await Job(World().Synchronizer(_shares)).ExecuteAsync(RunContext(), CancellationToken.None);
 
         run.Success.Should().BeFalse();
-        run.ErrorMessage.Should().Contain("1 child(ren) not updated");
+        // #1821: exactly the secure-child counts — no hard-deny clause (none unchecked or failed), no Direct-message clause
+        // (the Direct pass is unavailable here, which is not a failure).
+        run.ErrorMessage.Should().Be("1 child(ren) not updated and 0 held; the next run retries.");
     }
 
     [Fact]

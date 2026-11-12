@@ -610,7 +610,8 @@ public sealed class CoreAncestorResolver
         // Ontology task 042 (uac-r2 re-check F1): the result records the target it was derived for, so a caller that hands it back to
         // StampAsync can only have it reused for the SAME target. Set here, in the one public derivation, and nowhere else.
         (await DeriveStampsAsync(targetEntityLogicalName, targetRecordId, ct, intent).ConfigureAwait(false))
-            with { For = (targetEntityLogicalName, targetRecordId) };
+            with
+        { For = (targetEntityLogicalName, targetRecordId) };
 
     private async Task<CoreAncestorResult> DeriveStampsAsync(
         string targetEntityLogicalName,

@@ -1088,9 +1088,18 @@ public partial class RouteAuthorizationGuardTests
 
     private static readonly IReadOnlyDictionary<string, string> VerbByClientCall = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["GetAsync"] = "GET", ["GetFromJsonAsync"] = "GET", ["GetStringAsync"] = "GET", ["GetByteArrayAsync"] = "GET",
-        ["GetStreamAsync"] = "GET", ["PostAsync"] = "POST", ["PostAsJsonAsync"] = "POST", ["PutAsync"] = "PUT",
-        ["PutAsJsonAsync"] = "PUT", ["PatchAsync"] = "PATCH", ["PatchAsJsonAsync"] = "PATCH", ["DeleteAsync"] = "DELETE",
+        ["GetAsync"] = "GET",
+        ["GetFromJsonAsync"] = "GET",
+        ["GetStringAsync"] = "GET",
+        ["GetByteArrayAsync"] = "GET",
+        ["GetStreamAsync"] = "GET",
+        ["PostAsync"] = "POST",
+        ["PostAsJsonAsync"] = "POST",
+        ["PutAsync"] = "PUT",
+        ["PutAsJsonAsync"] = "PUT",
+        ["PatchAsync"] = "PATCH",
+        ["PatchAsJsonAsync"] = "PATCH",
+        ["DeleteAsync"] = "DELETE",
         ["DeleteFromJsonAsync"] = "DELETE",
     };
 
@@ -1887,25 +1896,25 @@ public partial class RouteAuthorizationGuardTests
                 return Regex.IsMatch(code, @"\.IsInRole\s*\(") && !ConsultsAny(code, decisions);
 
             case "AddPlaybookTablePrivilegeFilter":
-            {
-                // Owner decision 2026-10-30: a table-privilege gate. Its method asks the caller's table privilege and
-                // then calls next; it asks nothing about a record. (The same FILE holds the per-record playbook modes, so
-                // the pin reads the one method, not the file.)
-                var body = MethodBody(code, "AuthorizeCallerTablePrivilegeAsync");
-                return Regex.IsMatch(body, @"\.CallerHoldsPrivilegeAsync\s*\(")
-                       && Regex.IsMatch(body, @"return\s+await\s+next\s*\(")
-                       && !ConsultsAny(body, PlaybookRecordDecisionCalls);
-            }
+                {
+                    // Owner decision 2026-10-30: a table-privilege gate. Its method asks the caller's table privilege and
+                    // then calls next; it asks nothing about a record. (The same FILE holds the per-record playbook modes, so
+                    // the pin reads the one method, not the file.)
+                    var body = MethodBody(code, "AuthorizeCallerTablePrivilegeAsync");
+                    return Regex.IsMatch(body, @"\.CallerHoldsPrivilegeAsync\s*\(")
+                           && Regex.IsMatch(body, @"return\s+await\s+next\s*\(")
+                           && !ConsultsAny(body, PlaybookRecordDecisionCalls);
+                }
 
             case "AddPlaybookPublicFlagShareFilter":
-            {
-                // Review fix round F1: a PUT that changes IsPublic also needs Share, asked through the same table-privilege
-                // method; an unchanged IsPublic goes to next. It reads the stored flag, never asks a record right.
-                var body = MethodBody(code, "AuthorizePublicFlagChangeAsync");
-                return Regex.IsMatch(body, @"AuthorizeCallerTablePrivilegeAsync\s*\(\s*context\s*,\s*next\s*,\s*SharePlaybookPrivilege\s*\)")
-                       && Regex.IsMatch(body, @":\s*await\s+next\s*\(\s*context\s*\)")
-                       && !ConsultsAny(body, PlaybookRecordDecisionCalls);
-            }
+                {
+                    // Review fix round F1: a PUT that changes IsPublic also needs Share, asked through the same table-privilege
+                    // method; an unchanged IsPublic goes to next. It reads the stored flag, never asks a record right.
+                    var body = MethodBody(code, "AuthorizePublicFlagChangeAsync");
+                    return Regex.IsMatch(body, @"AuthorizeCallerTablePrivilegeAsync\s*\(\s*context\s*,\s*next\s*,\s*SharePlaybookPrivilege\s*\)")
+                           && Regex.IsMatch(body, @":\s*await\s+next\s*\(\s*context\s*\)")
+                           && !ConsultsAny(body, PlaybookRecordDecisionCalls);
+                }
 
             case "AddEndpointFilter<CommunicationAuthorizationFilter>":
             case "AddEndpointFilter<WorkspaceAuthorizationFilter>":

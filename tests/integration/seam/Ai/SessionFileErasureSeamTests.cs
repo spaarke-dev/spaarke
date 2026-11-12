@@ -542,7 +542,8 @@ public sealed class SessionFileErasureSeamTests : IClassFixture<ChatDocumentEndp
             PlaybookId: null,
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: []) { OwnerOid = TestSessionOwner.Oid };
+            Messages: [])
+        { OwnerOid = TestSessionOwner.Oid };
 
     /// <summary>Captures cleanup signals so a refused delete can be shown NOT to have fired one.</summary>
     private sealed class RecordingCleanupSignal : ISessionFilesCleanupSignal

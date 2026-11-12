@@ -122,6 +122,15 @@
 //   business-unit change strips every role, and H6/H7/H7b sign in as the BFF App User). The unit id is written to
 //   InterStepState.CustomerBusinessUnitId for H7b (checks it) and H11 (puts guests in it).
 //
+// ONTOLOGY WRITER UNIT (task 267 — #2618, owner decision 2026-11-10): the ontology writer's application user (task 266)
+//   lives ALONE in its own unit "Spaarke Ontology Writer", a direct child of the root, so it inherits nothing from the
+//   customer unit's default team (which H7b S25 gives "Spaarke Basic User"). H10 finds or creates that unit with the same
+//   find-or-create-under-root call, the customer's name among its reserved names (and the writer unit's name among the
+//   customer's), and creates the writer IN it. A writer found in the CUSTOMER's unit (a stamp built by task 266) whose
+//   object id is the writer's principal id is MOVED there and read back - the one move H10 makes: the writer holds no role
+//   H10 gives, and S24 grants its writer-unit role afterwards. Any other foreign unit stays QuarantineRequired. The unit id
+//   is written to InterStepState.OntologyWriterBusinessUnitId for H7b S24.
+//
 // MODEL 1 / MODEL 2 CODE PATH (task 205d / punch row A41 — auth-v4 §10.1 Δ5):
 //   H10 itself is DELIBERATELY tenancy-model-agnostic — it always registers
 //   exactly the two systemuser rows named by whatever bffAppRegId/miClientId/
@@ -315,6 +324,16 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 "customer.bicep's outputs, then start a new run. Nothing was written.",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (string.Equals(interStep.OntologyWriterClientId, interStep.BffAppRegId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Fail closed: nor the BFF app registration, whose app user H10 gives the stamp role in the customer unit and
+            // which H10 never moves (task 267) — the writer would keep the BFF's role and never reach its own unit.
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.OntologyWriterIsStampIdentity,
+                $"InterStepState.ontologyWriterClientId equals the BFF app registration's id ({interStep.BffAppRegId}). The " +
+                "Signal / Decision Record writer must be its own least-privileged identity, never the BFF. Fix customer.bicep's " +
+                "outputs, then start a new run. Nothing was written.",
+                cancellationToken).ConfigureAwait(false);
+        }
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingDataverseEnvUrl,
@@ -323,7 +342,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         }
 
         // T259: the customer unit's name — the intake rule POST /api/runs applied, re-checked (defence in depth).
-        var displayName = CustomerBusinessUnitIntake.Validate(parameters, SecureRecordOwnerRoleSet.Embedded.BusinessUnitName);
+        var displayName = CustomerBusinessUnitIntake.Validate(parameters, CustomerBusinessUnitIntake.ReservedBusinessUnitNames);
         if (displayName is CustomerBusinessUnitIntakeOutcome.Invalid invalidName)
         {
             return await FailAsync(run, etag, FailureClass.Resumable, invalidName.RejectionCode,
@@ -354,8 +373,12 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         }
 
         // (8b) T259 — the customer's own business unit, directly under the root (INCOMING-145 §6 T1).
+        //      The intake name check above is only a first filter (it compares names in code); the binding check is the
+        //      id comparison inside EnsureCustomerBusinessUnitAsync against the units Dataverse resolves for these names:
+        //      the Secure Record unit and (task 267) the ontology writer's unit.
         var unitOutcome = await _appUserCreator.EnsureCustomerBusinessUnitAsync(
-            dataverseEnvUrl, tenantId, customerUnitName, cancellationToken).ConfigureAwait(false);
+            dataverseEnvUrl, tenantId, customerUnitName, CustomerBusinessUnitIntake.ReservedBusinessUnitNames,
+            cancellationToken).ConfigureAwait(false);
         Guid customerUnitId;
         switch (unitOutcome)
         {
@@ -374,10 +397,69 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                     "The customer's unit must be a DIRECT child of the root, a sibling of the Secure Record unit (INCOMING-145 " +
                     "§6 T1); re-parenting a unit is an owner decision. Nothing was written.",
                     cancellationToken).ConfigureAwait(false);
+            case CustomerBusinessUnitOutcome.IsReservedUnit reserved:
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.CustomerBusinessUnitIsReserved,
+                    $"The business unit Dataverse finds for the customer's name '{customerUnitName}' is the " +
+                    $"'{reserved.ReservedUnitName}' unit ({reserved.BusinessUnitId}): Dataverse matches business-unit names " +
+                    "without case or accents, so the name collides with it. No user may be placed in that unit. " +
+                    (reserved.CreatedByThisCall
+                        ? "H10 had just created that unit (no reserved unit existed yet); it is empty — remove it, then "
+                        : "H10 placed no user in it in this attempt (if an earlier attempt of an older build did, moving those " +
+                          "users is an owner decision); ") +
+                    "start a new run with a customer display name that differs by more than case or accents.",
+                    cancellationToken).ConfigureAwait(false);
             default:
                 return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.CustomerBusinessUnitFailed,
                     $"The customer business unit '{customerUnitName}' could not be read or created: " +
                     $"{((CustomerBusinessUnitOutcome.Failure)unitOutcome).Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+        }
+
+        // (8c) Task 267 (#2618) — the ontology writer's OWN unit, directly under the root, holding the writer only. Same
+        //      find-or-create; its reserved names are the Secure Record unit and the customer's unit, compared by the ids
+        //      Dataverse resolves (both ways with 8b). H7b S24 re-checks it by id.
+        var writerUnitName = SecureRecordSetupProcedure.OntologyWriterBusinessUnitName;
+        var writerUnitOutcome = await _appUserCreator.EnsureCustomerBusinessUnitAsync(
+            dataverseEnvUrl, tenantId, writerUnitName,
+            [SecureRecordOwnerRoleSet.Embedded.BusinessUnitName, customerUnitName], cancellationToken).ConfigureAwait(false);
+        Guid writerUnitId;
+        switch (writerUnitOutcome)
+        {
+            case CustomerBusinessUnitOutcome.Success found when found.BusinessUnitId != customerUnitId:
+                writerUnitId = found.BusinessUnitId;
+                break;
+            case CustomerBusinessUnitOutcome.Success:
+                // Defence in depth: the reserved-name lookup already maps this case to IsReservedUnit.
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.OntologyWriterBusinessUnitIsReserved,
+                    $"The business unit Dataverse finds for '{writerUnitName}' is the customer's own unit ({customerUnitId}). The " +
+                    "ontology writer must be alone in its unit; H10 does not place it there. Nothing more was written.",
+                    cancellationToken).ConfigureAwait(false);
+            case CustomerBusinessUnitOutcome.Ambiguous ambiguous:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.OntologyWriterBusinessUnitAmbiguous,
+                    $"{ambiguous.Count} business units are named '{writerUnitName}' — H10 does not guess which one is the " +
+                    "ontology writer's. Rename or remove the extra one, then resume. Nothing more was written.",
+                    cancellationToken).ConfigureAwait(false);
+            case CustomerBusinessUnitOutcome.WrongParent wrong:
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.OntologyWriterBusinessUnitWrongParent,
+                    $"Business unit '{writerUnitName}' ({wrong.BusinessUnitId}) has parent " +
+                    $"{wrong.ParentId?.ToString() ?? "(none — it is the root)"}, not the root unit {wrong.RootBusinessUnitId}. " +
+                    "The ontology writer's unit must be a DIRECT child of the root; re-parenting a unit is an owner decision. " +
+                    "Nothing more was written.",
+                    cancellationToken).ConfigureAwait(false);
+            case CustomerBusinessUnitOutcome.IsReservedUnit reserved:
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.OntologyWriterBusinessUnitIsReserved,
+                    $"The business unit Dataverse finds for '{writerUnitName}' is the '{reserved.ReservedUnitName}' unit " +
+                    $"({reserved.BusinessUnitId}): Dataverse matches business-unit names without case or accents. The ontology " +
+                    "writer must be alone in its own unit, never in the Secure Record unit or the customer's. " +
+                    (reserved.CreatedByThisCall
+                        ? "H10 had just created that unit; it is empty — remove it, then start a new run with a customer " +
+                          "display name that differs from it by more than case or accents."
+                        : "H10 placed no user in it; renaming a unit is an owner decision, then resume."),
+                    cancellationToken).ConfigureAwait(false);
+            default:
+                return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.OntologyWriterBusinessUnitFailed,
+                    $"The ontology writer's business unit '{writerUnitName}' could not be read or created: " +
+                    $"{((CustomerBusinessUnitOutcome.Failure)writerUnitOutcome).Diagnostic}",
                     cancellationToken).ConfigureAwait(false);
         }
 
@@ -387,8 +469,8 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
             cancellationToken).ConfigureAwait(false);
         if (bffOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit bffElsewhere)
         {
-            return await ForeignUnitAsync(run, etag, "BFF app-reg", bffAppRegId, bffElsewhere, customerUnitId, cancellationToken)
-                .ConfigureAwait(false);
+            return await ForeignUnitAsync(run, etag, "BFF app-reg", bffAppRegId, bffElsewhere,
+                $"the customer's unit {customerUnitId}", cancellationToken).ConfigureAwait(false);
         }
         if (bffOutcome is DataverseAppUserCreationOutcome.Failure bffFailure)
         {
@@ -417,8 +499,8 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
             cancellationToken).ConfigureAwait(false);
         if (uamiOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit uamiElsewhere)
         {
-            return await ForeignUnitAsync(run, etag, "UAMI", uamiClientId, uamiElsewhere, customerUnitId, cancellationToken)
-                .ConfigureAwait(false);
+            return await ForeignUnitAsync(run, etag, "UAMI", uamiClientId, uamiElsewhere,
+                $"the customer's unit {customerUnitId}", cancellationToken).ConfigureAwait(false);
         }
         if (uamiOutcome is DataverseAppUserCreationOutcome.Failure uamiFailure)
         {
@@ -428,19 +510,23 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         }
         var uamiSystemUserIdFromCreate = ((DataverseAppUserCreationOutcome.Success)uamiOutcome).SystemUserId;
 
-        // (10b) Task 266 (#2605): the ontology writer UAMI's App User — IN the customer unit, with NO role (SecurityRoleName
-        //       null). H7b S24 gives it exactly the writer role and profiles; never System Administrator (FR-21). The
-        //       explicit azureactivedirectoryobjectid is the writer's principal id, as for the stamp UAMI (auth-v4 §10.4).
+        // (10b) Task 266 (#2605) / 267 (#2618): the ontology writer UAMI's App User — IN its own unit, with NO role
+        //       (SecurityRoleName null). H7b S24 gives it exactly the writer role and profiles; never System Administrator
+        //       (FR-21). The explicit azureactivedirectoryobjectid is the writer's principal id, as for the stamp UAMI
+        //       (auth-v4 §10.4). A writer task 266 placed in the customer's unit is moved here (object id checked first,
+        //       move read back); from any other unit it is never moved.
         var writerClientId = interStep.OntologyWriterClientId!;
         var writerOutcome = await _appUserCreator.EnsureAppUserAsync(
             new DataverseAppUserCreationRequest(
-                dataverseEnvUrl, tenantId, writerClientId, SecurityRoleName: null, customerUnitId,
-                SystemUserAzureActiveDirectoryObjectId: interStep.OntologyWriterObjectId),
+                dataverseEnvUrl, tenantId, writerClientId, SecurityRoleName: null, writerUnitId,
+                SystemUserAzureActiveDirectoryObjectId: interStep.OntologyWriterObjectId,
+                MoveFromBusinessUnitId: customerUnitId),
             cancellationToken).ConfigureAwait(false);
         if (writerOutcome is DataverseAppUserCreationOutcome.InForeignBusinessUnit writerElsewhere)
         {
-            return await ForeignUnitAsync(run, etag, "ontology writer UAMI", writerClientId, writerElsewhere, customerUnitId, cancellationToken)
-                .ConfigureAwait(false);
+            return await ForeignUnitAsync(run, etag, "ontology writer UAMI", writerClientId, writerElsewhere,
+                $"the ontology writer's unit '{writerUnitName}' {writerUnitId} (moved only from the customer's unit {customerUnitId})",
+                cancellationToken).ConfigureAwait(false);
         }
         if (writerOutcome is DataverseAppUserCreationOutcome.Failure writerFailure)
         {
@@ -448,7 +534,15 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
                 $"Ontology writer UAMI App User registration failed: {writerFailure.Diagnostic}", cancellationToken)
                 .ConfigureAwait(false);
         }
-        var writerSystemUserId = ((DataverseAppUserCreationOutcome.Success)writerOutcome).SystemUserId;
+        var writerSuccess = (DataverseAppUserCreationOutcome.Success)writerOutcome;
+        var writerSystemUserId = writerSuccess.SystemUserId;
+        if (writerSuccess.MovedFromBusinessUnitId is { } movedFrom)
+        {
+            _logger.LogWarning(
+                "H10 moved the ontology writer's App User {WriterSystemUserId} from business unit {From} to its own unit {To} " +
+                "(task 267); H7b S24 grants its writer-unit role (runId={RunId} customerId={CustomerId})",
+                writerSystemUserId, movedFrom, writerUnitId, envelope.RunId, envelope.CustomerId);
+        }
 
         // (11) T2 SILENT-FAIL TRAP — independent post-registration re-query.
         var t2Result = await _appUserVerifier.VerifyAsync(
@@ -599,24 +693,26 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
 
         return await MarkCompleteAsync(
             run, etag, idempotencyKey, uamiSystemUserId, bffSystemUserId ?? uamiSystemUserIdFromCreate, customerUnitId,
-            writerSystemUserId, envelope, cancellationToken).ConfigureAwait(false);
+            writerSystemUserId, writerUnitId, envelope, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// The set of application users H10 registers, folded into the idempotency key so a run completed under an older set
-    /// re-runs H10. <c>2</c> = task 266 added the ontology writer UAMI's application user (no role).
+    /// re-runs H10. <c>2</c> = task 266 added the ontology writer UAMI's application user (no role). <c>3</c> = task 267
+    /// moved it to its own business unit and records <see cref="InterStepState.OntologyWriterBusinessUnitId"/>.
     /// </summary>
-    internal const string AppUserSetVersion = "app-user-set=2";
+    internal const string AppUserSetVersion = "app-user-set=3";
 
     /// <summary>T259: an App User already in another business unit — QuarantineRequired, nothing moved.</summary>
     private Task<HandlerResult> ForeignUnitAsync(
         ProvisioningRun run, string etag, string label, string applicationId,
-        DataverseAppUserCreationOutcome.InForeignBusinessUnit elsewhere, Guid customerUnitId, CancellationToken cancellationToken)
+        DataverseAppUserCreationOutcome.InForeignBusinessUnit elsewhere, string wantedUnit, CancellationToken cancellationToken)
         => FailAsync(run, etag, FailureClass.QuarantineRequired, H10Rejections.AppUserInForeignBusinessUnit,
             $"The {label} App User (applicationid {applicationId}, systemuser {elsewhere.SystemUserId}) already exists in business " +
-            $"unit {elsewhere.BusinessUnitId}, not the customer's unit {customerUnitId}. H10 never moves it: a business-unit " +
-            "change strips every role, and H6/H7/H7b sign in as the BFF App User. Moving it (and re-granting System " +
-            "Administrator in the customer unit) is an owner decision; then resume.",
+            $"unit {elsewhere.BusinessUnitId}, not {wantedUnit}" +
+            (elsewhere.Reason is null ? string.Empty : $"; {elsewhere.Reason}") +
+            ". H10 never moves it: a business-unit change strips every role, and H6/H7/H7b sign in as the BFF App User. " +
+            "Moving it (and re-granting its roles in the right unit) is an owner decision; then resume.",
             cancellationToken);
 
     /// <summary>
@@ -706,6 +802,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         string bffSystemUserId,
         Guid customerUnitId,
         string writerSystemUserId,
+        Guid writerUnitId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -729,6 +826,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         run.InterStepState.BffAppRegSystemUserId = bffSystemUserId;
         run.InterStepState.CustomerBusinessUnitId = customerUnitId.ToString("D");   // T259 — read by H7b and H11
         run.InterStepState.OntologyWriterSystemUserId = writerSystemUserId;          // T266 — read by H7b S24
+        run.InterStepState.OntologyWriterBusinessUnitId = writerUnitId.ToString("D"); // T267 — read by H7b S24
 
         run.GateStates[H10Gates.AppUserCreated] = new GateEntry
         {

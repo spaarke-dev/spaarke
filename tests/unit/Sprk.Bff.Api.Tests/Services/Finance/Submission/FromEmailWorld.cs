@@ -111,6 +111,13 @@ internal sealed class FromEmailWorld
                 Files.TryGetValue((drive, item), out var bytes) ? new MemoryStream(bytes) : null);
     }
 
+    /// <summary>
+    /// Task 095c-2: the tracking-scope phase the intake reads (<see cref="ITrackingNumberAllocator.NumbersSubmissionsWithoutFirmAsync"/>):
+    /// true is P2 (the scope key Active), false is P0 or P1. Unset, the allocator double answers false (P0), as an environment before the script.
+    /// </summary>
+    public void ScopeKeyActive(bool active = true) =>
+        Intake.Allocator.Setup(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>())).ReturnsAsync(active);
+
     /// <summary>SPE, read-only here (Strict: any write fails the test).</summary>
     public readonly Mock<SpeFileStore> Spe;
 
@@ -129,7 +136,11 @@ internal sealed class FromEmailWorld
 
     public static AttachmentReference Attachment(string name, byte[] bytes, string type) => new()
     {
-        AttachmentId = "att-" + name, FileName = name, Size = bytes.Length, ContentType = type, ContentBase64 = Convert.ToBase64String(bytes),
+        AttachmentId = "att-" + name,
+        FileName = name,
+        Size = bytes.Length,
+        ContentType = type,
+        ContentBase64 = Convert.ToBase64String(bytes),
     };
 
     public static readonly AttachmentReference Invoice = Attachment("Invoice 1001.pdf", PdfBytes, "application/pdf");
@@ -137,7 +148,10 @@ internal sealed class FromEmailWorld
 
     public static FromEmailMark Mark(AttachmentReference a, string mark) => new()
     {
-        FileName = a.FileName, Size = a.Size, ContentType = a.ContentType, Mark = mark,
+        FileName = a.FileName,
+        Size = a.Size,
+        ContentType = a.ContentType,
+        Mark = mark,
     };
 
     public static EmailMetadata Email(params AttachmentReference[] attachments) => new()
@@ -151,15 +165,15 @@ internal sealed class FromEmailWorld
 
     public static FromEmailSubmissionInput Input(
         IReadOnlyList<FromEmailMark>? marks = null, EmailMetadata? email = null, string? number = "1001", string mode = "New", Guid? firm = null) => new()
-    {
-        CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
-        SaveEntityType = "Matter",
-        Email = email ?? Email(),
-        Marks = marks ?? new[] { Mark(Invoice, "Invoice"), Mark(Timesheet, "Supporting") },
-        FirmId = firm ?? FirmId,
-        FirmInvoiceNumber = number,
-        Mode = mode,
-    };
+        {
+            CoreRecord = new InvoiceCoreRecord(InvoiceCoreRecordKind.Matter, MatterId),
+            SaveEntityType = "Matter",
+            Email = email ?? Email(),
+            Marks = marks ?? new[] { Mark(Invoice, "Invoice"), Mark(Timesheet, "Supporting") },
+            FirmId = firm ?? FirmId,
+            FirmInvoiceNumber = number,
+            Mode = mode,
+        };
 
     public static HttpContext Http()
     {
@@ -297,7 +311,8 @@ internal sealed class FromEmailWorld
             {
                 ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Received),
                 [TrackingNumberAllocator.TrackingNumberColumn] = tracking,
-                [TrackingNumberAllocator.FirmColumn] = new EntityReference("sprk_organization", input.FirmId),
+                // Task 095c-2: a submission with no firm has no firm on its row.
+                [TrackingNumberAllocator.FirmColumn] = input.FirmId is { } firm ? new EntityReference("sprk_organization", firm) : null,
                 [TrackingNumberAllocator.FirmInvoiceNumberColumn] = input.FirmInvoiceNumber,
                 [RecordCreatorPerson.Column] = new EntityReference("systemuser", input.CallerSystemUserId),
             };

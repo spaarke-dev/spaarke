@@ -3,8 +3,10 @@
  * unfilled. A privilege or access refusal now becomes one plain sentence naming no ids, users, tables or privilege
  * names, chosen from the privilege the raw message names (Create / AppendTo or Append / none); a BFF child-record
  * refusal (`child_record.denied`) gets the neutral sentence; any other error keeps a clean message. Covers the helper,
- * the two Xrm.WebApi create wizards end to end (Project, Matter), and the five BFF-routed create wizards end to end
- * (Event, Invoice, Report Card, To Do, Work Assignment) through the BFF's 403.
+ * and the six BFF-routed create wizards end to end (Event, Report Card, To Do, Work Assignment, Matter, Project)
+ * through the BFF's 403. The Matter and Project wizards moved to the BFF child-records route in
+ * field-mapping-server-write-path-r1 tasks 021 and 022, so no Xrm.WebApi create wizard is left here. (The Invoice
+ * wizard no longer creates anything itself: ebilling-r1 task 052.)
  */
 
 import { describeWebApiCreateError } from '../webApiCreateError';
@@ -12,12 +14,10 @@ import { ChildRecordWriteError } from '../adapters/bffChildWriteAdapter';
 import { ProjectService } from '../../components/CreateProjectWizard/projectService';
 import { MatterService } from '../../components/CreateMatterWizard/matterService';
 import { EventService } from '../../components/CreateEventWizard/eventService';
-import { InvoiceService } from '../../components/CreateInvoiceWizard/invoiceService';
 import { ReportCardService } from '../../components/CreateReportCardWizard/reportCardService';
 import { TodoService } from '../../components/CreateTodoWizard/todoService';
 import { WorkAssignmentService } from '../../components/CreateWorkAssignmentWizard/workAssignmentService';
 import { EMPTY_EVENT_FORM } from '../../components/CreateEventWizard/formTypes';
-import { buildEmptyInvoiceForm } from '../../components/CreateInvoiceWizard/formTypes';
 import { buildEmptyReportCardForm } from '../../components/CreateReportCardWizard/formTypes';
 import { EMPTY_TODO_FORM } from '../../components/CreateTodoWizard/formTypes';
 import { EMPTY_WORK_ASSIGNMENT_FORM } from '../../components/CreateWorkAssignmentWizard/formTypes';
@@ -202,6 +202,53 @@ describe('describeWebApiCreateError', () => {
     }
   });
 
+  it.each([
+    ['sdap.access.deny.delegation_share_required', 'share'],
+    ['sdap.access.deny.delegation_write_required', 'edit and share'],
+  ])(
+    'under a secure matter, the secure-create rights refusal %s names the rule and the administrator',
+    (code, rights) => {
+      const err = new ChildRecordWriteError('To create a secure record you need Write and Share.', 403, code);
+      const text = describeWebApiCreateError(err, 'project', { rootCreate: true, secureParent: 'matter' });
+      expect(text).toEqual({
+        message: `Creating a project under a secure matter needs permission to ${rights} secure records. Ask an administrator.`,
+        isAccessDenied: true,
+      });
+      expect(text.message).not.toContain('without Secure');
+    }
+  );
+
+  it('under a secure matter, a rights check that could not be completed does not offer "without Secure"', () => {
+    const err = new ChildRecordWriteError('x', 403, 'sdap.access.deny.delegation_check_failed');
+    const text = describeWebApiCreateError(err, 'project', { secureParent: 'matter' });
+    expect(text.message).toBe(
+      'Whether you can create a project under a secure matter could not be checked. Try again in a moment.'
+    );
+  });
+
+  it('a value copied from a secure record that files the record gets its own sentence, which never suggests retrying', () => {
+    const asApiError = apiErrorFor(400, {
+      title: 'Invalid request',
+      status: 400,
+      detail: 'The server words.',
+      reasonCode: 'record_creation.mapping_source_secure_filing',
+    });
+    const asWriteError = new ChildRecordWriteError(
+      'The server words.',
+      400,
+      'record_creation.mapping_source_secure_filing'
+    );
+    for (const err of [asApiError, asWriteError]) {
+      const text = describeWebApiCreateError(err, 'project');
+      expect(text).toEqual({
+        message:
+          "This project can't be created with values copied from a secure record, because it would not be secure. Create it as secure, or file it under a different record.",
+        isAccessDenied: false,
+      });
+      expect(text.message.toLowerCase()).not.toContain('try again');
+    }
+  });
+
   it('a different sdap.access.deny code is not mapped to the secure-create sentence', () => {
     const err = new ChildRecordWriteError('Some other refusal.', 403, 'sdap.access.deny.delegation_no_caller_token');
     expect(describeWebApiCreateError(err, 'project')).toEqual({
@@ -261,18 +308,9 @@ describe('describeWebApiCreateError', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The Xrm.WebApi create wizards, end to end through their service
+// The create wizards' forms. No Xrm.WebApi create wizard is left: the Matter (task 021) and the Project (task 022)
+// create through the BFF child-records route and are covered with the BFF-routed wizards below.
 // ---------------------------------------------------------------------------
-
-function rejectingDataService(err: unknown): IDataService {
-  return {
-    createRecord: jest.fn().mockRejectedValue(err),
-    retrieveRecord: jest.fn().mockResolvedValue({}),
-    retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
-    updateRecord: jest.fn().mockResolvedValue(undefined),
-    deleteRecord: jest.fn().mockResolvedValue(undefined),
-  };
-}
 
 const PROJECT_FORM: ICreateProjectFormState = {
   projectTypeId: '',
@@ -304,64 +342,6 @@ const MATTER_FORM: ICreateMatterFormState = {
   assignedOutsideCounselName: '',
   summary: '',
 };
-
-describe('create wizards show the sentence for a privilege refusal and log the full error', () => {
-  let errorSpy: jest.SpyInstance;
-
-  beforeEach(() => {
-    (global as any).fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ value: [] }) });
-    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    jest.spyOn(console, 'info').mockImplementation(() => undefined);
-    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('Project: the sentence, no template, and the full error object in console.error', async () => {
-    const result = await new ProjectService(rejectingDataService(PRIVILEGE_ERROR)).createProject(PROJECT_FORM);
-
-    expect(result.success).toBe(false);
-    expect(result.errorMessage).toBe(NEUTRAL_SENTENCE('project'));
-    expect(errorSpy).toHaveBeenCalledWith('[ProjectService] createRecord error:', PRIVILEGE_ERROR);
-  });
-
-  it('Project: any other error keeps the "Failed to create project record" message', async () => {
-    const result = await new ProjectService(rejectingDataService(new Error('Dataverse boom'))).createProject(
-      PROJECT_FORM
-    );
-
-    expect(result.errorMessage).toBe('Failed to create project record: Dataverse boom');
-  });
-
-  it.each([
-    ['AppendTo on a reference table', missing('prvAppendTosprk_ProjectType_Ref'), LINK_SENTENCE('project')],
-    ['Create on the project itself', missing('prvCreatesprk_Project'), CREATE_SENTENCE('project')],
-  ])('Project: %s gets its own sentence', async (_label, err, sentence) => {
-    const result = await new ProjectService(rejectingDataService(err)).createProject(PROJECT_FORM);
-
-    expect(result.errorMessage).toBe(sentence);
-  });
-
-  it('Matter: the sentence, no template, and the full error object in console.error', async () => {
-    const authFetch = jest
-      .fn()
-      .mockResolvedValue({ ok: true, status: 200, json: async () => ({}), text: async () => '' });
-    const service = new MatterService(
-      rejectingDataService(PRIVILEGE_ERROR),
-      authFetch as unknown as typeof fetch,
-      'https://example.test',
-      'container'
-    );
-
-    const result = await service.createMatter(MATTER_FORM, [], {});
-
-    expect(result.status).toBe('error');
-    expect(result.errorMessage).toBe(NEUTRAL_SENTENCE('matter'));
-    expect(errorSpy).toHaveBeenCalledWith('[MatterService] createRecord error:', PRIVILEGE_ERROR);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // The BFF-routed create wizards, end to end through their service and the BFF's 403
@@ -424,16 +404,6 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
       f => new EventService(readOnlyDataService(), f, BFF).createEvent({ ...EMPTY_EVENT_FORM, eventName: 'Hearing' }),
     ],
     [
-      'Invoice',
-      'invoice',
-      f =>
-        new InvoiceService(readOnlyDataService(), f, BFF).createInvoice(
-          { ...buildEmptyInvoiceForm(), name: 'INV' },
-          null,
-          []
-        ),
-    ],
-    [
       'Report Card',
       'report card',
       f =>
@@ -447,6 +417,8 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
       'to do',
       f => new TodoService(readOnlyDataService(), f, BFF).createTodo({ ...EMPTY_TODO_FORM, title: 'Call' }),
     ],
+    ['Matter', 'matter', f => new MatterService(readOnlyDataService(), f, BFF).createMatter(MATTER_FORM, [], {})],
+    ['Project', 'project', f => new ProjectService(readOnlyDataService(), f, BFF).createProject(PROJECT_FORM)],
     [
       'Work Assignment',
       'work assignment',
@@ -468,5 +440,101 @@ describe('the BFF-routed create wizards show the neutral sentence for the BFF re
     expect(fetch.mock.calls.some(([url, init]) => CHILD_CREATE.test(url) && init?.method === 'POST')).toBe(true);
     expect(result.errorMessage).toBe(NEUTRAL_SENTENCE(noun));
     expect(result.errorMessage).not.toMatch(/prv|sprk_/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (task 021, F1): a ROOT create (the matter has no parent) answers the uniform 404 when a value it binds
+// is missing or not the caller's to use. The shared sentence says "a record this matter is filed under", which is wrong
+// here: the matter is filed under nothing. The matter's catch maps it to the sentence below.
+// ---------------------------------------------------------------------------
+
+const ROOT_NOT_FOUND_SENTENCE =
+  "One of the values you selected was not found, or you don't have permission to link it to this matter. Ask your administrator.";
+
+const BFF_NOT_FOUND = {
+  type: 'https://tools.ietf.org/html/rfc9110#section-15.5.5',
+  title: 'Not found',
+  status: 404,
+  detail: 'A record this matter is filed under was not found. The matter was not saved.',
+  reasonCode: 'child_record.not_found',
+};
+
+describe('a root create (matter) that gets the BFF uniform not-found', () => {
+  beforeEach(() => {
+    (global as any).fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ value: [] }) });
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('describeWebApiCreateError with { rootCreate: true } maps child_record.not_found to the access-denied sentence', () => {
+    const err = new ChildRecordWriteError(BFF_NOT_FOUND.detail, 404, 'child_record.not_found');
+    expect(describeWebApiCreateError(err, 'matter', { rootCreate: true })).toEqual({
+      message: ROOT_NOT_FOUND_SENTENCE,
+      isAccessDenied: true,
+    });
+  });
+
+  it('without the option the not-found keeps its own detail (the child wizards still say "filed under")', () => {
+    const err = new ChildRecordWriteError(BFF_NOT_FOUND.detail, 404, 'child_record.not_found');
+    expect(describeWebApiCreateError(err, 'to do')).toEqual({ message: BFF_NOT_FOUND.detail, isAccessDenied: false });
+  });
+
+  it('the Matter wizard shows the sentence, never "filed under", and does not prefix "Failed to create"', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(404, BFF_NOT_FOUND)
+        : fakeResponse(200, {})
+    );
+
+    const result = await new MatterService(readOnlyDataService(), fetch, BFF).createMatter(MATTER_FORM, [], {});
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toBe(ROOT_NOT_FOUND_SENTENCE);
+    expect(result.errorMessage).not.toMatch(/filed under/i);
+  });
+
+  // Task 022: the project create names no parent either (the wizard files it under its matter after the create), so the
+  // route's uniform not-found is one of the values the user selected.
+  it('the Project wizard shows the root-create sentence too, never "filed under"', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(404, {
+            ...BFF_NOT_FOUND,
+            detail: 'A record this project is filed under was not found. The project was not saved.',
+          })
+        : fakeResponse(200, {})
+    );
+
+    const result = await new ProjectService(readOnlyDataService(), fetch, BFF).createProject(PROJECT_FORM);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toBe(
+      "One of the values you selected was not found, or you don't have permission to link it to this project. Ask your administrator."
+    );
+    expect(result.errorMessage).not.toMatch(/filed under/i);
+  });
+
+  it('a different reasonCode on the matter create still gets the "Failed to create matter record" prefix', async () => {
+    const fetch = throwingAuthenticatedFetch(async (url: string, init?: RequestInit) =>
+      CHILD_CREATE.test(url) && (init?.method ?? 'GET').toUpperCase() === 'POST'
+        ? fakeResponse(400, {
+            title: 'Bad',
+            status: 400,
+            detail: 'Name is required.',
+            reasonCode: 'child_record.invalid',
+          })
+        : fakeResponse(200, {})
+    );
+
+    const result = await new MatterService(readOnlyDataService(), fetch, BFF).createMatter(MATTER_FORM, [], {});
+
+    expect(result.errorMessage).toBe('Failed to create matter record: Name is required.');
   });
 });

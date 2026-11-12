@@ -142,8 +142,9 @@
 - [Lavern Precedent Board](lavern-precedent-board.md) — promotion/decay
 
 ## Meta
-- [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention
-- [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked
+- [Knowledge base layout](knowledge-base-layout.md) — `knowledge/` tree convention; SOURCE/NOTES/README
+- [Cascade delete privileges/Archive (2026-10-17)](dataverse-cascade-delete-privileges-archive-2026-10-17.md) — child Delete priv checked, whole op fails (documented); Archive 'internal use only'; PUT+MergeLabels
+- [Defender for Storage overwrite->rescan (2026-11-05)](defender-storage-overwrite-rescan-2026-11-05.md) — Put Blob/PutBlockList overwrite triggers an on-upload scan (documented); tag fate on overwrite, identical-bytes skip and cap behaviour undocumented; not scanned at cap/filter/error
 - [Dataverse duplicate detection API (2026-10-15)](dataverse-duplicate-detection-api-default-2026-10-15.md) — suppressed by default
 - [xms_edov claim (2026-10-23)](entra-xms-edov-claim-2026-10-23.md) — needs email claim; absent vs false undocumented
 - [A9 dev Entra setup (2026-10-19)](entra-multitenant-api-a9-dev-setup-2026-10-19.md) — v2 token delta; AzureAd:Audience risk

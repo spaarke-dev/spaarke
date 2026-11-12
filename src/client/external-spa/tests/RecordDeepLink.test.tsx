@@ -36,14 +36,18 @@ vi.mock('../src/components/detail/RecordDetailModal', async () => {
     '../src/components/detail/RecordDetailModal'
   );
   type Props = React.ComponentProps<typeof actual.RecordDetailModal>;
-  const Stub = (props: Props): React.ReactElement => {
+  const Stub = (props: Props): React.ReactElement | null => {
     React.useEffect(() => {
       h.stubMounts.count += 1;
     }, []);
-    const { onSettled } = props;
+    // Like the real modal: the opener keeps it mounted and closes it with open={false} (#2658), so a closed stub renders
+    // nothing and settles nothing, and a record shown in its place settles again (the real one settles per id).
+    const { onSettled, open } = props;
+    const id = props.recordIds[props.index];
     React.useEffect(() => {
-      if (h.settle.value) onSettled?.();
-    }, [onSettled]);
+      if (open && h.settle.value) onSettled?.();
+    }, [open, id, onSettled]);
+    if (!open) return null;
     return React.createElement(
       'div',
       {

@@ -11,6 +11,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
+using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
@@ -69,6 +71,8 @@ public sealed class InvoiceAdjustmentServiceTests
         public readonly Guid InvoiceId = Guid.NewGuid();
         public readonly Entity Invoice;
         public readonly List<Entity> Lines = [];
+        /// <summary>095d-0: the submissions linked to the invoice (the firm gate reads their reason and stored findings).</summary>
+        public readonly List<Entity> Submissions = [];
         public readonly InMemoryLocks Locks = new();
         public readonly Mock<IGenericEntityService> Entities = new();
         public readonly Mock<IFieldMappingDataverseService> Records = new();
@@ -76,6 +80,12 @@ public sealed class InvoiceAdjustmentServiceTests
         public readonly List<BillingRuleCandidate> Candidates = [];
         public readonly Dictionary<Guid, string> RuleSetNames = new() { [RuleSet] = "Acme Billing Guidelines" };
         public readonly List<Guid> FirmsAsked = [];
+        /// <summary>082c: the core record and date each rule read was asked for.</summary>
+        public readonly List<(CoreRecordReference? Core, DateOnly Date)> RulesAsked = [];
+        /// <summary>082c K1: the latest dated line's work date each rule read was given (rule (c)).</summary>
+        public readonly List<DateOnly?> WorkDatesAsked = [];
+        /// <summary>082c: the Procedure stream the rule read resolves (none by default).</summary>
+        public ProcedureResolution Procedures = Sprk.Bff.Api.Tests.Domain.Signals.Billing.BillingEvaluationKit.NoProcedures();
         public RecordOwnerResolution Owner = RecordOwnerResolution.Owned(Team);
         /// <summary>194b R3b-2: when set, the REAL resolver (over an <see cref="TestInfrastructure.OwnershipDirectory"/>) replaces the mock.</summary>
         public IRecordOwnershipResolver? Resolver;
@@ -125,6 +135,7 @@ public sealed class InvoiceAdjustmentServiceTests
                         return Task.FromResult(query.EntityName switch
                         {
                             "sprk_invoice" => new EntityCollection([Copy(Invoice)]),
+                            "sprk_invoicesubmission" => new EntityCollection(Submissions.Select(Copy).ToList()),
                             "sprk_billingevent" => new EntityCollection(LinesFor(query).Select(Copy).ToList()),
                             "sprk_ruleset" => new EntityCollection(RuleSetNames
                                 .Select(n => new Entity("sprk_ruleset", n.Key) { ["sprk_name"] = n.Value }).ToList()),
@@ -198,10 +209,10 @@ public sealed class InvoiceAdjustmentServiceTests
                     : token.IsCancellationRequested
                         ? Task.FromCanceled<Dictionary<string, object?>>(token)
                         : Task.FromResult(new Dictionary<string, object?>
-                    {
-                        ["sprk_totalamount"] = Invoice.GetAttributeValue<Money>("sprk_totalamount").Value,
-                        ["versionnumber"] = 5L,
-                    }));
+                        {
+                            ["sprk_totalamount"] = Invoice.GetAttributeValue<Money>("sprk_totalamount").Value,
+                            ["versionnumber"] = 5L,
+                        }));
             Records.Setup(r => r.UpdateRecordFieldsIfUnchangedAsync("sprk_invoice", InvoiceId, It.IsAny<Dictionary<string, object?>>(), 5L, It.IsAny<CancellationToken>()))
                 .Callback((string _, Guid _, Dictionary<string, object?> fields, long _, CancellationToken _) =>
                 {
@@ -249,10 +260,13 @@ public sealed class InvoiceAdjustmentServiceTests
             var totals = new InvoiceTotalsService(Records.Object, Entities.Object, NullLogger<InvoiceTotalsService>.Instance);
             return new InvoiceAdjustmentService(
                 Entities.Object, totals, Locks, Resolver ?? Ownership.Object,
-                (firm, _) =>
+                (firm, core, date, work, _) =>
                 {
                     FirmsAsked.Add(firm);
-                    return Task.FromResult<IReadOnlyList<BillingRuleCandidate>>(Candidates.ToList());
+                    RulesAsked.Add((core, date));
+                    WorkDatesAsked.Add(work);
+                    // The loader's own pure selection (082c): one legacy version per policy in force on the date, plus the Procedure rules.
+                    return Task.FromResult(BillingFactLoader.RulesInForceOn(Candidates.ToList(), Procedures, date, work));
                 },
                 NullLogger<InvoiceAdjustmentService>.Instance,
                 new FixedTime(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero)),
@@ -335,21 +349,21 @@ public sealed class InvoiceAdjustmentServiceTests
         Guid? version = null, Guid? policy = null, string code = "BILL-DISCOUNT", RuleType type = RuleType.ApprovedRate,
         DateOnly? from = null, DateOnly? to = null, bool current = true, int number = 1, RuleSetScope scope = RuleSetScope.ClientDefault, Guid? ruleSet = null,
         string? ruleTypeText = null) => new()
-    {
-        PolicyId = policy ?? Guid.NewGuid(),
-        PolicyCode = code,
-        PolicyVersionId = version ?? Guid.NewGuid(),
-        RuleSetId = ruleSet ?? RuleSet,
-        Scope = scope,
-        RuleType = ruleTypeText ?? ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture),
-        ClauseReference = "Volume discounts: 5% above 10,000 dollars a month.",
-        ClauseLocation = "Section 4.2, page 3",
-        ShortHeadline = "Volume discount",
-        InForceFrom = from ?? new DateOnly(2026, 1, 1),
-        InForceTo = to,
-        IsCurrent = current,
-        VersionNumber = number,
-    };
+        {
+            PolicyId = policy ?? Guid.NewGuid(),
+            PolicyCode = code,
+            PolicyVersionId = version ?? Guid.NewGuid(),
+            RuleSetId = ruleSet ?? RuleSet,
+            Scope = scope,
+            RuleType = ruleTypeText ?? ((int)type).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ClauseReference = "Volume discounts: 5% above 10,000 dollars a month.",
+            ClauseLocation = "Section 4.2, page 3",
+            ShortHeadline = "Volume discount",
+            InForceFrom = from ?? new DateOnly(2026, 1, 1),
+            InForceTo = to,
+            IsCurrent = current,
+            VersionNumber = number,
+        };
 
     // =========================================================================================
     // Add: the amount and the totals are 016's (FR-32, FR-07, D-42, I-1, D-130)
@@ -1146,6 +1160,97 @@ public sealed class InvoiceAdjustmentServiceTests
         w.FirmsAsked.Should().Equal([Firm], "the invoice's own firm is the one whose rule sets apply");
     }
 
+    [Fact(DisplayName = "082c: on a Procedure invoice the options list the Procedure's rule in force (Scope \"Procedure\") beside the legacy one, asked for the invoice's core record and date")]
+    public async Task Options_OnAProcedureInvoice_ListTheProcedureRule_WithScopeProcedure()
+    {
+        var w = new World();
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Guidelines");
+        var procedureRule = kit.Rule("Guidelines", "PROC-A", RuleType.TimeIncrement);
+        w.Procedures = kit.Build();
+        w.Candidates.Add(Rule(code: "BILL-A"));
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+        var cited = await w.Service().AddAsync(Add(w, rule: procedureRule.PolicyVersionId), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        result.Rules!.Select(r => (r.PolicyCode, r.Scope)).Should().BeEquivalentTo(new[] { ("BILL-A", "ClientDefault"), ("PROC-A", "Procedure") });
+        w.RulesAsked.Should().AllSatisfy(asked =>
+        {
+            asked.Core.Should().Be(new CoreRecordReference(CoreRecordKind.Project, Core));
+            asked.Date.Should().Be(new DateOnly(2026, 9, 15));
+        });
+        cited.Status.Should().Be(AdjustmentStatus.Applied, "a Procedure rule in force is a rule the reviewer may cite");
+    }
+
+    /// <summary>A Procedure that ended on 10 September (the invoice is dated 15 September) with one rule; the world's first line is dated <paramref name="lineDate"/>.</summary>
+    private static (World World, ResolvedPolicyVersion Rule) WorldWithAnEndedProcedure(DateTime? lineDate)
+    {
+        var w = new World();
+        var kit = new Sprk.Bff.Api.Tests.Domain.Signals.Billing.ProcedureKit().Procedure("Ended", to: new DateOnly(2026, 9, 10));
+        var rule = kit.Rule("Ended", "PROC-ENDED", RuleType.TimeIncrement);
+        w.Procedures = kit.Build();
+        if (lineDate is { } date)
+        {
+            w.Lines[0]["sprk_eventdate"] = date;
+        }
+
+        return (w, rule);
+    }
+
+    [Fact(DisplayName = "082c-1 K1 must-fire: a Procedure that ended before the invoice date is offered (and citable) through the latest dated line's work date")]
+    public async Task Options_OfAProcedureEndedBeforeTheInvoiceDate_FallBackToTheLatestLinesWorkDate_K1()
+    {
+        var (w, rule) = WorldWithAnEndedProcedure(new DateTime(2026, 9, 5, 0, 0, 0, DateTimeKind.Utc));
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+        var cited = await w.Service().AddAsync(Add(w, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Rules!.Select(r => r.PolicyCode).Should().Equal("PROC-ENDED");
+        w.WorkDatesAsked.Should().AllSatisfy(asked => asked.Should().Be(new DateOnly(2026, 9, 5)));
+        cited.Status.Should().Be(AdjustmentStatus.Applied, "the rule that judged the invoice subject is a rule the reviewer may cite");
+    }
+
+    [Fact(DisplayName = "082c-1 K1 control: with no dated line the ended Procedure is not offered, and citing it is refused")]
+    public async Task Options_OfAProcedureEndedBeforeTheInvoiceDate_WithNoDatedLine_AreEmpty_K1()
+    {
+        var (w, rule) = WorldWithAnEndedProcedure(lineDate: null);
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+        var cited = await w.Service().AddAsync(Add(w, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Rules.Should().BeEmpty();
+        w.WorkDatesAsked.Should().AllSatisfy(asked => asked.Should().BeNull());
+        cited.Code.Should().Be(AdjustmentCodes.RuleNotAllowed);
+    }
+
+    [Fact(DisplayName = "082c-1 K1: the latest of several line dates is the fallback date; an Adjustment line's date is never one")]
+    public async Task Options_UseTheLatestDatedLine_NotAnAdjustmentLine_K1()
+    {
+        var (w, _) = WorldWithAnEndedProcedure(new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc));
+        w.Lines[1]["sprk_eventdate"] = new DateTime(2026, 9, 8, 0, 0, 0, DateTimeKind.Utc);
+        var adjustment = w.Line(InvoiceLineCostType.Adjustment, 10m, InvoiceLineStatus.Accepted, approved: null, sequence: 9);
+        adjustment["sprk_eventdate"] = new DateTime(2026, 9, 12, 0, 0, 0, DateTimeKind.Utc);
+        w.Lines.Add(adjustment);
+
+        await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+
+        w.WorkDatesAsked.Should().ContainSingle().Which.Should().Be(new DateOnly(2026, 9, 8));
+    }
+
+    [Fact(DisplayName = "082c: an invoice naming two core records has no single Procedure chain: the options are Unavailable and no rule is read")]
+    public async Task Options_OnAnInvoiceNamingTwoCoreRecords_AreUnavailable()
+    {
+        var w = new World();
+        w.Candidates.Add(Rule());
+        w.Invoice["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Unavailable);
+        result.Rules.Should().BeNull();
+        w.RulesAsked.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Options_CarryNoDocumentLink()
     {
@@ -1279,11 +1384,291 @@ public sealed class InvoiceAdjustmentServiceTests
         var w = new World();
         var service = new InvoiceAdjustmentService(
             w.Entities.Object, Mock.Of<IInvoiceTotalsService>(), w.Locks, w.Ownership.Object,
-            (_, _) => Task.FromException<IReadOnlyList<BillingRuleCandidate>>(new TimeoutException()), NullLogger<InvoiceAdjustmentService>.Instance);
+            (_, _, _, _, _) => Task.FromException<IReadOnlyList<BillingRuleCandidate>>(new TimeoutException()), NullLogger<InvoiceAdjustmentService>.Instance);
 
         var result = await service.ListRulesAsync(w.InvoiceId, CancellationToken.None);
 
         result.Status.Should().Be(AdjustmentStatus.Unavailable);
         result.Rules.Should().BeNull();
+    }
+
+    // =========================================================================================
+    // Task 095c-4: an invoice with no firm - no rule can be cited, an uncited adjustment is allowed
+    // =========================================================================================
+
+    [Fact(DisplayName = "095c-4: the rule options of an invoice with no firm are 409 firm_missing; no firm is asked (never the empty id)")]
+    public async Task NoFirm_ListRules_Is409FirmMissing()
+    {
+        var w = new World();
+        w.Invoice.Attributes.Remove("sprk_vendororg");
+        w.Candidates.Add(Rule());
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Rules.Should().BeNull();
+        w.FirmsAsked.Should().BeEmpty("Guid.Empty is never asked for rule sets");
+    }
+
+    [Fact(DisplayName = "095c-4: an adjustment citing a rule on an invoice with no firm is 409 firm_missing and writes nothing")]
+    public async Task NoFirm_CitedAdjustment_Is409_WritesNothing()
+    {
+        var w = new World();
+        w.Invoice.Attributes.Remove("sprk_vendororg");
+        var rule = Rule();
+        w.Candidates.Add(rule);
+
+        var result = await w.Service().AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.FirmsAsked.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095d-0 must-fire (EB-D-197; was 095c-4 'applied'): an UNCITED adjustment on an invoice with no firm is now 409 firm_missing and writes nothing")]
+    public async Task NoFirm_UncitedAdjustment_Is409_WritesNothing()
+    {
+        var w = new World();
+        w.Invoice.Attributes.Remove("sprk_vendororg");
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmMissingDetail);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.Queue.Sent.Should().BeEmpty("no re-index queued");
+        w.Invoice.Contains("sprk_approvedtotal").Should().BeFalse("the stored total is untouched");
+    }
+
+    // ── 095c-5 review K2: a held invoice that shows a firm is refused as one with no firm (the hold is read app-only) ──
+
+    [Fact(DisplayName = "095c-5 K2 (must fire): the rule options of an invoice held for a firm, firm column set, are 409 firm_missing with the held sentence; no firm is asked")]
+    public async Task HeldWithAFirm_ListRules_Is409FirmMissing()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
+        w.Invoice.Contains("sprk_vendororg").Should().BeTrue("the firm column is set");
+        w.Candidates.Add(Rule());
+
+        var result = await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.FirmHeldDetail).And.NotContain("has no firm");
+        result.Rules.Should().BeNull();
+        w.FirmsAsked.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095c-5 K2 (must fire): an adjustment citing a rule on an invoice held for a firm, firm column set, is 409 firm_missing and writes nothing")]
+    public async Task HeldWithAFirm_CitedAdjustment_Is409_WritesNothing()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
+        var rule = Rule();
+        w.Candidates.Add(rule);
+
+        var result = await w.Service().AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmHeldDetail);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.FirmsAsked.Should().BeEmpty();
+    }
+
+    // ── 095c-5 pass-2 review: no unconfirmed firm on a line. EB-D-197: a rule-less adjustment on a held invoice is now refused outright. ──
+
+    [Fact(DisplayName = "095d-0 must-fire (EB-D-197; was 095c-5 pass-2 'applied with no firm'): a rule-less adjustment on an invoice held for a firm, firm column set directly, is 409 firm_missing and writes nothing")]
+    public async Task HeldWithAFirm_RuleLessAdjustment_Is409_WritesNothing()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldValue;
+        w.Invoice.Contains("sprk_vendororg").Should().BeTrue("the firm column was set directly");
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmHeldDetail);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+    }
+
+    // ── 095d-0 (EB-D-197): no adjustment - add or remove, rule-less or rule-cited - while the invoice has no firm, is held, or its Set-firm re-run is pending ──
+
+    public enum GateState { NoFirm, HeldOwnColumn, HeldBySubmission, MarkerRerunPending, SubmissionRerunPending, UnknownOwnValue }
+
+    private static void PutInGateState(World w, GateState state)
+    {
+        const string findingsKey = "sprk_findingsjson";
+        switch (state)
+        {
+            case GateState.NoFirm:
+                w.Invoice.Attributes.Remove("sprk_vendororg");
+                break;
+            case GateState.HeldOwnColumn:
+                w.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+                break;
+            case GateState.HeldBySubmission:
+                w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+                {
+                    ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+                    ["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing,
+                    [findingsKey] = "{\"pipelineFindings\":[],\"lineFindings\":[]}",
+                });
+                break;
+            case GateState.MarkerRerunPending:
+                // The row Set firm leaves: the marker, plus the submission still storing the firm_missing reason beside the pending decision.
+                w.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue;
+                w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+                {
+                    ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+                    ["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing,
+                    [findingsKey] = InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunPending, Firm),
+                });
+                break;
+            case GateState.SubmissionRerunPending:
+                w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+                {
+                    ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+                    [findingsKey] = InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunPending, Firm),
+                });
+                break;
+            default:
+                w.Invoice[InvoiceFirmHold.InvoiceHoldColumn] = "ebilling.submission.something_new";
+                break;
+        }
+    }
+
+    private static InvoiceFirmGateResult ExpectedGate(GateState state) => state switch
+    {
+        GateState.NoFirm => InvoiceFirmGateResult.NoFirm,
+        GateState.MarkerRerunPending or GateState.SubmissionRerunPending => InvoiceFirmGateResult.RerunPending,
+        _ => InvoiceFirmGateResult.HeldForFirm,
+    };
+
+    [Theory(DisplayName = "095d-0 must-fire (EB-D-197): an adjustment - rule-less or rule-cited - on an invoice with no firm, held for one, or with the Set-firm re-run pending is 409 ebilling.adjustment.firm_missing; nothing written, no re-index")]
+    [InlineData(GateState.NoFirm, false)]
+    [InlineData(GateState.NoFirm, true)]
+    [InlineData(GateState.HeldOwnColumn, false)]
+    [InlineData(GateState.HeldOwnColumn, true)]
+    [InlineData(GateState.HeldBySubmission, false)]
+    [InlineData(GateState.HeldBySubmission, true)]
+    [InlineData(GateState.MarkerRerunPending, false)]
+    [InlineData(GateState.MarkerRerunPending, true)]
+    [InlineData(GateState.SubmissionRerunPending, false)]
+    [InlineData(GateState.SubmissionRerunPending, true)]
+    [InlineData(GateState.UnknownOwnValue, false)]
+    [InlineData(GateState.UnknownOwnValue, true)]
+    public async Task Add_WithoutAnOpenFirmGate_Is409_WritesNothing(GateState state, bool cited)
+    {
+        var w = new World();
+        var rule = Rule();
+        w.Candidates.Add(rule);
+        PutInGateState(w, state);
+
+        var result = await w.Service().AddAsync(cited ? Add(w, "percent", 10m, rule: rule.PolicyVersionId) : Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        result.Code.Should().Be("ebilling.adjustment.firm_missing");
+        result.Detail.Should().Be(AdjustmentCodes.AdjustFirmDetailFor(ExpectedGate(state)));
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+        w.DeactivationCount.Should().Be(0);
+        w.Queue.Sent.Should().BeEmpty();
+        w.FirmsAsked.Should().BeEmpty();
+        w.Invoice.Contains("sprk_approvedtotal").Should().BeFalse("the stored total is untouched");
+    }
+
+    [Theory(DisplayName = "095d-0 must-fire (EB-D-197): removing an adjustment on an invoice that is not open is 409 ebilling.adjustment.firm_missing; the row stays active, totals untouched")]
+    [InlineData(GateState.NoFirm)]
+    [InlineData(GateState.HeldOwnColumn)]
+    [InlineData(GateState.MarkerRerunPending)]
+    public async Task Remove_WithoutAnOpenFirmGate_Is409_ChangesNothing(GateState state)
+    {
+        var w = new World();
+        var service = w.Service();
+        var added = await service.AddAsync(Add(w, "percent", 10m), CancellationToken.None);
+        added.Status.Should().Be(AdjustmentStatus.Applied);
+        var totalsWrites = w.TotalsWriteCount;
+        PutInGateState(w, state);
+
+        var removed = await service.RemoveAsync(new RemoveAdjustmentCommand(w.InvoiceId, added.Adjustment!.LineId, Remover), CancellationToken.None);
+
+        removed.Status.Should().Be(AdjustmentStatus.FirmMissing);
+        removed.Code.Should().Be(AdjustmentCodes.FirmMissing);
+        removed.Detail.Should().Be(AdjustmentCodes.AdjustFirmDetailFor(ExpectedGate(state)));
+        w.DeactivationCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(totalsWrites);
+        w.Row(added.Adjustment.LineId).GetAttributeValue<OptionSetValue>("statecode").Value.Should().Be(0, "still active");
+        w.Stored("sprk_approvedtotal").Should().Be(910m);
+    }
+
+    [Fact(DisplayName = "095d-0 must-not-fire (EB-D-197): a firm, no hold and a Set-firm re-run 'completed' takes a rule-less and a cited adjustment and removes one")]
+    public async Task OpenGate_TakesAnAdjustment_AndRemovesOne()
+    {
+        var w = new World();
+        w.Submissions.Add(new Entity("sprk_invoicesubmission", Guid.NewGuid())
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", w.InvoiceId),
+            ["sprk_findingsjson"] = InvoiceFirmGateTests.FindingsWithAssignFirm(InvoiceAssignFirmService.RulesRerunCompleted, Firm),
+        });
+        var rule = Rule();
+        w.Candidates.Add(rule);
+        var service = w.Service();
+
+        var plain = await service.AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+        var cited = await service.AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+        var removed = await service.RemoveAsync(new RemoveAdjustmentCommand(w.InvoiceId, plain.Adjustment!.LineId, Remover), CancellationToken.None);
+
+        plain.Status.Should().Be(AdjustmentStatus.Applied);
+        cited.Status.Should().Be(AdjustmentStatus.Applied);
+        removed.Status.Should().Be(AdjustmentStatus.Applied);
+    }
+
+    [Fact(DisplayName = "095d-0 must-fire (EB-D-197): a fault reading the firm gate for an adjustment is Unavailable with nothing written (fail closed)")]
+    public async Task Add_WhenTheFirmGateCannotBeRead_IsUnavailable()
+    {
+        var w = new World();
+        w.Entities.Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_invoicesubmission"), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse"));
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Unavailable);
+        w.CreateCount.Should().Be(0);
+        w.TotalsWriteCount.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "095c-5 pass-2 must not fire: a rule-less adjustment on an ordinary firm invoice carries the invoice's firm on its line")]
+    public async Task OrdinaryFirmInvoice_RuleLessAdjustment_TheLineCarriesTheFirm()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = null;
+
+        var result = await w.Service().AddAsync(Add(w, "fixed", 150m), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.Row(result.Adjustment!.LineId).GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(Firm);
+    }
+
+    [Fact(DisplayName = "095c-5 K2 must not fire: an ordinary firm invoice (hold column present and empty) lists its rules and takes a cited adjustment")]
+    public async Task OrdinaryFirmInvoice_HoldColumnEmpty_ListsRules_AndTakesACitedAdjustment()
+    {
+        var w = new World();
+        w.Invoice[Sprk.Bff.Api.Services.Finance.Submission.InvoiceFirmHold.InvoiceHoldColumn] = null;
+        var rule = Rule();
+        w.Candidates.Add(rule);
+
+        (await w.Service().ListRulesAsync(w.InvoiceId, CancellationToken.None)).Status.Should().Be(AdjustmentStatus.Applied);
+        var result = await w.Service().AddAsync(Add(w, "percent", 10m, rule: rule.PolicyVersionId), CancellationToken.None);
+
+        result.Status.Should().Be(AdjustmentStatus.Applied);
+        w.CreateCount.Should().Be(1);
     }
 }

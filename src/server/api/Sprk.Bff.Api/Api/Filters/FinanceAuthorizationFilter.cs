@@ -1,10 +1,12 @@
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Api.Filters;
@@ -185,6 +187,17 @@ public enum FinanceDenial
     /// the check and the compute.
     /// </summary>
     UniformNotFound,
+
+    /// <summary>
+    /// The uniform 404 for a GENUINE denial only (no table privilege, a step-0 refusal of an external caller or of a caller with no
+    /// systemuser row, no Read), and the route's 503 (<c>ebilling.submission.record_unavailable</c>, the submission read fault) for
+    /// EVERY system-failure outcome: a step-0 flag or lookup read fault, a table-privilege read that has no complete answer
+    /// (<see cref="CallerPrivilegeAnswer.Faulted"/>), a target declaration or check that threw, a missing probe or caller resolver.
+    /// For a route whose 404 means "no match" (<c>GET /api/finance/invoice-submissions?internetMessageId=</c>, ebilling-r1 task 095a
+    /// review F1, uac-r2 binding): it must NEVER answer the no-match 404 when it could not decide. Opt-in: every other route keeps
+    /// <see cref="UniformNotFound"/> or <see cref="Forbidden"/>, where a fault is denied as before.
+    /// </summary>
+    UniformNotFoundFailClosed,
 }
 
 /// <summary>Which authorization path a <see cref="FinanceAuthorizationCheck"/> takes.</summary>
@@ -564,6 +577,17 @@ public class FinanceAuthorizationFilter : IEndpointFilter
                 return SystemFailureReasonCode;
             }
 
+            if (_denial == FinanceDenial.UniformNotFoundFailClosed)
+            {
+                // A fault is not a "no": it is reported as the system failure the route renders as its own 503.
+                return await probe.CallerPrivilegeAnswerAsync(callerToken, check.Operation, ct) switch
+                {
+                    CallerPrivilegeAnswer.Held => null,
+                    CallerPrivilegeAnswer.NotHeld => InsufficientPrivilegeReasonCode,
+                    _ => SystemFailureReasonCode,
+                };
+            }
+
             return await probe.CallerHoldsPrivilegeAsync(callerToken, check.Operation, ct)
                 ? null
                 : InsufficientPrivilegeReasonCode;
@@ -577,35 +601,42 @@ public class FinanceAuthorizationFilter : IEndpointFilter
         switch (check.Path)
         {
             case FinanceCheckPath.Document:
-            {
-                // Task 188 round 4b (F1-2): the caller's own rights on the document, then THE external document
-                // narrowing (InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync). A document it hides from a caller who
-                // is not an internal systemuser denies with the reason an unreadable one gets; an internal caller (the
-                // ebilling confirm and reject writes) makes no narrowing call. On an /api/finance route the external branch is
-                // unreachable (step 0 has already refused every caller who is not an internal systemuser); it stays as defence in
-                // depth, for a route that runs this filter without step 0.
-                var result = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
-                    httpContext, _authorizationService, userId, new[] { check.RecordId }, check.Operation, callerToken,
-                    "finance-document-check", logger, ct);
+                {
+                    // Task 188 round 4b (F1-2): the caller's own rights on the document, then THE external document
+                    // narrowing (InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync). A document it hides from a caller who
+                    // is not an internal systemuser denies with the reason an unreadable one gets; an internal caller (the
+                    // ebilling confirm and reject writes) makes no narrowing call. On an /api/finance route the external branch is
+                    // unreachable (step 0 has already refused every caller who is not an internal systemuser); it stays as defence in
+                    // depth, for a route that runs this filter without step 0.
+                    var result = await InternalPlaneDocumentNarrowing.AuthorizeDocumentsAsync(
+                        httpContext, _authorizationService, userId, new[] { check.RecordId }, check.Operation, callerToken,
+                        "finance-document-check", logger, ct);
 
-                return result.IsAllowed ? null : result.ReasonCode;
-            }
+                    return result.IsAllowed ? null : result.ReasonCode;
+                }
 
             case FinanceCheckPath.Record:
-            {
-                return await CallerHoldsRightsAsync(
-                    _authorizationService, userId, check.EntitySetName, check.RecordId, check.Operation, callerToken, ct)
-                    ? null
-                    : InsufficientRightsReasonCode;
-            }
+                {
+                    return await CallerHoldsRightsAsync(
+                        _authorizationService, userId, check.EntitySetName, check.RecordId, check.Operation, callerToken, ct)
+                        ? null
+                        : InsufficientRightsReasonCode;
+                }
 
             default:
                 return NoTargetReasonCode;
         }
     }
 
-    private IResult Deny(HttpContext httpContext, string reasonCode) =>
-        _denial == FinanceDenial.UniformNotFound
-            ? UniformRecordNotFound(httpContext)
-            : ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier);
+    private IResult Deny(HttpContext httpContext, string reasonCode) => _denial switch
+    {
+        FinanceDenial.UniformNotFound => UniformRecordNotFound(httpContext),
+
+        // Only a genuine denial is the no-match 404; any system failure is the route's 503 (see FinanceDenial.UniformNotFoundFailClosed).
+        FinanceDenial.UniformNotFoundFailClosed => reasonCode == SystemFailureReasonCode
+            ? InvoiceSubmissionHttp.ReadFault(InvoiceSubmissionService.ReadUnavailable())
+            : UniformRecordNotFound(httpContext),
+
+        _ => ProblemDetailsHelper.Forbidden(reasonCode, traceId: httpContext.TraceIdentifier),
+    };
 }

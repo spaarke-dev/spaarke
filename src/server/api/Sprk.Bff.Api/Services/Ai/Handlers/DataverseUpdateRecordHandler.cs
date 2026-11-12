@@ -184,7 +184,7 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out var validatedItem, out var error))
             return ToolValidationResult.Failure(error!);
 
         // Task 048 (owner decision 2026-11-04, D-204 extended to updates): a Signal, a Decision Record and a Budget Revision are
@@ -192,6 +192,12 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         // never a confirm dialog; ExecuteChatAsync asks again.
         if (RecordTableRules.RefuseWriterOnlyTableUpdate(tablename) is not null)
             return ToolValidationResult.Failure(ChangedOnlyByItsWriterChatMessage(tablename));
+
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): this tool writes AS the person, so only the writer-only COLUMN
+        // refusal is asked, never the full RefuseAppOnlyWrite (the document, owner and creator refusals are not a person's edit's).
+        // A column only the table's typed writer sets (the invoice's AP export claim) is refused before the dialog too.
+        if (RecordTableRules.RefuseWriterOnlyColumns(tablename, validatedItem.EnumerateObject().Select(p => p.Name)) is { } writerOnlyColumn)
+            return ToolValidationResult.Failure(WriterOnlyColumnChatMessage(writerOnlyColumn));
 
         return ToolValidationResult.Success();
     }
@@ -201,6 +207,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     /// <see cref="RecordTableRules.ChangedOnlyByItsWriterMessage"/>, a plain sentence.</summary>
     internal static string ChangedOnlyByItsWriterChatMessage(string tablename) =>
         ChatMessageFor(RecordTableRules.Find(tablename)?.Table ?? tablename);
+
+    /// <summary>The chat tool's wording of <see cref="RecordTableRules.RefuseWriterOnlyColumns"/>: the same words in both legs, with the code.</summary>
+    private static string WriterOnlyColumnChatMessage(RecordOwnerResolution refused) =>
+        $"The update was NOT written: {refused.Reason} ({refused.RefusalCode}).";
 
     private static string ChatMessageFor(string tablename) =>
         $"'{tablename}' records can't be changed from chat — this update was REJECTED and nothing was written. They are changed " +
@@ -240,6 +250,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         {
             return LogOutcome(context, tablename, recordId,
                 Error(tool, ChangedOnlyByItsWriterChatMessage(tablename), writerOnly.RefusalCode!, startedAt), stopwatch);
+        }
+
+        // ebilling-r1 task 165d fix round (EB-D-207; uac-r2 U1 option A): and a column only the table's typed writer sets, asked as ValidateChat
+        // asks it (the column check alone: this tool writes AS the person). Nothing is written.
+        if (RecordTableRules.RefuseWriterOnlyColumns(tablename, item.EnumerateObject().Select(p => p.Name)) is { } writerOnlyColumn)
+        {
+            return LogOutcome(context, tablename, recordId,
+                Error(tool, WriterOnlyColumnChatMessage(writerOnlyColumn), writerOnlyColumn.RefusalCode!, startedAt), stopwatch);
         }
 
         try
@@ -296,10 +314,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             }
 
             // #1616: the ADR-024 pair is prepared BEFORE anything is checked — a project's half-pair completed from the row (so
-            // the checks and the application's write see exactly one pair), a work assignment's pair kept in step with the
-            // typed filing lookup this update moves (so this server never leaves a pair no typed lookup repeats).
+            // the checks and the application's write see exactly one pair); on every other pair table the task 045b update
+            // planner: a type-only pair filled or cleared, a pair kept in step with the agreement lookup this update moves.
             var prepared = await OwnedChildWrite.KeepPairInStepAsync(
-                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken, _logger)
                 .ConfigureAwait(false);
             if (prepared.Refusal is { } pairRefusal)
             {

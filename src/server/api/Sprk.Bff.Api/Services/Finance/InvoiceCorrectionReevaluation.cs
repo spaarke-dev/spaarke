@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Billing;
 using Sprk.Bff.Api.Services.Signals.Billing.Handlers;
+using static Sprk.Bff.Api.Services.Finance.InvoiceFindingsDiff;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -31,6 +32,24 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
 {
     public string RefusalCode { get; } = refusalCode;
 }
+
+/// <summary>Task 095c-4: the re-evaluation found the invoice without a firm (the firm's rules cannot be re-run). The correction service answers 409
+/// <see cref="CorrectionCodes.FirmMissing"/>, not the 503 Incomplete: no repeat clears it until the firm is set (095d). Replaces the former
+/// <see cref="InvalidOperationException"/> "The invoice names no firm.".</summary>
+internal sealed class CorrectionFirmMissingException()
+    : Exception("The invoice names no firm, so its billing rules cannot be re-run.");
+
+/// <summary>082c C12 (F1-low): the corrected invoice has a Procedure gap its stored findings do not (a correction moved work onto a date with no
+/// terms in force on the record). The correction service answers 409 <see cref="CorrectionCodes.ProcedureGap"/> with a fixed sentence, not the 503
+/// Incomplete whose advice (repeat the same request) can never clear a gap. Carries no id and no message to show: the text is fixed.</summary>
+internal sealed class CorrectionProcedureGapException()
+    : Exception("The corrected invoice has a Procedure gap its stored findings do not; the findings are not patched.");
+
+/// <summary>082d fix round 2 (K): the patched findings are over <c>sprk_findingsjson</c>'s cap even without the Procedure snapshot. The correction service
+/// answers 409 <see cref="CorrectionCodes.FindingsTooLarge"/> (the value is saved, the findings are not patched; the correction stays unapplied and holds
+/// approval), not the 503 Incomplete whose advice (repeat) can never clear it. Carries no message to show.</summary>
+internal sealed class CorrectionFindingsTooLargeException()
+    : Exception("The patched findings are over the findings column; nothing is written.");
 
 /// <summary>
 /// The follow-through of a saved correction (ebilling-r1 task 101 part B2b-1; FR-25, FR-31, D-126): re-runs 072's billing rules in memory on the
@@ -70,6 +89,7 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
 /// <c>raiseFingerprint</c> is set (equal fingerprints: a refresh, no close); a <c>system</c> entry closes or refreshes that line's system Signal from
 /// the system findings re-mapped from the patched JSON. The D-125 coding hold clears when no undecided line lacks a code set: its
 /// <c>pipelineFindings[]</c> entry goes and the invoice's system Signal is closed (or refreshed when another invoice-level system finding remains).
+/// The rule reconcile is <see cref="InvoiceRuleSignalReconciler"/> (task 164a-4b: shared with Add line's Signals step, moved here unchanged).
 /// The member is removed (and the hold entry with it) in one row-version-conditional write after every Signal is done, so a failure part-way leaves
 /// it for the repeat; every close and write is idempotent. Then any undecided line still Pending with a recorded code set is re-derived.</para>
 /// <para><b>073 presentation.</b> Both sides of the plan diff are mapped with 073's STORED decisions (each finding's <c>consequence</c> /
@@ -82,6 +102,9 @@ internal sealed class CorrectionTotalsRefusedException(string refusalCode)
 /// the undecided lines in its value transaction (the persister copies the header currency onto every line), so no line carries a currency of its own and
 /// there is no per-line currency finding.</para>
 /// <para><b>Not here.</b> 073 itself: a correction of an In Review invoice does not re-decide it (new entries carry the rule's consequence and do not reject).</para>
+/// <para><b>The diff (task 164a-3).</b> The request builder (<see cref="InvoiceFindingsDiff.RequestBasis"/>, a correction basis here) and the findings and
+/// plan patch (<see cref="InvoiceFindingsDiff.PatchFindings"/>, <see cref="InvoiceFindingsDiff.PatchPlan"/>, <see cref="InvoiceFindingsDiff.SubjectsOf"/>)
+/// live in <see cref="InvoiceFindingsDiff"/>, shared with Add line; this class reads, sequences the steps and writes.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <see cref="InvoiceSubmissionPersister"/> builds the findings JSON for a
 /// whole submission and <see cref="InvoiceSubmissionAfterSteps"/> writes its Signals; neither patches a stored copy. Extension: the persister's
 /// per-entry builders and status rule are reused (B2a); the patch is a different write (one invoice's stored copy after a reviewer's change), so it
@@ -177,9 +200,6 @@ public sealed class InvoiceCorrectionReevaluation
         "sprk_matter", "sprk_project", "sprk_regardingworkassignment",
     ];
 
-    private static readonly string[] CorrectionColumns =
-        ["sprk_fieldname", "sprk_aivalue", "sprk_finalvalue", "sprk_outcometype", "sprk_invoiceline", "sprk_reviewedon", "createdon"];
-
     private readonly IGenericEntityService _entities;
     private readonly Func<BillingEvaluationRequest, CancellationToken, Task<BillingLoadedFacts>> _load;
     private readonly Func<BillingEvaluationRequest, BillingLoadedFacts, BillingEvaluationResult> _evaluate;
@@ -256,6 +276,10 @@ public sealed class InvoiceCorrectionReevaluation
             {
                 patched = await PatchFindingsAsync(applied, ct).ConfigureAwait(false);
             }
+            catch (Exception ex) when (ex is CorrectionFirmMissingException or CorrectionProcedureGapException or CorrectionFindingsTooLargeException)
+            {
+                throw; // a refusal, not a failed step (409, not 503)
+            }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 throw new CorrectionStepException(CorrectionCodes.FindingsStep, ex);
@@ -324,14 +348,14 @@ public sealed class InvoiceCorrectionReevaluation
 
     /// <summary>The ids of the field's Corrected / Confirmed rows (on its line), for a field with no findings step.</summary>
     private async Task<IReadOnlyList<Guid>> ReadFollowedAsync(CorrectionApplied applied, CancellationToken ct) =>
-        (await ReadCorrectionsAsync(applied.InvoiceId, ct).ConfigureAwait(false))
+        (await ReadCorrectionsAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false))
             .Where(r => r.IsLabel && r.Field == applied.Field && r.LineId == applied.LineId)
             .Select(r => r.Id)
             .ToList();
 
     /// <summary>
     /// After the last step: lists <paramref name="followed"/> in <see cref="AppliedCorrectionsMember"/> and removes the lines the status step re-derived
-    /// (<paramref name="derived"/>) from <see cref="PendingStatusLinesMember"/>, in one row-version-conditional write of the latest submission. Nothing is
+    /// (<paramref name="derived"/>) from <see cref="PendingStatusLinesMember"/>, in one row-version-conditional write of the invoice's own submission. Nothing is
     /// written when nothing changes (a repeat). Throws when the submission or its findings cannot be read (fail closed: the rows stay unapplied).
     /// </summary>
     private async Task<long> RecordFollowedThroughAsync(CorrectionApplied applied, IReadOnlyList<Guid> followed, IReadOnlySet<int>? derived, CancellationToken ct)
@@ -410,7 +434,7 @@ public sealed class InvoiceCorrectionReevaluation
     /// permanent write refusal), exactly as the persister and 049 do (<see cref="AdminAttentionText.Merge"/>: only the Signal segment is replaced, the other
     /// segments and any administrator text stay). Nothing is set when no refusal is stored or the text would not change.
     /// </summary>
-    private static void SetAdminAttention(Entity update, string? currentAttention, JsonObject root)
+    internal static void SetAdminAttention(Entity update, string? currentAttention, JsonObject root)
     {
         if (AdminAttentionText.FromFindings(root) is null)
         {
@@ -426,8 +450,6 @@ public sealed class InvoiceCorrectionReevaluation
 
     // ── The findings step ──
 
-    private sealed record StoredLine(int Index, Entity Row, JsonObject? Extraction, bool Decided);
-
     private sealed record Patched(JsonObject Root, IReadOnlyDictionary<int, StoredLine> Lines, IReadOnlySet<int> Touched, IReadOnlyList<Guid> Followed);
 
     private async Task<Patched> PatchFindingsAsync(CorrectionApplied applied, CancellationToken ct)
@@ -439,8 +461,15 @@ public sealed class InvoiceCorrectionReevaluation
             ?? throw new InvalidOperationException("The invoice has no submission.");
         var invoice = await ReadInvoiceAsync(applied.InvoiceId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("The invoice was not found.");
-        var lines = await ReadLinesAsync(applied.InvoiceId, ct).ConfigureAwait(false);
-        var rows = await ReadCorrectionsAsync(applied.InvoiceId, ct).ConfigureAwait(false);
+
+        // Task 095c-4: with no firm the rules cannot be re-run (095c-3 ran none); refuse before anything is diffed or patched.
+        if (InvoiceFirmHold.HasNoFirm(invoice))
+        {
+            throw new CorrectionFirmMissingException();
+        }
+
+        var lines = await ReadLinesAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false);
+        var rows = await ReadCorrectionsAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false);
         var json = submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionFindingsJson);
         if (string.IsNullOrWhiteSpace(json) || JsonNode.Parse(json) is not JsonObject root)
         {
@@ -475,7 +504,7 @@ public sealed class InvoiceCorrectionReevaluation
         var latest = labels[^1];
         var previous = labels.Take(labels.Count - 1).LastOrDefault(r => patchedIds.Contains(r.Id));
         var preValue = previous is not null ? previous.Final : fieldRows[0].Ai;
-        var verified = rows.Where(r => r.IsLabel).Select(r => (r.LineId, r.Field)).ToHashSet();
+        var verified = VerifiedOf(rows);
 
         // A timekeeper or date correction of a fee line also diffs the roster match and the rate: from the pair the findings were last patched with.
         StoredLine? correctedLine = correctedIndex is { } at ? lines[at] : null;
@@ -485,13 +514,24 @@ public sealed class InvoiceCorrectionReevaluation
 
         var provenance = ExtractionProvenance.ParseSubmission(json);
         var core = InvoiceLineDecisionService.SingleCoreOf(invoice) ?? throw new InvalidOperationException("The invoice names no single core record.");
-        var basis = new RequestBasis(applied, invoice, lines, provenance, verified, submission.Id, root, core, resolutionBefore);
+        var basis = RequestBasis.ForCorrection(applied, invoice, lines, provenance, verified, submission.Id, root, core, resolutionBefore);
         var before = basis.Build(preValue, preVerified: previous is not null, before: true);
         var after = basis.Build(latest.Final, preVerified: true, before: false);
 
         var loaded = await _load(after, ct).ConfigureAwait(false);
         var beforeResult = _evaluate(before, loaded);
         var afterResult = _evaluate(after, loaded);
+
+        // 082c C12 (interim; a new gap hold through a correction is 082d / 101). A resolution fault on either side has already thrown (the load,
+        // or RulesOn for a date only one side has). A Procedure gap the corrected value brings in (a date moved into a gap) means some of the
+        // corrected invoice's rules judged nothing: the patch is refused, so the correction stays unapplied, which already holds approval.
+        // Compared PER SUBJECT (F2): a line moved onto a date that already has a gap for another subject brings in no new (Procedure, date, kind)
+        // key, but its own rules judged nothing. The refusal is a fixed 409, never the generic Incomplete (F1-low): repeating never clears a gap.
+        var gapsBefore = GapSubjects(beforeResult);
+        if (GapSubjects(afterResult).Any(gap => !gapsBefore.Contains(gap)))
+        {
+            throw new CorrectionProcedureGapException();
+        }
 
         var original = root.ToJsonString();
         var touched = new HashSet<int>();
@@ -531,10 +571,27 @@ public sealed class InvoiceCorrectionReevaluation
 
         if (!string.Equals(original, root.ToJsonString(), StringComparison.Ordinal))
         {
+            // 082d fix rounds 1 and 2 (F4): the stored Procedure snapshot is replaced by the re-run's only when it still describes what the stored findings
+            // were judged with (see ProcedureSnapshot.ForPatchedFindings); else JSON null; an absent member (a row stored before 082d) stays absent.
+            ProcedureSnapshot.SetForPatchedFindings(root, beforeResult, afterResult, decided);
+            var findingsText = ProcedureSnapshot.SerializeWithinCap(root, InvoiceSubmissionPersister.FindingsJsonMaxLength, out var snapshotDropped);
+            if (findingsText is null)
+            {
+                _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: the patched findings are over the column even without the Procedure snapshot; nothing written.",
+                    applied.Field, applied.InvoiceId);
+                throw new CorrectionFindingsTooLargeException();
+            }
+
+            if (snapshotDropped)
+            {
+                _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: the patched findings are over the column; the Procedure snapshot is left out (null).",
+                    applied.Field, applied.InvoiceId);
+            }
+
             var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
             {
                 RowVersion = submissionVersion.ToString(CultureInfo.InvariantCulture),
-                [InvoiceSubmissionPersister.SubmissionFindingsJson] = root.ToJsonString(),
+                [InvoiceSubmissionPersister.SubmissionFindingsJson] = findingsText,
             };
             SetAdminAttention(update, submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionAdminAttention), root);
             await _entities.ExecuteTransactionAsync(
@@ -606,9 +663,6 @@ public sealed class InvoiceCorrectionReevaluation
     private static HashSet<int> PendingStatusOf(JsonObject root) =>
         (root[PendingStatusLinesMember] as JsonArray ?? []).Select(IntOf).Where(i => i is not null).Select(i => i!.Value).ToHashSet();
 
-    /// <summary>The roster match, approved rate and reasons a timekeeper or date correction is diffed FROM.</summary>
-    private sealed record ResolutionFacts(Guid? TimekeeperId, decimal? ApprovedRate, TimekeeperUnmatchedReason TimekeeperReason, RateResolutionStatus RateStatus, RateNotFoundReason RateReason);
-
     /// <summary>
     /// The pair the stored findings reflect for a fee line (fix round, part 3): the one recorded in <see cref="AppliedResolutionsMember"/> by the last
     /// timekeeper or date correction whose findings step finished; else, when a correction changed the pair, the pair the line had before its FIRST
@@ -657,308 +711,6 @@ public sealed class InvoiceCorrectionReevaluation
             ["rateStatus"] = after is null ? null : Text(after, "rateStatus"),
             ["rateReason"] = after is null ? null : Text(after, "rateReason"),
         };
-    }
-
-    private static string KeyOf(BillingFinding f) =>
-        string.Join('|', f.PolicyVersionId.ToString("D"), f.Subject.Kind.ToString(), f.Subject.LineIndex?.ToString(CultureInfo.InvariantCulture) ?? string.Empty, f.ReasonCode);
-
-    private static string? KeyOf(JsonObject entry) =>
-        Text(entry, "policyVersionId") is { } version && Guid.TryParse(version, out var id) && Text(entry, "subject") is { } subject && Text(entry, "reasonCode") is { } reason
-            ? string.Join('|', id.ToString("D"), subject, IntOf(entry["line"])?.ToString(CultureInfo.InvariantCulture) ?? string.Empty, reason)
-            : null;
-
-    /// <summary><c>findings[]</c>: per key, the entries that differ between the two evaluations are replaced, added or removed.</summary>
-    private static void PatchFindings(JsonObject root, BillingEvaluationResult before, BillingEvaluationResult after, IReadOnlySet<int> decided, HashSet<int> touched)
-    {
-        if (root["findings"] is not JsonArray stored)
-        {
-            root["findings"] = stored = [];
-        }
-
-        var beforeByKey = before.Findings.GroupBy(KeyOf).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
-        var afterByKey = after.Findings.GroupBy(KeyOf).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
-        var withheld = after.Findings.Where(f => f.DetailWithheld).Select(f => (f.PolicyId, f.Subject)).ToHashSet();
-
-        // A new entry takes an index no stored entry (nor 073's deciding list) has used, so a removed finding's index is never reused.
-        var next = stored.OfType<JsonObject>().Select(e => IntOf(e["index"]) ?? -1)
-            .Concat((root["decision"]?["deciding"] as JsonArray ?? []).Select(IntOf).Select(i => i ?? -1))
-            .DefaultIfEmpty(-1).Max() + 1;
-        foreach (var key in beforeByKey.Keys.Union(afterByKey.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal))
-        {
-            var was = beforeByKey.GetValueOrDefault(key) ?? [];
-            var now = afterByKey.GetValueOrDefault(key) ?? [];
-            if (Same(was, now))
-            {
-                continue;
-            }
-
-            var line = (was.Count > 0 ? was[0] : now[0]).Subject.LineIndex;
-            if (line is { } decidedLine && decided.Contains(decidedLine))
-            {
-                continue;
-            }
-
-            if (line is { } index)
-            {
-                touched.Add(index);
-            }
-
-            var existing = stored.OfType<JsonObject>().Where(e => KeyOf(e) == key).ToList();
-            for (var i = 0; i < Math.Max(existing.Count, now.Count); i++)
-            {
-                if (i >= now.Count)
-                {
-                    stored.Remove(existing[i]);
-                    continue;
-                }
-
-                var finding = now[i];
-                var scrub = withheld.Contains((finding.PolicyId, finding.Subject));
-                if (i < existing.Count)
-                {
-                    var slot = stored.IndexOf(existing[i]);
-                    var decision = DecisionOf(existing[i], finding, after);
-                    stored[slot] = InvoiceSubmissionPersister.FindingEntryJson(IntOf(existing[i]["index"]) ?? next++, finding, decision, scrub);
-                }
-                else
-                {
-                    stored.Add(InvoiceSubmissionPersister.FindingEntryJson(next++, finding, DecisionOf(null, finding, after), scrub));
-                }
-            }
-        }
-
-        static bool Same(List<BillingFinding> a, List<BillingFinding> b) =>
-            a.Count == b.Count && a.Zip(b).All(p => JsonNode.DeepEquals(
-                InvoiceSubmissionPersister.FindingEntryJson(0, p.First, null, scrub: false),
-                InvoiceSubmissionPersister.FindingEntryJson(0, p.Second, null, scrub: false)));
-    }
-
-    /// <summary>A replaced entry keeps 073's decision members as stored; a new one carries the rule's consequence and does not reject (no 073 re-run).</summary>
-    private static FindingDecision DecisionOf(JsonObject? stored, BillingFinding finding, BillingEvaluationResult after)
-    {
-        BillingConsequence? consequence = null;
-        if (stored is not null && Enum.TryParse<BillingConsequence>(Text(stored, "consequence"), out var kept))
-        {
-            consequence = kept;
-        }
-        else if (after.RulesByVersion.TryGetValue(finding.PolicyVersionId, out var rule) && rule.Consequence is { } value
-            && Enum.IsDefined(typeof(BillingConsequence), value))
-        {
-            consequence = (BillingConsequence)value;
-        }
-
-        return new FindingDecision
-        {
-            Index = 0,
-            Finding = finding,
-            Consequence = consequence,
-            Rejects = stored?["rejects"] is JsonValue rejects && rejects.TryGetValue<bool>(out var r) && r,
-            HeldBecause = stored is null ? null : Text(stored, "heldBecause"),
-            ValuesRead = finding.ValuesRead,
-        };
-    }
-
-    private static BillingSignalSubjects SubjectsOf(Guid invoiceId, JsonObject root, IReadOnlyDictionary<int, StoredLine> lines) => new(
-        invoiceId,
-        Text(root, "invoiceName"),
-        lines.ToDictionary(l => l.Key, l => l.Value.Row.Id),
-        lines.ToDictionary(l => l.Key, l => l.Value.Row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineName) ?? string.Empty));
-
-    private static string PlanKey(string? policyCode, string? entity, string? subjectId) =>
-        string.Join('|', policyCode, entity, Guid.TryParse(subjectId, out var id) ? id.ToString("D") : subjectId);
-
-    /// <summary>
-    /// 073's stored decision of each finding of <paramref name="result"/> (B2b-2): the n-th finding of a key takes the n-th stored entry of that key in
-    /// <paramref name="stored"/> (<see cref="DecisionOf"/>: its <c>consequence</c>, <c>rejects</c>, <c>heldBecause</c>); a finding with no stored entry
-    /// carries the rule's consequence and does not reject. Null when the stored findings carry no 073 decision (the persister mapped without one).
-    /// </summary>
-    private static IReadOnlyList<FindingDecision>? StoredDecisions(JsonObject root, BillingEvaluationResult result, JsonArray stored)
-    {
-        if (root["decision"] is not JsonObject)
-        {
-            return null;
-        }
-
-        var byKey = stored.OfType<JsonObject>().GroupBy(e => KeyOf(e) ?? string.Empty).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
-        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
-        var decisions = new List<FindingDecision>(result.Findings.Count);
-        for (var i = 0; i < result.Findings.Count; i++)
-        {
-            var finding = result.Findings[i];
-            var key = KeyOf(finding);
-            var n = seen.GetValueOrDefault(key);
-            seen[key] = n + 1;
-            var entry = byKey.TryGetValue(key, out var entries) && n < entries.Count ? entries[n] : null;
-            decisions.Add(DecisionOf(entry, finding, result) with { Index = i });
-        }
-
-        return decisions;
-    }
-
-    /// <summary>The stored outcome kind, passed to the mapper only with 073's decisions (a Blocked outcome needs them).</summary>
-    private static SubmissionEvaluationKind? StoredKind(JsonObject root) =>
-        Enum.TryParse<SubmissionEvaluationKind>(Text(root, "kind"), out var kind) ? kind : null;
-
-    /// <summary>
-    /// <c>signalPlan[]</c>: per (policy, subject), the entry is replaced, added or removed when the mapped group differs; the change is recorded for B2b-2.
-    /// Both sides are mapped with 073's stored decisions and the stored kind (<see cref="StoredDecisions"/>). A stored Blocked entry the after side would
-    /// present otherwise is kept and marked <see cref="CorrectionReviewMember"/>; a replacement the writer would refuse is recorded in
-    /// <see cref="InvoiceSubmissionPersister.SignalPlanRefusalsMember"/>.
-    /// </summary>
-    private static void PatchPlan(
-        JsonObject root, BillingEvaluationResult before, BillingEvaluationResult after, JsonArray storedFindings, BillingSignalSubjects subjects,
-        IReadOnlySet<int> decided, HashSet<int> touched)
-    {
-        if (root["signalPlan"] is not JsonArray plan)
-        {
-            root["signalPlan"] = plan = [];
-        }
-
-        var lineByRow = subjects.LineIds.ToDictionary(p => p.Value, p => p.Key);
-        var beforeDecisions = StoredDecisions(root, before, storedFindings);
-        var afterDecisions = StoredDecisions(root, after, root["findings"] as JsonArray ?? []);
-        var kind = beforeDecisions is null ? null : StoredKind(root);
-        var was = Entries(BillingFindingSignalMapper.MapAll(before, subjects, beforeDecisions, kind));
-        var now = Entries(BillingFindingSignalMapper.MapAll(after, subjects, afterDecisions, kind));
-        foreach (var key in was.Keys.Union(now.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal))
-        {
-            var old = was.GetValueOrDefault(key);
-            var current = now.GetValueOrDefault(key);
-            if (old is not null && current is not null && JsonNode.DeepEquals(old.Value.Entry, current.Value.Entry))
-            {
-                continue;
-            }
-
-            var sample = (current ?? old)!.Value.Mapping.Request;
-            if (sample.SubjectEntityLogicalName == BillingFindingSignalMapper.LineEntity && lineByRow.TryGetValue(sample.SubjectId, out var line))
-            {
-                if (decided.Contains(line))
-                {
-                    continue;
-                }
-
-                touched.Add(line);
-            }
-
-            var stored = plan.OfType<JsonObject>().FirstOrDefault(e => PlanKey(Text(e, "policyCode"), Text(e, "subjectEntity"), Text(e, "subjectId")) == key);
-            if (stored is not null && current is { } already && JsonNode.DeepEquals(stored, already.Entry))
-            {
-                // Fix round, part 3: a repeat whose patch already landed. The plan holds the entry; its Signal change is either still recorded (the
-                // Signals step has not finished) or done; recording it again would only make the Signals step write the same entry once more.
-                continue;
-            }
-
-            var storedFingerprint = stored is null ? null : Text(stored, "fingerprint");
-
-            // A correction never drops a hold: a stored entry presented Blocked stays as stored (its Signal too) when the after side would not present
-            // it Blocked; it is marked for the reviewer, who leaves the hold through override or return (105).
-            if (stored is not null && Text(stored, "decision") == nameof(BillingGroupDecision.Blocked)
-                && current is not { Mapping.Decision: BillingGroupDecision.Blocked })
-            {
-                stored[CorrectionReviewMember] = true;
-                continue;
-            }
-
-            string? raiseFingerprint = null;
-            var refusal = current is { } candidate ? SignalWriter.PreflightRefusal(candidate.Mapping.Request) : null;
-            if (refusal is not null)
-            {
-                RecordPlanRefusal(root, sample, refusal);
-            }
-
-            if (current is { } replacement && refusal is null)
-            {
-                if (stored is null)
-                {
-                    plan.Add(replacement.Entry.DeepClone());
-                }
-                else
-                {
-                    plan[plan.IndexOf(stored)] = replacement.Entry.DeepClone();
-                }
-
-                raiseFingerprint = replacement.Mapping.Fingerprint;
-            }
-            else if (stored is not null)
-            {
-                plan.Remove(stored);
-            }
-
-            RecordRuleChange(root, sample, storedFingerprint, raiseFingerprint);
-        }
-
-        static Dictionary<string, (BillingSignalMapping Mapping, JsonObject Entry)?> Entries(IReadOnlyList<BillingSignalMapping> mappings) =>
-            mappings.ToDictionary(
-                m => PlanKey(m.Request.PolicyCode, m.Request.SubjectEntityLogicalName, m.Request.SubjectId.ToString("D")),
-                m => ((BillingSignalMapping, JsonObject)?)(m, InvoiceSubmissionPersister.SignalPlanEntryJson(m)),
-                StringComparer.Ordinal);
-    }
-
-    /// <summary>A replacement the writer's preflight refuses is left out of the plan and recorded as the persister records one (049 F1-3), once.</summary>
-    private static void RecordPlanRefusal(JsonObject root, SignalWriteRequest request, string code)
-    {
-        if (root[InvoiceSubmissionPersister.SignalPlanRefusalsMember] is not JsonArray refusals)
-        {
-            root[InvoiceSubmissionPersister.SignalPlanRefusalsMember] = refusals = [];
-        }
-
-        var entry = InvoiceSubmissionPersister.SignalPlanRefusalEntryJson(
-            new InvoiceSubmissionPersister.SignalPlanRefusal(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, code));
-        if (!refusals.Any(r => JsonNode.DeepEquals(r, entry)))
-        {
-            refusals.Add(entry);
-        }
-    }
-
-    private static JsonObject Pending(JsonObject root)
-    {
-        if (root[PendingSignalChangesMember] is not JsonObject pending)
-        {
-            root[PendingSignalChangesMember] = pending = new JsonObject { ["rule"] = new JsonArray(), ["system"] = new JsonArray() };
-        }
-
-        if (pending["rule"] is not JsonArray)
-        {
-            pending["rule"] = new JsonArray();
-        }
-
-        if (pending["system"] is not JsonArray)
-        {
-            pending["system"] = new JsonArray();
-        }
-
-        return pending;
-    }
-
-    /// <summary>One <c>rule</c> entry per (policy, subject): the fingerprint to close is the one stored before the FIRST change, the one to raise the latest.</summary>
-    private static void RecordRuleChange(JsonObject root, SignalWriteRequest request, string? storedFingerprint, string? raiseFingerprint)
-    {
-        var key = PlanKey(request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId.ToString("D"));
-        var entry = (root[PendingSignalChangesMember]?["rule"] as JsonArray ?? [])
-            .OfType<JsonObject>().FirstOrDefault(e => PlanKey(Text(e, "policyCode"), Text(e, "subjectEntity"), Text(e, "subjectId")) == key);
-        if (entry is null)
-        {
-            if (storedFingerprint is null && raiseFingerprint is null)
-            {
-                return;
-            }
-
-            ((JsonArray)Pending(root)["rule"]!).Add(new JsonObject
-            {
-                ["policyCode"] = request.PolicyCode,
-                ["subjectEntity"] = request.SubjectEntityLogicalName,
-                ["subjectId"] = request.SubjectId.ToString("D"),
-                ["closeFingerprint"] = storedFingerprint,
-                ["raiseFingerprint"] = raiseFingerprint,
-            });
-            return;
-        }
-
-        entry["raiseFingerprint"] = raiseFingerprint;
-        if (Text(entry, "closeFingerprint") is null && raiseFingerprint is null)
-        {
-            ((JsonArray)entry.Parent!).Remove(entry);
-        }
     }
 
     private static void RecordSystemChange(JsonObject root, int line, string kind, string reason)
@@ -1121,7 +873,7 @@ public sealed class InvoiceCorrectionReevaluation
             throw new InvalidOperationException("The submission has no stored findings.");
         }
 
-        var lines = await ReadLinesAsync(applied.InvoiceId, ct).ConfigureAwait(false);
+        var lines = await ReadLinesAsync(_entities, applied.InvoiceId, ct).ConfigureAwait(false);
         var pending = root[PendingSignalChangesMember] as JsonObject;
         var ruleChanges = (pending?["rule"] as JsonArray ?? []).OfType<JsonObject>().ToList();
         var systemLines = (pending?["system"] as JsonArray ?? []).OfType<JsonObject>()
@@ -1139,19 +891,20 @@ public sealed class InvoiceCorrectionReevaluation
                 pipeline.Remove(hold);
             }
 
-            var refused = new List<(SignalWriteRequest Request, string Code)>();
+            var signals = new InvoiceRuleSignalReconciler(
+                _lifecycle, _closeSignal, _logger, SignalLogContext.Correction, applied.InvoiceId, applied.Field);
             foreach (var change in ruleChanges)
             {
-                await ReconcileRuleAsync(applied, root, change, refused, ct).ConfigureAwait(false);
+                await signals.ReconcileRuleAsync(root, change, ct).ConfigureAwait(false);
             }
 
             if (systemLines.Count > 0 || clearHold)
             {
-                await ReconcileSystemAsync(applied, root, lines, systemLines, clearHold, refused, ct).ConfigureAwait(false);
+                await ReconcileSystemAsync(applied, signals, root, lines, systemLines, clearHold, ct).ConfigureAwait(false);
             }
 
             root.Remove(PendingSignalChangesMember);
-            RecordWriteRefusals(root, refused);
+            InvoiceRuleSignalReconciler.RecordWriteRefusals(root, signals.Refused);
             var update = new Entity(InvoiceReviewReadService.SubmissionEntity, submission.Id)
             {
                 RowVersion = version.ToString(CultureInfo.InvariantCulture),
@@ -1161,7 +914,7 @@ public sealed class InvoiceCorrectionReevaluation
             await _entities.ExecuteTransactionAsync(
                 [new UpdateRequest { Target = update, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }], ct).ConfigureAwait(false);
             _logger.LogInformation("Correction of {Field} on invoice {InvoiceId}: Signals reconciled ({Rule} rule changes, {System} lines with system changes, coding hold cleared: {Hold}, {Refused} refused).",
-                applied.Field, applied.InvoiceId, ruleChanges.Count, systemLines.Count, clearHold, refused.Count);
+                applied.Field, applied.InvoiceId, ruleChanges.Count, systemLines.Count, clearHold, signals.Refused.Count);
         }
 
         await RederivePendingAsync(applied, root, lines, ct).ConfigureAwait(false);
@@ -1170,63 +923,14 @@ public sealed class InvoiceCorrectionReevaluation
     private static bool IsCoded(JsonObject? extraction) =>
         extraction?["coding"] is JsonObject coding && Text(coding, "codeSetId") is { Length: > 0 };
 
-    /// <summary>One <c>rule</c> entry: no raise → close the latest open episode (ConditionCleared); a raise → write the plan entry of <c>raiseFingerprint</c>, which the lifecycle refreshes (same fingerprint) or supersedes (another). A raise with no matching plan entry closes the old episode instead.</summary>
-    private async Task ReconcileRuleAsync(
-        CorrectionApplied applied, JsonObject root, JsonObject change, List<(SignalWriteRequest, string)> refused, CancellationToken ct)
-    {
-        if (Text(change, "policyCode") is not { Length: > 0 } policyCode || Text(change, "subjectEntity") is not { Length: > 0 } entity
-            || !Guid.TryParse(Text(change, "subjectId"), out var subjectId))
-        {
-            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: a pending Signal change names no policy or subject; skipped.", applied.Field, applied.InvoiceId);
-            return;
-        }
-
-        var close = Text(change, "closeFingerprint");
-        var raise = Text(change, "raiseFingerprint");
-        if (close is not null && raise is null)
-        {
-            // Raise null: the group is gone, so the latest open episode is closed whatever its fingerprint. A member that survived a failed clear can
-            // read close fp0 / raise null while the open episode already carries fp1 (a repeat wrote it); matching fp0 would leave that episode open.
-            // Raise set (fp0 -> fp1 while it still fires): nothing is cleared here; the lifecycle write below supersedes the open fp0 episode and opens
-            // the next, as SignalEpisodeLifecycle and the system path do (#2507 F1).
-            await CloseClearedAsync(policyCode, entity, subjectId, fingerprint: null, ct).ConfigureAwait(false);
-        }
-
-        if (raise is null)
-        {
-            return;
-        }
-
-        var key = PlanKey(policyCode, entity, subjectId.ToString("D"));
-        var entry = (root["signalPlan"] as JsonArray ?? []).OfType<JsonObject>()
-            .FirstOrDefault(e => PlanKey(Text(e, "policyCode"), Text(e, "subjectEntity"), Text(e, "subjectId")) == key);
-        if (entry is null || !string.Equals(Text(entry, "fingerprint"), raise, StringComparison.Ordinal))
-        {
-            // By construction the plan holds the entry B2b-1 recorded; anything else is not raised (nothing to raise it from).
-            _logger.LogWarning("Correction of {Field} on invoice {InvoiceId}: no plan entry of policy {PolicyCode} on {Subject} {SubjectId} matches the change; not raised.",
-                applied.Field, applied.InvoiceId, policyCode, entity, subjectId);
-
-            // Nothing will supersede the old episode, so it is closed here (of the stored fingerprint only).
-            if (close is not null && !string.Equals(close, raise, StringComparison.Ordinal))
-            {
-                await CloseClearedAsync(policyCode, entity, subjectId, close, ct).ConfigureAwait(false);
-            }
-
-            return;
-        }
-
-        var planned = InvoiceSubmissionAfterSteps.StoredFindings.ParsePlanEntry(entry);
-        await WriteAsync(applied, planned.Request, planned.Fingerprint, refused, ct).ConfigureAwait(false);
-    }
-
     /// <summary>
     /// The <c>system</c> entries and the coding hold: the system findings are re-mapped from the patched JSON (<see cref="InvoiceSubmissionAfterSteps.StoredFindings.SystemFindings"/>)
     /// under the system policy 049 reads; each named line's Signal, and the invoice's when the hold clears, is closed when none of its findings is left,
     /// else refreshed. A system policy that is not usable wrote no system Signal (049), so nothing is reconciled.
     /// </summary>
     private async Task ReconcileSystemAsync(
-        CorrectionApplied applied, JsonObject root, IReadOnlyDictionary<int, StoredLine> lines, IReadOnlyList<int> systemLines, bool clearHold,
-        List<(SignalWriteRequest, string)> refused, CancellationToken ct)
+        CorrectionApplied applied, InvoiceRuleSignalReconciler signals, JsonObject root, IReadOnlyDictionary<int, StoredLine> lines,
+        IReadOnlyList<int> systemLines, bool clearHold, CancellationToken ct)
     {
         var stored = InvoiceSubmissionAfterSteps.StoredFindings.Parse(root.ToJsonString())
             ?? throw new InvalidOperationException("The stored findings could not be read back.");
@@ -1255,93 +959,12 @@ public sealed class InvoiceCorrectionReevaluation
             var left = findings.Where(f => f.Subject.LineIndex == line).ToList();
             if (left.Count == 0)
             {
-                await CloseClearedAsync(rule.PolicyCode, entity, subjectId, fingerprint: null, ct).ConfigureAwait(false);
+                await signals.CloseClearedAsync(rule.PolicyCode, entity, subjectId, fingerprint: null, ct).ConfigureAwait(false);
                 continue;
             }
 
             var mapping = BillingFindingSignalMapper.MapAll(left, rules, subjects).Single();
-            await WriteAsync(applied, mapping.Request, mapping.Fingerprint, refused, ct).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// Closes the latest episode of (policy, subject) as ConditionCleared (record-free, as <c>SignalReevaluationJob</c> closes a cleared condition) when
-    /// it is open and, if <paramref name="fingerprint"/> is given, carries it. Already resolved, absent, or another fingerprint: nothing is written.
-    /// </summary>
-    private async Task CloseClearedAsync(string policyCode, string entity, Guid subjectId, string? fingerprint, CancellationToken ct)
-    {
-        var latest = await _lifecycle.LatestEpisodeAsync(policyCode, entity, subjectId, ct).ConfigureAwait(false);
-        if (latest is not { IsResolved: false } open
-            || (fingerprint is not null && !string.Equals(open.Fingerprint, fingerprint, StringComparison.Ordinal)))
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(open.RowVersion))
-        {
-            throw new InvalidOperationException("The open Signal was read without a row version.");
-        }
-
-        var outcome = await _closeSignal(open.Id, open.RowVersion, SignalWriter.ResolutionConditionCleared, policyCode, ct).ConfigureAwait(false);
-        if (outcome != SignalCloseOutcome.Closed)
-        {
-            throw new InvalidOperationException("The Signal changed while it was being closed.");
-        }
-    }
-
-    /// <summary>One write through the option-a lifecycle (B2b: a resolved latest episode reopens as n+1). A permanent refusal (049 F1-3) is recorded and the step goes on; a retryable failure fails the step.</summary>
-    private async Task WriteAsync(
-        CorrectionApplied applied, SignalWriteRequest request, string fingerprint, List<(SignalWriteRequest, string)> refused, CancellationToken ct)
-    {
-        SignalStep step;
-        try
-        {
-            step = await _lifecycle.WriteAsync(request, fingerprint, SignalLogContext.Correction, applied.InvoiceId, ResolvedEpisodeRule.ReopenAsNextEpisode, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            && InvoiceSubmissionAfterSteps.PermanentWriteRefusal(request, ex) is { } code)
-        {
-            step = new SignalStep(false, null, code);
-        }
-
-        if (step.RefusedCode is { } refusedCode)
-        {
-            _logger.LogError("Correction of {Field} on invoice {InvoiceId}: the Signal of policy {PolicyCode} on {Subject} {SubjectId} is refused permanently ({Code}); recorded in the findings.",
-                applied.Field, applied.InvoiceId, request.PolicyCode, request.SubjectEntityLogicalName, request.SubjectId, refusedCode);
-            refused.Add((request, refusedCode));
-        }
-
-        if (step.FailureCode is { } failure)
-        {
-            throw new InvalidOperationException($"A Signal write did not complete ({failure}).");
-        }
-    }
-
-    /// <summary>The writer's permanent refusals, in 049's <see cref="InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember"/> shape, once each.</summary>
-    private static void RecordWriteRefusals(JsonObject root, IReadOnlyList<(SignalWriteRequest Request, string Code)> refused)
-    {
-        if (refused.Count == 0)
-        {
-            return;
-        }
-
-        if (root[InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] is not JsonArray stored)
-        {
-            root[InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = stored = [];
-        }
-
-        foreach (var (request, code) in refused)
-        {
-            var entry = new JsonObject
-            {
-                ["policyCode"] = request.PolicyCode,
-                ["subject"] = new JsonObject { ["entity"] = request.SubjectEntityLogicalName, ["id"] = request.SubjectId.ToString("D") },
-                ["code"] = code,
-            };
-            if (!stored.Any(e => JsonNode.DeepEquals(e, entry)))
-            {
-                stored.Add(entry);
-            }
+            await signals.WriteAsync(mapping.Request, mapping.Fingerprint, ct).ConfigureAwait(false);
         }
     }
 
@@ -1377,227 +1000,6 @@ public sealed class InvoiceCorrectionReevaluation
         }
     }
 
-    // ── The request, rebuilt from the stored rows ──
-
-    private sealed record CorrectionRow(Guid Id, Guid? LineId, string Field, string? Ai, string? Final, bool IsLabel);
-
-    private sealed class RequestBasis(
-        CorrectionApplied applied, Entity invoice, IReadOnlyDictionary<int, StoredLine> lines, ExtractionProvenance.SubmissionProvenance? provenance,
-        IReadOnlySet<(Guid? LineId, string Field)> verified, Guid submissionId, JsonObject root, (string Entity, Guid Id) core, ResolutionFacts? resolutionBefore)
-    {
-        /// <summary>The request with the corrected field at <paramref name="value"/>; <paramref name="preVerified"/>: the field counts as verified (confidence 1.0);
-        /// <paramref name="before"/>: the side of the diff before the correction (a timekeeper or date correction reads the line's pre-correction roster match and rate).</summary>
-        public BillingEvaluationRequest Build(string? value, bool preVerified, bool before)
-        {
-            // A header field as the evaluator saw it: the corrected field at the value of this side; a field a reviewer corrected or confirmed at its
-            // column (the correction wrote it there); any other at the value the analyzer read (the header provenance: the invoice number column
-            // holds the number the submitter typed, not the one read), else its column.
-            string? Header(string name)
-            {
-                if (applied.LineId is null && applied.Field == name)
-                {
-                    return value;
-                }
-
-                if (!verified.Contains(((Guid?)null, name)) && provenance is not null
-                    && provenance.Header.TryGetValue(name, out var read) && read.Value is not null)
-                {
-                    return read.Value;
-                }
-
-                return ColumnText(name);
-            }
-
-            var confidence = new Dictionary<string, decimal>(StringComparer.Ordinal);
-            foreach (var (name, field) in provenance?.Header ?? new Dictionary<string, ExtractionProvenance.HeaderField>())
-            {
-                if (field.Combined is { } combined)
-                {
-                    confidence[name] = combined;
-                }
-            }
-
-            foreach (var name in ExtractionProvenance.HeaderFieldNames.Where(n => IsVerified(null, n, preVerified)))
-            {
-                confidence[name] = 1m;
-            }
-
-            return new BillingEvaluationRequest
-            {
-                SubmissionId = submissionId,
-                FirmId = invoice.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.InvoiceVendorOrg)?.Id ?? throw new InvalidOperationException("The invoice names no firm."),
-                CoreRecord = new CoreRecordReference(
-                    core.Entity switch { "sprk_matter" => CoreRecordKind.Matter, "sprk_project" => CoreRecordKind.Project, _ => CoreRecordKind.WorkAssignment },
-                    core.Id),
-                TrackingNumber = Text(root, "trackingNumber"),
-                FirmInvoiceNumber = Header(BillingFieldNames.FirmInvoiceNumber),
-                InvoiceDate = DateOf(Header(BillingFieldNames.InvoiceDate)),
-                ReceivedOn = DateOf(Text(root, "receivedOn")) ?? throw new InvalidOperationException("The stored findings have no received date."),
-                BillingPeriodStart = DateOf(Header(BillingFieldNames.BillingPeriodStart)),
-                BillingPeriodEnd = DateOf(Header(BillingFieldNames.BillingPeriodEnd)),
-                Currency = Header(BillingFieldNames.Currency),
-                HeaderConfidence = confidence,
-                Lines = lines.Values.OrderBy(l => l.Index).Select(l => LineFacts(l, value, preVerified, before)).ToList(),
-            };
-        }
-
-        /// <summary>A field the reviewer has seen counts as verified: any Corrected / Confirmed row, except that the corrected field before this correction counts only when an earlier row did.</summary>
-        private bool IsVerified(Guid? lineId, string field, bool preVerified) =>
-            applied.LineId == lineId && applied.Field == field ? preVerified : verified.Contains((lineId, field));
-
-        private string? ColumnText(string name) => name switch
-        {
-            BillingFieldNames.FirmInvoiceNumber => invoice.GetAttributeValue<string>(InvoiceReviewService.InvInvoiceNumber),
-            BillingFieldNames.InvoiceDate => DateText(invoice, InvoiceReviewService.InvInvoiceDate),
-            BillingFieldNames.BillingPeriodStart => DateText(invoice, InvoiceSubmissionPersister.InvoiceBillingPeriodStart),
-            BillingFieldNames.BillingPeriodEnd => DateText(invoice, InvoiceSubmissionPersister.InvoiceBillingPeriodEnd),
-            BillingFieldNames.Currency => invoice.GetAttributeValue<string>(InvoiceSubmissionPersister.InvoiceCurrency),
-            _ => null,
-        };
-
-        private BillingLineFacts LineFacts(StoredLine line, string? value, bool preVerified, bool before)
-        {
-            var row = line.Row;
-            var isFee = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value == (int)InvoiceLineCostType.Fee;
-            var target = applied.LineId == row.Id;
-            string? Field(string name, string? stored) => target && applied.Field == name ? value : stored;
-
-            var coding = line.Extraction?["coding"] as JsonObject;
-            var hours = isFee ? DecimalOf(Field(ResolutionFieldNames.Hours, Canonical(row.GetAttributeValue<decimal?>(InvoiceSubmissionPersister.LineQuantity)))) : null;
-            var rate = isFee ? DecimalOf(Field(ResolutionFieldNames.Rate, Canonical(row.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineRate)?.Value))) : null;
-            var amount = DecimalOf(Field(ResolutionFieldNames.Amount, Canonical(row.GetAttributeValue<Money>(InvoiceTotalsService.LineAmount)?.Value)));
-
-            var confidence = new Dictionary<string, decimal>(StringComparer.Ordinal);
-            foreach (var (name, node) in line.Extraction?["fields"] as JsonObject ?? new JsonObject())
-            {
-                if (node is JsonObject field && field["combined"] is JsonValue combined && combined.TryGetValue<decimal>(out var c))
-                {
-                    confidence[name] = c;
-                }
-            }
-
-            var observations = new List<InvoiceLineObservation>();
-            if (coding?["confidence"] is JsonValue codingConfidence && codingConfidence.TryGetValue<decimal>(out var codingValue))
-            {
-                confidence[BillingFieldNames.TaskCode] = codingValue;
-                confidence[BillingFieldNames.ActivityCode] = codingValue;
-                confidence[BillingFieldNames.ExpenseCode] = codingValue;
-            }
-
-            foreach (var observation in (coding?["observations"] as JsonArray ?? []).OfType<JsonObject>())
-            {
-                if (Enum.TryParse<InvoiceLineObservationType>(Text(observation, "type"), out var type)
-                    && observation["confidence"] is JsonValue oc && oc.TryGetValue<decimal>(out var ov))
-                {
-                    // The quoted text is not stored; it is the same (empty) on both sides of the diff.
-                    observations.Add(new InvoiceLineObservation { Type = type, Confidence = ov, QuotedText = string.Empty });
-                    var key = BillingFieldNames.ObservationPrefix + type;
-                    confidence[key] = confidence.TryGetValue(key, out var seen) ? Math.Max(seen, ov) : ov;
-                }
-            }
-
-            foreach (var name in new[] { ResolutionFieldNames.Hours, ResolutionFieldNames.Rate, ResolutionFieldNames.Amount, BillingFieldNames.Narrative,
-                BillingFieldNames.TaskCode, BillingFieldNames.ActivityCode, BillingFieldNames.ExpenseCode,
-                ResolutionFieldNames.Date, ResolutionFieldNames.TimekeeperAsBilled })
-            {
-                if (IsVerified(row.Id, name, preVerified))
-                {
-                    confidence[name] = 1m;
-                }
-            }
-
-            var timekeeperId = row.GetAttributeValue<EntityReference>(InvoiceSubmissionPersister.LineResolvedTimekeeper)?.Id;
-            var approvedRate = row.GetAttributeValue<Money>(InvoiceSubmissionPersister.LineApprovedRate)?.Value;
-            var timekeeperReason = TimekeeperUnmatchedReason.None;
-            var rateStatus = RateResolutionStatus.NotFound;
-            var rateReason = RateNotFoundReason.None;
-            if (line.Extraction?[ResolutionChangeMember] is JsonObject change)
-            {
-                var after = change["after"] as JsonObject;
-                timekeeperReason = Enum.TryParse<TimekeeperUnmatchedReason>(after is null ? null : Text(after, "timekeeperReason"), out var tr) ? tr : timekeeperReason;
-                rateStatus = Enum.TryParse<RateResolutionStatus>(after is null ? null : Text(after, "rateStatus"), out var rs) ? rs : rateStatus;
-                rateReason = Enum.TryParse<RateNotFoundReason>(after is null ? null : Text(after, "rateReason"), out var rr) ? rr : rateReason;
-            }
-
-            if (before && target && resolutionBefore is { } was)
-            {
-                // A timekeeper or date correction (fix round, part 3): the stored columns hold the pair the latest correction gave; the "before" side is
-                // the pair the stored findings were last patched with (see ResolutionBefore), so a correction whose findings step never ran is diffed too.
-                timekeeperId = was.TimekeeperId;
-                approvedRate = was.ApprovedRate;
-                (timekeeperReason, rateStatus, rateReason) = (was.TimekeeperReason, was.RateStatus, was.RateReason);
-            }
-
-            return new BillingLineFacts
-            {
-                Index = line.Index,
-                LineType = isFee ? InvoiceLineType.Fee : InvoiceLineType.Expense,
-                Date = DateOf(Field(ResolutionFieldNames.Date, DateText(row, InvoiceSubmissionPersister.LineEventDate))),
-                TimekeeperName = Field(ResolutionFieldNames.TimekeeperAsBilled, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTimekeeper)),
-                Timekeeper = !isFee ? null
-                    : timekeeperId is { } tk && tk != Guid.Empty
-                        ? new TimekeeperResolution { TimekeeperId = tk, Stage = TimekeeperMatchStage.Exact, MatchConfidence = 1m }
-                        : new TimekeeperResolution { Reason = timekeeperReason },
-                ApprovedRate = !isFee ? new RateResolution { Status = RateResolutionStatus.NotApplicable }
-                    : approvedRate is { } approved ? new RateResolution { Status = RateResolutionStatus.Found, ApprovedRate = approved }
-                    : new RateResolution { Status = rateStatus == RateResolutionStatus.Found ? RateResolutionStatus.NotFound : rateStatus, Reason = rateReason },
-                Hours = hours,
-                BilledRate = rate,
-                Amount = amount,
-                Narrative = Field(BillingFieldNames.Narrative, row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineDescription)),
-                TaskCode = Field(BillingFieldNames.TaskCode, CodeOf(coding, "task")),
-                ActivityCode = Field(BillingFieldNames.ActivityCode, CodeOf(coding, "activity")),
-                ExpenseCode = Field(BillingFieldNames.ExpenseCode, CodeOf(coding, "expense")),
-                BilledTaskCode = row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineTaskCodeAsBilled),
-                BilledActivityCode = row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineActivityCodeAsBilled),
-                BilledExpenseCode = row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExpenseCodeAsBilled),
-                Observations = observations,
-                FieldConfidence = confidence,
-            };
-        }
-
-        /// <summary>The unmatched / not-found reasons of a line as the first evaluation stored them: the reason codes of its ApprovedTimekeeper and ApprovedRate findings.</summary>
-        internal static (TimekeeperUnmatchedReason, RateResolutionStatus, RateNotFoundReason) StoredReasons(JsonObject root, int line)
-        {
-            var timekeeper = TimekeeperUnmatchedReason.None;
-            var status = RateResolutionStatus.NotFound;
-            var reason = RateNotFoundReason.None;
-            foreach (var entry in (root["findings"] as JsonArray ?? []).OfType<JsonObject>()
-                .Where(e => Text(e, "subject") == nameof(BillingSubjectKind.Line) && IntOf(e["line"]) == line))
-            {
-                switch (Text(entry, "reasonCode"))
-                {
-                    case BillingReasonCodes.TimekeeperNameMissing: timekeeper = TimekeeperUnmatchedReason.NameMissing; break;
-                    case BillingReasonCodes.TimekeeperLineDateMissing: timekeeper = TimekeeperUnmatchedReason.LineDateMissing; break;
-                    case BillingReasonCodes.TimekeeperNameIncomplete: timekeeper = TimekeeperUnmatchedReason.NameIncomplete; break;
-                    case BillingReasonCodes.TimekeeperNotOnRoster: timekeeper = TimekeeperUnmatchedReason.NotOnRoster; break;
-                    case BillingReasonCodes.TimekeeperNotApprovedOnLineDate: timekeeper = TimekeeperUnmatchedReason.NotApprovedOnLineDate; break;
-                    case BillingReasonCodes.TimekeeperAmbiguous: timekeeper = TimekeeperUnmatchedReason.Ambiguous; break;
-                    case BillingReasonCodes.TimekeeperAiBelowThreshold: timekeeper = TimekeeperUnmatchedReason.AiBelowThreshold; break;
-                    case BillingReasonCodes.TimekeeperAiNotClearlyAhead: timekeeper = TimekeeperUnmatchedReason.AiNotClearlyAhead; break;
-                    case BillingReasonCodes.TimekeeperAiUnavailable: timekeeper = TimekeeperUnmatchedReason.AiUnavailable; break;
-                    case BillingReasonCodes.RateAmbiguous: status = RateResolutionStatus.Ambiguous; break;
-                    case BillingReasonCodes.RateTimekeeperUnmatched: reason = RateNotFoundReason.TimekeeperUnmatched; break;
-                    case BillingReasonCodes.RateLineDateMissing: reason = RateNotFoundReason.LineDateMissing; break;
-                    case BillingReasonCodes.RateNoRateInForce: reason = RateNotFoundReason.NoRateInForce; break;
-                }
-            }
-
-            return (timekeeper, status, reason);
-        }
-
-        private static string? CodeOf(JsonObject? coding, string member) =>
-            coding?[member] is JsonObject slot && Text(slot, "code") is { } code && !string.IsNullOrWhiteSpace(code) ? code.Trim() : null;
-
-        private static string? Canonical(decimal? value) => value?.ToString(CultureInfo.InvariantCulture);
-
-        private static decimal? DecimalOf(string? text) =>
-            decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value) ? value : null;
-
-        private static string? DateText(Entity row, string column) =>
-            row.GetAttributeValue<DateTime?>(column) is { } date ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null;
-    }
-
     // ── Reads ──
 
     private async Task<Entity?> ReadInvoiceAsync(Guid invoiceId, CancellationToken ct)
@@ -1612,92 +1014,24 @@ public sealed class InvoiceCorrectionReevaluation
         return (await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
     }
 
-    /// <summary>The invoice's fee and expense lines by index (<c>sprk_linesequence</c> - 1, the persister's key); Adjustment lines are not evaluated.</summary>
-    private async Task<IReadOnlyDictionary<int, StoredLine>> ReadLinesAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceReviewReadService.LineEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceReviewReadService.LineColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-        };
-        query.Criteria.AddCondition(InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, ConditionOperator.Equal, invoiceId);
-        query.AddOrder(InvoiceSubmissionPersister.LineSequence, OrderType.Ascending);
-        var lines = new Dictionary<int, StoredLine>();
-        foreach (var row in await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false))
-        {
-            if (row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineCostType)?.Value is not ((int)InvoiceLineCostType.Fee or (int)InvoiceLineCostType.Expense)
-                || row.GetAttributeValue<int?>(InvoiceSubmissionPersister.LineSequence) is not { } sequence || sequence < 1)
-            {
-                continue;
-            }
-
-            JsonObject? extraction = null;
-            if (row.GetAttributeValue<string>(InvoiceSubmissionPersister.LineExtractionConfidence) is { Length: > 0 } text)
-            {
-                try
-                {
-                    extraction = JsonNode.Parse(text) as JsonObject;
-                }
-                catch (JsonException)
-                {
-                    extraction = null;
-                }
-            }
-
-            var status = row.GetAttributeValue<OptionSetValue>(InvoiceTotalsService.LineStatus)?.Value;
-            var decided = status is (int)InvoiceLineStatus.Accepted or (int)InvoiceLineStatus.Reduced or (int)InvoiceLineStatus.Disallowed;
-            if (!lines.TryAdd(sequence - 1, new StoredLine(sequence - 1, row, extraction, decided)))
-            {
-                throw new InvalidOperationException("Two lines of the invoice share a sequence.");
-            }
-        }
-
-        return lines;
-    }
-
-    /// <summary>Every correction row of the invoice, oldest first (the order the correction service reads them in).</summary>
-    private async Task<IReadOnlyList<CorrectionRow>> ReadCorrectionsAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceLineDecisionService.CorrectionEntity)
-        {
-            ColumnSet = new ColumnSet(CorrectionColumns),
-            Criteria = new FilterExpression(LogicalOperator.And),
-        };
-        query.Criteria.AddCondition("sprk_invoice", ConditionOperator.Equal, invoiceId);
-        query.AddOrder($"{InvoiceLineDecisionService.CorrectionEntity}id", OrderType.Ascending);
-        var rows = await InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct).ConfigureAwait(false);
-        return rows
-            .OrderBy(r => r.GetAttributeValue<DateTime?>("sprk_reviewedon") ?? r.GetAttributeValue<DateTime?>("createdon") ?? DateTime.MinValue)
-            .ThenBy(r => r.GetAttributeValue<DateTime?>("createdon"))
-            .Select(r => new CorrectionRow(
-                r.Id,
-                r.GetAttributeValue<EntityReference>("sprk_invoiceline")?.Id,
-                r.GetAttributeValue<string>("sprk_fieldname") ?? string.Empty,
-                r.GetAttributeValue<string>("sprk_aivalue"),
-                r.GetAttributeValue<string>("sprk_finalvalue"),
-                r.GetAttributeValue<OptionSetValue>("sprk_outcometype")?.Value is InvoiceCorrectionService.OutcomeCorrected or InvoiceCorrectionService.OutcomeConfirmed))
-            .ToList();
-    }
-
     private Task<Entity?> ReadSubmissionAsync(Guid invoiceId, CancellationToken ct) => ReadSubmissionAsync(_entities, invoiceId, ct);
 
-    /// <summary>The invoice's latest submission (its findings JSON, version and administrator text), read app-only.</summary>
-    private static async Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct)
-    {
-        var query = new QueryExpression(InvoiceReviewReadService.SubmissionEntity)
-        {
-            ColumnSet = new ColumnSet(InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceTotalsService.VersionNumber, InvoiceSubmissionPersister.SubmissionAdminAttention, "createdon"),
-            Criteria = new FilterExpression(LogicalOperator.And),
-            TopCount = 1,
-        };
-        query.Criteria.AddCondition(InvoiceSubmissionPersister.SubmissionInvoice, ConditionOperator.Equal, invoiceId);
-        query.AddOrder("createdon", OrderType.Descending);
-        return (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-    }
+    private static readonly string[] SubmissionReadColumns =
+        [InvoiceSubmissionPersister.SubmissionFindingsJson, InvoiceTotalsService.VersionNumber, InvoiceSubmissionPersister.SubmissionAdminAttention];
+
+    /// <summary>
+    /// The invoice's OWN submission (its findings JSON, version and administrator text), read app-only through the shared selection
+    /// <see cref="InvoiceBlockedHold.ReadOwnSubmissionAsync"/> (task 165a): among the submissions linked to the invoice, the one whose id derives the
+    /// invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), never another linked row, however recent (164a fix round F1). Null when it is
+    /// not linked: every caller (the correction's follow-through, Add line's steps 1 and 9, the unapplied-correction read) then writes nothing and fails
+    /// closed, and the approval and line decisions refuse.
+    /// </summary>
+    internal static Task<Entity?> ReadSubmissionAsync(IGenericEntityService entities, Guid invoiceId, CancellationToken ct) =>
+        InvoiceBlockedHold.ReadOwnSubmissionAsync(entities, invoiceId, SubmissionReadColumns, ct);
 
     /// <summary>
     /// Fix round, part 3 (F-2): the Corrected / Confirmed correction rows of the invoice, of a field this follow-through handles (re-evaluated, or one that
-    /// feeds the totals, TotalDue included), that are not listed in the latest submission's <see cref="AppliedCorrectionsMember"/>: corrections whose value
+    /// feeds the totals, TotalDue included), that are not listed in the invoice's own submission's <see cref="AppliedCorrectionsMember"/>: corrections whose value
     /// was saved but whose follow-through (findings, status, Signals, totals) has not finished (the client stopped after a 503 Incomplete). A row of a line that
     /// <paramref name="lines"/> shows a reviewer has decided (Accepted, Reduced, Disallowed) is not listed: <see cref="InvoiceLineDecisionService"/> refuses to
     /// decide a line while one of its corrections is listed here, and the correction service refuses a decided line, so such a row was followed through before
@@ -1756,14 +1090,4 @@ public sealed class InvoiceCorrectionReevaluation
             .ToList();
         return $"These corrections were saved but did not finish: {string.Join("; ", named)}. Repeat each correction, then {then}.";
     }
-
-    // ── JSON helpers ──
-
-    private static string? Text(JsonObject node, string name) =>
-        node[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
-
-    private static int? IntOf(JsonNode? node) => node is JsonValue value && value.TryGetValue<int>(out var number) ? number : null;
-
-    private static DateOnly? DateOf(string? text) =>
-        DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null;
 }

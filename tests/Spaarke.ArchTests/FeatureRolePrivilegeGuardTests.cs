@@ -43,6 +43,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>The ruled changes (task 046b).</b> <c>config/feature-role-privileges.json</c> lists the role changes the owner ruled on
 /// task 046's gaps; <c>scripts/Set-FeatureRolePrivileges.ps1</c> applies it to an environment. The role files hold each change at
 /// its declared depth, and putting any one back to its earlier level fails this guard.</para>
+/// <para><b>Pinned whole sets (ebilling-r1 DEF-059).</b> <see cref="ExactPrivilegeSets"/> lists roles whose entire privilege set is
+/// fixed: Spaarke Decision Record Reader holds Read on <c>sprk_decisionrecord</c> at Global and nothing else. An added privilege, a
+/// depth change or a table change fails.</para>
 /// <para><b>Basic User is read-only on Spaarke tables (task 046c; owner, 2026-11-06).</b> Spaarke Basic User holds Read and nothing else on
 /// every <c>sprk_*</c> table; its other privileges are the platform privileges listed by name in
 /// <see cref="BasicUserPlatformPrivileges"/>. <see cref="BasicUserIsReadOnlyOnSpaarkeTables"/> checks the role file against that rule.
@@ -66,6 +69,7 @@ public class FeatureRolePrivilegeGuardTests
     private const string BillingAdmin = "Spaarke Billing Administrator";
     private const string OntologyAdmin = "Spaarke Ontology Administrator";
     private const string AiAdmin = "Spaarke AI Analysis Admin";
+    private const string DecisionRecordReader = "Spaarke Decision Record Reader";
 
     private const string Bff = "src/server/api/Sprk.Bff.Api/";
     private const string ChildCreate = Bff + "Api/ChildRecordEndpoints.cs:70-85,279-286; " + Bff + "Services/Dataverse/CallerWriteAuthorization.cs:63-90";
@@ -171,7 +175,16 @@ public class FeatureRolePrivilegeGuardTests
         .. Wizard("Project wizard", "prvCreatesprk_Project", "prvAppendsprk_Project"),
         .. Wizard("Event wizard", "prvCreatesprk_Event", "prvAppendsprk_Event"),
         .. Wizard("To Do wizard", "prvCreatesprk_Todo", "prvAppendsprk_Todo"),
-        .. Wizard("Invoice wizard", "prvCreatesprk_Invoice", "prvAppendsprk_Invoice"),
+        // Invoice (ebilling-r1 task 096b, EB-D-201): the Create Invoice wizard no longer creates through the child-records route (an
+        // invoice is created only by submission, by the application). Create stays held, and this row stays, until the role change
+        // (096b notes, D3), for the reason that still asks it of the caller: R1, the confirm route (finance.confirm) asks the caller's
+        // Create (FinanceEndpoints.cs:179-182, FinanceAuthorizationFilter.cs:348). R4 (the wizard launcher's Mscrm.CreateSelectedEntityPermission
+        // display rule, sprk_Invoice RibbonDiff) is a second reason for as long as that rule stays. Append: no create route asks it for an
+        // invoice; it is not removed here (D3, R5).
+        .. For("Invoice confirm route (finance.confirm; R1) and the wizard launcher's display rule (R4)", [Core], "Basic",
+            Bff + "Api/Finance/FinanceEndpoints.cs:179-182; " + Bff + "Api/Filters/FinanceAuthorizationFilter.cs:348", "prvCreatesprk_Invoice"),
+        .. For("Invoice Append (not removed by 096b; the role change is D3, see the 096b notes R5)", [Core], "Basic",
+            Bff + "Api/ChildRecordEndpoints.cs:116 (RefileTables: the one child-records route that still names the invoice)", "prvAppendsprk_Invoice"),
         .. Wizard("Work Assignment wizard", "prvCreatesprk_WorkAssignment", "prvAppendsprk_WorkAssignment"),
         .. Wizard("Report Card wizard", "prvCreatesprk_ReportCard", "prvAppendsprk_ReportCard"),
         .. Wizard("Document upload (wizard document rows)", "prvCreatesprk_Document", "prvAppendsprk_Document"),
@@ -512,6 +525,12 @@ public class FeatureRolePrivilegeGuardTests
         new("Spaarke Reporting Access Admin", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
         new("Spaarke Reporting Access Author", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
         new("Spaarke Reporting Access Viewer", RoleKind.AddOn, [], [], NoBffFeature + ReportingByRole),
+        // ebilling-r1 DEF-059: held by the BFF application identity only, never by people. Not AppUsers on purpose: AppUsers leaves a
+        // role out of the person-role set, and so out of the writer-only must-not-hold rules, which must keep binding this role (the
+        // server writer alone creates Decision Records). Its whole privilege set is pinned by ExactPrivilegeSets.
+        new(DecisionRecordReader, RoleKind.AddOn, [], [],
+            NoBffFeature + "the BFF reads Decision Records app-only as its own application identity (counted spend, firm findings), "
+            + "not as a caller; this role gives that identity the one read, and ExactPrivilegeSets pins it."),
     ];
 
     private const string ReportingByRole =
@@ -835,9 +854,10 @@ public class FeatureRolePrivilegeGuardTests
             Directory.Delete(root, recursive: true);
         }
 
-        // Seeded drift against the real repo: the Billing row's former evidence names a file that is not on this branch.
-        Assert.Equal(new[] { Bff + "Api/Finance/ProcedureAssignmentEndpoints.cs" },
-            MissingEvidencePaths(Bff + "Api/Finance/ProcedureAssignmentEndpoints.cs:114-133,310-380 (branch task/ebilling-089e)", SourceScan.RepoRoot));
+        // Seeded drift against the real repo: evidence naming a file that exists on no branch is reported. (The seed used to be
+        // ProcedureAssignmentEndpoints.cs, absent on master but present once ebilling-r1 merges, so the seed now names a file that never exists.)
+        Assert.Equal(new[] { Bff + "Api/Finance/SeededDriftNoSuchEndpoints.cs" },
+            MissingEvidencePaths(Bff + "Api/Finance/SeededDriftNoSuchEndpoints.cs:114-133,310-380", SourceScan.RepoRoot));
     }
 
     /// <summary>Each "; "-separated evidence segment starts with a repo-relative path (up to its first ':', ' ' or '('); the paths that
@@ -941,7 +961,7 @@ public class FeatureRolePrivilegeGuardTests
     public void EveryRoleFileIsClassifiedAndEachAddOnIsCheckedAlone()
     {
         var files = RoleFileNames(RolesDirectory);
-        Assert.True(files.Count >= 13, $"Found only {files.Count} role files under {RolesDirectory} (expected >= 13).");
+        Assert.True(files.Count >= 14, $"Found only {files.Count} role files under {RolesDirectory} (expected >= 14).");
         _ = LoadRoles(RolesDirectory, files); // each file parses, holds privileges and names its own role
 
         var problems = ClassificationProblems(files, RoleClasses, Declared, Requirements, StandaloneExceptions.Keys.ToArray());
@@ -1482,6 +1502,107 @@ public class FeatureRolePrivilegeGuardTests
         var container = doc.Descendants().First(e => e.Name.LocalName == "RolePrivileges");
         container.Add(new XElement(container.Name.Namespace + "RolePrivilege", new XAttribute("name", privilege), new XAttribute("level", level)));
         doc.Save(path);
+    }
+
+    // ── Pinned whole privilege sets (ebilling-r1 DEF-059) ───────────────────────────────────────────────────────────────
+
+    /// <summary>Roles whose WHOLE privilege set is pinned: the role file holds exactly these entries (privilege and depth), no other
+    /// entry, and no entry twice. Spaarke Decision Record Reader gives the BFF application identity organization-wide Decision Record
+    /// read and nothing else; Create stays with the server writer (Spaarke Ontology Service), so write provenance is unchanged.</summary>
+    internal static readonly IReadOnlyDictionary<string, (string Privilege, string Depth)[]> ExactPrivilegeSets =
+        new Dictionary<string, (string Privilege, string Depth)[]>(StringComparer.Ordinal)
+        {
+            [DecisionRecordReader] = [("prvReadsprk_DecisionRecord", "Global")],
+        };
+
+    /// <summary>What differs between a role file's privilege entries and its pinned set: a count that is not the pinned count, an entry
+    /// outside the set (another privilege, or a pinned privilege at another depth), or a pinned entry that is absent.</summary>
+    internal static List<string> ExactPrivilegeSetProblems(string role, string roleXml, IReadOnlyList<(string Privilege, string Depth)> pinned)
+    {
+        var held = XDocument.Parse(roleXml).Descendants().Where(e => e.Name.LocalName == "RolePrivilege")
+            .Select(e => (Privilege: (string?)e.Attribute("name") ?? string.Empty, Depth: (string?)e.Attribute("level") ?? string.Empty))
+            .ToList();
+        bool Pinned((string Privilege, string Depth) h) => pinned.Any(p => Same(p.Privilege, h.Privilege) && Same(p.Depth, h.Depth));
+        var problems = new List<string>();
+        if (held.Count != pinned.Count)
+            problems.Add($"{role}: holds {held.Count} privilege entr{(held.Count == 1 ? "y" : "ies")}, pinned to exactly {pinned.Count}");
+        problems.AddRange(held.Where(h => !Pinned(h)).Select(h => $"{role}: holds {h.Privilege} at {h.Depth}, which is not in its pinned set"));
+        problems.AddRange(pinned.Where(p => !held.Any(h => Same(h.Privilege, p.Privilege) && Same(h.Depth, p.Depth)))
+            .Select(p => $"{role}: lacks {p.Privilege} at {p.Depth}"));
+        return problems;
+    }
+
+    [Fact(DisplayName = "DEF-059: Spaarke Decision Record Reader holds exactly one privilege, Read on sprk_decisionrecord at Global, and stays a person role for the writer-only rules")]
+    public void PinnedRolesHoldExactlyTheirSet()
+    {
+        // the pin itself is literal
+        Assert.Equal(new[] { DecisionRecordReader }, ExactPrivilegeSets.Keys);
+        Assert.Equal(new[] { ("prvReadsprk_DecisionRecord", "Global") }, ExactPrivilegeSets[DecisionRecordReader]);
+
+        foreach (var (role, pinned) in ExactPrivilegeSets)
+        {
+            Assert.Contains(RoleClasses, c => c.Role == role);
+            _ = LoadRoles(RolesDirectory, [role]); // present, parsable, names its own role
+            var problems = ExactPrivilegeSetProblems(role, File.ReadAllText(Path.Combine(RolesDirectory, role + ".xml")), pinned);
+            Assert.True(problems.Count == 0,
+                "A pinned role's privilege set changed (ebilling-r1 DEF-059). The role exists to give one read and nothing else; a change "
+                + "needs the owner's approval and unified-access-control-r2's review:\n  " + string.Join("\n  ", problems));
+        }
+
+        // Not exempt: the role is in the person-role set, so no writer-only privilege can be added to it unseen.
+        Assert.Contains(DecisionRecordReader, PersonRoles(SolutionsDirectory).Keys);
+        Assert.DoesNotContain(DecisionRecordReader, ExpectedAppUsersRoles);
+    }
+
+    [Theory(DisplayName = "DEF-059 must-fire: a seeded copy of Spaarke Decision Record Reader with an added privilege, another depth, another table, another verb, a duplicate or no grant fails the pin")]
+    [InlineData("add-baseline", "holds prvReadUser at Basic, which is not in its pinned set")]
+    [InlineData("add-signal-read", "holds prvReadsprk_Signal at Global, which is not in its pinned set")]
+    [InlineData("add-create", "holds prvCreatesprk_DecisionRecord at Global, which is not in its pinned set")]
+    [InlineData("depth-deep", "holds prvReadsprk_DecisionRecord at Deep, which is not in its pinned set")]
+    [InlineData("depth-basic", "lacks prvReadsprk_DecisionRecord at Global")]
+    [InlineData("table-signal", "holds prvReadsprk_Signal at Global, which is not in its pinned set")]
+    [InlineData("verb-write", "holds prvWritesprk_DecisionRecord at Global, which is not in its pinned set")]
+    [InlineData("duplicate", "holds 2 privilege entries, pinned to exactly 1")]
+    [InlineData("removed", "lacks prvReadsprk_DecisionRecord at Global")]
+    public void PinnedRoleSetFiresOnASeededCopy(string mutation, string expected)
+    {
+        var doc = XDocument.Parse(File.ReadAllText(Path.Combine(RolesDirectory, DecisionRecordReader + ".xml")));
+        var container = doc.Descendants().Single(e => e.Name.LocalName == "RolePrivileges");
+        var grant = container.Elements().Single(e => e.Name.LocalName == "RolePrivilege");
+        XElement Grant(string name, string level) => new(grant.Name, new XAttribute("name", name), new XAttribute("level", level));
+        switch (mutation)
+        {
+            case "add-baseline": container.Add(Grant("prvReadUser", "Basic")); break;
+            case "add-signal-read": container.Add(Grant("prvReadsprk_Signal", "Global")); break;
+            case "add-create": container.Add(Grant("prvCreatesprk_DecisionRecord", "Global")); break;
+            case "depth-deep": grant.SetAttributeValue("level", "Deep"); break;
+            case "depth-basic": grant.SetAttributeValue("level", "Basic"); break;
+            case "table-signal": grant.SetAttributeValue("name", "prvReadsprk_Signal"); break;
+            case "verb-write": grant.SetAttributeValue("name", "prvWritesprk_DecisionRecord"); break;
+            case "duplicate": container.Add(Grant("prvReadsprk_DecisionRecord", "Global")); break;
+            case "removed": grant.Remove(); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation), mutation, null);
+        }
+
+        var problems = ExactPrivilegeSetProblems(DecisionRecordReader, doc.ToString(), ExactPrivilegeSets[DecisionRecordReader]);
+
+        Assert.Contains($"{DecisionRecordReader}: {expected}", problems);
+    }
+
+    [Fact(DisplayName = "DEF-059 must-not-fire: the exact set in other casing passes; must-fire: Create on a Decision Record given to the reader is also caught by the writer-only rule")]
+    public void PinnedRoleSetControls()
+    {
+        const string otherCasing = """<Role name="R"><RolePrivileges><RolePrivilege name="PRVREADSPRK_DECISIONRECORD" level="global" /></RolePrivileges></Role>""";
+        Assert.Empty(ExactPrivilegeSetProblems("R", otherCasing, [("prvReadsprk_DecisionRecord", "Global")]));
+
+        // The writer-only must-not-hold rule binds the reader too (it is a person role here, not AppUsers).
+        var real = PersonRoles(SolutionsDirectory);
+        var seeded = new Dictionary<string, IReadOnlyDictionary<string, string>>(real)
+        {
+            [DecisionRecordReader] = new Dictionary<string, string>(real[DecisionRecordReader], StringComparer.OrdinalIgnoreCase) { ["prvCreatesprk_DecisionRecord"] = "Global" },
+        };
+        Assert.Empty(ForbiddenHeld(real, MustNotHold));
+        Assert.Contains(ForbiddenHeld(seeded, MustNotHold), f => f.StartsWith($"{DecisionRecordReader}: prvCreatesprk_DecisionRecord at Global", StringComparison.Ordinal));
     }
 
     // ── The ruled changes (task 046b) ──────────────────────────────────────────────────────────────────────────────────
@@ -2026,6 +2147,88 @@ public class FeatureRolePrivilegeGuardTests
             AddPrivilege(dir, Basic, "prvWriteSomePlatformTable", "Basic"); // must-fire: not in the list, not a Spaarke-table Read
             Assert.Equal(new[] { "prvWriteSomePlatformTable at Basic: neither Read on a Spaarke table nor in the named platform list (add it to the list only if it is a platform privilege)" },
                 ReadOnlyProblems(LoadRoles(dir, [Basic])[Basic], BasicUserPlatformPrivileges));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    // ── G5: invoice readers are never wider than core readers (field-mapping-server-write-path-r1 task 032b-1, Q-U1) ──────
+
+    private const string InvoiceRead = "prvReadsprk_invoice";
+    private static readonly string[] CoreReads = ["prvReadsprk_matter", "prvReadsprk_project", "prvReadsprk_workassignment"];
+
+    /// <summary>
+    /// Every role whose Read on <c>sprk_invoice</c> is deeper than its shallowest Read on the three core tables (an absent core Read
+    /// is shallower than any depth): such a role would show an invoice's copies of core-record values (its description, priority
+    /// and attorney and paralegal display copies, design notes/task-032b-design.md §2) to people who cannot read the core record. An
+    /// invoice Read at a level the scan does not know is reported too (fail closed).
+    /// </summary>
+    internal static List<string> InvoiceReaderProblems(IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> roles)
+    {
+        var problems = new List<string>();
+        foreach (var (role, privileges) in roles.OrderBy(r => r.Key, StringComparer.Ordinal))
+        {
+            if (!privileges.TryGetValue(InvoiceRead, out var invoice))
+                continue;
+            if (Rank(invoice) < 0)
+            {
+                problems.Add($"{role}: {InvoiceRead} at an unknown level '{invoice}'");
+                continue;
+            }
+
+            var shallowest = CoreReads
+                .Select(p => (Privilege: p, Level: privileges.TryGetValue(p, out var l) ? l : "none"))
+                .OrderBy(x => Rank(x.Level))
+                .First();
+            if (Rank(invoice) > Rank(shallowest.Level))
+                problems.Add($"{role}: {InvoiceRead} at {invoice} is wider than {shallowest.Privilege} at {shallowest.Level}");
+        }
+
+        return problems;
+    }
+
+    [Fact(DisplayName = "032b-1 G5: no role reads invoices more widely than it reads matters, projects and work assignments")]
+    public void InvoiceReadIsNeverWiderThanCoreRead()
+    {
+        var files = RoleFileNames(RolesDirectory);
+        var roles = LoadRoles(RolesDirectory, files);
+        Assert.Contains(roles, r => r.Value.ContainsKey(InvoiceRead)); // not vacuous: some role reads invoices
+
+        var problems = InvoiceReaderProblems(roles);
+        Assert.True(problems.Count == 0,
+            "An invoice carries copies of core-record values, so its readers must be a subset of the core record's (task 032b, "
+            + "Q-U1). Raise the core Read or lower the invoice Read with unified-access-control-r2:\n  " + string.Join("\n  ", problems));
+    }
+
+    [Fact(DisplayName = "032b-1 G5 controls: a seeded role with invoice Read at Global and matter Read at Local fails; equal depths and no invoice Read pass")]
+    public void InvoiceReadCheckFires()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "sprk-feature-roles-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            void Seed(string name, params (string Privilege, string Level)[] privileges) => File.WriteAllText(
+                Path.Combine(dir, name + ".xml"),
+                new XDocument(new XElement("Role", new XAttribute("name", name),
+                    new XElement("RolePrivileges", privileges.Select(p =>
+                        new XElement("RolePrivilege", new XAttribute("name", p.Privilege), new XAttribute("level", p.Level)))))).ToString());
+
+            Seed("Wide", ("prvReadsprk_Invoice", "Global"), ("prvReadsprk_matter", "Local"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Global"));
+            Seed("NoCore", ("prvReadsprk_invoice", "Basic"), ("prvReadsprk_matter", "Basic"), ("prvReadsprk_project", "Basic"));
+            Seed("Unknown", ("prvReadsprk_invoice", "Org"), ("prvReadsprk_matter", "Global"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Global"));
+            Seed("Equal", ("prvReadsprk_invoice", "Deep"), ("prvReadsprk_matter", "Deep"), ("prvReadsprk_project", "Global"), ("prvReadsprk_workassignment", "Deep"));
+            Seed("NoInvoice", ("prvReadsprk_matter", "Basic"));
+
+            var problems = InvoiceReaderProblems(LoadRoles(dir, ["Wide", "NoCore", "Unknown", "Equal", "NoInvoice"]));
+
+            Assert.Equal(new[]
+            {
+                "NoCore: prvReadsprk_invoice at Basic is wider than prvReadsprk_workassignment at none",
+                "Unknown: prvReadsprk_invoice at an unknown level 'Org'",
+                "Wide: prvReadsprk_invoice at Global is wider than prvReadsprk_matter at Local",
+            }, problems);
         }
         finally
         {

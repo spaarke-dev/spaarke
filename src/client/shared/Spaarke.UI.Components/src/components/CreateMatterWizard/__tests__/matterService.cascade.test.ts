@@ -1,42 +1,35 @@
 /**
- * MatterService — `sprk_searchindexname` BU cascade tests
+ * MatterService — the BU cascade is no longer written onto the matter (task 021, FR-16)
  *
- * Scope: the FR-WIZ-01 / FR-WIZ-08 extension to `CreateMatterWizard.matterService`
- * landed by spaarke-multi-container-multi-index-r1.
+ * History: spaarke-multi-container-multi-index-r1 (FR-WIZ-01 / FR-WIZ-08) cascaded `sprk_searchindexname` (and the
+ * `sprk_ai_search_index` bind) from the user's owning Business Unit onto the create payload, and task 076 (2026-09-03)
+ * deleted the `sprk_containerid` writes. Task 041 (FR-40) made both index columns the SERVER's on a matter: the index
+ * follows the content type, and the create path drops whatever a caller sends for either. Task 021 moves the wizard onto
+ * `POST /api/v1/child-records/sprk_matter` with the user's own values only, so the last client-side cascade write goes.
  *
- * Contract (refactored 2026-06-08 to match the CreateProjectWizard dependency-injection
- * pattern): `matterService.createMatter` accepts `cascadeDefaults?: IUserBuCascadeDefaults`
- * as a 4th parameter. The caller (typically `CreateMatterWizard.tsx` via the
- * `resolveUserBuDefaults` prop) is responsible for resolving the defaults using the
- * host's `Xrm.Utility.getGlobalContext().userSettings.userId` API. The previous inline
- * implementation called the non-existent `Xrm.Utility.getUserId()` and silently
- * skipped the cascade in the Code Page iframe runtime — fixed by moving the lookup
- * upstream and passing the resolved values in.
+ * Contract: `matterService.createMatter` still accepts `cascadeDefaults?: IUserBuCascadeDefaults` (the host resolves it
+ * from `Xrm.Utility.getGlobalContext().userSettings.userId`), but only to name the index that uploaded FILES are indexed
+ * into. It is never a source for the matter's own columns.
  *
- * Covered:
- *   - Cascade: `sprk_searchindexname` is added to the `createRecord` payload from the
- *     caller-provided `cascadeDefaults.searchIndexName` (FR-WIZ-01).
- *   - INV-5 preservation: the helper guards explicit values — covered comprehensively
- *     by `EntityCreationService.cascade.test.ts`; this file verifies the matterService
- *     correctly invokes the helper.
- *   - Security (task 076, 2026-09-03): `sprk_containerid` is NEVER present on the create
- *     payload — not from the host-injected container, not from `cascadeDefaults.containerId`.
- *     Both writes were deleted; the server derives the container from the matter itself.
- *     The former "`sprk_containerid` cascade unchanged" regression coverage is now this
- *     negative assertion, which is the guarantee actually worth holding.
- *   - Graceful degradation: when the caller omits `cascadeDefaults`, matter creation
- *     still succeeds and `sprk_searchindexname` is simply left unset.
- *   - NULL BU value: when defaults.searchIndexName is undefined, the field is unset.
+ * Covered (all negative on the create body, plus the graceful-degradation cases the old suite held):
+ *   - `sprk_searchindexname`, `sprk_ai_search_index` (the bind, whichever nav-prop casing) and `sprk_containerid` are
+ *     NEVER in the body -- whatever the host resolved and however the service was constructed;
+ *   - omitted / partial cascade defaults still create the matter, and no BU lookup is made on the client.
  */
 
 import { MatterService } from '../matterService';
 import type { ICreateMatterFormState } from '../formTypes';
 import type { IDataService } from '../../../types/serviceInterfaces';
+import { EntityCreationService } from '../../../services/EntityCreationService';
 import type { IUserBuCascadeDefaults } from '../../../services/EntityCreationService';
+import type { IUploadedFile } from '../wizardTypes';
 
 const MOCK_BU_ID = 'bu-guid-xyz';
 const MOCK_CONTAINER_ID = 'spe-container-from-host';
 const MOCK_BU_SEARCH_INDEX = 'spaarke-knowledge-index-v2';
+const MOCK_BU_SEARCH_INDEX_ID = 'index-guid-from-bu';
+const BFF_BASE = 'https://example.test';
+const ROUTE = `${BFF_BASE}/api/v1/child-records/sprk_matter`;
 
 function makeForm(overrides?: Partial<ICreateMatterFormState>): ICreateMatterFormState {
   return {
@@ -56,131 +49,184 @@ function makeForm(overrides?: Partial<ICreateMatterFormState>): ICreateMatterFor
   };
 }
 
-function makeDataService(): {
-  dataService: IDataService;
-  createCalls: Array<{ entity: string; payload: Record<string, unknown> }>;
-} {
-  const createCalls: Array<{ entity: string; payload: Record<string, unknown> }> = [];
-
-  const dataService: IDataService = {
-    createRecord: jest.fn().mockImplementation(async (entity: string, payload: Record<string, unknown>) => {
-      createCalls.push({ entity, payload });
-      return 'created-record-guid';
-    }),
+function makeDataService(): IDataService {
+  return {
+    createRecord: jest.fn().mockResolvedValue('xrm-created-guid'),
     retrieveRecord: jest.fn().mockResolvedValue({}),
     retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
     updateRecord: jest.fn().mockResolvedValue(undefined),
     deleteRecord: jest.fn().mockResolvedValue(undefined),
   };
-
-  return { dataService, createCalls };
 }
 
-const noopAuthFetch = jest.fn().mockResolvedValue({
-  ok: true,
-  status: 200,
-  statusText: 'OK',
-  json: async () => ({}),
-  text: async () => '',
-} as unknown as Response);
-const noopBffBase = 'https://example.test';
+/** Answers the create route with an id and every other call (the access sync) with an empty 200. */
+function makeFetch(): jest.Mock {
+  return jest.fn(async (url: string) =>
+    String(url).startsWith(ROUTE)
+      ? ({
+          ok: true,
+          status: 201,
+          json: async () => ({ id: 'created-record-guid' }),
+          text: async () => '',
+        } as unknown as Response)
+      : ({ ok: true, status: 200, json: async () => ({}), text: async () => '' } as unknown as Response)
+  );
+}
 
-describe('MatterService — sprk_searchindexname BU cascade (FR-WIZ-01)', () => {
+/** The body POSTed to the create route. */
+function createBody(fetchMock: jest.Mock): Record<string, unknown> {
+  const call = fetchMock.mock.calls.find(([url]) => String(url).startsWith(ROUTE));
+  expect(call).toBeDefined();
+  return JSON.parse((call![1] as RequestInit).body as string);
+}
+
+function expectNoCascadeColumns(body: Record<string, unknown>): void {
+  expect(body).not.toHaveProperty('sprk_searchindexname');
+  expect(body).not.toHaveProperty('sprk_containerid');
+  expect(Object.keys(body).filter(k => /ai_search_index/i.test(k))).toEqual([]);
+}
+
+describe('MatterService — BU cascade defaults are not written onto the matter (task 021)', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
   afterEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
   });
 
-  it('adds sprk_searchindexname to the createRecord payload from caller-provided cascadeDefaults (FR-WIZ-01)', async () => {
-    const { dataService, createCalls } = makeDataService();
+  it('writes none of the cascade columns when the host resolved the full BU defaults (name, index id, container)', async () => {
+    const fetchMock = makeFetch();
     const cascadeDefaults: IUserBuCascadeDefaults = {
       businessUnitId: MOCK_BU_ID,
       containerId: MOCK_CONTAINER_ID,
       searchIndexName: MOCK_BU_SEARCH_INDEX,
+      searchIndexId: MOCK_BU_SEARCH_INDEX_ID,
     };
 
-    const service = new MatterService(dataService, noopAuthFetch, noopBffBase, MOCK_CONTAINER_ID);
+    const service = new MatterService(makeDataService(), fetchMock, BFF_BASE, MOCK_CONTAINER_ID);
     const result = await service.createMatter(makeForm(), [], {}, cascadeDefaults);
 
     expect(result.status).toBe('success');
-    expect(createCalls).toHaveLength(1);
-    expect(createCalls[0].entity).toBe('sprk_matter');
-    expect(createCalls[0].payload['sprk_searchindexname']).toBe(MOCK_BU_SEARCH_INDEX);
-    // Task 076: the host-injected container is no longer stamped on the record. The old
-    // `toBe(MOCK_CONTAINER_ID)` regression assertion was CONVERTED to this negative one.
-    expect(createCalls[0].payload).not.toHaveProperty('sprk_containerid');
+    const body = createBody(fetchMock);
+    expectNoCascadeColumns(body);
+    expect(JSON.stringify(body)).not.toContain(MOCK_BU_SEARCH_INDEX);
+    expect(JSON.stringify(body)).not.toContain(MOCK_BU_SEARCH_INDEX_ID);
+    expect(JSON.stringify(body)).not.toContain(MOCK_CONTAINER_ID);
   });
 
-  it('leaves sprk_searchindexname unset when cascadeDefaults.searchIndexName is undefined (Phase A.5 ordering scenario)', async () => {
-    const { dataService, createCalls } = makeDataService();
-    const cascadeDefaults: IUserBuCascadeDefaults = {
-      businessUnitId: MOCK_BU_ID,
-      containerId: MOCK_CONTAINER_ID,
-      searchIndexName: undefined,
-    };
-
-    const service = new MatterService(dataService, noopAuthFetch, noopBffBase, MOCK_CONTAINER_ID);
-    const result = await service.createMatter(makeForm(), [], {}, cascadeDefaults);
-
-    expect(result.status).toBe('success');
-    expect('sprk_searchindexname' in createCalls[0].payload).toBe(false);
-    // Task 076: no container write survives on this path either.
-    expect(createCalls[0].payload).not.toHaveProperty('sprk_containerid');
-  });
-
-  it('leaves sprk_searchindexname unset when cascadeDefaults is omitted entirely (graceful degradation)', async () => {
-    const { dataService, createCalls } = makeDataService();
-
-    const service = new MatterService(dataService, noopAuthFetch, noopBffBase, MOCK_CONTAINER_ID);
-    const result = await service.createMatter(makeForm(), [], {});
-
-    // Matter creation still succeeds — cascade is best-effort
-    expect(result.status).toBe('success');
-    expect('sprk_searchindexname' in createCalls[0].payload).toBe(false);
-    expect(createCalls[0].payload).not.toHaveProperty('sprk_containerid');
-    // BU lookup must NOT have happened (caller didn't pass defaults)
-    expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('businessunit', expect.anything(), expect.anything());
-    expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('systemuser', expect.anything(), expect.anything());
-  });
-
-  // Converted by task 076: this test used to prove that `cascadeDefaults.containerId` filled
-  // `sprk_containerid` when the host injected none. That cascade (`applyDefaultContainerId`) is
-  // deleted, so the surviving — and stronger — guarantee is that the BU container is ignored.
-  it('ignores cascadeDefaults.containerId entirely: no sprk_containerid even when the host injected none', async () => {
-    const { dataService, createCalls } = makeDataService();
-    const cascadeDefaults: IUserBuCascadeDefaults = {
-      businessUnitId: MOCK_BU_ID,
-      containerId: MOCK_CONTAINER_ID,
-      searchIndexName: MOCK_BU_SEARCH_INDEX,
-    };
-
-    // No containerId passed to MatterService constructor — the only container in play is the
-    // caller-supplied BU cascade value, which must not be written.
-    const service = new MatterService(dataService, noopAuthFetch, noopBffBase, undefined);
-    const result = await service.createMatter(makeForm(), [], {}, cascadeDefaults);
-
-    expect(result.status).toBe('success');
-    expect(createCalls[0].payload).not.toHaveProperty('sprk_containerid');
-    // The search-index routing hint still cascades — only the storage location was removed.
-    expect(createCalls[0].payload['sprk_searchindexname']).toBe(MOCK_BU_SEARCH_INDEX);
-  });
-
-  // Converted by task 076: was "host container wins over cascadeDefaults.containerId (INV-5)".
-  // With BOTH container writes deleted, neither source may reach the payload — this covers the
-  // second deleted write site (the constructor-injected container) alongside the cascade one.
-  it('writes no sprk_containerid from EITHER source when the host injects one AND cascadeDefaults supplies one', async () => {
-    const { dataService, createCalls } = makeDataService();
+  it('writes no container from EITHER source (the host-injected container, the BU cascade container)', async () => {
+    const fetchMock = makeFetch();
     const cascadeDefaults: IUserBuCascadeDefaults = {
       businessUnitId: MOCK_BU_ID,
       containerId: 'cascade-container-should-be-ignored',
       searchIndexName: MOCK_BU_SEARCH_INDEX,
     };
 
-    const service = new MatterService(dataService, noopAuthFetch, noopBffBase, MOCK_CONTAINER_ID);
-    const result = await service.createMatter(makeForm(), [], {}, cascadeDefaults);
+    // No host container: the only container in play is the cascade's.
+    await new MatterService(makeDataService(), fetchMock, BFF_BASE, undefined).createMatter(
+      makeForm(),
+      [],
+      {},
+      cascadeDefaults
+    );
+    expectNoCascadeColumns(createBody(fetchMock));
+
+    // Both: still neither.
+    const second = makeFetch();
+    await new MatterService(makeDataService(), second, BFF_BASE, MOCK_CONTAINER_ID).createMatter(
+      makeForm(),
+      [],
+      {},
+      cascadeDefaults
+    );
+    const body = createBody(second);
+    expectNoCascadeColumns(body);
+    expect(JSON.stringify(body)).not.toContain('cascade-container-should-be-ignored');
+  });
+
+  it('creates the matter when cascadeDefaults.searchIndexName is undefined (Phase A.5 ordering scenario)', async () => {
+    const fetchMock = makeFetch();
+    const cascadeDefaults: IUserBuCascadeDefaults = {
+      businessUnitId: MOCK_BU_ID,
+      containerId: MOCK_CONTAINER_ID,
+      searchIndexName: undefined,
+    };
+
+    const result = await new MatterService(makeDataService(), fetchMock, BFF_BASE, MOCK_CONTAINER_ID).createMatter(
+      makeForm(),
+      [],
+      {},
+      cascadeDefaults
+    );
 
     expect(result.status).toBe('success');
-    expect(createCalls[0].payload).not.toHaveProperty('sprk_containerid');
-    // searchIndexName has no host injection — cascade wins
-    expect(createCalls[0].payload['sprk_searchindexname']).toBe(MOCK_BU_SEARCH_INDEX);
+    expectNoCascadeColumns(createBody(fetchMock));
+  });
+
+  it('creates the matter when cascadeDefaults is omitted entirely, and makes no BU lookup on the client', async () => {
+    const fetchMock = makeFetch();
+    const dataService = makeDataService();
+
+    const result = await new MatterService(dataService, fetchMock, BFF_BASE, MOCK_CONTAINER_ID).createMatter(
+      makeForm(),
+      [],
+      {}
+    );
+
+    expect(result.status).toBe('success');
+    expectNoCascadeColumns(createBody(fetchMock));
+    expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('businessunit', expect.anything(), expect.anything());
+    expect(dataService.retrieveRecord).not.toHaveBeenCalledWith('systemuser', expect.anything(), expect.anything());
+  });
+});
+
+// Fix round 1 (task 021, finding 4): the server's FileIndexRequest has no searchIndexName (FR-40: the index follows the
+// content type), so the wizard no longer names an index when it indexes the uploaded files.
+describe('MatterService — file indexing names no search index (task 021 fix round 1)', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('calls indexUploadedFiles without a search index name, even when the host resolved one', async () => {
+    const file = { id: 'item-1', name: 'a.pdf', size: 10, webUrl: 'https://x/a.pdf', driveId: 'b!drive' };
+    jest.spyOn(EntityCreationService.prototype, 'uploadFilesToSpe').mockResolvedValue({
+      success: true,
+      successCount: 1,
+      failureCount: 0,
+      uploadedFiles: [file],
+      errors: [],
+    } as never);
+    jest
+      .spyOn(EntityCreationService.prototype, 'createDocumentRecords')
+      .mockResolvedValue({ success: true, linkedCount: 1, createdDocumentIds: ['doc-1'], warnings: [] });
+    const index = jest.spyOn(EntityCreationService.prototype, 'indexUploadedFiles').mockResolvedValue([]);
+    const cascadeDefaults: IUserBuCascadeDefaults = {
+      businessUnitId: MOCK_BU_ID,
+      containerId: MOCK_CONTAINER_ID,
+      searchIndexName: MOCK_BU_SEARCH_INDEX,
+    };
+
+    const result = await new MatterService(
+      makeDataService(),
+      makeFetch(),
+      BFF_BASE,
+      MOCK_CONTAINER_ID,
+      'tenant-1'
+    ).createMatter(makeForm(), [{ id: 'u1', name: 'a.pdf' } as unknown as IUploadedFile], {}, cascadeDefaults);
+
+    expect(result.status).not.toBe('error');
+    expect(index).toHaveBeenCalledTimes(1);
+    const args = index.mock.calls[0];
+    expect(args).toHaveLength(4);
+    expect(JSON.stringify(args)).not.toContain(MOCK_BU_SEARCH_INDEX);
   });
 });

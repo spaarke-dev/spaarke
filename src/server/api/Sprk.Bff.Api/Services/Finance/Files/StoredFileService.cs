@@ -66,7 +66,8 @@ public sealed class StoredFileService
 
     /// <summary>
     /// Stages the bytes of <paramref name="spec"/> (9.1 step 2): a refused spec, a length outside 0..int.MaxValue and different bytes
-    /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry).
+    /// under an existing id are refusals with nothing written; the same bytes under an existing id are reused (a retry): write-once per
+    /// content, the same verified bytes are rewritten on reuse (DEF-044, owner 2026-11-05), see <see cref="StoredFileBlobs.StageAsync"/>.
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
     public Task<StageResult> StageAsync(StoredFileRowSpec spec, Stream content, CancellationToken ct) => StageAsync(spec, content, manifest: null, ct);
@@ -293,8 +294,10 @@ public sealed class StoredFileService
         owner.ApplyTo(row);
         if (creatorPersonId is { } person && person != Guid.Empty)
         {
-            // sprk_storedfile carries sprk_createdbyperson (088) but is not yet in RecordCreatorPerson.StampedChildTables (086 adds
-            // it), so ApplyTo does not stamp it; stamp it here. Once 086 lists the table both write the same column.
+            // sprk_storedfile is in RecordCreatorPerson.StampedChildTables (task 086), so ApplyTo stamps the resolution's
+            // CreatedByPerson when the owner was resolved with a RequestedBy. A transaction writer that resolves its owner once for
+            // every row and names the person here instead (the submission persister) still records them: the same column, the
+            // same person, written last.
             RecordCreatorPerson.Stamp(row, person);
         }
 
@@ -310,7 +313,8 @@ public sealed class StoredFileService
     private static RecordOwnershipContext OwnerQuestionOf(StoredFileRowSpec spec, RecordRequester? requester, Guid? creatorPersonId) =>
         RecordOwnershipContext.ForRow(
             StoredFileSchema.Entity, RowLookupsOf(spec),
-            callerObjectId: requester?.ObjectId, callerSystemUserId: creatorPersonId) with { RequestedBy = requester };
+            callerObjectId: requester?.ObjectId, callerSystemUserId: creatorPersonId) with
+        { RequestedBy = requester };
 
     /// <summary>
     /// The lookups <see cref="BuildRow"/> writes on a row for <paramref name="spec"/> (column → record): the parent lookup and, when set,
@@ -451,6 +455,27 @@ public sealed class StoredFileService
         return StageCreateFlipAsync(spec, content, RecordRequester.Of(systemUserId: requestedBy), requestedBy, ct);
     }
 
+    /// <summary>
+    /// The owner question <see cref="CreateForAppAsync"/> will ask for <paramref name="spec"/> — and nothing else: no read of the content, no
+    /// blob, no row. For a caller that must know BEFORE it writes anything whether the file can be owned (the AP export asks it before it creates its
+    /// batch or claims an invoice). It is the SAME question as the create's, from the same builder (<see cref="OwnerQuestionOf"/>) and the same
+    /// <paramref name="requestedBy"/>, so the two cannot be asked differently; the create still asks again and its answer decides (a change
+    /// between the two calls is still refused there). A resolver fault propagates. Returns the resolver's answer unchanged
+    /// (<see cref="RecordOwnerResolution.IsRefused"/>, <see cref="RecordOwnerResolution.RefusalCode"/>).
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — the create asks this question inline. (2) Extension — the same builder and
+    /// the same resolver call, now behind one private method both use; nothing about the owner rule is copied. (3) Cost of doing nothing — the AP export
+    /// either rebuilds the file's question itself (a second copy of the owner rule) or creates its batch first and finds out afterwards, leaving a
+    /// Failed batch row in the caller's business unit for a refusal that can never succeed.</remarks>
+    public Task<RecordOwnerResolution> ResolveOwnerForAppAsync(StoredFileRowSpec spec, Guid? requestedBy, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        return AskOwnerAsync(spec, RecordRequester.Of(systemUserId: requestedBy), requestedBy, ct);
+    }
+
+    private Task<RecordOwnerResolution> AskOwnerAsync(StoredFileRowSpec spec, RecordRequester? requester, Guid? creatorPersonId, CancellationToken ct) =>
+        _owners.ResolveOwnerAsync(OwnerQuestionOf(spec, requester, creatorPersonId), ct);
+
     private async Task<StoredFileCreateResult> StageCreateFlipAsync(
         StoredFileRowSpec spec, Stream content, RecordRequester? requester, Guid? creatorPersonId, CancellationToken ct)
     {
@@ -468,12 +493,13 @@ public sealed class StoredFileService
         // and the lookups BuildRow writes), never its parent's content question. An ordinary answer is then the restricted-content owner
         // team, a Secure one the Secure team. A parent that files nothing (a billing export, a procedure version) leaves the row unfiled:
         // the acting user's business unit decides, through the same restricted-content exit; no acting user refuses.
-        var owner = await _owners.ResolveOwnerAsync(OwnerQuestionOf(spec, requester, creatorPersonId), ct).ConfigureAwait(false);
+        var owner = await AskOwnerAsync(spec, requester, creatorPersonId, ct).ConfigureAwait(false);
         if (owner.IsRefused)
         {
             _logger.LogWarning("Stored file {FileId} refused: no owner under {ParentTable} {ParentId} ({OwnerCode})",
                 spec.FileId, spec.Parent.Table, spec.Parent.Id, owner.RefusalCode);
-            return StoredFileCreateResult.Refused(StoredFileRefusal.OwnerUnresolved);
+            // The resolver's own code rides along (never re-derived here), so a caller can tell a refusal no retry changes from a fault.
+            return StoredFileCreateResult.Refused(StoredFileRefusal.OwnerUnresolved, owner.RefusalCode);
         }
 
         var staged = await StageAsync(spec, content, ct).ConfigureAwait(false);
@@ -523,13 +549,33 @@ public sealed class StoredFileService
             : StoredFileCreateResult.Refused(flip.RefusalCode ?? StoredFileRefusal.RowNotFlippable);
     }
 
+    /// <summary>
+    /// The clean-up of a blob THIS attempt wrote (<c>!blob.Reused</c>) whose row write failed. DEF-044 (owner option B): the delete is pinned
+    /// to <see cref="StagedBlob.ETag"/>, the version this attempt wrote, so a concurrent retry that reused the blob since (its rewrite
+    /// moved the ETag) makes the delete fail 412, and the blob is KEPT for that retry (its row is still coming). Without an ETag there is
+    /// nothing to pin to, so the blob is kept for the reconcile job.
+    /// </summary>
     private async Task DeleteStagedBlobAsync(StagedBlob blob, Guid fileId)
     {
+        if (blob.ETag is not { } staged)
+        {
+            _logger.LogWarning("Stored file {FileId}: the row write failed; the blob {BlobName} has no recorded ETag to pin a delete to and is kept for the reconcile job",
+                fileId, blob.BlobPath);
+            return;
+        }
+
         try
         {
             // Not the request's token: the blob must go even when the caller went away (otherwise the reconcile job removes it).
-            await _blobs.DeleteAsync(blob.Container, blob.BlobPath, CancellationToken.None).ConfigureAwait(false);
+            await _blobs.DeleteAsync(blob.Container, blob.BlobPath, staged, CancellationToken.None).ConfigureAwait(false);
             _logger.LogWarning("Stored file {FileId}: the row write failed, so the staged blob {BlobName} was deleted", fileId, blob.BlobPath);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 412)
+        {
+            // The blob is no longer the version this attempt wrote: another attempt reused (rewrote) it. Theirs now; kept.
+            _logger.LogWarning(
+                "Stored file {FileId}: the row write failed; the staged blob {BlobName} was reused by another attempt since (412) and is kept ({Fault})",
+                fileId, blob.BlobPath, ex.GetType().Name);
         }
         catch (Exception ex)
         {
@@ -599,18 +645,26 @@ public sealed class StoredFileService
     public async Task<StoredFileProcessingRead> OpenForProcessingAsync(Guid fileId, CancellationToken ct)
     {
         var row = await ReadRowAsync(fileId, ct).ConfigureAwait(false);
-        if (row is null || row.Status is not (StoredFileStatus.Servable or StoredFileStatus.NotYetServable) || !PathIsOwn(row) || row.Sha256 is null)
+        return row is null
+            ? new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing)
+            : await ReadRowForProcessingAsync(row, ct).ConfigureAwait(false);
+    }
+
+    private async Task<StoredFileProcessingRead> ReadRowForProcessingAsync(StoredFileRow row, CancellationToken ct)
+    {
+        if (row.Status is not (StoredFileStatus.Servable or StoredFileStatus.NotYetServable) || !PathIsOwn(row) || row.Sha256 is null)
         {
             return new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
-        return await ReadVerifiedAsync(fileId, row.Container!, row.BlobPath!, expectedSha256: _ => row.Sha256, row.ContentType, ct).ConfigureAwait(false);
+        return await ReadVerifiedAsync(row.FileId, row.Container!, row.BlobPath!, expectedSha256: _ => row.Sha256, row.ContentType, ct).ConfigureAwait(false);
     }
 
     /// <summary>
     /// The job read of a file STAGED under a deterministic id whose row is written later, in the caller's own transaction (ebilling-r1
     /// task 092: a firm upload is staged at intake, and its row is created with the invoice the job commits). When the row exists the
-    /// answer is <see cref="OpenForProcessingAsync"/>'s. Otherwise the blob is found by its name (built from the typed purpose, parent
+    /// answer is <see cref="OpenForProcessingAsync"/>'s, provided the row has the asked purpose and parent (a row that does not is
+    /// <see cref="StoredFileProcessingOutcome.Missing"/>). Otherwise the blob is found by its name (built from the typed purpose, parent
     /// and id, never read back), its scan verdict is read as for a row, and its bytes must match the SHA-256 the stage recorded in the
     /// blob's metadata; no metadata hash, a mismatch or no blob is <see cref="StoredFileProcessingOutcome.Missing"/>. A fault throws.
     /// </summary>
@@ -618,9 +672,12 @@ public sealed class StoredFileService
     public async Task<StoredFileProcessingRead> OpenStagedForProcessingAsync(
         StoredFilePurpose purpose, StoredFileParent parent, Guid fileId, CancellationToken ct)
     {
-        if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is not null)
+        if (await ReadRowAsync(fileId, ct).ConfigureAwait(false) is { } row)
         {
-            return await OpenForProcessingAsync(fileId, ct).ConfigureAwait(false);
+            // 092 review K6: the row under this id must be the file asked for (same purpose and parent); anything else fails closed.
+            return row.Purpose == purpose && row.Parent == parent
+                ? await ReadRowForProcessingAsync(row, ct).ConfigureAwait(false)
+                : new StoredFileProcessingRead(StoredFileProcessingOutcome.Missing);
         }
 
         if (!Enum.IsDefined(purpose) || StoredFileSchema.ParentKindOf(purpose) != parent.Kind || parent.Id == Guid.Empty || fileId == Guid.Empty)
@@ -677,15 +734,29 @@ public sealed class StoredFileService
     /// The compensation of a stage whose caller then failed before any row could reference it (ebilling-r1 task 092: the intake's
     /// submission create or job enqueue failed). Deletes the blob of <paramref name="spec"/>, found by its name, only when Dataverse
     /// answers that no row with the file id exists; a row (or a row read that faulted) keeps the blob. False when nothing was deleted.
+    /// <para>DEF-044 (owner option B): the blob's properties (its ETag) are read BEFORE the row-absence question, and the delete is pinned
+    /// to that ETag (<c>If-Match</c>). A retry that reuses the blob after that read rewrites it (new ETag), so the delete fails 412 and
+    /// the blob is KEPT (false) for the retry whose row is still coming. A blob that was not there at the read is not deleted.</para>
+    /// <para>Adversarial pass F1: a read-time pin alone closes almost nothing when the caller's own stage is long past (a run whose submission
+    /// lock expired fails after a newer run reused the blob: the read sees the newer run's ETag and the delete would match it). A caller
+    /// that staged the blob passes <paramref name="stagedETag"/>, the ETag its own stage left (<see cref="StagedBlob.ETag"/>); the delete is
+    /// then pinned to THAT, so any later rewrite makes it fail 412 and the blob is kept. The properties read and the row-absence check
+    /// are unchanged. Null keeps the read-time pin (a caller with no <see cref="StagedBlob"/>).</para>
     /// </summary>
     /// <exception cref="RequestFailedException">A storage fault.</exception>
-    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct)
+    public async Task<bool> DeleteStagedAsync(StoredFileRowSpec spec, CancellationToken ct, ETag? stagedETag = null)
     {
         ArgumentNullException.ThrowIfNull(spec);
         if (spec.Invalid() is not null || !_blobs.IsConfigured)
         {
             return false;
         }
+
+        var container = StoredFileSchema.ContainerOf(spec.Purpose);
+        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
+
+        // The version judged: read first, so whatever is written after this read changes the ETag the delete is pinned to.
+        var properties = await _blobs.GetPropertiesAsync(container, name, ct).ConfigureAwait(false);
 
         var (known, row) = await TryReadRowAsync(spec.FileId, ct).ConfigureAwait(false);
         if (!known || row is not null)
@@ -694,10 +765,25 @@ public sealed class StoredFileService
             return false;
         }
 
-        var name = StoredFileBlobName.Build(_blobs.TenantId, spec.Parent, spec.FileId);
-        var deleted = await _blobs.DeleteAsync(StoredFileSchema.ContainerOf(spec.Purpose), name, ct).ConfigureAwait(false);
-        _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
-        return deleted;
+        if (properties is null)
+        {
+            _logger.LogInformation("Stored file {FileId}: no staged blob {BlobName} at the read; nothing to remove", spec.FileId, name);
+            return false;
+        }
+
+        try
+        {
+            var deleted = await _blobs.DeleteAsync(container, name, stagedETag ?? properties.ETag, ct).ConfigureAwait(false);
+            _logger.LogInformation("Stored file {FileId}: staged blob {BlobName} removed by compensation (deleted={Deleted})", spec.FileId, name, deleted);
+            return deleted;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 412)
+        {
+            _logger.LogWarning(
+                "Stored file {FileId}: the staged blob {BlobName} changed after it was read (a retry reused it, 412) and is kept ({Fault})",
+                spec.FileId, name, ex.GetType().Name);
+            return false;
+        }
     }
 
     /// <summary>
@@ -737,6 +823,11 @@ public sealed class StoredFileService
     /// is not cannot name this file's blob, so nothing is touched). The row stays: the undo deletes it in ONE transaction with its invoice
     /// (<see cref="Submission.SubmissionCommitGate.CompensateAsync"/>), so the invoice is never left without its file rows. A blob that is
     /// already gone is not a fault; a storage fault throws (the undo is then held and retried).
+    /// <para>DEF-044: deliberately NOT pinned to an ETag. The undo's judgment is the ROW (read, then withdrawn to Removed under its row
+    /// version, by every caller, before this runs), not a read of the blob, and a row carries no ETag. A properties read taken here and
+    /// followed at once by the delete would pin to whatever the blob is by then, a reuse included, and refuse nothing. Nor is this the
+    /// DEF-044 race: the row already exists under the deterministic id (withdrawn to Removed above), so a retry that reuses the blob
+    /// meets that row, writes no second one and cannot flip it back to Servable.</para>
     /// </summary>
     internal async Task DeleteBlobForUndoAsync(StoredFileRow row, CancellationToken ct)
     {
@@ -872,6 +963,24 @@ public sealed class StoredFileService
     // Row reads
     // =============================================================================================================================
 
+    /// <summary>
+    /// ebilling-r1 task 151e: the display name of the source email Document <paramref name="documentId"/>, app-only. Called only for a document
+    /// the CALLER may Read (the copy rule, <c>StoredFileAccessFilter.DecideRowAsync</c>). <c>null</c> when it has no name or does not exist; a
+    /// fault throws.
+    /// </summary>
+    internal async Task<string?> ReadDocumentNameAsync(Guid documentId, CancellationToken ct)
+    {
+        try
+        {
+            var entity = await _entities.RetrieveAsync(StoredFileSchema.DocumentTable, documentId, [StoredFileSchema.DocumentName], ct).ConfigureAwait(false);
+            return entity.GetAttributeValue<string>(StoredFileSchema.DocumentName);
+        }
+        catch (Exception ex) when (StoredFileNotFound.Is(ex))
+        {
+            return null;
+        }
+    }
+
     /// <summary>The row, or <c>null</c> when Dataverse answered not-found. Any other fault throws.</summary>
     internal async Task<StoredFileRow?> ReadRowAsync(Guid fileId, CancellationToken ct)
     {
@@ -932,6 +1041,12 @@ public sealed class StoredFileService
 internal sealed record StoredFileRow
 {
     public required Guid FileId { get; init; }
+
+    /// <summary>The display name (<c>sprk_name</c>). Shown only in the invoice file list; never logged.</summary>
+    public string? Name { get; init; }
+
+    /// <summary>The recorded size in bytes (<c>sprk_sizebytes</c>), when set.</summary>
+    public int? SizeBytes { get; init; }
 
     /// <summary>The purpose, or <c>null</c> for an unknown value.</summary>
     public StoredFilePurpose? Purpose { get; init; }
@@ -995,6 +1110,8 @@ internal sealed record StoredFileRow
         return new StoredFileRow
         {
             FileId = entity.Id,
+            Name = entity.GetAttributeValue<string>(StoredFileSchema.Name),
+            SizeBytes = entity.GetAttributeValue<int?>(StoredFileSchema.SizeBytes),
             Purpose = purpose,
             Status = status,
             Parent = parent,

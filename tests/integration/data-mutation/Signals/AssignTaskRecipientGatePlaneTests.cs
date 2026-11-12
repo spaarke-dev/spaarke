@@ -128,7 +128,7 @@ public sealed class AssignTaskRecipientGatePlaneTests
     private static AssignTaskRecipientGate Gate(
         IContactIdentityStore identities, IAccessibleRecordSetService accessibleSet, ExternalDataService? portalData = null,
         AssignedAccessTestDoubles.FakeAssignedAccessStore? links = null) =>
-        new(identities, links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore(), null!, null!, null!, accessibleSet, portalData!,
+        new(identities, links ?? new AssignedAccessTestDoubles.FakeAssignedAccessStore(), new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.None), null!, null!, accessibleSet, portalData!,
             NullLogger<AssignTaskRecipientGate>.Instance);
 
     /// <summary>The events list on the matter, as the portal serves it to the contact's HOME sign-in: the REAL workforce strategy
@@ -326,8 +326,9 @@ public sealed class AssignTaskRecipientGatePlaneTests
         links.UsersByLink.GetOrAdd(Contact, _ => new List<AssignedLinkCandidate>())
             .Add(new AssignedLinkCandidate(LicensedUser, Contact, Guid.NewGuid(), false, 0, null, false));
         var sets = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
-        var gate = new Mock<AssignTaskRecipientGate>(Identities(HomeContact()).Object, links, null!, null!, null!, sets.Object, null!,
-            NullLogger<AssignTaskRecipientGate>.Instance) { CallBase = true };
+        var gate = new Mock<AssignTaskRecipientGate>(Identities(HomeContact()).Object, links, new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.None), null!, null!, sets.Object, null!,
+            NullLogger<AssignTaskRecipientGate>.Instance)
+        { CallBase = true };
         gate.Setup(g => g.WallAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(SecureShareWallOutcome.NotSecure);
         gate.Setup(g => g.TaskRightsAsync(LicensedUser, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(AccessRights.Read);

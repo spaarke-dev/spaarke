@@ -1,3 +1,4 @@
+using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -20,8 +21,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// every export. The batch read needs Read on the batch (Dataverse as the caller), uniform 404 otherwise. A later dedicated export right changes
 /// that class only.</para>
 /// <para><b>Answers.</b> 201 with the batch; 400 <c>ebilling.export.invalid_request</c> / <c>selection_refused</c> (per-invoice reasons, nothing claimed) / <c>batch_total_out_of_range</c> (nothing claimed);
-/// 403 <c>ebilling.export.not_permitted</c> (names no invoice); 409 <c>invoice_conflict</c> (nothing claimed); 422 <c>mapping_invalid</c>; 500/503 for faults,
-/// each saying whether anything was exported. 503 <c>ebilling.disabled</c> when the module is off.</para>
+/// 403 <c>ebilling.export.not_permitted</c> (names no invoice); 409 <c>invoice_conflict</c> (nothing claimed); 409 <c>owner_unit_not_allowed</c> (the caller's
+/// business unit cannot own export files, e.g. the root unit: nothing written, a retry cannot change it, an administrator must export from a user in a
+/// business unit); 422 <c>mapping_invalid</c>; 500/503 for faults, each saying whether anything was exported (a 503 is retryable). 503 <c>ebilling.disabled</c> when the module is off.</para>
 /// <para><b>File download (151a).</b> <c>GET export-batches/{batchId}/files/{format}</c> serves the stored CSV or JSON exactly as written at export
 /// (never regenerated), through the same download pipeline as 090's file route (<see cref="StoredFileEndpoints.StreamServableAsync"/>), as an attachment
 /// named <c>ap-export-{batchId}.{format}</c>. Needs Read on the batch (uniform 404 otherwise), the right 090's route already asks for the same bytes.
@@ -72,7 +74,10 @@ public static class ApExportEndpoints
                 "All or nothing. The caller needs Create on the export table and the decide right on every selected invoice (403 otherwise, naming no " +
                 "invoice). Only Approved invoices with no batch are accepted (400 with a reason per invoice). The server claims each invoice for this " +
                 "batch, writes a CSV (one row per invoice) and a JSON (with lines) as internal-only Stored Files from the mapping in the eBilling " +
-                "settings (D-56 default), moves the invoices to Sent to AP and marks the batch Completed. Two batches never hold the same invoice (409).")
+                "settings (D-56 default), moves the invoices to Sent to AP and marks the batch Completed. Two batches never hold the same invoice (409). " +
+                "409 ebilling.export.owner_unit_not_allowed when the caller's business unit cannot own export files (for example a user in the root " +
+                "business unit): nothing is written, trying again will not help, and an administrator must run the export from a user in a business unit. " +
+                "503 ebilling.export.file_failed and unavailable are transient faults (retry).")
             .Produces<ApExportBatchDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -121,7 +126,8 @@ public static class ApExportEndpoints
             .WithDescription(
                 "Moves the invoice from Sent to AP to Paid through the invoice lifecycle service (payment is the full approved total, one payment, never " +
                 "reopened). The caller needs the decide right and Read on the invoice (uniform 404 otherwise). Any other current status, Paid included, " +
-                "is 409 invoice.transition_not_allowed with currentStatus and nothing is written.")
+                "is 409 invoice.transition_not_allowed with currentStatus and nothing is written. A Sent to AP invoice without the server-written approve " +
+                "Decision Record is 409 ebilling.apexport.approval_not_recorded and nothing is written.")
             .Produces<InvoiceMarkPaidResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -159,7 +165,8 @@ public static class ApExportEndpoints
             .WithSummary("Mark an AP export batch as sent to AP")
             .WithDescription(
                 "Sets the batch's Sent to AP Date to now when it is empty; otherwise leaves it (idempotent). Both answer 200 { sentToApDate, alreadySet }. " +
-                "Needs Read and Write on the batch (uniform 404 otherwise). 409 ebilling.export.batch_not_completed when the batch is not Completed.")
+                "Needs Read and Write on the batch (uniform 404 otherwise). 409 ebilling.export.batch_not_completed when the batch is not Completed; " +
+                "409 ebilling.export.file_not_available when it has no export files or no invoices (a batch made by hand, not by Export to AP).")
             .Produces<ApExportMarkSentResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
@@ -327,8 +334,53 @@ public static class ApExportEndpoints
     private static IResult FileNotAvailable(string format) =>
         InvoiceLineReviewEndpoints.Refused(StatusCodes.Status404NotFound, ApExportCodes.FileNotAvailable, $"This batch has no {format} file to download.");
 
-    private static async Task<IResult> MarkPaid(Guid invoiceId, IInvoiceLifecycleService lifecycle, HttpContext httpContext, ILoggerFactory loggerFactory, CancellationToken ct)
+    private static async Task<IResult> MarkPaid(
+        Guid invoiceId, IInvoiceLifecycleService lifecycle, ApExportService exports, HttpContext httpContext, ILoggerFactory loggerFactory, CancellationToken ct)
     {
+        // Task 165b-3 part B fix round (K1; EB-D-208): Mark Paid decides only from server-written sources. Without the writer-created approve record
+        // (the export's own batched check) the lifecycle is not called: a Sent to AP invoice is 409 approval_not_recorded, any other status keeps the
+        // answer FR-42 gives it, and nothing is written. A read fault is 503.
+        (bool Recorded, Entity? Invoice) approval;
+        try
+        {
+            approval = await exports.MarkPaidApprovalAsync(invoiceId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            loggerFactory.CreateLogger(typeof(ApExportEndpoints).FullName!).LogError(
+                "Mark Paid: the approval of invoice {InvoiceId} could not be read ({ExceptionType}) (503)", invoiceId, ex.GetType().Name);
+            return InvoiceLineReviewEndpoints.Refused(
+                StatusCodes.Status503ServiceUnavailable, InvoicePaymentCodes.Unavailable,
+                "The payment could not be recorded. Check the invoice's status and try again.");
+        }
+
+        if (!approval.Recorded)
+        {
+            if (approval.Invoice is null)
+            {
+                return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
+            }
+
+            if (approval.Invoice.GetAttributeValue<OptionSetValue>("statuscode")?.Value is not { } code
+                || !InvoiceStatusCodes.TryFromStatusCode(code, out var current))
+            {
+                return NotMarkable(InvoiceTransitionReasons.StatusUnknown, null, "Only an invoice that is Sent to AP can be marked Paid. Nothing was changed.");
+            }
+
+            if (current != InvoiceLifecycleStatus.SentToAp)
+            {
+                return NotMarkable(InvoiceTransitionReasons.NotAllowed, current, current == InvoiceLifecycleStatus.Paid
+                    ? "The invoice is already Paid."
+                    : "Only an invoice that is Sent to AP can be marked Paid. Nothing was changed.");
+            }
+
+            loggerFactory.CreateLogger(typeof(ApExportEndpoints).FullName!).LogWarning(
+                "Mark Paid refusal {ReasonCode} on {Table} {RowId}", ApExportCodes.ApprovalNotRecorded, ApExportService.InvoiceEntity, invoiceId);
+            return InvoiceLineReviewEndpoints.Refused(
+                StatusCodes.Status409Conflict, ApExportCodes.ApprovalNotRecorded,
+                "This invoice has no recorded approval, so it cannot be marked Paid. Nothing was changed. An administrator must review the invoice.");
+        }
+
         InvoiceTransitionResult result;
         try
         {
@@ -389,6 +441,8 @@ public static class ApExportEndpoints
             }),
         ApExportOutcome.TotalOutOfRange => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status400BadRequest, result.Code!, result.Detail),
         ApExportOutcome.MappingInvalid => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status422UnprocessableEntity, result.Code!, result.Detail),
+        // A refusal a retry cannot change (the caller's business unit cannot own export files). No batch id: nothing the user can act on, and no internal id in the answer.
+        ApExportOutcome.OwnerUnitNotAllowed => InvoiceLineReviewEndpoints.Refused(StatusCodes.Status409Conflict, result.Code!, result.Detail),
         ApExportOutcome.Conflict => Results.Problem(
             statusCode: StatusCodes.Status409Conflict, detail: result.Detail,
             extensions: new Dictionary<string, object?> { ["errorCode"] = result.Code, ["batchId"] = result.BatchId }),

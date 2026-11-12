@@ -935,15 +935,15 @@ public sealed class ScheduledJobHost : BackgroundService
                 switch (grant.Status)
                 {
                     case ScheduledJobLeaseStatus.Granted:
-                    {
-                        var token = grant.Token ?? throw new InvalidOperationException(
-                            $"{_lease.GetType().Name} granted the lease for '{jobId}' without a holder token.");
-                        return new LeaseAcquisition(
-                            LeaseOutcome.Acquired,
-                            Hold: new ScheduledJobLeaseHold(
-                                _lease, jobId, token, _options.LeaseDuration, _options.MaxRunDuration,
-                                _timeProvider, _logger));
-                    }
+                        {
+                            var token = grant.Token ?? throw new InvalidOperationException(
+                                $"{_lease.GetType().Name} granted the lease for '{jobId}' without a holder token.");
+                            return new LeaseAcquisition(
+                                LeaseOutcome.Acquired,
+                                Hold: new ScheduledJobLeaseHold(
+                                    _lease, jobId, token, _options.LeaseDuration, _options.MaxRunDuration,
+                                    _timeProvider, _logger));
+                        }
 
                     case ScheduledJobLeaseStatus.OccurrenceAlreadyDispatched:
                         return new LeaseAcquisition(

@@ -4,7 +4,7 @@
     <title>Document the core/child taxonomy and inheritance behaviour (FR-26/FR-27)</title>
     <phase>3 Child inheritance</phase>
     <gate>blocked — requires 056 merged (documents shipped behaviour, not intent)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation only; no code changes.</rigor-reason>
     <model-tier>sonnet</model-tier>

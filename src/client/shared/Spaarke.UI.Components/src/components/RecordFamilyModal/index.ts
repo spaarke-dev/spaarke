@@ -8,6 +8,7 @@ export {
   buildPushRequest,
   groupRowsByTable,
   isNoFilingEdgeRefusal,
+  isNoProfileRefusal,
   parsePushResponse,
   pushFieldMappings,
   PUSH_FAILED_TEXT,

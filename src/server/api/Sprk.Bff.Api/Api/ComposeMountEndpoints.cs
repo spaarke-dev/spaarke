@@ -67,10 +67,10 @@ internal static class ComposeMountEndpoints
             .Produces<ComposeProjectResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized);
-            // Deliberately NOT .Produces(413): the raised cap is a transport backstop, and an oversize
-            // document is refused by the handler as a 400 ProblemDetails that names the limit. The save
-            // routes declare their responses the same way — a 413 in the contract would advertise a
-            // bodiless rejection as a normal outcome, which is the failure mode FR-S08 removed.
+        // Deliberately NOT .Produces(413): the raised cap is a transport backstop, and an oversize
+        // document is refused by the handler as a 400 ProblemDetails that names the limit. The save
+        // routes declare their responses the same way — a 413 in the contract would advertise a
+        // bodiless rejection as a normal outcome, which is the failure mode FR-S08 removed.
 
         return group;
     }

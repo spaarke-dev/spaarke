@@ -143,6 +143,59 @@ public class OfficeTodoRegardingContractTests
     }
 
     [Fact]
+    public async Task Post_OfficeCreateTodo_WithARecordRegarding_WritesTheRecordUrlBesideTheIdAndName()
+    {
+        // field-mapping-server-write-path-r1 045c (gap G5, writer W11): the to-do's display columns follow its pair. The
+        // writer already holds the table and the id, so the relative record URL (the format every other writer of the pair
+        // uses, RegardingRecordType.BuildRecordUrl) is written with them, never left blank.
+        using var factory = new TodoRegardingTestWebAppFactory();
+        using var client = factory.CreateClient();
+
+        var matterId = Guid.NewGuid();
+        var request = new CreateTodoRequest
+        {
+            Name = "Draft engagement letter",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+            RegardingRecordName = "Acme Corp",
+            PriorityScore = 50,
+            EffortScore = 50,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var entity = factory.CreatedEntities.Should().ContainSingle().Subject;
+        entity.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(matterId.ToString());
+        entity.GetAttributeValue<string>("sprk_regardingrecordurl")
+            .Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", matterId.ToString()));
+    }
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_WithOnlyACarrier_WritesNoRecordUrl()
+    {
+        // The URL describes the RECORD, like the id and the name: a to-do filed only to a document names no record, so no
+        // URL is invented for the carrier.
+        using var factory = new TodoRegardingTestWebAppFactory();
+        using var client = factory.CreateClient();
+
+        var request = new CreateTodoRequest
+        {
+            Name = "Review NDA red-lines",
+            DocumentId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var entity = factory.CreatedEntities.Should().ContainSingle().Subject;
+        entity.Contains("sprk_regardingrecordurl").Should().BeFalse();
+        entity.Contains("sprk_regardingrecordid").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Post_OfficeCreateTodo_WhenUnauthenticated_Returns401_AndCreatesNoRow()
     {
         // Arrange — negative case (acceptance criterion 6), extended beyond the sibling file's status-code-only
@@ -552,7 +605,7 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                 dataverseMock
                     .Setup(d => d.RetrieveAsync(source, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                     .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken __) =>
-                        SourceRows.TryGetValue((entity, id), out var row) ? row : null!);
+                        SourceRows.TryGetValue((entity, id), out var row) ? row.WithGate() : null!);
             }
             // Task 156 (verifier round 1 item 8): a carrier-only To Do is stamped from its carrier, so the carrier is READ.
             // A carrier not seeded in CarrierRows names no root (an empty row); one in CarrierFaults is unreadable.

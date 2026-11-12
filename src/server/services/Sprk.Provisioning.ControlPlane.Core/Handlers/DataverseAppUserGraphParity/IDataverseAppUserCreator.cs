@@ -34,16 +34,23 @@ public abstract record DataverseAppUserCreationOutcome
 
     /// <summary>App User exists (created or already present) with the requested role associated.</summary>
     /// <param name="SystemUserId">The Dataverse <c>systemuserid</c> GUID.</param>
-    public sealed record Success(string SystemUserId) : DataverseAppUserCreationOutcome;
+    /// <param name="MovedFromBusinessUnitId">
+    /// Task 267: set when this call MOVED the existing row from this unit (the request's
+    /// <see cref="DataverseAppUserCreationRequest.MoveFromBusinessUnitId"/>) into the requested unit and read the move back.
+    /// </param>
+    public sealed record Success(string SystemUserId, Guid? MovedFromBusinessUnitId = null) : DataverseAppUserCreationOutcome;
 
     /// <summary>Registration failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
     public sealed record Failure(string Diagnostic) : DataverseAppUserCreationOutcome;
 
     /// <summary>
     /// T259: the App User already exists in <paramref name="BusinessUnitId"/>, not the requested unit. Nothing was written
-    /// — a business-unit change strips every role of the user, so it is never moved here.
+    /// — a business-unit change strips every role of the user, so it is never moved here (the one exception is the
+    /// request's <see cref="DataverseAppUserCreationRequest.MoveFromBusinessUnitId"/>; <paramref name="Reason"/> says why
+    /// such a row was NOT moved, e.g. its azureactivedirectoryobjectid is not the identity's principal id).
     /// </summary>
-    public sealed record InForeignBusinessUnit(string SystemUserId, Guid BusinessUnitId) : DataverseAppUserCreationOutcome;
+    public sealed record InForeignBusinessUnit(string SystemUserId, Guid BusinessUnitId, string? Reason = null)
+        : DataverseAppUserCreationOutcome;
 }
 
 /// <summary>Result of <see cref="IDataverseAppUserCreator.EnsureCustomerBusinessUnitAsync"/> (T259).</summary>
@@ -62,6 +69,16 @@ public abstract record CustomerBusinessUnitOutcome
     /// Nothing was written.
     /// </summary>
     public sealed record WrongParent(Guid BusinessUnitId, Guid? ParentId, Guid RootBusinessUnitId) : CustomerBusinessUnitOutcome;
+
+    /// <summary>
+    /// The unit Dataverse finds for the customer's name IS a reserved unit (the Secure Record unit): its id equals the id
+    /// Dataverse resolves for <paramref name="ReservedUnitName"/>. Dataverse matches names without case or accents, so a
+    /// name that differs from the reserved one only that way lands on it. No user was placed in it by this call;
+    /// <paramref name="CreatedByThisCall"/>: this call created it (fresh stamp — the name collides with a reserved name, and
+    /// the unit is empty).
+    /// </summary>
+    public sealed record IsReservedUnit(Guid BusinessUnitId, string ReservedUnitName, bool CreatedByThisCall = false)
+        : CustomerBusinessUnitOutcome;
 
     /// <summary>A read or the create failed. <paramref name="Diagnostic"/> is operator-facing.</summary>
     public sealed record Failure(string Diagnostic) : CustomerBusinessUnitOutcome;
@@ -86,6 +103,15 @@ public abstract record CustomerBusinessUnitOutcome
 /// the correct behavior for a standard Entra app registration (BFF app-reg OBO row), whose Dataverse
 /// AAD sync reliably finds the enterprise application's service principal object id.
 /// </param>
+/// <param name="MoveFromBusinessUnitId">
+/// Task 267 (#2618): OPTIONAL, and allowed only with <paramref name="SecurityRoleName"/> null and an explicit
+/// <paramref name="SystemUserAzureActiveDirectoryObjectId"/> that parses as a GUID (otherwise <see cref="ArgumentException"/>). An existing row
+/// found by <paramref name="ApplicationId"/> in EXACTLY this unit, whose azureactivedirectoryobjectid equals the requested
+/// principal id, is moved to <paramref name="BusinessUnitId"/> and the move is read back. The ontology writer only: it
+/// holds no role H10 gives (moving strips roles; H7b S24 grants the writer-unit copy afterwards). Any other foreign unit,
+/// or a row with another object id, stays <see cref="DataverseAppUserCreationOutcome.InForeignBusinessUnit"/>. Never used
+/// for the BFF's application users.
+/// </param>
 /// <remarks>
 /// <b>auth-v4 §10.4 silent-fail trap (task 205d / punch row A41, BINDING)</b>: for the UAMI row, this
 /// value MUST be supplied explicitly and MUST be the UAMI's <b>principalId (service principal object
@@ -103,7 +129,8 @@ public sealed record DataverseAppUserCreationRequest(
     string ApplicationId,
     string? SecurityRoleName,
     Guid BusinessUnitId,
-    string? SystemUserAzureActiveDirectoryObjectId = null);
+    string? SystemUserAzureActiveDirectoryObjectId = null,
+    Guid? MoveFromBusinessUnitId = null);
 
 /// <summary>
 /// Ensures a Dataverse Application User exists (upsert semantics — creates if
@@ -128,10 +155,16 @@ public interface IDataverseAppUserCreator
     /// <summary>
     /// T259 (ISS-010, INCOMING-145 §6 T1): finds the business unit named <paramref name="name"/> directly under the root,
     /// or creates it there. Read-then-write: an ambiguous name or a unit of that name under another parent writes nothing.
+    /// The found unit's ID is compared with the units Dataverse resolves for <paramref name="reservedUnitNames"/> — never the
+    /// names in code (Dataverse matches names without case or accents) — on the found, ambiguous AND just-created unit; a
+    /// match is <see cref="CustomerBusinessUnitOutcome.IsReservedUnit"/> and places no user. Any read fault is a Failure.
+    /// Task 267: H10 calls it twice — for the customer's unit and for the ontology writer's own unit — each with the
+    /// other's name among the reserved names, so neither can land on the other (or on the Secure Record unit).
     /// </summary>
     Task<CustomerBusinessUnitOutcome> EnsureCustomerBusinessUnitAsync(
         string environmentUrl,
         string tenantId,
         string name,
+        IReadOnlyCollection<string> reservedUnitNames,
         CancellationToken cancellationToken);
 }

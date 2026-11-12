@@ -792,6 +792,7 @@ public class AssociationMappingTests
         var matterId = Guid.NewGuid();
         var orgId = Guid.NewGuid();
         var contactId = Guid.NewGuid();
+        var matterTypeRowId = Guid.NewGuid();
         var source = new DataverseEntity("sprk_communication", sourceId)
         {
             ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
@@ -799,7 +800,8 @@ public class AssociationMappingTests
             ["sprk_regardingperson"] = new EntityReference("contact", contactId),
             ["sprk_regardingrecordname"] = "Smith v. Jones",
             ["sprk_regardingrecordid"] = matterId.ToString(),
-            ["sprk_regardingrecordtype"] = "sprk_matter",
+            // The pair's type is a lookup to sprk_recordtype_ref (not text), and the reply copies it as one (045c, Q6 (c)).
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", matterTypeRowId),
             ["sprk_associationcount"] = 3,
         };
         SetupSourceCommunication(sourceId, source);
@@ -815,7 +817,9 @@ public class AssociationMappingTests
         (_capturedEntity["sprk_regardingperson"] as EntityReference)!.Id.Should().Be(contactId);
         // Denormalized pointer + count mirror the parent.
         _capturedEntity["sprk_regardingrecordname"].Should().Be("Smith v. Jones");
-        _capturedEntity["sprk_regardingrecordtype"].Should().Be("sprk_matter");
+        var copiedType = (_capturedEntity["sprk_regardingrecordtype"] as EntityReference)!;
+        copiedType.LogicalName.Should().Be("sprk_recordtype_ref");
+        copiedType.Id.Should().Be(matterTypeRowId);
         _capturedEntity["sprk_associationcount"].Should().Be(3);
     }
 
@@ -904,6 +908,127 @@ public class AssociationMappingTests
         _genericEntityServiceMock.Verify(
             ds => ds.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    #endregion
+
+    #region Association status of a sender-filed email (owner UAT 2026-11-11)
+
+    // The email page's "Related to" panel shows a filed record only when sprk_associationstatus is Resolved; an empty status
+    // with no engine provenance renders "Requires review / No confident match". The engine never evaluates an outgoing row,
+    // so the send path is the only writer that can settle it.
+
+    private int? StatusOfCaptured() =>
+        _capturedEntity!.GetAttributeValue<OptionSetValue>("sprk_associationstatus")?.Value;
+
+    [Fact]
+    public async Task SendAsync_WithMatterAssociation_MarksTheAssociationResolved()
+    {
+        var service = CreateService();
+
+        await service.SendAsync(CreateRequestWithAssociations(new CommunicationAssociation
+        {
+            EntityType = "sprk_matter",
+            EntityId = Guid.NewGuid(),
+            EntityName = "Smith v. Jones",
+        }));
+
+        _capturedEntity.Should().NotBeNull();
+        StatusOfCaptured().Should().Be(Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Resolved,
+            "the sender chose the record, so there is nothing left to review");
+    }
+
+    [Fact]
+    public async Task SendAsync_WithUnknownEntityType_DoesNotMarkTheAssociationResolved()
+    {
+        var service = CreateService();
+
+        await service.SendAsync(CreateRequestWithAssociations(new CommunicationAssociation
+        {
+            EntityType = "sprk_unknown_entity",
+            EntityId = Guid.NewGuid(),
+            EntityName = "Unknown Thing",
+        }));
+
+        _capturedEntity.Should().NotBeNull();
+        _capturedEntity!.Attributes.ContainsKey("sprk_associationstatus").Should().BeFalse(
+            "no regarding lookup was written, so the row is not filed");
+    }
+
+    [Fact]
+    public async Task SendAsync_WithNoAssociations_DoesNotSetAssociationStatus()
+    {
+        var service = CreateService();
+
+        await service.SendAsync(CreateRequestWithAssociations());
+
+        _capturedEntity.Should().NotBeNull();
+        _capturedEntity!.Attributes.ContainsKey("sprk_associationstatus").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_WithInheritRegarding_FromResolvedParent_MarksTheReplyResolved()
+    {
+        var sourceId = Guid.NewGuid();
+        string[]? readColumns = null;
+        _genericEntityServiceMock
+            .Setup(ds => ds.RetrieveAsync("sprk_communication", sourceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, _, columns, _) => readColumns = columns)
+            .ReturnsAsync(new DataverseEntity("sprk_communication", sourceId)
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+                ["sprk_associationstatus"] = new OptionSetValue(Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Resolved),
+            });
+        var service = CreateService();
+
+        await service.SendAsync(CreateInheritingRequest(sourceId));
+
+        // The parent's status reaches the copy only if the source read selects it (Dataverse returns only selected columns).
+        readColumns.Should().Contain("sprk_associationstatus");
+        _capturedEntity.Should().NotBeNull();
+        StatusOfCaptured().Should().Be(Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Resolved);
+    }
+
+    [Theory]
+    [InlineData(Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Suggested)]
+    [InlineData(Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.PendingReview)]
+    public async Task SendAsync_WithInheritRegarding_FromUnsettledParent_LeavesTheReplyStatusEmpty(int parentStatus)
+    {
+        var sourceId = Guid.NewGuid();
+        SetupSourceCommunication(sourceId, new DataverseEntity("sprk_communication", sourceId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+            ["sprk_associationstatus"] = new OptionSetValue(parentStatus),
+        });
+        var service = CreateService();
+
+        await service.SendAsync(CreateInheritingRequest(sourceId));
+
+        _capturedEntity.Should().NotBeNull();
+        _capturedEntity!.Attributes.ContainsKey("sprk_associationstatus").Should().BeFalse(
+            "replying does not settle an unconfirmed parent, and the reply must not join the review queue either");
+    }
+
+    [Fact]
+    public async Task SendAsync_WithInheritRegarding_FromUnsettledParent_AndExplicitAssociation_MarksResolved()
+    {
+        var sourceId = Guid.NewGuid();
+        SetupSourceCommunication(sourceId, new DataverseEntity("sprk_communication", sourceId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+            ["sprk_associationstatus"] = new OptionSetValue(Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Suggested),
+        });
+        var service = CreateService();
+        var request = CreateInheritingRequest(sourceId) with
+        {
+            Associations = new[] { new CommunicationAssociation { EntityType = "sprk_matter", EntityId = Guid.NewGuid() } },
+        };
+
+        await service.SendAsync(request);
+
+        _capturedEntity.Should().NotBeNull();
+        StatusOfCaptured().Should().Be(Sprk.Bff.Api.Services.Communication.Engine.AssociationStatusCodes.Resolved,
+            "the sender's explicit choice settles the row whatever the parent's status");
     }
 
     #endregion

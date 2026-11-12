@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
  *
  * - Prettier: runs on staged .ts, .tsx, .json, .yaml, .yml files
  * - ESLint:   runs on staged .ts, .tsx files (grouped by nearest eslint.config directory)
- * - dotnet format: runs on staged .cs files (scoped via --include)
+ * - dotnet format: whitespace-formats staged .cs files (--folder, scoped via --include)
  *
  * Uses function syntax (.mjs) because ESLint flat config requires running
  * from the directory containing the eslint.config.mjs file. Plain JSON
@@ -99,10 +99,16 @@ export default {
     "pwsh -NoProfile -File scripts/provisioning-prereqs/validate.ps1",
   ],
 
-  // dotnet format: format staged C# files (scoped to staged files only)
+  // dotnet format: whitespace-format staged C# files (scoped to staged files only).
+  //
+  // `whitespace --folder` formats from .editorconfig without loading the MSBuild workspace: about 2 s per
+  // commit instead of 16-45 s, with no restore needed and no BuildHost to be killed under load. It makes the
+  // same changes as the workspace mode, and it is exactly what CI's Tier 2 `Format (dotnet format)` job checks
+  // (`dotnet format whitespace --verify-no-changes`). The slow workspace run was why commits were made with
+  // `--no-verify`, and those commits left 2,569 violations in 230 files on master by 2026-11-10.
+  // ROOT_DIR is the folder, so absolute and relative staged paths both resolve.
   "**/*.cs": (files) => {
-    // dotnet format --include accepts a space-separated list of file paths
     const fileList = files.map((f) => `"${f}"`).join(" ");
-    return [`dotnet format --verbosity quiet --include ${fileList}`];
+    return [`dotnet format whitespace "${ROOT_DIR}" --folder --verbosity quiet --include ${fileList}`];
   },
 };

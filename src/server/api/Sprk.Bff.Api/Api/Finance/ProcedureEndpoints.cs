@@ -84,6 +84,7 @@ public static class ProcedureEndpoints
         group.MapPost("/{procedureId:guid}/versions", CreateVersion)
             .AddFinanceAuthorizationFilter(BillingAdminAuthorization.CreateProcedureVersion)
             .RequireEbillingEnabled()
+            .RequireRateCardCreateOnARateCardProcedure() // a Rate card Procedure's copy-forward also creates cards
             .WithName("CreateProcedureVersion")
             .WithSummary("Create the next version as a Draft, copying the rules of the version before it")
             .Produces<ProcedureVersionCreated>(StatusCodes.Status201Created)
@@ -182,10 +183,17 @@ public static class ProcedureEndpoints
         Guid procedureId, ProcedureUpdateRequest body, ProcedureService service, HttpContext http, CancellationToken ct) =>
         Map(await service.UpdateAsync(procedureId, body, ct), http);
 
-    private static async Task<IResult> CreateVersion(
+    internal static async Task<IResult> CreateVersion(
         Guid procedureId, ProcedureVersionCreateBody? body, ProcedureService service, HttpContext http, CancellationToken ct)
     {
-        var outcome = await service.CreateVersionAsync(procedureId, body?.EffectiveFrom, body?.EffectiveTo, CallerOid(http), ct);
+        // The Procedure type the privilege filter checked; the service refuses 409 if the Procedure reads as a Rate card now and the check
+        // covered another type. No record of the check is a fault.
+        if (!http.Items.TryGetValue(BillingAdminAuthorization.CheckedProcedureTypeItem, out var checkedItem) || checkedItem is not ProcedureType checkedType)
+        {
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        var outcome = await service.CreateVersionAsync(procedureId, body?.EffectiveFrom, body?.EffectiveTo, CallerOid(http), checkedType, ct);
         return outcome.Kind == RuleSetOutcomeKind.Done
             ? Results.Created($"{Route}/{procedureId}", outcome.Value)
             : Map(outcome, http);

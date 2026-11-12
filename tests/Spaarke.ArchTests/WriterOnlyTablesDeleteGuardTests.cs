@@ -119,8 +119,12 @@ public class WriterOnlyTablesDeleteGuardTests
             Assert.True((refused is not null) == rule.CreatedOnlyByItsWriter, $"{rule.Table}: the delete refusal disagrees with the registry flag.");
             Assert.True((refused is not null) == (RecordTableRules.RefuseWriterOnlyTableUpdate(rule.Table) is not null),
                 $"{rule.Table}: the delete refusal disagrees with the update refusal.");
-            Assert.True((refused is not null) == Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter(rule.Table),
-                $"{rule.Table}: the delete refusal disagrees with the chat create tool's refusal.");
+            // ebilling-r1 task 164a-1 (uac-r2 Q6): the chat create refuses every table the delete refuses, and the create-only
+            // tables besides (RecordTableRule.GenericCreateRefused; an invoice line's delete is not refused).
+            var createRefused = Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler.IsCreatedOnlyByItsWriter(rule.Table);
+            Assert.True(createRefused == rule.GenericCreateRefused, $"{rule.Table}: the chat create tool's refusal disagrees with the registry.");
+            Assert.True(refused is null || createRefused,
+                $"{rule.Table}: the delete refusal is not matched by the chat create tool's refusal.");
             if (refused is not null)
             {
                 Assert.Equal("record_delete.changed_only_by_its_writer", refused.RefusalCode);

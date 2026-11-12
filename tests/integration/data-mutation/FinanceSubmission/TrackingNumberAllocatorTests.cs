@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
@@ -23,16 +24,43 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceSubmission;
 /// Dataverse does, with the faults measured in dev (2026-10-16) through the SDK client: the primary key first (<c>0x80040237</c>), then the
 /// (firm, tracking number) alternate key, case-insensitively (<c>0x80060892</c>), each refusing the write whole. The same properties against the
 /// real keys are proven live in <c>TrackingNumberAllocatorLiveTests</c> (tests/integration/data-mutation).
+/// <para>Task 095c: the table also models the tracking-scope schema (<see cref="TrackingScopePhase"/>): the scope key on (tracking number,
+/// scope), which like the firm key does not cover a row whose column is null, the firm key's retirement, and the scope column at SystemRequired
+/// (<c>0x80040200</c>). The phase the allocator reads is the test's (<see cref="_phase"/>); every test that does not set it runs in P0, today's
+/// behaviour.</para>
 /// </remarks>
-public sealed class TrackingNumberAllocatorTests
+public sealed partial class TrackingNumberAllocatorTests
 {
     private static readonly Guid FirmA = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
     private static readonly Guid FirmB = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
 
     private readonly SubmissionStore _store = new();
+    private readonly TrackingScopePhaseCache _phases = new(TimeProvider.System);
+    private readonly Queue<TrackingScopePhase?> _phaseAnswers = new();
+    private TrackingScopePhase? _phase = TrackingScopePhase.P0NoScopeColumn;
+    private int _phaseReads;
+
+    /// <summary>The phase reader the allocator is given: the next queued answer, else <see cref="_phase"/>; every read is counted.</summary>
+    private Task<TrackingScopePhase?> ReadPhase(CancellationToken _)
+    {
+        Interlocked.Increment(ref _phaseReads);
+        lock (_phaseAnswers)
+        {
+            return Task.FromResult(_phaseAnswers.Count > 0 ? _phaseAnswers.Dequeue() : _phase);
+        }
+    }
 
     private TrackingNumberAllocator CreateService(ILogger<TrackingNumberAllocator>? logger = null) =>
-        new(_store.Entities.Object, logger ?? NullLogger<TrackingNumberAllocator>.Instance);
+        new(_store.Entities.Object, ReadPhase, _phases, logger ?? NullLogger<TrackingNumberAllocator>.Instance);
+
+    /// <summary>Puts the environment in <paramref name="phase"/>, keys and required level as the schema script leaves them at that phase.</summary>
+    private void InPhase(TrackingScopePhase phase, bool firmKeyRetired = false)
+    {
+        _phase = phase;
+        _store.ScopeKeyActive = phase == TrackingScopePhase.P2ScopeKeyActive;
+        _store.ScopeRequired = phase == TrackingScopePhase.P2ScopeKeyActive;
+        _store.FirmKeyActive = !firmKeyRetired;
+    }
 
     // ── Numbering (acceptance 1 and 2) ───────────────────────────────────────────────────────────────────────
 
@@ -399,6 +427,9 @@ public sealed class TrackingNumberAllocatorTests
     [InlineData("sprk_submissionsequence")]
     [InlineData("sprk_firminvoicenumber")]
     [InlineData("sprk_vendororg")]
+    [InlineData("sprk_trackingscope")]
+    [InlineData("sprk_previoussequence")]
+    [InlineData("SPRK_PreviousSequence")]
     [InlineData("sprk_invoicesubmissionid")]
     [InlineData("SPRK_TrackingNumber")]
     public async Task AColumnTheAllocatorOwns_CannotBeSuppliedByTheCaller(string column)
@@ -500,6 +531,280 @@ public sealed class TrackingNumberAllocatorTests
         }
     }
 
+    // ── Tracking scope (task 095c): one test per phase, the stale instance, the no-firm race ───────────────────
+
+    [Fact]
+    public async Task P0_AFirmSubmission_IsNumberedPerFirm_AndWritesNoScope()
+    {
+        _store.AddNumbered(FirmA, "INV-002", 1);
+        var id = Guid.NewGuid();
+
+        var result = await CreateService().CreateSubmissionAsync(id, FirmA, "INV-002");
+
+        result.TrackingNumber.Should().Be("INV-002.2");
+        _store.Row(id).Contains("sprk_trackingscope").Should().BeFalse("in P0 the column does not exist: today's write, unchanged");
+        _store.Row(id).GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(FirmA);
+    }
+
+    [Theory]
+    [InlineData(TrackingScopePhase.P0NoScopeColumn)]
+    [InlineData(TrackingScopePhase.P1ScopeColumn)]
+    public async Task BeforeP2_ASubmissionWithNoFirm_IsRefusedAsFirmRequired_AndNothingIsReadOrWritten(TrackingScopePhase phase)
+    {
+        InPhase(phase);
+
+        var result = await CreateService().CreateSubmissionAsync(Guid.NewGuid(), null, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.Refused);
+        result.Reason.Should().Be(TrackingNumberReasons.FirmRequired, "nothing guards a no-firm number before the scope key is Active");
+        _store.SequenceReads.Should().Be(0);
+        _store.CreateCalls.Should().Be(0);
+        _store.RowCount.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "095c-2: NumbersSubmissionsWithoutFirmAsync (the intake's early check) is true only in P2, and reads and writes no row")]
+    [InlineData(TrackingScopePhase.P0NoScopeColumn, false)]
+    [InlineData(TrackingScopePhase.P1ScopeColumn, false)]
+    [InlineData(TrackingScopePhase.P2ScopeKeyActive, true)]
+    public async Task NumbersSubmissionsWithoutFirm_IsTrueOnlyInP2(TrackingScopePhase phase, bool expected)
+    {
+        InPhase(phase);
+
+        (await CreateService().NumbersSubmissionsWithoutFirmAsync()).Should().Be(expected);
+        _store.SequenceReads.Should().Be(0);
+        _store.CreateCalls.Should().Be(0);
+    }
+
+    [Theory(DisplayName = "095d pre-P2 safety: ScopeColumnExistsAsync (Set firm's gate on selecting sprk_trackingscope) is false only at P0, agrees with the phase, and reads and writes no row")]
+    [InlineData(TrackingScopePhase.P0NoScopeColumn, false)]
+    [InlineData(TrackingScopePhase.P1ScopeColumn, true)]
+    [InlineData(TrackingScopePhase.P2ScopeKeyActive, true)]
+    public async Task ScopeColumnExists_IsFalseOnlyAtP0(TrackingScopePhase phase, bool expected)
+    {
+        InPhase(phase);
+
+        (await CreateService().ScopeColumnExistsAsync()).Should().Be(expected);
+        _store.SequenceReads.Should().Be(0);
+        _store.CreateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task P1_AFirmSubmission_WritesItsFirmAsTheScope_AndStillCountsPerFirm()
+    {
+        InPhase(TrackingScopePhase.P1ScopeColumn);
+        _store.AddNumbered(FirmA, "INV-002", 1); // written before the backfill: no scope yet, still counted
+        var id = Guid.NewGuid();
+
+        var result = await CreateService().CreateSubmissionAsync(id, FirmA, "INV-002");
+
+        result.TrackingNumber.Should().Be("INV-002.2", "P1 counts per firm, so a row the backfill has not reached is still counted");
+        _store.Row(id).GetAttributeValue<string>("sprk_trackingscope").Should().Be(FirmA.ToString("D"));
+        _store.Row(id).GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(FirmA);
+        _store.SequenceReads.Should().Be(1, "one read of the highest sequence");
+        _store.CreateCalls.Should().Be(1, "numbered on the first attempt: .2 was not reached through a lost race");
+    }
+
+    [Theory]
+    [InlineData(TrackingScopePhase.P0NoScopeColumn)]
+    [InlineData(TrackingScopePhase.P1ScopeColumn)]
+    public async Task BeforeP2_ARedeliveredNoFirmCreate_ThatAP2InstanceAlreadyNumbered_ReturnsThatRow_NotFirmRequired(TrackingScopePhase phase)
+    {
+        // A P2 instance created the no-firm row and its reply was lost; the redelivery lands on this instance, whose cached phase is stale.
+        InPhase(phase);
+        var id = _store.AddScoped(null, "INV-002", 1);
+
+        var result = await CreateService().CreateSubmissionAsync(id, null, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.AlreadyCreated);
+        result.TrackingNumber.Should().Be("INV-002.1");
+        _store.SequenceReads.Should().Be(0, "the existing row is the answer: no number is computed");
+        _store.CreateCalls.Should().Be(0);
+        _store.RowCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task P2_AFirmSubmission_IsCountedPerScope_AndWritesTheFirmAndItsScope()
+    {
+        InPhase(TrackingScopePhase.P2ScopeKeyActive, firmKeyRetired: true);
+        _store.AddScoped(FirmA, "INV-002", 1);
+        _store.AddScoped(null, "INV-002", 1);
+        _store.AddScoped(FirmB, "INV-002", 4);
+        // A firm-A row filed in the no-firm scope (assigning a firm to a no-firm row does this; notes/095c-from-email-firm-optional.md 8.9).
+        // Counted per firm it would make the result .8; per scope it is not this scope's row.
+        _store.AddWithScope(FirmA, TrackingNumberAllocator.NoFirmScope, "INV-002", 7);
+        var id = Guid.NewGuid();
+
+        var result = await CreateService().CreateSubmissionAsync(id, FirmA, "INV-002");
+
+        result.TrackingNumber.Should().Be("INV-002.2", "the firm's own scope only: neither the no-firm scope (even on a firm-A row) nor another firm's counts");
+        _store.Row(id).GetAttributeValue<string>("sprk_trackingscope").Should().Be(FirmA.ToString("D"));
+        _store.Row(id).GetAttributeValue<EntityReference>("sprk_vendororg").Id.Should().Be(FirmA);
+        _store.SequenceReads.Should().Be(1);
+        _store.CreateCalls.Should().Be(1, "exactly one create: the count is per scope, not reached through a lost race");
+    }
+
+    [Fact]
+    public async Task P2_ASubmissionWithNoFirm_IsNumberedInTheNoFirmScope_AndHasNoFirm()
+    {
+        InPhase(TrackingScopePhase.P2ScopeKeyActive);
+        _store.AddScoped(FirmA, "INV-002", 3);
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+
+        var one = await CreateService().CreateSubmissionAsync(first, null, "INV-002");
+        var two = await CreateService().CreateSubmissionAsync(second, null, "INV-002");
+
+        one.TrackingNumber.Should().Be("INV-002.1", "a firm's sequence is not the no-firm sequence");
+        two.TrackingNumber.Should().Be("INV-002.2");
+        foreach (var id in new[] { first, second })
+        {
+            _store.Row(id).Contains("sprk_vendororg").Should().BeFalse("no firm is written, never a placeholder");
+            _store.Row(id).GetAttributeValue<string>("sprk_trackingscope").Should().Be(TrackingNumberAllocator.NoFirmScope);
+        }
+    }
+
+    [Fact]
+    public async Task P2_ARedeliveredNoFirmCreate_ReturnsItsNumber_AndARedeliveryWithAFirmIsNotRenumbered()
+    {
+        InPhase(TrackingScopePhase.P2ScopeKeyActive);
+        var id = _store.AddScoped(null, "INV-002", 1);
+
+        var again = await CreateService().CreateSubmissionAsync(id, null, "INV-002");
+        var withFirm = () => CreateService().CreateSubmissionAsync(id, FirmA, "INV-002");
+
+        again.Outcome.Should().Be(TrackingNumberOutcome.AlreadyCreated);
+        again.TrackingNumber.Should().Be("INV-002.1");
+        await withFirm.Should().ThrowAsync<InvalidOperationException>("the row has no firm, so it is not this firm's submission");
+        _store.RowCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AStaleP0Instance_RefusedByTheRequiredScopeColumn_ReReadsThePhaseOnce_AndRetriesWithTheScope()
+    {
+        // Schema script steps 3 to 5: this instance cached P0, then the column was added and raised to SystemRequired.
+        _store.ScopeRequired = true;
+        _phaseAnswers.Enqueue(TrackingScopePhase.P0NoScopeColumn);
+        _phaseAnswers.Enqueue(TrackingScopePhase.P1ScopeColumn);
+        var id = Guid.NewGuid();
+
+        var result = await CreateService().CreateSubmissionAsync(id, FirmA, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.Created);
+        result.TrackingNumber.Should().Be("INV-002.1");
+        _store.Row(id).GetAttributeValue<string>("sprk_trackingscope").Should().Be(FirmA.ToString("D"));
+        _store.CreateCalls.Should().Be(2, "the refused create wrote nothing; the retry in P1 wrote the row");
+        _phaseReads.Should().Be(2, "the refusal forced one re-read inside the cache window");
+    }
+
+    [Fact]
+    public async Task AStaleP0Instance_WhosePhaseStillReadsP0_AnswersTheRetryableRefusal_NotAFault_AndWritesNothing()
+    {
+        _store.ScopeRequired = true; // P0 read (an unreadable metadata read keeps P0), yet the column is required
+
+        var result = await CreateService().CreateSubmissionAsync(Guid.NewGuid(), FirmA, "INV-002");
+
+        result.Outcome.Should().Be(TrackingNumberOutcome.Refused);
+        result.Reason.Should().Be(TrackingNumberReasons.Unavailable, "a retryable 503 at the intake, never a 500");
+        _store.RowCount.Should().Be(0);
+        _store.CreateCalls.Should().Be(1, "one re-read, no retry loop");
+        _phaseReads.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ARequiredColumnRefusalOutsideP0_Propagates_ItIsNotTheStaleCase()
+    {
+        InPhase(TrackingScopePhase.P1ScopeColumn);
+        _store.CreateFault = new InvalidOperationException("Failed to create", new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040200) }, new FaultReason("Attribute 'sprk_other' cannot be NULL")));
+
+        var act = () => CreateService().CreateSubmissionAsync(Guid.NewGuid(), FirmA, "INV-002");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _phaseReads.Should().Be(1, "no forced re-read: the scope was written, so the refusal is about something else");
+    }
+
+    [Fact]
+    public async Task TenParallelCreatesWithNoFirm_AllGetADistinctNumberInTheNoFirmScope()
+    {
+        // The firm key is still Active (steps 7 and 8, before it is retired) and does not cover a no-firm row: only the scope key guards these.
+        InPhase(TrackingScopePhase.P2ScopeKeyActive);
+        const int callers = 10;
+        var ids = Enumerable.Range(0, callers).Select(_ => Guid.NewGuid()).ToList();
+        var firstReads = 0;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _store.BeforeSequenceRead = async () =>
+        {
+            var arrival = Interlocked.Increment(ref firstReads);
+            if (arrival <= callers)
+            {
+                if (arrival == callers)
+                {
+                    release.TrySetResult();
+                }
+
+                await release.Task;
+            }
+        };
+
+        var results = await Task.WhenAll(ids.Select(id => Task.Run(() => CreateService().CreateSubmissionAsync(id, null, "INV-002"))));
+
+        results.Should().OnlyContain(r => r.Outcome == TrackingNumberOutcome.Created);
+        results.Select(r => r.TrackingNumber).Should().OnlyHaveUniqueItems("two parallel no-firm submissions must never share a tracking number");
+        results.Select(r => r.Sequence!.Value).OrderBy(n => n).Should().Equal(Enumerable.Range(1, callers));
+        _store.CreateCalls.Should().BeGreaterThan(callers, "all ten contended for .1 and the scope key refused the losers");
+        _store.RowCount.Should().Be(callers);
+        foreach (var id in ids)
+        {
+            _store.Row(id).Contains("sprk_vendororg").Should().BeFalse();
+            _store.Row(id).GetAttributeValue<string>("sprk_trackingscope").Should().Be(TrackingNumberAllocator.NoFirmScope);
+        }
+    }
+
+    /// <summary>An allocator that holds <paramref name="phase"/> in a cache of its own: one instance of a rolling deployment.</summary>
+    private TrackingNumberAllocator CreateInstanceIn(TrackingScopePhase phase) =>
+        new(_store.Entities.Object, _ => Task.FromResult<TrackingScopePhase?>(phase), new TrackingScopePhaseCache(TimeProvider.System),
+            NullLogger<TrackingNumberAllocator>.Instance);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AP1InstanceAndAP2Instance_NumberingOneFirmAndNumberTogether_NeverShareANumber_AndNeitherFaults(bool firmKeyRetired)
+    {
+        // Steps 7 to 9 of the schema script on a rolling deployment: the scope key is Active (P2 instances count per scope), and the firm key is
+        // still there (both keys guard a firm's row) or already retired (only the scope key does, so a P1 instance's retry meets the scope key).
+        // Both instances read .1, both write FirmA + scope FirmA; one wins, the other is refused by a key and takes the next number.
+        InPhase(TrackingScopePhase.P2ScopeKeyActive, firmKeyRetired);
+        var p1 = CreateInstanceIn(TrackingScopePhase.P1ScopeColumn);
+        var p2 = CreateInstanceIn(TrackingScopePhase.P2ScopeKeyActive);
+        var arrivals = 0;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _store.AfterSequenceRead = async () =>
+        {
+            if (Interlocked.Increment(ref arrivals) <= 2)
+            {
+                if (arrivals == 2)
+                {
+                    release.TrySetResult();
+                }
+
+                await release.Task;
+            }
+        };
+        var idP1 = Guid.NewGuid();
+        var idP2 = Guid.NewGuid();
+
+        var results = await Task.WhenAll(
+            Task.Run(() => p1.CreateSubmissionAsync(idP1, FirmA, "INV-002")),
+            Task.Run(() => p2.CreateSubmissionAsync(idP2, FirmA, "INV-002")));
+
+        results.Should().OnlyContain(r => r.Outcome == TrackingNumberOutcome.Created, "the loser retries to the next number: never refused, never a fault");
+        results.Select(r => r.TrackingNumber).Should().BeEquivalentTo(["INV-002.1", "INV-002.2"], "one of them took .1 and the other .2, never both .1");
+        _store.CreateCalls.Should().Be(3, "two contended for .1; the loser's second create took .2");
+        _store.RowCount.Should().Be(2);
+        _store.Row(idP1).GetAttributeValue<string>("sprk_trackingscope").Should().Be(FirmA.ToString("D"), "a P1 instance writes the scope too");
+        _store.Row(idP2).GetAttributeValue<string>("sprk_trackingscope").Should().Be(FirmA.ToString("D"));
+    }
+
     // ── Logging (ADR-015) ───────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -562,6 +867,7 @@ public sealed class TrackingNumberAllocatorTests
         private readonly Dictionary<Guid, Entity> _rows = [];
         private int _createCalls;
         private int _sequenceReads;
+        private int _idReads;
 
         public SubmissionStore()
         {
@@ -569,6 +875,24 @@ public sealed class TrackingNumberAllocatorTests
                 .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns(async (QueryExpression query, CancellationToken _) =>
                 {
+                    // Task 095d-1a (K4): the none scope's previous-sequence read is counted; an environment whose schema script has not run
+                    // refuses any query that names the column, as Dataverse does.
+                    var previousRead = query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_previoussequence");
+                    if (previousRead)
+                    {
+                        Interlocked.Increment(ref _previousSequenceReads);
+                    }
+
+                    if (!PreviousSequenceColumnExists && NamesThePreviousSequence(query))
+                    {
+                        throw MissingPreviousSequenceFault();
+                    }
+
+                    if (previousRead && PreviousSequenceReadFault is { } readFault)
+                    {
+                        throw readFault;
+                    }
+
                     // A lookup by the submission id is the idempotency read; one on the sequence is the highest-sequence read; one on
                     // the tracking number is the held-number check (task 094).
                     var byId = !query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_submissionsequence");
@@ -581,6 +905,7 @@ public sealed class TrackingNumberAllocatorTests
                     }
 
                     await Task.Yield();
+                    EntityCollection answer;
                     lock (_gate)
                     {
                         if (!byId)
@@ -588,8 +913,20 @@ public sealed class TrackingNumberAllocatorTests
                             _sequenceReads++;
                         }
 
-                        return Run(query);
+                        if (query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_invoicesubmissionid"))
+                        {
+                            _idReads++;
+                        }
+
+                        answer = Run(query);
                     }
+
+                    if (!byId && AfterSequenceRead is { } after)
+                    {
+                        await after().ConfigureAwait(false);
+                    }
+
+                    return answer;
                 });
 
             Entities
@@ -617,12 +954,28 @@ public sealed class TrackingNumberAllocatorTests
                                     new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040237) }, new FaultReason("Cannot insert duplicate key.")));
                         }
 
+                        var scope = entity.GetAttributeValue<string>("sprk_trackingscope");
+                        if (ScopeRequired && string.IsNullOrEmpty(scope))
+                        {
+                            // Task 095c: the scope column at SystemRequired (schema script step 5), as the SDK client raises it (measured, notes/027).
+                            throw new InvalidOperationException(
+                                "Failed to create sprk_invoicesubmission record: Attribute 'sprk_trackingscope' cannot be NULL.",
+                                new FaultException<OrganizationServiceFault>(
+                                    new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040200) },
+                                    new FaultReason("Attribute 'sprk_trackingscope' cannot be NULL")));
+                        }
+
+                        // Each key covers only rows whose key columns all hold a value (notes/095c section 2.3): a null firm is not a value.
                         var firm = entity.GetAttributeValue<EntityReference>("sprk_vendororg")?.Id;
-                        var clash = _rows.Values.Any(other =>
-                            other.GetAttributeValue<EntityReference>("sprk_vendororg")?.Id == firm
-                            && string.Equals(other.GetAttributeValue<string>("sprk_trackingnumber"), entity.GetAttributeValue<string>("sprk_trackingnumber"),
-                                StringComparison.OrdinalIgnoreCase));
-                        if (clash)
+                        var tracking = entity.GetAttributeValue<string>("sprk_trackingnumber");
+                        bool SameNumber(Entity other) =>
+                            string.Equals(other.GetAttributeValue<string>("sprk_trackingnumber"), tracking, StringComparison.OrdinalIgnoreCase);
+                        var firmClash = FirmKeyActive && firm is not null && _rows.Values.Any(other =>
+                            other.GetAttributeValue<EntityReference>("sprk_vendororg")?.Id == firm && SameNumber(other));
+                        var scopeClash = ScopeKeyActive && !string.IsNullOrEmpty(scope) && _rows.Values.Any(other =>
+                            string.Equals(other.GetAttributeValue<string>("sprk_trackingscope"), scope, StringComparison.OrdinalIgnoreCase)
+                            && SameNumber(other));
+                        if (firmClash || scopeClash)
                         {
                             // The key violation as the SDK client raises it: the SDK fault, wrapped.
                             throw new InvalidOperationException(
@@ -636,6 +989,141 @@ public sealed class TrackingNumberAllocatorTests
                         return id;
                     }
                 });
+
+            Entities
+                .Setup(e => e.ExecuteTransactionAsync(It.IsAny<IReadOnlyList<OrganizationRequest>>(), It.IsAny<CancellationToken>()))
+                .Returns(async (IReadOnlyList<OrganizationRequest> requests, CancellationToken _) =>
+                {
+                    await Task.Yield();
+                    lock (_gate)
+                    {
+                        Transact(requests);
+                    }
+                });
+        }
+
+        /// <summary>
+        /// Task 095d-1a: one Dataverse transaction, all or nothing. A submission update is checked as Dataverse checks it on update: its row
+        /// version under <c>IfRowVersionMatches</c>, then the scope key and the firm key over every OTHER row. Any other request is a caller
+        /// request; <see cref="CallerRequestFault"/> faults the first of them. A fault is raised the way the SDK client raises it: an
+        /// <c>ExecuteTransactionFault</c> naming the request, the request's own code as its inner fault, mapped by the real
+        /// <see cref="DataverseServiceClientImpl.MapTransactionFailure"/>. Nothing is applied unless every request passes.
+        /// </summary>
+        private void Transact(IReadOnlyList<OrganizationRequest> requests)
+        {
+            var call = ++_transactionCalls;
+            Transactions.Add(requests.ToList());
+            BeforeTransaction?.Invoke(call, requests);
+
+            var updates = new List<(Guid Id, Entity Target)>();
+            for (var index = 0; index < requests.Count; index++)
+            {
+                if (requests[index] is UpdateRequest { Target.LogicalName: "sprk_invoicesubmission" } update)
+                {
+                    var target = update.Target;
+                    if (!_rows.TryGetValue(target.Id, out var existing))
+                    {
+                        throw TransactionFault(requests, index, unchecked((int)0x80040217), "sprk_invoicesubmission With Id Does Not Exist");
+                    }
+
+                    if (update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches && target.RowVersion != existing.RowVersion)
+                    {
+                        throw TransactionFault(requests, index, DataverseServiceClientImpl.ConcurrencyVersionMismatch,
+                            "The version of the existing record doesn't match the RowVersion property provided.");
+                    }
+
+                    if (!PreviousSequenceColumnExists && target.Contains("sprk_previoussequence"))
+                    {
+                        throw TransactionFault(requests, index, unchecked((int)0x80041103), MissingPreviousSequenceMessage);
+                    }
+
+                    var after = Clone(existing, existing.Id);
+                    foreach (var attribute in target.Attributes)
+                    {
+                        after[attribute.Key] = attribute.Value;
+                    }
+
+                    var tracking = after.GetAttributeValue<string>("sprk_trackingnumber");
+                    var scope = after.GetAttributeValue<string>("sprk_trackingscope");
+                    var firm = after.GetAttributeValue<EntityReference>("sprk_vendororg")?.Id;
+                    var others = _rows.Values.Where(other => other.Id != target.Id
+                        && string.Equals(other.GetAttributeValue<string>("sprk_trackingnumber"), tracking, StringComparison.OrdinalIgnoreCase)).ToList();
+                    var scopeClash = ScopeKeyActive && !string.IsNullOrEmpty(scope) && others.Any(other =>
+                        string.Equals(other.GetAttributeValue<string>("sprk_trackingscope"), scope, StringComparison.OrdinalIgnoreCase));
+                    var firmClash = FirmKeyActive && firm is not null && others.Any(other =>
+                        other.GetAttributeValue<EntityReference>("sprk_vendororg")?.Id == firm);
+                    if (scopeClash || firmClash)
+                    {
+                        throw TransactionFault(requests, index, unchecked((int)0x80060892),
+                            "A record that has the attribute values Tracking Number, Tracking Scope already exists.");
+                    }
+
+                    updates.Add((existing.Id, after));
+                    continue;
+                }
+
+                if (CallerRequestFault is { } code)
+                {
+                    throw TransactionFault(requests, index, code, "The caller's request faulted.");
+                }
+            }
+
+            foreach (var (id, after) in updates)
+            {
+                after.RowVersion = (int.Parse(_rows[id].RowVersion, System.Globalization.CultureInfo.InvariantCulture) + 1)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture);
+                _rows[id] = after;
+            }
+
+            Applied.AddRange(requests.Where(r => r is not UpdateRequest { Target.LogicalName: "sprk_invoicesubmission" }));
+        }
+
+        /// <summary>
+        /// The failure the SDK client raises for a transaction: with an <paramref name="index"/>, an <c>ExecuteTransactionFault</c> naming that
+        /// request with the request's own code as its inner fault; with none, a plain fault carrying the code and no faulted request (what
+        /// Dataverse sends when it does not say which request faulted, GitHub #971), mapped by the real <c>MapTransactionFailure</c>.
+        /// </summary>
+        public static DataverseTransactionException TransactionFault(IReadOnlyList<OrganizationRequest> requests, int? index, int code, string message) =>
+            DataverseServiceClientImpl.MapTransactionFailure(
+                requests,
+                index is { } faulted
+                    ? new FaultException<OrganizationServiceFault>(
+                        new ExecuteTransactionFault
+                        {
+                            FaultedRequestIndex = faulted,
+                            Message = "The transaction failed.",
+                            InnerFault = new OrganizationServiceFault { ErrorCode = code, Message = message },
+                        },
+                        new FaultReason("The transaction failed."))
+                    : new FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = code, Message = message },
+                        new FaultReason("The transaction failed.")));
+
+        private int _transactionCalls;
+
+        /// <summary>Task 095d-1a: every transaction sent, committed or not, in order.</summary>
+        public List<List<OrganizationRequest>> Transactions { get; } = [];
+
+        /// <summary>Task 095d-1a: the caller requests of the transactions that committed.</summary>
+        public List<OrganizationRequest> Applied { get; } = [];
+
+        /// <summary>Task 095d-1a: runs with the table locked as a transaction arrives, before any check (another request committing first).</summary>
+        public Action<int, IReadOnlyList<OrganizationRequest>>? BeforeTransaction { get; set; }
+
+        /// <summary>Task 095d-1a: when set, the first caller request of every transaction faults with this code.</summary>
+        public int? CallerRequestFault { get; set; }
+
+        public int TransactionCalls => Volatile.Read(ref _transactionCalls);
+
+        /// <summary>Task 095d-1a: a concurrent edit of the row: its version moves on, nothing else changes.</summary>
+        public void Touch(Guid id)
+        {
+            lock (_gate)
+            {
+                var row = _rows[id];
+                row.RowVersion = (int.Parse(row.RowVersion, System.Globalization.CultureInfo.InvariantCulture) + 1)
+                    .ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
 
         public Mock<IGenericEntityService> Entities { get; } = new(MockBehavior.Strict);
@@ -646,12 +1134,53 @@ public sealed class TrackingNumberAllocatorTests
         /// <summary>Awaited at the start of every highest-sequence read.</summary>
         public Func<Task>? BeforeSequenceRead { get; set; }
 
+        /// <summary>Awaited after every highest-sequence read has been answered (the answer is already taken): holds a caller with a stale number.</summary>
+        public Func<Task>? AfterSequenceRead { get; set; }
+
         /// <summary>When set, every create raises it.</summary>
         public Exception? CreateFault { get; set; }
+
+        /// <summary>The firm key on (firm, tracking number) (task 020); retired by the schema script's last step.</summary>
+        public bool FirmKeyActive { get; set; } = true;
+
+        /// <summary>Task 095c: the scope key on (tracking number, scope), Active from P2.</summary>
+        public bool ScopeKeyActive { get; set; }
+
+        /// <summary>Task 095c: the scope column at SystemRequired (schema script step 5): a create without it is refused whole.</summary>
+        public bool ScopeRequired { get; set; }
 
         public int CreateCalls => Volatile.Read(ref _createCalls);
 
         public int SequenceReads => Volatile.Read(ref _sequenceReads);
+
+        private int _previousSequenceReads;
+
+        /// <summary>Task 095d-1a (K4): the reads that name <c>sprk_previoussequence</c> in a condition (the none scope's previous-sequence read).</summary>
+        public int PreviousSequenceReads => Volatile.Read(ref _previousSequenceReads);
+
+        /// <summary>Task 095d-1a (K4): false models an environment whose schema script has not run: a query or a write that names
+        /// <c>sprk_previoussequence</c> faults as Dataverse faults on a column that is not there (<c>0x80041103</c>).</summary>
+        public bool PreviousSequenceColumnExists { get; set; } = true;
+
+        /// <summary>Task 095d-1a (K4): when set, every previous-sequence read raises it (a fault that is not a missing column).</summary>
+        public Exception? PreviousSequenceReadFault { get; set; }
+
+        public const string MissingPreviousSequenceMessage =
+            "'sprk_invoicesubmission' entity doesn't contain attribute with Name = 'sprk_previoussequence' and NameMapping = 'Logical' " +
+            "(look up attribute by name is case-sensitive).orgIndex: 142, logicalName: sprk_invoicesubmission";
+
+        /// <summary>The fault the SDK client raises for a query that names a column the environment does not have.</summary>
+        public static FaultException<OrganizationServiceFault> MissingPreviousSequenceFault() => new(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80041103), Message = MissingPreviousSequenceMessage },
+            new FaultReason(MissingPreviousSequenceMessage));
+
+        private static bool NamesThePreviousSequence(QueryExpression query) =>
+            query.ColumnSet.Columns.Contains("sprk_previoussequence")
+            || query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_previoussequence")
+            || query.Orders.Any(o => o.AttributeName == "sprk_previoussequence");
+
+        /// <summary>Task 095d-1a (review F4): the reads of a row by its id (the idempotency read of a create, the precondition read of a renumber).</summary>
+        public int IdReads => Volatile.Read(ref _idReads);
 
         public int RowCount
         {
@@ -673,18 +1202,56 @@ public sealed class TrackingNumberAllocatorTests
         }
 
         /// <summary>A submission that already holds <c>{number}.{sequence}</c>.</summary>
-        public Guid AddNumbered(Guid firmId, string firmInvoiceNumber, int sequence, int stateCode = 0, Guid? id = null)
+        public Guid AddNumbered(Guid firmId, string firmInvoiceNumber, int sequence, int stateCode = 0, Guid? id = null) =>
+            Add(firmId, scope: null, firmInvoiceNumber, sequence, stateCode, id);
+
+        /// <summary>Task 095c: a numbered submission as the schema script leaves it after the backfill: its scope is its firm's id, or
+        /// <c>none</c> with no firm.</summary>
+        public Guid AddScoped(Guid? firmId, string firmInvoiceNumber, int sequence, Guid? id = null) =>
+            Add(firmId, firmId?.ToString("D") ?? "none", firmInvoiceNumber, sequence, 0, id);
+
+        /// <summary>Task 095d-1a (K4): a submission as a renumber leaves it: in <paramref name="firmId"/>'s scope holding <paramref name="sequence"/>
+        /// there, with the <c>none</c>-scope sequence it gave up in <c>sprk_previoussequence</c>.</summary>
+        public Guid AddRenumbered(Guid firmId, string firmInvoiceNumber, int sequence, int previousSequence) =>
+            WithPreviousSequence(AddScoped(firmId, firmInvoiceNumber, sequence), previousSequence);
+
+        /// <summary>Task 095d-1a (K4): sets <c>sprk_previoussequence</c> on the row <paramref name="id"/>; returns the id.</summary>
+        public Guid WithPreviousSequence(Guid id, int previousSequence)
+        {
+            lock (_gate)
+            {
+                _rows[id]["sprk_previoussequence"] = previousSequence;
+            }
+
+            return id;
+        }
+
+        /// <summary>Task 095c: a numbered submission with an explicit scope, whatever its firm (e.g. a firm filed in the <c>none</c> scope).</summary>
+        public Guid AddWithScope(Guid? firmId, string scope, string firmInvoiceNumber, int sequence) =>
+            Add(firmId, scope, firmInvoiceNumber, sequence, 0, null);
+
+        private Guid Add(Guid? firmId, string? scope, string firmInvoiceNumber, int sequence, int stateCode, Guid? id)
         {
             lock (_gate)
             {
                 var row = new Entity("sprk_invoicesubmission", id ?? Guid.NewGuid())
                 {
-                    ["sprk_vendororg"] = new EntityReference("sprk_organization", firmId),
+                    RowVersion = "1",
                     ["statecode"] = new OptionSetValue(stateCode),
                     ["sprk_firminvoicenumber"] = firmInvoiceNumber,
                     ["sprk_submissionsequence"] = sequence,
                     ["sprk_trackingnumber"] = $"{firmInvoiceNumber}.{sequence}",
                 };
+                if (firmId is { } firm)
+                {
+                    row["sprk_vendororg"] = new EntityReference("sprk_organization", firm);
+                }
+
+                if (scope is not null)
+                {
+                    row["sprk_trackingscope"] = scope;
+                }
+
                 _rows[row.Id] = row;
                 return row.Id;
             }
@@ -698,6 +1265,29 @@ public sealed class TrackingNumberAllocatorTests
             lock (_gate)
             {
                 _rows[id].Attributes.Remove("sprk_firminvoicenumber");
+            }
+
+            return id;
+        }
+
+        /// <summary>Task 095d-1a: <see cref="AddUndone"/> as the schema script leaves it after the backfill, in its firm's scope.</summary>
+        public Guid AddScopedUndone(Guid firmId, string firmInvoiceNumber, int sequence)
+        {
+            var id = AddScoped(firmId, firmInvoiceNumber, sequence);
+            lock (_gate)
+            {
+                _rows[id].Attributes.Remove("sprk_firminvoicenumber");
+            }
+
+            return id;
+        }
+
+        /// <summary>Task 095d-1a (review F4): the row <paramref name="id"/> as it is with <paramref name="column"/> not set; returns the id.</summary>
+        public Guid WithoutColumn(Guid id, string column)
+        {
+            lock (_gate)
+            {
+                _rows[id].Attributes.Remove(column);
             }
 
             return id;
@@ -728,7 +1318,7 @@ public sealed class TrackingNumberAllocatorTests
 
         private static Entity Clone(Entity source, Guid id)
         {
-            var copy = new Entity(source.LogicalName, id);
+            var copy = new Entity(source.LogicalName, id) { RowVersion = source.RowVersion };
             foreach (var attribute in source.Attributes)
             {
                 copy[attribute.Key] = attribute.Value;

@@ -811,9 +811,22 @@ public sealed class InvoiceApprovalServiceTests
         failed.Code.Should().Be("ebilling.approval.incomplete");
         w.InvoiceStatus.Should().Be(InvoiceStatusCodes.Approved, "the transition happened");
 
-        // Another approver in between: a no-op that records nothing (the claimant's record is the claimant's).
-        (await w.ApproveAs(BobUser)).Outcome.Should().Be(ApprovalOutcome.AlreadyApproved);
-        w.ApproveRecords.Count.Should().BeLessThanOrEqualTo(1);
+        // Another approver in between records nothing (the claimant's record is the claimant's). Task 165b-3 part B (EB-D-208): while the
+        // writer-created approve record does not exist the invoice is not counted as approved, so that call is refused (Claimed), not a no-op.
+        // Fix round: the expectation is chosen from the step, never from state read after the call. Only "link" fails after the record.
+        var recordWritten = step == "link";
+        var between = await w.ApproveAs(BobUser);
+        if (recordWritten)
+        {
+            between.Outcome.Should().Be(ApprovalOutcome.AlreadyApproved, between.Detail);
+            w.ApproveRecords.Should().ContainSingle();
+        }
+        else
+        {
+            between.Outcome.Should().Be(ApprovalOutcome.Conflict, between.Detail);
+            between.Code.Should().Be(InvoiceApprovalCodes.Claimed);
+            w.ApproveRecords.Should().BeEmpty();
+        }
 
         var retried = await w.ApproveAs(AliceUser);
 

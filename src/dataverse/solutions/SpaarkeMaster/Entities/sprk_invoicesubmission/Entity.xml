@@ -1586,7 +1586,7 @@
           <ValidForCreateApi>1</ValidForCreateApi>
           <IsCustomField>1</IsCustomField>
           <IsAuditEnabled>1</IsAuditEnabled>
-          <IsSecured>0</IsSecured>
+          <IsSecured>1</IsSecured>
           <IntroducedVersion>1.2.3.1</IntroducedVersion>
           <IsCustomizable>1</IsCustomizable>
           <IsRenameable>1</IsRenameable>
@@ -1610,7 +1610,7 @@
             <displayname description="Source Email Document" languagecode="1033" />
           </displaynames>
           <Descriptions>
-            <Description description="" languagecode="1033" />
+            <Description description="The .eml Document this from-email submission was read from (095a). A plain reference written by the server in the same create as the row, equal to the sourcedocument of the invoice's Stored Files; not a filing or a regarding, it decides no ownership, isolation or visibility, and it is never returned to an external caller." languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="sprk_SubmissionSequence">
@@ -1728,14 +1728,54 @@
             <displayname description="Tracking Number" languagecode="1033" />
           </displaynames>
           <Descriptions>
-            <Description description="Tracking number {firm invoice number}.{n}, for example INV-002.2 (D-37). Unique per firm (alternate key). Allocated concurrency-safe by task 045." languagecode="1033" />
+            <Description description="Tracking number {firm invoice number}.{n}, for example INV-002.2 (D-37). Unique per tracking scope (alternate key with sprk_trackingscope, task 095c). Allocated concurrency-safe by task 045." languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_TrackingScope">
+          <Type>nvarchar</Type>
+          <Name>sprk_trackingscope</Name>
+          <LogicalName>sprk_trackingscope</LogicalName>
+          <RequiredLevel>systemrequired</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.2.4.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>36</MaxLength>
+          <Length>72</Length>
+          <displaynames>
+            <displayname description="Tracking Scope" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="The sequence the tracking number belongs to (task 095c): the firm id in D form, or none for a submission with no firm. Part of the alternate key with the tracking number. Written only by the server at create; decides no access." languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="sprk_VendorOrg">
           <Type>lookup</Type>
           <Name>sprk_vendororg</Name>
           <LogicalName>sprk_vendororg</LogicalName>
-          <RequiredLevel>systemrequired</RequiredLevel>
+          <RequiredLevel>none</RequiredLevel>
           <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
           <ValidForUpdateApi>1</ValidForUpdateApi>
           <ValidForReadApi>1</ValidForReadApi>
@@ -1766,7 +1806,7 @@
             <displayname description="Firm" languagecode="1033" />
           </displaynames>
           <Descriptions>
-            <Description description="The firm that sent the invoice. Part of the alternate key with the tracking number." languagecode="1033" />
+            <Description description="The firm that sent the invoice. Optional for an internal from-email submission (task 095c); external visibility of the submission is decided by this column. Its sequence is kept by sprk_trackingscope." languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="statecode">
@@ -1980,6 +2020,19 @@
           </EntityKeyAttributes>
           <displaynames>
             <displayname description="Firm and Tracking Number" languagecode="1033" />
+          </displaynames>
+        </EntityKey>
+        <EntityKey>
+          <Name>sprk_invoicesubmission_scope_trackingnumber</Name>
+          <LogicalName>sprk_invoicesubmission_scope_trackingnumber</LogicalName>
+          <IntroducedVersion>1.2.4.0</IntroducedVersion>
+          <IsCustomizable>0</IsCustomizable>
+          <EntityKeyAttributes>
+            <AttributeName>sprk_trackingnumber</AttributeName>
+            <AttributeName>sprk_trackingscope</AttributeName>
+          </EntityKeyAttributes>
+          <displaynames>
+            <displayname description="Tracking Scope and Tracking Number" languagecode="1033" />
           </displaynames>
         </EntityKey>
       </EntityKeys>

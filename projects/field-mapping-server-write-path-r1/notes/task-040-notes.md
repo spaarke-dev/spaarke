@@ -198,4 +198,10 @@ The owner gave the go in fm's main session for new FMSWP- rows. Scripted HTTP th
 
 (a) the Push Updates button opens the `sprk_recordfamily` page, and (c) a failed form save opens nothing. Both need a browser; the owner clicks through them.
 
+**Owner browser checks (2026-11-08):**
+- **(a) PASS.** Push Updates opens the Record Family page and lists the family. The owner ran it on Matter PAT-477689.
+- **(c) not run as written.** Instead, the owner ticked rows of several tables and chose "Push field updates". The preview failed as a whole: `No field mapping profile found for source entity 'sprk_matter' and target entity 'sprk_document'`.
+  - **Defect, fixed in scope (task 076c).** The panel treated only the 409 no-Filing-edge answer per table. The 404 for a table with no profile from the source failed every table.
+  - **Fix:** the push 404 gains the reason code `field_mapping_profile_missing`, an additive change. The panel lists such a table as having nothing set up to push, and still previews the rest. A 404 without the code (source not found) still fails the whole preview.
+
 **Rows to clean up later:** matter `33873a1a-dc61-481d-aae4-d736679305c6` and project `8c788447-7ae7-4886-ba44-4a91d61db52b`. They join the FMSWP-021 cleanup list in `task-021-live.md`.

@@ -583,6 +583,31 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         H.JobsSent.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "095c-2: a submission with no firm is decided with no firm read or linked, and created with no firm")]
+    public async Task Submit_NoFirm_IsDecidedWithoutAFirm_AndCreatedWithNoFirm()
+    {
+        var result = await Build().SubmitAsync(Input() with { FirmId = null }, CancellationToken.None);
+
+        result.Outcome.Should().Be(FromEmailSubmitOutcome.Received);
+        H.Allocations.Should().ContainSingle().Which.FirmId.Should().BeNull("no firm is the allocator's null, never the empty id");
+        H.Entities.Verify(e => e.RetrieveAsync("sprk_organization", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never(), "there is no firm to check");
+        H.OwnerContexts.Should().ContainSingle("the record and its owner are decided as for any submission");
+    }
+
+    [Fact(DisplayName = "095c-2 (defence in depth): the allocator's firm_required (no scope key yet) is the route's 400 firm_invalid, with no job")]
+    public async Task Submit_TheAllocatorRefusesNoFirm_Is400FirmInvalid()
+    {
+        H.Allocation = TrackingNumberResult.Refused(TrackingNumberReasons.FirmRequired);
+
+        var result = await Build().SubmitAsync(Input() with { FirmId = null }, CancellationToken.None);
+
+        (result.Outcome, result.Status, result.ErrorCode).Should().Be(
+            (FromEmailSubmitOutcome.Refused, StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid));
+        result.Detail.Should().StartWith("A firm is required.");
+        H.JobsSent.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Submit_OtherBytesAreStagedUnderThisAttempt_Is409DocumentAlreadySubmitted_NoRow()
     {
@@ -723,7 +748,9 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         var target = Guid.NewGuid();
         var input = Input() with
         {
-            Mode = FromEmailModes.Correction, InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target), ResubmissionOf = target,
+            Mode = FromEmailModes.Correction,
+            InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target),
+            ResubmissionOf = target,
         };
 
         var result = await Build().SubmitAsync(input, CancellationToken.None);
@@ -739,6 +766,36 @@ public sealed class SubmitInvoiceFromEmailOperationTests
         await Build().SubmitAsync(Input(), CancellationToken.None);
 
         H.Allocations.Should().ContainSingle().Which.Fields!.Should().NotContainKey("sprk_resubmissionof");
+    }
+
+    [Theory(DisplayName = "095a: every from-email attempt (New or Correction) creates its submission with sprk_sourceemaildocument = the staged source .eml, the id sprk_storedfile.sprk_sourcedocument is written from")]
+    [InlineData(FromEmailModes.New)]
+    [InlineData(FromEmailModes.Correction)]
+    public async Task Submit_RecordsTheSourceEml_OnTheSubmission(string mode)
+    {
+        var target = Guid.NewGuid();
+        var input = mode == FromEmailModes.New
+            ? Input()
+            : Input() with { Mode = FromEmailModes.Correction, InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(target), ResubmissionOf = target };
+
+        await Build().SubmitAsync(input, CancellationToken.None);
+
+        var fields = H.Allocations.Should().ContainSingle().Which.Fields!;
+        fields["sprk_sourceemaildocument"].Should().Be(new EntityReference("sprk_document", input.SourceEmlDocumentId));
+        fields["sprk_sourceemaildocument"].Should().Be(new EntityReference("sprk_document", W.EmlId));
+        fields.Should().NotContainKey("sprk_document", "the from-email submission still has no document of its own (092); the link is a citation, not a filing parent");
+    }
+
+    [Fact(DisplayName = "095a: the source-email link is a column the external view never selects or serializes (uac-r2: it never reaches an external response)")]
+    public void SourceEmailLink_IsNotInTheViewColumns_AndNotOnTheViewType()
+    {
+        InvoiceSubmissionService.ViewColumns.Should().NotContain("sprk_sourceemaildocument");
+        InvoiceSubmissionService.ViewColumns.Should().NotContain(c => c.Contains("sourceemail", StringComparison.OrdinalIgnoreCase));
+        typeof(InvoiceSubmissionView).GetProperties().Select(p => p.Name)
+            .Should().NotContain(n => n.Contains("SourceEmail", StringComparison.OrdinalIgnoreCase) || n.Contains("Eml", StringComparison.OrdinalIgnoreCase));
+
+        // Control (must fire): a column that IS in the view is found by the same probes.
+        InvoiceSubmissionService.ViewColumns.Should().Contain("sprk_trackingnumber");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

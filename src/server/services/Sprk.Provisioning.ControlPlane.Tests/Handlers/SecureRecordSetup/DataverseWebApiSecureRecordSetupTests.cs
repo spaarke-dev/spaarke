@@ -212,6 +212,22 @@ public sealed class DataverseWebApiSecureRecordSetupTests
     }
 
     [Fact]
+    public async Task W10b_TeamProfiles_ReadTheTeamsFieldSecurityProfiles()
+    {
+        // Task 267 S24: the ontology writer unit's default team must be in no field-security profile.
+        var team = Guid.NewGuid();
+        var profile = Guid.NewGuid();
+        var http = new Recorder().Respond(_ => Json(new { value = new object[] { new { fieldsecurityprofileid = profile } } }));
+
+        var profiles = await Api(http).ListTeamProfilesAsync(team, CancellationToken.None);
+
+        Uri.UnescapeDataString(http.Requests.Single().Uri).Should()
+            .Contain($"teams({team})/teamprofiles_association?$select=fieldsecurityprofileid");
+        http.Requests.Single().Method.Should().Be(HttpMethod.Get);
+        profiles.Should().Equal(profile);
+    }
+
+    [Fact]
     public async Task W11_OntologyServiceRole_ReadsEveryCopy_ItsUsersWithApplicationId_AndTheUsersRoles()
     {
         var user = Guid.NewGuid();
@@ -315,7 +331,9 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         var parent = Guid.NewGuid();
         var http = new Recorder().Respond(_ => Json(new Dictionary<string, object>
         {
-            ["businessunitid"] = Unit.ToString(), ["name"] = "Acme Corporation", ["_parentbusinessunitid_value"] = parent.ToString(),
+            ["businessunitid"] = Unit.ToString(),
+            ["name"] = "Acme Corporation",
+            ["_parentbusinessunitid_value"] = parent.ToString(),
         }));
 
         var unit = await Api(http).GetBusinessUnitAsync(Unit, CancellationToken.None);

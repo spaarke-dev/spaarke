@@ -192,7 +192,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             using var scope = _scopeFactory.CreateScope();
             var run = new Run(
                 scope.ServiceProvider.GetRequiredService<IGenericEntityService>(),
-                scope.ServiceProvider.GetRequiredService<AssignedAccessStore>(),
+                scope.ServiceProvider.GetRequiredService<ContactUserRepresentation>(),
                 scope.ServiceProvider.GetRequiredService<SecureChildReconciler>(),
                 counts, problems, context);
             var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
@@ -620,7 +620,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         ToDoAnswer answer;
         try
         {
-            var todo = await ClassifyToDoAsync(run.Entities, run.Links, _coreAncestors, todoId, ct).ConfigureAwait(false);
+            var todo = await ClassifyToDoAsync(run.Entities, run.People, _coreAncestors, todoId, ct).ConfigureAwait(false);
             if (todo.Kind == ToDoKind.CoreRefused)
             {
                 _logger.LogWarning("{Prefix} To Do {TodoId}: its core record cannot be derived ({Error}); its rows are refused, not "
@@ -662,26 +662,26 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     /// </summary>
     /// <exception cref="Exception">A Dataverse fault reading the To Do, its links or its core propagates (Unverified).</exception>
     internal static async Task<ToDoClass> ClassifyToDoAsync(
-        IGenericEntityService entities, AssignedAccessStore links, CoreAncestorResolver coreAncestors, Guid todoId, CancellationToken ct)
+        IGenericEntityService entities, ContactUserRepresentation people, CoreAncestorResolver coreAncestors, Guid todoId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(coreAncestors);
-        var assignee = await PersonalToDoAssignee.ClassifyAsync(entities, links, todoId, ct).ConfigureAwait(false);
+        var assignee = await PersonalToDoAssignee.ClassifyAsync(entities, people, todoId, ct).ConfigureAwait(false);
         switch (assignee.Outcome)
         {
             case PersonalToDoAssignee.Outcome.ToDoNotFound:
                 return new ToDoClass(ToDoKind.Gone);
             case PersonalToDoAssignee.Outcome.Filed:
-            {
-                // Read-only (GitHub #2002): the answer only classifies the To Do; nothing is written against it, so an unfiled one is not a Warning.
-                var core = await coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
-                if (!core.Succeeded && core.IsPermanent)
-                    return new ToDoClass(ToDoKind.CoreRefused, Detail: core.Error);
-                if (!core.Succeeded)
-                    throw new InvalidOperationException($"the core record of the To Do could not be derived ({core.Error})");
-                return core.Stamps.Count > 0
-                    ? new ToDoClass(ToDoKind.Cored)
-                    : new ToDoClass(ToDoKind.Fallback, FallbackReason.FiledNonCore);
-            }
+                {
+                    // Read-only (GitHub #2002): the answer only classifies the To Do; nothing is written against it, so an unfiled one is not a Warning.
+                    var core = await coreAncestors.ResolveStampsAsync(TodoTable, todoId, ct, CoreAncestorIntent.ReadOnly).ConfigureAwait(false);
+                    if (!core.Succeeded && core.IsPermanent)
+                        return new ToDoClass(ToDoKind.CoreRefused, Detail: core.Error);
+                    if (!core.Succeeded)
+                        throw new InvalidOperationException($"the core record of the To Do could not be derived ({core.Error})");
+                    return core.Stamps.Count > 0
+                        ? new ToDoClass(ToDoKind.Cored)
+                        : new ToDoClass(ToDoKind.Fallback, FallbackReason.FiledNonCore);
+                }
 
             case PersonalToDoAssignee.Outcome.NoAssignedTo or PersonalToDoAssignee.Outcome.NoLinkedUser:
                 return new ToDoClass(ToDoKind.Fallback, FallbackReason.NoAssignee);
@@ -717,14 +717,14 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     /// </summary>
     /// <exception cref="Exception">A Dataverse fault propagates (the row is not decided: the job's Unverified).</exception>
     internal static async Task<bool> SelectsAsync(
-        Entity row, IGenericEntityService entities, AssignedAccessStore links, CoreAncestorResolver coreAncestors, CancellationToken ct)
+        Entity row, IGenericEntityService entities, ContactUserRepresentation people, CoreAncestorResolver coreAncestors, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(row);
         if (row.GetAttributeValue<EntityReference>(RegardingTodoColumn) is not { } todo || todo.Id == Guid.Empty)
             return false;
         if (HasLiveCoreStamp(row, CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)) || IsOwnedByUser(row))
             return false;
-        return KeepsRowsOf((await ClassifyToDoAsync(entities, links, coreAncestors, todo.Id, ct).ConfigureAwait(false)).Kind);
+        return KeepsRowsOf((await ClassifyToDoAsync(entities, people, coreAncestors, todo.Id, ct).ConfigureAwait(false)).Kind);
     }
 
     /// <summary>The assignee's business-unit team (D-134 via <see cref="RecordOwnershipContext.ForUserTeam"/>), once per user per run.</summary>
@@ -1234,11 +1234,11 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
 
     /// <summary>One run's reads, memo and counts.</summary>
     private sealed class Run(
-        IGenericEntityService entities, AssignedAccessStore links, SecureChildReconciler reconciler,
+        IGenericEntityService entities, ContactUserRepresentation people, SecureChildReconciler reconciler,
         RunCounts counts, List<string> problems, JobRunContext context)
     {
         public IGenericEntityService Entities { get; } = entities;
-        public AssignedAccessStore Links { get; } = links;
+        public ContactUserRepresentation People { get; } = people;
         public SecureChildReconciler Reconciler { get; } = reconciler;
         public RunCounts Counts { get; } = counts;
         public List<string> Problems { get; } = problems;

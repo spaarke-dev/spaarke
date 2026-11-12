@@ -238,6 +238,7 @@
       <RootComponent type="20" id="{810926e0-a97c-44ea-9891-e80dadef73f0}" behavior="0" />
       <RootComponent type="20" id="{9af584ac-2ce4-f011-8406-7ced8d1dc988}" behavior="0" />
       <RootComponent type="20" id="{9e6af7ee-ddf6-f011-8406-7c1e520aa4df}" behavior="0" />
+      <RootComponent type="20" id="{a8308e87-b0e0-4cd1-9c66-3672e9bdad16}" behavior="0" />
       <RootComponent type="20" id="{b1fb7ee0-bfbe-f111-aaaf-0022482913fc}" behavior="0" />
       <RootComponent type="60" id="{4ddb4c94-d1ff-f011-8407-7ced8d1dc988}" behavior="0" />
       <RootComponent type="61" schemaName="sprk_/html/matter_insight_card_host.html" behavior="0" />

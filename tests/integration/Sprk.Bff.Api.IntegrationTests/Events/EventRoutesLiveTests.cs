@@ -759,14 +759,18 @@ public sealed class EventRoutesLiveTests
     /// create stamps <c>sprk_createdbyperson</c> — a real systemuser the bind resolves.</summary>
     private static CallerPrincipal OperatorAsCreator(Guid operatorId) => new()
     {
-        Plane = CallerPrincipalPlane.Workforce, SystemUserId = operatorId, ContactId = Guid.Empty,
+        Plane = CallerPrincipalPlane.Workforce,
+        SystemUserId = operatorId,
+        ContactId = Guid.Empty,
         ProjectAccess = Array.Empty<CallerProjectAccess>(),
     };
 
     /// <summary>R3 task 039: the operator as a READER of <paramref name="projectId"/> (the external event list takes the caller).</summary>
     private static CallerPrincipal OperatorReading(Guid operatorId, Guid projectId) => new()
     {
-        Plane = CallerPrincipalPlane.Workforce, SystemUserId = operatorId, ContactId = Guid.Empty,
+        Plane = CallerPrincipalPlane.Workforce,
+        SystemUserId = operatorId,
+        ContactId = Guid.Empty,
         ProjectAccess = new[] { CallerProjectAccess.FromLevel(projectId, ExternalAccessLevel.ViewOnly) },
     };
 
@@ -1074,7 +1078,8 @@ public sealed class EventRoutesLiveTests
             return collection;
         }
 
-        internal HttpClient MetadataClient => _metadata;    }
+        internal HttpClient MetadataClient => _metadata;
+    }
 
     /// <summary>
     /// The production probe with ONE step substituted: the OBO exchange (substitution 2). WhoAmI and

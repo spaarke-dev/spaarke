@@ -146,7 +146,7 @@ Closing an alert by hand does not silence the check: the next failing run reopen
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          SCHEDULED                                    │
-│  mutation-nightly.yml (dispatch only; schedule pending #1870)         │
+│  mutation-nightly.yml (daily, 05:00 UTC; max_files cap a night)       │
 │  issues-dashboard.yml (every 6h + issue events)                       │
 │  nightly-health.yml (daily, 06:00 UTC)                                │
 │  client-tests.yml (nightly, 07:00 UTC)                                │
@@ -206,7 +206,7 @@ Closing an alert by hand does not silence the check: the next failing run reopen
 | `deploy-teams-app.yml` | Deploy Teams App Package | Manual | Build the external-spa Teams surface as a sanity gate, package the Teams manifest, publish it as a GitHub artifact |
 | `issues-dashboard.yml` | issues-dashboard | Scheduled + issue events / advisory | Regenerates the pinned Issues & Quality Dashboard issue (see Quality alerts) |
 | `master-ci-alert.yml` | Master CI Alert | `workflow_run` / advisory | Raises or clears the `router-master` and `tier2-master/full-unit-tests` quality alerts when `CI` completes on a master push |
-| `mutation-nightly.yml` | mutation-nightly | Dispatch only (schedule pending #1870) / advisory | Stryker.NET mutation run over the allowlisted security/contract BFF files changed in the last 24h; raises the `mutation-nightly` quality alert |
+| `mutation-nightly.yml` | mutation-nightly | Schedule (daily 05:00 UTC) + dispatch / advisory | Stryker.NET mutation run over the allowlisted security/contract BFF files changed in the last 24h; raises the `mutation-nightly` quality alert |
 | `nightly-health.yml` | nightly-health | Scheduled / advisory | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy filesystem scan, dependency audit, Graph app-role parity; one quality alert per check + rolling tracking issue |
 | `office-addins-tests.yml` | Office Add-ins Tests (Gate) | PR/push (scoped); reports only | Gated jest ratchet (56 of 56 suites), production-only TypeScript typecheck, office-scope C# server suites, ESLint |
 | `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time); PR dry run | Packs SpaarkeMaster managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster`, checks both, and publishes them with the `dataverse-solutions-latest.json` manifest H6 reads (T218d) |
@@ -224,7 +224,7 @@ Closing an alert by hand does not silence the check: the next failing run reopen
 Husky pre-commit hooks run automatically on every `git commit`. They execute lint-staged, which:
 - **TypeScript/TSX files**: Formats with Prettier, then lints with ESLint (from the nearest `eslint.config.mjs` directory)
 - **JSON/YAML files**: Formats with Prettier
-- **C# files**: Formats with `dotnet format` (scoped to staged files only)
+- **C# files**: Whitespace-formats the staged files with `dotnet format whitespace --folder` (~2 s, no MSBuild workspace). Skipping the hook with `--no-verify` does not skip the check: Tier 1 `Format (changed C# files)` fails the PR
 
 Hooks complete in under 10 seconds. If a hook fails, the commit is blocked until the issue is fixed.
 
@@ -559,6 +559,7 @@ The required status check `CI / Router` (the ruleset also requires `Client lint 
 | `compose-fidelity-gate` | Corpus round-trip harness over every `.docx` under `tests/fixtures/compose-corpus/` (requires Git-LFS checkout) |
 | `datagrid-external-host-gate` | The shared DataGrid's jest folder; runs on `Spaarke.UI.Components` or workflow changes. **Advisory** (job-level `continue-on-error`) until its FLIP CONDITION; see the job |
 | `xrm-capability-guard` | The `getXrm` capability guard (`xrmCapabilityUsage.guard.test.ts`, an AST scan of all of `src/`, ~70 s); runs on `src/client/**`, `src/solutions/**` or workflow changes. **Blocking**. Added 2026-10-06 as an owner-approved §6.5 path-A exception to the header's scope list (ontology task 081, PR #1309) |
+| `format-changed-cs` | `scripts/quality/check-changed-cs-format.sh`: `dotnet format whitespace --folder --verify-no-changes` over the `*.cs` files under `src/` and `tests/` that the PR (or merge-queue group, or push) changed; every such file when there is no base. No restore, so under a minute, in parallel with `arch-tests`. **Blocking**. Added 2026-11-10 as an owner-approved §6.5 path-A exception (PR #2663) after master reached 2,569 violations behind the advisory Tier 2 `format` job |
 
 Spec budget: p95 ≤ 3 min (NFR-01). `eval-gate`, `tenant-isolation`, and `compose-fidelity-gate` run on `windows-latest` and were ported verbatim from `sdap-ci.yml` because they are fast, security/fidelity-critical gates that must never be advisory.
 
@@ -568,9 +569,9 @@ Spec budget: p95 ≤ 3 min (NFR-01). `eval-gate`, `tenant-isolation`, and `compo
 
 | Job | Purpose |
 |-----|---------|
-| `format` | `dotnet format whitespace --verify-no-changes` |
+| `format` | `dotnet format whitespace --verify-no-changes` over the whole solution: an advisory backstop; changed C# files are checked blocking by Tier 1 `format-changed-cs` |
 | `lint` | Prettier (`src/client/**/*.{ts,tsx}`) + ESLint (`src/client/pcf`) |
-| `full-unit-tests` | The repo's one full-suite run, as four parallel shards (`full-unit-tests-shard`: `api-office`, `api-insights-integration`, `api-seam`, `rest`; `rest` is the complement of the others, so every test runs exactly once). Each shard runs `dotnet test` over the whole `Spaarke.sln` with its namespace filter, so every test project in the solution (Bff.Api.Tests, ControlPlane.Tests, Core.Tests, Scheduling.Tests, Bff.Api.IntegrationTests, Spe.Integration.Tests, ...) runs in some shard. The job runs when the Router's `dotnet_tests` filter matches (see the Router section). Each shard is two-pass (all tests, then retry only pass-1 failures); the `full-unit-tests` job aggregates the shard verdicts, and a shard with no verdict counts as a failure. Debug only (`FR-B07`); 40-min timeout per shard as a runaway guard (expected ~18 min) |
+| `full-unit-tests` | The repo's one full-suite run, as five parallel shards (`full-unit-tests-shard`: `api-office`, `api-insights-integration`, `api-ai-finance-external`, `api-seam`, `rest`; `rest` is the complement of the others, so every test runs exactly once). Each shard runs `dotnet test` over the whole `Spaarke.sln` with its namespace filter, so every test project in the solution (Bff.Api.Tests, ControlPlane.Tests, Core.Tests, Scheduling.Tests, Bff.Api.IntegrationTests, Spe.Integration.Tests, ...) runs in some shard. The job runs when the Router's `dotnet_tests` filter matches (see the Router section). Each shard is two-pass (all tests, then retry only pass-1 failures); the `full-unit-tests` job aggregates the shard verdicts, and a shard with no verdict counts as a failure. Debug only (`FR-B07`); 40-min timeout per shard as a runaway guard (expected ~18 min) |
 | `adr-compliance` | The full NetArchTest suite again (non-blocking copy of Tier 1's `arch-tests`) |
 | `markdown-link-validator` | `scripts/validate-markdown-links.ps1` (short-circuits with a notice if the script is absent) |
 | `last-reviewed-stamp` | Verifies touched `.claude/skills/*/SKILL.md`, `.claude/constraints/*.md`, `docs/standards/*.md`, `docs/architecture/*.md`, `docs/procedures/*.md` carry a `Last Reviewed` stamp ≤ 365 days old |
@@ -733,12 +734,12 @@ Runs the full NetArchTest suite (`continue-on-error: true` on the test step itse
 
 ## Scheduled Workflows
 
-Six workflows run on a `schedule:` trigger (`mutation-nightly.yml` is dispatch-only until #1870 proves a complete run). Two of them (`nightly-health.yml`, `client-tests.yml`), plus `mutation-nightly.yml`, also raise [quality alerts](#quality-alerts). There is no longer a single "nightly quality" or "weekly quality" workflow — those were deleted (see [`.claude/CHANGELOG.md`](../../.claude/CHANGELOG.md) history and the `github-actions-rationalization-r1` project) and their responsibilities now live across the workflows below.
+Seven workflows run on a `schedule:` trigger (`mutation-nightly.yml` was re-enabled when #1870 closed, with a per-night file cap). Two of them (`nightly-health.yml`, `client-tests.yml`), plus `mutation-nightly.yml`, also raise [quality alerts](#quality-alerts). There is no longer a single "nightly quality" or "weekly quality" workflow — those were deleted (see [`.claude/CHANGELOG.md`](../../.claude/CHANGELOG.md) history and the `github-actions-rationalization-r1` project) and their responsibilities now live across the workflows below.
 
 | Workflow | Schedule | What it reports | Blocking |
 |---|---|---|---|
 | `issues-dashboard.yml` | Every 6 hours (also on issue open/close/label events) | Regenerates the pinned `📊 Issues & Quality Dashboard` issue: open quality alerts, last result of each nightly, new / stale issues, totals | No — edits one issue body in place, never comments |
-| `mutation-nightly.yml` | **Dispatch only** (daily 05:00 UTC once #1870 is closed) | Stryker.NET mutation run over the allowlisted security/contract BFF files that changed in the last 24h (since-mode: changed lines only) | No — quality alert `mutation-nightly` + `mutation-report` artifact |
+| `mutation-nightly.yml` | Daily 05:00 UTC (+ dispatch) | Stryker.NET mutation run over the allowlisted security/contract BFF files that changed in the last 24h (since-mode: changed lines only) | No — quality alert `mutation-nightly` + `mutation-report` artifact |
 | `nightly-health.yml` | Daily, 06:00 UTC | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity | No — one quality alert per check + rolling tracking issue |
 | `client-tests.yml` | Nightly, 07:00 UTC | test baseline (jest, vitest, node:test) across the client packages (pass/fail/install-failed/deps-build-failed table) | No — quality alert `client-tests` + job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
@@ -785,9 +786,9 @@ Stryker.NET 5.0.0 (installed with `dotnet tool install --tool-path`, pinned) ove
 | Allowlist | `src/server/api/Sprk.Bff.Api/{Api/Filters, Infrastructure/Errors, Infrastructure/Authentication, Services/Access}/**` and `src/server/shared/Spaarke.Dataverse/**AccessRights*` (the latter is a second Stryker run, `project=Spaarke.Dataverse.csproj`). Edit the pathspecs in the `Resolve scope` step to widen it. |
 | Window | Commits from the last 24h, or `-f since=<git ref>` on dispatch. Stryker `since` mode then mutates only the changed lines. No allowlisted file changed: the job succeeds in about a minute and the alert is `ok`. |
 | Tests that may kill a mutant | Derived per run by `scripts/ci/run-stryker.sh` from the files being mutated: the dedicated suites `Filters.`, `Services.Access.`, `Infrastructure.Authentication.`, `Infrastructure.Errors.` plus every test class in `tests/**` that names a type declared in a mutated file (worst case, all 52 files: 4,661 tests; 14 files: 2,746). Compose tests are excluded (Git-LFS fixtures). The broad ADR-038 KEEP set (9,667 tests, with Api.Office / Api.Insights / Api.Documents already excluded) took 71 min for the initial run alone and was dropped. A test that reaches a mutated type without naming it is not selected. |
-| Output | `mutation-report` artifact (HTML + JSON), a per-file table (killed / survived / no-coverage / score) and every surviving mutant with `file:line` in the job summary (`scripts/ci/summarize-mutation-report.py`). |
+| Output | `mutation-report` artifact (HTML + JSON), a per-file table (killed / survived / no-coverage / score) and every surviving mutant with `file:line` in the job summary (`scripts/ci/summarize-mutation-report.py`). Stryker keys files by absolute runner path; the script makes them repo-relative (`--repo-root`, default `$GITHUB_WORKSPACE`) and lists only files with an active mutant, counting the rest in one line (#1821 fix: paths were printed twice and ~1,900 inactive rows crowded the alert). |
 | Alert | `mutation-nightly`: `failing` when a changed file has surviving or no-coverage mutants, or the run errors or hits its cap; `ok` otherwise. |
-| Timeout / duration | 190 min (~1.5x the one complete run). **One run has completed end to end** (run 38601727169, 2 changed files, 1,390 mutants, 1,259 tests: 124 min = ~21 min build and instrumentation of the 165,676-mutant assembly + ~79 min at ~3.4 s per mutant). A 14-file window (3,448 mutants) did not finish in 240 min, so a heavy night cannot finish. That is why the schedule is off until #1870 decides how to bound a night. |
+| Timeout / duration | 190 min (~1.5x the one complete run). **One run has completed end to end** (run 38601727169, 2 changed files, 1,390 mutants, 1,259 tests: 124 min = ~21 min build and instrumentation of the 165,676-mutant assembly + ~79 min at ~3.4 s per mutant). A 14-file window (3,448 mutants) did not finish in 240 min, so a heavy night cannot finish. So a night mutates at most `max_files` allowlisted files (default 2, smallest first; the rest are listed as deferred in the run summary — cover them with a dispatch run using `since` + `max_files`). |
 
 **Manual dispatch**: `gh workflow run mutation-nightly.yml -f since=<ref>` (optionally `-f dry_run_alert=true` to print the alert decision instead of posting it). Use a `since` ref that predates the file you want mutated, otherwise the window is empty.
 
@@ -1112,7 +1113,7 @@ This CI/CD workflow integrates with the [Testing and Code Quality Procedures](te
 |-------|-------|----------------------------------|-----------|
 | Prettier | Pre-commit hook | Tier 2 `lint` job | — |
 | ESLint | Pre-commit hook | Tier 2 `lint` job | `client-tests.yml` (full suite, nightly) |
-| dotnet format | Pre-commit hook | Tier 2 `format` job | — |
+| dotnet format | Pre-commit hook | Tier 1 `format-changed-cs` (blocking, changed files) + Tier 2 `format` job (advisory, whole solution) | — |
 | Tests (compile + smoke) | During implementation | Tier 1 `compile` / `changed-surface-smoke` / `auth-smoke` | `nightly-health.yml` `full-integration` |
 | Full unit-test suite | — | Tier 2 `full-unit-tests` (advisory) | — |
 | ADR Tests | Step 9.5: `/adr-check` | Tier 1 `arch-tests` (blocking) + Tier 2 `adr-compliance` (advisory copy) | `adr-audit.yml` (weekly) |

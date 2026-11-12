@@ -864,6 +864,9 @@ public class DecisionActionExecutorsTests
         body.GetProperty("sprk_regardingmatter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})");
         body.GetProperty("sprk_regardingrecordid").GetString().Should().Be(MatterId.ToString("D"));
         body.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Acme v. Roe");
+        // Found in passing (task 045b): the pair type is bound by the table's own navigation property, which is case-sensitive.
+        body.GetProperty("sprk_RegardingRecordType@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
+        body.TryGetProperty("sprk_regardingrecordtype@odata.bind", out _).Should().BeFalse("sprk_todo's navigation property is sprk_RegardingRecordType");
     }
 
     [Fact]
@@ -996,7 +999,7 @@ public class DecisionActionExecutorsTests
         body.GetProperty("sprk_assignedtointernal@odata.bind").GetString().Should().Be($"/contacts({ContactId:D})");
         body.GetProperty("sprk_regardingmatter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})",
             "uac-r2: on a work assignment the typed pair counts only when the typed regarding lookup repeats it");
-        body.GetProperty("sprk_regardingrecordtype@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
+        body.GetProperty("sprk_RegardingRecordType@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
         body.GetProperty("sprk_regardingrecordid").GetString().Should().Be(MatterId.ToString("D"));
         probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), "prvCreatesprk_WorkAssignment", It.IsAny<CancellationToken>()), Times.Once,
             "the live privilege name (spaarkedev1 2026-10-11)");
@@ -1068,7 +1071,7 @@ public class DecisionActionExecutorsTests
         body.GetProperty("sprk_regardingmatter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})");
         body.GetProperty("sprk_regardingrecordid").GetString().Should().Be(MatterId.ToString("D"));
         body.GetProperty("sprk_regardingrecordname").GetString().Should().Be("Acme v. Roe");
-        body.GetProperty("sprk_regardingrecordtype@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
+        body.GetProperty("sprk_RegardingRecordType@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
         body.TryGetProperty("sprk_assignedtointernal@odata.bind", out _).Should().BeFalse("that is the work assignment's assignee column, not the event's");
         probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.CreateEventPrivilege, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -1524,6 +1527,22 @@ public class DecisionActionExecutorsTests
         var sendFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendFailed, sr));
         sendFailed.Status.Should().Be(DecisionActionStatus.Failed);
         sendFailed.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) }, "the row exists; the email did not go");
+    }
+
+    [Fact]
+    public void InquiryAdapter_ASentInquiryWhoseEmlWasNotArchived_IsDone_WithTheFixedCommitWarning_Task176()
+    {
+        var sr = Guid.NewGuid();
+        var comm = Guid.NewGuid();
+
+        var unarchived = BudgetInquiryActionExecutor.ToOutcome(
+            new BudgetInquiryResult(BudgetInquiryOutcome.Sent, sr, comm, ArchivalWarning: "archival failed: container x/secret"));
+        var archived = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.Sent, sr, comm));
+
+        unarchived.Status.Should().Be(DecisionActionStatus.Done, "the email is out; the decision stands");
+        unarchived.Warning.Should().Be("inquiry_email_not_archived", "a fixed code, never the core's text");
+        unarchived.Detail.Should().BeNull();
+        archived.Warning.Should().BeNull();
     }
 
     /// <summary>Captures what is logged, to show where the inquiry's raw error text goes.</summary>

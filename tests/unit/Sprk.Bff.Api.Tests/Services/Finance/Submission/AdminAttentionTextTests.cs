@@ -58,7 +58,8 @@ public class AdminAttentionTextTests
     {
         [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(Enumerable.Range(0, count).Select(i => (JsonNode)new JsonObject
         {
-            ["policyCode"] = $"BILL-{i}", ["code"] = "core_record_changed",
+            ["policyCode"] = $"BILL-{i}",
+            ["code"] = "core_record_changed",
             ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = Guid.NewGuid().ToString("D") },
         }).ToArray()),
     };
@@ -110,7 +111,8 @@ public class AdminAttentionTextTests
         {
             [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = "BILL-W", ["code"] = "dataverse_access_denied",
+                ["policyCode"] = "BILL-W",
+                ["code"] = "dataverse_access_denied",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
             }),
         };
@@ -199,17 +201,65 @@ public class AdminAttentionTextTests
         {
             [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = "BILL-W", ["code"] = "dataverse_access_denied",
+                ["policyCode"] = "BILL-W",
+                ["code"] = "dataverse_access_denied",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
             }),
             [InvoiceSubmissionPersister.SignalPlanRefusalsMember] = new JsonArray(new JsonObject
             {
-                ["policyCode"] = "BILL-P", ["code"] = "sentence_too_long",
+                ["policyCode"] = "BILL-P",
+                ["code"] = "sentence_too_long",
                 ["subject"] = new JsonObject { ["entity"] = "sprk_invoice", ["id"] = "bbbbbbbb-0000-0000-0000-000000000000" },
             }),
         };
 
         AdminAttentionText.FromFindings(findings).Should().Be(
             "2 Signals could not be created: sentence_too_long (BILL-P on invoice bbbbbbbb), dataverse_access_denied (BILL-W on line aaaaaaaa)");
+    }
+
+    // ── 082c-2 fix round 2 (uac-r2 option (i), conditions (a) and (b)): the join key stays, the reader text never prints it ──
+
+    private static readonly string RecordRuleKey = Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService.RecordRuleCode(Guid.NewGuid());
+
+    [Fact(DisplayName = "082c-2 fix round 2 (uac-r2 (a)/(b)): a record rule's BRR- key is not in the admin attention text; the reader text says 'record rule'; a catalogue code reads as before")]
+    public void RecordRuleKey_IsNeverInTheText()
+    {
+        ReaderSentinel.Scan(RecordRuleKey).Should().NotBeEmpty("must-fire control: the scan finds the key the text must not carry");
+
+        var text = AdminAttentionText.Build([Line(RecordRuleKey, "record_owner_no_default_team"), Line("BILL-RATE", "sentence_too_long", "0a1b2c3d-0000-0000-0000-000000000002")])!;
+
+        text.Should().Contain("record_owner_no_default_team (record rule on line 0a1b2c3d)").And.Contain("sentence_too_long (BILL-RATE on line 0a1b2c3d)");
+        text.Should().NotContain(RecordRuleKey).And.NotContain(RecordRuleKey["BRR-".Length..]);
+        ReaderSentinel.Scan(text).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "082c-2 fix round 2 (uac-r2 (b)): a BRR- key planted in the stored plan and write refusals reaches the admin attention text from the stored findings; the stored key itself is unchanged (it is the join key)")]
+    public void RecordRuleKey_InStoredFindings_ReachesNoReaderText_AndStaysTheKey()
+    {
+        var planKey = RecordRuleKey;
+        var writeKey = Sprk.Bff.Api.Services.Finance.Procedures.ProcedureAssignmentService.RecordRuleCode(Guid.NewGuid());
+        var findings = new JsonObject
+        {
+            [InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember] = new JsonArray(new JsonObject
+            {
+                ["policyCode"] = writeKey,
+                ["code"] = "dataverse_access_denied",
+                ["subject"] = new JsonObject { ["entity"] = "sprk_billingevent", ["id"] = "aaaaaaaa-0000-0000-0000-000000000000" },
+            }),
+            [InvoiceSubmissionPersister.SignalPlanRefusalsMember] = new JsonArray(new JsonObject
+            {
+                ["policyCode"] = planKey,
+                ["code"] = "sentence_too_long",
+                ["subject"] = new JsonObject { ["entity"] = "sprk_invoice", ["id"] = "bbbbbbbb-0000-0000-0000-000000000000" },
+            }),
+        };
+
+        var text = AdminAttentionText.FromFindings(findings)!;
+
+        text.Should().Be("2 Signals could not be created: sentence_too_long (record rule on invoice bbbbbbbb), dataverse_access_denied (record rule on line aaaaaaaa)");
+        ReaderSentinel.Scan(text).Should().BeEmpty();
+        findings[InvoiceSubmissionPersister.SignalPlanRefusalsMember]![0]!["policyCode"]!.GetValue<string>().Should().Be(planKey, "the join key is stored as it was");
+        findings[InvoiceSubmissionAfterSteps.SignalWriteRefusalsMember]![0]!["policyCode"]!.GetValue<string>().Should().Be(writeKey);
+        ReaderSentinel.Scan(findings.ToJsonString()).Should().NotBeEmpty("control: the stored copy does hold the keys, so the text's emptiness is the mapping's");
     }
 }

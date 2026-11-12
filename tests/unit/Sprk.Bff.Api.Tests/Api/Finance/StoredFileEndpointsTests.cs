@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Spaarke.Core.Auth;
+using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Configuration;
@@ -442,7 +444,8 @@ public sealed class StoredFileEndpointsTests
         var gate = new System.Text.RegularExpressions.Regex(@"\.GetCallerRightsForAuthorizationGateAsync\s*\(");
 
         direct.IsMatch(source).Should().BeFalse("a direct GetCallerRightsAsync call would answer no-access faster than not-found");
-        gate.Matches(source).Count.Should().Be(2, "the parent Read and the copy rule");
+        gate.Matches(source).Count.Should().Be(1, "the ONE memoizing helper (CallerRightsMemo) the parent Read and the copy rule both ask through");
+        System.Text.RegularExpressions.Regex.Matches(source, @"rights\.GetAsync\s*\(").Count.Should().Be(2, "the parent Read and the copy rule");
 
         // Controls: the patterns see what they must, and not each other.
         direct.IsMatch("await probe.GetCallerRightsAsync(token, set, id, ct)").Should().BeTrue();
@@ -496,6 +499,12 @@ public sealed class StoredFileEndpointsTests
             builder.Services.AddOptions<EbillingOptions>().Configure(o => o.Enabled = ebillingEnabled);
             builder.Services.AddSingleton(host.Rig.Service);
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Rig.Probe);
+
+            // 151e: the invoice file list is authorized on the invoice by the REAL Finance authorization stack, asked what the rig's probe
+            // grants (one statement of the caller's rights: GrantParentRead grants the filter's check and the per-file decision alike).
+            builder.Services.AddSingleton<IAccessDataSource>(new RigAccessDataSource(host.Rig));
+            builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
+            builder.Services.AddScoped<AuthorizationService>();
 
             builder.WebHost.UseTestServer();
             host._app = builder.Build();
@@ -552,6 +561,24 @@ public sealed class StoredFileEndpointsTests
                 await _app.DisposeAsync();
             }
         }
+    }
+
+    /// <summary>The Finance authorization stack's access-data seam, answering from the rig's rights (the same grants the probe answers).</summary>
+    internal sealed class RigAccessDataSource(StoredFileRig rig) : IAccessDataSource
+    {
+        public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+            Answer(userId, StoredFileSchema.DocumentEntitySet, Guid.Parse(resourceId), userAccessToken);
+
+        public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
+            Answer(userId, entitySetName, recordId, userAccessToken);
+
+        private Task<AccessSnapshot> Answer(string userId, string set, Guid id, string? token) =>
+            Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = id.ToString(),
+                AccessRights = token is not null && rig.Probe.Rights.TryGetValue((set, id), out var rights) ? rights : AccessRights.None,
+            });
     }
 
     internal sealed class CapturingProvider(ConcurrentQueue<string> timeline) : ILoggerProvider

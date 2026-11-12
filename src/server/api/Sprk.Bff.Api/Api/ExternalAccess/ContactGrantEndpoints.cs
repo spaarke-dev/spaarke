@@ -539,8 +539,11 @@ public static class ContactGrantEndpoints
 
         // Person grants only — a contact can never issue an organization-wide one, so an issued row naming no contact
         // is not one of theirs to show. The issuer is re-checked in memory: the filter decides what is returned.
+        // Fix round 3g: a row whose issuer or grantee column the read did not return is not shown (it is not known to be theirs);
+        // the match below is positive-only, and the reads are stated so the rule does not rest on a null comparison.
         var mine = rows
-            .Where(r => r.GrantedByContactId == g.ContactId && r.ContactId is { } c && c != Guid.Empty)
+            .Where(r => r.IssuerRead && r.ContactRead
+                && r.GrantedByContactId == g.ContactId && r.ContactId is { } c && c != Guid.Empty)
             .ToList();
 
         var names = await ReadContactNamesAsync(dataverseClient, mine.Select(r => r.ContactId!.Value).Distinct().ToList(), logger, ct);
@@ -640,6 +643,19 @@ public static class ContactGrantEndpoints
         // "Issued by me" is decided from THIS read, and each deactivation is conditional on the version this read returned
         // (session 27 round 42 item 1): an internal user who takes a row over after this read (round 34 item 3) makes the
         // write fail rather than be overwritten.
+        // Fix round 3g: a row whose issuer column the read did not return is neither "mine" nor "somebody else's". Skipping it
+        // would leave a row of the caller's standing while reporting the revoke done, so the revoke takes the answer of a
+        // read that failed: nothing is changed, try again (the 503 above).
+        if (activeRows.Any(r => !r.IssuerRead))
+        {
+            logger.LogError(
+                "[EXT-CONTACT-GRANT] Revoke {AccessRecordId}: a row of the grant did not carry the issuer column; nothing was " +
+                "revoked.", request.AccessRecordId);
+            return ContactGrantorAuthorizationFilter.Problem(httpContext, StatusCodes.Status503ServiceUnavailable,
+                "Access not revoked", ContactGrantorAuthorizationFilter.RevokeFailedReasonCode,
+                "The access could not be revoked just now. Nothing was changed; try again in a moment.");
+        }
+
         var mine = activeRows.Where(r => r.GrantedByContactId == g.ContactId).ToList();
         var othersRemain = activeRows.Any(r => r.GrantedByContactId != g.ContactId);
 

@@ -15,10 +15,14 @@
 //   EnsureCustomerBusinessUnitAsync — GET the root (exactly one), GET units by
 //   name ($top=2): two → Ambiguous; one under the root → reuse; one anywhere
 //   else (or the root itself) → WrongParent; none → POST businessunits under
-//   the root. Never re-parents a unit.
+//   the root. Never re-parents a unit. A unit found under the root whose ID is
+//   a reserved unit's (the Secure Record unit, resolved by Dataverse) →
+//   IsReservedUnit, nothing written — IDs, never names compared in code.
 //   EnsureAppUserAsync — an existing App User in another unit is refused
 //   (InForeignBusinessUnit, nothing written: a business-unit change strips every
-//   role); a new one is created with businessunitid = the customer's unit; the
+//   role) — except (task 267, #2618) a role-less request's MoveFromBusinessUnitId:
+//   a row in exactly that unit whose azureactivedirectoryobjectid is the requested
+//   principal id is PATCHed into the requested unit and read back; a new one is created with businessunitid = the customer's unit; the
 //   role is resolved in THAT unit (Dataverse assigns a user only its own unit's
 //   roles) — exactly one match, never a name-only fallback that could pick a
 //   copy from another unit.
@@ -45,6 +49,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
 {
     private const string Api = "/api/data/v9.2/";
+
+    /// <summary>Rows read per reserved-name lookup; reaching it is a Failure (cannot decide), never a pass.</summary>
+    internal const int ReservedLookupCap = 50;
 
     private readonly HttpClient _httpClient;
     private readonly H10DataverseAppUserGraphParityOptions _options;
@@ -84,11 +91,18 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         string environmentUrl,
         string tenantId,
         string name,
+        IReadOnlyCollection<string> reservedUnitNames,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environmentUrl);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(reservedUnitNames);
+        if (reservedUnitNames.Count == 0 || reservedUnitNames.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("At least one reserved unit name (the Secure Record unit's) is required, none blank.",
+                nameof(reservedUnitNames));
+        }
 
         if (!Uri.TryCreate(environmentUrl, UriKind.Absolute, out var envUri))
         {
@@ -120,18 +134,52 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             var named = Values(await GetAsync(envUri, token,
                 $"businessunits?$filter=name eq '{Literal(name)}'&$select=businessunitid,_parentbusinessunitid_value&$top=2",
                 cancellationToken).ConfigureAwait(false));
+            // The reserved units (the Secure Record unit) are direct children of the root too. Compare IDs, never names in
+            // code: Dataverse's `name eq` ignores case AND accents, so a customer name that differs from a reserved one only
+            // that way resolves to the same unit — adopting it would put the BFF's System Administrator users in it. A read
+            // fault throws → Failure below (fail closed). Checked on every branch, the ambiguous one included, so the
+            // operator is told the real cause.
+            async Task<CustomerBusinessUnitOutcome.IsReservedUnit?> ReservedAmongAsync(IReadOnlyCollection<Guid> unitIds, bool created)
+            {
+                foreach (var reservedName in reservedUnitNames)
+                {
+                    // Read EVERY unit answering the reserved name (several can, in exactly the collision case): a capped read
+                    // could leave the customer's unit unread. Hitting the cap is undecidable → throw → Failure (fail closed).
+                    var reserved = Values(await GetAsync(envUri, token,
+                        $"businessunits?$filter=name eq '{Literal(reservedName)}'&$select=businessunitid&$top={ReservedLookupCap}",
+                        cancellationToken).ConfigureAwait(false));
+                    if (reserved.Count >= ReservedLookupCap)
+                    {
+                        throw new InvalidOperationException(
+                            $"{reserved.Count} or more business units answer the reserved name '{reservedName}' — H10 cannot " +
+                            "tell whether the customer's unit is among them. Nothing more was written.");
+                    }
+                    var hit = reserved.Select(row => Id(row, "businessunitid")).FirstOrDefault(unitIds.Contains);
+                    if (hit != Guid.Empty)
+                    {
+                        return new CustomerBusinessUnitOutcome.IsReservedUnit(hit, reservedName, created);
+                    }
+                }
+                return null;
+            }
+
             switch (named.Count)
             {
                 case > 1:
-                    return new CustomerBusinessUnitOutcome.Ambiguous(named.Count);
+                    return await ReservedAmongAsync(named.Select(row => Id(row, "businessunitid")).ToArray(), created: false)
+                                .ConfigureAwait(false)
+                           ?? (CustomerBusinessUnitOutcome)new CustomerBusinessUnitOutcome.Ambiguous(named.Count);
                 case 1:
-                {
-                    var unitId = Id(named[0], "businessunitid");
-                    var parentId = OptionalId(named[0], "_parentbusinessunitid_value");
-                    return parentId == rootId
-                        ? new CustomerBusinessUnitOutcome.Success(unitId, Created: false)
-                        : new CustomerBusinessUnitOutcome.WrongParent(unitId, parentId, rootId);
-                }
+                    {
+                        var unitId = Id(named[0], "businessunitid");
+                        var parentId = OptionalId(named[0], "_parentbusinessunitid_value");
+                        if (parentId != rootId)
+                        {
+                            return new CustomerBusinessUnitOutcome.WrongParent(unitId, parentId, rootId);
+                        }
+                        return await ReservedAmongAsync([unitId], created: false).ConfigureAwait(false)
+                               ?? (CustomerBusinessUnitOutcome)new CustomerBusinessUnitOutcome.Success(unitId, Created: false);
+                    }
             }
 
             var created = await CreateAsync(envUri, token, "businessunits", new Dictionary<string, object?>
@@ -140,7 +188,13 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                 ["parentbusinessunitid@odata.bind"] = $"/businessunits({rootId:D})",
             }, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("H10 created the customer business unit {BusinessUnitId} under the root {RootId}", created, rootId);
-            return new CustomerBusinessUnitOutcome.Success(created, Created: true);
+
+            // On a fresh stamp no reserved unit exists before this create, so the check above had nothing to compare. Look
+            // the reserved names up AGAIN now: Dataverse resolves a colliding reserved name to the unit just created, and H10
+            // refuses before any user is placed in it (only an empty unit was written). H7b S1 stays as the backstop for a
+            // reserved name added after H10 ran — keep both checks.
+            return await ReservedAmongAsync([created], created: true).ConfigureAwait(false)
+                   ?? (CustomerBusinessUnitOutcome)new CustomerBusinessUnitOutcome.Success(created, Created: true);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -170,6 +224,28 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
         {
             // null = no role (task 266); a blank name is a caller bug, never "no role".
             ArgumentException.ThrowIfNullOrWhiteSpace(request.SecurityRoleName);
+        }
+        if (request.MoveFromBusinessUnitId is { } moveFrom)
+        {
+            // Task 267: a move strips every role, so only a role-less identity (the ontology writer) may be moved, and only
+            // when its object id can be checked first. Never the BFF's System Administrator users.
+            if (request.SecurityRoleName is not null)
+            {
+                throw new ArgumentException("MoveFromBusinessUnitId is allowed only with SecurityRoleName null.", nameof(request));
+            }
+            if (string.IsNullOrWhiteSpace(request.SystemUserAzureActiveDirectoryObjectId)
+                || !Guid.TryParse(request.SystemUserAzureActiveDirectoryObjectId, out _))
+            {
+                // A GUID, so MoveAsync's comparison can never throw on it.
+                throw new ArgumentException(
+                    "MoveFromBusinessUnitId requires SystemUserAzureActiveDirectoryObjectId as a GUID: the row's object id is " +
+                    "checked before any move.",
+                    nameof(request));
+            }
+            if (moveFrom == Guid.Empty || moveFrom == request.BusinessUnitId)
+            {
+                throw new ArgumentException("MoveFromBusinessUnitId must be a unit other than BusinessUnitId.", nameof(request));
+            }
         }
 
         if (!Uri.TryCreate(request.EnvironmentUrl, UriKind.Absolute, out var envUri))
@@ -236,6 +312,12 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             {
                 systemUserId = Id(existing[0], "systemuserid");
                 var unit = OptionalId(existing[0], "_businessunitid_value");
+                if (unit is { } foundIn && foundIn == request.MoveFromBusinessUnitId)
+                {
+                    // Task 267: the one move H10 makes (see MoveAsync) - object id first, then PATCH, then read back.
+                    return await MoveAsync(envUri, token, request, systemUserId, foundIn,
+                        OptionalId(existing[0], "azureactivedirectoryobjectid"), cancellationToken).ConfigureAwait(false);
+                }
                 if (unit != request.BusinessUnitId)
                 {
                     // T259: never moved — a business-unit change strips every role of the user.
@@ -322,6 +404,51 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             return new DataverseAppUserCreationOutcome.Failure(
                 $"Dataverse Web API error: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Task 267 (#2618): moves the role-less App User found in <paramref name="from"/> (the request's
+    /// <see cref="DataverseAppUserCreationRequest.MoveFromBusinessUnitId"/>) into the requested unit. The object id is checked
+    /// BEFORE anything is written: a row holding another principal is not this identity's and is never moved
+    /// (<see cref="DataverseAppUserCreationOutcome.InForeignBusinessUnit"/> with a reason). The move is read back.
+    /// <para>
+    /// UNVERIFIED LIVE: whether Dataverse accepts a <c>businessunitid</c> PATCH on systemuser, or requires the
+    /// <c>SetBusinessSystemUser</c> message, has not been tried against a live environment. A rejection surfaces as an HTTP
+    /// fault, so <see cref="DataverseAppUserCreationOutcome.Failure"/> (H10: Resumable), and an accepted PATCH that did not
+    /// move the row fails the read-back the same way — never a wrong outcome.
+    /// </para>
+    /// </summary>
+    private async Task<DataverseAppUserCreationOutcome> MoveAsync(
+        Uri envUri, AccessToken token, DataverseAppUserCreationRequest request, Guid systemUserId, Guid from,
+        Guid? heldObjectId, CancellationToken ct)
+    {
+        var wanted = Guid.Parse(request.SystemUserAzureActiveDirectoryObjectId!);
+        if (heldObjectId != wanted)
+        {
+            return new DataverseAppUserCreationOutcome.InForeignBusinessUnit(systemUserId.ToString("D"), from,
+                $"its azureactivedirectoryobjectid is '{heldObjectId?.ToString("D") ?? "(empty)"}', not the identity's principal " +
+                $"id {wanted:D}, so it is not this identity's row and H10 does not move it");
+        }
+
+        await SendAsync(envUri, token, HttpMethod.Patch, $"systemusers({systemUserId:D})",
+            new Dictionary<string, object?> { ["businessunitid@odata.bind"] = $"/businessunits({request.BusinessUnitId:D})" },
+            ct).ConfigureAwait(false);
+
+        using var reread = await GetAsync(envUri, token, $"systemusers({systemUserId:D})?$select=_businessunitid_value", ct)
+            .ConfigureAwait(false);
+        var now = OptionalId(reread.RootElement, "_businessunitid_value");
+        if (now != request.BusinessUnitId)
+        {
+            return new DataverseAppUserCreationOutcome.Failure(
+                $"The App User {systemUserId:D} was moved from business unit {from:D} to {request.BusinessUnitId:D}, but it reads " +
+                $"business unit {now?.ToString("D") ?? "(none)"} afterwards. Dataverse may still be applying the move; resume " +
+                "re-reads it.");
+        }
+
+        _logger.LogWarning(
+            "H10 moved App User {SystemUserId} from business unit {From} to {To} (task 267); the move strips its roles",
+            systemUserId, from, request.BusinessUnitId);
+        return new DataverseAppUserCreationOutcome.Success(systemUserId.ToString("D"), MovedFromBusinessUnitId: from);
     }
 
     /// <summary>

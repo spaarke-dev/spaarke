@@ -235,7 +235,8 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
             _h.Store.Assign(root, id, Attorney1, attorney);
             _h.Store.Assign(root, id, "sprk_assignedtoexternal", external);
             _h.Store.Assign(root, id, "sprk_assignedlawfirm1", firm);
-        });
+        }
+        );
     }
 
     [Fact]
@@ -499,21 +500,71 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
     // ─────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task UpdateRecordActionCore_ThatWritesAnAssignedLookup_MaterializesTheRoot()
+    public async Task UpdateRecordActionCore_AConfirmedProposalThatWritesAnAssignedLookup_MaterializesTheRoot()
     {
+        // #2250: the Job B apply (ActionSeam), a person's own confirmed edit written AS that person, still materializes.
         var matter = Guid.NewGuid();
         var contact = _h.Contact();
+        var person = Guid.NewGuid();
         _h.Store.Assign(ExternalGrantRootType.Matter, matter, Attorney1, contact);
         var fieldMappings = new Mock<IFieldMappingDataverseService>();
         var core = new UpdateRecordActionCore(fieldMappings.Object, Scopes(), NullLogger.Instance);
 
         await core.UpdateAsync(new UpdateRecordActionInput(
             "sprk_matter", matter, null, null,
-            new[] { new RenderedLookup(Attorney1, "contact", contact.ToString("D")) }), CancellationToken.None);
+            new[] { new RenderedLookup(Attorney1, "contact", contact.ToString("D")) },
+            ImpersonateSystemUserId: person, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal), CancellationToken.None);
 
         fieldMappings.Verify(f => f.UpdateExistingRecordFieldsAsync("sprk_matter", matter, It.IsAny<Dictionary<string, object?>>(),
-            null, It.IsAny<CancellationToken>()), Times.Once);
+            person, It.IsAny<CancellationToken>()), Times.Once);
         _h.Grants.ActiveRowsOf(matter, contact).Should().ContainSingle();
+    }
+
+    public static TheoryData<Guid?> NoConfirmingPerson() => new() { null, Guid.Empty };
+
+    [Theory]
+    [MemberData(nameof(NoConfirmingPerson))]
+    public async Task UpdateRecordActionCore_AProposalNoPersonConfirmed_ThatWritesAnAssignedLookup_IsRefused_AndGrantsNothing(Guid? user)
+    {
+        // #2250 review: a proposal written app-only (no confirming person) is model-built, so it gets the playbook rule.
+        var matter = Guid.NewGuid();
+        var contact = _h.Contact();
+        _h.Store.Assign(ExternalGrantRootType.Matter, matter, Attorney1, contact);
+        var fieldMappings = new Mock<IFieldMappingDataverseService>();
+        var core = new UpdateRecordActionCore(fieldMappings.Object, Scopes(), NullLogger.Instance);
+
+        var act = () => core.UpdateAsync(new UpdateRecordActionInput(
+            "sprk_matter", matter, null, null,
+            new[] { new RenderedLookup(Attorney1, "contact", contact.ToString("D")) },
+            ImpersonateSystemUserId: user, PayloadSource: UpdateRecordPayloadSource.ConfirmedProposal), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.PlaybookAssignedToWriteReasonCode);
+        fieldMappings.Invocations.Should().BeEmpty();
+        _h.Grants.ActiveRowsOf(matter, contact).Should().BeEmpty();
+        _h.TotalWrites.Should().Be(0, "no Assigned-To grant, share or ledger row comes from an unconfirmed proposal");
+    }
+
+    [Fact]
+    public async Task UpdateRecordActionCore_APlaybookNodeThatWritesAnAssignedLookup_IsRefused_AndGrantsNothing()
+    {
+        // #2250 (owner decision, option 2): a playbook's Update Record node never causes an Assigned-To grant. The whole write
+        // is refused before anything is written, so the real materializer has nothing to grant from.
+        var matter = Guid.NewGuid();
+        var contact = _h.Contact();
+        _h.Store.Assign(ExternalGrantRootType.Matter, matter, Attorney1, contact);
+        var fieldMappings = new Mock<IFieldMappingDataverseService>();
+        var core = new UpdateRecordActionCore(fieldMappings.Object, Scopes(), NullLogger.Instance);
+
+        var act = () => core.UpdateAsync(new UpdateRecordActionInput(
+            "sprk_matter", matter, null, new Dictionary<string, string?> { ["sprk_mattername"] = "Renamed" },
+            new[] { new RenderedLookup(Attorney1, "contact", contact.ToString("D")) }), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which.RefusalCode
+            .Should().Be(InheritedAccessPermission.PlaybookAssignedToWriteReasonCode);
+        fieldMappings.Invocations.Should().BeEmpty("neither the Assigned column nor the payload's other field is written");
+        _h.Grants.ActiveRowsOf(matter, contact).Should().BeEmpty();
+        _h.TotalWrites.Should().Be(0, "no Assigned-To grant, share or ledger row comes from a playbook write");
     }
 
     [Fact]
@@ -699,6 +750,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         var dataverse = new Mock<IFieldMappingDataverseService>();
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             dataverse.Object,
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             new[] { new FieldMappingRuleDto { SourceField = Attorney1, TargetField = Attorney1, SourceFieldType = "Text", TargetFieldType = "Text" } },
@@ -730,6 +782,7 @@ public sealed class AssignedAccessWriterTriggerTests : TypedToolHandlerTestFixtu
         var dataverse = new Mock<IFieldMappingDataverseService>();
 
         var (updated, failed, _, _, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             dataverse.Object,
             new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper,
             new[] { new FieldMappingRuleDto { SourceField = Attorney1, TargetField = Attorney1, SourceFieldType = "Text", TargetFieldType = "Text" } },

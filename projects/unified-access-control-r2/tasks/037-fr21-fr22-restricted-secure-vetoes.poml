@@ -4,7 +4,7 @@
     <title>FR-21 + FR-22 — Restricted post-max veto and Secure pre-max suppression, for every principal kind</title>
     <phase>1 One evaluator</phase>
     <gate>after-032</gate>
-    <status>pending</status>
+    <status>completed</status>
     <status-note>RE-OPENED 2026-09-30 (owner Q7 approval, session 27). This task was marked completed on 2026-09-04, and its title and FR-22 claim cover "every principal kind". But its file list excluded Infrastructure/ExternalAccess/CallerPrincipalResolver.cs, so the CIAM plane (CiamContactPrincipalStrategy) applies neither the Restricted veto nor Secure suppression. That is defect C1. Also, the Secure suppression it built yields None-rights keys that the presence-only external read gates still admit, which is defect C2. The work delivered on 2026-09-04 stands; it is incomplete. The completing work is task 135 (CIAM veto parity) and task 136 (rights-based external read gates). See the amendments block. Set this back to completed only when both are completed.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation of two security vetoes; tags bff-api/auth.</rigor-reason>

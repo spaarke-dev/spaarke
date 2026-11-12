@@ -58,7 +58,7 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/{lineId}/decision - one decision on one line
         group.MapPost("/invoices/{invoiceId:guid}/lines/{lineId:guid}/decision", DecideLine)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("DecideInvoiceLine")
             .WithSummary("Accept, reduce or disallow one invoice line")
@@ -76,7 +76,7 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/decisions - one action and reason on selected lines
         group.MapPost("/invoices/{invoiceId:guid}/lines/decisions", DecideLines)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("DecideInvoiceLines")
             .WithSummary("Apply one action and reason to several invoice lines")
@@ -93,7 +93,7 @@ public static class InvoiceLineReviewEndpoints
 
         // POST /api/finance/invoices/{invoiceId}/lines/accept-clean - Accept all Clean
         group.MapPost("/invoices/{invoiceId:guid}/lines/accept-clean", AcceptClean)
-            .AddFinanceAuthorizationFilter("ebilling.invoice.decide",FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
             .RequireEbillingEnabled()
             .WithName("AcceptCleanInvoiceLines")
             .WithSummary("Accept every Clean line of an invoice")
@@ -106,6 +106,24 @@ public static class InvoiceLineReviewEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // POST /api/finance/invoices/{invoiceId}/lines - Add line (task 164, EB-D-188). The same right as a line decision: Write on the invoice, as the caller.
+        group.MapPost("/invoices/{invoiceId:guid}/lines", AddLine)
+            .AddFinanceAuthorizationFilter("ebilling.invoice.decide", FinanceAuthorizationFilter.InvoiceEntitySet, routeKey: "invoiceId")
+            .RequireEbillingEnabled()
+            .WithName("AddInvoiceLine")
+            .WithSummary("Add a Fee or Expense line the firm did not bill")
+            .WithDescription(
+                "Adds one reviewer-typed Fee or Expense line to an invoice that is In Review and has a firm. The line is created Flagged, its codes must be " +
+                "in the invoice's code set, and the billing rules are run again on the invoice. A retry with the same requestId addresses the same line.")
+            .Produces<AddLineResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return app;
@@ -199,6 +217,57 @@ public static class InvoiceLineReviewEndpoints
         return ToResult(result, httpContext, body.DecisionId);
     }
 
+    private static async Task<IResult> AddLine(
+        Guid invoiceId, AddLineRequest? body, InvoiceLineAddService service, HttpContext httpContext, CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Refused(StatusCodes.Status400BadRequest, AddLineCodes.Invalid, "A request body is required.");
+        }
+
+        // Step 0 before any I/O (the decider lookup included): a malformed request is 400 whoever sends it.
+        var command = new AddLineCommand(
+            invoiceId, body.RequestId, body.CostType, body.Date, body.Timekeeper, body.Hours, body.Rate, body.Amount,
+            body.TaskCode, body.ActivityCode, body.ExpenseCode, body.Description, body.Reason, DeciderSystemUserId: Guid.Empty);
+        if (InvoiceLineAddService.ShapeError(command, out _) is { } invalid)
+        {
+            return ToResult(invalid, httpContext, body.RequestId);
+        }
+
+        if (await DeciderAsync(httpContext, ct) is not { } decider)
+        {
+            return DeciderUnresolved(httpContext);
+        }
+
+        return ToResult(await service.AddAsync(command with { DeciderSystemUserId = decider }, ct), httpContext, body.RequestId);
+    }
+
+    /// <summary>Maps an Add line outcome to one HTTP status and one stable code (ADR-019; brief section 3).</summary>
+    internal static IResult ToResult(AddLineResult result, HttpContext httpContext, Guid requestId) => result.Status switch
+    {
+        AddLineStatus.Applied => TypedResults.Ok(new AddLineResponse(
+            requestId, result.LineId!.Value, result.DecisionId!.Value, result.LineStatus, result.AlreadyApplied, result.Totals)),
+        AddLineStatus.InvalidRequest => Refused(StatusCodes.Status400BadRequest, result.Code, result.Detail),
+        AddLineStatus.InvoiceNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
+        AddLineStatus.NotInReview or AddLineStatus.FirmMissing or AddLineStatus.CorrectionsPending or AddLineStatus.CodeSetUnavailable
+            or AddLineStatus.ProcedureGap or AddLineStatus.TotalsRefused or AddLineStatus.IdReused or AddLineStatus.Busy
+            or AddLineStatus.Changed or AddLineStatus.TooLarge => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
+        AddLineStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
+        // The line was committed but totals, record or Signals did not finish: the repeat of the same request completes it (164a-4b, N10).
+        AddLineStatus.Incomplete => Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            detail: result.Detail,
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = result.Code,
+                ["requestId"] = requestId,
+                ["lineId"] = result.LineId,
+                ["decisionId"] = result.DecisionId,
+                ["failedStep"] = result.FailedStep,
+            }),
+        _ => Refused(StatusCodes.Status503ServiceUnavailable, result.Code, result.Detail),
+    };
+
     /// <summary>The caller's <c>systemuserid</c> from the caller's own token (<c>WhoAmI</c> on the OBO token); null means the identity is unproven (fail closed).</summary>
     private static async Task<Guid?> DeciderAsync(HttpContext httpContext, CancellationToken ct) =>
         await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, ct);
@@ -219,7 +288,7 @@ public static class InvoiceLineReviewEndpoints
         LineDecisionStatus.InvalidRequest => Refused(StatusCodes.Status400BadRequest, result.Code, result.Detail),
         LineDecisionStatus.InvoiceNotFound or LineDecisionStatus.LineNotFound => FinanceAuthorizationFilter.UniformRecordNotFound(httpContext),
         LineDecisionStatus.NotInReview or LineDecisionStatus.LineNotDecidable or LineDecisionStatus.TotalsRefused
-            or LineDecisionStatus.Busy or LineDecisionStatus.Changed => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
+            or LineDecisionStatus.Busy or LineDecisionStatus.Changed or LineDecisionStatus.FirmRequired => Refused(StatusCodes.Status409Conflict, result.Code, result.Detail),
         LineDecisionStatus.OwnerUnresolved => Refused(StatusCodes.Status500InternalServerError, result.Code, result.Detail),
         LineDecisionStatus.Forbidden => Refused(StatusCodes.Status403Forbidden, result.Code, result.Detail),
         LineDecisionStatus.Incomplete => Results.Problem(
@@ -254,3 +323,25 @@ public sealed record AcceptCleanRequest(Guid DecisionId);
 
 /// <summary>200 body of a decision: the lines decided (with their new state) and the invoice totals as 016 stored them (null when nothing was decided).</summary>
 public sealed record LineDecisionResponse(Guid DecisionId, IReadOnlyList<DecidedLineDto> Lines, ReviewTotalsDto? Totals);
+
+/// <summary>
+/// Body of Add line. No total, status, owner or person: the decider is the caller. <paramref name="RequestId"/> is the client's id for this add; a retry
+/// sends the same one.
+/// </summary>
+public sealed record AddLineRequest(
+    Guid RequestId,
+    string? CostType,
+    DateOnly? Date,
+    string? Timekeeper,
+    decimal? Hours,
+    decimal? Rate,
+    decimal? Amount,
+    string? TaskCode,
+    string? ActivityCode,
+    string? ExpenseCode,
+    string? Description,
+    string? Reason);
+
+/// <summary>200 body of Add line. <paramref name="AlreadyApplied"/> is true when the same request had already added the line. <paramref name="Totals"/> is
+/// null until task 164a-4b.</summary>
+public sealed record AddLineResponse(Guid RequestId, Guid LineId, Guid DecisionId, string? Status, bool AlreadyApplied, ReviewTotalsDto? Totals);

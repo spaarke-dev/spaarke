@@ -15,14 +15,15 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 /// </summary>
 /// <remarks>
 /// T218b (ADR-027 §3, amended 2026-10-07): the package is one solution, so its own version is the release tag and the
-/// value is readable: <c>SpaarkeMaster 1.2.0.0 (managed)</c>. It also records the package type on the registry row
-/// (owner D8) without a new column. Task 245b's 32-hex fingerprint served a multi-solution set with no release tag;
-/// that set no longer exists.
+/// value is readable: <c>SpaarkeMaster Managed 1.2.0.0</c>. It also records the package type on the registry row
+/// (owner D8) without a new column — in the name, so the version stays a bare number (owner 2026-11-10; it was
+/// <c>SpaarkeMaster 1.2.0.0 (managed)</c> before). Task 245b's 32-hex fingerprint served a multi-solution set with no
+/// release tag; that set no longer exists.
 /// </remarks>
 public static class ImportedSolutionSet
 {
     /// <summary>
-    /// <c>{SpaarkeMaster} {version} ({managed|unmanaged})</c>, or <c>null</c> when SpaarkeMaster is not among the records
+    /// <c>SpaarkeMaster {Managed|Unmanaged} {version}</c>, or <c>null</c> when SpaarkeMaster is not among the records
     /// (nothing imported, or a run recorded before T218b).
     /// </summary>
     public static string? ComputeVersion(IEnumerable<ImportedSolutionRecord>? solutions)
@@ -34,6 +35,6 @@ public static class ImportedSolutionSet
         {
             return null;
         }
-        return $"{SpaarkePackage.SolutionUniqueName} {package.Version.Trim()} ({(package.IsManaged ? "managed" : "unmanaged")})";
+        return $"{SpaarkePackage.SolutionUniqueName} {(package.IsManaged ? "Managed" : "Unmanaged")} {package.Version.Trim()}";
     }
 }

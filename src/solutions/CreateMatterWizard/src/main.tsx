@@ -114,7 +114,9 @@ function App() {
   }, []);
 
   // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): resolve BU cascade defaults
-  // (sprk_containerid + sprk_searchindexname) from the current user's owning BU.
+  // (sprk_containerid + sprk_searchindexname) from the current user's owning BU. Since task 021 the wizard passes
+  // them to MatterService but nothing reads them (the matter's index and container columns are the server's,
+  // FR-38/FR-40; the uploaded files are indexed without naming an index); the callback stays as the host's contract.
   // Matches CreateProjectWizard / CreateEventWizard / CreateWorkAssignmentWizard
   // solution wiring exactly — Xrm.Utility.getGlobalContext().userSettings.userId is
   // the correct documented API in the Code Page host (Xrm.Utility.getUserId does NOT

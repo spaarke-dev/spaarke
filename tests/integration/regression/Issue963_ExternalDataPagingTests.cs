@@ -41,7 +41,8 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
     /// <summary>The creator every external create stamps (R3 task 030, FR-25) — a contact principal.</summary>
     private static readonly CallerPrincipal Creator = new()
     {
-        Plane = CallerPrincipalPlane.CiamContact, ContactId = Guid.Parse("96300000-0000-0000-0000-0000000000c0"),
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.Parse("96300000-0000-0000-0000-0000000000c0"),
         ProjectAccess = new[] { CallerProjectAccess.FromLevel(Root, ExternalAccessLevel.ViewOnly) },
     };
 
@@ -73,6 +74,9 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         _ => throw new ArgumentOutOfRangeException(nameof(read)),
     };
 
+    private static readonly string[] RootStampColumns =
+        { "_sprk_regardingproject_value", "_sprk_regardingmatter_value", "_sprk_regardingworkassignment_value" };
+
     /// <summary>Seeds <paramref name="count"/> children of <see cref="Root"/> for <paramref name="read"/>.</summary>
     private void Seed(string read, int count)
     {
@@ -82,22 +86,39 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
             switch (read)
             {
                 case "documents":
-                    _dataverse.Add("sprk_documents", new JsonObject
+                    var document = new JsonObject
                     {
-                        ["sprk_documentid"] = id, ["sprk_documentname"] = $"Doc {i}", ["_sprk_project_value"] = Root.ToString(),
-                    });
+                        ["sprk_documentid"] = id,
+                        ["sprk_documentname"] = $"Doc {i}",
+                        ["_sprk_project_value"] = Root.ToString(),
+                    };
+                    // The Web API returns every selected root link, an unset one as an explicit null (task 130-0 fix round 3b).
+                    foreach (var column in ExternalDataService.DocumentRootLinks.SelectColumns.Concat(ExternalMultiRootRule.LiveParentSelect("sprk_document"))
+                                 .Concat(ExternalDocumentNarrowing.SelectColumns))
+                        document.TryAdd(column, null); // fix round 3c: and every live-parent lookup column; fix round 3d: and the narrowing columns
+                    _dataverse.Add("sprk_documents", document);
                     break;
                 case "todos":
-                    _dataverse.Add("sprk_todos", new JsonObject
+                    var todo = new JsonObject
                     {
-                        ["sprk_todoid"] = id, ["sprk_name"] = $"To-do {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
-                    });
+                        ["sprk_todoid"] = id,
+                        ["sprk_name"] = $"To-do {i}",
+                        ["_sprk_regardingproject_value"] = Root.ToString(),
+                    };
+                    foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_todo").Concat(RootStampColumns))
+                        todo.TryAdd(column, null); // fix round 3c: an unset selected lookup is an explicit null (3d: and the other root stamps)
+                    _dataverse.Add("sprk_todos", todo);
                     break;
                 case "events":
-                    _dataverse.Add("sprk_events", new JsonObject
+                    var calendarEvent = new JsonObject
                     {
-                        ["sprk_eventid"] = id, ["sprk_eventname"] = $"Event {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
-                    });
+                        ["sprk_eventid"] = id,
+                        ["sprk_eventname"] = $"Event {i}",
+                        ["_sprk_regardingproject_value"] = Root.ToString(),
+                    };
+                    foreach (var column in ExternalMultiRootRule.LiveParentSelect("sprk_event").Concat(RootStampColumns))
+                        calendarEvent.TryAdd(column, null); // fix round 3c: an unset selected lookup is an explicit null (3d: and the other root stamps)
+                    _dataverse.Add("sprk_events", calendarEvent);
                     break;
                 case "contacts":
                     _dataverse.Add("sprk_externalrecordaccesses", new JsonObject { ["_sprk_contact_value"] = id });
@@ -333,7 +354,9 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         foreach (var id in ids)
             _dataverse.Add("sprk_projects", new JsonObject
             {
-                ["sprk_projectid"] = id.ToString(), ["sprk_projectname"] = $"Project {id}", ["sprk_issecure"] = false,
+                ["sprk_projectid"] = id.ToString(),
+                ["sprk_projectname"] = $"Project {id}",
+                ["sprk_issecure"] = false,
             });
 
         var projects = await _sut.GetProjectsAsync(ids);
@@ -356,7 +379,8 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         var typeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
         _dataverse.Add("sprk_recordtype_refs", new JsonObject
         {
-            ["sprk_recordtype_refid"] = typeRef.ToString(), ["sprk_recorddisplayname"] = "Project",
+            ["sprk_recordtype_refid"] = typeRef.ToString(),
+            ["sprk_recorddisplayname"] = "Project",
             ["sprk_recordlogicalname"] = "sprk_project",
         });
 
@@ -381,7 +405,8 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         var typeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
         _dataverse.Add("sprk_recordtype_refs", new JsonObject
         {
-            ["sprk_recordtype_refid"] = typeRef.ToString(), ["sprk_recorddisplayname"] = "Project",
+            ["sprk_recordtype_refid"] = typeRef.ToString(),
+            ["sprk_recorddisplayname"] = "Project",
             ["sprk_recordlogicalname"] = "sprk_project",
         });
         _dataverse.FailRequest("sprk_recordtype_refs", requestNumber: 1);
@@ -413,11 +438,15 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         var active = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
         _dataverse.Add("sprk_recordtype_refs", new JsonObject
         {
-            ["sprk_recordtype_refid"] = inactive.ToString(), ["sprk_recordlogicalname"] = "sprk_project", ["statecode"] = 1,
+            ["sprk_recordtype_refid"] = inactive.ToString(),
+            ["sprk_recordlogicalname"] = "sprk_project",
+            ["statecode"] = 1,
         });
         _dataverse.Add("sprk_recordtype_refs", new JsonObject
         {
-            ["sprk_recordtype_refid"] = active.ToString(), ["sprk_recordlogicalname"] = "sprk_project", ["statecode"] = 0,
+            ["sprk_recordtype_refid"] = active.ToString(),
+            ["sprk_recordlogicalname"] = "sprk_project",
+            ["statecode"] = 0,
         });
 
         await _sut.CreateTodoAsync(

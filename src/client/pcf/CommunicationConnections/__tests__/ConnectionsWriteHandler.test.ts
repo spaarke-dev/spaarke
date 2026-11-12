@@ -30,6 +30,16 @@ jest.mock('@spaarke/ui-components', () => {
     // validate the host record id, so a stub that doesn't lowercase/brace-strip would
     // pass tests a real mismatch would catch.
     cleanGuid: (id: string | null | undefined) => (id ?? '').replace(/[{}]/g, '').trim().toLowerCase(),
+    // Same behaviour as the shared helper (PolymorphicResolverService.nullRecordNumberWhenTargetHasNone, which has its
+    // own unit tests): null the number when the payload has none AND the host carries the regarding pair.
+    nullRecordNumberWhenTargetHasNone: (
+      payload: Record<string, unknown>,
+      navProps: Array<{ columnName: string }>
+    ): void => {
+      if (payload['sprk_regardingrecordnumber'] !== undefined) return;
+      if (!navProps.some(n => n.columnName.toLowerCase() === 'sprk_regardingrecordtype')) return;
+      payload['sprk_regardingrecordnumber'] = null;
+    },
   };
 });
 
@@ -171,6 +181,81 @@ describe('applyRegardingSelection', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('The record was not found, or you do not have access to it.');
     expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  describe('the primary changes to a target with no number (045c review round 3)', () => {
+    /** A host that carries the regarding pair (the record-type lookup). */
+    const PAIR_NAV_PROPS_RESPONSE = {
+      ok: true,
+      json: async () => ({
+        value: [
+          {
+            ReferencingAttribute: 'sprk_regardingmatter',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
+            ReferencedEntity: 'sprk_matter',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingcontact',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact',
+            ReferencedEntity: 'contact',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingrecordtype',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
+            ReferencedEntity: 'sprk_recordtype_ref',
+          },
+        ],
+      }),
+    };
+
+    it('nulls the previous primary number when the shared write left none', async () => {
+      const ctx = mkCtx();
+      (applyResolverFields as jest.Mock).mockResolvedValueOnce({ recordNumber: null, displayName: 'Jane Doe' });
+
+      await applyRegardingSelection(
+        ctx,
+        { entityType: 'contact', recordId: 'con-1', recordName: 'Jane Doe' },
+        undefined,
+        jest.fn().mockResolvedValue(PAIR_NAV_PROPS_RESPONSE) as unknown as typeof fetch
+      );
+
+      const payload = (ctx.refileThroughBff as jest.Mock).mock.calls[0][2];
+      expect('sprk_regardingrecordnumber' in payload).toBe(true);
+      expect(payload['sprk_regardingrecordnumber']).toBeNull();
+    });
+
+    it('keeps the number the shared write produced', async () => {
+      const ctx = mkCtx();
+      (applyResolverFields as jest.Mock).mockImplementationOnce(async (_w, payload: Record<string, unknown>) => {
+        payload['sprk_regardingrecordnumber'] = 'MAT-2';
+        return { recordNumber: 'MAT-2', displayName: 'Acme' };
+      });
+
+      await applyRegardingSelection(
+        ctx,
+        { entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme' },
+        undefined,
+        jest.fn().mockResolvedValue(PAIR_NAV_PROPS_RESPONSE) as unknown as typeof fetch
+      );
+
+      const payload = (ctx.refileThroughBff as jest.Mock).mock.calls[0][2];
+      expect(payload['sprk_regardingrecordnumber']).toBe('MAT-2');
+    });
+
+    it('writes no number key to a host without the regarding pair (a missing column is a 400)', async () => {
+      const ctx = mkCtx();
+      (applyResolverFields as jest.Mock).mockResolvedValueOnce({ recordNumber: null, displayName: 'Jane Doe' });
+
+      await applyRegardingSelection(
+        ctx,
+        { entityType: 'contact', recordId: 'con-1', recordName: 'Jane Doe' },
+        undefined,
+        jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE) as unknown as typeof fetch
+      );
+
+      const payload = (ctx.refileThroughBff as jest.Mock).mock.calls[0][2];
+      expect('sprk_regardingrecordnumber' in payload).toBe(false);
+    });
   });
 
   it('rejects an unknown entity type without calling the shared service', async () => {

@@ -151,6 +151,23 @@ public class RegistrationEmailInviteTests
             || line.Contains("invite=", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// UAC task 193 (F-final): the REAL mailer, through the real communication pipeline, writes no log line naming the
+    /// invitee's email (the recipient) — on both invite emails. MUTATION: putting the recipient back into either
+    /// "Sending CIAM …" log template fails its row.
+    /// </summary>
+    [Theory]
+    [InlineData("onboarding")]
+    [InlineData("existing-account")]
+    public async Task NoLogLine_NamesTheInviteeEmail(string email)
+    {
+        await Send(email, NewInvite().InviteUrl);
+
+        _log.Lines.Should().Contain(line => line.StartsWith("Sending CIAM", StringComparison.Ordinal),
+            "the mailer logs the send");
+        _log.Lines.Should().NotContain(line => line.Contains(Recipient, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>Provisioning R2 (owner round 98): the ExistingAccount email tells the person what to do with an account they don't recognise.</summary>
     [Fact]
     public async Task TheExistingAccountEmail_CarriesTheForgotPasswordLine()

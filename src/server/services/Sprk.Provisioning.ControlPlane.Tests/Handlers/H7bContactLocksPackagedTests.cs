@@ -174,7 +174,7 @@ public sealed class H7bContactLocksPackagedTests
     private static Task<SecureRecordSetupOutcome> RunAsync(FakeSecureRecordSetupDataverse dv)
         => new SecureRecordSetupProcedure(dv, NullLogger.Instance)
             .RunAsync(new SecureRecordSetupRequest(new SecureRecordSetupTarget("https://spaarke-acme.crm.dynamics.com/", "tenant", "bff-app"),
-                RoleSet, [dv.BffAppUser, dv.MiAppUser], dv.MiAppUser, dv.WriterAppUser, dv.CustomerUnitId, DryRun: false), CancellationToken.None);
+                RoleSet, [dv.BffAppUser, dv.MiAppUser], dv.MiAppUser, dv.WriterAppUser, dv.CustomerUnitId, dv.WriterUnitId, DryRun: false), CancellationToken.None);
 
     /// <summary>
     /// A fake environment whose S19/S22 contact columns carry exactly the packaged IsSecured flags and profile rows (plus

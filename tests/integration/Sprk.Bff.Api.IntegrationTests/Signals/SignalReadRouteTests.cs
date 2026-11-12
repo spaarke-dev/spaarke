@@ -2513,7 +2513,9 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
         public Guid Invoice(Guid[] readers, Guid vendorOrg, Guid? matter = null) =>
             Record("sprk_invoice", readers, new()
             {
-                ["_sprk_vendororg_value"] = vendorOrg, ["sprk_highpriority"] = false, ["_sprk_matter_value"] = matter,
+                ["_sprk_vendororg_value"] = vendorOrg,
+                ["sprk_highpriority"] = false,
+                ["_sprk_matter_value"] = matter,
             });
 
         /// <summary>D-176: a billing event (an invoice line) of <paramref name="invoice"/>.</summary>
@@ -2524,7 +2526,9 @@ public sealed partial class SignalReadRouteTests : IClassFixture<SignalReadRoute
         public Guid Submission(Guid[] readers, Guid vendorOrg, string trackingNumber, Guid? invoice) =>
             Record("sprk_invoicesubmission", readers, new()
             {
-                ["_sprk_vendororg_value"] = vendorOrg, ["sprk_trackingnumber"] = trackingNumber, ["_sprk_invoice_value"] = invoice,
+                ["_sprk_vendororg_value"] = vendorOrg,
+                ["sprk_trackingnumber"] = trackingNumber,
+                ["_sprk_invoice_value"] = invoice,
             });
 
         public Guid Matter(Guid[] readers, string? name = null, string? number = null, bool highPriority = false, Guid? assignedToInternal = null) =>

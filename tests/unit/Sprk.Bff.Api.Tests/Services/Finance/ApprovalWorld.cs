@@ -44,7 +44,15 @@ internal sealed class ApprovalWorld
     public static readonly Guid Carol = Guid.Parse("03000000-0000-4000-8000-0000000000c2");
     public static readonly Guid Dan = Guid.Parse("03000000-0000-4000-8000-0000000000d2");
 
-    public readonly Guid InvoiceId = Guid.NewGuid();
+    /// <summary>Task 095c-4: the invoice's firm (an invoice with no firm cannot be approved or returned; <see cref="WithoutFirm"/>).</summary>
+    public static readonly Guid FirmId = Guid.Parse("03000000-0000-4000-8000-0000000000f1");
+
+    /// <summary>The submission the invoice was created from: its id derives the invoice's (<see cref="InvoiceSubmissionPersister.InvoiceIdFor"/>), so the
+    /// readers that take only the invoice's own submission (164a fix round F1; task 165a) find a submission a test links under this id. It is linked and
+    /// Accepted with its recorded findings naming the invoice, as the persister leaves it; the FR-20 hold (<see cref="InvoiceBlockedHold"/>) holds an
+    /// invoice whose own submission is not linked.</summary>
+    public readonly Guid OwnSubmissionId;
+    public readonly Guid InvoiceId;
     public readonly Guid ApprovalId = Guid.NewGuid();
     public readonly Guid CoreId = Guid.NewGuid();
     public readonly string CoreEntity;
@@ -74,7 +82,8 @@ internal sealed class ApprovalWorld
     public readonly ApprovalListLogger<EligibleApproverResolver> ResolverLog = new();
     public readonly ApprovalListLogger<InvoiceApprovalService> Log = new();
     public readonly Mock<CallerRecordAccessProbe> Probe = new(
-        new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!) { CallBase = false };
+        new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!, null!)
+    { CallBase = false };
 
     public EbillingSettings SettingsValue { get; set; } = new();
 
@@ -106,15 +115,22 @@ internal sealed class ApprovalWorld
     public int Transitions;
     private long _nextVersion = 100;
 
-    public ApprovalWorld(string coreEntity = "sprk_project", int invoiceStatus = InvoiceStatusCodes.InReview)
+    /// <param name="ownSubmissionId">Task 165b: the submission the invoice was created from (a test that drops the persister's own line rows in
+    /// passes the persister's submission id, so the lines are this invoice's intake lines); a new id when omitted.</param>
+    public ApprovalWorld(string coreEntity = "sprk_project", int invoiceStatus = InvoiceStatusCodes.InReview, Guid? ownSubmissionId = null)
     {
         CoreEntity = coreEntity;
+        OwnSubmissionId = ownSubmissionId ?? Guid.NewGuid();
+        InvoiceId = InvoiceSubmissionPersister.InvoiceIdFor(OwnSubmissionId);
         var invoiceCoreColumn = coreEntity == "sprk_workassignment" ? "sprk_regardingworkassignment" : coreEntity;
 
         Put(new Entity("sprk_invoice", InvoiceId)
         {
             ["statuscode"] = new OptionSetValue(invoiceStatus),
+            // Task 165b-3 part B: Dataverse stamps every row's createdon; completion bounds the decision time by it.
+            ["createdon"] = Now.UtcDateTime.AddDays(-7),
             ["sprk_totalamount"] = new Money(1000m),
+            ["sprk_vendororg"] = new EntityReference("sprk_organization", FirmId),
             [invoiceCoreColumn] = new EntityReference(coreEntity, CoreId),
             ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
             ["sprk_regardingrecordid"] = CoreId.ToString("D"),
@@ -122,6 +138,7 @@ internal sealed class ApprovalWorld
             ["sprk_regardingrecordurl"] = "https://example.invalid/c",
             ["sprk_regardingrecordnumber"] = "C-1",
         });
+        StoreTotalsFromLines(); // Task 165b-2: no line yet; AddLine stores them again after each line
 
         // Default roles (settings): Assigned Attorney 1 (Alice) + Assigned To Internal (Bob). Carol is assigned nowhere; Dan (no user) is Paralegal 1.
         Put(new Entity(coreEntity, CoreId)
@@ -135,6 +152,13 @@ internal sealed class ApprovalWorld
         Put(Contact(Carol, "Carol Clark", CarolUser));
         Put(Contact(Dan, "Dan Dawson", null));
 
+        Put(new Entity("sprk_invoicesubmission", OwnSubmissionId)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_findingsjson"] = RecordedFindings("Accepted", InvoiceId),
+        });
+
         Put(new Entity("sprk_invoiceapproval", ApprovalId)
         {
             ["sprk_approvalstatus"] = new OptionSetValue(InvoiceApprovalService.PortionPending),
@@ -144,6 +168,16 @@ internal sealed class ApprovalWorld
         });
 
         H = DecisionRecordWriterTests.WithBillingLookups(new DecisionRecordWriterTests.Harness());
+
+        // Task 165b-3 fix round (K4): each row the writer creates has its own id, returned by the create (the harness returns one shared id for
+        // every create), so a reader that keys on the row id cannot confuse two records.
+        H.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Returns((Entity created, CancellationToken _) =>
+            {
+                created.Id = Guid.NewGuid();
+                H.Created.Add(created);
+                return Task.FromResult(created.Id);
+            });
         H.Rows[("sprk_invoice", InvoiceId)] = new Entity("sprk_invoice", InvoiceId) { [invoiceCoreColumn] = new EntityReference(coreEntity, CoreId) };
 
         Settings.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(() => SettingsValue);
@@ -235,7 +269,11 @@ internal sealed class ApprovalWorld
             {
                 lock (Gate)
                 {
-                    Rows[("sprk_invoice", InvoiceId)]["sprk_approvedtotal"] = new Money((decimal)fields["sprk_approvedtotal"]!);
+                    // Task 165b-2: the five totals the service writes (approval compares them with the lines).
+                    foreach (var column in InvoiceTotalsService.StoredTotalsColumns.Where(fields.ContainsKey))
+                    {
+                        Rows[("sprk_invoice", InvoiceId)][column] = new Money((decimal)fields[column]!);
+                    }
                 }
             })
             .Returns(Task.CompletedTask);
@@ -294,13 +332,18 @@ internal sealed class ApprovalWorld
         return contact;
     }
 
-    public Entity AddLine(InvoiceLineStatus? status, decimal amount = 100m, InvoiceLineCostType type = InvoiceLineCostType.Fee, string? extraction = null, decimal? approved = null)
+    public Entity AddLine(
+        InvoiceLineStatus? status, decimal amount = 100m, InvoiceLineCostType type = InvoiceLineCostType.Fee, string? extraction = null, decimal? approved = null,
+        Guid? id = null)
     {
-        var id = Guid.NewGuid();
-        var line = new Entity("sprk_billingevent", id)
+        // 164a fix round: a reviewer-added line has its derived id. Task 165b: any other line is the own submission's intake line (its id derives
+        // from the submission and its sequence, as the persister writes it), so approval knows its origin.
+        var sequence = Rows.Keys.Count(k => k.Table == "sprk_billingevent") + 1;
+        var lineId = id ?? InvoiceSubmissionPersister.LineIdFor(OwnSubmissionId, sequence - 1);
+        var line = new Entity("sprk_billingevent", lineId)
         {
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
-            ["sprk_linesequence"] = Rows.Keys.Count(k => k.Table == "sprk_billingevent") + 1,
+            ["sprk_linesequence"] = sequence,
             ["sprk_costtype"] = new OptionSetValue((int)type),
             ["sprk_amount"] = new Money(amount),
             ["sprk_description"] = "Draft the response",
@@ -313,13 +356,101 @@ internal sealed class ApprovalWorld
         if (approved is not null) line["sprk_approvedamount"] = new Money(approved.Value);
         if (extraction is not null) line["sprk_extractionconfidence"] = extraction;
         Put(line);
-        H.Rows[("sprk_billingevent", id)] = new Entity("sprk_billingevent", id)
+        H.Rows[("sprk_billingevent", lineId)] = new Entity("sprk_billingevent", lineId)
         {
             [CoreEntity == "sprk_workassignment" ? "sprk_regardingworkassignment" : CoreEntity] = new EntityReference(CoreEntity, CoreId),
             ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
         };
+        StoreTotalsFromLines();
         return line;
     }
+
+    /// <summary>
+    /// Task 165b-2: stores the invoice's five derived totals as the totals service does after every line change: <see cref="InvoiceTotalsCalculator"/>
+    /// over the invoice's counted lines with its stored billed total. A refused calculation stores nothing (as the service). A test that edits a stored
+    /// total or a line afterwards makes them differ.
+    /// </summary>
+    public void StoreTotalsFromLines()
+    {
+        lock (Gate)
+        {
+            var invoice = Rows[("sprk_invoice", InvoiceId)];
+            var lines = Rows.Values
+                .Where(r => r.LogicalName == "sprk_billingevent" && r.GetAttributeValue<EntityReference>("sprk_invoice")?.Id == InvoiceId && InvoiceTotalsService.IsCounted(r))
+                .Select(InvoiceTotalsService.ToRow).ToList();
+            var calculation = InvoiceTotalsCalculator.Calculate(invoice.GetAttributeValue<Money>("sprk_totalamount")?.Value, lines);
+            if (calculation.IsRefused)
+            {
+                return;
+            }
+
+            invoice["sprk_feestotal"] = new Money(calculation.FeesTotal);
+            invoice["sprk_expensestotal"] = new Money(calculation.ExpensesTotal);
+            invoice["sprk_lineadjustmentstotal"] = new Money(calculation.LineAdjustmentsTotal);
+            invoice["sprk_invoiceadjustmentstotal"] = new Money(calculation.InvoiceAdjustmentsTotal);
+            invoice["sprk_approvedtotal"] = new Money(calculation.ApprovedTotal);
+        }
+    }
+
+    /// <summary>Task 095c-4: the invoice names no firm (the from-email no-firm invoice of 095c-3).</summary>
+    public void WithoutFirm() => Rows[("sprk_invoice", InvoiceId)].Attributes.Remove("sprk_vendororg");
+
+    /// <summary>Task 095c-4: the invoice's firm is set natively (a direct Web API write, no pipeline): the column changes, the stored hold does not.</summary>
+    public void SetFirmNatively(Guid firm) => Rows[("sprk_invoice", InvoiceId)]["sprk_vendororg"] = new EntityReference("sprk_organization", firm);
+
+    /// <summary>Task 095c-4: the invoice's submission as 095c-3 leaves a no-firm one: Accepted <c>firm_missing</c>, with the pipeline finding and the
+    /// line marker in its stored findings unless <paramref name="reasonOnly"/>.</summary>
+    public Guid HoldForFirm(bool reasonOnly = false, string? findingsJson = null)
+    {
+        var id = Guid.NewGuid();
+        var row = new Entity("sprk_invoicesubmission", id)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_outcomereasoncode"] = SubmissionReasonCodes.FirmMissing,
+        };
+        if (findingsJson is not null || !reasonOnly)
+        {
+            row["sprk_findingsjson"] = findingsJson ?? """{"pipelineFindings":[{"reasonCode":"ebilling.submission.firm_missing","values":{}}],"lineFindings":[]}""";
+        }
+
+        Put(row);
+        return id;
+    }
+
+    /// <summary>Task 095d-0: a submission linked to the invoice that carries no hold but stores <paramref name="findingsJson"/> (the Set-firm decision's
+    /// <c>assignFirm</c> member, <see cref="InvoiceFirmGateTests.FindingsWithAssignFirm"/>): the firm is set and the re-run state is what the member says.</summary>
+    public Guid LinkSubmission(string findingsJson)
+    {
+        var id = Guid.NewGuid();
+        Put(new Entity("sprk_invoicesubmission", id)
+        {
+            ["sprk_invoice"] = new EntityReference("sprk_invoice", InvoiceId),
+            ["sprk_processingstatus"] = new OptionSetValue((int)InvoiceSubmissionStatus.Accepted),
+            ["sprk_findingsjson"] = findingsJson,
+        });
+        return id;
+    }
+
+    /// <summary>Task 095c-5: the invoice's own field-secured firm hold (<c>sprk_invoice.sprk_firmhold</c>), as the persister writes it with the held
+    /// outcome. Read app-only by <see cref="InvoiceFirmHold"/>; this world is the app-only store.</summary>
+    public void HoldInvoiceForFirm() => Rows[("sprk_invoice", InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceHoldValue;
+
+    /// <summary>EB-D-185 R1/R2/R3: the invoice exactly as Set firm (095d-1) leaves it - the firm is on the invoice, its own hold is the rerun-pending
+    /// marker, and the linked submission still stores the firm_missing reason with the stored <c>assignFirm</c> decision (<paramref name="rulesRerun"/>,
+    /// naming the invoice's firm). Returns the submission id (to re-point or unlink it).</summary>
+    public Guid AfterSetFirm(string rulesRerun = "pending")
+    {
+        Rows[("sprk_invoice", InvoiceId)][InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue;
+        return HoldForFirm(findingsJson: InvoiceFirmGateTests.FindingsWithAssignFirm(rulesRerun, FirmId));
+    }
+
+    /// <summary>Task 095c-5: columns this environment does not have (a script not yet run): a query that names one faults, as Dataverse does.</summary>
+    public readonly HashSet<string> MissingColumns = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Task 165a: the recorded findings the persister writes, reduced to what the FR-20 hold reads (<c>kind</c>, <c>invoiceId</c>).</summary>
+    public static string RecordedFindings(string kind, Guid invoiceId) =>
+        $$"""{"schema":1,"kind":"{{kind}}","invoiceId":"{{invoiceId:D}}"}""";
 
     /// <summary>A blocked submission (FR-20: held from approval until decided).</summary>
     public void Hold() => Put(new Entity("sprk_invoicesubmission", Guid.NewGuid())
@@ -481,6 +612,14 @@ internal sealed class ApprovalWorld
 
     public BillingDecisionRecorder Recorder() => new(H.Writer, Identity.Object, NullLogger<BillingDecisionRecorder>.Instance);
 
+    /// <summary>Task 165b: the <c>add-line</c> Decision Record Add line writes for <paramref name="lineId"/> (through the real recorder, so the writer
+    /// identity creates it); its facts name <paramref name="factsInvoiceId"/> (this invoice when omitted) and the line.</summary>
+    public Task<BillingDecisionRecordResult> RecordAddedLineAsync(Guid lineId, Guid decisionId, Guid? factsInvoiceId = null) =>
+        Recorder().RecordAsync(new BillingDecision(
+            decisionId, InvoiceLineAddService.ActionCode, lineId, BillingDecider.Human(BobUser, InvoiceLineAddService.DeciderRole),
+            new Dictionary<string, object?> { ["invoiceId"] = factsInvoiceId ?? InvoiceId, ["lineId"] = lineId },
+            InvoiceLineAddService.OutcomeAdded, Reason: "Charge the firm left off the invoice"));
+
     public InvoiceLineDecisionService LineService() => new(
         Entities.Object, Totals(), Recorder(), Locks, Ownership.Object, Probe.Object,
         (_, _, _, _, _, _) => Task.FromResult(SignalAutomatedCloseOutcome.Closed),
@@ -529,17 +668,88 @@ internal sealed class ApprovalWorld
             return Task.FromException<EntityCollection>(fault);
         }
 
+        if (query.ColumnSet?.Columns.FirstOrDefault(MissingColumns.Contains) is { } missing)
+        {
+            return Task.FromException<EntityCollection>(new InvalidOperationException(
+                $"'{query.EntityName}' entity doesn't contain attribute with Name = '{missing}' (simulated: the column's script has not run)"));
+        }
+
         lock (Gate)
         {
             // The Decision Records live in the writer's harness (F2 asks which lines have one).
-            var source = query.EntityName == InvoiceReviewReadService.DecisionRecordEntity ? H.Created.AsEnumerable() : Rows.Values;
-            var rows = source
-                .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria) && query.LinkEntities.All(link => Joins(r, link)))
-                .Select(r => WithLinkColumns(Copy(r), query.LinkEntities))
+            // Task 165b: as Dataverse stores them, the writer's rows carry the writer identity as createdby; a seeded row keeps its own.
+            var source = query.EntityName == InvoiceReviewReadService.DecisionRecordEntity
+                ? H.Created.Select(StoredByTheWriter).Concat(H.Seeded)
+                : Rows.Values;
+            var rows = Ordered(
+                    source.Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria) && query.LinkEntities.All(link => Joins(r, link))),
+                    query.Orders)
+                .Select(r => WithLinkColumns(ProjectLineColumns(Copy(r), query), query.LinkEntities))
                 .Take(query.TopCount ?? int.MaxValue)
                 .ToList();
             return Task.FromResult(new EntityCollection(rows) { MoreRecords = false });
         }
+    }
+
+    /// <summary>Task 165b-3 fix round (F3): a line read returns only the columns it asks for, as Dataverse does, so a reader that uses a column it did
+    /// not request (the adjustment method and value, for one) sees it missing here too. Only the lines are narrowed: other tables keep the
+    /// whole row, as their readers were written against.</summary>
+    private static Entity ProjectLineColumns(Entity row, QueryExpression query)
+    {
+        if (query.EntityName != "sprk_billingevent" || query.ColumnSet is null || query.ColumnSet.AllColumns || query.ColumnSet.Columns.Count == 0)
+        {
+            return row;
+        }
+
+        var wanted = new HashSet<string>(query.ColumnSet.Columns, StringComparer.Ordinal);
+        foreach (var name in row.Attributes.Keys.Where(k => !wanted.Contains(k)).ToList())
+        {
+            row.Attributes.Remove(name);
+        }
+
+        return row;
+    }
+
+    /// <summary>Task 165a: the query's <c>AddOrder</c>s applied before <c>TopCount</c>, as Dataverse does (an empty value sorts first ascending,
+    /// last descending); with no order, insertion order. A reader that takes "the latest" row is therefore seen taking it.</summary>
+    private static IEnumerable<Entity> Ordered(IEnumerable<Entity> rows, IEnumerable<OrderExpression> orders)
+    {
+        IOrderedEnumerable<Entity>? sorted = null;
+        foreach (var order in orders)
+        {
+            object? Key(Entity r) => order.AttributeName == r.LogicalName + "id" ? r.Id : r.Contains(order.AttributeName) ? r[order.AttributeName] : null;
+            sorted = (sorted, order.OrderType) switch
+            {
+                (null, OrderType.Ascending) => rows.OrderBy(Key, OrderComparer.Instance),
+                (null, _) => rows.OrderByDescending(Key, OrderComparer.Instance),
+                (_, OrderType.Ascending) => sorted.ThenBy(Key, OrderComparer.Instance),
+                _ => sorted.ThenByDescending(Key, OrderComparer.Instance),
+            };
+        }
+
+        return sorted ?? rows;
+    }
+
+    private sealed class OrderComparer : IComparer<object?>
+    {
+        public static readonly OrderComparer Instance = new();
+
+        public int Compare(object? x, object? y) => (Plain(x), Plain(y)) switch
+        {
+            (null, null) => 0,
+            (null, _) => -1,
+            (_, null) => 1,
+            (IComparable a, var b) => a.CompareTo(b),
+            _ => 0,
+        };
+
+        private static object? Plain(object? value) => value switch
+        {
+            OptionSetValue o => o.Value,
+            EntityReference r => r.Id,
+            Money m => m.Value,
+            _ => value,
+        };
     }
 
     /// <summary>A link's requested columns come back as <c>alias.column</c> aliased values, as Dataverse returns them.</summary>
@@ -714,6 +924,21 @@ internal sealed class ApprovalWorld
         }
 
         row["versionnumber"] = ++_nextVersion;
+    }
+
+    /// <summary>Task 165b: a row the writer created, as Dataverse stores it (<c>createdby</c> is the writer's own user). Task 165b-3: with the id
+    /// the create returned (the harness's <see cref="DecisionRecordWriterTests.Harness.NewId"/> when the writer sent none), as the harness's own
+    /// lookups store it, so a reader that keys on the row id sees the record the approval linked.</summary>
+    private Entity StoredByTheWriter(Entity created)
+    {
+        var stored = Copy(created);
+        if (stored.Id == Guid.Empty)
+        {
+            stored.Id = H.NewId;
+        }
+
+        stored["createdby"] = new EntityReference("systemuser", DecisionRecordWriterTests.WriterUser);
+        return stored;
     }
 
     private static Entity Copy(Entity source)
