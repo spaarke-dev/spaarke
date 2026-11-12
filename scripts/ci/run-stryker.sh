@@ -88,6 +88,11 @@ while IFS= read -r c; do
   include+="${include:+|}FullyQualifiedName~${c}"
 done <<<"$classes"
 echo "Test selection for ${label}: types=[$(echo "$types" | paste -sd, )] referencing-test-classes=${class_count}"
+# A selection this large usually means a type name is a common word; the initial test run
+# alone then nears the job cap (#1821: 249 classes, cancelled). Say so where it is visible.
+if [ "$class_count" -gt 150 ]; then
+  echo "::warning::Stryker test selection for ${label} is ${class_count} classes; a type name above may be a common word matching unrelated tests (#1821)."
+fi
 if [ -z "$include" ]; then
   echo "::error::no test selected for ${label}: no seed namespace and no test names a mutated type"
   exit 1
