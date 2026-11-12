@@ -1,6 +1,6 @@
 # Reuse-scan dry-run (task 010, FR-03)
 
-> Status: **in progress**. Answer keys are written before any agent runs (POML step 1). No agent has been launched yet.
+> Status: **complete** (2026-11-12). Answer keys were written before any agent ran (POML step 1).
 > Decision rule (owner, 2026-11-10): both cases caught at `low` → go. One missed → the owner sees the measured token cost per scan and the projected monthly cost at `medium`, and decides. Both missed → no-go, and tasks 011 and 012 are cancelled.
 
 ## Method
@@ -59,4 +59,4 @@ Mean cost per scan: about 36k sub-agent tokens at `sonnet`/`low`, well under the
 
 ## Decision
 
-By the owner's rule (2026-11-10), both scored cases were caught at `low`, so the result is **go**: tasks 011 (reuse scan in `/design-to-spec`) and 012 (`project-pipeline` fallback) proceed, at effort `low`. Awaiting the owner's confirmation.
+By the owner's rule (2026-11-10), both scored cases were caught at `low`, so the result is **go**: tasks 011 (reuse scan in `/design-to-spec`) and 012 (`project-pipeline` fallback) proceed, at effort `low`. **Owner answer, 2026-11-12: "Go."**

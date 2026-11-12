@@ -10,3 +10,4 @@
 | 2026-11-10 | PR shape: items 1–3 one PR; item 4 own PR(s); item-5 sub-items own PRs; one adversarial pass over 1–4 | spec.md NFR-05 |
 | 2026-11-10 | Dry-run pass rule (both caught → go; one missed → owner decides on `medium`; both missed → no-go) | spec.md FR-03 |
 | 2026-11-10 | Item 4 execution waits on owner approval per package, also in autonomous mode | spec.md FR-08 |
+| 2026-11-12 | Dry-run case 1 = nav-prop discovery (field mapping run as unscored 1b); result go (both caught at `low`); owner answered "Go" — tasks 011 and 012 proceed at `low` | task 010, `notes/reuse-scan-dry-run.md` |

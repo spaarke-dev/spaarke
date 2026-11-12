@@ -4,7 +4,7 @@
     <title>Reuse-scan dry-run and owner go/no-go</title>
     <phase>2 Reuse scan</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates a new project note and runs an agent under explicit cost constraints (FR-03, NFR-03)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -90,6 +90,8 @@
   </acceptance-criteria>
 
   <notes>The project's own spec was generated with the old design-to-spec Step 3; that is expected.</notes>
+
+  <completion-notes>Completed 2026-11-12 (results commit 82648c08e4). Case 1 answer key escalated (trigger 1): the field-mapping history was not a cross-project duplication; the owner chose nav-prop discovery as scored case 1 and asked that field mapping also run, as unscored case 1b. code-mapper sonnet/low, projects/ excluded: case 1 caught (39,299 tokens), case 2 caught (34,346), case 1b caught (33,249). Verdicts rest on hits the search makes without index rows 5 and 30. Decision under FR-03: go; owner answered "Go" 2026-11-12. No skill or agent file changed. Found in passing: 7 private copies of nav-prop discovery remain (listed in notes/reuse-scan-dry-run.md as input for task 020). rework: none task 010</completion-notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
