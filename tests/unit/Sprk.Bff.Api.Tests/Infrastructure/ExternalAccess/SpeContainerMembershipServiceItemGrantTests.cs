@@ -207,6 +207,67 @@ public class SpeContainerMembershipServiceItemGrantTests
         Writes.Should().NotContain(r => r.Method == "DELETE" && r.Path.Contains(OtherItem), because);
     }
 
+    /// <summary>MUTATION (review 191g-A1): clearing the stale marker although its item's list was partial.</summary>
+    [Fact(DisplayName = "191g: a stale marker whose OTHER item's permissions cannot be read to their end is KEPT — nothing deleted, nothing granted, Failed")]
+    public async Task Grant_StaleMarkerOtherItemPartialList_KeepsMarker()
+    {
+        FreshGrantRoutes();
+        _graph.Properties[Key] = Value(OtherItem);
+        _graph.Respond("GET", ItemPermissions(OtherItem),
+            $$"""{"value":[{{JsonSerializer.Serialize(Perm("old", ObjectId, "write"))}}],"@odata.nextLink":"{{Base}}/drives/{{Container}}/items/{{OtherItem}}/permissions?$skiptoken=x"}""");
+        _graph.Respond("DELETE", ItemPermission(OtherItem, "old"), "", HttpStatusCode.NoContent);
+
+        (await Grant()).Should().Be(Membership.ItemGrantOutcome.Failed);
+
+        Writes.Should().BeEmpty("the old grant's only record stays and no new grant is made beside it");
+        _graph.Properties.Should().ContainKey(Key).WhoseValue.Should().Be(Value(OtherItem));
+    }
+
+    /// <summary>MUTATION: acting on (clearing or reusing) a marker this code did not write.</summary>
+    [Theory(DisplayName = "191g: a marker under our key that is malformed or whose ids do not derive the key is LEFT ALONE — nothing written, Failed")]
+    [InlineData("malformed")]
+    [InlineData("mismatched")]
+    public async Task Grant_ForeignMarker_IsLeftAlone(string how)
+    {
+        FreshGrantRoutes();
+        var foreign = how == "malformed"
+            ? "not-a-marker"
+            : Membership.ItemMarkerValue(SomeoneElse, DocumentId, Item)!;   // parses, but derives another key
+        _graph.Properties[Key] = foreign;
+        ItemHas(Item, Perm("ours", ObjectId, "write"));
+
+        (await Grant()).Should().Be(Membership.ItemGrantOutcome.Failed);
+
+        Writes.Should().BeEmpty();
+        _graph.Properties[Key].Should().Be(foreign);
+    }
+
+    /// <summary>MUTATION (review 191g-A2): undoing the permission but leaving a marker whose write landed.</summary>
+    [Fact(DisplayName = "191g: a marker that was written but cannot be READ BACK undoes the permission AND clears the marker")]
+    public async Task Grant_MarkerReadBackFails_UndoesPermissionAndMarker()
+    {
+        FreshGrantRoutes();
+        _graph.OnRequest = r => { if (r.Method == "PATCH") _graph.ContainerGetStatus = HttpStatusCode.InternalServerError; };
+
+        (await Grant()).Should().Be(Membership.ItemGrantOutcome.Failed);
+
+        Writes.Where(r => r.Method == "DELETE").Select(r => r.Path).Should().Equal(ItemPermission(Item, "new"));
+        _graph.Properties.Should().NotContainKey(Key, "a marker must not outlive the permission it records");
+    }
+
+    /// <summary>MUTATION: clearing the marker although the permission could not be deleted.</summary>
+    [Fact(DisplayName = "191g (must not fire): when the undo's DELETE fails, the marker that landed is KEPT — it is the record the sync removes the permission by")]
+    public async Task Grant_UndoDeleteFails_KeepsMarker()
+    {
+        FreshGrantRoutes();
+        _graph.Error("DELETE", ItemPermission(Item, "new"), HttpStatusCode.InternalServerError);
+        _graph.OnRequest = r => { if (r.Method == "PATCH") _graph.ContainerGetStatus = HttpStatusCode.InternalServerError; };
+
+        (await Grant()).Should().Be(Membership.ItemGrantOutcome.Failed);
+
+        _graph.Properties.Should().ContainKey(Key).WhoseValue.Should().Be(Value(Item));
+    }
+
     [Fact(DisplayName = "191g: a marked grant a person DOWNGRADED to read is not ours any more — marker cleared, nothing deleted, HeldReadOnly")]
     public async Task Grant_MarkedGrantDowngraded_IsLeftAlone()
     {
@@ -490,6 +551,9 @@ public class SpeContainerMembershipServiceItemGrantTests
         /// <summary>Runs after each request is recorded, before it is answered.</summary>
         public Action<Sent>? OnRequest { get; set; }
 
+        /// <summary>When set, a GET of the container answers this error status (its properties are kept).</summary>
+        public HttpStatusCode? ContainerGetStatus { get; set; }
+
         public Wire Respond(string method, string path, string body, HttpStatusCode status = HttpStatusCode.OK)
         {
             _routes[(method, path)] = (status, body);
@@ -509,6 +573,8 @@ public class SpeContainerMembershipServiceItemGrantTests
 
             if (request.Method == HttpMethod.Get && path == ContainerPath)
             {
+                if (ContainerGetStatus is { } failing)
+                    return Json(failing, $$$"""{"error":{"code":"serviceNotAvailable","message":"{{{failing}}}"}}""");
                 var props = Properties.ToDictionary(p => p.Key, p => (object)new { value = p.Value, isSearchable = false });
                 return Json(HttpStatusCode.OK, JsonSerializer.Serialize(new { id = Container, customProperties = props }));
             }

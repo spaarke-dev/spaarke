@@ -1110,12 +1110,33 @@ public class SpeContainerMembershipService
             //    another item is undone first — so it can never block a new grant.
             if (markers.TryGetValue(key, out var recorded))
             {
-                var ours = TryParseItemMarker(key, recorded, out _, out _, out var markedItem);
-                if (ours && string.Equals(markedItem, itemId, StringComparison.Ordinal) && direct.Any(IsPlainItemWriter))
+                // A marker under our key that does not parse, or whose ids do not derive this key, was not written by this
+                // code: reported and left alone, like the sync does — no grant beside a record nobody can read.
+                if (!TryParseItemMarker(key, recorded, out _, out _, out var markedItem))
+                {
+                    _logger.LogWarning(
+                        "[SPE-MEMBERSHIP] The item-grant marker for document {DocumentId} and user {SystemUserId} on container {ContainerId} "
+                        + "is malformed or does not match its key; left alone, no item grant.",
+                        documentId, systemUserId, containerId);
+                    return ItemGrantOutcome.Failed;
+                }
+
+                if (string.Equals(markedItem, itemId, StringComparison.Ordinal) && direct.Any(IsPlainItemWriter))
                     return ItemGrantOutcome.Reused;
 
-                if (ours && !string.Equals(markedItem, itemId, StringComparison.Ordinal))
-                    await DeletePlainItemWritesAsync(graphClient, containerId, markedItem, userObjectId, ct).ConfigureAwait(false);
+                // The marker names another item of this document (its file was replaced): undo that grant first. A list of
+                // the old item's permissions that cannot be read to its end deletes nothing, so the marker — the only record
+                // of that grant — is kept and nothing is granted (review 191g-A1).
+                if (!string.Equals(markedItem, itemId, StringComparison.Ordinal)
+                    && await DeletePlainItemWritesAsync(graphClient, containerId, markedItem, userObjectId, ct).ConfigureAwait(false) is null)
+                {
+                    _logger.LogWarning(
+                        "[SPE-MEMBERSHIP] The permissions of document {DocumentId}'s previous item on container {ContainerId} could not be "
+                        + "fully read; its marker is kept and no item grant is made.",
+                        documentId, containerId);
+                    return ItemGrantOutcome.Failed;
+                }
+
                 await WriteMarkerAsync(graphClient, containerId, key, value: null, ct).ConfigureAwait(false);
             }
 
@@ -1186,10 +1207,26 @@ public class SpeContainerMembershipService
             }
             catch (Exception undoEx)
             {
+                // The marker, if its write landed, is kept: it is then the record the sync removes this permission by.
                 _logger.LogCritical(undoEx,
                     "[SPE-MEMBERSHIP] UNRECORDED item write permission {PermissionId} for user {SystemUserId} remains on document "
                     + "{DocumentId}'s item (container {ContainerId}) and could not be removed; an operator must remove it.",
                     permissionId, systemUserId, documentId, containerId);
+                return ItemGrantOutcome.Failed;
+            }
+
+            // The permission is gone: a marker whose write may have landed before the failure must not outlive it, or a later
+            // hand-granted write on this item would read as ours (review 191g-A2). Best effort, logged when it fails.
+            try
+            {
+                await WriteMarkerAsync(graphClient, containerId, key, value: null, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception clearEx)
+            {
+                _logger.LogError(clearEx,
+                    "[SPE-MEMBERSHIP] The undone item grant's marker for document {DocumentId} and user {SystemUserId} on container "
+                    + "{ContainerId} could not be cleared; it may remain without a permission.",
+                    documentId, systemUserId, containerId);
             }
 
             return ItemGrantOutcome.Failed;

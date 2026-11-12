@@ -582,7 +582,10 @@ public class SpeContainerMembershipSyncTests
                 true, new Dictionary<string, string>()));
         _membership.Setup(m => m.RemoveFlaggedUserContainerRoleAsync(SecureContainer, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
-        _users.Add(User(Alice, Unit, external: true)); // the flagged-user query answers from _users
+        // The stub answers every systemuser query from _users, whatever its criteria: Bob (internal) is in the answer too, so
+        // only the sweep's own flag check keeps his role (review 191g-B2).
+        _users.Add(User(Alice, Unit, external: true));
+        _users.Add(User(Bob, Unit, external: false));
     }
 
     [Fact(DisplayName = "Task 191g: with the setting ON, a flagged user's hand-granted container role on a secure container is removed; an internal user's is not")]
@@ -598,6 +601,10 @@ public class SpeContainerMembershipSyncTests
         result.FlaggedRoleSweep.Should().BeTrue();
         result.FlaggedRolesRemoved.Should().Be(1);
         result.Failed.Should().Be(0);
+        _dataverse.Verify(d => d.RetrieveMultipleAsync(
+            It.Is<QueryExpression>(q => q.EntityName == "systemuser" && q.Criteria.Conditions.Any(c =>
+                c.AttributeName == "sprk_isexternal" && c.Operator == ConditionOperator.Equal && c.Values.Count == 1 && Equals(c.Values[0], true))),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce, "the flagged users are asked for by their flag");
     }
 
     [Theory(DisplayName = "Task 191g (must not fire): with the setting OFF (absent, false, unparseable), no container role is removed and no role list is read")]

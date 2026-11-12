@@ -179,6 +179,24 @@ the task-171 container grant, which had the same gap).
 - K8 — The marker value (about 100 characters) is longer than any live-proven marker value; proven at the 191i gate.
 - K9 — A systemuser whose Entra object id cannot be read (deleted or disabled user) keeps its item grant; reported every
   run until an operator removes it.
+- K10 — A `sprk_document` row deleted while its file stays: the visibility answer is "row not found" (191c's transient
+  set), so the grant is kept and reported every run; losing Write or the kill switch still removes it.
+- K11 — A 404 on the item's permission list counts as "item and permissions gone". If restoring a recycled SPE item
+  brings its unique permissions back (not verified), that permission returns unrecorded.
+- K12 — An open that re-grants between the sync's permission delete and its marker clear loses the new marker (the
+  same window exists for the task-171 container grant); needs a verdict flip inside one sync's Graph retries.
+- K13 — A Graph-side timeout in one item removal ends that container's pass for the run (counted failed, retried next
+  run) — the existing task-171 pattern.
+- K14 — A flagged caller whose systemuser has a blank `domainname` gets 503 instead of view only; B2B guests always
+  carry one.
+- K15 — With the setting on and any flagged user present, every secure container's roles are read each run (load).
+
+**Adversarial review (two Opus passes, 2026-11-12) — fixed:** (A1/B1) the stale-marker path cleared the old item's marker
+after a partial permission list, leaving an unrecorded write — now Failed with the marker kept; (A2) an undo after the
+marker write landed left the marker — now cleared once the permission is gone, kept when the delete fails; (A-K4) a
+foreign marker under our key was cleared silently on the open path — now reported and left alone (Failed); (B2) the sweep
+tests would have passed with the flag condition removed — the sweep now re-checks `sprk_isexternal == true` on every
+returned row, and the test includes an internal user and asserts the query's flag condition.
 
 **Deviations:** the code was built while the live test waited (main session's explicit allowance); the task-171
 cancellation fix is in scope (same gap); `ExternalRowVisibility.MayAnswerLater` is added to 191h's answer type (the sync

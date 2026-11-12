@@ -320,10 +320,14 @@ public class SpeContainerMembershipSync
             {
                 var query = new QueryExpression("systemuser")
                 {
-                    ColumnSet = new ColumnSet("systemuserid", "domainname", "azureactivedirectoryobjectid"),
+                    ColumnSet = new ColumnSet("systemuserid", "domainname", "azureactivedirectoryobjectid", "sprk_isexternal"),
                 };
                 query.Criteria.AddCondition("sprk_isexternal", ConditionOperator.Equal, true);
-                flaggedUsers = await ReadAllAsync(query, ct).ConfigureAwait(false);
+                // The flag is re-checked on every row the query returns (review 191g-B2): a sweep removes roles, so a query
+                // that came back wider than asked must never make an internal user's role removable.
+                flaggedUsers = (await ReadAllAsync(query, ct).ConfigureAwait(false))
+                    .Where(u => u.GetAttributeValue<bool?>("sprk_isexternal") == true)
+                    .ToList();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
