@@ -219,6 +219,52 @@ def render_review_method(md, out_path, created=None):
 
 # ---------------------------------------------------------------- read me first
 
+# The Word process, by use case (owner, 2026-11-11). Word reads no folder by itself: the user attaches what it needs.
+# "Not yet confirmed" marks steps Word round 2 tests (R-2, R-3, H-1); drop it once a step passes.
+NOT_CONFIRMED = "Not yet confirmed in our tests."
+WORD_STEPS = [
+    ("Word: how it works",
+     "Copilot in Word does not look in your folders. In each chat you give it what it needs: pick a saved playbook, "
+     "or attach a file with the paperclip or + (or type / and the file name). Microsoft's legal skills do the work; "
+     "they turn on by themselves when Word sees a legal document.",
+     ["Before you start, save a copy of the document under a new name (File › Save a copy) and work on the copy.",
+      "Allow editing lets Copilot change the open document, as tracked changes with comments. Chat only answers in "
+      "the Copilot pane and leaves the document alone. With a contract open, Word offers Allow editing only.",
+      "Word does not open files named in your custom instruction, does not use Cowork skills, and does not search "
+      "a folder by itself. Attach the file each time."]),
+    ("Word 1: review a contract", None,
+     ["Open the contract. Attach Cowork/Playbooks/NDA/Spaarke NDA – Mutual v1.2.docx and ask \"Review this NDA "
+      "against the attached playbook\". Then choose Apply edits with comments.",
+      "Or choose Review contract with a playbook and pick a saved playbook. Pick the newest version: a saved "
+      "playbook is a copy made when you first attached the file, and it does not change when the file is updated.",
+      "Attach one file only. A contract review takes exactly one playbook and nothing else.",
+      "Rated chart as well (optional): in the same chat, attach Cowork/Playbooks/Review method/Spaarke Review "
+      "Method.docx and ask \"Follow the attached review method to produce the topic-by-topic chart for the review "
+      "you just ran.\"",
+      "To see deleted text struck through in the document rather than in balloons: Review › Show Markup › "
+      "Balloons › Show All Revisions Inline."]),
+    ("Word 2: draft a contract", NOT_CONFIRMED,
+     ["Open a blank document and choose Draft new contract from a precedent. Attach your approved template or "
+      "precedent and say who the other party is. Word fills in the placeholders.",
+      "The package includes no templates: use your own. Keep one approved template or precedent per agreement "
+      "type next to its playbook, in Cowork/Playbooks/<type>/Templates, and move old ones out of your OneDrive."]),
+    ("Word 3: review a document that is not a contract", None,
+     ["Open the document (for example a legal hold notice). Switch Copilot to agent mode and to Chat only. Attach "
+      "Cowork/Playbooks/Legal Hold Notice/Spaarke Legal Hold Notice – Employee Custodians v1.0.docx and ask "
+      "\"Review this notice against the attached playbook\". The review method is inside that file. You get a "
+      "rated table in chat.",
+      "Here you can attach more than one file, such as a policy or the matter's facts.",
+      "To apply the changes (" + NOT_CONFIRMED[:-1].lower() + "): in the same chat, switch to Allow editing and ask "
+      "for them as tracked changes, with a comment on each."]),
+    ("Word 4: draft a document that is not a contract", NOT_CONFIRMED,
+     ["Open a blank document. Attach your approved template (for example a legal hold notice template) and the "
+      "matter's facts (a demand letter, a complaint), and ask Copilot to draft from the template using those facts.",
+      "A template is safer than an old notice from another matter: names and dates from the old matter can carry "
+      "over.",
+      "Then review the draft as in Word 3."]),
+]
+
+
 def render_readme(out_path, version, created=None):
     d = new_document("Spaarke – Read me first", "Individual base package", created)
     d.add_paragraph("Spaarke Legal Accelerator for Microsoft Copilot", style="Title")
@@ -261,32 +307,21 @@ def render_readme(out_path, version, created=None):
         "Optional, in Cowork: type /accelerator-setup once to record your name and defaults.",
     ], 1):
         d.add_paragraph(f"{i}. {s}").paragraph_format.left_indent = Inches(0.25)
-    d.add_heading("How to use it", level=2)
+    for heading, intro, items in WORD_STEPS:
+        d.add_heading(heading, level=2)
+        if intro:
+            d.add_paragraph(intro)
+        bullets(items)
+    d.add_heading("Cowork", level=2)
     bullets([
-        "First, save a copy of the document under a new name (File › Save a copy) and review the copy, so the "
-        "original stays as it was.",
-        "Word, a contract (NDA): open the NDA, open Copilot and attach Cowork/Playbooks/NDA/Spaarke NDA – Mutual "
-        "v1.2.docx (the paperclip, or type / and pick the file). Ask \"Review this NDA against the attached "
-        "playbook\", then choose Apply edits with comments. The edits are made in the open document. After the "
-        "first time you can pick the saved playbook instead (Review contract with a playbook), but a saved "
-        "playbook does not change when the file is updated.",
-        "Word, a contract, rated chart as well (optional): in the same chat, attach Cowork/Playbooks/Review method/"
-        "Spaarke Review Method.docx and ask \"Follow the attached review method to produce the topic-by-topic chart "
-        "for the review you just ran.\" A contract review takes only one attached file, so this is a second step.",
-        "Word, anything that is not a contract (a legal hold notice): open the notice, switch Copilot to agent mode, "
-        "switch to Chat only, attach Cowork/Playbooks/Legal Hold Notice/Spaarke Legal Hold Notice – Employee "
-        "Custodians v1.0.docx and ask \"Review this notice against the attached playbook\". The review method is "
-        "inside that file. You get a rated table in chat.",
-        "To see deleted text struck through in the document rather than in balloons: Review › Show Markup › "
-        "Balloons › Show All Revisions Inline.",
-        "Cowork: ask \"review this NDA\" or \"review this legal hold notice\". The skills find the playbook in "
-        "Cowork/Playbooks. Each builds a redlined copy next to your document, after you approve the plan. The "
-        "legal hold copy has a colour-coded Review summary on page 1.",
+        "Ask \"review this NDA\" or \"review this legal hold notice\". Unlike Word, Cowork does read your folders: "
+        "the skills find the playbook in Cowork/Playbooks. Each builds a redlined copy next to your document, after "
+        "you approve the plan. The legal hold copy has a colour-coded Review summary on page 1.",
     ])
     d.add_heading("Keep file names unique", level=2)
-    d.add_paragraph("Word finds files by name, anywhere in your OneDrive and SharePoint. Do not keep copies or old "
-                    "versions of these files elsewhere, and do not rename them. To update a playbook, replace the "
-                    "file in place.")
+    d.add_paragraph("When you attach with + or /, Word searches by file name across your OneDrive and SharePoint. "
+                    "Do not keep copies or old versions of these files elsewhere, and do not rename them. To update "
+                    "a playbook, replace the file in place, and move old versions out of your OneDrive.")
     d.add_heading("Safe to know", level=2)
     bullets([
         "Nothing is sent to anyone: the skills never send email, and never change your original file.",

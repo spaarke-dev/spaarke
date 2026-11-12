@@ -96,6 +96,31 @@ class CustomInstructionTests(unittest.TestCase):
             self.assertIn(needle, ci)
 
 
+class ReadMeTests(unittest.TestCase):
+    def test_word_steps_cover_the_four_use_cases_and_name_real_package_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paras = doc_text(pd.render_readme(os.path.join(tmp, "r.docx"), "0.1"))
+        heads = [h for h, _, _ in pd.WORD_STEPS]
+        self.assertEqual(heads[1:], ["Word 1: review a contract", "Word 2: draft a contract",
+                                     "Word 3: review a document that is not a contract",
+                                     "Word 4: draft a document that is not a contract"])
+        for h in heads:
+            self.assertIn(h, paras)
+        self.assertEqual(sum(p == pd.NOT_CONFIRMED for p in paras), 2)  # the two drafting use cases
+        text = "\n".join(paras)
+        self.assertIn("does not look in your folders", text)
+        # every file the Word steps tell the user to attach is one the package ships (the template path is a pattern)
+        steps = "\n".join(i for _, _, items in pd.WORD_STEPS for i in items)
+        named = set(re.findall(r"Cowork/Playbooks/[^\"\n]+?\.docx", steps))
+        self.assertTrue(named)
+        shipped = {"Cowork/Playbooks/NDA/Spaarke NDA – Mutual v1.2.docx",
+                   "Cowork/Playbooks/Review method/Spaarke Review Method.docx",
+                   "Cowork/Playbooks/Legal Hold Notice/Spaarke Legal Hold Notice – Employee Custodians v1.0.docx"}
+        self.assertEqual(named, shipped)
+        for name in ("Spaarke NDA – Mutual v1.2.md", "Spaarke Legal Hold Notice – Employee Custodians v1.0.md"):
+            self.assertTrue(any(name in f for _, _, fs in os.walk(ROOT) for f in fs), name)
+
+
 class AgentRecipeTests(unittest.TestCase):
     def test_recipe_holds_the_instructions_verbatim_with_their_character_count(self):
         for key, a in pd.AGENTS.items():

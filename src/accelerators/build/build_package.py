@@ -238,6 +238,11 @@ def build_test_documents(out, kit, method_md):
         for label, body in (("draft A", mk.DRAFT_A), ("draft B", mk.DRAFT_B)):
             title = f"Harbor Point – Legal Hold Notice ({label})"
             mk.write_notice(os.path.join(top, f"{title}.docx"), title, body)
+        # Word round 2, R-3: draft a non-contract from a template or precedent, with the matter facts
+        refs = os.path.join(top, "References")
+        mk.write_template(os.path.join(refs, "Acme Legal Hold Notice Template v1.0.docx"))
+        mk.write_precedent(os.path.join(refs, "Legal Hold Notice – Kestrel Freight (2025-02-28).docx"))
+        mk.write_demand_letter(os.path.join(refs, "Harbor Point – Demand letter (2026-10-20).docx"))
     finally:
         sys.path.remove(kit_src)
         if old_env is None:
@@ -319,7 +324,10 @@ def main(argv=None):
             "Spaarke Test Documents/Harbor Point – Legal Hold Notice (draft B).docx",
             "Spaarke Test Documents/Decoy/Spaarke Review Method.docx", "Spaarke Test Documents/Screens/.keep",
             "Spaarke Test Documents/References/Acme Mutual NDA (model form).docx",
-            "Spaarke Test Documents/References/Acme NDA Approval and Signature Authority Policy v1.0.docx"])
+            "Spaarke Test Documents/References/Acme NDA Approval and Signature Authority Policy v1.0.docx",
+            "Spaarke Test Documents/References/Acme Legal Hold Notice Template v1.0.docx",
+            "Spaarke Test Documents/References/Legal Hold Notice – Kestrel Freight (2025-02-28).docx",
+            "Spaarke Test Documents/References/Harbor Point – Demand letter (2026-10-20).docx"])
     except GateFailure as ex:
         log(f"\nPACKAGE BUILD FAILED: {ex}")
         return 1
