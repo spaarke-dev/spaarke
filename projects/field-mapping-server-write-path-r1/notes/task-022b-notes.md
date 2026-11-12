@@ -187,6 +187,14 @@ isolated return.
    (`InheritedAccessPermission.SourceTablesCarryingColumn`, held equal to the solution by `AccessPermissionTablesGuardTests`).
    In an environment whose solution does not yet have the column on a source table, that read faults: nothing is mapped and
    the user is told (fail closed). Deploy the solution with the column before, or with, this BFF change.
+9. **K: Restricted-ness is decided at the write** (unified-access-control-r2, 2026-11-12; the same text is in the 022c notes).
+   The rule maps a Restricted source's values only into a row known to end Restricted at the time of the write
+   (unified-access-control-r2's rule, 2026-11-08). A target whose Access Permission is later loosened keeps the values
+   mapped into it. That happens in one of two ways:
+   - **By hand:** a deliberate act by a user with the rights to change it.
+   - **By its parent:** inherited values follow the parent down, but a source that is not that parent leaves its values in place.
+
+   Nothing strips them again later; no code is written for this.
 
 ## Test doubles changed
 
