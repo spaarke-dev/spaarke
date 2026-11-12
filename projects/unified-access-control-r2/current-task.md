@@ -5,14 +5,14 @@
 > - **History:** git log of this file.
 > - **NOTE:** master is ahead of this work branch on project files (#2685, #2697, #2698, #2700, #2702, 191 PRs). This copy is the session's state carrier. Read master's TASK-INDEX and README for task status.
 
-> **Last Updated**: 2026-11-11 (checkpoint #126, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-handoff-2026-11-09-198.md`, `private-handoff-2026-11-08.md`, `private-p1-2026-11-11.md` (never copy into repo text).
+> **Last Updated**: 2026-11-11 (checkpoint #127, desktop session `uac-r2`). Private: `~/.claude/projects/c--code-files-spaarke-wt-unified-access-control-r2/private-handoff-2026-11-09-198.md`, `private-handoff-2026-11-08.md`, `private-p1-2026-11-11.md` (never copy into repo text).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Wrap-up, extended. Owner: "Build in uac-r2 now" for **191** (D-13) and **193** (D-14). Round-90 rules. This session (`uac-r2`) is authoritative. Merges: `git merge-tree` first, then squash with `--match-head-commit` after Router AND Client lint are green; ONE merge watcher at a time. Live actions need the owner's go IN THIS SESSION. Agents: Opus, a fresh short-path worktree each, own scratch folder `scratchpad\c<task>\`, at most 2 at once, never merge. |
-| **Next action** | (1) Watcher `bp2tzsgxy` merges #2711 (191b) at head `c90d6a0a4a`. (2) When it merges, start Group B agents: 191c (after b+d), 191g (after b), 191h (after b), keeping at most 2 running (191e is running). (3) The 191f agent: wire the Pester file into CI on #2712 and push, then open a separate R1 BFF PR (`fix/uac-191f-r1-draft-marker`, `C:\wt191r1`): `EmailDraftToolHandler` must omit the marker columns on caller-written creates under `OwnedChildWrite.AppliesTo`. Review and merge both. (4) Review fm piece 3a, then 3b (named edit to `SecureChildReconciler`: a content row follows the RESOLVED Direct team only; unknown means no owner write). (5) After ebilling's 116 merges: next dev deploy = local merge of origin/master + spike `755987b385` (ledger conflict: master count + 1); include ontology #2695 and ebilling #2708. (6) Ask the owner the batched questions below before 191i. |
+| **Next action** | (1) Wait for the 191c agent (`C:\wt191c`, two adversarial passes) → review its PR → merge (one watcher at a time). (2) When 191c finishes, start the 191g agent (`C:\wt191g`): step 1 writes the live-test plan, then it STOPS for the owner's go on the live test. (3) 191h agent running (`C:\wt191h`); its PR reports the dev document count for batched Q5. (4) Review fm piece 3b's diff: no `SecureChildReconciler` edit expected, only pinning tests; non-Direct unfile stays Unchanged pending #2722; a must-not-fire test on a generic path. (5) After ebilling's 116 merges: next dev deploy = local merge of origin/master + spike `755987b385` (ledger conflict: master count + 1); include #2695, #2708, #2719, #2721. (6) Ask the owner the batched questions below before 191i (now including #2722 and the 191g live-test go). |
 
 ## Done today (2026-11-11)
 - Merged: D-5 #2690, D-3 #2691, 090 housekeeping #2685, #2697 (194 closed), #2698 (191 design), **#2700 (193, `b4130cc5ea`)**, **#2702 (191d, `29b1d5b74b`)**.
@@ -33,10 +33,14 @@
 4. **191d OQ-4 (mine):** `prvReadUser` / `prvReadTeam` floor is Local (`canbebasic=false`, read on dev), and all flagged users share one unit, so partners at different firms can see each other's user rows. Accept as a known limit and document it (Rec.), versus per-firm units (against Q5).
 5. **191b → 191h:** documents become STRICTER for externals than 188 alone (the parent walk; `NoRoot` hides). Accept the stricter result (Rec.); count affected dev documents before 191h switches surfaces.
 
+6. **#2722 (unfile owner rule, from fm's 3b scoping):** an unfiled non-Direct communication keeps its former record team as owner. D-11 (creator's BU team) conflicts with round 87 (a re-file never loosens). Rec.: move it to the creator's BU team unless the former parent was Secure or Restricted, in which case keep the former owner. Until decided, 3b keeps Unchanged.
+7. **191g live test go:** item-level SPE write permission test with the BFF identity on dev (plan in the 191g note first).
+
 ## Running agents / jobs
-- **Watcher `bp2tzsgxy`:** merges #2711 at `c90d6a0a4a`.
-- **191e agent** (`C:\wt191e`, `task/uac-191e`): placement job; reads the stored flag only, never `#EXT#`.
-- **191f agent** (`C:\wt191f`, PR #2712 head `06be45b61b`): CI wiring, then the R1 PR (`C:\wt191r1`).
+- **191c agent** (`C:\wt191c`): team share job, two adversarial passes.
+- **191h agent** (`C:\wt191h`, `task/uac-191h`): SPA/AI predicate parity; counts affected dev documents (read-only).
+- Merged this segment: #2711 191b `7068026705`, #2719 191f R1 `309659fde5`, #2712 191f `08abdfe151`, **#2721 191e `60a33ac4eb`** (two adversarial passes; F2 census remedy text fixed; K-11/K-12 recorded). The 191e setting `ExternalAccess__FlaggedUserPlacement__WritesEnabled` stays unset until 191i (owner go).
+- fm 3a APPROVED and merged to the fm branch (`2a20f937e1`); 3b running (helper for all unfile paths; generic paths stop handing rows to the acting user's BU team).
 
 ## 191 build order and live steps
 - Done: b (#2711 merging), d (#2702), f (#2712 open). Group B: c (after b, d), e (running), g (after b; live test with the BFF identity first, owner go), h (after b). Then i (dev migration + live gate; each write an owner go), then j (docs + issues, incl. the provisioning follow-up for the field-security scripts, R3/K2; `.claude/constraints/auth.md` edit by the main session).
