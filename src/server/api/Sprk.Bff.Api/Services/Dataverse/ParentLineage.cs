@@ -506,6 +506,23 @@ internal static class InheritedAccessPermission
     internal static bool AppliesTo(string? table) => table is not null && Tables.Contains(table);
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 022b: the tables that carry <see cref="Column"/>, from the metadata this code
+    /// already holds — the four inheriting tables (<see cref="Tables"/>) and every secure root whose server-owned columns name
+    /// it (<see cref="SecureRootColumns"/>, from the table registry). No list of its own: a table added to either is here.
+    /// Held equal to the solution's tables that define the column by <c>AccessPermissionTablesGuardTests</c>.
+    /// </summary>
+    internal static IEnumerable<string> TablesCarryingColumn() =>
+        Tables.Concat(SecureRootColumns.Where(root => root.Value.Contains(Column)).Select(root => root.Key))
+            .Select(table => table.ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal);
+
+    /// <summary>Task 022b: true when rows of <paramref name="table"/> carry <see cref="Column"/> (<see cref="TablesCarryingColumn"/>).
+    /// A table without it is never read for it, and its rows can never be Restricted.</summary>
+    internal static bool CarriesColumn(string? table) =>
+        table is not null
+        && (Tables.Contains(table) || (SecureRootColumns.TryGetValue(table, out var columns) && columns.Contains(Column)));
+
+    /// <summary>
     /// The most restrictive of <paramref name="values"/> (null counts as Standard), or <see langword="null"/> when one of
     /// them is not a known level — an unknown option is never ranked by guess.
     /// </summary>
@@ -530,7 +547,22 @@ internal static class InheritedAccessPermission
     }
 
     /// <summary>What a row's parents give it.</summary>
-    internal sealed record Answer(ParentTopsStatus Status, int? Value, IReadOnlyList<ParentTop> Tops, string? Reason);
+    internal sealed record Answer(ParentTopsStatus Status, int? Value, IReadOnlyList<ParentTop> Tops, string? Reason)
+    {
+        /// <summary>Task 022b: the row has no parent, or every parent was read and none gives Restricted.</summary>
+        internal bool NoRestrictedAncestor =>
+            Status == ParentTopsStatus.NoParent || (Status == ParentTopsStatus.Found && Value is { } value && value != Restricted);
+
+        /// <summary>Task 022b: what the parents give cannot be told (a value that cannot be read, a record that did not come back,
+        /// or a fault). Never read as "no Restricted ancestor".</summary>
+        internal bool Unknown => Status == ParentTopsStatus.Undetermined || (Status == ParentTopsStatus.Found && Value is null);
+
+        /// <summary>Task 022b: <paramref name="reason"/> as an answer that cannot be told.</summary>
+        internal static Answer Undetermined(string reason) => new(ParentTopsStatus.Undetermined, null, [], reason);
+
+        /// <summary>Task 022b: the answer for a row that names no parent.</summary>
+        internal static Answer NoParent { get; } = new(ParentTopsStatus.NoParent, null, [], null);
+    }
 
     /// <summary>
     /// The inherited value for a row whose filing parents are <paramref name="parents"/>, through <paramref name="walk"/>

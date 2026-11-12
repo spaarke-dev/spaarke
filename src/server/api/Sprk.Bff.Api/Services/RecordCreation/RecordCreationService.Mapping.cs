@@ -109,6 +109,18 @@ internal sealed partial class RecordCreationService
     internal const string MappingSourceUndeterminedNotMapped =
         "No fields were copied from the related record because it could not be checked whether it is secure. Try again later.";
 
+    /// <summary>Task 022b: the words for mapped values removed before the create because the source's access is Restricted and
+    /// the new record is not Restricted once created.</summary>
+    internal const string MappingSourceRestrictedStripped =
+        "Some fields weren't copied from the related record because its access is Restricted. A Restricted record's fields " +
+        "are copied only into a record that is Restricted when it is created.";
+
+    /// <summary>Task 022b: the words when the source's access could not be read, or whether the new record is Restricted could
+    /// not be told. Never "because its access is Restricted".</summary>
+    internal const string MappingSourceRestrictedUndetermined =
+        "No fields were copied from the related record because it could not be checked whether they may be copied into this " +
+        "record. Try again later.";
+
     /// <summary>
     /// True for a lookup of <paramref name="table"/> that FILES the row under a record (FR-08 amendment, owner 2026-10-20,
     /// unified-access-control-r2 condition c): a lineage lookup (<see cref="SecureChildLineage"/>), an ownership-parent
@@ -484,13 +496,7 @@ internal sealed partial class RecordCreationService
         if (decision.Verdict == MappingSourceCopyVerdict.Allowed)
             return (null, item, mappedValues);
 
-        // A copied default is a value from the mapping source when its source column was mapped at step 3 — matched against
-        // step 3's columns, so a copy is removed even when step 5 dropped its source and kept the copy.
-        var mapped = mappedValues.Keys.Where(k => !defaultColumns.Contains(k)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var removed = mappedValues.Keys
-            .Where(k => mapped.Contains(k) || copiedDefaults.Any(c => string.Equals(c.Column, k, StringComparison.OrdinalIgnoreCase)
-                                                                      && stepThreeMappedColumns.Contains(c.Source)))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var removed = MappedSourceValues(mappedValues, defaultColumns, copiedDefaults, stepThreeMappedColumns);
         if (removed.Count == 0)
             return (null, item, mappedValues);
 
@@ -501,15 +507,52 @@ internal sealed partial class RecordCreationService
         // Task 022 fix round 4: a secure source refuses as the request (400, the same answer every time); a source whose answer
         // could not be told refuses as a check that failed (503), which may be retried.
         var undetermined = decision.Verdict == MappingSourceCopyVerdict.Unknown;
+        return await StripMappedSourceValuesAsync(
+                table, rule, user, callerItem, item, mappedValues, removed, warnings,
+                new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null,
+                    undetermined ? MappingSourceUndeterminedNotMapped : MappingSourceSecureStripped),
+                undetermined ? MappingSourceCheckFailed(noun) : MappingSourceFilingRefused(noun), noun, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The values from the mapping source (task 022 fix round 3): every mapped value that is not an adapter default, and every
+    /// default copied from a column step 3 mapped — matched against step 3's columns, so a copy is removed even when step 5
+    /// dropped its source and kept the copy. A plain adapter default is not one. Pure.
+    /// </summary>
+    private static HashSet<string> MappedSourceValues(
+        IReadOnlyDictionary<string, JsonElement> mappedValues, IReadOnlySet<string> defaultColumns,
+        IReadOnlyCollection<(string Column, string Source)> copiedDefaults, IReadOnlySet<string> stepThreeMappedColumns)
+    {
+        var mapped = mappedValues.Keys.Where(k => !defaultColumns.Contains(k)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return mappedValues.Keys
+            .Where(k => mapped.Contains(k) || copiedDefaults.Any(c => string.Equals(c.Column, k, StringComparison.OrdinalIgnoreCase)
+                                                                      && stepThreeMappedColumns.Contains(c.Source)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The strip (task 022 fix rounds 2 and 3; shared by the secure-source and the Restricted-source rules): the
+    /// <paramref name="removed"/> values come out of the row, the caller's values and the plain adapter defaults stay, and
+    /// <paramref name="warning"/> replaces any warning about a removed column. A removed value that files the row was read by
+    /// steps 6 to 7, so the create is refused with <paramref name="filingRefusal"/> instead (nothing is written). The rebuild
+    /// and the pre-write rules' re-run on the row as it will be written fail closed: a row that cannot be rebuilt, or a
+    /// refusal or fault in either, refuses the whole create.
+    /// </summary>
+    private async Task<(RecordCreationRefusal? Refusal, DataverseWriteItemMapper.MappedItem Item, IReadOnlyDictionary<string, JsonElement> Values)>
+        StripMappedSourceValuesAsync(
+            string table, RecordTableRule rule, IDataverseUserClient user, DataverseWriteItemMapper.MappedItem callerItem,
+            DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, JsonElement> mappedValues, IReadOnlySet<string> removed,
+            List<RecordCreationWarning> warnings, RecordCreationWarning warning, RecordCreationRefusal filingRefusal, string noun,
+            CancellationToken ct)
+    {
         var filing = removed.FirstOrDefault(c => FilesTheRow(table, item, c));
         if (filing is not null)
         {
             _logger.LogWarning("[RECORD-CREATE] a removed mapped value of a {Table} files the row ({Column}); refused", table, filing);
-            return (undetermined ? MappingSourceCheckFailed(noun) : MappingSourceFilingRefused(noun), item, mappedValues);
+            return (filingRefusal, item, mappedValues);
         }
 
-        // The rebuild and the pre-write rules' re-run fail closed: a row that cannot be rebuilt, or a fault in either, refuses
-        // the whole create (nothing is written).
         var kept = mappedValues.Where(kv => !removed.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
         var stripped = callerItem;
         if (kept.Count > 0)
@@ -522,8 +565,7 @@ internal sealed partial class RecordCreationService
         }
 
         warnings.RemoveAll(w => w.Column is { } column && removed.Contains(column));
-        warnings.Add(new RecordCreationWarning(RecordCreationWarning.MappingSourceSecureCode, null,
-            undetermined ? MappingSourceUndeterminedNotMapped : MappingSourceSecureStripped));
+        warnings.Add(warning);
 
         if (rule.PreWriteRules.Count > 0
             && await RunPreWriteRulesAsync(table, rule, user, stripped, noun, ct).ConfigureAwait(false) is { } preWriteRefusal)
@@ -533,6 +575,109 @@ internal sealed partial class RecordCreationService
 
         return (null, stripped, kept);
     }
+
+    /// <summary>Task 022b: what a mapping source's Access Permission says for the Restricted-source rule.</summary>
+    internal enum MappingSourceAccess
+    {
+        /// <summary>The source's table carries no <see cref="InheritedAccessPermission.Column"/>: the rule does not apply.</summary>
+        NoColumn,
+
+        /// <summary>Standard or Limited (an empty value counts as Standard, the inheritance walk's own rule).</summary>
+        NotRestricted,
+
+        /// <summary>Restricted.</summary>
+        Restricted,
+
+        /// <summary>The table carries the column, and its value could not be read: no read, or a value that is no known level.</summary>
+        Unreadable,
+    }
+
+    /// <summary>Task 022b: the source column the Restricted-source rule reads, in step 3's one app-only read, when the source's
+    /// table carries it (<see cref="InheritedAccessPermission.CarriesColumn"/>); none otherwise. Pure.</summary>
+    internal static IEnumerable<string> MappingSourceAccessColumns(string sourceTable) =>
+        InheritedAccessPermission.CarriesColumn(sourceTable) ? [InheritedAccessPermission.Column] : [];
+
+    /// <summary>
+    /// Task 022b: the source's Access Permission from step 3's app-only read (<paramref name="read"/>, which holds
+    /// <see cref="MappingSourceAccessColumns"/>). A table without the column is <see cref="MappingSourceAccess.NoColumn"/>
+    /// whatever the read holds; no read, a value of another type, or an option that is not Standard, Limited or Restricted is
+    /// <see cref="MappingSourceAccess.Unreadable"/> (fail closed). Pure.
+    /// </summary>
+    internal static MappingSourceAccess MappingSourceAccessOf(string sourceTable, Entity? read)
+    {
+        if (!InheritedAccessPermission.CarriesColumn(sourceTable))
+            return MappingSourceAccess.NoColumn;
+        if (read is null)
+            return MappingSourceAccess.Unreadable;
+        if (!read.Attributes.TryGetValue(InheritedAccessPermission.Column, out var value) || value is null)
+            return MappingSourceAccess.NotRestricted;
+
+        return value is OptionSetValue option
+            ? option.Value switch
+            {
+                InheritedAccessPermission.Restricted => MappingSourceAccess.Restricted,
+                InheritedAccessPermission.Standard or InheritedAccessPermission.Limited => MappingSourceAccess.NotRestricted,
+                _ => MappingSourceAccess.Unreadable,
+            }
+            : MappingSourceAccess.Unreadable;
+    }
+
+    /// <summary>
+    /// Task 022b (the Restricted-source rule): values mapped from a source whose Access Permission is Restricted — or from a
+    /// source table with the column whose value could not be read — are written only into a row that ends Restricted in this
+    /// create (<see cref="InCreateAccessPermissionAsync"/>, step 10's own value; one that cannot be told is not Restricted). A
+    /// source read as Standard or Limited, or a table without the column, maps unchanged. Otherwise the strip of task 022 fix
+    /// round 2 (<see cref="StripMappedSourceValuesAsync"/>), with <see cref="RecordCreationWarning.MappingSourceRestrictedCode"/>.
+    /// Asked after the owner and before the create. <c>Access</c> is the step-10 answer when the item is returned unchanged
+    /// (step 10 then uses it, never deciding twice); <see langword="null"/> after a strip (step 10 decides on the stripped row).
+    /// </summary>
+    private async Task<(RecordCreationRefusal? Refusal, DataverseWriteItemMapper.MappedItem Item,
+            IReadOnlyDictionary<string, JsonElement> Values, InCreateAccessPermission? Access)>
+        EnforceMappingSourceRestrictedAsync(
+            string table, RecordTableRule rule, IDataverseUserClient user, MappedSourceGate gate,
+            DataverseWriteItemMapper.MappedItem callerItem, DataverseWriteItemMapper.MappedItem item,
+            IReadOnlyDictionary<string, JsonElement> mappedValues, IReadOnlySet<string> defaultColumns,
+            IReadOnlyCollection<(string Column, string Source)> copiedDefaults, IReadOnlySet<string> stepThreeMappedColumns,
+            IReadOnlyDictionary<string, object>? stampPlan, List<RecordCreationWarning> warnings, string noun, CancellationToken ct)
+    {
+        var source = MappingSourceAccessOf(gate.SourceTable, gate.Read);
+        if (source is MappingSourceAccess.NoColumn or MappingSourceAccess.NotRestricted)
+            return (null, item, mappedValues, null);
+
+        var access = await InCreateAccessPermissionAsync(table, item, stampPlan, ct).ConfigureAwait(false);
+        if (access.EndsRestricted)
+            return (null, item, mappedValues, access);
+
+        var removed = MappedSourceValues(mappedValues, defaultColumns, copiedDefaults, stepThreeMappedColumns);
+        if (removed.Count == 0)
+            return (null, item, mappedValues, access);
+
+        // A source value that cannot be read, or a row whose answer cannot be told, is a check that could not be made (503 when a
+        // removed value files the row, which may be retried); a Restricted source into a row known not to end Restricted is the
+        // request's own answer (400, the same every time).
+        var undetermined = source == MappingSourceAccess.Unreadable || access.Undetermined;
+        _logger.LogWarning(
+            "[RECORD-CREATE] the mapping source of a {Table} is {Source} and the row does not end Restricted in this create " +
+            "(undetermined: {Undetermined}); {Count} mapped value(s) removed before the create",
+            table, source, access.Undetermined, removed.Count);
+        var stripped = await StripMappedSourceValuesAsync(
+                table, rule, user, callerItem, item, mappedValues, removed, warnings,
+                new RecordCreationWarning(RecordCreationWarning.MappingSourceRestrictedCode, null,
+                    undetermined ? MappingSourceRestrictedUndetermined : MappingSourceRestrictedStripped),
+                undetermined ? MappingSourceCheckFailed(noun) : MappingSourceRestrictedFilingRefused(noun), noun, ct)
+            .ConfigureAwait(false);
+        return (stripped.Refusal, stripped.Item, stripped.Values, null);
+    }
+
+    /// <summary>
+    /// Task 022b: a value copied from a Restricted source files the row, and the row is not Restricted once created. The same
+    /// refusal as a secure source's (<see cref="RecordCreationRefusal.MappingSourceSecureFilingCode"/>, 400): the same request
+    /// is refused every time.
+    /// </summary>
+    internal static RecordCreationRefusal MappingSourceRestrictedFilingRefused(string noun) => new(
+        RecordCreationRefusalKind.Invalid, RecordCreationRefusal.MappingSourceSecureFilingCode,
+        $"This {noun} can't be created with values copied from a record whose access is Restricted, because it would not be " +
+        "Restricted. File it under a different record.");
 
     /// <summary>Whether <paramref name="column"/> of <paramref name="item"/> files the row: the regarding pair, or a lookup
     /// Repair's own test (<see cref="WouldFileTheRow"/>) says files it.</summary>
@@ -646,8 +791,10 @@ internal sealed partial class RecordCreationService
         // nothing mapped (not even a Default rule), one warning that names nothing.
         // Task 022 fix round 2: the columns the 032b copy gate reads to tell whether the source is secure are read in the same
         // one app-only read (never copied: step 3 masks the read down to the rules' own columns before the engine sees it).
+        // Task 022b: and the source's Access Permission, when its table carries the column (never asked of one that does not).
         var readColumns = sourceColumns
             .Concat(MappingSourceCopyGate.SourceGateColumns(source.EntityLogicalName))
+            .Concat(MappingSourceAccessColumns(source.EntityLogicalName))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         using var attributesCancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
