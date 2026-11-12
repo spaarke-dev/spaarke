@@ -289,16 +289,19 @@ follows instructions-only skills, a Word edition of our playbook procedures beco
 
 ### WP-3. Word: does it call the Spaarke MCP?
 Run this as the user who passed the Spaarke MCP connection test on 2026-11-12 (the demo user), or any licensed user
-with **Spaarke MCP** connected. I'm confirming with the MCP project that its test tools are still deployed on the
-dev server; wait for my go before running this.
+with **Spaarke MCP** connected. The MCP project confirmed 2026-11-12 that its test tools stay on the dev server and
+that this run also counts as its own Word test (T1-Word), so run it once. If a call fails, wait a minute and retry:
+a server update can cause about a minute of errors.
 1. Word for the web (an InPrivate window signed in as that user is easiest): open a blank document, Copilot pane ›
    **+** › **Sources** (or the plugins list): is **Spaarke MCP** there? Select it.
 2. Type: *Use Spaarke MCP to run SpaarkeMCP_spike_echo with the text "Word probe".*
 3. Then: *Run SpaarkeMCP_spike_whoami and show me the full result.*
 4. If you can sign in to Word desktop as that user, repeat 1–3 there.
 
-**Record:** whether Spaarke MCP is listed in Word; whether each tool ran (echo returns the server's time; whoami
-returns `status: ok` and the tenant id); any approval card Word showed. **Pass:** a tool result with the server's
+**Record:** Word web or desktop; whether Spaarke MCP is listed under **+** › **Sources**; whether each tool ran
+(echo returns the server's time; whoami returns `status: ok` and the tenant id); for echo, whether a small panel
+(widget) appeared or text only, and its load time in ms if the panel shows one; whether Word asked you to consent or
+confirm before a tool ran. **Pass:** a tool result with the server's
 time. This is the route to the advanced redline in Word: the redline engine would run on our server as a tool.
 
 ### WP-4 (optional, 3 minutes). Word: watch a partner plugin run
