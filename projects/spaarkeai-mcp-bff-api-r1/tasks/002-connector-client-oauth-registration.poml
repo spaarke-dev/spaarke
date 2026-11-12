@@ -4,7 +4,7 @@
     <title>A10 connector client, OAuth and connector registration</title>
     <phase>0 Platform spike</phase>
     <gate>after 001 (spike deployed to dev with the owner's per-SHA go)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Creates new files (runbook draft, registration facts) under explicit ADR-028 constraints; no code files</rigor-reason>
     <model-tier>opus</model-tier>
@@ -105,7 +105,14 @@
     <criterion testable="true">Every admin-center step was run by the owner, not by the agent (stated per step in the runbook draft).</criterion>
   </acceptance-criteria>
 
-  <notes>The runbook draft is finalised into docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md by task 042 after the connector is re-pointed at the real endpoint. T5 gates everything (FR-19): task 003 owns the stop decision if it failed.</notes>
+  <notes>The runbook draft is finalised into docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md by task 042 after the connector is re-pointed at the real endpoint. T5 gates everything (FR-19): task 003 owns the stop decision if it failed.
+
+Completed 2026-11-12. T5 PASSED: the licensed non-admin user demo@demo.spaarke.com called spike_whoami from Copilot Chat (web) through connector "Spaarke MCP"; aud (BFF app), scp (user_impersonation), tid (Spaarke tenant) and oid were present, and the returned systemuserid is that user's Dataverse systemuser (cross-checked in Graph and dev Dataverse). Evidence and every registration fact: notes/phase0-registration-facts.md ("Summary" and (d)).
+Deviations: (1) confidential client, not public + PKCE: the Dev Portal requires a secret (owner-confirmed 2026-11-08; ADR-028 A10 Path A, 24-month dev expiry); (2) connector display name "Spaarke MCP", not "Spaarke" (owner, 2026-11-10); (3) the Dev Portal registration was re-created 2026-11-10 with Base URL = the full MCP URL after "The requested resource does not exist"; (4) T5 needs a Microsoft 365 Copilot licence on the user (Business Premium alone hides the connector).
+Secret check: grep of the 53 changed project files found no secret value; no Key Vault write.
+Found in passing for task 003: Copilot Chat rendered the spike widget inline (T1 evidence) and the widget's callServerTool worked; dev App Insights now samples MCP requests (25-33%), so tools/call rows can be missing.
+Owed: connector secret rotation runbook (task 052); ADR-028 A10 follow-up note (Dev Portal requires a secret).
+rework: none task 002</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

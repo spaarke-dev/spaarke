@@ -2,6 +2,22 @@
 
 > Non-secret identifiers only. The connector app has one client secret, created by the owner on 2026-11-08 and held only in the Teams Developer Portal registration; its value is never recorded here.
 
+## Summary (task 002 acceptance, 2026-11-12)
+
+| Item | Value |
+|---|---|
+| Client app | `Spaarke Copilot Connector – dev`, appId `04f37fe4-5714-46f9-8796-5363a7a52244` |
+| Client type and reason | **Confidential** (one secret, held only in the Dev Portal registration). A public client with PKCE was tried first (A10); the Dev Portal will not save a registration without a secret (2026-11-08), so the confidential-client branch was taken after the owner's explicit confirmation. Public client flows off. |
+| Redirect URI | Web: `https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect` (no SPA / public-client redirects) |
+| Scope | `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation` (BFF app; admin consent granted, `AllPrincipals`) |
+| Authority | Spaarke tenant: `https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/oauth2/v2.0/{authorize,token}` (runbook table) |
+| Connector | Display name **`Spaarke MCP`** — owner decision 2026-11-10, a recorded deviation from the POML's `Spaarke` (see (c)); URL `https://spaarke-bff-dev.azurewebsites.net/mcp/legal-operations` |
+| Entra SSO option | **Not used.** The owner chose authentication type **OAuth 2.0** with the Dev Portal registration ID in the admin-center form ((c), 2026-11-09/10). T5 confirms it: `aud` = the BFF app, `scp` contains `user_impersonation`, `tid` = the Spaarke tenant. |
+| Who ran what | (a) Azure CLI under the owner's signed-in account on the owner's explicit "yes, run it" (2026-11-08); redirect added by the owner. (b), (c) owner. (d) owner as the demo user. |
+| Scriptable | (a) yes (`az ad app …`, Graph PATCH); (b) not known, Dev Portal UI; (c) not known, admin-center UI; (d) no, interactive (runbook "Scriptable?") |
+| Secrets in repo | None. Grep of every project file changed on this branch (53) for `clientSecret`, `client_secret` and the Entra secret shape `…8Q~…`, 2026-11-12: one hit, the POML's own step text. No Key Vault secret written. |
+| T5 | **Passed 2026-11-12**, see (d) |
+
 ## (a) Entra app — done 2026-11-08
 
 Created by the main session with the Azure CLI under the owner's signed-in account, on the owner's explicit "yes, run it" (2026-11-08).
@@ -58,7 +74,13 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
   - Connector ID: _tbd (owner)_ · Date: 2026-11-10
 - **First T5 attempt, 2026-11-10 (the owner's admin account, confirmed 2026-11-10, so a pre-check only; T5 requires a licensed non-admin user):** Copilot answered "couldn't call spike_whoami" because it searched the connected **Dataverse** MCP instead of Spaarke MCP. No `tools/call` reached the BFF. Retry with Spaarke MCP explicitly selected in the chat, as a non-admin user.
 
-## (d) T5 — pending
+## (d) T5 — ✅ PASSED 2026-11-12 (~16:15Z)
+
+- **Caller:** `demo@demo.spaarke.com` ("Spaarke Demo Access"), licensed (Microsoft 365 Business Standard with Copilot + Copilot Business add-on), **no Entra directory roles** (Graph `transitiveMemberOf/directoryRole` = none, checked 2026-11-12). Copilot Chat on the web, new chat, Spaarke MCP selected as a source. Dev BFF `6dbe69b9e2`.
+- **Prompt:** "Now run SpaarkeMCP_spike_whoami and show me the full result." **Result** (owner screenshot): `status: "ok"`; `aud` present, `matchesBffApp: true`; `scp` present, `hasUserImpersonation: true`; `tid` = `a221a95e-6abc-4434-aecc-e48338a1b2f2` (Spaarke tenant); `oid` = `279d9f5d-db14-415c-a75e-f13cbea011ca`; `systemUserId` = `849beec2-2b30-f111-88b5-7c1e520aa4df`.
+- **Verified independently:** `oid` equals the demo user's Entra object id (Graph). Dev Dataverse `systemusers(849beec2-…)` is "# Spaarke Demo Access", `azureactivedirectoryobjectid` = that same `oid`, enabled, access mode 0 (read-write). So the token Copilot sent was the **user's** delegated token for the BFF app (A10), and `spike_whoami` ran WhoAmI **on behalf of that user** (OBO), not app-only.
+- **Not yet recorded:** what the user saw at Connect (sign-in only, or a consent prompt). Admin consent for `user_impersonation` was granted at (a); ask the owner and note it under T5's consent behaviour in `phase0-results.md`.
+- App Insights sampling (25–33% on these rows) dropped the `tools/call` request rows; the chat result plus the Graph/Dataverse cross-check is the evidence.
 
 - **Licence is a precondition (2026-11-12).** Microsoft's federated-connector overview (updated 2026-10-19) lists "The user has a Microsoft 365 Copilot license" among the conditions for seeing a connector; unlicensed Copilot Chat ("Basic") users do not get it. Web vs desktop is not a factor. The test account `demo@demo.spaarke.com` (same tenant, no admin roles checked for the other seat holder only) first had Business Premium only and could not see Spaarke MCP. The owner then assigned Microsoft 365 Business Standard with Copilot **and** the Copilot Business add-on; Graph `licenseDetails` shows every `M365_COPILOT_*` plan `Success` in both SKUs (one is redundant). The web client still labelled the account "M365 Copilot (Basic)" right after the change.
 - **Dev BFF `6dbe69b9e2`, App Insights 2026-11-12:**
