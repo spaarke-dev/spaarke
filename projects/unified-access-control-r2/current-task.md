@@ -32,7 +32,7 @@
 #2722 (creator's BU team unless leaving Secure/Restricted; replaces `NonDirectUnfileAnswer`'s body) + #2728 (`sprk_relatedcommunication` as a document parent) + 198 participant shares get the 191 predicate + `GateDecisionRecordSharing` drops `domainname` + one unit-name source (drop `ExternalAccess:ExternalTeamShare:BusinessUnitName`).
 
 ## 191 remaining
-- **191i** (dev migration + live gate; each write an owner go): `Set-ExternalCollaboratorRole.ps1 -Apply` → `Set-RecordCreatorPersonSchema.ps1 -Apply` → access-marker dry run → `-BffOmitsMarkersFromCallerCreates -Apply` → `-Verify` → `CustomerBusinessUnitId` before 191e WritesEnabled → placement job report-only → 191c settings → 191g one-marker gate (then the 5-case probe if it fails; template private in scratchpad c191g\probe-paste.txt) → AC-3 gate.
+- **191i** (dev migration + live gate; each write an owner go): `Set-ExternalCollaboratorRole.ps1 -Apply` → `Set-RecordCreatorPersonSchema.ps1 -Apply` → access-marker dry run → `-BffOmitsMarkersFromCallerCreates -Apply` → `-Verify` → `CustomerBusinessUnitId` before 191e WritesEnabled → placement job report-only → 191c settings → 191g one-marker gate (then the 5-case probe if it fails; template private in scratchpad c191g\probe-paste.txt) → AC-3 gate. When `ExternalAccess:FlaggedOfficeEdit:Enabled` goes on, tell word-add-in-r1 (they'll have the owner open a secure document for edit from Word).
 - **191j**: docs + issues (provisioning follow-up for the field-security scripts; main-session `.claude/constraints/auth.md` naming `AppOnlyExternalVisibility`).
 
 ## Open items for the owner
