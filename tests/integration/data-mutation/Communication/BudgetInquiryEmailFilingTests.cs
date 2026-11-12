@@ -294,6 +294,9 @@ public class BudgetInquiryEmailFilingTests
             entities.Setup(e => e.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns((string _, Guid id, string[] _, CancellationToken _) => Task.FromResult(Threads.FirstOrDefault(t => t.Id == id)!));
             var communications = new Mock<ICommunicationDataverseService>(MockBehavior.Loose);
+            // Issue #2033: a send as user needs the caller's enabled systemuser.
+            communications.Setup(c => c.QuerySystemUserByAzureAdOidAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
 
             var dispatcher = new CommunicationChannelDispatcher(
                 new ICommunicationChannelSender[] { new AcceptingSender() }, Array.Empty<ICommunicationArchiver>());

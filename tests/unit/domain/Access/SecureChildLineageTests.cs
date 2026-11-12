@@ -526,9 +526,11 @@ public class SecureChildLineageTests
         foreach (var table in RecordOwnershipResolver.RestrictedContentTables)
             RecordShareLevels.ChildMirrorMask(table, 327703 | 524288 | 32).Should().Be(1, $"{table} is a hard-deny table");
 
-        // Which hard-deny tables are secure-lineage children today (the others are covered by name all the same).
+        // Which hard-deny tables are secure-lineage children today (the others are covered by name all the same). eBilling's rule set,
+        // Procedure assignment and Stored File tables (ebilling-r1 tasks 089 / 090, on master since #2689) are both hard-deny and
+        // filed under a secure root.
         SecureChildLineage.Children.Keys.Where(RecordOwnershipResolver.IsRestrictedContentTable)
-            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion");
+            .Should().BeEquivalentTo("sprk_policy", "sprk_policyversion", "sprk_ruleset", "sprk_procedureassignment", "sprk_storedfile");
     }
 
     [Fact]
@@ -620,5 +622,105 @@ public class SecureChildLineageTests
     {
         var blank = () => RecordShareLevels.ChildMirrorRights(" ", 1);
         blank.Should().Throw<ArgumentException>();
+    }
+
+    // ── unified-access-control-r2 task 191b: the external markers ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Task 191b (#2179 design v2 §3.3): every registry table's marker, pinned. A table added without a decision does not
+    /// compile (the marker is a required positional argument); a marker changed by accident fails here.
+    /// </summary>
+    [Fact]
+    public void EveryTable_DeclaresTheExpectedExternalMarker()
+    {
+        var expected = new Dictionary<string, ExternalMarker>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_communication"] = ExternalMarker.Predicate(ExternalOwnRule.Communication065),
+            ["sprk_communicationthread"] = ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen),
+            ["sprk_document"] = ExternalMarker.Predicate(ExternalOwnRule.DocumentNarrowing),
+            ["sprk_invoice"] = ExternalMarker.Predicate(ExternalOwnRule.InvoiceSource),
+            ["sprk_emailartifact"] = ExternalMarker.Never,
+            ["sprk_attachmentartifact"] = ExternalMarker.Never,
+            ["sprk_emailreviewlog"] = ExternalMarker.Never,
+            ["sprk_analysis"] = ExternalMarker.DocumentText,
+            ["sprk_analysisoutput"] = ExternalMarker.DocumentText,
+            ["sprk_policy"] = ExternalMarker.HardDeny,
+            ["sprk_policyversion"] = ExternalMarker.HardDeny,
+            ["sprk_procedureassignment"] = ExternalMarker.HardDeny,
+            ["sprk_ruleset"] = ExternalMarker.HardDeny,
+            ["sprk_storedfile"] = ExternalMarker.HardDeny,
+        };
+
+        foreach (var table in SecureChildLineage.Children.Values)
+        {
+            table.External.Should().NotBeNull($"{table.LogicalName} declares a marker");
+            table.External.Should().Be(
+                expected.TryGetValue(table.LogicalName, out var marker) ? marker : ExternalMarker.None,
+                $"{table.LogicalName}'s external marker");
+        }
+
+        SecureChildLineage.OutsideLineage.Should().BeEquivalentTo(
+            new Dictionary<string, ExternalMarker> { ["sprk_affinity"] = ExternalMarker.Never });
+    }
+
+    /// <summary>Task 191b: the communication-content tables (the guard's refused list) are the registry's Never markers.</summary>
+    [Fact]
+    public void NeverExternalTables_AreTheCommunicationContentTables()
+    {
+        SecureChildLineage.NeverExternalTables.Should().BeEquivalentTo(
+            "sprk_emailartifact", "sprk_attachmentartifact", "sprk_emailreviewlog", "sprk_affinity");
+        SecureChildLineage.ExternalMarkerOf("sprk_affinity").Should().Be(ExternalMarker.Never);
+        SecureChildLineage.ExternalMarkerOf("sprk_matter").Should().BeNull("a root declares no marker: its own flags decide it");
+        SecureChildLineage.ExternalMarkerOf("sprk_unknown").Should().BeNull();
+    }
+
+    [Fact]
+    public void ExternalMarker_Predicate_RefusesNoRule_AndTheKindsAreDistinct()
+    {
+        var none = () => ExternalMarker.Predicate(ExternalOwnRule.None);
+        none.Should().Throw<ArgumentOutOfRangeException>();
+
+        ExternalMarker.None.Kind.Should().Be(ExternalMarkerKind.None);
+        ExternalMarker.DocumentText.Kind.Should().Be(ExternalMarkerKind.None);
+        ExternalMarker.DocumentText.CarriesDocumentText.Should().BeTrue();
+        ExternalMarker.None.CarriesDocumentText.Should().BeFalse();
+        ExternalMarker.Never.Kind.Should().Be(ExternalMarkerKind.Never);
+        ExternalMarker.HardDeny.Kind.Should().Be(ExternalMarkerKind.HardDeny);
+        ExternalMarker.HardDeny.Should().NotBe(ExternalMarker.Never);
+        ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen).Should().Be(ExternalMarker.Predicate(ExternalOwnRule.ThreadOpen));
+        ExternalMarker.None.Should().NotBe(ExternalMarker.DocumentText);
+    }
+
+    /// <summary>
+    /// Task 191b (#2179 design §0 item 1): every hard-deny table (<see cref="RecordOwnershipResolver.RestrictedContentTables"/>)
+    /// the registry knows is <see cref="ExternalMarkerKind.HardDeny"/> (or <see cref="ExternalMarkerKind.Never"/>), so a new
+    /// hard-deny table cannot arrive as None and be shared with externals; and none is in the Never set, which is the
+    /// assistant guard's refused list and message (unchanged).
+    /// </summary>
+    [Fact]
+    public void EveryHardDenyTableInTheRegistry_IsNeverExternallyVisible()
+    {
+        var inRegistry = RecordOwnershipResolver.RestrictedContentTables
+            .Where(t => SecureChildLineage.ExternalMarkerOf(t) is not null)
+            .ToList();
+
+        inRegistry.Should().NotBeEmpty();
+        foreach (var table in inRegistry)
+            SecureChildLineage.ExternalMarkerOf(table)!.Kind.Should().BeOneOf(
+                new[] { ExternalMarkerKind.HardDeny, ExternalMarkerKind.Never }, $"{table} is a hard-deny table");
+        SecureChildLineage.NeverExternalTables.Should().NotIntersectWith(RecordOwnershipResolver.RestrictedContentTables);
+    }
+
+    /// <summary>Task 191b: the predicate's two document edges are registry lookups of the document (a renamed column would
+    /// silently stop the chain bound).</summary>
+    [Fact]
+    public void TheDocumentChainAndLinkColumns_AreDocumentLookups()
+    {
+        var document = SecureChildLineage.Children["sprk_document"];
+
+        document.Lookups[Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.ParentDocumentAttribute]
+            .Should().Be("sprk_document");
+        document.Lookups[Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDocumentNarrowing.RelatedCommunicationAttribute]
+            .Should().Be("sprk_communication");
     }
 }
