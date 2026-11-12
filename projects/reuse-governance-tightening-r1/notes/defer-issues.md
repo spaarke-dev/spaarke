@@ -115,7 +115,7 @@ On the Linux CI runner the check reports **13** new missing paths, not 2 (Tier 2
 
 | Field | Value |
 |---|---|
-| **Status** | Done 2026-11-12: owner confirmed Power Pages deploys are retired. Skill archived to `.claude/archive/2026-11-12/skills/power-page-deploy/` (repo archive convention, not `_archived/`); INDEX row removed; `azure-deploy`, `deploy-new-release`, `office-addins-deploy`, two docs and `knowledge/sharepoint-embedded/NOTES.md` repointed at the Static Web Apps workflow; 2 baseline lines removed. |
+| **Status** | Fixed on the project branch 2026-11-12 (`65224ce73f`); #2713 closes when that reaches master. Owner confirmed Power Pages deploys are retired. Skill archived to `.claude/archive/2026-11-12/skills/power-page-deploy/` (repo archive convention, not `_archived/`); INDEX row removed; `azure-deploy`, `deploy-new-release`, `office-addins-deploy`, two docs and `knowledge/sharepoint-embedded/NOTES.md` repointed at the Static Web Apps workflow; 2 baseline lines removed. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-11 |
 | **Source** | Found in passing while fixing ISS-002 (its `.site-download` path has never been in the repo) |

@@ -24,9 +24,11 @@ Previous: 002 done 2026-11-11 (index wired into task-create 3.5.6, code-review 6
 
 **PR plan (owner approves each)**: 041 and 042 each get their own PR (NFR-05, item 5). 001 and 002 ship with items 1–3 in one PR after 011/012/020/021.
 
+**2026-11-12**: PRs #2705 (041) and #2706 (042) merged (squash `530b9b9185`, `9456083c78`); `C:\wt041p`/`C:\wt042p` removed; master merged into the branch (`29bcda5fe3`), instruction-path checker 0 new. ISS-003 fixed on branch (`65224ce73f`, skill archived); #2713 closes when it reaches master. Task 040 (Learn MCP) needs the owner's per-machine approval when we get there (owner agreed).
+
 **Open, reported to owner, not this project's to fix**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
-- ISS-002 #2684 — `Test-InstructionPaths.ps1` exits 1 on master (2 false positives).
+- ISS-002 #2684 — done (PR #2714).
 - 042 code-review K-class: S2 "never re-add CS0618" is prose only (guard cut per §10.7); S3 `knowledge/` / spike `.csproj`s now fail closed on obsolete calls.
 
 **Registered**: Project Issue #2682 under Epic #427, Board #2, label `reuse-governance-tightening-r1`. Board synced 2026-11-11: Tasks Completed 4/19, Status Reason "In progress".
