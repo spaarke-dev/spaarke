@@ -1,6 +1,6 @@
 # Current Task State - spaarke-legal-ai-accelerator-r1 (tiered package: individual base/advanced)
 
-> **Last Updated**: 2026-11-10 (by context-handoff, Claude Desktop session `acclerator-r1`)
+> **Last Updated**: 2026-11-12 (Claude Desktop session `acclerator-r1`)
 > **Recovery**: Read "Quick Recovery" section first
 > **Branch**: `work/spaarke-legal-ai-accelerator-r1` · **Worktree**: `C:\code_files\spaarke-wt-spaarke-legal-ai-accelerator-r1` · **PR**: #2528 (unmerged)
 > Earlier checkpoints (verbatim): `notes/handoff-history/2026-11.md`. Session narrative: `git log`.
@@ -14,7 +14,7 @@
 | **Task** | Build and test the **four-tier package** (individual base/advanced, team no-IT/IT) from `notes/accelerator-components-by-surface.md` (DRAFT v2). Pre-pipeline spike work; no POML tasks |
 | **Step** | (a) OneDrive clean-up DONE (cloud moves; `notes/poc-e2e/onedrive-layout.md`). (b) Five build items: package build `src/accelerators/build/Build-Package.ps1` (legal hold Cowork skill, readable playbook renderer, Spaarke Review Method SRM-1110-A, zip laid out like `Documents/`, agent recipes) — verify + commit. (c) Owner script `notes/poc-e2e/tier-test-script.md` (W-1, G-1..G-4, H-1, P-1, C-1..C-3, A-1..A-3) |
 | **Status** | Word round 1 recorded 2026-11-11 (`results.md` "Tier tests round 1: Word"; gaps #36–#38): W-1 pass, G-1 fail 0/3, "attach both" works for non-contracts, contracts take one file. Word round 2 written into `tier-test-script.md` |
-| **Next Action** | Word process defined 2026-11-11 by four use cases (contract review / contract drafting / non-contract review / non-contract drafting); owner decision: Word reads no folder, the user attaches. Read me "Word 1–4" sections (`package_docs.WORD_STEPS`); Word round 2 rewritten by use case (U-1 saved playbooks, G-3b +, R-2, G-5, H-1, R-3; optional W-2, R-1b; P-1 moved to Cowork); test zip `References/` (5 files). Owner re-extracts both zips (replace) and runs Word round 2; record as "Tier tests round 2" in `results.md`. **Then:** Copilot app component decision (what goes in the agent vs Cowork skills vs reference files: agents, py engines, playbooks, templates/precedents, review guides) before the C-/A- tests. Open: personal `Cowork/Playbooks/<type>/Templates` location (in Read me, owner to confirm) |
+| **Next Action** | Word process defined 2026-11-11 by four use cases (contract review / contract drafting / non-contract review / non-contract drafting); owner decision: Word reads no folder, the user attaches. Read me "Word 1–4" sections (`package_docs.WORD_STEPS`); Word round 2 rewritten by use case (U-1 saved playbooks, G-3b +, R-2, G-5, H-1, R-3; optional W-2, R-1b; P-1 moved to Cowork); test zip `References/` (5 files). Owner re-extracts both zips (replace) and runs Word round 2; record as "Tier tests round 2" in `results.md`. **Copilot app decision made 2026-11-12: skills first** (`notes/copilot-app-components.md`): reviews and redlines through the Cowork skills; agents optional, v0.3 instructions (`NDAR-1112-A`/`LHR-1112-A`) review in chat only and point to `/nda-review`/`/legal-hold-review`; build gate `package_docs.recipe_problems()`; A-2 rewritten. Owner rebuilds both agents from the new recipes. **Next:** record Tests 1–3 output comparison in `results.md` (gap candidates: §4.4 derived data rated differently across runs; numbering gaps after section deletions) once the owner says whether Test 3 started from a fresh copy (2:12 PM edits under the owner's name). Open: personal `Cowork/Playbooks/<type>/Templates` location (owner to confirm) |
 
 ### Critical context
 - **Microsoft folders:** `Documents/Cowork/skills/<name>/SKILL.md` is the only documented auto-loaded location (Cowork FAQ). `Cowork/Tasks|Projects|AGENTS.md` are Cowork's. `Documents/Copilot/Created` = Copilot outputs; `Copilot/Memory/v2` = undocumented memory store. Nothing reads instructions from `Documents/Copilot`. Our files: `Cowork/Skills/` + `Cowork/Playbooks/` (owner decision 2026-11-10; was top-level `Legal Knowledge/`) + `Spaarke Test Documents/`. Team library keeps the name `Legal Knowledge`.
@@ -49,6 +49,7 @@
 - Claude never types passwords and never sends email; choose "No email" on Cowork cards.
 - Leave the owner's tabs alone. Prefer moving over deleting; no permanent deletes by Claude. Ask before T-04 (share).
 - No Copilot Tuning in design.md yet. No declarative agents in the package **(under review: four-tier draft puts Agent Builder agents in the advanced tiers)**.
+- Skills first in the Copilot app (owner, 2026-11-12): Cowork skills do reviews and redlines; Agent Builder agents are optional, review in chat only and never build redlines (enforced by the package build).
 - The Office add-in for redlining is out of scope; don't raise it.
 - Two editions/components (Word vs Cowork) are wanted.
 - Mechanics first; scoring and quality later (owner, 2026-11-10).

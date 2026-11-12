@@ -70,7 +70,7 @@ file is test G-2.
 
 | Component | How | What it adds | Status |
 |---|---|---|---|
-| **Agent recipe** per document type (name, instructions text, suggested prompts, which knowledge files to pick) | The user builds the agent in Agent Builder. Knowledge = the readable playbook in their own `Documents/Cowork/Playbooks/` (OneDrive files, not uploads) | Same `@`-name and method in Word (agent mode), Cowork and the Copilot app; no custom instruction needed; in Cowork, review **plus** a redlined copy in one step (instructions v0.2) | Owner built three (Copilot Studio); OneDrive-file knowledge and v0.2 untested (A-1, A-2) |
+| **Agent recipe** per document type (name, instructions text, suggested prompts, which knowledge files to pick) | The user builds the agent in Agent Builder. Knowledge = the readable playbook in their own `Documents/Cowork/Playbooks/` (OneDrive files, not uploads) | Same `@`-name and method in Word (agent mode), Cowork and the Copilot app; no custom instruction needed. Rated review in chat only; for a redline it points to the Cowork skill (instructions v0.3, owner decision 2026-11-12: skills first, see `copilot-app-components.md`) | Owner built three (Copilot Studio); Test 3 (v0.2 agent in the Copilot app) redlined loosely. OneDrive-file knowledge and v0.3 untested (A-1, A-2) |
 
 The base stays in use: in Word the agent can't edit the open document and blocks the Legal skills in its chat, so
 contracts still go through *Review contract* for an in-place redline.
@@ -121,7 +121,7 @@ tiers: `poc-e2e/tier-test-script.md`.
 
 **Individual advanced**
 - **A-1** Agent Builder agent with knowledge picked from OneDrive files (not uploaded): does it read the whole playbook?
-- **A-2** Instructions v0.2: in Cowork, automatic redline with the coloured summary; in Word, what happens.
+- **A-2** Instructions v0.3: the agent reviews in chat, makes no file, and points to `/nda-review` or `/legal-hold-review` when asked for a redline.
 - **A-3** Change the playbook file in OneDrive: does the agent use the new version without being rebuilt?
 
 **Team base (needs a second, non-owner test user)**

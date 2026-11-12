@@ -141,6 +141,24 @@ class AgentRecipeTests(unittest.TestCase):
         for key, a in pd.AGENTS.items():
             self.assertIn(a["knowledge"], read(os.path.join(ROOT, a["instructions"])), key)
 
+    def test_agents_review_in_chat_and_send_redlines_to_the_skill(self):
+        for key, a in pd.AGENTS.items():
+            with self.subTest(agent=key):
+                text = read(os.path.join(ROOT, a["instructions"]))
+                self.assertEqual(pd.recipe_problems(key, text), [])
+                self.assertTrue(os.path.isfile(os.path.join(ROOT, "practices", key, "skills", a["skill"], "SKILL.md")))
+                with tempfile.TemporaryDirectory() as tmp:
+                    paras = "\n".join(doc_text(pd.render_recipe(key, text, os.path.join(tmp, "r.docx"))))
+                self.assertIn(f"run /{a['skill']} in Cowork", paras)
+
+    def test_v02_style_instructions_that_build_a_redline_are_refused(self):
+        a = pd.AGENTS["nda"]
+        v02 = (f'Knowledge: "{a["knowledge"]}". Unless the user asks for a review only, create a redlined copy: '
+               'a new Word file named "<original name> - Spaarke redline.docx".')
+        problems = pd.recipe_problems("nda", v02)
+        self.assertTrue(any("build a redline itself" in p for p in problems), problems)
+        self.assertTrue(any("/nda-review" in p for p in problems), problems)
+
     def test_a_mismatched_knowledge_name_would_be_caught(self):
         a = pd.AGENTS["nda"]
         self.assertNotIn(a["knowledge"].replace("(agent knowledge)", "(readable)"),

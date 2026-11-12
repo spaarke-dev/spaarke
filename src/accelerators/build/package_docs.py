@@ -32,6 +32,7 @@ AGENTS = {
         "instructions": "practices/nda/agent/nda-review.instructions.md",
         "knowledge": "Spaarke NDA – Mutual v1.2 (agent knowledge).docx",
         "folder": "NDA",
+        "skill": "nda-review",
         "prompts": ["Review this NDA against the playbook in your knowledge.",
                     "Which topics in this NDA are red, and what would you change?"],
         "doc": "mutual NDA",
@@ -44,6 +45,7 @@ AGENTS = {
         "instructions": "practices/legal-hold/agent/legal-hold-review.instructions.md",
         "knowledge": "Spaarke Legal Hold Notice – Employee Custodians v1.0 (agent knowledge).docx",
         "folder": "Legal Hold Notice",
+        "skill": "legal-hold-review",
         "prompts": ["Review this legal hold notice against the playbook in your knowledge.",
                     "Is this hold notice ready to send? List what to fix first."],
         "doc": "legal hold notice",
@@ -335,6 +337,26 @@ def render_readme(out_path, version, created=None):
 
 # ---------------------------------------------------------------- agent recipes
 
+# Owner decision 2026-11-12: in the Copilot app, reviews with redlines run through the Cowork skills; the agents
+# are optional and review in chat only. Test 3 showed an agent asked to build a redline follows that loosely.
+AGENT_MAKES_FILES = re.compile(r"create (?:a|the) redlined copy|Spaarke redline\.docx|tracked change \(insertion",
+                               re.IGNORECASE)
+
+
+def recipe_problems(key, instructions_text):
+    """Why these agent instructions break the skills-first rule; empty when they are fine."""
+    a = AGENTS[key]
+    problems = []
+    if a["knowledge"] not in instructions_text:
+        problems.append(f"instructions do not name the knowledge file {a['knowledge']!r}")
+    if f"/{a['skill']}" not in instructions_text:
+        problems.append(f"instructions do not point to the /{a['skill']} skill for redlines")
+    m = AGENT_MAKES_FILES.search(instructions_text)
+    if m:
+        problems.append(f"instructions tell the agent to build a redline itself ({m.group(0)!r})")
+    return problems
+
+
 def render_recipe(key, instructions_text, out_path, created=None):
     a = AGENTS[key]
     d = new_document(f"Agent recipe – {a['name']}", "Agent Builder recipe", created)
@@ -342,6 +364,9 @@ def render_recipe(key, instructions_text, out_path, created=None):
     d.add_paragraph("Build this agent yourself in Agent Builder, about five minutes. It is optional: the base "
                     "package works without it. The agent reads the playbook from your own OneDrive; nothing is "
                     "uploaded.")
+    d.add_paragraph(f"The agent reviews in chat and answers questions about the playbook. It does not build "
+                    f"redlined files: for a redlined copy, run /{a['skill']} in Cowork, which shows its edit plan "
+                    f"and builds checked redlines after you approve.")
     d.add_heading("Name", level=2)
     d.add_paragraph(a["name"])
     d.add_heading("Description", level=2)

@@ -13,7 +13,7 @@ Design: `notes/accelerator-components-by-surface.md`. Layout and archive: `onedr
 |---|---|
 | `SRM-1110-A` | `Cowork/Playbooks/Review method/Spaarke Review Method.docx` (the real one) |
 | `SRM-DECOY-1` | the decoy copy (G-1, G-2 only) |
-| `NDAR-1110-A` / `LHR-1110-A` | the NDA / Legal Hold Review agents (v0.2 instructions) |
+| `NDAR-1112-A` / `LHR-1112-A` | the NDA / Legal Hold Review agents (v0.3 instructions: review in chat, redlines through the skill). `NDAR-1110-A` / `LHR-1110-A` = the old v0.2 agents |
 
 Test documents (from the test zip): `Spaarke Test Documents/Brightwater Mutual NDA.docx` (contract) and
 `Harbor Point – Legal Hold Notice (draft A).docx` (non-contract). **Before any test that edits, save a copy**
@@ -279,16 +279,19 @@ in it: the shaded summary table on page 1, tracked changes, comments starting wi
 **Record:** whether Agent Builder accepts the OneDrive file as knowledge; the topic count (expected 24 and 13);
 any missing topics. If Agent Builder only offers upload, say so and upload instead.
 
-## A-2. The v0.2 instructions: review plus automatic redlined copy
+## A-2. The v0.3 instructions: review in chat, redlines through the skill
 
-1. **Cowork:** new chat, open the Brightwater NDA, add **Spaarke NDA Review** (the new Agent Builder agent), type
-   *Review this NDA.* Don't ask for a redline.
-2. **Word desktop:** a copy of the Brightwater NDA, agent mode, `@Spaarke NDA Review` *Review this NDA.*
-3. Repeat 1 with **Spaarke Legal Hold Review** on draft A.
+Owner decision 2026-11-12: skills first (`notes/copilot-app-components.md`). Rebuild both agents from the new
+recipes first (paste the new instructions over the old ones).
 
-**Record:** the code (`NDAR-1110-A` / `LHR-1110-A`), whether the rating cells start with 🟢/🟡/🔴, and whether a
-`… - Spaarke redline.docx` was created **without being asked** (Cowork), with the shaded summary page. In Word,
-what the agent does about the redline (expected: says it can't create files and lists the edits).
+1. **Copilot app:** new chat, `@Spaarke NDA Review`, attach a fresh copy of the Brightwater NDA, type *Review this NDA.*
+   Then type *Apply these changes to the Word file.*
+2. **Cowork:** new chat with a fresh copy, type `/nda-review`. Approve the plan.
+3. Repeat 1 with **Spaarke Legal Hold Review** on draft A, then `/legal-hold-review` in Cowork.
+
+**Record:** the code (`NDAR-1112-A` / `LHR-1112-A`); whether the rating cells start with 🟢/🟡/🔴; whether the
+agent declined to edit and named the skill (expected), or changed a file (fail). From step 2: whether the plan
+table and the redline files came from one request with one approval.
 
 ## A-3. Does a playbook change reach the agent without rebuilding it?
 

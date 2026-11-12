@@ -189,8 +189,11 @@ def build_individual_base(out, nda_skills, work):
         text = read(os.path.join(ROOT, a["instructions"])).rstrip("\n") + "\n"
         if os.path.basename(a["knowledge"]).replace(" (agent knowledge).docx", "") != stems[key]:
             raise GateFailure(f"recipe {key}: knowledge file {a['knowledge']!r} does not match playbook {stems[key]!r}")
-        if a["knowledge"] not in text:
-            raise GateFailure(f"recipe {key}: instructions do not name the knowledge file {a['knowledge']!r}")
+        problems = docs.recipe_problems(key, text)
+        if problems:
+            raise GateFailure(f"recipe {key}: " + "; ".join(problems))
+        if not os.path.isfile(os.path.join(ROOT, "practices", key, "skills", a["skill"], "SKILL.md")):
+            raise GateFailure(f"recipe {key}: the skill it points to, {a['skill']}, does not exist")
         docs.render_recipe(key, text, os.path.join(sh, a["file"]))
 
     log("[4/5] package gates")
