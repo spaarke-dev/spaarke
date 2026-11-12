@@ -320,3 +320,43 @@ uac-r2 re-checked fix round 3 (`9e398e23e3..a7dc4c5276`) and the 084f role diff 
   - Send uac-r2 a notice before and after the dev role apply.
   - After the AFTER notice, uac-r2 re-runs its SecureChild `-Verify`.
   - 112 step 2 and step 5 now say so, and step 5 also deploys `sprk_recordprocedures`.
+
+## 084e: design approved by ontology-r1 (2026-11-12), with binding changes
+
+Design sent 2026-11-12 (the pure function `RulePrecedence.Resolve<T>(precedence, versions, rankOf, statesCap, valid)` → `PrecedenceResult<T>(ProcedureRank? Top, Outcomes, Displacing)`, with outcomes `Applies` / `DisplacedOutright` / `CapDisplaced`). The evaluator and 084's rules-in-force read call it; ProcedureResolver's episode filter becomes one internal static helper. ontology-r1 approved it, binding the following.
+
+**O-1. `valid` stays lazy, in today's order.** An eager `valid` is an F1 behaviour change, because `HandlerAccepts` is not pure: on a refusal it logs, records telemetry and adds a reported `handlerRefusals` entry.
+- Resolve walks ranks in descending order and calls `valid` only until it finds Top. It never calls `valid` or `statesCap` on a version ranked below Top.
+- Computing "Displacing at Top" may call `valid` on the other versions at Top. They Apply and are judged in the loop anyway, and the result is cached. Say so in a comment.
+- Must-fire parity case: under Replace, a valid higher version plus a lower version whose handler throws `BillingRuleRefusedException`. Refusals, telemetry calls and the handler-invocation count are identical before and after. The handler is never invoked for the lower version.
+
+**O-2. Outcomes are a list in input order:** `IReadOnlyList<(T Version, PrecedenceOutcome Outcome)> Outcomes`, never a dictionary keyed by T. `BillingRuleCandidate` is a record with value equality, so duplicate keys would throw, and a list keeps today's iteration order.
+
+**O-3. Ranks and ties use ProcedureRank's own equality and CompareTo** (`GroupBy(rankOf)` + `OrderByDescending(g.Key)`). A tie is an equal ProcedureRank. No new comparer and no Scope term.
+
+**O-4. Grouping by PrecedenceKey stays the caller's job.** Resolve carries the comment "versions MUST be one PrecedenceKey group of one subject". The read tests that a late-fee cap and an administrative-fee cap never mark each other.
+
+**O-5. Parity fixtures.** In each, `displacedOutright`, `capDisplaced`, `subjectsByVersion` and refusals are identical before and after:
+- Replace: a valid higher version displaces the lower one.
+- Replace: the higher version is refused by its handler, so the lower one stays in force.
+- Replace: the higher version is downgraded, so the lower one stays in force.
+- Split: a capped higher version makes the lower one CapDisplaced (the lower one is still judged).
+- Split: a capless higher version leaves the lower cap in force (must-not-fire).
+- A tie at Top: both Apply, and both are in Displacing.
+- Additive: nothing is displaced.
+- A legacy policy version is in the group (R6).
+- The O-1 case.
+
+Existing evaluator tests stay unchanged.
+
+**O-6. The read.**
+- `valid` = gate-accepted (`TryPrepareBillingRule`) and not downgraded.
+- No rank loop of its own.
+- A mark only on an outcome other than Applies; "by" = every Displacing version at Top; the R4 note text.
+- Must-not-fire cases:
+  - a tie with Top gets no mark;
+  - a version above Top that is not displacing (capless under Split, or downgraded) gets no mark.
+
+**O-7. Episode helper.** One boundary test: the helper and `RecordProcedureReadService.CurrentEpisodeVersion` agree when a version's CreatedOn equals the Exclude row's CreatedOn ("on or after" means it is included). ProcedureResolver's existing tests stay unchanged.
+
+**Before merge:** the Services/Signals/** diff and the parity test go to ontology-r1.
