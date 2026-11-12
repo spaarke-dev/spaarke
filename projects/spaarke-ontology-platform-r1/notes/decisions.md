@@ -780,3 +780,8 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Q5 other pickers:** the same rule applies; update Rule Review, the ontology rule wizard and SPE Admin (task 187).
 - **Q6 contacts:** person lookups show active contacts only.
 - **Effect:** tasks 179–182 lose their owner-question gates; 183 turns templates/AI on; new tasks 186 (Send Email dialog templates + AI) and 187 (other pickers); 185 deploys them all.
+
+## D-220 — Templates and AI drafting: not Daily Briefing; yes the Office add-in, after coordination (owner, 2026-11-12, asked directly; task 186 inventory)
+
+- **Daily Briefing:** no (its composer stays without templates, AI draft or upload).
+- **Office add-in email** (`office-addins/shared/taskpane/components/views/EmailView.tsx`, `SendEmailPane`): yes, "but this needs to be coordinated with word-add-in-r1 and uac-r2 because there may be technical limits". AI draft and template render are BFF calls the add-in can make; template listing reads `template` rows through `Xrm.WebApi`, which the add-in lacks. Questions sent to both sessions 2026-11-12; task 189 waits on their answers.
