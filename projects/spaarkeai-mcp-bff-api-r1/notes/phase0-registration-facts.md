@@ -59,3 +59,9 @@ Created by the main session with the Azure CLI under the owner's signed-in accou
 - **First T5 attempt, 2026-11-10 (the owner's admin account, confirmed 2026-11-10, so a pre-check only; T5 requires a licensed non-admin user):** Copilot answered "couldn't call spike_whoami" because it searched the connected **Dataverse** MCP instead of Spaarke MCP. No `tools/call` reached the BFF. Retry with Spaarke MCP explicitly selected in the chat, as a non-admin user.
 
 ## (d) T5 — pending
+
+- **Licence is a precondition (2026-11-12).** Microsoft's federated-connector overview (updated 2026-10-19) lists "The user has a Microsoft 365 Copilot license" among the conditions for seeing a connector; unlicensed Copilot Chat ("Basic") users do not get it. Web vs desktop is not a factor. The test account `demo@demo.spaarke.com` (same tenant, no admin roles checked for the other seat holder only) first had Business Premium only and could not see Spaarke MCP. The owner then assigned Microsoft 365 Business Standard with Copilot **and** the Copilot Business add-on; Graph `licenseDetails` shows every `M365_COPILOT_*` plan `Success` in both SKUs (one is redundant). The web client still labelled the account "M365 Copilot (Basic)" right after the change.
+- **Dev BFF `6dbe69b9e2`, App Insights 2026-11-12:**
+  - 14:59Z: client `CopilotConnector 1.0.0`, authenticated (aud = BFF app): `initialize` 200, `notifications/initialized` 202, GET 405, `tools/list` 200. Matches the owner connecting Spaarke MCP under Connections.
+  - 15:42Z: client **`Sydney 1.0.0`** (the Copilot Chat runtime), authenticated: `tools/list` 200. First time the chat runtime itself loaded our tools. No `tools/call` yet.
+  - **Telemetry caveat:** the 15:42Z request row carries `microsoft.sample_rate` 25 (the 14:59Z rows 100). Absence of a `tools/call` row is not proof it did not happen; the chat reply from `spike_whoami` is the primary evidence.
