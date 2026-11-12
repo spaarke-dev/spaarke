@@ -536,6 +536,27 @@ Owner choice: (1) separate batches for secure invoices, owned by the Secure Reco
 **Fails without it**: a rare double delivery over a source changed without a new row version is undone instead of retried.
 
 ---
+### ISS-014 — Invoice Review does not notice the firm gate opening while firmNeeded
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-11-12 |
+| **Source** | ebilling-r1 task 095d0 review (Codex P2 fix `546296be5c` covers only the re-read case) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2730 |
+
+**Description**: while the approval state's `firmNeeded` is true, the Invoice Review page disables header Correct, Add line, the By-rule suggestions, the bulk Accept / Disallow and Accept all clean, and the wizard's Adjust step (EB-D-185 / EB-D-197). When the firm is set elsewhere (another tab, another user, the From-email firm step), the page does not notice: it stays disabled until something re-reads the review (an action, the Pending-line poll, which runs only while a line is Processing, or a reload). Nothing polls while `firmNeeded`.
+
+**Entry-points**: `src/solutions/InvoiceReview/src/components/InvoiceReviewPage.tsx` (the F-1 poll effect ~line 371; the `firmNeeded` prop ~226 / 292 and its uses ~759–897); the approval state's `firmNeeded` (`InvoiceApprovalService`, `GET .../invoices/{id}/approval`); `notes/095d0-firm-gate.md`.
+
+**Suggested fix**: while `firmNeeded` is true, re-read the approval state at the Pending-line interval and stop when it clears (then re-read the review once); or a Refresh action next to the firm-needed message.
+
+**Fails without it**: a reviewer waiting on the page after the firm was set sees every line action disabled until a reload. No wrong data: the server refuses writes with 409 `firm_missing` while the gate is closed.
+
+**Estimated effort**: 2–4 hours including a jest test. **Blockers**: none.
+
+---
 ### ISS-001 — InvoiceLiveFactResolver reads non-existent sprk_invoice columns (sprk_total, sprk_status)
 
 | Field | Value |

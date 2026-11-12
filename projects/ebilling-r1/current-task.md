@@ -13,10 +13,11 @@
 >   ArchTests 2505/2505; agreement and procedure tests 551/551. Publishing (`publish-dataverse-solutions-manifest.yml`, `publish: true`, from master) is the owner's step after merge. provisioning-r1 is waiting for the published version, because its H7b S26 stops new runs until 166's lock ships.
 > - **#2725 (profile matched by name):** our three scripts are fixed locally as `f7240c397b` (not pushed). The other 15 sites belong to uac-r2 and R3.
 > - **Next:**
->   - The owner's go to apply 080's column on dev, then tell uac-r2.
->   - Push and open the PR for 1.3.1.0 plus #2725; the owner publishes after merge.
->   - The ontology K4 comment fix.
->   - Deferred issue: Invoice Review doesn't poll while `firmNeeded`.
+>   - (Done) 080's column was already on dev; nothing to apply.
+>   - (Done) 1.3.1.0 + #2725 merged as #2727, `2b79f06b4b`. The owner publishes 1.3.1.0 (`publish-dataverse-solutions-manifest.yml`, publish: true); then tell provisioning-r1.
+>   - (Done 2026-11-12) The ontology K4 comment fix, `584f6cc34d`; ontology-r1 closed K4.
+>   - (Done 2026-11-12) Deferred issue filed as ISS-014, #2730.
+>   - ontology-r1 note (not blocking): the O3 pin names the Ontology Service role file; check which role supplies the spend reader's Decision Record read since DEF-059 and repoint or explain (answer ontology-r1 by message, no membership detail in the repo).
 >   - 084 via task-execute (split per EB-D-217: 084 → 084a → 084b → 084c; 084d after 084 and 084b, opus, its design to ontology-r1 first).
 > - **word-add-in-r1** is owed the dev sha `6dbe69b9e2` (a superset of `b3ca99cad5`); it was not reachable on 2026-11-12, so send it when it is.
 
