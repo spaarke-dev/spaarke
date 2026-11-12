@@ -152,7 +152,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
 
         // Task 191c: the External-team pass's own heartbeat line (counts only; row ids are in the per-table report lines).
         _logger.Log(
-            external.Ok ? LogLevel.Information : LogLevel.Warning,
+            external.Clean ? LogLevel.Information : LogLevel.Warning,
             "[EXTERNAL-TEAM-SHARE] heartbeat status={Status} writes={Writes} reownWrites={ReownWrites} carriedIn={CarriedIn} " +
             "listed={Listed} swept={Swept} examined={Examined} undecided={Undecided} teamGrants={TeamGrants} teamChanges={TeamChanges} " +
             "teamRevokes={TeamRevokes} flaggedUserRevokes={FlaggedUserRevokes} reowns={Reowns} written={Written} reowned={Reowned} " +
@@ -203,7 +203,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                         (direct.Failure is null ? "" : $" ({direct.Failure})"))
                   + (external.Ok
                       ? ""
-                      : $"; External team: {external.Status}, {external.Carried} row(s) carried" +
+                      : $"; External team: {external.Status}, {external.Failures} row(s) carried for a fault, {external.Carried} carried in all" +
                         (external.Failure is null ? "" : $" ({external.Failure})"))
                   + "; the next run retries.",
             ProcessedItems: result.ChildrenInScope + direct.Examined + external.Examined,
@@ -265,6 +265,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                     externalTeamOwned = external.ExternalTeamOwned,
                     directOwnedFlaggedShares = external.DirectOwnedFlaggedShares,
                     carried = external.Carried,
+                    failures = external.Failures,
+                    leftToSweep = external.LeftToSweep,
                     sweepPassComplete = external.SweepPassComplete,
                     failure = external.Failure,
                 },

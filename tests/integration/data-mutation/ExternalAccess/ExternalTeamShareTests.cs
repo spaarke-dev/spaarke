@@ -139,8 +139,30 @@ public class ExternalTeamShareTests
         private readonly Dictionary<(string, Guid), (ExternalVisibilityVerdict Verdict, ExternalVisibilityReason Reason)> _verdicts = new();
         private readonly Dictionary<(string, Guid), (string Table, Guid Id)[]> _roots = new();
         private readonly HashSet<(string, Guid)> _rootsUnknown = new();
+        private readonly HashSet<(string, Guid)> _effectivelySecure = new();
+        private readonly HashSet<(string, Guid)> _faultsWhenAsked = new();
 
         public bool Faults { get; set; }
+
+        /// <summary>Runs on every decision (a test that cancels mid-pass).</summary>
+        public Action? OnDecide { get; set; }
+
+        /// <summary>The number of decisions asked for (one per call).</summary>
+        public int Calls { get; private set; }
+
+        /// <summary>The root's effective flags say Secure (Secure inherited from an ancestor root, the stored flag still false).</summary>
+        public FakePredicate SecureByInheritance(string table, Guid id)
+        {
+            _effectivelySecure.Add((table, id));
+            return this;
+        }
+
+        /// <summary>Any decision whose batch includes this row faults (one bad row).</summary>
+        public FakePredicate FaultsWhenAsked(string table, Guid id)
+        {
+            _faultsWhenAsked.Add((table, id));
+            return this;
+        }
 
         public List<(string Table, Guid Id)> Asked { get; } = new();
 
@@ -169,7 +191,10 @@ public class ExternalTeamShareTests
         public Task<ExternalVisibilityResult> Decide(IReadOnlyCollection<(string Table, Guid Id)> rows, CancellationToken ct)
         {
             Asked.AddRange(rows);
-            if (Faults)
+            Calls++;
+            OnDecide?.Invoke();
+            ct.ThrowIfCancellationRequested();
+            if (Faults || rows.Any(r => _faultsWhenAsked.Contains(r)))
                 throw new InvalidOperationException("Test: the predicate's reads faulted.");
 
             var decided = new Dictionary<ExternalVisibility.Node, ExternalVisibilityDecision>();
@@ -189,7 +214,12 @@ public class ExternalTeamShareTests
                 reached[node] = roots.Select(r => new ExternalVisibility.Node(r.Table, r.Id)).ToArray();
             }
 
-            return Task.FromResult(new ExternalVisibilityResult(decided, faulted: false) { RootsReached = reached });
+            return Task.FromResult(new ExternalVisibilityResult(decided, faulted: false)
+            {
+                RootsReached = reached,
+                EffectivelySecureRoots = reached.Values.SelectMany(r => r)
+                    .Where(n => _effectivelySecure.Contains((n.Table, n.Id))).ToHashSet(),
+            });
         }
     }
 
@@ -662,10 +692,10 @@ public class ExternalTeamShareTests
             .Modified("sprk_document", Doc, since.AddMinutes(-1));
 
         var (rows, capped) = await Engine(world, Config()).ListModifiedSinceAsync(
-            new Dictionary<string, DateTime>(), since, perTableCap: 1, CancellationToken.None);
+            new Dictionary<string, (DateTime At, Guid AfterId)>(), since, perTableCap: 1, CancellationToken.None);
 
         rows.Should().Equal(("sprk_event", EventA));
-        capped.Should().ContainKey("sprk_event").WhoseValue.Should().Be(since.AddMinutes(1));
+        capped.Should().ContainKey("sprk_event").WhoseValue.Should().Be((since.AddMinutes(1), EventA));
     }
 
     [Fact]
@@ -822,7 +852,8 @@ public class ExternalTeamShareTests
         _predicate.Says("sprk_event", EventA, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed);
 
         var first = await job.ExecuteAsync(RunContext(), CancellationToken.None);
-        first.Success.Should().BeFalse("an undecided row is left out of line until it is decided");
+        first.Success.Should().BeTrue("a carried row is not a failure: an undecidable row would hold the job incomplete for ever (F3)");
+        first.ResultJson.Should().Contain("\"status\":\"incomplete\"");
         _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().BeNull();
 
         _predicate.Says("sprk_event", EventA, ExternalVisibilityVerdict.Visible, ExternalVisibilityReason.Visible);
@@ -831,5 +862,269 @@ public class ExternalTeamShareTests
 
         _predicate.Asked.Should().Contain(("sprk_event", EventA), "the carried row is decided again");
         _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().Be(ReadAppendTo);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Adversarial pass 1 (F1–F4): each test fails without its fix
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task F1_AVisibleChildUnderARootSecureByInheritance_IsNeverTeamShared_AndLosesAnExistingTeamShare()
+    {
+        // The matter's stored flag is false, but an ancestor made it Secure (the inheritance job has not stamped it yet).
+        _shares.Seed("sprk_event", EventB, Team(ExternalTeam), ReadAppendTo);
+        _predicate.SecureByInheritance("sprk_matter", Matter);
+
+        var result = await Engine(World(), Config()).SyncRowsAsync(
+            [("sprk_event", EventA), ("sprk_event", EventB)], "test", CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().BeNull();
+        _shares.MaskOf("sprk_event", EventB, Team(ExternalTeam)).Should().BeNull();
+        result.SecureFamily.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task F2_OneRowThatFaultsThePredicate_DoesNotHoldBackTheRest_AndIsCarried()
+    {
+        _predicate.FaultsWhenAsked("sprk_event", EventB);
+
+        var result = await Engine(World(), Config()).SyncRowsAsync(
+            [("sprk_event", EventA), ("sprk_event", EventB)], "test", CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().Be(ReadAppendTo, "the batch is bisected");
+        _shares.MaskOf("sprk_event", EventB, Team(ExternalTeam)).Should().BeNull();
+        result.Carried.Should().Contain(("sprk_event", EventB)).And.NotContain(("sprk_event", EventA));
+    }
+
+    [Fact]
+    public async Task F2_ASystemicFault_StopsSplittingAfterTheFirstSplit()
+    {
+        _predicate.Faults = true;
+        var world = World();
+        var rows = Enumerable.Range(1, 64).Select(i => ("sprk_event", new Guid(0x7e000000 + i, 0x0191, 0x4c00, new byte[8]))).ToList();
+        foreach (var (table, id) in rows)
+            world.OrdinaryChild(table, id, ("sprk_regardingmatter", "sprk_matter", Matter));
+
+        var result = await Engine(world, Config()).SyncRowsAsync(rows, "test", CancellationToken.None);
+
+        _predicate.Calls.Should().Be(3, "the whole batch and both halves faulted: not one bad row");
+        result.Carried.Should().Contain(rows);
+    }
+
+    [Fact]
+    public async Task F2_BisectingStopsAtTheCap()
+    {
+        var world = World();
+        var rows = Enumerable.Range(1, 64).Select(i => ("sprk_event", new Guid(0x7e000000 + i, 0x0191, 0x4c00, new byte[8]))).ToList();
+        foreach (var (table, id) in rows)
+            world.OrdinaryChild(table, id, ("sprk_regardingmatter", "sprk_matter", Matter));
+        foreach (var (table, id) in rows.Where((_, i) => i < 32 && i % 4 == 0))
+            _predicate.FaultsWhenAsked(table, id); // eight bad rows, all in the first half
+
+        var result = await Engine(world, Config()).SyncRowsAsync(rows, "test", CancellationToken.None);
+
+        _predicate.Calls.Should().Be(ExternalTeamShareSynchronizer.MaxDecideCalls);
+        result.Carried.Should().Contain(rows.Where((_, i) => i < 32 && i % 4 == 0));
+    }
+
+    [Fact]
+    public async Task F2_OneRowThatFaultsThePredicate_CostsOnlyItsOwnFlaggedUserShares()
+    {
+        _shares.Seed("sprk_event", EventA, User(Partner), Read);
+        _shares.Seed("sprk_event", EventB, User(Partner), Read);
+        _predicate.FaultsWhenAsked("sprk_event", EventB);
+
+        var result = await Engine(World(), Config()).SyncRowsAsync(
+            [("sprk_event", EventA), ("sprk_event", EventB)], "test", CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", EventA, User(Partner)).Should().Be(Read, "EventA is decided Visible once the batch is bisected");
+        _shares.MaskOf("sprk_event", EventB, User(Partner)).Should().BeNull("an undecided row fails closed (task constraint)");
+        result.Carried.Should().Contain(("sprk_event", EventB));
+    }
+
+    [Fact]
+    public async Task F2_ListModifiedSince_AdvancesThroughMoreRowsThanTheCapAtOneInstant()
+    {
+        var at = new DateTime(2026, 11, 1, 0, 0, 0, DateTimeKind.Utc);
+        var world = World()
+            .Modified("sprk_event", EventA, at)
+            .Modified("sprk_event", EventB, at)
+            .Modified("sprk_event", EventOwnedByPartner, at);
+        var engine = Engine(world, Config());
+
+        var seen = new List<(string Table, Guid Id)>();
+        var held = new Dictionary<string, (DateTime At, Guid AfterId)>();
+        for (var run = 0; run < 4; run++)
+        {
+            var (rows, capped) = await engine.ListModifiedSinceAsync(held, at, perTableCap: 1, CancellationToken.None);
+            seen.AddRange(rows.Where(r => r.Table == "sprk_event"));
+            held = capped.TryGetValue("sprk_event", out var position)
+                ? new Dictionary<string, (DateTime At, Guid AfterId)> { ["sprk_event"] = position }
+                : new Dictionary<string, (DateTime At, Guid AfterId)>();
+        }
+
+        seen.Should().Contain([("sprk_event", EventA), ("sprk_event", EventB), ("sprk_event", EventOwnedByPartner)]);
+        seen.Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task F3_ARowWhoseRootCannotBeRead_IsCarried()
+    {
+        var world = World().FailingQueriesOf("sprk_matter");
+
+        var result = await Engine(world, Config()).SyncRowsAsync([("sprk_event", EventA)], "test", CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().BeNull();
+        result.Carried.Should().Contain(("sprk_event", EventA));
+    }
+
+    [Fact]
+    public async Task F3_AnInlineHook_StopsAtItsCap_AndHandsTheWalkBack()
+    {
+        var result = await Engine(World(), Config()).SyncFamilyAsync(
+            "sprk_matter", Matter, "test", CancellationToken.None, maxRows: 1);
+
+        result.Status.Should().Be(ExternalTeamShareStatus.Incomplete);
+        result.WalkAgain.Should().Equal(("sprk_matter", Matter));
+        result.Carried.Should().NotContain(("sprk_matter", Matter));
+    }
+
+    [Fact]
+    public async Task F3_ARowCarriedForTooManyRuns_IsLeftToTheSweep()
+    {
+        var (job, _) = Job(Config());
+        _predicate.Says("sprk_event", EventA, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed);
+
+        for (var run = 0; run <= SecureChildShareReconciliationJob.MaxExternalCarriedRuns; run++)
+            await job.ExecuteAsync(RunContext(), CancellationToken.None);
+        _predicate.Asked.Clear();
+        await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        _predicate.Asked.Should().NotContain(("sprk_event", EventA));
+    }
+
+    [Fact]
+    public async Task F3_TheMirror_AsksThePredicateOnceForAllItsSecureChildren()
+    {
+        var world = MirrorWorld()
+            .SecureChild("sprk_document", SecureDoc2, ("sprk_project", "sprk_project", SecureProject));
+        _shares.Seed("sprk_project", SecureProject, User(Partner), Read);
+
+        await Mirror(world, Config()).ReconcileAllAsync(CancellationToken.None);
+
+        _predicate.Calls.Should().Be(1);
+        _shares.MaskOf("sprk_document", SecureDoc2, User(Partner)).Should().Be(Read);
+    }
+
+    private static readonly Guid SecureDoc2 = Guid.Parse("e7800000-0191-4c00-8000-000000000003");
+
+    [Fact]
+    public async Task Reown_AnAnswerOfTheSecureTeam_IsRefused_AndCarried()
+    {
+        var world = World().Add("sprk_event", EventOwnedByPartnerUnderSecure,
+            ("owninguser", new EntityReference("systemuser", Partner)),
+            ("sprk_regardingmatter", new EntityReference("sprk_matter", SecureMatter)));
+        _predicate.RootsOf("sprk_event", EventOwnedByPartnerUnderSecure, ("sprk_matter", SecureMatter));
+
+        var result = await Engine(world, Config(reown: true)).SyncRowsAsync(
+            [("sprk_event", EventOwnedByPartnerUnderSecure)], "test", CancellationToken.None);
+
+        world.OwnerWrites.Should().BeEmpty("moving a row into isolation is the secure reconciler's job");
+        result.Carried.Should().Contain(("sprk_event", EventOwnedByPartnerUnderSecure));
+    }
+
+    private static readonly Guid EventOwnedByPartnerUnderSecure = Guid.Parse("e7200000-0191-4c00-8000-000000000009");
+
+    // ── The L1 hooks (F3: untested before) ──────────────────────────────────────────────────────────────────────
+
+    private SecureChildReconciler Reconciler(SecureChildShareWorld world, IConfiguration configuration) =>
+        SecureChildShareWorld.ReconcilerOver(() => world, _shares, null!, externalTeam: Engine(world, configuration));
+
+    [Fact]
+    public async Task Hook_AReFile_BringsTheReFiledRowsTeamShareIntoLine_WithTheWritesOn()
+    {
+        var world = World();
+
+        await Reconciler(world, Config()).AfterRefileAsync("sprk_event", EventA, () => Task.FromResult(false), CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().Be(ReadAppendTo);
+    }
+
+    [Fact]
+    public async Task Hook_AReFile_WritesNothing_WithTheWritesOff()
+    {
+        var world = World();
+
+        await Reconciler(world, Config(writes: false)).AfterRefileAsync("sprk_event", EventA, () => Task.FromResult(false), CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Hook_ASecureTransition_RevokesTheTeamShareAcrossTheFamily()
+    {
+        var world = World();
+        _shares.Seed("sprk_event", EventA, Team(ExternalTeam), ReadAppendTo);
+        _predicate.SecureByInheritance("sprk_matter", Matter);
+
+        await Reconciler(world, Config()).ReconcileAsync(
+            "sprk_matter", Matter, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Provisioning, CancellationToken.None);
+
+        _shares.MaskOf("sprk_event", EventA, Team(ExternalTeam)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Hook_ACancelledReFile_DoesNotThrowFromTheTeamShareStep()
+    {
+        var world = World();
+        using var cancelled = new CancellationTokenSource();
+        _predicate.OnDecide = () => cancelled.Cancel();
+
+        var refile = () => Reconciler(world, Config()).AfterRefileAsync(
+            "sprk_event", EventA, () => Task.FromResult(false), cancelled.Token);
+
+        await refile.Should().NotThrowAsync<OperationCanceledException>();
+    }
+
+    // ── Adversarial pass 2 ─────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task P2F2_AWriteThatDoesNotReadBack_FailsTheJob_AnUndecidedRowDoesNot()
+    {
+        var (job, _) = Job(Config());
+        _shares.IgnoreWrites = true;
+
+        var run = await job.ExecuteAsync(RunContext(), CancellationToken.None);
+
+        run.Success.Should().BeFalse("a share that did not read back is a fault, not an answer");
+        run.ResultJson.Should().MatchRegex("\"failures\":[1-9]");
+    }
+
+    [Fact]
+    public async Task P2F2_ARowCarriedOnlyForAnUndecidedAnswer_CountsNoFailure()
+    {
+        _predicate.Says("sprk_event", EventA, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed);
+
+        var result = await Engine(World(), Config()).SyncRowsAsync([("sprk_event", EventA)], "test", CancellationToken.None);
+
+        result.Carried.Should().Contain(("sprk_event", EventA));
+        result.Failures.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task P2F1_AFamilyLargerThanOnePass_IsBroughtIntoLineInFull()
+    {
+        var world = World();
+        var events = Enumerable.Range(1, ExternalTeamShareSynchronizer.MaxFamilyRows + 5)
+            .Select(i => new Guid(0x7f000000 + i, 0x0191, 0x4c00, new byte[8])).ToList();
+        foreach (var id in events)
+            world.OrdinaryChild("sprk_event", id, ("sprk_regardingmatter", "sprk_matter", Matter));
+
+        var result = await Engine(world, Config(writes: false)).SyncFamilyAsync("sprk_matter", Matter, "test", CancellationToken.None);
+
+        result.Status.Should().NotBe(ExternalTeamShareStatus.Failed);
+        result.WalkAgain.Should().BeEmpty("the walk collected every row");
+        result.Examined.Should().BeGreaterThan(ExternalTeamShareSynchronizer.MaxFamilyRows);
+        result.Tables.Single(t => t.Table == "sprk_event").TeamGrants.Should().BeGreaterThan(ExternalTeamShareSynchronizer.MaxFamilyRows);
     }
 }

@@ -313,7 +313,7 @@ public sealed class RestrictedExternalShareRemover
 
         try
         {
-            var result = await engine.SyncFamilyAsync(logical, recordId, "restricted", ct).ConfigureAwait(false);
+            var result = await engine.SyncFamilyAsync(logical, recordId, "restricted", ct, ExternalTeamShareSynchronizer.MaxInlineFamilyRows).ConfigureAwait(false);
             if (result.Status is ExternalTeamShareStatus.Failed or ExternalTeamShareStatus.Incomplete)
             {
                 _logger.LogWarning(

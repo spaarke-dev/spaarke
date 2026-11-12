@@ -538,7 +538,7 @@ internal sealed class OwnershipDirectory
 
         IEnumerable<Entity> rows = query.EntityName switch
         {
-            "systemuser" => UsersMatching(conditions),
+            "systemuser" => UsersMatching(conditions, query.ColumnSet),
             "team" => _teams
                 .Where(t => Matches(conditions, "teamid", t.TeamId)
                             && Matches(conditions, "businessunitid", t.BusinessUnit)
@@ -578,7 +578,7 @@ internal sealed class OwnershipDirectory
         return RecordsMatching(query.EntityName, conditions);
     }
 
-    private IEnumerable<Entity> UsersMatching(IReadOnlyDictionary<string, object> conditions)
+    private IEnumerable<Entity> UsersMatching(IReadOnlyDictionary<string, object> conditions, ColumnSet columns)
     {
         // The KEY condition (systemuserid or azureactivedirectoryobjectid) plus, optionally, isdisabled (issue #1576),
         // which Dataverse evaluates against the row like any column. Anything else is not a query this fake answers.
@@ -593,7 +593,9 @@ internal sealed class OwnershipDirectory
                 {
                     ["businessunitid"] = new EntityReference("businessunit", u.BusinessUnit),
                 };
-                if (_externalFlags.TryGetValue(u.SystemUserId, out var flagged))
+                // Only when asked for, as Dataverse answers: a resolver that forgot the column reads it blank (not flagged).
+                if ((columns.AllColumns || columns.Columns.Contains("sprk_isexternal", StringComparer.OrdinalIgnoreCase))
+                    && _externalFlags.TryGetValue(u.SystemUserId, out var flagged))
                     row["sprk_isexternal"] = flagged;
                 return row;
             });

@@ -607,7 +607,7 @@ public sealed class SecureChildReconciler
 
     /// <summary>
     /// Task 191c (L1): the External Collaborators team's shares on a row and everything filed under it, now. Never throws
-    /// (cancellation aside): a fault is logged and the two-minute share job re-decides the same rows. Nothing when the engine is
+    /// (cancellation included, so the caller's next step runs): a fault is logged and the two-minute share job re-decides the same rows. Nothing when the engine is
     /// not composed or its writes are off.
     /// </summary>
     private async Task SyncExternalTeamFamilyAsync(string table, Guid id, string trigger, CancellationToken ct)
@@ -618,14 +618,14 @@ public sealed class SecureChildReconciler
 
         try
         {
-            var result = await engine.SyncFamilyAsync(table, id, trigger, ct).ConfigureAwait(false);
+            var result = await engine.SyncFamilyAsync(table, id, trigger, ct, ExternalTeamShareSynchronizer.MaxInlineFamilyRows).ConfigureAwait(false);
             if (result.Status is ExternalTeamShareStatus.Failed or ExternalTeamShareStatus.Incomplete)
             {
                 _logger.LogWarning("[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares are " +
                     "{Status} ({Detail}); the two-minute share job finishes them.", table, id, trigger, result.Status, result.Detail);
             }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        catch (Exception ex) // never throws, not even for cancellation: the caller's next step (the gate) must run (F4)
         {
             _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} ({Trigger}): the External Collaborators team's shares could " +
                 "not be updated; the two-minute share job finishes them.", table, id, trigger);

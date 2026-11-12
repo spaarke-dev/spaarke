@@ -159,7 +159,11 @@ internal static class ExternalVisibility
                 decided.Values.Count(d => d.Verdict == ExternalVisibilityVerdict.Hidden),
                 decided.Values.Count(d => d.Verdict == ExternalVisibilityVerdict.Undecided),
                 ExternalVisibilityResult.Summary(decided.Values));
-            return new ExternalVisibilityResult(decided, faulted: false) { RootsReached = run.RootsReached };
+            return new ExternalVisibilityResult(decided, faulted: false)
+            {
+                RootsReached = run.RootsReached,
+                EffectivelySecureRoots = run.EffectivelySecureRoots,
+            };
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -290,6 +294,10 @@ internal static class ExternalVisibility
         /// keep a secure family out (the External-team share); empty until <see cref="DecideAsync"/> has walked.</summary>
         internal IReadOnlyDictionary<Node, IReadOnlyCollection<Node>> RootsReached { get; private set; } =
             new Dictionary<Node, IReadOnlyCollection<Node>>();
+
+        /// <summary>uac-r2 191c: the reached roots whose EFFECTIVE flags (<see cref="Readers.RootFlags"/>: Secure through filing)
+        /// say Secure, or could not be read — the roots of a secure family, whatever the root's own stored flag says yet.</summary>
+        internal HashSet<Node> EffectivelySecureRoots { get; } = new();
 
         /// <summary>One row's parents, queued (or decided: a root, an undecidable parent).</summary>
         private async Task ExpandAsync(State state, List<State> next)
@@ -473,6 +481,8 @@ internal static class ExternalVisibility
                 var flags = await readers.RootFlags(group.Key, ids, ct).ConfigureAwait(false);
                 foreach (var node in group)
                 {
+                    if (!flags.TryGetValue(node.Id, out var secureCheck) || secureCheck.IsUnreadable || secureCheck.IsSecure)
+                        EffectivelySecureRoots.Add(node);
                     if (!flags.TryGetValue(node.Id, out var f) || f.IsUnreadable)
                         Set(node, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.RootUnreadable);
                     else if (f.IsRestricted)
@@ -714,6 +724,37 @@ internal sealed class ExternalVisibilityResult
     /// <summary>uac-r2 191c: set by <see cref="ExternalVisibility.DecideAsync"/> on a decision that did not fault.</summary>
     internal IReadOnlyDictionary<ExternalVisibility.Node, IReadOnlyCollection<ExternalVisibility.Node>> RootsReached { get; init; } =
         new Dictionary<ExternalVisibility.Node, IReadOnlyCollection<ExternalVisibility.Node>>();
+
+    /// <summary>uac-r2 191c: the reached roots whose effective flags say Secure (Secure through filing) or could not be read.</summary>
+    internal IReadOnlySet<ExternalVisibility.Node> EffectivelySecureRoots { get; init; } = new HashSet<ExternalVisibility.Node>();
+
+    /// <summary>uac-r2 191c: whether a reached root of the row is effectively Secure (or unreadable); <c>true</c> when the roots
+    /// are not known (fail closed).</summary>
+    internal bool ReachesEffectivelySecureRoot(string table, Guid id) =>
+        RootsOf(table, id) is not { } roots || roots.Any(r => EffectivelySecureRoots.Contains(new ExternalVisibility.Node(r.Table, r.Id)));
+
+    /// <summary>uac-r2 191c: one answer from several that did not fault (disjoint batches of one pass, asked separately).</summary>
+    internal static ExternalVisibilityResult Merge(IReadOnlyList<ExternalVisibilityResult> parts)
+    {
+        if (parts.Any(p => p.Faulted))
+            throw new ArgumentException("Only answers that did not fault are merged.", nameof(parts));
+        if (parts.Count == 1)
+            return parts[0];
+
+        var decided = new Dictionary<ExternalVisibility.Node, ExternalVisibilityDecision>();
+        var roots = new Dictionary<ExternalVisibility.Node, IReadOnlyCollection<ExternalVisibility.Node>>();
+        var secure = new HashSet<ExternalVisibility.Node>();
+        foreach (var part in parts)
+        {
+            foreach (var (node, decision) in part._decided)
+                decided[node] = decision;
+            foreach (var (node, reached) in part.RootsReached)
+                roots[node] = reached;
+            secure.UnionWith(part.EffectivelySecureRoots);
+        }
+
+        return new ExternalVisibilityResult(decided, faulted: false) { RootsReached = roots, EffectivelySecureRoots = secure };
+    }
 
     /// <summary>The not-visible count per reason code (one log line; codes and counts only).</summary>
     internal static string Summary(IEnumerable<ExternalVisibilityDecision> decisions) =>

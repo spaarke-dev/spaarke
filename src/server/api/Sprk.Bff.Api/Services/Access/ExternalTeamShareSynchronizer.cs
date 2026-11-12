@@ -106,6 +106,56 @@ public sealed record ExternalTeamShareResult(ExternalTeamShareStatus Status, str
     /// <summary>Rows to look at again next run: a read or write failed, or the predicate could not decide them.</summary>
     public IReadOnlyList<(string Table, Guid Id)> Carried { get; init; } = [];
 
+    /// <summary>Changed rows whose family walk stopped short (too many rows, or a read fault): walked again next run (F2).</summary>
+    public IReadOnlyList<(string Table, Guid Id)> WalkAgain { get; init; } = [];
+
+    /// <summary>Rows carried for a FAULT (a read, write or read-back failed, a flagged-user revoke was withheld, a re-own was
+    /// refused) rather than for an Undecided answer: the job is not successful while any remain (pass-2 F2).</summary>
+    public int Failures { get; init; }
+
+    /// <summary>One result from the passes of one call (disjoint rows): the worst status, the sums, the tables merged.</summary>
+    internal static ExternalTeamShareResult Combine(IReadOnlyList<ExternalTeamShareResult> parts)
+    {
+        if (parts.Count == 0)
+            return Nothing;
+        if (parts.Count == 1)
+            return parts[0];
+
+        var status = parts.Any(p => p.Status == ExternalTeamShareStatus.Failed) ? ExternalTeamShareStatus.Failed
+            : parts.Any(p => p.Status == ExternalTeamShareStatus.Incomplete) ? ExternalTeamShareStatus.Incomplete
+            : parts.Any(p => p.Status == ExternalTeamShareStatus.Completed) ? ExternalTeamShareStatus.Completed
+            : ExternalTeamShareStatus.NotApplicable;
+        var details = parts.Select(p => p.Detail).Where(d => d is not null && IsReal(d)).Distinct().ToList();
+        return new ExternalTeamShareResult(status, details.Count == 0 ? null : string.Join("; ", details))
+        {
+            WritesEnabled = parts.Any(p => p.WritesEnabled),
+            ReownWritesEnabled = parts.Any(p => p.ReownWritesEnabled),
+            Examined = parts.Sum(p => p.Examined),
+            Shareable = parts.Sum(p => p.Shareable),
+            Undecided = parts.Sum(p => p.Undecided),
+            SecureFamily = parts.Sum(p => p.SecureFamily),
+            Written = parts.Sum(p => p.Written),
+            Reowned = parts.Sum(p => p.Reowned),
+            ExternalTeamOwned = parts.Sum(p => p.ExternalTeamOwned),
+            FlaggedRevokesWithheld = parts.Sum(p => p.FlaggedRevokesWithheld),
+            DirectOwnedFlaggedShares = parts.Sum(p => p.DirectOwnedFlaggedShares),
+            Failures = parts.Sum(p => p.Failures),
+            Tables = parts.SelectMany(p => p.Tables)
+                .GroupBy(t => t.Table, StringComparer.Ordinal)
+                .OrderBy(g => g.Key, StringComparer.Ordinal)
+                .Select(g => new ExternalTeamShareTableReport(
+                    g.Key, g.Sum(t => t.TeamGrants), g.Sum(t => t.TeamChanges), g.Sum(t => t.TeamRevokes),
+                    g.Sum(t => t.FlaggedUserRevokes), g.Sum(t => t.Reowns),
+                    g.SelectMany(t => t.GrantRows).Take(ExternalTeamShareSynchronizer.ReportIdsPerTable).ToArray(),
+                    g.SelectMany(t => t.RevokeRows).Take(ExternalTeamShareSynchronizer.ReportIdsPerTable).ToArray()))
+                .ToList(),
+            Carried = parts.SelectMany(p => p.Carried).Distinct().ToList(),
+            WalkAgain = parts.SelectMany(p => p.WalkAgain).Distinct().ToList(),
+        };
+
+        static bool IsReal(string? detail) => detail != Nothing.Detail;
+    }
+
     /// <summary>True when nothing was left out of line.</summary>
     public bool IsComplete => Status is ExternalTeamShareStatus.Completed or ExternalTeamShareStatus.NotApplicable;
 
@@ -183,6 +233,10 @@ public sealed class ExternalTeamShareSynchronizer
     private const string IsSecureColumn = "sprk_issecure";
     private const string IsExternalColumn = "sprk_isexternal";
     private const string ModifiedOnColumn = "modifiedon";
+    private const string VersionNumberColumn = "versionnumber";
+
+    /// <summary>The most predicate calls one pass makes while bisecting a faulted decision (F2).</summary>
+    internal const int MaxDecideCalls = 16;
 
     /// <summary>The tables partners file under: the role grants AppendTo there (design §3.2; config lineage entries with AppendTo).</summary>
     internal static readonly IReadOnlySet<string> FilingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -195,20 +249,16 @@ public sealed class ExternalTeamShareSynchronizer
     /// config "never"): hard-deny and communication-content tables (the predicate hides them anyway) and the invoice family
     /// (Q6 = a: invoices reach flagged users through the SPA firm route only).
     /// </summary>
-    internal static readonly IReadOnlySet<string> NeverSharedTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "sprk_procedureassignment", "sprk_storedfile", "sprk_ruleset", "sprk_policy", "sprk_policyversion",
-        "sprk_emailartifact", "sprk_attachmentartifact", "sprk_emailreviewlog",
-        "sprk_invoice", "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_invoicecorrection", "sprk_externalidentifier",
-        "sprk_billingevent",
-    };
-
-    /// <summary>The communication tables whose unfiled rows keep their creator (task 146 E1): never re-owned when unfiled.</summary>
-    private static readonly IReadOnlySet<string> KeepCreatorWhenUnfiled = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "sprk_communication", "sprk_communicationattachment", "sprk_communicationparticipant", "sprk_communicationthread",
-        "sprk_emailartifact", "sprk_attachmentartifact", "sprk_emailreviewlog",
-    };
+    internal static readonly IReadOnlySet<string> NeverSharedTables = new HashSet<string>(
+        // The communication-content tables come from the lineage registry's markers (task 191b: one list, never restated).
+        SecureChildLineage.NeverExternalTables.Where(t => SecureChildLineage.IsRoot(t) || SecureChildLineage.IsChild(t))
+            .Concat(
+            [
+                "sprk_procedureassignment", "sprk_storedfile", "sprk_ruleset", "sprk_policy", "sprk_policyversion",
+                "sprk_invoice", "sprk_invoicesubmission", "sprk_invoiceapproval", "sprk_invoicecorrection", "sprk_externalidentifier",
+                "sprk_billingevent",
+            ]),
+        StringComparer.OrdinalIgnoreCase);
 
     private readonly IGenericEntityService _dataverse;
     private readonly IDataverseRecordShareService _shares;
@@ -310,54 +360,71 @@ public sealed class ExternalTeamShareSynchronizer
     /// assignment's typed filing, a project's pair and a Signal's or Decision Record's core pair) into line. The L1 hook of the
     /// Restricted remover and of Make Secure / Unsecure. Never throws for a Dataverse fault.
     /// </summary>
-    public Task<ExternalTeamShareResult> SyncFamilyAsync(string rootTable, Guid rootId, string trigger, CancellationToken ct) =>
-        SyncFamiliesAsync([(rootTable, rootId)], trigger, ct);
+    public Task<ExternalTeamShareResult> SyncFamilyAsync(
+        string rootTable, Guid rootId, string trigger, CancellationToken ct, int maxRows = MaxWalkRows) =>
+        SyncFamiliesAsync([(rootTable, rootId)], trigger, ct, maxRows);
+
+    /// <summary>The most family rows an inline (L1) hook walks and brings into line before returning to its caller; a larger
+    /// family is the two-minute pass's, which lists the changed row (F3: a save is not held for a large family).</summary>
+    internal const int MaxInlineFamilyRows = 100;
+
+    /// <summary>The most rows one family walk collects (ids only); past it the changed rows are walked again, one by one, next
+    /// run (pass-2 F1).</summary>
+    internal const int MaxWalkRows = 50_000;
 
     /// <summary>
     /// Brings <paramref name="changed"/> and every row filed under each of them into line (the recent-changes reverse walk: a
     /// modified communication or thread reaches the documents derived from it and the records about it; a modified root reaches its
-    /// descendants). A walk past <see cref="MaxFamilyRows"/> is reported Incomplete and the changed rows are carried. Never throws
-    /// for a Dataverse fault.
+    /// descendants), in passes of <see cref="MaxFamilyRows"/> rows. At most <paramref name="maxRows"/> rows are walked: past
+    /// it (or when the walk's read faults) the result is Incomplete and the changed rows are returned to walk again
+    /// (<see cref="ExternalTeamShareResult.WalkAgain"/>). Never throws for a Dataverse fault.
     /// </summary>
     public async Task<ExternalTeamShareResult> SyncFamiliesAsync(
-        IReadOnlyCollection<(string Table, Guid Id)> changed, string trigger, CancellationToken ct)
+        IReadOnlyCollection<(string Table, Guid Id)> changed, string trigger, CancellationToken ct, int maxRows = MaxWalkRows)
     {
         ArgumentNullException.ThrowIfNull(changed);
         var start = Normalize(changed);
         if (start.Count == 0)
             return ExternalTeamShareResult.Nothing;
 
+        var walkCap = Math.Clamp(maxRows, 1, MaxWalkRows);
         IReadOnlyList<(string Table, Guid Id)> family;
         bool truncated;
         try
         {
-            (family, truncated) = await DescendantsAsync(start, ct).ConfigureAwait(false);
+            (family, truncated) = await DescendantsAsync(start, ct, walkCap).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "{Tag} the rows filed under {Count} changed row(s) could not be read ({Trigger}); only the changed " +
-                "rows themselves are brought into line, and they are carried.", LogTag, start.Count, trigger);
+                "rows themselves are brought into line, and they are walked again next run.", LogTag, start.Count, trigger);
             var own = await SyncRowsAsync(start, trigger, ct).ConfigureAwait(false);
-            return Incomplete(own, start, "the rows filed under a changed row could not be read");
+            return Incomplete(own, start, "the rows filed under a changed row could not be read", fault: true);
         }
 
-        var result = await SyncRowsAsync(start.Concat(family).ToList(), trigger, ct).ConfigureAwait(false);
+        // Every row walked is brought into line, in passes (the walk collects ids only), so a large family does not stop at
+        // the same rows every run.
+        var parts = new List<ExternalTeamShareResult>();
+        foreach (var pass in start.Concat(family).Chunk(MaxFamilyRows))
+            parts.Add(await SyncRowsAsync(pass, trigger, ct).ConfigureAwait(false));
+        var result = ExternalTeamShareResult.Combine(parts);
         if (!truncated)
             return result;
-        _logger.LogWarning("{Tag} the family walk from {Count} row(s) stopped at {Max} rows ({Trigger}); the rest wait for the sweep " +
-            "and the changed rows are carried.", LogTag, start.Count, MaxFamilyRows, trigger);
-        return Incomplete(result, start, $"the family walk stopped at {MaxFamilyRows} rows");
+        _logger.LogWarning("{Tag} the family walk from {Count} row(s) stopped at {Max} rows ({Trigger}); the rows walked were " +
+            "brought into line and the changed rows are walked again next run.", LogTag, start.Count, walkCap, trigger);
+        return Incomplete(result, start, $"the family walk stopped at {walkCap} rows", fault: false);
     }
 
     private static ExternalTeamShareResult Incomplete(
-        ExternalTeamShareResult result, IReadOnlyCollection<(string Table, Guid Id)> carry, string detail) =>
+        ExternalTeamShareResult result, IReadOnlyCollection<(string Table, Guid Id)> walkAgain, string detail, bool fault) =>
         result.Status == ExternalTeamShareStatus.Failed
-            ? result with { Carried = result.Carried.Concat(carry).Distinct().ToList() }
+            ? result with { WalkAgain = result.WalkAgain.Concat(walkAgain).Distinct().ToList() }
             : result with
             {
                 Status = ExternalTeamShareStatus.Incomplete,
                 Detail = result.Detail is null ? detail : $"{result.Detail}; {detail}",
-                Carried = result.Carried.Concat(carry).Distinct().ToList(),
+                WalkAgain = result.WalkAgain.Concat(walkAgain).Distinct().ToList(),
+                Failures = result.Failures + (fault ? walkAgain.Count : 0),
             };
 
     /// <summary>
@@ -403,30 +470,51 @@ public sealed class ExternalTeamShareSynchronizer
     }
 
     /// <summary>
-    /// The rows of every lineage table modified at or after <paramref name="sinceUtc"/>, oldest first, at most
-    /// <paramref name="perTableCap"/> per table, with the newest <c>modifiedon</c> seen per capped table (the caller holds that
-    /// table's watermark there). A read fault propagates.
+    /// The rows of every lineage table modified at or after <paramref name="defaultSinceUtc"/> (or, for a table held by an earlier
+    /// capped listing, after its held position), in (<c>modifiedon</c>, id) order, at most <paramref name="perTableCap"/> per
+    /// table, with the last position read per capped table (the caller holds that table there). The position is a key set
+    /// (<c>modifiedon</c>, id), so more than <paramref name="perTableCap"/> rows sharing one <c>modifiedon</c> (a bulk import)
+    /// still advance (F2). A read fault propagates.
     /// </summary>
-    internal async Task<(List<(string Table, Guid Id)> Rows, Dictionary<string, DateTime> CappedAt)> ListModifiedSinceAsync(
-        IReadOnlyDictionary<string, DateTime> sinceUtcByTable, DateTime defaultSinceUtc, int perTableCap, CancellationToken ct)
+    internal async Task<(List<(string Table, Guid Id)> Rows, Dictionary<string, (DateTime At, Guid AfterId)> CappedAt)> ListModifiedSinceAsync(
+        IReadOnlyDictionary<string, (DateTime At, Guid AfterId)> heldByTable, DateTime defaultSinceUtc, int perTableCap, CancellationToken ct)
     {
         var rows = new List<(string Table, Guid Id)>();
-        var capped = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        var capped = new Dictionary<string, (DateTime At, Guid AfterId)>(StringComparer.OrdinalIgnoreCase);
         foreach (var table in LineageTables)
         {
-            var since = sinceUtcByTable.TryGetValue(table, out var s) ? s : defaultSinceUtc;
             var query = new QueryExpression(table)
             {
                 ColumnSet = new ColumnSet(ModifiedOnColumn),
                 TopCount = perTableCap,
                 NoLock = true,
             };
-            query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, since);
+            if (heldByTable.TryGetValue(table, out var held))
+            {
+                // (modifiedon > At) OR (modifiedon = At AND id > AfterId)
+                var after = new FilterExpression(LogicalOperator.Or);
+                after.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterThan, held.At);
+                var sameInstant = new FilterExpression(LogicalOperator.And);
+                sameInstant.AddCondition(ModifiedOnColumn, ConditionOperator.Equal, held.At);
+                sameInstant.AddCondition(table + "id", ConditionOperator.GreaterThan, held.AfterId);
+                after.AddFilter(sameInstant);
+                query.Criteria.AddFilter(after);
+            }
+            else
+            {
+                query.Criteria.AddCondition(ModifiedOnColumn, ConditionOperator.GreaterEqual, defaultSinceUtc);
+            }
+
             query.AddOrder(ModifiedOnColumn, OrderType.Ascending);
+            query.AddOrder(table + "id", OrderType.Ascending);
             var found = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
             rows.AddRange(found.Where(e => e.Id != Guid.Empty).Select(e => (table, e.Id)));
             if (found.Count >= perTableCap && found[^1].GetAttributeValue<DateTime?>(ModifiedOnColumn) is { } last)
-                capped[table] = last;
+            {
+                capped[table] = (last, found[^1].Id);
+                _logger.LogWarning("{Tag} {Table}: {Cap} or more rows changed since the last run; the table is held at the last row " +
+                    "read and continues next run.", LogTag, table, perTableCap);
+            }
         }
 
         return (rows, capped);
@@ -476,7 +564,7 @@ public sealed class ExternalTeamShareSynchronizer
     /// <see cref="MaxFamilyRows"/> (truncated). A read fault propagates.
     /// </summary>
     internal async Task<(IReadOnlyList<(string Table, Guid Id)> Rows, bool Truncated)> DescendantsAsync(
-        IReadOnlyCollection<(string Table, Guid Id)> start, CancellationToken ct)
+        IReadOnlyCollection<(string Table, Guid Id)> start, CancellationToken ct, int maxRows = MaxFamilyRows)
     {
         var seen = new HashSet<(string Table, Guid Id)>(start);
         var found = new List<(string Table, Guid Id)>();
@@ -499,7 +587,7 @@ public sealed class ExternalTeamShareSynchronizer
                             continue;
                         next.Add((table, row.Id));
                         found.Add((table, row.Id));
-                        if (found.Count >= MaxFamilyRows)
+                        if (found.Count >= maxRows)
                             return (found, true);
                     }
                 }
@@ -595,6 +683,14 @@ public sealed class ExternalTeamShareSynchronizer
     private sealed class Pass(ExternalTeamShareSynchronizer owner, string trigger, CancellationToken ct)
     {
         private readonly HashSet<(string Table, Guid Id)> _carried = new();
+        private readonly HashSet<(string Table, Guid Id)> _faults = new();
+
+        /// <summary>Carries a row for a FAULT (counted in <see cref="ExternalTeamShareResult.Failures"/>).</summary>
+        private void Carry((string Table, Guid Id) row)
+        {
+            _carried.Add(row);
+            _faults.Add(row);
+        }
         private Guid? _secureTeam;
         private Guid? _externalTeam;
         private Guid? _directTeam;
@@ -642,15 +738,16 @@ public sealed class ExternalTeamShareSynchronizer
                 return Report([], 0, 0, 0, 0);
 
             // 2. The predicate, then the facts of every root a closure reached (a secure family is never team-shared).
-            var visibility = await owner.DecideAsync(present, ct).ConfigureAwait(false);
+            var (visibility, decideFaulted) = await DecideBisectingAsync(present).ConfigureAwait(false);
             var rootsNeeded = present
                 .SelectMany(r => visibility.RootsOf(r.Table, r.Id) ?? [])
                 .Where(r => !facts.ContainsKey(r))
                 .Distinct()
                 .ToList();
+            var rootReadFailed = new HashSet<(string, Guid)>();
             var rootFacts = rootsNeeded.Count == 0
                 ? new Dictionary<(string, Guid), Facts>()
-                : await ReadFactsAsync(rootsNeeded, carryFailures: false).ConfigureAwait(false);
+                : await ReadFactsAsync(rootsNeeded, carryFailures: false, failed: rootReadFailed).ConfigureAwait(false);
 
             // 3. The shares on every present row (a table whose read faults is carried, nothing written for it).
             var shares = await ReadSharesAsync(present).ConfigureAwait(false);
@@ -686,6 +783,12 @@ public sealed class ExternalTeamShareSynchronizer
                         "a row (census alarm; the re-own and placement steps are the owner's).", LogTag, row.Table, row.Id);
                 }
 
+                // A row whose decision still faulted after bisecting, or whose root could not be read, is carried (F2/F3). It
+                // fails closed below: no team grant, and an existing team or flagged-user share is revoked (task constraint).
+                if (decideFaulted.Contains(row)
+                    || (visibility.RootsOf(row.Table, row.Id) is { } reached && reached.Any(rootReadFailed.Contains)))
+                    Carry(row);
+
                 var decision = visibility.For(row.Table, row.Id);
                 var secure = InSecureFamily(row, fact, visibility, facts, rootFacts);
                 if (secure)
@@ -694,7 +797,7 @@ public sealed class ExternalTeamShareSynchronizer
                 {
                     undecided++;
                     if (IsTransient(decision.Reason))
-                        _carried.Add(row); // a read may answer next run; a structural one waits for a change or the sweep
+                        _carried.Add(row); // an Undecided answer, not a fault: a read may answer next run; a structural one waits for a change or the sweep
                 }
 
                 var rights = TeamRightsFor(row.Table);
@@ -715,7 +818,9 @@ public sealed class ExternalTeamShareSynchronizer
                 }
 
                 // Flagged users' per-user shares on a child the predicate does not show (roots are I-14's; Secure-team-owned rows
-                // the mirror's; Direct-team-owned rows task 198's writer's — reported, never fought).
+                // the mirror's; Direct-team-owned rows task 198's writer's — reported, never fought). Undecided revokes too, a
+                // transient one included (task constraint: fail closed); the bisecting decision keeps one faulting row from
+                // making the rest of its batch Undecided (F2).
                 if (!decision.IsVisible && !SecureChildLineage.IsRoot(row.Table) && !(_secureTeam is { } st && fact.OwningTeam == st))
                 {
                     var flaggedHolders = flags is null
@@ -724,7 +829,7 @@ public sealed class ExternalTeamShareSynchronizer
                                 && flags.TryGetValue(p.Principal.Id, out var flagged) && flagged)
                             .Select(p => p.Principal).Distinct().ToList();
                     if (flags is null && held.Any(p => p.Principal.Kind == DataversePrincipalKind.SystemUser && p.AccessRightsMask > 0))
-                        _carried.Add(row);
+                        Carry(row);
                     if (flaggedHolders.Count > 0)
                     {
                         if (_directTeam is { } dt && fact.OwningTeam == dt)
@@ -737,7 +842,7 @@ public sealed class ExternalTeamShareSynchronizer
                         else if (_directUnknown)
                         {
                             _withheld += flaggedHolders.Count;
-                            _carried.Add(row);
+                            Carry(row);
                         }
                         else
                         {
@@ -749,7 +854,7 @@ public sealed class ExternalTeamShareSynchronizer
                 if (flags is not null && fact.OwningUser is { } ownerUser && flags.TryGetValue(ownerUser, out var ownerFlagged) && ownerFlagged)
                     plan.ReownFrom = ownerUser;
                 else if (flags is null && fact.OwningUser is not null)
-                    _carried.Add(row);
+                    Carry(row);
 
                 if (plan.HasShareWrite || plan.ReownFrom is not null)
                     plans.Add(plan);
@@ -776,6 +881,10 @@ public sealed class ExternalTeamShareSynchronizer
                 return true;
             if (visibility.RootsOf(row.Table, row.Id) is not { } roots)
                 return true;
+            // Secure INHERITED from an ancestor root (a work assignment or project filed under a secure matter, before the
+            // inheritance job stamps it): the predicate's effective root flags, Secure folded from the ancestors (F1).
+            if (visibility.ReachesEffectivelySecureRoot(row.Table, row.Id))
+                return true;
             foreach (var root in roots)
             {
                 var rootFact = facts.TryGetValue(root, out var f) ? f : rootFacts.TryGetValue(root, out var r) ? r : null;
@@ -787,8 +896,57 @@ public sealed class ExternalTeamShareSynchronizer
             return false;
         }
 
+        /// <summary>
+        /// The predicate over <paramref name="rows"/>; a faulted decision is split in halves and asked again (at most
+        /// <see cref="MaxDecideCalls"/> calls), so one bad row does not leave the batch undecided. The rows still faulted are
+        /// returned (nothing is written for them; they are carried).
+        /// </summary>
+        private async Task<(ExternalVisibilityResult Result, HashSet<(string Table, Guid Id)> Faulted)> DecideBisectingAsync(
+            List<(string Table, Guid Id)> rows)
+        {
+            var parts = new List<ExternalVisibilityResult>();
+            var faulted = new HashSet<(string Table, Guid Id)>();
+            var queue = new Queue<List<(string Table, Guid Id)>>();
+            queue.Enqueue(rows);
+            var calls = 0;
+            while (queue.Count > 0)
+            {
+                var batch = queue.Dequeue();
+                // The whole batch and both its halves faulted: a systemic fault (a reader down), not one bad row; splitting
+                // further would only multiply the load (pass-2 K2).
+                if (calls >= MaxDecideCalls || (calls >= 3 && parts.Count == 0))
+                {
+                    faulted.UnionWith(batch);
+                    continue;
+                }
+
+                calls++;
+                var result = await owner.DecideAsync(batch, ct).ConfigureAwait(false);
+                if (!result.Faulted)
+                {
+                    parts.Add(result);
+                    continue;
+                }
+
+                if (batch.Count == 1)
+                {
+                    faulted.Add(batch[0]);
+                    continue;
+                }
+
+                var half = batch.Count / 2;
+                queue.Enqueue(batch.Take(half).ToList());
+                queue.Enqueue(batch.Skip(half).ToList());
+            }
+
+            if (faulted.Count > 0)
+                Log.LogWarning("{Tag} the visibility decision faulted for {Count} of {Rows} row(s) after {Calls} call(s) ({Trigger}); " +
+                    "no grant is made for them, an existing team or flagged-user share is revoked (fail closed), and they are carried.", LogTag, faulted.Count, rows.Count, calls, trigger);
+            return (ExternalVisibilityResult.Merge(parts), faulted);
+        }
+
         private async Task<Dictionary<(string, Guid), Facts>> ReadFactsAsync(
-            IReadOnlyCollection<(string Table, Guid Id)> rows, bool carryFailures = true)
+            IReadOnlyCollection<(string Table, Guid Id)> rows, bool carryFailures = true, HashSet<(string, Guid)>? failed = null)
         {
             var facts = new Dictionary<(string, Guid), Facts>();
             foreach (var group in rows.GroupBy(r => r.Table))
@@ -821,8 +979,11 @@ public sealed class ExternalTeamShareSynchronizer
                         if (carryFailures)
                         {
                             foreach (var id in chunk)
-                                _carried.Add((group.Key, id));
+                                Carry((group.Key, id));
                         }
+
+                        foreach (var id in chunk)
+                            failed?.Add((group.Key, id));
                     }
                 }
             }
@@ -846,7 +1007,7 @@ public sealed class ExternalTeamShareSynchronizer
                             if (read.TryGetValue(id, out var held))
                                 shares[(group.Key, id)] = held;
                             else
-                                _carried.Add((group.Key, id));
+                                Carry((group.Key, id));
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -854,7 +1015,7 @@ public sealed class ExternalTeamShareSynchronizer
                         Log.LogWarning(ex, "{Tag} the shares of {Count} {Table} row(s) could not be read ({Trigger}); nothing is written " +
                             "for them and they are carried.", LogTag, chunk.Length, group.Key, trigger);
                         foreach (var id in chunk)
-                            _carried.Add((group.Key, id));
+                            Carry((group.Key, id));
                     }
                 }
             }
@@ -896,7 +1057,7 @@ public sealed class ExternalTeamShareSynchronizer
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
                     Log.LogWarning(ex, "{Tag} a share write on {Table} {Id} failed ({Trigger}); it is carried.", LogTag, table, id, trigger);
-                    _carried.Add(plan.Row);
+                    Carry(plan.Row);
                 }
             }
 
@@ -916,7 +1077,7 @@ public sealed class ExternalTeamShareSynchronizer
                         Log.LogWarning(ex, "{Tag} the read-back of {Count} {Table} row(s) failed ({Trigger}); they are carried.",
                             LogTag, chunk.Length, group.Key, trigger);
                         foreach (var plan in chunk)
-                            _carried.Add(plan.Row);
+                            Carry(plan.Row);
                         continue;
                     }
 
@@ -933,7 +1094,7 @@ public sealed class ExternalTeamShareSynchronizer
                         {
                             Log.LogWarning("{Tag} {Table} {Id} did not read back as written ({Trigger}); it is carried.",
                                 LogTag, plan.Row.Table, plan.Row.Id, trigger);
-                            _carried.Add(plan.Row);
+                            Carry(plan.Row);
                             continue;
                         }
 
@@ -954,7 +1115,7 @@ public sealed class ExternalTeamShareSynchronizer
                 Log.LogWarning("{Tag} {Count} row(s) owned by a flagged user were not re-owned: no ownership resolver in this " +
                     "composition; they are carried.", LogTag, plans.Count);
                 foreach (var plan in plans)
-                    _carried.Add(plan.Row);
+                    Carry(plan.Row);
                 return;
             }
 
@@ -977,14 +1138,15 @@ public sealed class ExternalTeamShareSynchronizer
                     {
                         Log.LogWarning("{Tag} {Table} {Id} is owned by a flagged user, but its ownership question cannot be asked " +
                             "({Reason}); it is carried.", LogTag, table, id, question.Undetermined ?? question.NoCoreOwnerRule);
-                        _carried.Add(plan.Row);
+                        Carry(plan.Row);
                         continue;
                     }
 
-                    if (question.Context.Parents.Count == 0 && KeepCreatorWhenUnfiled.Contains(table))
+                    if (question.Context.Parents.Count == 0 && OwnedChildWrite.KeepsItsCreatorWhenUnfiled(table))
                     {
                         Log.LogWarning("{Tag} {Table} {Id} is an unfiled communication row owned by a flagged user; unfiled " +
                             "communications keep their creator (task 146 E1), so it is reported and not re-owned.", LogTag, table, id);
+                        // not carried: it stays its creator's until it is filed (the refile hook re-owns it then)
                         continue;
                     }
 
@@ -992,18 +1154,35 @@ public sealed class ExternalTeamShareSynchronizer
                     {
                         CallerSystemUserId = plan.ReownFrom,
                         WhenUnfiled = UnfiledOwnership.ActingUserTeam,
-                        ChildEntityLogicalName = table,
                     }, ct).ConfigureAwait(false);
-                    if (!resolution.IsOwned || resolution.OwningTeamId == _externalTeam)
+                    // Never the External team; never INTO isolation (a Secure answer is the secure reconciler's move, with its
+                    // mirror and its file relocation: SecureChildReconciler).
+                    if (!resolution.IsOwned || resolution.OwningTeamId == _externalTeam || resolution.IsSecureOwner
+                        || resolution.OwningTeamId == _secureTeam)
                     {
                         Log.LogWarning("{Tag} {Table} {Id} is owned by a flagged user and was not re-owned: {Outcome} ({Reason}); " +
                             "it is carried.", LogTag, table, id, resolution.Outcome,
-                            resolution.OwningTeamId == _externalTeam ? "the answer is the External Collaborators team" : resolution.Reason);
-                        _carried.Add(plan.Row);
+                            resolution.OwningTeamId == _externalTeam ? "the answer is the External Collaborators team"
+                            : resolution.IsSecureOwner || resolution.OwningTeamId == _secureTeam ? "the answer is the Secure Record owner team (the secure reconciler's)"
+                            : resolution.Reason);
+                        Carry(plan.Row);
                         continue;
                     }
 
-                    await owner._dataverse.UpdateAsync(table, id,
+                    // Conditional on the version read with the owner check (a concurrent re-file or re-own wins; it is carried).
+                    var version = row.RowVersion
+                        ?? (row.GetAttributeValue<long?>(VersionNumberColumn) is { } number
+                            ? number.ToString(CultureInfo.InvariantCulture)
+                            : null);
+                    if (version is null)
+                    {
+                        Log.LogWarning("{Tag} {Table} {Id} carries no row version, so its owner is not written; it is carried.",
+                            LogTag, table, id);
+                        Carry(plan.Row);
+                        continue;
+                    }
+
+                    await owner._dataverse.UpdateIfRowVersionMatchesAsync(table, id, version,
                         new Dictionary<string, object> { ["ownerid"] = new EntityReference("team", resolution.OwningTeamId!.Value) }, ct)
                         .ConfigureAwait(false);
                     var check = new QueryExpression(table) { ColumnSet = new ColumnSet(OwningTeamColumn), TopCount = 1, NoLock = true };
@@ -1012,7 +1191,7 @@ public sealed class ExternalTeamShareSynchronizer
                     if (written?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id != resolution.OwningTeamId)
                     {
                         Log.LogWarning("{Tag} {Table} {Id}'s re-own did not read back; it is carried.", LogTag, table, id);
-                        _carried.Add(plan.Row);
+                        Carry(plan.Row);
                         continue;
                     }
 
@@ -1021,7 +1200,7 @@ public sealed class ExternalTeamShareSynchronizer
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
                     Log.LogWarning(ex, "{Tag} the re-own of {Table} {Id} failed ({Trigger}); it is carried.", LogTag, table, id, trigger);
-                    _carried.Add(plan.Row);
+                    Carry(plan.Row);
                 }
             }
         }
@@ -1086,6 +1265,7 @@ public sealed class ExternalTeamShareSynchronizer
                 DirectOwnedFlaggedShares = _directOwnedFlagged,
                 Tables = tables,
                 Carried = carried,
+                Failures = _faults.Count,
             };
         }
     }

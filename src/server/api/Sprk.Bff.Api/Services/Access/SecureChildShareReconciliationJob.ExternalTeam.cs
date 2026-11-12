@@ -5,15 +5,29 @@ namespace Sprk.Bff.Api.Services.Access;
 
 public sealed partial class SecureChildShareReconciliationJob
 {
-    /// <summary>Task 191c: the most rows one recent-changes listing reads per lineage table; past it that table's watermark is
-    /// held at the newest row read.</summary>
+    /// <summary>Task 191c: the most rows one recent-changes listing reads per lineage table; past it that table is held at the
+    /// last (modifiedon, id) read and continues next run.</summary>
     internal const int MaxExternalListedPerTable = 500;
 
     /// <summary>Task 191c: the most rows carried between runs; past it the rest wait for the sweep (logged).</summary>
     internal const int MaxExternalCarried = 2000;
 
-    /// <summary>Task 191c: the catch-up sweep's rows per run.</summary>
+    /// <summary>Task 191c: how many consecutive runs a row is carried before it is left to the sweep (logged): a row that stays
+    /// undecidable is not retried every two minutes for ever.</summary>
+    internal const int MaxExternalCarriedRuns = 5;
+
+    /// <summary>Task 191c: how many runs a family walk that stopped short (too many rows, or a read fault) is walked again before
+    /// it is left to the sweep (logged).</summary>
+    internal const int MaxExternalWalkAttempts = 3;
+
+    /// <summary>Task 191c: the catch-up sweep's rows per page.</summary>
     internal const int ExternalSweepPageSize = 500;
+
+    /// <summary>Task 191c: the most sweep pages one run reads, within <see cref="ExternalSweepBudget"/>.</summary>
+    internal const int MaxExternalSweepPagesPerRun = 20;
+
+    /// <summary>Task 191c: the time one run spends on sweep pages (a page started inside it finishes).</summary>
+    internal static readonly TimeSpan ExternalSweepBudget = TimeSpan.FromSeconds(45);
 
     /// <summary>Task 191c (design §3.7): a full sweep starts at each instance start, then this long after the previous one
     /// started.</summary>
@@ -27,11 +41,13 @@ public sealed partial class SecureChildShareReconciliationJob
 
     private readonly object _externalGate = new();
     private DateTime? _externalSince;
-    private readonly Dictionary<string, DateTime> _externalHeld = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<(string Table, Guid Id)> _externalCarried = new();
+    private readonly Dictionary<string, (DateTime At, Guid AfterId)> _externalHeld = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(string Table, Guid Id), int> _externalCarried = new();
+    private readonly Dictionary<(string Table, Guid Id), int> _externalWalkAgain = new();
     private (string Table, Guid After)? _externalSweepCursor;
     private bool _externalSweepActive = true; // the instance-start sweep
     private DateTimeOffset? _externalSweepStartedAt;
+    private int _externalUnavailableLogged;
 
     /// <summary>What the External-team pass did in one run.</summary>
     internal sealed record ExternalTeamRun(string Status)
@@ -45,6 +61,7 @@ public sealed partial class SecureChildShareReconciliationJob
         public bool WritesEnabled { get; init; }
         public bool ReownWritesEnabled { get; init; }
         public int CarriedIn { get; init; }
+        public int WalkedAgain { get; init; }
         public int Listed { get; init; }
         public int Swept { get; init; }
         public int Examined { get; init; }
@@ -59,36 +76,54 @@ public sealed partial class SecureChildShareReconciliationJob
         public int ExternalTeamOwned { get; init; }
         public int DirectOwnedFlaggedShares { get; init; }
         public int Carried { get; init; }
+        public int Failures { get; init; }
+        public int LeftToSweep { get; init; }
         public bool SweepPassComplete { get; init; }
         public string? Failure { get; init; }
 
-        /// <summary>Nothing left out of line this run (or the pass is not composed in this host).</summary>
-        public bool Ok => Status is StatusOk or StatusUnavailable;
+        /// <summary>The pass ran without a failure: no listing or prerequisite failed and no row was carried for a fault (a
+        /// read, write or read-back failure, a withheld revoke). Rows carried only because the predicate answered Undecided are
+        /// not a failure: holding the job on them would make it permanently incomplete (pass-1 F3, pass-2 F2).</summary>
+        public bool Ok => Status is not (StatusFailed or StatusListingFailed) && Failures == 0;
+
+        /// <summary>Nothing was left out of line this run (or the pass is not composed in this host).</summary>
+        public bool Clean => Status is StatusOk or StatusUnavailable;
     }
 
     /// <summary>
-    /// Task 191c: carried rows, then every lineage row changed since this pass's watermark with everything filed under it (the
-    /// reverse walk: a communication or thread to the documents derived from it and the records about it, a root to its
-    /// descendants), then the next page of the catch-up sweep (at instance start, then hourly). Writes only what the engine's
-    /// settings allow (off by default: the plan is reported per table). Never throws for a Dataverse fault.
+    /// Task 191c: carried rows, family walks that stopped short, then every lineage row changed since this pass's watermark with
+    /// everything filed under it (the reverse walk: a communication or thread to the documents derived from it and the records
+    /// about it, a root to its descendants), then sweep pages within a time budget (at instance start, then hourly). Writes only
+    /// what the engine's settings allow (off by default: the plan is reported per table). Never throws for a Dataverse fault.
     /// </summary>
     private async Task<ExternalTeamRun> ReconcileExternalTeamAsync(
         IServiceProvider services, DateTimeOffset startedAt, Guid runId, CancellationToken ct)
     {
         var engine = services.GetService<ExternalTeamShareSynchronizer>();
         if (engine is null)
+        {
+            // Once per instance (F4): a host without the engine never brings the External team's shares into line.
+            if (Interlocked.Exchange(ref _externalUnavailableLogged, 1) == 0)
+            {
+                _logger.LogWarning("[EXTERNAL-TEAM-SHARE] run={RunId}: the External-team share engine is not composed in this host; " +
+                    "the External Collaborators team's shares are not brought into line here.", runId);
+            }
+
             return new ExternalTeamRun(ExternalTeamRun.StatusUnavailable);
+        }
 
         DateTime since;
-        Dictionary<string, DateTime> held;
-        List<(string Table, Guid Id)> carried;
+        Dictionary<string, (DateTime At, Guid AfterId)> held;
+        Dictionary<(string Table, Guid Id), int> carriedRuns;
+        Dictionary<(string Table, Guid Id), int> walkRuns;
         (string Table, Guid After)? cursor;
         bool sweep;
         lock (_externalGate)
         {
             since = _externalSince ?? (startedAt - ExternalInitialLookback).UtcDateTime;
-            held = new Dictionary<string, DateTime>(_externalHeld, StringComparer.OrdinalIgnoreCase);
-            carried = _externalCarried.ToList();
+            held = new Dictionary<string, (DateTime At, Guid AfterId)>(_externalHeld, StringComparer.OrdinalIgnoreCase);
+            carriedRuns = new Dictionary<(string Table, Guid Id), int>(_externalCarried);
+            walkRuns = new Dictionary<(string Table, Guid Id), int>(_externalWalkAgain);
             cursor = _externalSweepCursor;
             if (!_externalSweepActive && _externalSweepStartedAt is { } last && startedAt - last >= ExternalSweepInterval)
                 _externalSweepActive = true;
@@ -98,19 +133,19 @@ public sealed partial class SecureChildShareReconciliationJob
         }
 
         var results = new List<ExternalTeamShareResult>();
-        var stillCarried = new HashSet<(string Table, Guid Id)>();
         string? failure = null;
         var listingFailed = false;
 
         // 1. Carried rows (each brought into line on its own; no walk).
-        if (carried.Count > 0)
-        {
-            var result = await engine.SyncRowsAsync(carried, "carried", ct).ConfigureAwait(false);
-            results.Add(result);
-            stillCarried.UnionWith(result.Carried);
-        }
+        if (carriedRuns.Count > 0)
+            results.Add(await engine.SyncRowsAsync(carriedRuns.Keys.ToList(), "carried", ct).ConfigureAwait(false));
 
-        // 2. Recent changes and their families.
+        // 2. Family walks that stopped short last run, walked again.
+        //    One start per walk, so a large family does not stop the others at the same rows (pass-2 F1).
+        foreach (var start in walkRuns.Keys)
+            results.Add(await engine.SyncFamiliesAsync([start], "walk-again", ct).ConfigureAwait(false));
+
+        // 3. Recent changes and their families.
         var listed = 0;
         try
         {
@@ -118,7 +153,6 @@ public sealed partial class SecureChildShareReconciliationJob
             listed = rows.Count;
             var result = rows.Count == 0 ? ExternalTeamShareResult.Nothing : await engine.SyncFamiliesAsync(rows, "recent", ct).ConfigureAwait(false);
             results.Add(result);
-            stillCarried.UnionWith(result.Carried);
             if (result.Status != ExternalTeamShareStatus.Failed)
             {
                 lock (_externalGate)
@@ -138,20 +172,24 @@ public sealed partial class SecureChildShareReconciliationJob
                 "next run lists again.", runId);
         }
 
-        // 3. The catch-up sweep's next page.
+        // 4. The catch-up sweep: pages within the run's budget.
         var swept = 0;
         var sweepComplete = false;
         if (sweep)
         {
-            try
+            var sweepStarted = _timeProvider.GetTimestamp();
+            for (var page = 0; page < MaxExternalSweepPagesPerRun && _timeProvider.GetElapsedTime(sweepStarted) < ExternalSweepBudget; page++)
             {
-                var (page, next) = await engine.ListSweepPageAsync(cursor, ExternalSweepPageSize, ct).ConfigureAwait(false);
-                swept = page.Count;
-                var result = page.Count == 0 ? ExternalTeamShareResult.Nothing : await engine.SyncRowsAsync(page, "sweep", ct).ConfigureAwait(false);
-                results.Add(result);
-                stillCarried.UnionWith(result.Carried);
-                if (result.Status != ExternalTeamShareStatus.Failed)
+                try
                 {
+                    var (rows, next) = await engine.ListSweepPageAsync(cursor, ExternalSweepPageSize, ct).ConfigureAwait(false);
+                    swept += rows.Count;
+                    var result = rows.Count == 0 ? ExternalTeamShareResult.Nothing : await engine.SyncRowsAsync(rows, "sweep", ct).ConfigureAwait(false);
+                    results.Add(result);
+                    if (result.Status == ExternalTeamShareStatus.Failed)
+                        break; // the cursor is held: the page is read again next run
+
+                    cursor = next;
                     lock (_externalGate)
                     {
                         _externalSweepCursor = next;
@@ -161,27 +199,59 @@ public sealed partial class SecureChildShareReconciliationJob
                             sweepComplete = true;
                         }
                     }
+
+                    if (next is null)
+                        break;
                 }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                failure ??= "the sweep listing failed";
-                listingFailed = true;
-                _logger.LogWarning(ex, "[EXTERNAL-TEAM-SHARE] run={RunId}: the sweep listing failed; its cursor is held.", runId);
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    failure ??= "the sweep listing failed";
+                    listingFailed = true;
+                    _logger.LogWarning(ex, "[EXTERNAL-TEAM-SHARE] run={RunId}: the sweep listing failed; its cursor is held.", runId);
+                    break;
+                }
             }
         }
 
-        var kept = stillCarried.Take(MaxExternalCarried).ToList();
-        if (stillCarried.Count > kept.Count)
+        // 5. What is looked at again next run, with how many runs each has been: past the cap a row (or a walk) is left to the
+        //    sweep, which decides every row again.
+        var leftToSweep = 0;
+        var nextCarried = new Dictionary<(string Table, Guid Id), int>();
+        foreach (var row in results.SelectMany(r => r.Carried).Distinct())
         {
-            _logger.LogWarning("[EXTERNAL-TEAM-SHARE] run={RunId}: {Dropped} carried row(s) over the cap of {Cap} wait for the sweep.",
-                runId, stillCarried.Count - kept.Count, MaxExternalCarried);
+            var runs = (carriedRuns.TryGetValue(row, out var n) ? n : 0) + 1;
+            if (runs > MaxExternalCarriedRuns)
+                leftToSweep++;
+            else if (nextCarried.Count < MaxExternalCarried)
+                nextCarried[row] = runs;
+            else
+                leftToSweep++;
+        }
+
+        var nextWalk = new Dictionary<(string Table, Guid Id), int>();
+        foreach (var row in results.SelectMany(r => r.WalkAgain).Distinct())
+        {
+            var runs = (walkRuns.TryGetValue(row, out var n) ? n : 0) + 1;
+            if (runs > MaxExternalWalkAttempts || nextWalk.Count >= MaxExternalCarried)
+                leftToSweep++;
+            else
+                nextWalk[row] = runs;
+        }
+
+        if (leftToSweep > 0)
+        {
+            _logger.LogWarning("[EXTERNAL-TEAM-SHARE] run={RunId}: {Count} row(s) or walk(s) carried for {Runs} runs (or over the cap of " +
+                "{Cap}) are left to the hourly sweep.", runId, leftToSweep, MaxExternalCarriedRuns, MaxExternalCarried);
         }
 
         lock (_externalGate)
         {
             _externalCarried.Clear();
-            _externalCarried.UnionWith(kept);
+            foreach (var (row, runs) in nextCarried)
+                _externalCarried[row] = runs;
+            _externalWalkAgain.Clear();
+            foreach (var (row, runs) in nextWalk)
+                _externalWalkAgain[row] = runs;
         }
 
         var failed = results.Any(r => r.Status == ExternalTeamShareStatus.Failed);
@@ -189,12 +259,13 @@ public sealed partial class SecureChildShareReconciliationJob
         return new ExternalTeamRun(
             listingFailed ? ExternalTeamRun.StatusListingFailed
             : failed ? ExternalTeamRun.StatusFailed
-            : kept.Count > 0 ? ExternalTeamRun.StatusIncomplete
+            : nextCarried.Count > 0 || nextWalk.Count > 0 ? ExternalTeamRun.StatusIncomplete
             : ExternalTeamRun.StatusOk)
         {
             WritesEnabled = engine.WritesEnabled,
             ReownWritesEnabled = engine.ReownWritesEnabled,
-            CarriedIn = carried.Count,
+            CarriedIn = carriedRuns.Count,
+            WalkedAgain = walkRuns.Count,
             Listed = listed,
             Swept = swept,
             Examined = results.Sum(r => r.Examined),
@@ -208,7 +279,9 @@ public sealed partial class SecureChildShareReconciliationJob
             Reowned = results.Sum(r => r.Reowned),
             ExternalTeamOwned = results.Sum(r => r.ExternalTeamOwned),
             DirectOwnedFlaggedShares = results.Sum(r => r.DirectOwnedFlaggedShares),
-            Carried = kept.Count,
+            Carried = nextCarried.Count + nextWalk.Count,
+            Failures = results.Sum(r => r.Failures),
+            LeftToSweep = leftToSweep,
             SweepPassComplete = sweepComplete,
             Failure = failure,
         };

@@ -2441,6 +2441,11 @@ public sealed class SecureChildShareSynchronizer
         // the predicate's answer per child, read at most once per run.
         private readonly Dictionary<Guid, bool?> _externalFlags = new();
         private readonly Dictionary<RowRef, bool> _childVisible = new();
+        private readonly HashSet<RowRef> _childBatchAsked = new();
+
+        /// <summary>uac-r2 191c: the secure children asked about in one predicate call when the flagged filter first needs an
+        /// answer.</summary>
+        private const int ChildVisibilityBatch = 200;
 
         /// <summary>
         /// uac-r2 task 191c (#2179 design §3.4, §3.5, §3.8): the flagged-principal filter of the mirror. A system user whose stored
@@ -2501,6 +2506,28 @@ public sealed class SecureChildShareSynchronizer
 
             // Undecided until the predicate answers: nothing is added for a flagged or unverifiable user meanwhile.
             var decided = !(flagFault && addingFlagged.Count > 0);
+            if (!_childVisible.ContainsKey(child) && _childBatchAsked.Add(child))
+            {
+                // A child that needs an answer is asked about with the next secure children of this run not yet asked (at most
+                // ChildVisibilityBatch in one predicate call, F3 cost), so later children are usually answered already. A
+                // faulted batch is left to the per-child question below.
+                var batchRows = new List<(string Table, Guid Id)> { (child.Table, child.Id) };
+                foreach (var other in _secureChildren.Keys)
+                {
+                    if (batchRows.Count >= ChildVisibilityBatch)
+                        break;
+                    if (!_childVisible.ContainsKey(other) && _childBatchAsked.Add(other))
+                        batchRows.Add((other.Table, other.Id));
+                }
+
+                var batch = await external.DecideAsync(batchRows, _ct).ConfigureAwait(false);
+                if (!batch.Faulted)
+                {
+                    foreach (var (table, id) in batchRows)
+                        _childVisible[new RowRef(table, id)] = batch.IsVisible(table, id);
+                }
+            }
+
             if (!_childVisible.TryGetValue(child, out var visible))
             {
                 var answer = await external.DecideAsync([(child.Table, child.Id)], _ct).ConfigureAwait(false);
