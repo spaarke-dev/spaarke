@@ -5,7 +5,7 @@
 ## Status 2026-11-12 — read first
 - **Branch is current with master** as of merge `d269f0abe7` (1229 master commits, no conflicts), plus `c14e4bf3a4`, which re-records 5 decision baselines for master's per-step `warning` (`90e8571c20`, D-216; the only diff is one `"warning":null` per step). BFF build 0/0; ArchTests 2491/2491; filtered unit tests 5693/5693. The dev spike `755987b385` is unchanged (separate branch).
 - **Side PRs done:** #2714 (`a654da59c4`), #2720 (`8669da238d`), #2692 (`6607ac31c6`) merged to master. Main checkout's local `master` fast-forwarded by ref only (it is on `chore/review-quick-fixes`). `C:\wtpaths` removed. code-reuse-r1 told. #2684 and #1906 closed; #1717 still open.
-- **Dev deploy in progress (uac-r2, started 2026-11-12):** local, never-pushed merge of origin/master (`a654da59c4` or later) + spike `755987b385`. uac-r2 will report the deployed SHA and gates (including the anonymous `POST /mcp/legal-operations` 401). Record the SHA under Active Lanes when it arrives.
+- **Dev BFF now runs `6dbe69b9e2`** (2026-11-12, deployed by uac-r2): local, never-pushed merge of origin/master `a654da59c4` + spike `755987b385`; ledger count conflict resolved to 153 as before. Gates per uac-r2: build clean, ArchTests 2506/2506, /healthz 200, /ping 200, anonymous `POST /mcp/legal-operations` 401. Ready for T5.
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -37,7 +37,7 @@
 
 ## Active Lanes
 - None running. Runbook: `notes/drafts/connector-registration-runbook.md` (its step (b) says Mobile and desktop and no secret; that is **superseded**: Web platform plus a secret, see decisions 2026-11-08).
-- **Dev BFF ran `b3ca99cad5`** until uac-r2's 2026-11-12 redeploy (see Status above) (2026-11-11, deployed by uac-r2): a LOCAL, never-pushed merge of origin/master `ddae82fa90` + spike tip `755987b385` (unchanged). One conflict, the `RouteAuthorizationGuardTests.Ledger.cs` endpoint-file count, resolved to 153 (master 152 + the spike file). uac-r2 reports ArchTests 2431/2431, /healthz 200, anonymous MCP POST 401. Earlier the same day: `dc4f28ded8` (master `df93d2029c` + spike). Spike tip `755987b385` itself was first deployed 2026-11-10 by mcp-r1. **Standing rule (confirmed to uac-r2 2026-11-11):** every uac-r2 dev deploy is a local merge with the spike tip until we declare Phase 0 done. The spike stays off master: master→spike merges only; PR #2615 is a draft and is never merged.
+- **Dev BFF ran `b3ca99cad5`** until uac-r2's 2026-11-12 redeploy of `6dbe69b9e2` (see Status above) (2026-11-11, deployed by uac-r2): a LOCAL, never-pushed merge of origin/master `ddae82fa90` + spike tip `755987b385` (unchanged). One conflict, the `RouteAuthorizationGuardTests.Ledger.cs` endpoint-file count, resolved to 153 (master 152 + the spike file). uac-r2 reports ArchTests 2431/2431, /healthz 200, anonymous MCP POST 401. Earlier the same day: `dc4f28ded8` (master `df93d2029c` + spike). Spike tip `755987b385` itself was first deployed 2026-11-10 by mcp-r1. **Standing rule (confirmed to uac-r2 2026-11-11):** every uac-r2 dev deploy is a local merge with the spike tip until we declare Phase 0 done. The spike stays off master: master→spike merges only; PR #2615 is a draft and is never merged.
 
 ## Next Actions (after 002)
 1. 003: Phase 0 live tests (T0–T14, E1–E5) into `notes/phase0-results.md`. The size-test widgets (1/3/6 MB) are not built yet and would need a new spike SHA. Notify `uac-r2` before the window and when Phase 0 is done.
