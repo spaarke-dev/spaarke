@@ -360,3 +360,39 @@ Existing evaluator tests stay unchanged.
 **O-7. Episode helper.** One boundary test: the helper and `RecordProcedureReadService.CurrentEpisodeVersion` agree when a version's CreatedOn equals the Exclude row's CreatedOn ("on or after" means it is included). ProcedureResolver's existing tests stay unchanged.
 
 **Before merge:** the Services/Signals/** diff and the parity test go to ontology-r1.
+
+## 084e (built), branch `task/ebilling-084e` from `c528133c11`
+
+Commits: `539d467e40` parity tests (green on today's evaluator) → `6d0b1667f6` extraction → `3c2cccbad5` episode helper → `6c139c0d4d` the mark. Signals diff for ontology-r1: `git diff c528133c11 6c139c0d4d -- src/server/api/Sprk.Bff.Api/Services/Signals/`.
+
+**The function** (`Services/Signals/Billing/RulePrecedence.cs`):
+`public static PrecedenceResult<T> Resolve<T>(BillingRulePrecedence precedence, IReadOnlyList<T> versions, Func<T, ProcedureRank> rankOf, Func<T, bool> statesCap, Func<T, bool> valid)`
+→ `PrecedenceResult<T>(ProcedureRank? Top, IReadOnlyList<(T Version, PrecedenceOutcome Outcome)> Outcomes, IReadOnlyList<T> Displacing)`, outcomes `Applies` / `DisplacedOutright` / `CapDisplaced`. A version displaces when it is valid and (not Split, or it states a cap). The evaluator's step 4 now calls it and keeps its own loop for subjects, refusals and the cap-displaced set.
+
+**How O-1..O-7 are met**
+- O-1 (lazy valid): ranks descending, stop at the first rank with a displacing version; `valid`/`statesCap` never called below Top; every version at Top is asked once (cached by the evaluator). Tests: `RulePrecedenceParityTests.Replace_ValidHigher_LowerWhoseHandlerRefuses_IsNeverRun` (refusals, telemetry and handler-call count identical; handler never invoked for the lower version), `RulePrecedenceTests.BelowTop_IsNeverAsked_AndNothingIsAskedTwice`, `Split_CaplessHigher_LeavesTheLowerCap_AndIsNotAskedForValidity`.
+- O-2 (list in input order): `RulePrecedenceTests.Outcomes_AreInInputOrder_AndKeepDuplicates`.
+- O-3 (ProcedureRank equality/CompareTo, no new comparer): `GroupBy(rankOf)` + `OrderByDescending(g.Key)`; `RulePrecedenceTests.TieAtTop_BothApply_BothDisplace`.
+- O-4 (grouping is the caller's): the "one PrecedenceKey group of one subject" comment on Resolve; `RecordProcedureOutrankedContractTests.AddedFee_LateFeeAndAdminFee_AreSeparateKeys`.
+- O-5 (parity), all in `RulePrecedenceParityTests`: `Replace_ValidHigher_DisplacesTheLower`, `Replace_HigherRefusedByItsHandler_LowerStaysInForce`, `Replace_HigherDowngraded_LowerStaysInForce`, `Split_CappedHigher_LowerIsCapDisplaced_AndStillJudged`, `Split_CaplessHigher_LeavesTheLowerCapInForce`, `TieAtTop_BothApply_TheLowerIsDisplaced`, `Split_TieAtTop_WithALowerRefusingVersion_SameCountsAndRefusals`, `Additive_NothingIsDisplaced`, `LegacyVersion_IsInTheGroup_AndOutranksAProcedureRule`, plus the O-1 case. Existing evaluator and ProcedureResolver tests are byte-unchanged.
+- O-6 (the read), in `RecordProcedureOutrankedContractTests`: must-fire `Replace_ValidHigher_MarksTheLowerOutranked`, `Split_CappedHigher_MarksTheLowerCapOutranked`, `LegacyHigher_OutranksAProcedureRule_AndIsAsked`, `LegacyOutrankingRow_Unreadable_Is503`; must-not-fire `TieAtTop_ListsBoth_MarksNeither`, `GateRefusedHigher_LeavesTheLowerUnmarked`, `DowngradedHigher_LeavesTheLowerUnmarked`, `InvalidLegacyHigher_LeavesTheLowerUnmarked`, `Split_CaplessHigher_LeavesTheLowerCap`, `AboveTopNotDisplacing_GetsNoMark`, `Additive_MarksNothing`; plus `NoDisplacedWording_ReachesTheDto`, `ProceduresRoute_ReadsNoLegacyRules`. `valid` = gate-accepted (`TryPrepareBillingRule`) and not downgraded; the group is legacy rules (as the evaluator loads them) plus the resolver's on-date Procedure rules (R6); no rank loop of its own.
+- O-7 (episode helper): `ProcedureResolution.CurrentEpisodeVersions` (internal static) is used by `ProcedureResolver.RecordRuleVersionOn` and `RecordProcedureReadService.CurrentEpisodeVersion`. `RecordRuleEpisodeTests.VersionCreatedAtTheBoundary_IsInTheEpisode_InBothCallers`, `NoBoundary_EveryVersionCounts`, `KnownBoundary_NoVersionReachesIt_IsAFault`.
+
+**The mark.** `RuleMarkView` gains `Text`, `Note` and `By` (a list of `OutrankingRuleView`). Kinds `Outranked` ("Outranked by X") and `CapOutranked` ("Cap outranked by X"); several codes read "A and B" / "A, B and C". Note: "applies unless X is/are refused when an invoice is checked; a line can differ (dates, fallback)" (R4). Only the rules route reads legacy rules. EB-D-218: every candidate at rank ≥ Top is asked of the caller (policy, version, rule set; a legacy policy's versions; a Procedure and its versions); the three guards stay green with a new seed `outranked`. Exemptions, each naming segment and reason: `outranked/procedures/*` (the procedures list shows no rule), and `outranked/rules-in-force/LEGACY-CD-RATE` (below Top, so the read never consults it, per O-1).
+
+**Parity results.** The parity fixtures pass unchanged before and after the extraction. Seeding proofs (each reverted): without the mark, 7 fail; without exposing the deciding rows, 6 fail (including the GUID guard and the version-row guard); ignoring downgrades, 2 fail; `statesCap` always true plus legacy dropped from the group, 8 fail.
+
+**Build, tests, publish size**
+- BFF build: 0 warnings, 0 errors.
+- Tests (filters Procedure, InvoiceCompliance, Billing, RulePrecedence, RecordRuleEpisode): 3413 passed, 0 failed. RecordProcedure filter: 257 passed. ArchTests: 2513 passed, 0 failed.
+- Publish (Release, linux-x64, framework-dependent, `Compress-Archive -CompressionLevel Optimal`): fresh `origin/master` `76b2930961` 191 files, zip 42,034,770 B; branch head `6c139c0d4d` 191 files, zip 42,028,480 B. Delta about 0 MB (−6,290 B; master has later commits than this branch's base). No new package.
+
+**Deviations and known limits**
+- `InvoiceComplianceEvaluator.IsSystemRule` and `DisallowedConsequenceType` went from private to internal so the read applies the same filters (bodies unchanged).
+- The read builds its gate snapshot the way the evaluator's step 2 does. So a gate-refused rule logs an error and counts `billing.rule.invalid` on each rules read as well as each invoice check (known limit, K-class: telemetry volume only).
+- `HandlerAccepts` call order may differ from today only for a Split tie at Top against a lower version. The call set, refusals and counts are identical (`Split_TieAtTop_WithALowerRefusingVersion_SameCountsAndRefusals`).
+- `RecordProcedureReadModelContractTests.InForceRules_EqualTheResolversOutput_FromOneResolution` now expects `oneResolution + 1` queries: the rules route reads the legacy rule sets once.
+- The `RecordProcedureReadService` constructor takes `BillingFactLoader` and `PolicyVersionValidator`; both were already registered, so DI is unchanged.
+- A gate-refused legacy version above Top makes nothing outranked, and it is not asked of the caller (its absence from the mark does not show it).
+- Client: render `Outranked` and `CapOutranked` as neutral badges. A cap-outranked rule still applies to everything but its cap, so do not dim it.
+- Noticed, not fixed (out of scope): a doc summary above `IsSystemRule` in the evaluator sits on the wrong member, and the display name of `Marks_AreFourKindsOnly` is now stale (there are six kinds).
