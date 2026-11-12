@@ -425,6 +425,15 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 .Where(u => !flagged.Contains(u)
                             || (answers.TryGetValue((table, id), out var answer) && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant))
                 .ToList();
+
+            // 197b review F1: the NoRoot exemption rests on the Direct team owning the message (bound i). The decision above took
+            // reads of its own, so the owner is read again right before the message grant; a re-filed message grants nothing here
+            // (the share job lists it and reconciles).
+            if (!await DirectMessageParticipantShares.OwnerUnchangedAsync(
+                    _entityService, communicationId, directTeam, "grant after the visibility decision", _logger, ct))
+            {
+                return;
+            }
         }
 
         await GrantReadAccessToPrincipalsAsync(communicationId, threadId, granteesFor(MessageEntity, communicationId), ct);
@@ -479,14 +488,28 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         Dictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> users = new();
         if (_webApi is not null)
         {
-            try
+            // 197b review F2: no job re-grants a message the Direct team does not own, so a transient fault is retried once here.
+            // A second fault fails closed (only a participant the predicate shows the message to is granted) and is logged as an
+            // Error: an internal participant may then lack Read on this message until it is granted again.
+            for (var attempt = 1; ; attempt++)
             {
-                users = await RestrictedExternalShareRemover.ReadUsersAsync(_webApi, participants.Distinct().ToList(), ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-            {
-                _logger.LogWarning(ex, "Message {CommunicationId}: its Direct participants' external flags could not be read; only a " +
-                    "participant the external visibility predicate shows it to is granted (ThreadId={ThreadId}).", communicationId, threadId);
+                try
+                {
+                    users = await RestrictedExternalShareRemover.ReadUsersAsync(_webApi, participants.Distinct().ToList(), ct);
+                    break;
+                }
+                catch (Exception ex) when (attempt < 2 && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
+                {
+                    _logger.LogWarning(ex, "Message {CommunicationId}: its Direct participants' external flags could not be read; " +
+                        "retrying once (ThreadId={ThreadId}).", communicationId, threadId);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogError(ex, "Message {CommunicationId}: its Direct participants' external flags could not be read twice; " +
+                        "only a participant the external visibility predicate shows the message to is granted, and the others are NOT " +
+                        "granted Read on it (ThreadId={ThreadId}).", communicationId, threadId);
+                    break;
+                }
             }
         }
 

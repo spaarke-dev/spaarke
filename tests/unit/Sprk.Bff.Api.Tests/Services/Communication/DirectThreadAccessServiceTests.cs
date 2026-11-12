@@ -589,12 +589,12 @@ public class DirectThreadAccessServiceTests
 
     private DirectThreadAccessService BuildSut(
         Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing gateDecisionRecords, UserFlagDirectoryDouble? users = null,
-        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? scopes = null) => new(
+        Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? scopes = null, ILogger<DirectThreadAccessService>? logger = null) => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
-        Mock.Of<ILogger<DirectThreadAccessService>>(),
+        logger ?? Mock.Of<ILogger<DirectThreadAccessService>>(),
         gateDecisionRecords,
         DirectMessageOwnerTeamDouble.Unconfigured(),
         users ?? new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser),
@@ -1941,6 +1941,78 @@ public class DirectThreadAccessServiceTests
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact(DisplayName = "197b review F2 must-fire: a flag read that faults once is retried, and the internal participants are granted")]
+    public async Task R197b_UserOwned_AFlagReadFaultingOnce_IsRetried_AndGrants()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var users = new UserFlagDirectoryDouble().Internal(Caller, Other, ThirdUser);
+        users.Fault = () =>
+        {
+            users.Fault = null;
+            return new HttpRequestException("transient");
+        };
+        var stub = new ExternalVisibilitySeamStub { Throws = new InvalidOperationException("must not be asked") };
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, users, Scopes(stub.Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        users.Queries.Should().HaveCount(2, "the read is retried once");
+        stub.Calls.Should().BeEmpty();
+        foreach (var user in new[] { Caller, Other })
+        {
+            _accessGrant.Verify(
+                g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(user), "ReadAccess", It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+    }
+
+    [Fact(DisplayName = "197b review F2 must-fire: a flag read that faults twice grants no participant of a message the predicate does not show, and is logged as an Error")]
+    public async Task R197b_UserOwned_AFlagReadFaultingTwice_FailsClosed_WithAnError()
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+        var users = new UserFlagDirectoryDouble { Faults = true };
+        var stub = new ExternalVisibilitySeamStub().Set("sprk_communication", CommunicationId,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NoRoot);
+        var logger = new Mock<ILogger<DirectThreadAccessService>>();
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, users, Scopes(stub.Seam), logger.Object)
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        users.Queries.Should().HaveCount(2);
+        VerifyNeverGranted(Caller);
+        VerifyNeverGranted(Other);
+        logger.Verify(
+            l => l.Log(LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact(DisplayName = "197b review F1 must-not-fire: a Direct-team message re-owned while the predicate decides grants nothing on it")]
+    public async Task R197b_DirectTeam_AnOwnerChangeDuringTheDecision_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        var stub = NoRootDirectMessage();
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility seam = (rows, ct) =>
+        {
+            MessageOwnedByOwnerTeam(OtherTeamId); // re-filed while the decision runs
+            return stub.Seam(rows, ct);
+        };
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true, scopes: Scopes(seam)).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        VerifyNeverGranted(Other);
     }
 
     /// <summary>
