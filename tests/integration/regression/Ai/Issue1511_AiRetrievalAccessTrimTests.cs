@@ -64,7 +64,7 @@ public sealed class Issue1511_AiRetrievalAccessTrimTests : TypedToolHandlerTestF
             .ReturnsAsync(false);
         var accessor = new HttpContextAccessor { HttpContext = TestHttpContexts.Authenticated(CallerOid) };
         _trim = new RetrievalAccessTrim(
-            accessor, _userClient, _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing,
+            accessor, _userClient, _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible,
             NullLogger<RetrievalAccessTrim>.Instance);
     }
 

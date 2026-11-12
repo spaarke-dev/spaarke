@@ -47,6 +47,9 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
     /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
     private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.ChildTablesShown;
 
+    /// <summary>Task 191h: THE external visibility predicate seam (a test about it sets the real predicate or a fault).</summary>
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible;
+
     public DataverseDescribeHandlerTests()
     {
         // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
@@ -60,12 +63,81 @@ public sealed class DataverseDescribeHandlerTests : TypedToolHandlerTestFixture
 
     private DataverseDescribeHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseDescribeHandler>(), _httpContextAccessor,
-            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily);
+            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily, _externalVisibility);
 
     private void AsExternalCaller() =>
         _identityResolver
             .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // uac-r2 task 191h (#2189): THE external visibility predicate on a root or lineage-child record
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private Task<ToolResult> DescribeAnalysisAsync(Guid id) =>
+        DescribeLinkedAsync(Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceLinkedCase.Of("analysis"), id);
+
+    [Fact(DisplayName = "191h describe must fire (#2189): an analysis filed only to an internal-only email, and one under a Restricted matter, answer like a missing record; the 188 legs alone return them")]
+    public async Task ExecuteChatAsync_191h_TheVisibilityPredicate_HidesALineageRecord_TheControlReturnsIt()
+    {
+        AsExternalCaller();
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+
+        // Control (perturbation): without THE predicate, the 188 derived leg alone returns the record (#2189).
+        ShouldReturnTheRecord(await DescribeAnalysisAsync(leak.AnalysisAboutTheEmail));
+
+        _externalVisibility = leak.Seam;
+        ShouldAnswerLikeAMissingRecord(await DescribeAnalysisAsync(leak.AnalysisAboutTheEmail));
+        ShouldAnswerLikeAMissingRecord(await DescribeAnalysisAsync(leak.AnalysisUnderTheRestrictedMatter));
+        ShouldReturnTheRecord(await DescribeAnalysisAsync(leak.PlainAnalysis));
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains("entity=sprk_analysis") && m.FormattedMessage.Contains("external_visibility_hidden"));
+    }
+
+    [Fact(DisplayName = "191h describe must fire: an external caller's not-found on a guarded root answers exactly like a hidden record")]
+    public async Task ExecuteChatAsync_191h_AGuardedNotFound_AnswersLikeAHiddenRecord()
+    {
+        AsExternalCaller();
+        _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"EntitySetName\": \"sprk_matters\", \"PrimaryIdAttribute\": \"sprk_matterid\" }")));
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters(")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Record not found."));
+
+        var result = await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: "{\"path\":\"tables/sprk_matter/records/" + Guid.NewGuid().ToString("D") + "\"}"),
+            BuildDescribeTool(), CancellationToken.None);
+
+        ShouldAnswerLikeAMissingRecord(result);
+    }
+
+    [Fact(DisplayName = "191h describe must not fire: an internal systemuser's record is returned and the predicate is never asked")]
+    public async Task ExecuteChatAsync_191h_AnInternalCaller_IsUnchanged_AndThePredicateIsNotAsked()
+    {
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+        _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        ShouldReturnTheRecord(await DescribeAnalysisAsync(leak.AnalysisAboutTheEmail));
+    }
+
+    [Theory(DisplayName = "191h describe must fire: a predicate that faults or throws fails the tool call with no data (fail closed)")]
+    [InlineData("faulted")]
+    [InlineData("throws")]
+    public async Task ExecuteChatAsync_191h_APredicateFault_FailsTheCall(string fault)
+    {
+        AsExternalCaller();
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+        _externalVisibility = fault == "faulted"
+            ? Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Faulted
+            : Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        var result = await DescribeAnalysisAsync(leak.PlainAnalysis);
+
+        result.Success.Should().BeFalse();
+        result.Data.Should().BeNull();
+    }
 
     private static AnalysisTool BuildDescribeTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseDescribeHandler), name: "SYS-Dataverse Describe");
