@@ -51,11 +51,19 @@ case "$label" in
     ;;
 esac
 
-# Types declared in the mutated files (plus the file stems, e.g. SecureRootInheritance.Cascade.cs).
+# Top-level types declared in the mutated files (plus the file stems, e.g.
+# SecureRootInheritance.Cascade.cs). Nested types are left out: a test reaches one through
+# its outer type's name (SecureChildLineage.Table), which is already in the list, and a
+# nested name is often a common word. #1821: the nested `Table` record matched 196 test
+# files, selected 9,341 tests and the night was cancelled at the job cap; the nested
+# `Outcome` record did the same the night before. A top-level declaration is the least
+# indented one in its file (column 0 under a file-scoped namespace, 4 under a block one).
 types="$(
   while IFS= read -r f; do
     basename "$f" .cs | sed 's/\..*$//'
-    grep -hoE '^[[:space:]]*(public|internal)?[[:space:]]*((sealed|static|abstract|partial|readonly|ref)[[:space:]]+)*(class|interface|record|enum|struct)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" | awk '{print $NF}'
+    grep -hoE '^[[:space:]]*(public|internal)?[[:space:]]*((sealed|static|abstract|partial|readonly|ref)[[:space:]]+)*(class|interface|record|enum|struct)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$f" |
+      awk '{ match($0, /^[ \t]*/); indent[NR] = RLENGTH; name[NR] = $NF; if (NR == 1 || RLENGTH < min) min = RLENGTH }
+           END { for (i = 1; i <= NR; i++) if (indent[i] == min) print name[i] }'
   done < "$files" | sort -u
 )"
 type_re="($(echo "$types" | paste -sd'|'))"
