@@ -6,3 +6,9 @@ export { MetricCardRow } from '../../../../client/shared/Spaarke.UI.Components/s
 export type { MetricCardConfig } from '../../../../client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/types';
 export { StatusBadge } from '../../../../client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge';
 export type { StatusBadgeTone } from '../../../../client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge';
+export { WizardShell } from '../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell';
+export type {
+  IWizardShellHandle,
+  IWizardStepConfig,
+  IWizardSuccessConfig,
+} from '../../../../client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes';
