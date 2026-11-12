@@ -105,7 +105,7 @@ src/client/external-spa/
 
 4. **`.site-download/spaarke-external-workspace/` exists** in the `external-spa` folder.
    This is the new-format Code Site workspace created by `pac pages download-code-site`.
-   It is not tracked in git (gitignored) — `scripts/Deploy-PowerPages.ps1` downloads it when it is missing.
+   It is committed to the repo — if missing on a fresh clone, the deploy script recreates it automatically.
 
 ---
 
@@ -234,7 +234,7 @@ pac pages upload-code-site `
     --siteName "Spaarke External Workspace"
 ```
 
-The `.site-download/spaarke-external-workspace/` folder is a local download (gitignored, never committed); `scripts/Deploy-PowerPages.ps1` re-creates it when missing. Uploads always use this folder as `--rootPath`.
+The `.site-download/spaarke-external-workspace/` folder is committed to the repo. Future uploads always use this folder as `--rootPath`.
 
 **If you need to re-run the download** (e.g., portal metadata has changed significantly):
 ```powershell

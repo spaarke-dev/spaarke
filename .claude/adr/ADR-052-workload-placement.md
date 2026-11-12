@@ -86,7 +86,7 @@ provisioning + CI/CD); Flex cost and limits.
 |---|---|
 | No Functions / Durable Task packages or Function-attributed types, methods or parameters in the BFF assembly | `ADR001_MinimalApiTests` |
 | No contradicting placement phrasing outside marked historical regions | `WorkloadPlacementDocDriftTests` |
-| No new hand-rolled timer `BackgroundService` (ratchet) · `IScheduledJob` host-neutrality · Functions projects under `src/server/functions/<Name>/`, not referencing `Sprk.Bff.Api`, no confidential-client / assertion / OBO types, impersonation only through the shared helper | `WorkloadPlacementGuardTests` |
+| No new hand-rolled timer `BackgroundService` (ratchet) · `IScheduledJob` host-neutrality · Functions projects under `src/server/functions/`, not referencing `Sprk.Bff.Api`, no confidential-client / assertion / OBO types, impersonation only through the shared helper | `WorkloadPlacementGuardTests` |
 | Host choice recorded with signals + costs | Placement Justification; `code-review` / `adr-check` |
 
 ## Integration with Other ADRs

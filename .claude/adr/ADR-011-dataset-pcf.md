@@ -20,7 +20,7 @@ Use **Dataset PCF** for list/grid views that are **embedded on Dataverse entity 
 
 - **MUST** use Dataset PCF when the list is embedded on a Dataverse entity form with a dataset parameter
 - **MUST** use React Code Page when the list/view is opened as a standalone dialog or page
-- **MUST** build list UX on the DataGrid framework (`<DataGrid configId=… />` from `@spaarke/ui-components` + a `sprk_gridconfiguration` record) — the old UniversalDatasetGrid PCF was deleted when the framework superseded it (see `.claude/constraints/pcf.md`)
+- **MUST** implement/extend `src/client/pcf/UniversalDatasetGrid/` for Dataset PCF controls
 - **MUST** reuse shared components from `@spaarke/ui-components`
 - **MUST** use Fluent UI v9 exclusively
 - **MUST** achieve 80%+ test coverage on PCF controls
