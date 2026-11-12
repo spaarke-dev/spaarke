@@ -220,7 +220,9 @@ public static partial class ProblemDetailsHelper
     /// The ONE 409 for a record-owner refusal (unified-access-control-r2 task 146): the write was not made because no
     /// owner resolves for the row — a named parent unreadable, a root flagged secure but not isolated, the Secure team
     /// missing. Carries the stable <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/> code as
-    /// <c>reasonCode</c>, so every HTTP writer reports the same condition the same way (ADR-019).
+    /// <c>reasonCode</c>, so every HTTP writer reports the same condition the same way (ADR-019). One code is not a conflict:
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.DirectTeamUnavailable"/> (the Direct message owner team
+    /// could not be read; retry) is answered 503 (fm task 054 piece 3b).
     /// </summary>
     /// <param name="refusalCode">The resolution's refusal code.</param>
     /// <param name="reason">The resolution's reason (names what is wrong; never a secure record's content).</param>
@@ -239,7 +241,10 @@ public static partial class ProblemDetailsHelper
 
         return Results.Problem(
             title: "Record owner unresolved",
-            statusCode: StatusCodes.Status409Conflict,
+            statusCode: string.Equals(refusalCode, Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.DirectTeamUnavailable,
+                StringComparison.Ordinal)
+                ? StatusCodes.Status503ServiceUnavailable
+                : StatusCodes.Status409Conflict,
             detail: $"The {noun} was not saved: {reason ?? "no owner could be resolved"}.",
             extensions: extensions);
     }

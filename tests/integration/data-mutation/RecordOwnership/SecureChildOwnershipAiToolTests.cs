@@ -859,6 +859,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_sentby", "systemuser", "sprk_SentBy"),
+                // fm task 054b: the Direct recipient (a BFF-owned column), so a forged bind reaches the refusal, not the mapper.
+                ("sprk_directrecipient", "systemuser", "sprk_DirectRecipient"),
+                // fm task 054 piece 3b: a typed regarding lookup to a table that is no ownership parent (live: sprk_RegardingPerson).
+                ("sprk_regardingperson", "contact", "sprk_RegardingPerson"),
                 ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
                 // #2091 (b): a communication's project filing (SecureChildLineage: sprk_communication.sprk_regardingproject).
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
