@@ -11,6 +11,7 @@
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { confirmRevoke } from '../../../__tests__/helpers/confirmDialog';
+import { openAccessNotes } from '../../../__tests__/helpers/accessNotes';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
@@ -591,7 +592,10 @@ describe('AccessGrantModal — cancellation follows the parent (task 174, owner 
         'No effect: this record is secure, so standing grants give no access.'
       )
     ).toBeInTheDocument();
-    expect(screen.getByText(/It follows the matter it is filed under: Parent Matter\./)).toBeInTheDocument();
+    // Task 196: the Access Permission explanation is a note behind the header bell.
+    expect(
+      within(await openAccessNotes()).getByText(/It follows the matter it is filed under: Parent Matter\./)
+    ).toBeInTheDocument();
   });
 
   it('under a Restricted matter: every contact-based row has no effect', async () => {
