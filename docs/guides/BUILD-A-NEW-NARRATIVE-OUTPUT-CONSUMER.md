@@ -63,7 +63,7 @@ The playbook needs a caller. Three common shapes in Spaarke:
 | Background scheduler | Job handler in `Services/Jobs/` | (deferred for R7) |
 | Form / save event | Power Apps form save → Dataverse webhook → BFF endpoint | (not yet built) |
 
-For new endpoints, see [`docs/architecture/ai-architecture-consumer-routing.md`](../architecture/ai-architecture-consumer-routing.md) and the existing `/narrate` endpoint at [`src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs`](../../src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs).
+For new endpoints, see [`docs/architecture/ai-architecture-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) and the existing `/narrate` endpoint at [`src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs`](../../src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs).
 
 ### Step 2 — Author the Action JPS
 

@@ -351,9 +351,9 @@ Examples:
 | ADR | Focus | When to Load |
 |-----|-------|--------------|
 | [ADR-003](../adr/ADR-003-authorization-seams.md) | Authorization seams | Architecture review, new rule design |
-| [ADR-004](../adr/ADR-004-bff-api-authorization.md) | OAuth/OBO flow | Token exchange decisions |
+| [ADR-028](../adr/ADR-028-spaarke-auth-architecture.md) | OAuth/OBO flow | Token exchange decisions |
 | [ADR-008](../adr/ADR-008-endpoint-filters.md) | Endpoint authorization | Auth filter implementation |
-| [ADR-009](../adr/ADR-009-redis-first-caching.md) | Token caching | Caching strategy decisions |
+| [ADR-009](../adr/ADR-009-redis-caching.md) | Token caching | Caching strategy decisions |
 
 ---
 

@@ -385,9 +385,9 @@ Before starting implementation, verify:
 
 ## Related Documents
 
-- [Skills Index](.claude/skills/INDEX.md) - All available skills
-- [ADR Index](docs/adr/INDEX.md) - Architecture decisions
-- [Root CLAUDE.md](CLAUDE.md) - Repository-wide AI instructions
+- [Skills Index](../../.claude/skills/INDEX.md) - All available skills
+- [ADR Index](../adr/INDEX.md) - Architecture decisions
+- [Root CLAUDE.md](../../CLAUDE.md) - Repository-wide AI instructions
 
 ---
 
@@ -520,11 +520,11 @@ Hooks are silent on success (single `✅ Portfolio synced: #N` line) and degrade
 
 ## Related Documents
 
-- [Skills Index](.claude/skills/INDEX.md) - All available skills (includes 9 `/devops-*` family)
-- [ADR Index](docs/adr/INDEX.md) - Architecture decisions
-- [Root CLAUDE.md](CLAUDE.md) - Repository-wide AI instructions
+- [Skills Index](../../.claude/skills/INDEX.md) - All available skills (includes 9 `/devops-*` family)
+- [ADR Index](../adr/INDEX.md) - Architecture decisions
+- [Root CLAUDE.md](../../CLAUDE.md) - Repository-wide AI instructions
 - [Project #2 (Spaarke Core)](https://github.com/users/spaarke-dev/projects/2) - Portfolio board
-- [AI Coding Procedures Guide](docs/procedures/AI-CODING-PROCEDURES-GUIDE.md) - Lifecycle scenarios
+- [AI Coding Procedures Guide](../procedures/AI-CODING-PROCEDURES-GUIDE.md) - Lifecycle scenarios
 
 ---
 

@@ -61,7 +61,7 @@ var key = DistributedCacheExtensions.CreateKey(
     "ai-embedding", tenantId, documentId, $"v:{rowVersion}");
 ```
 
-**See**: [AI Caching Pattern](../patterns/ai/caching.md)
+**See**: [AI Caching Pattern](../patterns/caching/distributed-cache.md)
 
 ---
 

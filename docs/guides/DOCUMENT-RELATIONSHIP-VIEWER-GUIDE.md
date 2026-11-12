@@ -880,6 +880,6 @@ module.exports = {
 - [Shared UI Components Guide](SHARED-UI-COMPONENTS-GUIDE.md)
 - [PCF Deployment Guide](PCF-DEPLOYMENT-GUIDE.md)
 - [Code Page Deploy Skill](../../.claude/skills/code-page-deploy/SKILL.md)
-- [ADR-006: PCF for forms, Code Pages for dialogs](../../docs/adr/ADR-006-pcf-over-webresources.md)
-- [ADR-021: Fluent UI v9 Design System](../../docs/adr/ADR-021-fluent-design-system.md)
+- [ADR-006: PCF for forms, Code Pages for dialogs](../adr/ADR-006-prefer-pcf-over-webresources.md)
+- [ADR-021: Fluent UI v9 Design System](../adr/ADR-021-fluent-ui-design-system.md)
 - [ADR-022: PCF Platform Libraries](../../docs/adr/ADR-022-pcf-platform-libraries.md)

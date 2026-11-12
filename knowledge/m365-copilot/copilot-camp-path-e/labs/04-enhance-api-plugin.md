@@ -35,7 +35,7 @@ This will implement a new Azure function to provide access to Trey Research proj
 
 Let's take a moment to review the code.
 
-This is a version 4 Azure function, so the code looks a lot like traditional Express code for NodeJS. The `projects` class implements an HTTP request trigger, which is called when the "/projects" path is accessed. This is followed by some in-line code that defines the methods and route. For now, access is anonymous; we'll add authentication, [checkout out pathways for authentication](./auth.md).
+This is a version 4 Azure function, so the code looks a lot like traditional Express code for NodeJS. The `projects` class implements an HTTP request trigger, which is called when the "/projects" path is accessed. This is followed by some in-line code that defines the methods and route. For now, access is anonymous; we'll add authentication, checkout out pathways for authentication.
 
 ~~~typescript
 export async function projects(
@@ -95,7 +95,7 @@ If your app is still running from previous lab, stop the debugger and restart it
 
 Now try sending the new requests and you should be able to see Trey Research project details or assign a new consultant to a project using the POST request.
 
-![Visual Studio Code showing the treyResearchAPI.http file with the POST request for projects highligthed on the left and the response on the right side.](../../assets/images/extend-m365-copilot-03/test-projects-2.png)
+*(image not included in this snapshot: Visual Studio Code showing the treyResearchAPI.http file with the POST request for projects highligthed on the left and the response on the right side.)*
 
 <cc-end-step lab="e4" exercise="1" step="4" />
 
@@ -401,11 +401,11 @@ You will be in a window with direct chat with your agent in Copilot.
 
 Now try a prompt such as "what projects are we doing for adatum?"
 
-![Microsoft 365 Copilot prompting the user with a confirmation card to allow invoking the API plugin. There are three buttons to 'Always allow', 'Allow once', or 'Cancel' the request.](../../assets/images/extend-m365-copilot-04/adatum.png)
+*(image not included in this snapshot: Microsoft 365 Copilot prompting the user with a confirmation card to allow invoking the API plugin. There are three buttons to 'Always allow', 'Allow once', or 'Cancel' the request.)*
 
 Your agent will ask permission to allow this action even for the GET request. Select "Always allow" and proceed to the request to view the project details.
 
-![Microsoft 365 Copilot showing the output of Trey Genie agent when invoking the API plugin](../../assets/images/extend-m365-copilot-04/response-adatum.png)
+*(image not included in this snapshot: Microsoft 365 Copilot showing the output of Trey Genie agent when invoking the API plugin)*
 
 <cc-end-step lab="e4" exercise="3" step="2" />
 

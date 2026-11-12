@@ -134,5 +134,5 @@ services.AddScoped<IAnalysisDataverseService>(sp => sp.GetRequiredService<Datave
 ## Related
 
 - [Service Decomposition Guide](SERVICE-DECOMPOSITION-GUIDE.md) — Companion guide for service decomposition
-- [ADR-010: DI Minimalism](../../.claude/adr/ADR-010.md) — DI registration patterns
+- [ADR-010: DI Minimalism](../../.claude/adr/ADR-010-di-minimalism.md) — DI registration patterns
 - [Service Registration Pattern](../../.claude/patterns/api/service-registration.md) — Feature module patterns
