@@ -12,14 +12,15 @@
 >
 >   ArchTests 2505/2505; agreement and procedure tests 551/551. Publishing (`publish-dataverse-solutions-manifest.yml`, `publish: true`, from master) is the owner's step after merge. provisioning-r1 is waiting for the published version, because its H7b S26 stops new runs until 166's lock ships.
 > - **#2725 (profile matched by name):** our three scripts are fixed locally as `f7240c397b` (not pushed). The other 15 sites belong to uac-r2 and R3.
-> - **Next:**
->   - (Done) 080's column was already on dev; nothing to apply.
->   - (Done) 1.3.1.0 + #2725 merged as #2727, `2b79f06b4b`. The owner publishes 1.3.1.0 (`publish-dataverse-solutions-manifest.yml`, publish: true); then tell provisioning-r1.
->   - (Done 2026-11-12) The ontology K4 comment fix, `584f6cc34d`; ontology-r1 closed K4.
->   - (Done 2026-11-12) Deferred issue filed as ISS-014, #2730.
->   - ontology-r1 note (not blocking): the O3 pin names the Ontology Service role file; check which role supplies the spend reader's Decision Record read since DEF-059 and repoint or explain (answer ontology-r1 by message, no membership detail in the repo).
->   - **084 BLOCKED on two owner decisions (2026-11-12, escalation trigger 2):** (1) how the lists read "as the caller": no existing caller-identity row source for `ProcedureResolver.ReadAsync`; options are an SDK CallerId read-only adapter, an OData translator, or app-only reads plus a batched caller-rights probe over every exposed row (503 on any refusal). (2) What "displaced" means on a record-level list. uac-r2 and ontology-r1 have been asked for their views. Branch `task/ebilling-084` sits at `0b466586e7`, empty; resume the implementer when decided. conflict-check: soft warning only (#2615, mcp-r1's do-not-merge spike, touches the append points `EndpointMappingExtensions.cs` and `RouteAuthorizationGuardTests.Ledger.cs`). Then 084a → 084b → 084c; 084d after 084 and 084b (opus, design to ontology-r1 first).
-> - **word-add-in-r1** is owed the dev sha `6dbe69b9e2` (a superset of `b3ca99cad5`); it was not reachable on 2026-11-12, so send it when it is.
+> - **Next (checkpoint 2026-11-12, late):**
+>   - **084 RUNNING:** fresh implementer `impl-084r` on `task/ebilling-084-r1` from work `afe78f9d01` (agent worktree). Owner decisions: EB-D-218 (option A: app-only rows + ONE batched caller-rights check over every exposed row, 503 `procedures.unavailable` on any refusal; uac-r2's 4 conditions) and EB-D-219 (displaced → new task **084e**, POML written, TASK-INDEX row added, 112 deps updated). The first agent's branch `task/ebilling-084` (empty, at `0b466586e7`) sits in a finished agent worktree: remove that worktree with `Remove-WorktreeSafe.ps1` later. When impl-084r reports: review, code-review + adr-check, merge into work, close out 084, send the branch to uac-r2 for review.
+>   - **uac-r2 condition 2 is MINE:** make the access invariant behind EB-D-218 a checked step (add it to a verify run after imports, or file with provisioning-r1). Keep all detail out of the repo; tell uac-r2 which.
+>   - **Owner asked (2026-11-12): investigate/test the SPA invoice link format.** Findings so far (R4 worktree `03148d2530` + R4's uncommitted change): `?record=` collided with the app-wide `RecordDeepLink` (mounted above all routes; it opens the record modal and strips the param); R4 renamed the page param to `?invoiceRecord={kind}:{guid}` (`pages/invoiceSubmitLink.ts`, router-free). `parseRecordLink` uses `URLSearchParams.getAll('record')` (exact key), so `invoiceRecord` cannot collide; the only global params are `customer`, `invite`, `dv_persona`, `record`; sign-in keeps `pathname + search` (`captureReturnTo`, `safeRelativePath` checks only the path shape); the invite step strips only its own code. Still to do: in Teams, `RecordDeepLink` restores a captured return-to only when it carries `record=`, so check whether an `invoiceRecord` link survives the Teams sub-page path; then run R4's updated tests (shell-level test + both-params twin) when spa-r4 sends the diff, and report to the owner.
+>   - spa-r4: my approval of R4 007 carries over to the `invoiceRecord` rename on two conditions (shell-level test; a both-params twin). Waiting for its diff + sha.
+>   - Owner step: publish SpaarkeMaster 1.3.1.0 (`publish-dataverse-solutions-manifest.yml`, publish: true, from master); then tell provisioning-r1.
+>   - ontology-r1 note (not blocking): check which role supplies the spend reader's Decision Record read since DEF-059; answer by message.
+>   - word-add-in-r1 is owed the dev sha `6dbe69b9e2` (unreachable 2026-11-12).
+>   - After 084: 084a → 084b → 084c; 084d after 084 and 084b; 084e after 084.
 
 ## Quick recovery
 
