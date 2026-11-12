@@ -123,6 +123,17 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.63 (task 196, unified-access-control-r2, owner 2026-11-12):
+ * - "Email members" emails the record's people as Manage Access lists them, not only its `sprk_assigned*` role
+ *   contacts: role contacts + contacts with an active grant (`fetchExistingGrants`) + users the record is shared with
+ *   (`/user-shares`), one list de-duplicated by email, No Access applied. The rule is the shared
+ *   `resolveEmailMembersRecipients`; this file supplies strict reads (`readRoleCandidates(true)`, `readContactEmails`,
+ *   `readUserEmails`) so a failed read is reported in the dialog, never mistaken for "no members". Empty state only when
+ *   every source was read and found nobody; an error when nothing could be read. Not a grant root (To Do, Event): role
+ *   contacts only, as before.
+ * - In the bundled modal, the informational banners (Access Permission, the parent's minimum access, the secure owner)
+ *   are behind a bell in the header; errors and the deny state stay inline.
+ *
  * v1.0.62 (task 193, master merge 2026-11-11): no change in this file's logic. Both lines of work are bundled: task
  *   193's one "Add person" entry and paired workforce-app grant (v1.0.55 to v1.0.61 on the task-193 branch, below) and
  *   master's Family tool (v1.0.55 and v1.0.56 on master, below). The two lines each used 1.0.55 and 1.0.56; 1.0.62 is
@@ -359,6 +370,10 @@ import {
   isLooserThanFloor,
   accessPermissionStateOf,
   describeEffectiveAccess,
+  resolveEmailMembersRecipients,
+  EMAIL_MEMBERS_EMPTY_MESSAGE,
+  EMAIL_MEMBERS_FAILED_MESSAGE,
+  type EmailMembersResolution,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
 // Spaarke theme resolution (ADR-021 dark mode): the user's Spaarke theme choice, then the MDA's own theme — the same
 // helpers the Communication PCFs use.
@@ -599,8 +614,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   // `CommunicationActionsApp.tsx`).
   private apiBaseUrl = '';
   private isSendEmailDialogOpen = false;
-  private isEmailEmptyStateOpen = false;
+  /** Task 196: the "Email members" message dialog — nobody to email (`empty`) or nobody could be read (`failed`). */
+  private emailMessageState: 'empty' | 'failed' | null = null;
   private emailRecipients: string[] = [];
+  /** Task 196: shown in the email dialog when some recipient sources could not be read (fail visible). */
+  private emailNotice: string | null = null;
 
   public init(
     context: ComponentFramework.Context<IInputs>,
@@ -1165,7 +1183,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * `DATA-ACCESS-DECISION-CRITERIA.md`) and returns the populated ones as
    * membership candidates, de-duplicated by contact (a contact assigned to
    * two role fields appears once, tagged with the first role encountered). */
-  private fetchCandidates = async (): Promise<IAccessGrantCandidate[]> => {
+  private fetchCandidates = (): Promise<IAccessGrantCandidate[]> => this.readRoleCandidates(false);
+
+  /** The role-contact read behind {@link fetchCandidates}. `strict: false` (the modal's candidates) fails SOFT, as it
+   * always has: an unreadable record is no candidates, an unreadable email is no email. `strict: true` (task 196, the
+   * "Email members" recipients) rejects instead, so a failed read is reported as one, never as "no members". */
+  private readRoleCandidates = async (strict: boolean): Promise<IAccessGrantCandidate[]> => {
     const recordId = this.getRecordId();
     if (!recordId) return [];
 
@@ -1183,7 +1206,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         recordId,
         `?$select=${valueFields}`
       )) as unknown as Record<string, unknown>;
-    } catch {
+    } catch (err) {
+      if (strict) throw err;
       // A host entity may not carry every role field — candidates are a convenience (the named-contact
       // picker still works), so fail SOFT to an empty list rather than breaking the whole modal load.
       return [];
@@ -1204,33 +1228,69 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }
     if (byId.size === 0) return [];
 
-    const emailById = await this.fetchContactEmails([...byId.keys()]);
+    const ids = [...byId.keys()];
+    const emailById = strict ? await this.readContactEmails(ids) : await this.fetchContactEmails(ids);
     return [...byId.entries()].map(([contactId, meta]) => ({
       contactId,
       fullName: meta.fullName,
-      email: emailById.get(contactId),
+      email: emailById.get(cleanGuid(contactId)),
       role: meta.role,
     }));
   };
 
-  /** Batch-fetches emails for a set of contacts (host-context). Email is best-effort — it drives the
-   * modal's external-vs-internal grant routing but a miss simply routes as grant-only. */
+  /** Batch-fetches emails for a set of contacts (host-context). Email is best-effort — it is shown beside a
+   * candidate's name; a miss leaves it blank. */
   private fetchContactEmails = async (contactIds: string[]): Promise<Map<string, string>> => {
-    const map = new Map<string, string>();
-    if (contactIds.length === 0) return map;
-    const filter = contactIds.map(id => `contactid eq ${id}`).join(' or ');
     try {
+      return await this.readContactEmails(contactIds);
+    } catch {
+      /* email is best-effort here — an unknown email is left blank */
+      return new Map<string, string>();
+    }
+  };
+
+  /** Contact id → `emailaddress1` (host-context). Rejects on failure (task 196: the email recipients state a failed
+   * read; {@link fetchContactEmails} keeps the best-effort behaviour for the modal). */
+  private readContactEmails = (contactIds: string[]): Promise<Map<string, string>> =>
+    this.readPrimaryEmails('contact', 'contactid', 'emailaddress1', contactIds);
+
+  /** System user id → `internalemailaddress`, the user's primary email (task 196, the "Email members" shared users).
+   * Rejects on failure. */
+  private readUserEmails = (systemUserIds: string[]): Promise<Map<string, string>> =>
+    this.readPrimaryEmails('systemuser', 'systemuserid', 'internalemailaddress', systemUserIds);
+
+  /** One host-context email read for a set of rows, asked in chunks so a long list cannot exceed the URL limit. Only
+   * canonical GUIDs enter the OData filter: anything else is refused (rejects) rather than dropped. Keys are the row ids
+   * as Dataverse returns them (lower-case, no braces). */
+  private readPrimaryEmails = async (
+    entity: 'contact' | 'systemuser',
+    idColumn: 'contactid' | 'systemuserid',
+    emailColumn: 'emailaddress1' | 'internalemailaddress',
+    ids: string[]
+  ): Promise<Map<string, string>> => {
+    const map = new Map<string, string>();
+    if (ids.length === 0) return map;
+    const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const clean = [...new Set(ids.map(cleanGuid))];
+    if (!clean.every(id => GUID.test(id))) {
+      throw new Error(`readPrimaryEmails(${entity}): an id is not a GUID`);
+    }
+    const CHUNK = 40;
+    for (let i = 0; i < clean.length; i += CHUNK) {
+      const filter = clean
+        .slice(i, i + CHUNK)
+        .map(id => `${idColumn} eq ${id}`)
+        .join(' or ');
       const res = await this.context.webAPI.retrieveMultipleRecords(
-        'contact',
-        `?$select=contactid,emailaddress1&$filter=${filter}`
+        entity,
+        `?$select=${idColumn},${emailColumn}&$filter=${filter}`
       );
       for (const e of res.entities) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const row = e as any;
-        if (row.contactid && row.emailaddress1) map.set(row.contactid as string, row.emailaddress1 as string);
+        const row = e as unknown as Record<string, unknown>;
+        const id = row[idColumn];
+        const email = row[emailColumn];
+        if (typeof id === 'string' && typeof email === 'string' && email) map.set(cleanGuid(id), email);
       }
-    } catch {
-      /* email is best-effort — routing falls back to grant-only when unknown */
     }
     return map;
   };
@@ -1538,27 +1598,59 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   // =========================================================================
-  // Email-members wiring (task 042, teams-app-r1). Reuses `fetchCandidates()`
-  // above verbatim — the SAME allowlist-filtered `sprk_assigned*` membership-
-  // contact data source the grant modal (task 041) uses — per this task's
-  // "MUST NOT invent a separate recipient-derivation rule" constraint.
+  // Email-members wiring (task 042, teams-app-r1; task 196, unified-access-control-r2). The recipients are the
+  // record's people as Manage Access lists them: role contacts (`fetchCandidates`' read), contacts with an active
+  // grant (`fetchExistingGrants`) and users the record is shared with (`/user-shares`), No Access applied. The rule
+  // lives in the shared `resolveEmailMembersRecipients`; this host supplies its reads, as it does for the modal.
   // =========================================================================
 
-  /** Resolves the email-members recipient list: the current record's
-   * membership contacts, deduplicated by email, dropping any candidate with
-   * no populated email address (it cannot be pre-filled as a To recipient).
-   * An empty result means "no emailable membership contacts" — the caller
-   * (the click handler below) shows an empty state instead of opening
-   * `SendEmailDialog` with zero recipients. */
-  private resolveEmailMembersRecipients = async (): Promise<string[]> => {
-    const candidates = await this.fetchCandidates();
-    const emails = new Set<string>();
-    for (const candidate of candidates) {
-      if (candidate.email && candidate.email.trim().length > 0) {
-        emails.add(candidate.email.trim());
-      }
+  /** Resolves the "Email members" recipients for the bound record (task 196). On a grant root every source applies and
+   * each read REJECTS on failure, so a failure is reported, never mistaken for "no members". On any other host (a To Do
+   * or Event form, a harness) only the role contacts apply, read as the modal reads them. */
+  private resolveEmailMembers = (): Promise<EmailMembersResolution> => {
+    const recordId = this.getRecordId();
+    const root = GRANT_ROOT_BY_ENTITY[this.getHostEntity()];
+    if (!recordId || !root) {
+      return resolveEmailMembersRecipients({ readRoleContacts: this.fetchCandidates });
     }
-    return Array.from(emails);
+    return resolveEmailMembersRecipients({
+      readRoleContacts: () => this.readRoleCandidates(true),
+      root: {
+        recordType: root.recordType,
+        recordId,
+        authenticatedFetch: this.authenticatedFetchGated,
+        readGrants: this.fetchExistingGrants,
+        readContactEmails: this.readContactEmails,
+        readUserEmails: this.readUserEmails,
+        readContactOrganizationMemberships: this.fetchContactOrganizationMemberships,
+        accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
+        isSecureRecord: this.isSecureValue === true,
+      },
+    });
+  };
+
+  /** The email icon's click (task 196): opens the composer with the recipients (and the notice when some could not be
+   * read), or the message dialog when there is nobody to email or nothing could be read. An answer for a record the
+   * form has since left is dropped. */
+  private openEmailMembers = async (): Promise<void> => {
+    const askedFor = this.getRecordId();
+    let resolution: EmailMembersResolution;
+    try {
+      resolution = await this.resolveEmailMembers();
+    } catch (err) {
+      // The resolver never rejects; this is the backstop, and it is a failure, never "no members".
+      console.warn('[TrackingFieldTrio] Email members: the recipients could not be resolved.', err);
+      resolution = { kind: 'failed' };
+    }
+    if (this.getRecordId() !== askedFor) return;
+    if (resolution.kind === 'recipients') {
+      this.emailRecipients = resolution.recipients;
+      this.emailNotice = resolution.notice;
+      this.isSendEmailDialogOpen = true;
+    } else {
+      this.emailMessageState = resolution.kind;
+    }
+    this.renderControl();
   };
 
   private closeSendEmailDialog = (): void => {
@@ -1567,7 +1659,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   private closeEmailEmptyState = (): void => {
-    this.isEmailEmptyStateOpen = false;
+    this.emailMessageState = null;
     this.renderControl();
   };
 
@@ -1601,7 +1693,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.62 • Built 2026-11-11',
+      versionText: 'v1.0.63 • Built 2026-11-12',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
@@ -1637,22 +1729,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         this.isGrantModalOpen = true;
         this.renderControl();
       },
-      // Email icon (task 042) — resolves the record's membership contacts
-      // (reusing fetchCandidates(), same as the grant modal) then either
-      // opens the canonical SendEmailDialog pre-populated with those emails,
-      // or — if none are emailable — shows the empty-state alert instead of
-      // opening a dialog with zero recipients.
+      // Email icon (task 042; task 196) — resolves the record's people (role contacts, active grants, user shares;
+      // No Access applied) then opens the canonical SendEmailDialog pre-populated with their emails, or the message
+      // dialog when there is nobody to email (every source read) or nobody could be read.
       onOpenEmailMembers: () => {
-        void (async () => {
-          const recipients = await this.resolveEmailMembersRecipients();
-          if (recipients.length === 0) {
-            this.isEmailEmptyStateOpen = true;
-          } else {
-            this.emailRecipients = recipients;
-            this.isSendEmailDialogOpen = true;
-          }
-          this.renderControl();
-        })();
+        void this.openEmailMembers();
       },
       // Family icon (task 074, FR-33) - opens RecordFamilyModal for this record. Offered only on a bound record: with
       // no id (a harness, an unsaved form) there is no family to list, so no icon is drawn.
@@ -1786,8 +1867,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the
-              // record's membership-contact emails (resolveEmailMembersRecipients()
-              // above). Send flows through the engine's OWN sendCommunication()
+              // record's people's emails (resolveEmailMembers() above, task 196). Send flows through the engine's OWN sendCommunication()
               // call (ADR-045) — no custom send logic here. Gated on `recordId`
               // for the same reason as the grant modal above.
               recordId
@@ -1795,6 +1875,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     open: this.isSendEmailDialogOpen,
                     onClose: this.closeSendEmailDialog,
                     initialTo: this.emailRecipients,
+                    // Task 196: some recipient sources could not be read — said in the dialog, never silent.
+                    notice: this.emailNotice ?? undefined,
                     authenticatedFetch: this.authenticatedFetchGated,
                     bffBaseUrl: this.apiBaseUrl,
                     titleOverride: 'Email Members',
@@ -1826,9 +1908,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     },
                   })
                 : null,
-              // Empty-state alert (task 042) — shown INSTEAD of SendEmailDialog
-              // when the record has no membership contacts with a populated
-              // email, so the dialog never opens with zero recipients.
+              // Message dialog (task 042; task 196) — shown INSTEAD of SendEmailDialog when every source was read and
+              // nobody has an email (the empty state), or when no source could be read (an error, never the empty
+              // state), so the composer never opens with zero recipients by mistake.
               //
               // no-children-prop is intentionally suppressed here: Fluent v9 `DialogProps`
               // types `children` as REQUIRED, which the createElement rest-args overload
@@ -1836,7 +1918,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
               // type-checking of the props, so the fully-typed `children` prop is retained.
               // eslint-disable-next-line react/no-children-prop
               React.createElement(Dialog, {
-                open: this.isEmailEmptyStateOpen,
+                open: this.emailMessageState !== null,
                 onOpenChange: (_event: unknown, data: { open: boolean }) => {
                   if (!data.open) this.closeEmailEmptyState();
                 },
@@ -1854,7 +1936,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     React.createElement(
                       DialogContent,
                       null,
-                      'This record has no membership contacts with an email address yet. Grant access or assign a role first.'
+                      this.emailMessageState === 'failed' ? EMAIL_MEMBERS_FAILED_MESSAGE : EMAIL_MEMBERS_EMPTY_MESSAGE
                     ),
                     React.createElement(
                       DialogActions,

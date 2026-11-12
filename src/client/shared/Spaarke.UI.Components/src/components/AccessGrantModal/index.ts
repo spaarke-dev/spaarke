@@ -52,3 +52,10 @@ export {
 } from './followsParent';
 export type { AccessValueOrigin } from './followsParent';
 export { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
+// Task 196: the "Email members" recipients (role contacts + active grants + user shares, No Access applied).
+export {
+  resolveEmailMembersRecipients,
+  EMAIL_MEMBERS_EMPTY_MESSAGE,
+  EMAIL_MEMBERS_FAILED_MESSAGE,
+} from './emailMembers';
+export type { EmailMembersResolution, IEmailMembersSources, IEmailMembersRootSources } from './emailMembers';
