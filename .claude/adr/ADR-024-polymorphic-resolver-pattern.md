@@ -216,8 +216,8 @@ The resolver pattern integrates with the Field Mapping Framework. When a parent 
 | **Native subgrid filtering** | Entity-specific lookup fields work with Dataverse views |
 | **Unified cross-entity views** | Resolver fields enable "All Events" view across all parent types |
 | **Admin configurability** | `sprk_recordtype_ref` allows adding entity types without schema changes |
-| **User-friendly picker** | AssociationResolver PCF provides single UI for all entity types |
-| **Clickable links in grids** | RegardingLink PCF renders resolver name as navigation link |
+| **User-friendly picker** | RegardingResolver PCF provides a single UI for all entity types (AssociationResolver, which did this first, is deleted) |
+| **Clickable links in grids** | Provided until 2026-03-15 by the RegardingLink PCF (rendered the resolver name as a navigation link); that control is deleted (`ded4e037c2`) |
 | **Automatic field mapping** | Integration with Field Mapping Framework auto-populates child fields |
 
 ---
@@ -238,7 +238,7 @@ The resolver pattern integrates with the Field Mapping Framework. When a parent 
 
 | ADR | Relationship |
 |-----|--------------|
-| [ADR-006](ADR-006-pcf-over-webresources.md) | AssociationResolver and RegardingLink are PCF controls |
+| [ADR-006](ADR-006-pcf-over-webresources.md) | RegardingResolver is a PCF control (AssociationResolver and RegardingLink, also PCFs, are deleted) |
 | [ADR-021](ADR-021-fluent-design-system.md) | PCF controls use Fluent UI v9 |
 | [ADR-022](ADR-022-pcf-platform-libraries.md) | PCF controls use React 16 APIs |
 
