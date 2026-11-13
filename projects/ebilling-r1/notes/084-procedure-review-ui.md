@@ -736,3 +736,14 @@ The base-retired Changed mark has no `baseRuleBody`, because nothing is publishe
 **Still open for the owner:**
 - Item 8: confirm that "rate cards offer no Change" means the ApprovedRate type (decision 2).
 - Make the ruleType fixture words the enum names across 084a/084b (item 10c). This is test hygiene, with no user-visible effect.
+
+### 084c close (2026-11-13)
+
+- **uac-r2 review** of the read-model additions (`RuleBody`, `Consequence`, `BasePolicyId`, `BaseRuleBody`; `3a94a37fc9..f67e5c6acd`): **PASS**. Each field reaches the answer only through `Reading.Expose`. Accepted K: because the base version row is now always asked, a caller who can Read the shown rule but not its base version gets 503 (EB-D-218: a row denied alone gives 503). The DeniedAlone tests pin this.
+- **Scoped re-check of the client fix diff:** no F-class findings. Known limits recorded:
+  - **K1.** The `WizardsAllowed` property test has no Changed variant carrying `basePolicyId`. `planChange.test.ts` covers `planWithin` for the re-change plan directly. Add the variant when next touching that file.
+  - **K2.** A re-change keeps the firm of the earlier change: the firm field is fixed to the record rule's `firmScope`. To re-change for all firms or another firm, run the published rule first, then change.
+  - **K3.** The Duplicate/Reject pre-check reads the record rule's consequence. A re-change goes to the base rule, whose consequence can differ after a Stale refresh. The server then refuses, and the message shows in the general bar; nothing is saved silently.
+  - **K4.** `testKit.ts` still classifies a `ruleset` route that the client no longer calls. Dead test code; remove it when next touching the file.
+- **Merged** into `work/ebilling-r1` as `a74278e22c`. The BFF part (read-model fields) reaches dev with task 112.
+- **Open owner question (item 8):** which rules refuse Change? Today: ApprovedRate (rate card) and ApprovedTimekeeper (no values).
