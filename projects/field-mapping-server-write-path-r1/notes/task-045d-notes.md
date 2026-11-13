@@ -21,9 +21,16 @@ Design: `task-045c-notes.md` "Q8 (a)" (copied, not redesigned). POML: `tasks/045
    when the guard admits the row. On every update path it runs after that path's invoice-family guard and the 045b planner,
    so their refusals come first and are unchanged.
 6. The dedicated submission writers are unchanged: their derive still refuses a blank name or number (all five or none).
-7. On the field-mapping push the name and number are read as the caller, as the 045b planner reads display values there.
-   A record the caller may not read (403 or 404) that exists has its name and number cleared; the type, id and URL are
-   still written. A record that does not exist refuses.
+7. On the app-only paths the name and number are read as the 045b planner reads a moved pair's display values on that
+   path:
+   - on the push, as the caller;
+   - on the playbook update and the output orchestrator, as the person the run acts as (`MovedDisplayReader`);
+   - with no person they are cleared, never derived app-only. This is 045b's rule (fix round F-045b-1), which the derive
+     matches so it never refills what the planner cleared.
+
+   A record the reader may not read (403 or 404) that exists has its name and number cleared; the type, id and URL are
+   still written. A record that does not exist refuses (`record_not_found`, or `read_failed` on a write run as a person).
+   A reader fault, or no query, refuses `read_failed`.
 8. A fault's own text never enters a generic writer's refusal reason (only its type name); the reason can reach a 500's
    detail. The submission writers' text is unchanged.
 9. The derive reads the stored row only to derive from it. A stored row that does not exist gets no derive refusal; the
@@ -80,7 +87,8 @@ A blank name or number is legitimate data, and refusing it would make such a rec
   - the row's stored core lookups (`RetrieveAsync`);
   - the catalog row by table name (`RetrieveMultipleAsync`, a `QueryExpression` on `sprk_recordtype_ref`:
     `sprk_recordlogicalname` = table, active, top 1);
-  - the record's name and number (`RetrieveAsync`; on the push, as the caller — rule 7).
+  - the record's name and number, as the caller or the person (rule 7); app-only only to check, after a 403 or 404, that
+    the record exists.
 - It decides with the guard's pure `Check` on the stored values overlaid with the change. A row `Check` refuses is left to the
   path's existing guard, so there is no new refusal for any table.
 - Payload shapes: one helper, the dictionary overload of `OwnedChildWrite.WithColumnsSet`:
@@ -191,11 +199,27 @@ A blank name or number is legitimate data, and refusing it would make such a rec
   - Run B switched off the app-only derive. All 5 failed: the approval moves on 3 paths, the external identifier to
     invoice-only, and the pushed pair replaced.
   - Restored: all pass.
-- ebilling-r1's proof (minus `Api.Office.`): Finance 7280 passed, 0 failed, 4 skipped; ProcedureAssignment 392 passed;
-  InvoiceFamily 469 passed.
+- Fourth round (fix round 4), tests new or changed:
+  - on both handlers, a run as a person:
+    - who may not read the new matter: type, id and URL written, name and number cleared;
+    - who may read it: the person's name and number written;
+  - on the push:
+    - a caller read that times out, or no caller query: `read_failed`, nothing written;
+    - a 403 on a matter that does not exist: `record_not_found`;
+  - H1 on the two handlers, a run as a person: a missing row is `read_failed` and never created;
+  - H1 delete race on every path, table and identity: the guard finds the row, the update-only write does not, and the
+    guard's code is answered (never the upsert);
+  - the "core already named" theory now lists only the rows whose core lookup is writable (no empty passes);
+  - the no-person rows of the handler tests expect name and number cleared (rule 7).
+- Fail-then-pass (fourth round): the switch-offs were the handlers' person display read, the push's fault branch and
+  exists-check, the guard's person mapping, and `IsUpdateOnlyTarget` narrowed. With them, 44 failed. The 4 that passed are
+  the push rows of the moved-record tests (unchanged on the push) and one unrelated test the filter matched. Restored: all
+  pass.
+- ebilling-r1's proof (minus `Api.Office.`), fourth round: Finance 7280 passed, 0 failed, 4 skipped; ProcedureAssignment 392
+  passed; InvoiceFamily 502 passed.
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
 - `dotnet test tests/Spaarke.ArchTests/`: 2536 passed.
-- `Sprk.Bff.Api.Tests` filtered run: 9427 passed, 0 failed, 3 skipped (live tests), run alone (third round).
+- `Sprk.Bff.Api.Tests` filtered run: 9460 passed, 0 failed, 3 skipped (live tests), run alone (fourth round; third round 9427).
   - Filter: Invoice | RecordTableRules | PreWrite | RecordCreation | OwnedChildWrite | UpdatePlanner | ChildRecord |
     RegardingPair | SecureChildOwnership | DataverseUpdateRecordHandler | BillingExport | Refusal | ActionSeam | FieldMapping |
     UpdateRecordAction | DataverseUpdateHandler | AiTool | InvoiceSubmission, minus `Api.Office.`.
@@ -205,9 +229,11 @@ A blank name or number is legitimate data, and refusing it would make such a rec
 
 ## Known limits (K)
 
-- K1: an update that changes a core lookup costs up to three more reads (the stored core lookups, the catalog row, the
-  record's name and number), plus any metadata read the record reader needs. On a caller path they run as the caller; on an
-  app-only path they run app-only.
+- K1: an update that changes a core lookup costs up to four more reads, plus any metadata read the record reader needs:
+  - the stored core lookups and the catalog row: as the caller on a caller path, app-only on an app-only path;
+  - the record's name and number: as the caller on a caller path and on the push, as the person on the two handlers, and
+    not read at all on a handler run with no person (they are cleared);
+  - after a 403 or 404 on that read, one app-only read to check that the record exists.
 - K2: the derive's stored-lookup read and the guard's own are separate reads. A row changed between them is decided by the
   guard on its read, and the five reflect the derive's read. This is the same window as 045b's planner.
 - K3: when a derive failure and a later refusal both apply on an update, the derive failure is answered. The later refusals
@@ -230,3 +256,9 @@ A blank name or number is legitimate data, and refusing it would make such a rec
   core-lookup move of a family row refuses with `invoice_family_resolver_fields_incomplete`.
 - K10: model-driven form edits of a family row's core lookup do not pass through these paths and are not covered.
 - K11: a pair-only write that disagrees with the row's core lookup is a separate owner decision (#2772, DI-029).
+- K12: a new core record deleted while a push runs gives `record_not_found` for that child (a delete race only).
+- K13: on a handler run as a person, a new core record that does not exist answers `read_failed`, while one that exists but
+  the person may not read is written (name and number cleared). The two outcomes differ; Dataverse's bind of the lookup
+  shows the same difference.
+- K14: on a handler run with no person, the name and number of a moved family row are cleared, as 045b clears a moved
+  pair's display with no person. Only the type, id and URL describe the record until a write that can read it.
