@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open: owner decision pending (refuse or re-derive) |
+| **Status** | Decided: option (a), refuse (owner, 2026-11-13, given in field-mapping-r1's session, recorded there and on #2772). Built by field-mapping task 045e after 045d; ebilling-r1 reviews the diff before merge. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 (by field-mapping-r1 as DI-029, during the 045d review) |
 | **Source** | field-mapping-server-write-path-r1 task 045d adversarial review |
@@ -31,7 +31,7 @@ It touches field-mapping's FR-23, so the owner decides, and field-mapping-r1 con
 **Entry-points**: the invoice-family core-record guard (`InvoiceFamilyCoreRecordGuard.cs`) and field-mapping's pair-derivation rule (045b rule 3).
 
 **Estimated effort**: small, once decided.
-**Blockers**: owner decision.
+**Blockers**: none (decided). field-mapping 045e runs after 045d merges.
 **Related**: D-68, D-96; field-mapping 045d (the neighbouring gap was closed there by widening the guard to all six family tables).
 
 ---
