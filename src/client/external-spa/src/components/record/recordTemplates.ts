@@ -6,14 +6,15 @@
  *
  * | Type             | Left (66%)                       | Right (34%)              | Toolbar                                  | Section actions                                           |
  * |------------------|----------------------------------|--------------------------|------------------------------------------|-----------------------------------------------------------|
- * | Matter, Project  | Information, Documents, Invoices | Messages, Tasks & events | Refresh, Submit invoice, Copy link       | Documents: Upload; Messages: New message; Tasks & events: Add event |
- * | Work assignment  | Information, Documents           | Messages, Tasks & events | same as Matter                           | same as Matter                                            |
+ * | Matter, Project  | Information, Documents, Invoices | Messages, Tasks & events | Refresh, Copy link                       | Documents: Upload; Invoices: Submit invoice; Messages: New message; Tasks & events: Add event |
+ * | Work assignment  | Information, Documents           | Messages, Tasks & events | Refresh, Submit invoice, Copy link       | Documents: Upload; Messages: New message; Tasks & events: Add event |
  * | Invoice          | Information, Files               | Messages                 | Refresh, Copy link                       | Messages: New message (Files keeps its own Upload)        |
  * | Service request  | Information, Documents           | Messages                 | Refresh, Copy link, Delete request       | Documents: Upload; Messages: New message                  |
  * | Document         | Information, Preview             | —                        | Refresh, Download, Copy link             | —                                                         |
  *
- * Submit invoice stays in the toolbar until task 010 moves it to the Invoices section (`sectionActions.invoices`; its
- * action host mounts for a section action as for a toolbar one).
+ * Submit invoice (task 010, owner 2026-11-12) sits in the Invoices section's header (`sectionActions.invoices`) and opens
+ * as a modal over the record. A Work assignment has no Invoices section (`sprk_invoice` has no work-assignment lookup), so it
+ * keeps the action in the header toolbar; the action host and the modal are the same either way.
  *
  * HEADER FACTS come only from the entity's existing read fields (`RECORD_DETAIL_ENTITIES`), so they add no column and no
  * read. The prototype's other facts have no data source today and are left out (POML escalation 2, FR-18 / task 031 owns
@@ -24,13 +25,22 @@
 import { EMPTY_VALUE, formatDetailValue, type DetailRecord } from '../detail/RecordDetailFields';
 import type { RecordTemplateConfig, RecordToolbarActionId } from './recordTemplate.types';
 
-/** Matter, Project and Work assignment offer the same toolbar and the same section actions (FR-01, task 009). */
-const ROOT_TOOLBAR: readonly RecordToolbarActionId[] = ['refresh', 'submitInvoice', 'copyLink'];
-const ROOT_SECTION_ACTIONS: RecordTemplateConfig['sectionActions'] = {
+/**
+ * Matter, Project and Work assignment offer the same section actions (FR-01, task 009) and the same Submit invoice (task
+ * 010). A Matter and a Project show Submit invoice in their Invoices section; a Work assignment has no such section, so
+ * its toolbar lists it.
+ */
+const ROOT_SECTION_ACTIONS: NonNullable<RecordTemplateConfig['sectionActions']> = {
   documents: ['upload'],
   messages: ['newMessage'],
   tasksEvents: ['addEvent'],
 };
+const INVOICING_ROOT_TOOLBAR: readonly RecordToolbarActionId[] = ['refresh', 'copyLink'];
+const INVOICING_ROOT_SECTION_ACTIONS: NonNullable<RecordTemplateConfig['sectionActions']> = {
+  ...ROOT_SECTION_ACTIONS,
+  invoices: ['submitInvoice'],
+};
+const WORK_ASSIGNMENT_TOOLBAR: readonly RecordToolbarActionId[] = ['refresh', 'submitInvoice', 'copyLink'];
 
 export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = {
   sprk_project: {
@@ -44,8 +54,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     ],
     left: ['information', 'documents', 'invoices'],
     right: ['messages', 'tasksEvents'],
-    toolbar: ROOT_TOOLBAR,
-    sectionActions: ROOT_SECTION_ACTIONS,
+    toolbar: INVOICING_ROOT_TOOLBAR,
+    sectionActions: INVOICING_ROOT_SECTION_ACTIONS,
   },
   sprk_matter: {
     entity: 'sprk_matter',
@@ -55,8 +65,8 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     headerFacts: [{ attribute: 'statuscode', label: 'Status' }],
     left: ['information', 'documents', 'invoices'],
     right: ['messages', 'tasksEvents'],
-    toolbar: ROOT_TOOLBAR,
-    sectionActions: ROOT_SECTION_ACTIONS,
+    toolbar: INVOICING_ROOT_TOOLBAR,
+    sectionActions: INVOICING_ROOT_SECTION_ACTIONS,
   },
   sprk_workassignment: {
     entity: 'sprk_workassignment',
@@ -70,7 +80,7 @@ export const RECORD_TEMPLATES: Readonly<Record<string, RecordTemplateConfig>> = 
     ],
     left: ['information', 'documents'],
     right: ['messages', 'tasksEvents'],
-    toolbar: ROOT_TOOLBAR,
+    toolbar: WORK_ASSIGNMENT_TOOLBAR,
     sectionActions: ROOT_SECTION_ACTIONS,
   },
   sprk_invoice: {

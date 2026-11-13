@@ -770,17 +770,16 @@ describe('InvoiceSubmitPage — ?invoiceRecord= preselect (R4 task 007, FR-10)',
   // The parser is the one place the link's shape is decided; the page tests above prove what the wizard then shows.
   describe('the link format', () => {
     it(
-      'reads {kind}:{guid} for the three kinds, any case of GUID; the builder writes what the parser reads',
+      'reads {kind}:{guid} for the three kinds, any case of GUID, and from a full address',
       async () => {
-        const { parseInvoiceRecordParam, invoiceSubmitPathFor } = await import('../src/pages/invoiceSubmitLink');
+        const { parseInvoiceRecordParam } = await import('../src/pages/invoiceSubmitLink');
         for (const kind of ['matter', 'project', 'workassignment'] as const) {
           expect(parseInvoiceRecordParam(`${kind}:${MATTER_ID}`)).toEqual({ kind, recordId: MATTER_ID });
           expect(parseInvoiceRecordParam(`${kind}:${MATTER_ID.toUpperCase()}`)).toEqual({
             kind,
             recordId: MATTER_ID.toUpperCase(),
           });
-          const path = invoiceSubmitPathFor(kind, MATTER_ID);
-          expect(path).toBe(`/invoices/submit?invoiceRecord=${kind}%3A${MATTER_ID}`);
+          const path = `/invoices/submit?invoiceRecord=${kind}%3A${MATTER_ID}`;
           expect(parseInvoiceRecordParam(new URL(path, 'https://x.test').searchParams.get('invoiceRecord'))).toEqual({
             kind,
             recordId: MATTER_ID,

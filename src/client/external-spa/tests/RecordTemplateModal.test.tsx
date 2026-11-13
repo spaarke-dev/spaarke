@@ -165,9 +165,16 @@ afterEach(() => {
 describe('RECORD_TEMPLATES', () => {
   it('has exactly the six types, with the left, right, toolbar and section-action lists (FR-01; task 009)', () => {
     // Task 009: a create action sits in the header of its own section; the record header keeps Refresh, Copy link and
-    // the type's own actions. Submit invoice stays in the header until task 010 moves it to Invoices.
-    const root = ['refresh', 'submitInvoice', 'copyLink'];
+    // the type's own actions. Task 010: Submit invoice is in the Invoices section's header on a Matter and a Project; a
+    // Work assignment has no Invoices section, so it stays in that type's header.
+    const root = ['refresh', 'copyLink'];
     const rootSections = { documents: ['upload'], messages: ['newMessage'], tasksEvents: ['addEvent'] };
+    const invoicingSections = {
+      documents: ['upload'],
+      invoices: ['submitInvoice'],
+      messages: ['newMessage'],
+      tasksEvents: ['addEvent'],
+    };
     const shape = Object.fromEntries(
       Object.entries(RECORD_TEMPLATES).map(([entity, c]) => [
         entity,
@@ -188,20 +195,20 @@ describe('RECORD_TEMPLATES', () => {
         left: ['information', 'documents', 'invoices'],
         right: ['messages', 'tasksEvents'],
         toolbar: root,
-        sectionActions: rootSections,
+        sectionActions: invoicingSections,
       },
       sprk_matter: {
         label: 'Matter',
         left: ['information', 'documents', 'invoices'],
         right: ['messages', 'tasksEvents'],
         toolbar: root,
-        sectionActions: rootSections,
+        sectionActions: invoicingSections,
       },
       sprk_workassignment: {
         label: 'Work assignment',
         left: ['information', 'documents'],
         right: ['messages', 'tasksEvents'],
-        toolbar: root,
+        toolbar: ['refresh', 'submitInvoice', 'copyLink'],
         sectionActions: rootSections,
       },
       sprk_invoice: {
@@ -229,6 +236,11 @@ describe('RECORD_TEMPLATES', () => {
     // No create action is left in any record header, and no section action names a section the record does not show.
     for (const c of Object.values(RECORD_TEMPLATES)) {
       for (const id of ['upload', 'newMessage', 'addEvent']) expect(c.toolbar).not.toContain(id);
+      // Task 010: a type with an Invoices section lists Submit invoice there, never in its header too.
+      if (c.left.includes('invoices')) {
+        expect(c.toolbar).not.toContain('submitInvoice');
+        expect(c.sectionActions?.invoices).toEqual(['submitInvoice']);
+      }
       for (const section of Object.keys(c.sectionActions ?? {})) expect([...c.left, ...c.right]).toContain(section);
     }
     // Tabs are off by default for every type (owner 2026-11-08).

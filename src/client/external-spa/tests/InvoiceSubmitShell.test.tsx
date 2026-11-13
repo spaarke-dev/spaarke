@@ -1,6 +1,5 @@
 // The shell path of "Submit invoice" (R4 task 007 fix round 1, F1 / F3): `RecordDeepLink` (the app-wide `?record=` deep link,
-// mounted on every route), the record opener with the router's `navigate` (the production `RouterRecordOpener` App.tsx
-// mounts), the REAL record modal, and the `/invoices/submit` route with the real
+// mounted on every route), the shell's record opener (`RecordOpenerProvider`, as App.tsx mounts it), the REAL record modal, and the `/invoices/submit` route with the real
 // `InvoiceSubmitPage` + shared wizard all run in one MemoryRouter. The network seam is the same as InvoiceSubmitPage.test.tsx:
 // `fetch` is a URL-routed fake BFF and the token acquirer is a fake.
 //
@@ -134,9 +133,8 @@ async function load() {
   selection.activateBackend('ciam', { ...CONTOSO });
   const { InvoiceSubmitPage } = await import('../src/pages/InvoiceSubmitPage');
   const { RecordDeepLink } = await import('../src/components/detail/RecordDeepLink');
-  const { useOpenRecord } = await import('../src/components/detail/RecordOpener');
-  const { RouterRecordOpener } = await import('../src/components/detail/RouterRecordOpener');
-  return { InvoiceSubmitPage, RecordDeepLink, RouterRecordOpener, useOpenRecord };
+  const { useOpenRecord, RecordOpenerProvider } = await import('../src/components/detail/RecordOpener');
+  return { InvoiceSubmitPage, RecordDeepLink, RecordOpenerProvider, useOpenRecord };
 }
 
 type Loaded = Awaited<ReturnType<typeof load>>;
@@ -157,19 +155,18 @@ const Home: React.FC<{ useOpenRecord: Loaded['useOpenRecord'] }> = ({ useOpenRec
 
 async function renderShell(entry: string) {
   const loaded = await load();
-  // The production bridge App.tsx mounts (the opener given the router's navigate), not a copy.
-  const { InvoiceSubmitPage, RecordDeepLink, RouterRecordOpener, useOpenRecord } = loaded;
+  const { InvoiceSubmitPage, RecordDeepLink, RecordOpenerProvider, useOpenRecord } = loaded;
   return render(
     <FluentProvider theme={webLightTheme}>
       <MemoryRouter initialEntries={[entry]}>
-        <RouterRecordOpener>
+        <RecordOpenerProvider>
           <RecordDeepLink teamsHost={false} />
           <Where />
           <Routes>
             <Route path="/invoices/submit" element={<InvoiceSubmitPage />} />
             <Route path="*" element={<Home useOpenRecord={useOpenRecord} />} />
           </Routes>
-        </RouterRecordOpener>
+        </RecordOpenerProvider>
       </MemoryRouter>
     </FluentProvider>
   );
@@ -256,26 +253,40 @@ describe('the invoice page under the shell: invoiceRecord is not the record deep
     SLOW
   );
 
+  // Task 010: the record view's Submit invoice (in the Invoices section) no longer leaves the record. It opens the wizard
+  // in a child dialog over it with the matter fixed; the address does not change and no page mounts. The page path above
+  // is unchanged.
   it(
-    'the full click path: open the matter record view, click Submit invoice, land on the page with the matter chosen and no dialog open',
+    'the full click path: open the matter record view, click Submit invoice in Invoices, the wizard opens over the record with the matter fixed and the URL unchanged',
     async () => {
       await renderShell('/');
 
       fireEvent.click(await screen.findByRole('button', { name: 'Open the matter' }));
       const dialog = await screen.findByRole('dialog', undefined, WAIT);
       await within(dialog).findByRole('heading', { name: 'Acme v. Roadrunner' }, WAIT);
-      const submit = await within(dialog).findByRole('button', { name: /submit invoice/i }, WAIT);
+      const invoices = await within(dialog).findByTestId('record-section-invoices', undefined, WAIT);
+      const submit = await within(invoices).findByRole('button', { name: /submit invoice/i }, WAIT);
+      await settle();
+      submit.focus();
       fireEvent.click(submit);
 
-      // The record view closes and the router goes to the page, with the page's parameter (not `record`).
-      await waitFor(() => expect(where()).toMatch(/^\/invoices\/submit\?invoiceRecord=/), WAIT);
-      expect(where()).not.toMatch(/[?&]record=/);
-      expect(isChecked(await matterRadio(false))).toBe(true);
-      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), WAIT);
-      // The app-wide deep link did not re-open anything over the page.
-      await settle();
-      expect(screen.queryByRole('dialog')).toBeNull();
-      expect(isChecked(await matterRadio(false))).toBe(true);
+      // The wizard is a second dialog over the record; the record is still there, and the address is as it was.
+      const child = await screen.findByRole('dialog', { name: 'Submit invoice' }, WAIT);
+      expect(where()).toBe('/');
+      expect(child).not.toBe(dialog);
+      // The matter is fixed: no Record step, no picker, and the file step is the first (no firm step for one firm).
+      await waitFor(() => expect(child.querySelector('input[type="file"]')).not.toBeNull(), WAIT);
+      expect(within(child).getByText('Step 1 of 2')).toBeTruthy();
+      expect(within(child).queryByRole('radio')).toBeNull();
+      expect(within(child).queryByText('Choose the record this invoice is for')).toBeNull();
+      // The check read the firm's records (the real transport): the project list and the matter list.
+      expect(matterListReads().length).toBeGreaterThan(0);
+
+      // Cancel closes only the wizard: the record view is still open.
+      fireEvent.click(within(child).getByRole('button', { name: /^cancel$/i }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Submit invoice' })).toBeNull(), WAIT);
+      expect(document.body.contains(dialog)).toBe(true);
+      expect(where()).toBe('/');
     },
     SLOW
   );

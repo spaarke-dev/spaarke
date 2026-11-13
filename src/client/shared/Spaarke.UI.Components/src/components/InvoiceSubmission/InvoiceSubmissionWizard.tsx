@@ -14,6 +14,9 @@
  *   1. Record  — choose an accessible core record (matter / project / work assignment), from `loadRecords`. The host is
  *                asked for the records linked to the invoice's firm (D-106: the one firm, or the chosen one), and again
  *                when the choice changes. A capped or partly failed read is said on screen, not hidden.
+ *              With `lockedRecord` (the host fixed the record) there is NO Record step: the host's `loadRecords` is still
+ *              asked for the firm's records, and the first step after the firm step shows a check instead of the upload
+ *              until the locked record is among a complete list (see {@link InvoiceSubmissionWizardProps.lockedRecord}).
  *   2. File    — one PDF. Type and size are checked here only as a convenience; the server is the authority.
  *   3. Details — the firm invoice number (REQUIRED, D-91) and an optional PO number. Finish submits.
  *   4. Processing then Result — the success screen mounts {@link InvoiceSubmissionOutcome}, which polls `getStatus`
@@ -33,6 +36,7 @@ import {
   Field,
   Input,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   Radio,
   RadioGroup,
@@ -68,6 +72,9 @@ const PO_NUMBER_MAX = 100;
 
 /** Shown on the "Choose firm" step when the server's `firm_required` brought it in after the first firm list said there was none to choose. */
 const FIRM_CHOICE_NOTICE = 'Your account belongs to more than one firm. Choose the firm this invoice is from.';
+
+/** Shown (with a locked record) when the firm's COMPLETE record list does not include the locked record. Fixed text. */
+export const LOCKED_RECORD_MISSING_MESSAGE = "This record can't take invoices for the selected firm.";
 
 const KIND_LABEL: Readonly<Record<InvoiceCoreRecordKind, string>> = {
   matter: 'Matter',
@@ -128,6 +135,12 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
    * modal preset is a fraction of the viewport width.
    */
   embedded?: boolean;
+  /**
+   * With `embedded`: hide the shell's own title bar and close button, for a host that supplies its own header and close
+   * (the SPA mounts the wizard inside a `SprkModal` and wires that modal's close to `onClose`). Ignored when not embedded.
+   * Default false.
+   */
+  hideTitle?: boolean;
   /** Wizard title. Default "Submit invoice". */
   title?: string;
   /** Called on Cancel, the close button, and Done on the result screen. */
@@ -150,6 +163,23 @@ export interface InvoiceSubmissionWizardProps extends InvoiceSubmissionCallbacks
    * record). It stays chosen while the host's `loadRecords` still offers it; otherwise it is dropped like any other choice.
    */
   initialRecord?: InvoiceCoreRecordOption;
+  /**
+   * Optional: the record this invoice is for, fixed by the host (a host that opens the wizard from a record). Same
+   * option type and identity as {@link initialRecord}: `kind` + `recordId` (the id compared without regard to case).
+   *
+   * ABSENT: the wizard behaves exactly as before. PRESENT:
+   * - there is no Record step and no record picker anywhere; the submit callback always receives this record;
+   * - `loadRecords` still decides whether the record can take an invoice: the wizard asks for the firm's records
+   *   (per firm, as before) and the locked record must be among them. When the firm's list is COMPLETE (neither
+   *   `truncated` nor `partial`) and lacks it, the wizard says "This record can't take invoices for the selected firm."
+   *   and `submit` is never called. When the read failed, or the list is truncated or partial and lacks the record, the
+   *   wizard cannot tell, so it shows the read message with Retry (Back and Cancel stay in the footer) instead;
+   * - the check runs again on every firm change (a message is cleared and an older firm's list never counts);
+   * - the captions count the steps without the Record step: "Step n of 2", or "Step n of 3" with the firm step.
+   *
+   * If both `lockedRecord` and `initialRecord` are given, `lockedRecord` wins and `initialRecord` is ignored.
+   */
+  lockedRecord?: InvoiceCoreRecordOption;
   /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.keepPolling`). */
   keepPolling?: (status: InvoiceSubmissionStatusView) => boolean;
   /** Optional (task 052): passed to the result screen (`InvoiceSubmissionOutcome.renderAccepted`). */
@@ -186,10 +216,13 @@ function recordLabel(record: InvoiceCoreRecordOption): string {
 }
 
 const recordKey = (record: InvoiceCoreRecordOption): string => `${record.kind}:${record.recordId}`;
+/** The locked record's identity: kind + id, the id compared without regard to case (a GUID has no case). */
+const lockedKey = (record: InvoiceCoreRecordOption): string => `${record.kind}:${record.recordId.toLowerCase()}`;
 
 export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = ({
   open = true,
   embedded = false,
+  hideTitle = false,
   title = 'Submit invoice',
   onClose,
   onSubmitted,
@@ -198,6 +231,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   pollIntervalMs,
   doneLabel = 'Done',
   initialRecord,
+  lockedRecord,
   keepPolling,
   renderAccepted,
   loadRecords,
@@ -248,8 +282,11 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
 
   const needsFirmStep = (firms?.length ?? 0) > 1;
   const chosenFirm = needsFirmStep ? (firms?.find(f => f.firmId === firmId) ?? null) : null;
-  const totalSteps = needsFirmStep ? 4 : 3;
-  const stepCaption = (n: number): string => `Step ${needsFirmStep ? n + 1 : n} of ${totalSteps}`;
+  // A locked record removes the Record step, so the steps after it count from one less.
+  const totalSteps = (needsFirmStep ? 1 : 0) + (lockedRecord ? 2 : 3);
+  // `n` is the step's number among the steps after the firm step, counted as if the Record step existed (Record 1, File 2, Details 3).
+  const stepCaption = (n: number): string =>
+    `Step ${(needsFirmStep ? 1 : 0) + (lockedRecord ? n - 1 : n)} of ${totalSteps}`;
 
   // ── Record step ─────────────────────────────────────────────────────────
   // The records are those linked to the invoice's firm (D-106): the chosen firm, or the one firm of a single-firm caller.
@@ -261,6 +298,11 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
   const [recordsError, setRecordsError] = React.useState<string | null>(null);
   const [recordFilter, setRecordFilter] = React.useState('');
   const [selected, setSelected] = React.useState<InvoiceCoreRecordOption | null>(initialRecord ?? null);
+  // Which firm the current `records` / `recordsError` answer was for ('' = no firm). Only the locked-record check reads it: a
+  // list or error that belongs to another firm is never counted (it is "still loading").
+  const [recordsFirmKey, setRecordsFirmKey] = React.useState<string | null>(null);
+  // Bumped by the locked-record Retry button to ask the host for the records again.
+  const [recordsReload, setRecordsReload] = React.useState(0);
 
   const loadRecordsRef = React.useRef(loadRecords);
   loadRecordsRef.current = loadRecords;
@@ -273,6 +315,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     setRecordsError(null);
     if (needsFirmStep && !recordFirmId) return;
     let cancelled = false;
+    const firmKey = recordFirmId ?? '';
     loadRecordsRef
       .current(recordFirmId ? { firmId: recordFirmId } : {})
       .then(result => {
@@ -282,15 +325,40 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
         setRecordsPartial(result.partial === true);
         // A record picked under another firm (or no firm) that is not offered now is dropped.
         setSelected(prev => (prev && result.records.some(r => recordKey(r) === recordKey(prev)) ? prev : null));
+        setRecordsFirmKey(firmKey);
       })
       .catch(err => {
         if (cancelled) return;
         setRecordsError(invoiceSubmissionErrorMessage(err));
+        setRecordsFirmKey(firmKey);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, firmsKnown, needsFirmStep, recordFirmId]);
+  }, [open, firmsKnown, needsFirmStep, recordFirmId, recordsReload]);
+
+  // ── Locked record (the host fixed the record: no Record step) ───────────
+  // The check is derived, never stored, so it cannot go stale: it reads only an answer that belongs to the current firm.
+  //   loading     — the firm is not chosen yet, or its records have not arrived;
+  //   ok          — the firm's list offers the locked record (kind + id), complete or not;
+  //   missing     — a COMPLETE list (neither truncated nor partial) lacks it: the record cannot take invoices for this firm;
+  //   unreadable  — the read threw, or the list is truncated / partial and lacks it: it is unknown, so not "missing".
+  type LockedCheck = 'loading' | 'ok' | 'missing' | 'unreadable';
+  let lockedCheck: LockedCheck | null = null;
+  if (lockedRecord) {
+    const answerIsCurrent = firmsKnown && !(needsFirmStep && !recordFirmId) && recordsFirmKey === (recordFirmId ?? '');
+    if (!answerIsCurrent) lockedCheck = 'loading';
+    else if (recordsError) lockedCheck = 'unreadable';
+    else if (records === null) lockedCheck = 'loading';
+    else if (records.some(r => lockedKey(r) === lockedKey(lockedRecord))) lockedCheck = 'ok';
+    else lockedCheck = recordsTruncated || recordsPartial ? 'unreadable' : 'missing';
+  }
+  // The record a submit carries: the locked one once the check passed (it wins over `initialRecord` and any pick), else the pick.
+  const chosenRecord: InvoiceCoreRecordOption | null = lockedRecord
+    ? lockedCheck === 'ok'
+      ? lockedRecord
+      : null
+    : selected;
 
   const visibleRecords = React.useMemo(() => {
     const needle = recordFilter.trim().toLowerCase();
@@ -329,7 +397,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
 
   // ── Finish: submit, then mount the Processing / Result screen ───────────
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig | void> => {
-    if (!selected || !file || !firmInvoiceNumberTrimmed) return;
+    if (!chosenRecord || !file || !firmInvoiceNumberTrimmed) return;
     // A caller with several firms must have chosen one: never submit without it (the server would answer firm_required).
     if (needsFirmStep && !chosenFirm) return;
 
@@ -337,7 +405,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     let accepted: InvoiceSubmissionAccepted;
     try {
       accepted = await submit({
-        record: selected,
+        record: chosenRecord,
         file: file.file,
         firmInvoiceNumber: firmInvoiceNumberTrimmed,
         poNumber: poNumber.trim() || undefined,
@@ -379,7 +447,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
       ),
     };
   }, [
-    selected,
+    chosenRecord,
     file,
     firmInvoiceNumberTrimmed,
     poNumber,
@@ -438,115 +506,179 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
     canAdvance: () => chosenFirm !== null,
   };
 
+  const recordStep: IWizardStepConfig = {
+    id: 'record',
+    label: 'Record',
+    renderContent: () => (
+      <div className={styles.stepContent}>
+        <Text size={200} className={styles.caption}>
+          {stepCaption(1)}
+        </Text>
+        <Text size={400} weight="semibold">
+          Choose the record this invoice is for
+        </Text>
+
+        {notice && !needsFirmStep && (
+          <MessageBar intent="warning" role="alert">
+            <MessageBarBody>{notice}</MessageBarBody>
+          </MessageBar>
+        )}
+        {recordsError && (
+          <MessageBar intent="error" role="alert">
+            <MessageBarBody>{recordsError}</MessageBarBody>
+          </MessageBar>
+        )}
+        {!recordsError && records === null && <Spinner size="small" label="Loading your records" />}
+        {records !== null && recordsPartial && (
+          <MessageBar intent="warning" data-testid="records-partial">
+            <MessageBarBody>
+              Some of your records could not be loaded, so this list is incomplete. Try again in a moment.
+            </MessageBarBody>
+          </MessageBar>
+        )}
+        {records !== null && recordsTruncated && (
+          <MessageBar intent="warning" data-testid="records-truncated">
+            <MessageBarBody>
+              Only the first part of your list is shown, and the search box searches only those records. If the record
+              you need is missing, contact your administrator.
+            </MessageBarBody>
+          </MessageBar>
+        )}
+        {records !== null && records.length === 0 && (
+          <MessageBar intent="info">
+            <MessageBarBody>
+              {recordFirmId
+                ? 'No record that you can submit an invoice against is linked to this firm.'
+                : 'You do not have a record to submit an invoice against.'}
+            </MessageBarBody>
+          </MessageBar>
+        )}
+        {records !== null && records.length > 0 && (
+          <>
+            <Field label="Find a record">
+              <Input value={recordFilter} onChange={(_e, data) => setRecordFilter(data.value)} />
+            </Field>
+            <div className={styles.recordList}>
+              <RadioGroup
+                aria-label="Records"
+                value={selected ? recordKey(selected) : ''}
+                onChange={(_e, data) => setSelected(records.find(r => recordKey(r) === data.value) ?? null)}
+              >
+                {visibleRecords.map(record => (
+                  <Radio
+                    key={recordKey(record)}
+                    value={recordKey(record)}
+                    label={
+                      <span
+                        className={styles.recordLabel}
+                      >{`${recordLabel(record)} · ${KIND_LABEL[record.kind]}`}</span>
+                    }
+                  />
+                ))}
+              </RadioGroup>
+              {visibleRecords.length === 0 && <Text size={200}>No record matches that search.</Text>}
+            </div>
+          </>
+        )}
+      </div>
+    ),
+    canAdvance: () => selected !== null,
+  };
+
+  // With a locked record the check above is shown here, on the first step after the firm step, in place of the upload: the
+  // user can go Back to another firm (when there is a firm step) or Cancel, and nothing is submitted until the record passes.
+  const renderLockedGate = (): React.ReactNode => {
+    if (lockedCheck === 'loading') return <Spinner size="small" label="Checking this record" />;
+    if (lockedCheck === 'missing') {
+      return (
+        <MessageBar intent="warning" role="alert" data-testid="locked-record-missing">
+          <MessageBarBody>{LOCKED_RECORD_MISSING_MESSAGE}</MessageBarBody>
+        </MessageBar>
+      );
+    }
+    // 'unreadable': today's read messages (the failure text, or the partial / truncated note), with a Retry.
+    const retry = (
+      <MessageBarActions>
+        <Button size="small" onClick={() => setRecordsReload(n => n + 1)}>
+          Retry
+        </Button>
+      </MessageBarActions>
+    );
+    if (recordsError) {
+      return (
+        <MessageBar intent="error" role="alert" data-testid="locked-record-read-failed">
+          <MessageBarBody>{recordsError}</MessageBarBody>
+          {retry}
+        </MessageBar>
+      );
+    }
+    if (recordsPartial) {
+      return (
+        <MessageBar intent="warning" role="alert" data-testid="records-partial">
+          <MessageBarBody>
+            Some of your records could not be loaded, so this list is incomplete. Try again in a moment.
+          </MessageBarBody>
+          {retry}
+        </MessageBar>
+      );
+    }
+    return (
+      <MessageBar intent="warning" role="alert" data-testid="records-truncated">
+        <MessageBarBody>
+          Only the first part of your list could be read, so this record could not be checked. Try again, or contact
+          your administrator.
+        </MessageBarBody>
+        {retry}
+      </MessageBar>
+    );
+  };
+
+  const fileStep: IWizardStepConfig = {
+    id: 'file',
+    label: 'File',
+    renderContent: () => (
+      <div className={styles.stepContent}>
+        <Text size={200} className={styles.caption}>
+          {stepCaption(2)}
+        </Text>
+        {/* With a locked record there is no Record step to carry a refusal's notice (firm_required with no choice to make). */}
+        {lockedRecord && notice && !needsFirmStep && (
+          <MessageBar intent="warning" role="alert" data-testid="locked-record-notice">
+            <MessageBarBody>{notice}</MessageBarBody>
+          </MessageBar>
+        )}
+        {lockedCheck !== null && lockedCheck !== 'ok' ? (
+          renderLockedGate()
+        ) : (
+          <>
+            <Text size={400} weight="semibold">
+              Upload the invoice PDF
+            </Text>
+            <Text size={300}>Drag a PDF here or browse (one file, up to {formatBytes(maxFileSizeBytes)}).</Text>
+            <FileUploadZone
+              onFilesAccepted={handleFilesAccepted}
+              onValidationErrors={handleFileErrors}
+              validationConfig={PDF_VALIDATION(maxFileSizeBytes)}
+            />
+            {fileNotices.map((notice, i) => (
+              <MessageBar key={i} intent="warning">
+                <MessageBarBody>
+                  {notice.fileName}: {notice.reason}
+                </MessageBarBody>
+              </MessageBar>
+            ))}
+            {file && <UploadedFileList files={[file]} onRemove={handleRemoveFile} />}
+          </>
+        )}
+      </div>
+    ),
+    canAdvance: () => file !== null && (lockedCheck === null || lockedCheck === 'ok'),
+  };
+
   const steps: IWizardStepConfig[] = [
     ...(needsFirmStep ? [firmStep] : []),
-    {
-      id: 'record',
-      label: 'Record',
-      renderContent: () => (
-        <div className={styles.stepContent}>
-          <Text size={200} className={styles.caption}>
-            {stepCaption(1)}
-          </Text>
-          <Text size={400} weight="semibold">
-            Choose the record this invoice is for
-          </Text>
-
-          {notice && !needsFirmStep && (
-            <MessageBar intent="warning" role="alert">
-              <MessageBarBody>{notice}</MessageBarBody>
-            </MessageBar>
-          )}
-          {recordsError && (
-            <MessageBar intent="error" role="alert">
-              <MessageBarBody>{recordsError}</MessageBarBody>
-            </MessageBar>
-          )}
-          {!recordsError && records === null && <Spinner size="small" label="Loading your records" />}
-          {records !== null && recordsPartial && (
-            <MessageBar intent="warning" data-testid="records-partial">
-              <MessageBarBody>
-                Some of your records could not be loaded, so this list is incomplete. Try again in a moment.
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {records !== null && recordsTruncated && (
-            <MessageBar intent="warning" data-testid="records-truncated">
-              <MessageBarBody>
-                Only the first part of your list is shown, and the search box searches only those records. If the record
-                you need is missing, contact your administrator.
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {records !== null && records.length === 0 && (
-            <MessageBar intent="info">
-              <MessageBarBody>
-                {recordFirmId
-                  ? 'No record that you can submit an invoice against is linked to this firm.'
-                  : 'You do not have a record to submit an invoice against.'}
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {records !== null && records.length > 0 && (
-            <>
-              <Field label="Find a record">
-                <Input value={recordFilter} onChange={(_e, data) => setRecordFilter(data.value)} />
-              </Field>
-              <div className={styles.recordList}>
-                <RadioGroup
-                  aria-label="Records"
-                  value={selected ? recordKey(selected) : ''}
-                  onChange={(_e, data) => setSelected(records.find(r => recordKey(r) === data.value) ?? null)}
-                >
-                  {visibleRecords.map(record => (
-                    <Radio
-                      key={recordKey(record)}
-                      value={recordKey(record)}
-                      label={
-                        <span
-                          className={styles.recordLabel}
-                        >{`${recordLabel(record)} · ${KIND_LABEL[record.kind]}`}</span>
-                      }
-                    />
-                  ))}
-                </RadioGroup>
-                {visibleRecords.length === 0 && <Text size={200}>No record matches that search.</Text>}
-              </div>
-            </>
-          )}
-        </div>
-      ),
-      canAdvance: () => selected !== null,
-    },
-    {
-      id: 'file',
-      label: 'File',
-      renderContent: () => (
-        <div className={styles.stepContent}>
-          <Text size={200} className={styles.caption}>
-            {stepCaption(2)}
-          </Text>
-          <Text size={400} weight="semibold">
-            Upload the invoice PDF
-          </Text>
-          <Text size={300}>Drag a PDF here or browse (one file, up to {formatBytes(maxFileSizeBytes)}).</Text>
-          <FileUploadZone
-            onFilesAccepted={handleFilesAccepted}
-            onValidationErrors={handleFileErrors}
-            validationConfig={PDF_VALIDATION(maxFileSizeBytes)}
-          />
-          {fileNotices.map((notice, i) => (
-            <MessageBar key={i} intent="warning">
-              <MessageBarBody>
-                {notice.fileName}: {notice.reason}
-              </MessageBarBody>
-            </MessageBar>
-          ))}
-          {file && <UploadedFileList files={[file]} onRemove={handleRemoveFile} />}
-        </div>
-      ),
-      canAdvance: () => file !== null,
-    },
+    ...(lockedRecord ? [] : [recordStep]),
+    fileStep,
     {
       id: 'details',
       label: 'Details',
@@ -573,13 +705,15 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
               Summary
             </Text>
             {chosenFirm && <Text size={200}>Firm: {chosenFirm.name}</Text>}
-            <Text size={200}>Record: {selected ? `${recordLabel(selected)} (${KIND_LABEL[selected.kind]})` : '-'}</Text>
+            <Text size={200}>
+              Record: {chosenRecord ? `${recordLabel(chosenRecord)} (${KIND_LABEL[chosenRecord.kind]})` : '-'}
+            </Text>
             <Text size={200}>File: {file ? `${file.name} (${formatBytes(file.sizeBytes)})` : '-'}</Text>
           </div>
         </div>
       ),
       canAdvance: () =>
-        selected !== null &&
+        chosenRecord !== null &&
         file !== null &&
         firmInvoiceNumberTrimmed.length > 0 &&
         (!needsFirmStep || chosenFirm !== null),
@@ -600,6 +734,7 @@ export const InvoiceSubmissionWizard: React.FC<InvoiceSubmissionWizardProps> = (
       <WizardShell
         open={open}
         embedded={embedded}
+        hideTitle={hideTitle}
         title={title}
         steps={steps}
         onClose={onClose}

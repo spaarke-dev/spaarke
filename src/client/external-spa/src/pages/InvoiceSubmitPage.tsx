@@ -12,8 +12,9 @@
  *     submission the URL is rewritten to carry its id, so reloading or returning to the address shows it again.
  *   - submissionId: the Processing / Result screen alone, read from the server. Leaving the page and coming back shows
  *     the same answer (FR-18). Nothing is kept in the browser. It wins over `invoiceRecord` when both are present.
- *   - invoiceRecord (spaarke-SPA-external-access-platform-r4 task 007, FR-10; agreed with ebilling-r1): the record view's
- *     "Submit invoice" opens the wizard with that record preselected. `kind` is matter | project | workassignment and the
+ *   - invoiceRecord (spaarke-SPA-external-access-platform-r4 task 007, FR-10; agreed with ebilling-r1): an address
+ *     that names a record opens the wizard with that record preselected (no in-app link builds one since task 010: the
+ *     record view's "Submit invoice" opens a modal instead; a saved or pasted address still works). `kind` is matter | project | workassignment and the
  *     id a GUID; anything else is ignored and the wizard starts empty. No name travels in the address: the option is
  *     taken from this page's own `loadRecords` result (the records the caller can submit for), so a record the caller
  *     cannot submit for is simply not preselected. A caller with several firms is never given a firm by the link: the

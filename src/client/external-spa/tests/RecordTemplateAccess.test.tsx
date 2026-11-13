@@ -299,7 +299,7 @@ describe.each(['matter', 'wa'] as const)('%s: the toolbar follows each list canC
       expect(noteOf(dialog, 'documents')).toBeNull();
       expect(noteOf(dialog, 'messages')).toBeNull();
       expect(noteOf(dialog, 'tasksEvents')).toBeNull();
-      // Submit invoice (task 007) needs a host onNavigate, which this harness does not give: not shown.
+      // Submit invoice (task 007) needs the caller's firms linked to the record, which this harness does not give: not shown.
       expect(actionsOf(dialog)).not.toContain('submitInvoice');
     },
     SLOW
