@@ -1041,6 +1041,15 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
               coreRecord.id,
               'invoice-no-firm-open'
             )}
+          {/* The user adds the firm in Spaarke and comes back: nothing here changes on its own, so ask again on request. */}
+          <Button
+            appearance="subtle"
+            size="small"
+            data-testid="invoice-no-firm-recheck"
+            onClick={() => setFirmsReload(n => n + 1)}
+          >
+            Check again
+          </Button>
         </>
       );
     }
@@ -1081,6 +1090,15 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
             {CORRECTION_NO_FIRM_MESSAGE}
           </Text>
           {renderOpenInSpaarke('sprk_invoice', c.invoiceId, 'invoice-correction-no-firm-open')}
+          {/* After the firm is set in Spaarke, read the prefill again (the cached one still says "no firm"). */}
+          <Button
+            appearance="subtle"
+            size="small"
+            data-testid="invoice-correction-no-firm-recheck"
+            onClick={() => setPrefillReload(n => n + 1)}
+          >
+            Check again
+          </Button>
         </>
       )}
       {normalizeFirmInvoiceNumber(c.firmInvoiceNumber) === null && (
