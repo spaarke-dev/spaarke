@@ -976,3 +976,15 @@ Rows not listed write other tables: thread rows (`ThreadResolver.cs:251`, `:1098
 - `RecordOwnerAssignmentCensusTests`: the `DirectMessageOwnerStep.WriteDirectTeamOwnerAsync` entry and its kind comment now cover the join and the unfile; the `MessagingIngestor` waiver reason names the step as the only owner change after the join.
 - `InboundIngestionCreatorsGuardTests`: rule (7). The chat ingestor calls `GrantAtJoinAsync` then `OwnDirectAfterContentAsync` once each, in that order after the thread resolver's join, calls no other member of the step, names no Assign and does not read the Direct team; the join members are called only from the chat ingestor and the outbound send. Must-fire controls mutate the real source (an Assign, a second call, a wrong member, a lookup read, a removed call, a step call added to the mailbox processor); must-not-fire controls cover comments and declarations.
 - `CrossSurfaceOwnerTests`: a content row of a Direct-team message gets the Direct team from every question a surface asks (content of the message, owning-team question, the gate record, each content table); a content row of a record-filed message does not; with both settings unset the answer is today's; a row that is not message content is not routed.
+
+## Live record — dev (spaarkedev1)
+
+- **2026-11-13, 054b, run on the owner's go (2026-11-12, this session).** The dev BFF was live at 9411f604bb (master e9208abc5e, which includes 054), with the `DirectMessage:*` settings unset.
+  - **Dry run:** exit 0. All of p0–p6 were OK, and the writers were exactly the two BFF application users.
+  - **`-Apply`:** exit 0.
+    - It removed four main-form controls (on the Message form and the Communication Thread form).
+    - It secured all five columns and granted both profiles, with a masked window of 18–29 s per column.
+    - It published both tables.
+  - **`-Verify`:** exit 0, PASS, "PRECONDITION MET" for the `DirectMessage:*` settings.
+  - Reported to unified-access-control-r2. Next in the binding order: their step 3 (Direct setup), then 054c Stamp.
+  - Manual checks m1–m4 need a non-administrator sign-in; they are open, for UAT.
