@@ -28,7 +28,7 @@ Spec validation → resource discovery → project artifacts (`project-setup`) �
 
 - **Autonomous by default.** Run every step end to end; report at each milestone without waiting. The user can interrupt at any time.
 - **Interactive on request.** If the user says "run interactively", "with approvals" or similar, read `references/interactive-mode.md` before Step 0. It lists the confirmation gate at each step.
-- **Safety gates stop in both modes**: pre-flight (0.3), an incomplete spec (1), the Completeness Lint (3), registration (4.2), and the build check between waves (5). They are not confirmation gates. The user fixes the cause; the pipeline does not auto-fix it.
+- **Safety gates stop in both modes**: pre-flight (0.3), an incomplete spec (1), a reuse choice with 2+ candidates (2; interactive mode asks it as a question), the Completeness Lint (3), registration (4.2), and the build check between waves (5). They are not confirmation gates. The user fixes the cause; the pipeline does not auto-fix it.
 - **Model and effort**: run Steps 0–3 (planning) on opus, or fable for the hardest projects, at effort `high` (`.claude/constraints/agent-cost.md`). Task execution uses each POML's `<model-tier>`/`<effort>` (Step 5).
 - **Output length**: this skill writes long artifacts. If one comes back truncated, set `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` and restart the session. Do not set `MAX_THINKING_TOKENS`; current models ignore it.
 
@@ -133,7 +133,7 @@ SUMMARIZE "N tensions (X A, Y B, Z C) on the record" and CONTINUE. Do not block:
 - Overlap → **HARD WARNING** in the Step 2 output, naming the projects and a coordination recommendation. Do not block; the user decides the sequencing. (Purpose: no silent collisions on shared files when many worktrees touch one surface; in one count, 13 of 17 worktrees touched the BFF.)
 - None → log "✅ Hot-path surfaces unique among active worktrees". The project's own row is appended in Step 4.
 
-**Part 1: Resource discovery.** This is the comprehensive pass: design-to-spec Step 3 loaded only ADR constraints to enrich the spec, while this step loads everything implementation needs.
+**Part 1: Resource discovery.** This is the comprehensive pass: design-to-spec Step 3 loaded ADR constraints and ran one reuse scan (`notes/reuse-scan.md`) to enrich the spec, while this step loads everything implementation needs.
 
 ```
 1. IDENTIFY resource types from spec.md: technologies, operations, components (API, PCF, storage, AI, jobs)
@@ -144,6 +144,10 @@ SUMMARIZE "N tensions (X A, Y B, Z C) on the record" and CONTINUE. Do not block:
    (service, endpoint, DI registration, package, Dataverse column, file surface), record the existing
    component it overlaps with: the root CLAUDE.md §11 "Existing" answer that task-create Step 3.5.6
    requires per task. Flag project-level new surface the spec/design leaves unjustified.
+   REUSE SCAN: notes/reuse-scan.md exists → cite its row per capability; do not re-scan (a capability the file
+   does not cover is a §11 flag). Missing (e.g. a hand-written spec.md) → run the scan exactly as design-to-spec
+   Step 3 defines it; Part 2 writes the file. A capability with 2+ viable candidates: interactive → ask the
+   owner; autonomous → STOP at this gate with the options.
 6. DISCOVER scripts via script-aware (scripts/README.md): e.g. PCF build → Invoke-PcfBuildProd.ps1
    (deploy via pcf-deploy), API testing → Test-SdapBffApi.ps1, custom pages → Deploy-CustomPage.ps1,
    ribbon → Export-EntityRibbon.ps1
@@ -162,6 +166,7 @@ Output: counts and lists of ADRs, skills, knowledge docs, canonical implementati
 ```
 INVOKE project-setup projects/{project-name} with spec.md + the discovery summary
   → README.md, plan.md, CLAUDE.md, current-task.md, tasks/ and notes/ folders (project-setup is authoritative)
+IF Part 1 ran the reuse scan: WRITE notes/reuse-scan.md to the design-to-spec Step 4 contract
 THEN ENHANCE:
   plan.md   — fill "Discovered Resources" (ADRs with summaries, skills with purpose, knowledge docs, reusable
               code) and the References section

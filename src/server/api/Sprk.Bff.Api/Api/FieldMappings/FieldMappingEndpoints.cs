@@ -1633,7 +1633,7 @@ public static class FieldMappingEndpoints
                                     ParentChanges = parentChanges,
                                     CallerSystemUserId = callerSystemUserId,
                                     // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct
-                                    // message returns to the Direct team; any other communication is Unchanged pending #2722).
+                                    // message returns to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722).
                                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                                         targetEntity, actsForAPerson: true, directOwner),
                                     RegardingLinksSet = Sprk.Bff.Api.Services.Dataverse.RecordReparent.RegardingLinksSetIn(

@@ -21,7 +21,7 @@ After each step, report as in autonomous mode, then wait for the user's answer b
 | 1 | Wait after validation | `Next: generate the project artifacts. [Y to proceed / refine to change spec.md / stop to exit]` |
 | 1.5 | If overlaps were found, wait | `[Y to proceed with awareness / stop to wait]` |
 | 1.7 | No gate: accepted tension declarations are authoritative | — |
-| 2 | Wait after artifacts are generated | `[Y to proceed / review to view artifacts / refine {file} to edit / stop to exit]` |
+| 2 | If the reuse scan found 2+ candidates for a capability, ask which to extend (autonomous mode stops instead). Wait after artifacts are generated | `{capability}: extend {A} or {B}, or neither (why)?` then `[Y to proceed / review to view artifacts / refine {file} to edit / stop to exit]` |
 | 3 | Wait after tasks are generated | `[Y to continue to branch creation / review {task-number} to view a task / stop to exit]` |
 | 4 | Wait after the branch is pushed | `[Y to continue / stop to exit]` |
 | 4.2 | No gate: registration is a MUST and runs without a prompt | — |

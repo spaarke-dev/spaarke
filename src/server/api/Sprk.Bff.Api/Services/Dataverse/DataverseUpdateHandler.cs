@@ -222,7 +222,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     // runs AS; an app-only write passes no caller and is refused such a move.
                     CallerSystemUserId = impersonateSystemUserId,
                     // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
-                    // to the Direct team; any other communication is Unchanged pending #2722). An app-only write keeps the
+                    // to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722). An app-only write keeps the
                     // acting-user rule, so with no person named it is refused as before.
                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                         entityLogicalName, actsForAPerson: impersonateSystemUserId is not null, _directOwner),

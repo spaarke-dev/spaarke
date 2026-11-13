@@ -179,6 +179,216 @@ public class RecordOwnershipResolverDirectParentTests
         resolution.OwningTeamId.Should().Be(DirectUnitDefaultTeam, "the rule reads message content rows only");
     }
 
+    // ── uac-r2 197a-2 (#2728, owner option a): a document of an UNFILED message the Direct team owns ─────────────────────────
+    // The #2468 demotion (an unfiled communication counts for secure-if-any only) is skipped ONLY when the message is positively
+    // owned by the resolved Direct team; every other case demotes as before. Asked as the reconciler asks (KeepCreator), so a
+    // demoted answer is "unchanged".
+
+    [Fact(DisplayName = "#2728 must-fire: a document linked only to an unfiled message the resolved Direct team owns is the Direct team's")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_OfAnUnfiledMessageTheResolvedDirectTeamOwns_IsTheDirectTeams()
+    {
+        var resolution = await Resolver(World().WithMessage(DirectUnit, DirectTeam), Resolved()).ResolveOwnerAsync(
+            DocumentOfMessage(), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Owned, resolution.Reason);
+        resolution.OwningTeamId.Should().Be(DirectTeam, "the document follows its Direct message, never the Direct unit's default team");
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: a document of an unfiled message owned by ANOTHER team is demoted as before")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_OfAnUnfiledMessageOwnedByAnotherTeam_IsDemotedAsBefore()
+    {
+        var resolution = await Resolver(World().WithMessage(FakeDirectory.ChildBu, OtherNamedTeam), Resolved()).ResolveOwnerAsync(
+            DocumentOfMessage(), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged, "an unfiled message that is not the Direct team's never names it");
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: with no Direct setting configured the document is demoted, and the lookup reads nothing")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_WhenNoDirectSettingIsConfigured_IsDemotedAsBefore_AndNothingMoreIsRead()
+    {
+        var withoutLookup = World().WithMessage(DirectUnit, DirectTeam);
+        await withoutLookup.Resolver().ResolveOwnerAsync(DocumentOfMessage(), CancellationToken.None);
+        var directory = World().WithMessage(DirectUnit, DirectTeam);
+        var client = new CountingClient();
+
+        var resolution = await Resolver(directory, Unconfigured(client)).ResolveOwnerAsync(DocumentOfMessage(), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        client.Reads.Should().Be(0);
+        directory.QueriedEntities.Should().Equal(withoutLookup.QueriedEntities, "the rule off reads exactly what it read before");
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: without a Direct lookup composed the document is demoted as before")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_WithoutADirectLookup_IsDemotedAsBefore()
+    {
+        var resolution = await World().WithMessage(DirectUnit, DirectTeam).Resolver().ResolveOwnerAsync(
+            DocumentOfMessage(), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+    }
+
+    [Theory(DisplayName = "#2728 must-not-fire: while the Direct team cannot be identified the document is demoted, never refused or the Direct team")]
+    [Trait("status", "issue-2728")]
+    [InlineData(DirectMessageOwnerTeam.BusinessUnitNameConfigKey)]
+    [InlineData(DirectMessageOwnerTeam.OwnerTeamNameConfigKey)]
+    public async Task Document_WhileTheDirectTeamCannotBeIdentified_IsDemotedAsBefore(string onlySet)
+    {
+        var resolution = await Resolver(World().WithMessage(DirectUnit, DirectTeam), DirectMessageOwnerStepTests.PartiallyConfigured(onlySet))
+            .ResolveOwnerAsync(DocumentOfMessage(), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged, "only a POSITIVE Direct answer skips the demotion");
+        _log.Entries.Should().NotContain(e => e.Event.Id == 5418);
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: when the Direct lookup faults the document is demoted, never the Direct team")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_WhenTheDirectLookupFaults_IsDemotedAsBefore()
+    {
+        var lookup = new DirectMessageOwnerTeamDouble().WithDirectTeam(DirectTeam);
+        lookup.Faults = true;
+
+        var resolution = await Resolver(World().WithMessage(DirectUnit, DirectTeam), lookup.Lookup()).ResolveOwnerAsync(
+            DocumentOfMessage(), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.OwningTeamId.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: when the message's owner read faults the fault propagates, as before; never the Direct team")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_WhenTheMessagesOwnerReadFaults_TheFaultPropagates()
+    {
+        // The message's owner-facts read alone faults (its filing read, the whole row, answers). Before #2728 the demoted path
+        // reads the same row's owner facts for secure-if-any, so the same fault propagated there.
+        var directory = World().WithMessage(DirectUnit, DirectTeam);
+        var resolver = ResolverFaulting(directory, Resolved(),
+            q => q.EntityName == "sprk_communication" && !q.ColumnSet.AllColumns ? new TimeoutException("the owner read timed out") : null);
+
+        var act = () => resolver.ResolveOwnerAsync(DocumentOfMessage(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<TimeoutException>("a fault is not an answer: never the Direct team on a guess");
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: a message that cannot be found still refuses with its own code")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_OfAMessageThatCannotBeFound_StillRefuses()
+    {
+        var resolution = await Resolver(World(), Resolved()).ResolveOwnerAsync(DocumentOfMessage(), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.CommunicationFilingUnresolved);
+    }
+
+    [Fact(DisplayName = "#2728 never loosens: a Direct-owned unfiled message plus a Secure second parent gives the Secure team")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_OfADirectOwnedUnfiledMessage_AndASecureSecondParent_IsTheSecureTeams()
+    {
+        var secureEvent = Guid.Parse("d1d1d1d1-0054-4054-8054-000000000020");
+        var question = DocumentOfMessage(("sprk_relatedevent", new EntityReference("sprk_event", secureEvent)));
+        question.Parents[0].Should().Be(new RecordOwnershipParent("sprk_communication", MessageId),
+            "precondition: the message is the document's primary parent, so the #2468 branch is the one asked");
+
+        var resolution = await Resolver(
+                World().WithMessage(DirectUnit, DirectTeam)
+                    .WithRecord("sprk_event", secureEvent, FakeDirectory.SecureBu, owningTeam: FakeDirectory.SecureNamedTeam),
+                Resolved())
+            .ResolveOwnerAsync(question, CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(FakeDirectory.SecureNamedTeam, "secure-if-any over the other parents still holds");
+        resolution.IsSecureOwner.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "#2728 never loosens: a Direct-owned unfiled message plus a Secure canonical (Secure-only) gives the Secure team")]
+    [Trait("status", "issue-2728")]
+    public async Task Document_OfADirectOwnedUnfiledMessage_AndASecureCanonical_IsTheSecureTeams()
+    {
+        var canonical = Guid.Parse("d1d1d1d1-0054-4054-8054-000000000021");
+        var question = DocumentOfMessage(("sprk_canonicaldocument", new EntityReference("sprk_document", canonical)));
+
+        var resolution = await Resolver(
+                World().WithMessage(DirectUnit, DirectTeam)
+                    .WithRecord("sprk_document", canonical, FakeDirectory.SecureBu, owningTeam: FakeDirectory.SecureNamedTeam),
+                Resolved())
+            .ResolveOwnerAsync(question, CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(FakeDirectory.SecureNamedTeam);
+    }
+
+    [Fact(DisplayName = "#2728 must-fire: on the re-file path the document follows its Direct message, its owner read committed")]
+    [Trait("status", "issue-2728")]
+    public async Task Refile_LeavingADocumentLinkedOnlyToADirectOwnedUnfiledMessage_IsTheDirectTeams_ItsOwnerReadCommitted()
+    {
+        var matter = Guid.Parse("d1d1d1d1-0054-4054-8054-000000000030");
+        var document = Guid.Parse("d1d1d1d1-0054-4054-8054-000000000031");
+        var directory = World().WithMessage(DirectUnit, DirectTeam)
+            .WithRecord("sprk_matter", matter, FakeDirectory.ChildBu, owningTeam: FakeDirectory.ChildTeam)
+            .WithRecord("sprk_document", document, FakeDirectory.ChildBu, owningTeam: FakeDirectory.ChildTeam, extra: new()
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", matter),
+                ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", MessageId),
+            });
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "sprk_document",
+            RecordId = document,
+            ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = null },
+        };
+
+        var resolution = await Resolver(directory, Resolved()).ReparentAsync(
+            request,
+            _ =>
+            {
+                directory.Write("sprk_document", document, new Dictionary<string, object?> { ["sprk_matter"] = null });
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(DirectTeam, resolution.Reason);
+        var ownerReads = directory.RecordQueries
+            .Where(q => q.EntityName == "sprk_communication" && !q.ColumnSet.AllColumns)
+            .ToList();
+        ownerReads.Should().NotBeEmpty().And.OnlyContain(q => !q.NoLock, "every parent fact on the re-file path is a committed read");
+    }
+
+    /// <summary>A document linked to the message (<c>sprk_relatedcommunication</c>) and to <paramref name="others"/>, asked as the
+    /// reconciler asks for an existing row (<c>SecureChildReconciler.ContextFor</c>: the row's own question, KeepCreator).</summary>
+    private static RecordOwnershipContext DocumentOfMessage(params (string Column, EntityReference Target)[] others)
+    {
+        var row = new Entity("sprk_document", Guid.Parse("d1d1d1d1-0054-4054-8054-0000000000d1"))
+        {
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", MessageId),
+        };
+        foreach (var (column, target) in others)
+            row[column] = target;
+        return RecordOwnershipContext.ForChild(row) with { WhenUnfiled = UnfiledOwnership.KeepCreator };
+    }
+
+    /// <summary>The REAL resolver over <paramref name="directory"/> with <paramref name="lookup"/>; <paramref name="faultFor"/> may
+    /// fault one query.</summary>
+    private RecordOwnershipResolver ResolverFaulting(
+        FakeDirectory directory, DirectMessageOwnerTeam lookup, Func<Microsoft.Xrm.Sdk.Query.QueryExpression, Exception?> faultFor)
+    {
+        var entities = new Moq.Mock<IGenericEntityService>(Moq.MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) =>
+                faultFor(query) is { } fault
+                    ? Task.FromException<EntityCollection>(fault)
+                    : Task.FromResult(directory.Answer(query)));
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SecureRecord:BusinessUnitName"] = FakeDirectory.SecureBuName,
+                ["SecureRecord:OwnerTeamName"] = FakeDirectory.SecureOwnerTeamName,
+            })
+            .Build();
+        return new RecordOwnershipResolver(entities.Object, configuration, _log, lookup);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The standard directory plus the Direct business unit, its default team and its named Direct team, and another
