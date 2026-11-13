@@ -2,17 +2,17 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md`. Narrative → commit messages. Full detail of every open item below as of 2026-11-06 (verbatim): `notes/handoff-history/current-task-archive-2026-11-06.md`.
 
-> **Last Updated**: 2026-11-13 (Desktop session `provisioning-r1`; PR #2766 merged).
+> **Last Updated**: 2026-11-13 (Desktop session `provisioning-r1`; checkpoint at 85% context, mid task 269 Step 9.5 fix round).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | None in progress. Last completed: **268** (H7b S26, invoice money + firm column lock, verify only; ProcedureVersion 9) — MERGED to master via PR #2766 → `4b45bdf3fe` (2026-11-13, owner go; advisory Markdown Link Validator cancelled at its 5-min cap, changed files checked clean locally). |
-| **Next Action** | With owner go: Set-CustomerOwnerTeams writer-unit exclusion, or H7c (#2429). SpaarkeMaster 1.3.1.0 is published, so new runs pass S26 via H6. |
+| **Task** | **269 IN PROGRESS** (FULL, opus/high) — `tasks/269-owner-teams-exclude-ontology-writer-unit.poml`: `scripts/Set-CustomerOwnerTeams.ps1` never treats "Spaarke Ontology Writer" (task 267) as a customer unit. Owner go 2026-11-13 ("Writer-unit fix"). Master merged first (`04e5cf5997`). Implementation committed `77b6cbe417` (NOT pushed). Last completed: 268 → PR #2766 `4b45bdf3fe`. |
+| **Next Action** | Step 9.5 fix round (2 adversarial reviews done: opus logic — no F1/F2; sonnet tests — F3 descendants untested). UNCOMMITTED fix edits: script help text (.DESCRIPTION drift + REFUSED lists), PASS/plan text name the writer unit, K1 refuse `-SecureBusinessUnitName` = writer unit, K3 `$forbiddenOrigin` (ids) replaces label compare; guide ~1968 reworded (named customer subtree only); Pester +4 rows (team below writer unit, team below Secure Record label, K1, holder of writer-child copy) + tree-shape tail assert. Pester 80/81: fix the "no writer unit" row — replace `Should -Not -Match 'ontology writer'` with `Should -Not -Match 'Refused'` (plan text now always names the writer unit). Then: re-run Pester; scoped sonnet re-check of the fix diff; commit `--only`; POML notes (K2 renamed unit invisible, K Verify not run for team configs with writer present, K name-case row absent) + `rework: fix-round-1 task 269` + status completed; TASK-INDEX ✅; drift check; push; open PR (owner approves merge). |
 | **Done 2026-11-11/13** | PR #2676 (task 267) → `df93d2029c`. ebilling #2689 → `2fc434c912`. Task 268 → PR #2766 `4b45bdf3fe`; #2725 / ISS-028 filed (19 operator scripts excuse System Administrator by name; ebilling fixing its 4 sites). SpaarkeMaster 1.3.1.0 published 2026-11-13. |
 | **Quality alert** | #1821 mutation-nightly, #1906 client-tests, #2060 tier2 full-unit-tests — mentioned to owner; not started. |
-| **Working tree** | Clean. |
+| **Working tree** | Uncommitted: scripts/Set-CustomerOwnerTeams.ps1, tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 (CRLF), docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (LF), this file. |
 
 ## 🔔 Owner questions open
 
@@ -21,7 +21,7 @@
 
 ## Follow-ups unblocked by ebilling #2689 (not started)
 
-- `scripts/Set-CustomerOwnerTeams.ps1`: exclude the "Spaarke Ontology Writer" unit from `$customerTops` by id (`Get-DvOntologyWriterUnitId`), as master excludes the Direct unit. Master already merged into branch (`b94d351d2a`).
+- (task 269, in progress) Set-CustomerOwnerTeams writer-unit exclusion.
 - **H7c (#2429)**: `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it, review, resume (owner go). Covers both owner teams, Billing Rule Reader role, `EnableOwnershipAcrossBusinessUnits`, H12b owner bind + `sprk_aisearchindex` seeding (owner chose B).
 - Possible: S26-style check for ebilling 095a (`sprk_invoicesubmission.sprk_sourceemaildocument` lock) — would make that ordering rule mechanical.
 
