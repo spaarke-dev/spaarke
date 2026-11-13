@@ -394,7 +394,8 @@ public sealed partial class RecordRepairModeTests
         typeof(RecordCreationService).GetMethod(nameof(RecordCreationService.RepairAsync),
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetParameters().Select(p => p.ParameterType)
-            .Should().Equal([typeof(string), typeof(Guid), typeof(CancellationToken)], "no caller client, token or principal");
+            .Should().Equal([typeof(string), typeof(Guid), typeof(CancellationToken), typeof(RecordRepairPassContext)],
+                "no caller client, token or principal (task 052b: only the pass's own rule and metadata cache)");
 
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
         await _world.RepairAsync("sprk_event", id);
@@ -1782,7 +1783,7 @@ internal sealed partial class RepairWorld
             .GetRequiredService<IServiceScopeFactory>();
 
         return new RecordCreationService(
-            new CapturingResolver(Directory.Resolver(), OwnerContexts, () => ResolverFault, () => ResolverAnswer), appOnly.Object, entities,
+            new CapturingResolver(Directory.Resolver(customerContactOwner: CustomerContactOwner), OwnerContexts, () => ResolverFault, () => ResolverAnswer), appOnly.Object, entities,
             SecureRootFilingGateFixtures.Over(entities),
             new CoreAncestorRestamper(_stamps.Service, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(ShareWorld, new FakeRecordShareTable()),

@@ -20,11 +20,16 @@ namespace Spaarke.ArchTests;
 public sealed class RecordRepairReachabilityTests
 {
     /// <summary>
-    /// Members allowed to reference Repair, each with its reason. Empty until task 052b, the scheduled repair pass, adds the
-    /// first production caller (the app-only metadata wiring it needed landed in 052a).
+    /// Members allowed to reference Repair, each with its reason. Task 052b added the first production caller, the scheduled
+    /// repair pass (the app-only metadata wiring it needed landed in 052a).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> AllowedReferences =
-        new Dictionary<string, string>(StringComparer.Ordinal);
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Sprk.Bff.Api.Services.RecordCreation.RecordRepairPassJob::RunTableAsync"] =
+                "Task 052b, the scheduled pass: system principal, forward-only (go-live and task 050's marker, re-checked by Repair "
+                + "through the pass context), task and account excluded, contacts owner-only through the resolver, claimed per table.",
+        };
 
     [Fact]
     public void RecordRepair_HasNoProductionCaller_UntilTask052ListsOne()

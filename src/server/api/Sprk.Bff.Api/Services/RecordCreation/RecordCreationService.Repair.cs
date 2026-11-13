@@ -53,7 +53,7 @@ internal sealed partial class RecordCreationService
     /// step 7 reads <see cref="RecordTableRule.OwnershipException"/> and refuses an unfiled create with it, so a registry
     /// entry would change Create.
     /// </summary>
-    private static readonly IReadOnlySet<string> AppendOnlyTables =
+    internal static readonly IReadOnlySet<string> AppendOnlyTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_decisionrecord" };
 
     /// <summary>
@@ -62,8 +62,16 @@ internal sealed partial class RecordCreationService
     /// registering it must not make Repair read, map into or re-own it: it stays exactly what it was before the entry, a table this service
     /// does not create (<see cref="RecordRepairReason.TableUnsupported"/>, neutral wording; not "append-only", which it is not).
     /// </summary>
-    private static readonly IReadOnlySet<string> NotCreatedHereTables =
+    internal static readonly IReadOnlySet<string> NotCreatedHereTables =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_procedureversion" };
+
+    /// <summary>
+    /// Task 052b (owner 2026-11-08): the chat create's <c>task</c> and <c>account</c> are registered for the create only. Repair
+    /// neither reads nor writes either (a user-created task or account is never re-owned to a team); the repair pass leaves
+    /// them out of its table list too (<see cref="RecordRepairPassJob.ExcludedTables"/>).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> NotRepairedTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "task", "account" };
 
     /// <summary>Repair's warning for a mapping source it could not read — neutral: no caller is addressed (K4).</summary>
     internal const string RepairSourceUnreadableWarning =
@@ -78,14 +86,25 @@ internal sealed partial class RecordCreationService
     /// and the I-1 stamp (step 10), fill-only, in ONE conditional update — or none when nothing is missing. No search-index
     /// column is written (task 041, FR-40). Never throws for a Dataverse fault (cancellation aside): every outcome is in the report.
     /// </summary>
+    /// <param name="pass">Task 052b: the scheduled pass this repair runs in, or <c>null</c>. When given, the row Repair reads must
+    /// meet the pass's rule (<see cref="RecordRepairPassContext.RowOutsideThePass"/>: created at or after go-live, by no product
+    /// principal) or nothing is decided or written, and column metadata is read through the pass's cache.</param>
     /// <exception cref="ArgumentException">No table or no id.</exception>
-    internal async Task<RecordRepairOutcome> RepairAsync(string table, Guid id, CancellationToken ct)
+    internal async Task<RecordRepairOutcome> RepairAsync(
+        string table, Guid id, CancellationToken ct, RecordRepairPassContext? pass = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         if (id == Guid.Empty)
             throw new ArgumentException("A record id is required.", nameof(id));
 
         table = table.Trim().ToLowerInvariant();
+        if (NotRepairedTables.Contains(table))
+        {
+            // Task 052b (owner 2026-11-08): never read, never written.
+            _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: the table is excluded from repair; not repaired", table, id);
+            return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.TableExcluded);
+        }
+
         if (AppendOnlyTables.Contains(table))
         {
             // Review F1-f / UAC-r2: a Decision Record is append-only (D-144 as amended: a user-owned one stays its user's,
@@ -118,6 +137,14 @@ internal sealed partial class RecordCreationService
 
         if (row is null)
             return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, RecordRepairReason.RowNotFound);
+
+        // Task 052b (forward-only, defence in depth): the row as read must meet the pass's rule before anything is decided.
+        if (pass?.RowOutsideThePass(row) is { } outside)
+        {
+            _logger.LogWarning("[RECORD-REPAIR] {Table} {Id} is outside the repair pass ({Reason}); nothing was decided or written",
+                table, id, outside);
+            return RecordRepairOutcome.Row(table, id, RecordRepairStatus.Skipped, outside);
+        }
 
         var patch = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         var mapped = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // #2247: the patch columns a mapping rule gave
@@ -155,7 +182,7 @@ internal sealed partial class RecordCreationService
         }
         else
         {
-            await RepairMappingAsync(table, rule, row, ownerParents, patch, mapped, report, warnings, ct).ConfigureAwait(false);
+            await RepairMappingAsync(table, rule, row, ownerParents, patch, mapped, report, warnings, pass, ct).ConfigureAwait(false);
         }
 
         // No search-index step (task 041, FR-40): the index follows the content type, so Repair writes neither column.
@@ -265,7 +292,7 @@ internal sealed partial class RecordCreationService
     private async Task RepairMappingAsync(
         string table, RecordTableRule rule, Entity row, IReadOnlyList<RecordOwnershipParent> ownerParents,
         Dictionary<string, object> patch, HashSet<string> mappedColumns, List<RecordRepairField> report, List<string> warnings,
-        CancellationToken ct)
+        RecordRepairPassContext? pass, CancellationToken ct)
     {
         if (!rule.MappingApplies)
         {
@@ -339,13 +366,13 @@ internal sealed partial class RecordCreationService
             // Task 052a: both tables' column metadata, read app-only before anything is read from the source (owner decision
             // 2026-10-21, option 1; UAC-r2 condition 1: metadata that cannot be read, or does not say, maps nothing).
             if (await SourceColumnsRepairMayCopyAsync(table, row.Id, source.EntityLogicalName,
-                    CreateTimeFieldMapping.CollectSourceColumns(rules), ct).ConfigureAwait(false) is not { } copyable)
+                    CreateTimeFieldMapping.CollectSourceColumns(rules), pass, ct).ConfigureAwait(false) is not { } copyable)
             {
                 report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingSourceMetadataUnavailable));
                 return;
             }
 
-            if (await ColumnMetadataForRepairAsync(table, row.Id, ct).ConfigureAwait(false) is not { } targetColumns)
+            if (await ColumnMetadataForRepairAsync(table, row.Id, pass, ct).ConfigureAwait(false) is not { } targetColumns)
             {
                 report.Add(RecordRepairField.Skipped(RecordRepairPart.Mapping, null, RecordRepairReason.MappingTargetMetadataUnavailable));
                 return;
@@ -518,9 +545,10 @@ internal sealed partial class RecordCreationService
     /// <remarks>Task 032b-1: a wrapper over <see cref="MappingColumnMetadata.CopyableSourceColumns"/> (the shared gate) that keeps
     /// Repair's log lines.</remarks>
     private async Task<IReadOnlyList<string>?> SourceColumnsRepairMayCopyAsync(
-        string table, Guid rowId, string sourceTable, IEnumerable<string> mappedSourceColumns, CancellationToken ct)
+        string table, Guid rowId, string sourceTable, IEnumerable<string> mappedSourceColumns, RecordRepairPassContext? pass,
+        CancellationToken ct)
     {
-        if (await ColumnMetadataForRepairAsync(sourceTable, rowId, ct).ConfigureAwait(false) is not { } columns)
+        if (await ColumnMetadataForRepairAsync(sourceTable, rowId, pass, ct).ConfigureAwait(false) is not { } columns)
             return null;
 
         var answer = MappingColumnMetadata.CopyableSourceColumns(columns, mappedSourceColumns);
@@ -544,14 +572,22 @@ internal sealed partial class RecordCreationService
     /// <paramref name="table"/>'s column metadata, read app-only (<see cref="IGenericEntityService.GetColumnMetadataAsync"/>,
     /// task 052a), or <c>null</c> when it faulted or came back empty (an empty answer cannot be told from a failed read).
     /// Cancellation is rethrown. Task 032b-1: a wrapper over <see cref="MappingColumnMetadata.ReadAsync"/> (the shared gate)
-    /// that keeps Repair's log lines.
+    /// that keeps Repair's log lines. Task 052b: within a repair pass (<paramref name="pass"/>) a table's columns are read once and
+    /// kept for the pass; a fault or an empty answer is never kept.
     /// </summary>
     private async Task<IReadOnlyDictionary<string, ColumnMetadata>?> ColumnMetadataForRepairAsync(
-        string table, Guid rowId, CancellationToken ct)
+        string table, Guid rowId, RecordRepairPassContext? pass, CancellationToken ct)
     {
+        if (pass is not null && pass.TryGetColumns(table, out var kept))
+            return kept;
+
+        pass?.CountMetadataRead();
         var read = await MappingColumnMetadata.ReadAsync(_entities, table, ct).ConfigureAwait(false);
         if (read.Columns is { } columns)
+        {
+            pass?.KeepColumns(table, columns);
             return columns;
+        }
 
         if (read.Fault is { } fault)
         {
@@ -963,6 +999,28 @@ internal sealed record RecordRepairOutcome
     /// <summary>Whether the one update was written.</summary>
     public bool Wrote => Status == RecordRepairStatus.Repaired;
 
+    /// <summary>
+    /// Task 052b (NFR-04): whether the repair pass must ask this row again on a later run — something that may succeed then did
+    /// not succeed now: the read or the write faulted, the row changed under the repair, the owner could not be decided right now
+    /// (<see cref="RecordCreationRefusalKind.Unavailable"/>) or a contact's customer team cannot be resolved yet (an
+    /// administrator's fix), or a step faulted (<see cref="TransientReasons"/>). A decided outcome (repaired, nothing to repair,
+    /// a refusal that is an answer, a table or row the rules skip) is not asked again.
+    /// </summary>
+    public bool NeedsRetry =>
+        Status is RecordRepairStatus.Failed or RecordRepairStatus.RowChanged
+        || OwnerRefusal is { Kind: RecordCreationRefusalKind.Unavailable }
+        || OwnerRefusal?.Code == Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.CustomerContactTeamUnresolved
+        || Fields.Any(f => f.ReasonCode is { } reason && TransientReasons.Contains(reason));
+
+    /// <summary>Task 052b: the per-step reasons that report a fault, not an answer (see <see cref="NeedsRetry"/>).</summary>
+    internal static readonly IReadOnlySet<string> TransientReasons = new HashSet<string>(StringComparer.Ordinal)
+    {
+        RecordRepairReason.MappingUnavailable,
+        RecordRepairReason.MappingSourceMetadataUnavailable,
+        RecordRepairReason.MappingTargetMetadataUnavailable,
+        RecordRepairReason.StampUnavailable,
+    };
+
     internal static RecordRepairOutcome Row(string table, Guid id, RecordRepairStatus status, string reason) =>
         new() { Table = table, Id = id, Status = status, ReasonCode = reason };
 }
@@ -976,6 +1034,19 @@ internal static class RecordRepairReason
     internal const string VersionUnknown = "record_repair.version_unknown";
     internal const string RowChanged = "record_repair.row_changed";
     internal const string WriteFailed = "record_repair.write_failed";
+
+    /// <summary>Task 052b (owner 2026-11-08): <c>task</c> and <c>account</c> are never repaired (read or written).</summary>
+    internal const string TableExcluded = "record_repair.table_excluded";
+
+    /// <summary>Task 052b (forward-only): the row was created before the pass's go-live instant, or its <c>createdon</c> could not
+    /// be read — the pass never writes it.</summary>
+    internal const string RowCreatedBeforeGoLive = "record_repair.row_created_before_go_live";
+
+    /// <summary>Task 052b (task 050's marker): the row was created by a product principal — the product already decided it.</summary>
+    internal const string RowCreatedByProduct = "record_repair.row_created_by_product";
+
+    /// <summary>Task 052b: the row's <c>createdby</c> could not be read, so it cannot be told native — the pass never writes it.</summary>
+    internal const string RowCreatorUnknown = "record_repair.row_creator_unknown";
 
     /// <summary>ebilling-r1 #1911's guard is not on this build: an invoice-family row is not written (fail closed).</summary>
     internal const string InvoiceFamilyGuardUnavailable = "record_repair.invoice_family_guard_unavailable";
