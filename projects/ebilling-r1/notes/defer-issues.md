@@ -10,6 +10,39 @@
 
 ## Open (in priority order)
 
+### ISS-018 — Pending Spend column missing on dev and from SpaarkeMaster; the rollup's Pending Spend PATCH gets 400
+
+| Field | Value |
+|---|---|
+| **Status** | Open. Waiting on the owner's OK for the dev run. |
+| **Urgency** | now |
+| **Filed** | 2026-11-13 (reported by ontology-r1 from the dev log) |
+| **Source** | Dev log, 2026-11-13 03:27:38Z: `POST /api/finance/matters/{id}/recalculate` → Dataverse 400 `0x80048d19` on the Pending Spend PATCH |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2777 |
+
+**Description**
+
+`sprk_pendingspend` (Money, D-104) is missing on dev on both `sprk_matter` and `sprk_project`; a read-only metadata query on 2026-11-13 returned only `sprk_totalspendtodate`. It is also missing from the SpaarkeMaster source. Task 049 wrote `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` and noted "NOT run against any environment", and no later task picked the script up.
+
+The rollup writes Pending Spend in its own PATCH (ontology-r1 review F1), so Dataverse refuses that PATCH and logs an Error. The counted rollup is still written. Pending Spend never gets a value on any matter or project, here or on a customer stamp.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Finance/FinanceRollupService.cs` (`WriteRollupAsync`, `BuildPendingSpendFields`)
+- `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` (run with `-WhatIf` first)
+
+**Suggested fix**
+
+1. Run the script on dev. This needs the owner's OK, and uac-r2 is told before and after.
+2. Add both columns to the SpaarkeMaster source in the next solution version.
+3. Put the script on task 112's dev apply list.
+
+**Estimated effort**: about 1 hour, plus a solution version.
+**Blockers**: the owner's OK for the live schema write.
+**Related**: D-104, task 049, task 165b-4, task 112, SpaarkeMaster 1.3.1.0
+
+---
+
 ### ISS-017 — Invoice-family rows: a regarding pair that disagrees with the core lookup
 
 | Field | Value |
