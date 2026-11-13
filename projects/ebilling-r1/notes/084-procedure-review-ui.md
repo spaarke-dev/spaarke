@@ -1392,3 +1392,17 @@ Client only: no server file changed. Each item is finding, change, test.
   - Expect "This preview isn't available for this firm.", and Confirm and the save still work.
 - **Assign Procedure:** not testable here; moved to 084d-5.
 - **Dark mode (ADR-021):** repeat the first test in the dark theme. Every colour comes from Fluent v9 tokens; no colour literal was added.
+
+### 084d-4 close (2026-11-13)
+
+Merged into work at `cd869e3050`: `029428af92` (build) + `7af227b4c8` (review round 1).
+
+- Reviews: Opus adversarial pass (9 F-class findings, all fixed in round 1); Sonnet scoped re-check of the fix diff: PASS.
+- Known limits from the re-check, accepted:
+  - K1: `previewLines` (084b's removal-preview fallback) still composes "N open invoice(s) you can see is/are affected." when `affectedText` is absent; the server always sends it (`ProcedureAssignmentService.cs` ~1391), so the branch is dead on real paths.
+  - K2: the dry-run answer cache grows with distinct proposals on one row; reset on row change.
+  - K3: the "closing abandons the read" test's console spy cannot fail; the `signal.aborted` assertions carry it.
+  - K4: 80 ms real timers in `Impact.test.tsx` could flake under heavy load; raise to 200 ms or more if they do.
+  - K5: the 20 s timeout also covers the token step; the worst-case Next hold is 40 s (a dry-run 503 after 20 s, then the fallback).
+  - K6: the source guard's comment stripper is approximate.
+- The Assign Procedure wizard is NOT in 084d-4; it moved to 084d-5 (no route lists assignable Procedures).
