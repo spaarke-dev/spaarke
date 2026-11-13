@@ -792,3 +792,10 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - The four SPE Admin pickers (Business Unit in `BuContextPicker` and `ContainerTypeConfig`, Container Type Config, Environment) keep their BFF-backed lists. An exception to D-219 Q5 ("any lookup uses side pane").
 - Why: each BFF route limits the list to the caller's business units (`BusinessUnitEndpoints`, `ListConfigsAsync`, `ListEnvironmentsAsync`); the Dataverse side pane lists every row the user can read and its `filters` cannot express that reach, so it would show rows the routes hide, and a pick outside the list clears `BuContextPicker`'s selection.
 - Rejected: a BFF-backed side pane (new surface with no owner need).
+
+## D-222 — Budget inquiry: Cc/Bcc sent end to end; a failed send is recoverable; dev evidence kept (owner, 2026-11-13, after the 176/160 dev run on MAT-34929-0040)
+
+- **Cc/Bcc:** the Send budget inquiry step sends Cc and Bcc end to end, like the Send Email dialog (D-219 Q4). The warning "Cc and Bcc are not sent with this step. Add every recipient to To." goes away. Rejected: hiding Cc behind a toggle as the only fix. Task 190.
+- **Failed send:** when the inquiry email fails after earlier actions succeeded, the user can retry from the item; the retry re-sends (reusing the service request already created) instead of replaying the stored error, and the Signal is not auto-closed while a decision on it is unfinished. Task 191 (Opus review; ontology-owned).
+- **Why:** on dev the budget revision and service request were written, the email was not sent, no Decision Record was written, the budget-revision trigger closed the Signal 33 s later, and "Record decision" then returned HTTP 500 by replaying the failure. The user had no way to finish.
+- **Dev data:** the revision, service request and closed Signal stay as evidence; re-test on a fresh zz- fee/scope communication after the next nightly run.
