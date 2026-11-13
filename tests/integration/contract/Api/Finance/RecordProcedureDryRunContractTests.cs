@@ -121,10 +121,10 @@ public sealed class RecordProcedureDryRunContractTests
         }
     }
 
-    /// <summary>A REAL planner over the rig's world. Planning asks no owner, closes nothing and counts nothing (084d-1), so those are stubs that throw if reached.</summary>
+    /// <summary>A REAL planner over the rig's world, with the rig's REAL rule-set service (a change is validated by it: 084d-2a fix round 1, F-1). Planning asks no owner, closes nothing and counts nothing (084d-1), so those are stubs that throw if reached.</summary>
     private static ProcedureAssignmentService Planner(RecordProcedureRig rig) => new(
         rig.Entities.Object, new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object,
-        (RuleSetService)RuntimeHelpers.GetUninitializedObject(typeof(RuleSetService)),
+        rig.RuleSets,
         (Sprk.Bff.Api.Services.Signals.SignalClosureService)RuntimeHelpers.GetUninitializedObject(typeof(Sprk.Bff.Api.Services.Signals.SignalClosureService)),
         (AffectedInvoiceCounter)RuntimeHelpers.GetUninitializedObject(typeof(AffectedInvoiceCounter)),
         NullLogger<ProcedureAssignmentService>.Instance);
@@ -181,6 +181,22 @@ public sealed class RecordProcedureDryRunContractTests
 
     private static object ExcludeBody(Guid policy, Guid? firm = null) =>
         new { kind = "ExcludeRule", excludeRule = new { policyId = policy, reason = "Agreed for this record", firmId = firm } };
+
+    /// <summary>A change of a rule's message, headline and consequence (the base version has no template, so the change names one).</summary>
+    private static object ChangeBody(Guid policy, Guid? replaces = null) =>
+        new
+        {
+            kind = "ChangeRule",
+            replacesOverrideId = replaces,
+            changeRule = new
+            {
+                policyId = policy,
+                reason = "Agreed for this record",
+                shortHeadline = "Rate agreed for this record",
+                messageTemplate = "The billed rate differs from the rate agreed for this record.",
+                consequence = "Flag",
+            },
+        };
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Now -> After, the response shape, one combined check, nothing written
@@ -543,7 +559,7 @@ public sealed class RecordProcedureDryRunContractTests
 
     private sealed record DryRunSeed(string Segment, Guid RecordId, object Body, Guid[] AlsoAsked);
 
-    public static TheoryData<string> DryRunSeeds => new() { "assign", "exclude with firm", "switch", "remove" };
+    public static TheoryData<string> DryRunSeeds => new() { "assign", "exclude with firm", "switch", "remove", "change", "re-change" };
 
     private static DryRunSeed SeedFor(string name, Host host)
     {
@@ -581,6 +597,27 @@ public sealed class RecordProcedureDryRunContractTests
                     return new DryRunSeed("matters", M, new { kind = "Remove", overrideId = row }, [row]);
                 }
 
+            case "change":
+                {
+                    // 084d-2a fix round 1 (F-1): the Change kind through the route. Its base rule is real and shows; the record rule, its set, its
+                    // first version and the Exclude row are the proposal's.
+                    var s = rig.Changeable("CHANGE-ME");
+                    host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+                    return new DryRunSeed("projects", P, ChangeBody(s.Rule), []);
+                }
+
+            case "re-change":
+                {
+                    // A Change replacing this record's own Change of the same rule: the removal is planned first, and the change is planned over it,
+                    // re-creating the record rule at its derived id (a real row) and the Exclude row at its derived id (the removed one).
+                    var s = rig.Changeable("RE-CHANGE");
+                    var recordRule = ProcedureAssignmentService.RecordRulePolicyIdFor(ProcedureAssignmentService.RecordRuleSetIdFor(Project, P, null), s.Rule);
+                    var changed = rig.ChangeRuleRows(
+                        Project, P, s.Rule, s.RuleVersion, Jan15, code: ProcedureAssignmentService.RecordRuleCode(recordRule), rowVersion: true);
+                    host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+                    return new DryRunSeed("projects", P, ChangeBody(s.Rule, replaces: changed.Exclude), [changed.Exclude]);
+                }
+
             default: throw new ArgumentOutOfRangeException(nameof(name), name, null);
         }
     }
@@ -613,6 +650,52 @@ public sealed class RecordProcedureDryRunContractTests
     private static List<Guid> Unasked(IEnumerable<Guid> guids, ISet<Guid> asked, ISet<Guid> exempt) =>
         guids.Where(g => !asked.Contains(g) && !exempt.Contains(g)).ToList();
 
+    /// <summary>The four override entity sets and the tables they hold (the only rows a dry run can exempt).</summary>
+    private static readonly IReadOnlyDictionary<string, string> TableOfOverrideSet = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [AssignmentSet] = ProcedureAssignmentEntity.Entity,
+        ["sprk_rulesets"] = RuleSet,
+        ["sprk_policies"] = Policy,
+        ["sprk_policyversions"] = PolicyVersion,
+    };
+
+    /// <summary>
+    /// K-7: the exempt ids the guard allows, derived from the ANSWER and the WORLD and never from what the service reported: the body's
+    /// proposed row ids minus those that exist in any of the four override tables of the rig's world (the dry run writes nothing, so the world
+    /// after the request is the world it read).
+    /// </summary>
+    private static HashSet<Guid> ExpectedExemptIds(JsonObject body, RecordProcedureRig rig) =>
+        body["proposal"]!["proposedRowIds"]!.AsArray().Select(v => v!.GetValue<Guid>())
+            .Where(id => !TableOfOverrideSet.Values.Any(table => rig.World.Has(table, id))).ToHashSet();
+
+    /// <summary>
+    /// K-7: how the reported exemption departs from the derived one. Each exempt (entity set, id) must name one of the four override sets and
+    /// must be absent from THAT set's table (a real row is never exempt), and the exempt ids must be exactly the derived ones.
+    /// </summary>
+    private static List<string> ExemptionViolations(IEnumerable<(string Set, Guid Id)> exempted, JsonObject body, RecordProcedureRig rig)
+    {
+        var reported = exempted.Distinct().ToList();
+        var violations = new List<string>();
+        foreach (var (set, id) in reported)
+        {
+            if (!TableOfOverrideSet.TryGetValue(set, out var table))
+            {
+                violations.Add($"{set} {id}: not an override entity set");
+            }
+            else if (rig.World.Has(table, id))
+            {
+                violations.Add($"{set} {id}: a real row is exempt");
+            }
+        }
+
+        if (!reported.Select(r => r.Id).ToHashSet().SetEquals(ExpectedExemptIds(body, rig)))
+        {
+            violations.Add("the exempt ids are not exactly the proposed ids that exist in no override table");
+        }
+
+        return violations;
+    }
+
     [Theory(DisplayName = "084d-2a guard (Every200Guid_WasAskedOfTheCaller, dry run): every GUID in a dry-run 200 was asked of the caller, except exactly the synthetic proposed rows (exempt, never asked); a real proposed id is asked")]
     [MemberData(nameof(DryRunSeeds))]
     public async Task Every200Guid_WasAskedOfTheCaller_DryRun(string seedName)
@@ -623,18 +706,64 @@ public sealed class RecordProcedureDryRunContractTests
         var response = await host.Client.SendAsync(Post(seed.Segment, seed.RecordId, seed.Body));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        var guids = GuidsIn(await Json(response)).Distinct().ToList();
-        var asked = host.Rig.Probe.Asked.Select(a => a.RecordId).ToHashSet();
-        var exempt = host.Exempted.SelectMany(e => e).Select(e => e.Id).ToHashSet();
+        var body = await Json(response);
+        var guids = GuidsIn(body).Distinct().ToList();
+        var askedPairs = host.Rig.Probe.Asked.ToHashSet();
+        var asked = askedPairs.Select(a => a.RecordId).ToHashSet();
+        var reported = host.Exempted.SelectMany(e => e).ToList();
+
+        // K-7: the exempt ids the verdict allows are derived from the answer and the world, not from what the service reported exempt, so a
+        // code change that exempts a real row fails here with no AlsoAsked listing needed.
+        var exempt = ExpectedExemptIds(body, host.Rig);
         guids.Should().Contain(seed.RecordId);
         guids.Count.Should().BeGreaterThanOrEqualTo(3, "the seed is rich enough to be a guard");
+        ExemptionViolations(reported, body, host.Rig).Should().BeEmpty($"{seedName}: only the synthetic rows are exempt, matched with their entity set");
         Unasked(guids, asked, exempt).Should().BeEmpty($"{seedName}: a GUID in the answer the caller's rights were never checked against");
-        exempt.Where(asked.Contains).Should().BeEmpty("an exempt row is never asked");
+        reported.Where(askedPairs.Contains).Should().BeEmpty("an exempt (entity set, id) is never asked");
         seed.AlsoAsked.Where(g => !asked.Contains(g)).Should().BeEmpty($"{seedName}: a row that decided what the answer shows, never checked");
 
-        // Must-fire control: the verdict is not vacuous; a GUID planted in the walk that nobody asked is reported.
+        // Must-fire controls: the verdicts are not vacuous. A GUID planted in the walk that nobody asked is reported; a real row exempted (the
+        // seed's base policy version, which every seed holds) is reported; a synthetic row left unexempted is reported.
         var planted = Guid.Parse("084d2a00-0000-4000-8000-00000000beef");
         Unasked(guids.Append(planted), asked, exempt).Should().Equal(planted);
+        var baseVersion = host.Rig.VersionRows.First(v => v.Set == "sprk_policyversions");
+        ExemptionViolations(reported.Append((baseVersion.Set, baseVersion.Id)), body, host.Rig).Should().NotBeEmpty("a real row exempt must fail the guard");
+        if (reported.Count > 0)
+        {
+            ExemptionViolations(reported.Skip(1), body, host.Rig).Should().NotBeEmpty("a synthetic row asked of Dataverse must fail the guard");
+        }
+    }
+
+    [Theory(DisplayName = "084d-2a F-2 (EB-D-218): the override a removal removes, or a create replaces, is asked of the caller even when no list shows it (a Follow row of a Retired Procedure); denying that row alone is 503")]
+    [InlineData("remove")]
+    [InlineData("replace")]
+    public async Task TheNamedOverride_IsAsked_EvenWhenNoListShowsIt(string how)
+    {
+        await using var host = await Host.StartAsync();
+        var rig = host.Rig;
+        var retired = rig.AddProcedure("RETIRED", ProcedureAppliesTo.AssignedRecordsOnly, status: ProcedureEntity.StatusRetired);
+        var row = rig.Assign(Project, P, retired, by: Reviewer);
+        var other = rig.Simple("GENERAL");
+        host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, retired);
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, other.Rule);
+        object body = how == "remove"
+            ? new { kind = "Remove", overrideId = row }
+            : new { kind = "ExcludeRule", replacesOverrideId = row, excludeRule = new { policyId = other.Rule, reason = "Agreed for this record" } };
+
+        var response = await host.Client.SendAsync(Post("projects", P, body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var json = await Json(response);
+        GuidsIn(json["now"]).Should().NotContain(row, "the premise: no list shows a row of a Retired Procedure");
+        GuidsIn(json["after"]).Should().NotContain(row);
+        GuidsIn(json["proposal"]).Should().Contain(row, "the answer names it");
+        host.Rig.Probe.Asked.Should().Contain((AssignmentSet, row), "the named override is asked, whatever the lists show");
+        host.Exempted.SelectMany(e => e).Should().NotContain((AssignmentSet, row), "it is a real row");
+        host.Rig.NoWrites();
+
+        // Deny that row alone: 503.
+        host.Rig.Probe.Denied.Add((AssignmentSet, row));
+        await AssertUnavailable(await host.Client.SendAsync(Post("projects", P, body)), host);
     }
 
     [Theory(DisplayName = "084d-2a guard (version rows, dry run): every Procedure Version and policy version row of a seed is asked on the dry-run route, or the 200 body is byte-identical without it")]

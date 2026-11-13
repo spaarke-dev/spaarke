@@ -471,6 +471,7 @@ public class RecordProcedureReadService
 
             if (synthetic.Count > 0)
             {
+                // Safe only because ReadAsync never calls Expose: every exposure happens in BuildProcedures / BuildRulesAsync, after this Exempt.
                 afterReading.Exempt(synthetic);
                 OnExempt?.Invoke(synthetic);
             }
@@ -486,6 +487,15 @@ public class RecordProcedureReadService
             }
 
             nowReading.Expose(SetOf(coreTable), recordId);
+
+            // EB-D-218: the proposal names the override a removal removes, or a create replaces, and its kind. Both come from an app-only read of
+            // the stored row, and the row can sit in no list (a Follow row of a Retired Procedure shows in no view), so no view asked about it.
+            // It is a real row, never exempt.
+            if ((request.Kind == ProcedureDryRunRequest.KindRemove ? request.OverrideId : request.ReplacesOverrideId) is { } overrideRow)
+            {
+                nowReading.Expose(ProcedureAssignmentEntity.EntitySet, overrideRow);
+            }
+
             var exposed = nowReading.Exposed.Concat(afterReading.Exposed).ToHashSet();
             if (!await CallerCanReadAllAsync(exposed, callerBearerToken, ct).ConfigureAwait(false))
             {

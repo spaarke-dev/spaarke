@@ -6,6 +6,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
 using Sprk.Bff.Api.Services.Finance.Resolution;
@@ -56,6 +57,9 @@ internal sealed class RecordProcedureRig
 
     public RecordProcedureReadService Service { get; }
 
+    /// <summary>084d-2a fix round 1: the REAL rule-set service over the same validator, for a planner that validates a change.</summary>
+    public RuleSetService RuleSets { get; }
+
     /// <summary>What the service logged at Warning or above: (level, exception type).</summary>
     public CapturingLogger Log { get; } = new();
 
@@ -98,6 +102,12 @@ internal sealed class RecordProcedureRig
         {
             Clock = new FakeTimeProvider(new DateTimeOffset(2026, 2, 10, 12, 0, 0, TimeSpan.Zero)),
         };
+
+        // 084d-2a fix round 1 (F-1): the rule-set service a change is validated by, REAL (the same validator the read service holds), so a
+        // dry-run Change reaches the exposure path instead of failing on a service that was never built. Planning asks no owner.
+        RuleSets = new RuleSetService(
+            Entities.Object, new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object, validator, describer,
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), NullLogger<RuleSetService>.Instance);
 
         World.Add(RecordType, MatterType, ("sprk_recordlogicalname", "sprk_matter"));
         World.Add(Matter, M, ("sprk_mattername", "Matter M"));
@@ -162,14 +172,36 @@ internal sealed class RecordProcedureRig
         return id;
     }
 
-    public Guid AddRule(Guid set, string code, Guid? id = null)
+    /// <param name="rowVersion">084d-2a fix round 1: the policy carries a row version, as a stored row does; a write or a dry-run plan that updates it needs one.</param>
+    public Guid AddRule(Guid set, string code, Guid? id = null, bool rowVersion = false)
     {
         id ??= NextId();
-        World.Add(Policy, id.Value,
+        var columns = new List<(string, object)>
+        {
             ("sprk_policycode", code), ("sprk_ruleset", Ref(RuleSet, set)), ("sprk_enabled", true), ("statecode", Option(0)),
-            (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)));
+            (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)),
+        };
+        if (rowVersion) columns.Add((RuleSetService.RowVersionColumn, 1L));
+        World.Add(Policy, id.Value, columns.ToArray());
         _ruleCodes[id.Value] = code;
         return id.Value;
+    }
+
+    /// <summary>
+    /// 084d-2a fix round 1 (F-1): a Procedure rule a dry-run CHANGE can name: its rule set is Published, the policy has a name and its current
+    /// version, so the planner finds it in force. Everything else is <see cref="Simple"/>'s.
+    /// </summary>
+    public (Guid Procedure, Guid Version, Guid Rule, Guid RuleVersion) Changeable(string code)
+    {
+        var s = Simple(code);
+        var set = _setOf[s.Procedure];
+        World.Add(RuleSet, set,
+            ("sprk_procedure", Ref(ProcedureEntity.Entity, s.Procedure)), (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)),
+            ("statecode", Option(0)), ("statuscode", Option(RuleSetService.RuleSetPublished)));
+        World.Add(Policy, s.Rule,
+            ("sprk_policycode", code), ("sprk_name", "Rule " + code), ("sprk_ruleset", Ref(RuleSet, set)), ("sprk_enabled", true), ("statecode", Option(0)),
+            (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)), ("sprk_currentversion", Ref(PolicyVersion, s.RuleVersion)));
+        return s;
     }
 
     public Guid AddProcedureRule(Guid procedure, string code) => AddRule(_setOf[procedure], code);
@@ -309,7 +341,7 @@ internal sealed class RecordProcedureRig
     /// <summary>As <see cref="ChangeRule"/>, naming every row it seeded. 084c fix round 1: <paramref name="type"/> and <paramref name="body"/> are the record rule version's (default: an ApprovedRate body).</summary>
     public ChangedRows ChangeRuleRows(
         string table, Guid record, Guid basePolicy, Guid baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1", string? reason = null,
-        RuleType type = RuleType.ApprovedRate, string? body = null)
+        RuleType type = RuleType.ApprovedRate, string? body = null, bool rowVersion = false)
     {
         var at = Tick();
         var exclude = ExcludeRule(table, record, basePolicy, firm, at, reason);
@@ -321,7 +353,7 @@ internal sealed class RecordProcedureRig
         };
         if (firm is { } f) setColumns.Add(("sprk_firm", Ref("sprk_organization", f)));
         World.Add(RuleSet, set, setColumns.ToArray());
-        var recordRule = AddRule(set, code, ProcedureAssignmentService.RecordRulePolicyIdFor(set, basePolicy));
+        var recordRule = AddRule(set, code, ProcedureAssignmentService.RecordRulePolicyIdFor(set, basePolicy), rowVersion);
         var ruleVersion = AddRuleVersion(recordRule, null, from, basedOn: baseVersion, created: at, headline: "Changed rate", type: type, body: body);
         return new ChangedRows(recordRule, set, exclude, ruleVersion);
     }

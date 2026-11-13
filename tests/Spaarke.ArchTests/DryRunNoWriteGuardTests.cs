@@ -44,7 +44,8 @@ public sealed class DryRunNoWriteGuardTests
         typeof(SignalWriter), typeof(DecisionRecordWriter), typeof(IRecordOwnershipResolver), typeof(SignalClosureService),
     ];
 
-    private static readonly Type[] DryRunTypes = [typeof(WriteRefusingEntityService), typeof(ProcedureRowOverlay)];
+    /// <summary>The row source, the planning service, and (084d-2a fix round 1, K-5) the 2a entry point itself: the whole read service, so DryRunAsync, PlanAsync, SyntheticRowsAsync and their state machines are scanned.</summary>
+    private static readonly Type[] DryRunTypes = [typeof(WriteRefusingEntityService), typeof(ProcedureRowOverlay), typeof(RecordProcedureReadService)];
 
     private static IEnumerable<string> Violations(IEnumerable<Type> types) =>
         IlCallScan.MethodReferences(types.SelectMany(IlCallScan.WithNested))
@@ -86,6 +87,13 @@ public sealed class DryRunNoWriteGuardTests
         var references = IlCallScan.MethodReferences(DryRunTypes.SelectMany(IlCallScan.WithNested)).ToList();
 
         Assert.Contains(references, r => r.Caller == typeof(ProcedureRowOverlay) || IlCallScan.Outermost(r.Caller) == typeof(ProcedureRowOverlay));
+        foreach (var entryPoint in new[] { "DryRunAsync", "PlanAsync", "SyntheticRowsAsync" })
+        {
+            // K-5: the 2a entry point's own async bodies (the compiler-generated state machines) are read, not just its outer type.
+            Assert.Contains(references, r => IlCallScan.Outermost(r.Caller) == typeof(RecordProcedureReadService)
+                                             && IlCallScan.SourceMethodName(r.Caller, r.CallerMethod) == entryPoint);
+        }
+
         Assert.Contains(references, r => r.Target.Name == nameof(IGenericEntityService.RetrieveMultipleAsync)
                                          && r.Target.DeclaringType == typeof(IGenericEntityService));
         Assert.Contains(references, r => r.Target.Name == nameof(IGenericEntityService.RetrieveAsync)
