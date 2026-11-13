@@ -269,7 +269,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | ✅ [done] 187 | [Rule Review, ontology rule wizard and SPE Admin pickers use the side pane (D-219 Q5)](187-other-pickers-side-pane.poml) | FULL | sonnet/high | 178 | M | Non-Dataverse lists stay as they are (recorded) · PR [#2754](https://github.com/spaarke-dev/spaarke/pull/2754) merged `e9208abc5e`: matter limit + Firm converted; 4 SPE Admin pickers unchanged (BFF routes scope to caller BUs; owner **D-221** keep) |
 | 🔲 [open] 188 | [Remaining composer hosts: templates, AI, attachment upload (ComposeWorkspace, TrackingFieldTrio, CommunicationPage, CommunicationActions)](188-remaining-composer-hosts-templates-ai.poml) | FULL | sonnet/high | 186 | — | From the 186 inventory; Daily Briefing out, Office add-in = task 189 after coordination (**D-220**) |
 | ✅ [done] 190 | [Send budget inquiry sends Cc and Bcc end to end; the "not sent" warning goes away on that step](190-budget-inquiry-cc-bcc.poml) | FULL | sonnet/high | none | — | D-222 |
-| 🔲 [open] 191 | [A decision whose inquiry send failed can be finished from the item: retry sends only the unfinished step, no duplicates, no HTTP 500](191-decision-failed-send-recovery.poml) | FULL | **opus**/high | none | — | D-222 |
+| ✅ [done] 191 | [A decision whose inquiry send failed can be finished from the item: retry sends only the unfinished step, no duplicates, no HTTP 500](191-decision-failed-send-recovery.poml) | FULL | **opus**/high | none | — | D-222 |
 
 ### Phase 5 — The worklist surface
 

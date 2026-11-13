@@ -4,7 +4,7 @@
     <title>A decision whose budget inquiry send failed can be finished from the item: retry sends only the unfinished step, no duplicates, no HTTP 500 (D-222)</title>
     <phase>11 UAT (budget inquiry follow-up, D-222)</phase>
     <gate>startable (after 190 merges, or rebase onto it)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies the decision route's resume logic (.cs) and the DecisionWizard (.tsx).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -148,6 +148,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above; anything beyond needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
   <notes>Dev 2026-11-13 (MAT-34929-0040): revision 03:26:52Z, service request 03:26:54Z, no sprk_communication, Signal closed ConditionCleared 03:27:27Z with no record, retry 500 in 0.6 s; send exception lost to sampling (Graph 502/503/timeouts then). Resume/Retry/Resumable exist; the gap is that a Failed step is never resumable and a replayed failure maps to 500.</notes>
+  <completion>Done 2026-11-13: PR #2792 merged to master (e5f5c9a6df). Notes: notes/task-191-notes.md. rework: fix-round-3 task 191</completion>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master (line numbers in this POML are origin/master d8b53ec0c3); PR to master.</protocol>
