@@ -24,6 +24,8 @@
   <constraints>
     <constraint source="FR-06/FR-07">Labels are display only; create visibility still follows each list's canCreate; unknown = nothing shown.</constraint>
     <constraint source="uac-r2 A2">For callers with `writeAccessPerRecord` the label is the composed READ view; it never hides or shows write actions for them (they keep asking the record's canCreate). Same rule as project labels; test it.</constraint>
+    <constraint source="task 009 handover">The shared `RECORD_ACTION_ICONS` (shared lib) still has `addTodo` and no `addTask`: replace `addTodo` with `addTask` there (shared-lib Jest). Task 009 removed the separate per-list busy hold in TasksEventsSection (one list left); restore it when the Task list is added. Use the template's `sectionActions.tasksEvents` for "Add task".</constraint>
+    <constraint source="task 008 review F2-1">"Add task" shows only when the event list's `canCreateTask` is true; "Add event" keeps following `canCreate`. Unknown = hidden.</constraint>
     <constraint source="owner 2026-11-13">One label set everywhere: the five duplicated label maps (D-11 #2718) use ACCESS_LEVEL_LABELS.</constraint>
   </constraints>
 

@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// Called by the external SPA and the Teams workforce host on startup to retrieve the caller's own
 /// project access context: the projects the caller can READ (possibly none) with a level string each,
-/// so the client can build its navigation. Principal-agnostic: a CIAM external contact and a workforce user.
+/// so the client can build its navigation (and, R4 task 008, its readable matters/work assignments). Principal-agnostic.
 ///
 /// Authentication: the ExternalCollaboration policy (the Ciam, default and WorkforceHome schemes), then the
 /// group-level CallerPrincipalAuthorizationFilter, which resolves the token to a CallerPrincipal.
@@ -80,9 +80,16 @@ public static class ExternalUserContextEndpoint
             }
         }
 
+        // R4 task 008 (uac-r2 review 2026-11-13, A): the matters and work assignments the caller can READ, each with its display
+        // level, from the principal's own MatterAccess / WorkAssignmentAccess (CallerPrincipal.ReadableRecordLevels — the dictionaries
+        // the read routes' RightsForRoot reads). Additive: `projects` is unchanged and nothing new is read.
+        var records = caller.ReadableRecordLevels
+            .Select(r => new RecordAccessEntry(SecureRecordRoot.For(r.RootType).WireToken, r.RecordId, r.Level.ToString()))
+            .ToList();
+
         logger.LogInformation(
-            "[EXT-ME] Caller {ContactId} ({Plane}) requested context: {Count} readable projects. TraceId={TraceId}",
-            caller.ContactId, caller.Plane, projects.Count, httpContext.TraceIdentifier);
+            "[EXT-ME] Caller {ContactId} ({Plane}) requested context: {Count} readable projects, {RecordCount} readable matters/work assignments. TraceId={TraceId}",
+            caller.ContactId, caller.Plane, projects.Count, records.Count, httpContext.TraceIdentifier);
 
         var response = new ExternalUserContextResponse(
             caller.ContactId,
@@ -94,7 +101,8 @@ public static class ExternalUserContextEndpoint
             // Task 036 fix round 1 (F4): the levels above are the composed rights. For a caller whose access Dataverse
             // decides they say only what the caller may see; write affordances are then asked of the record (its list's
             // canCreate). No per-record call here. Omitted (false) for every other caller.
-            WriteAccessPerRecord: caller.DataverseConfirmsWrites);
+            WriteAccessPerRecord: caller.DataverseConfirmsWrites,
+            Records: records);
 
         return Results.Ok(response);
     }
@@ -122,7 +130,7 @@ public static class ExternalUserContextEndpoint
         Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Configuration.EbillingOptions> ebilling,
         CancellationToken ct)
     {
-        // Fully qualified: a `using` here would shift the line numbers the route ledger cites (:45, :74).
+        // Fully qualified: a `using` here would shift the line numbers the route ledger cites (:46, :75, :86).
         var result = Handle(httpContext, logger);
         if (result is not Microsoft.AspNetCore.Http.HttpResults.Ok<ExternalUserContextResponse> { Value: { } response }
             || !ebilling.CurrentValue.Enabled

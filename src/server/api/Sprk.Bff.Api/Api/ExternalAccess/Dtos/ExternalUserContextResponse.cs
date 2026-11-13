@@ -31,6 +31,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// list (<c>canCreate</c>) instead of the level. Omitted when <see langword="false"/>, so every other caller's response
 /// is byte-for-byte what it was.
 /// </param>
+/// <param name="Records">
+/// spaarke-SPA-external-access-platform-r4 task 008 (additive; uac-r2 review 2026-11-13, condition A). The matters and work
+/// assignments the caller can READ, each with its display level, exactly as <see cref="Projects"/> does for projects
+/// (<c>CallerPrincipal.ReadableRecordLevels</c>). The handler always sets it (an empty list when there are none); omitted only
+/// when a response is built without it. Display only: a level never authorizes anything, and for a
+/// <see cref="WriteAccessPerRecord"/> caller it is the READ view.
+/// </param>
 public record ExternalUserContextResponse(
     Guid ContactId,
     string Email,
@@ -40,7 +47,9 @@ public record ExternalUserContextResponse(
     IReadOnlyList<ExternalFirmEntry>? Firms = null,
     [property: System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
-    bool WriteAccessPerRecord = false);
+    bool WriteAccessPerRecord = false,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<RecordAccessEntry>? Records = null);
 
 /// <summary>One firm the caller belongs to (see <see cref="ExternalUserContextResponse.Firms"/>).</summary>
 /// <param name="FirmId">The Dataverse <c>sprk_organizationid</c>; the value to send as <c>firmId</c> when submitting.</param>
@@ -54,4 +63,15 @@ public record ExternalFirmEntry(Guid FirmId, string Name);
 /// <param name="AccessLevel">The access level string: "ViewOnly", "Collaborate", or "FullAccess".</param>
 public record ProjectAccessEntry(
     Guid ProjectId,
+    string AccessLevel);
+
+/// <summary>
+/// One matter or work-assignment access entry in the external user context response (task 008).
+/// </summary>
+/// <param name="RecordType">The wire root token: <c>"matter"</c> or <c>"workassignment"</c> (the tokens the grant routes accept).</param>
+/// <param name="RecordId">The Dataverse record id.</param>
+/// <param name="AccessLevel">The display level string, as for projects: "ViewOnly", "Collaborate" or "FullAccess".</param>
+public record RecordAccessEntry(
+    string RecordType,
+    Guid RecordId,
     string AccessLevel);

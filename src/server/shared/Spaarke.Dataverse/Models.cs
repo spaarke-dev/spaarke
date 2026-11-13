@@ -1390,6 +1390,28 @@ public static class EventStatusCode
 }
 
 /// <summary>
+/// The <c>sprk_eventtype_ref</c> rows the BFF writes or compares by id: reference data shared across environments.
+/// </summary>
+/// <remarks>
+/// <para>ONE definition for Signals' <c>assign-task</c> (ontology task 159, D-178) and the external event create and lists
+/// (spaarke-SPA-external-access-platform-r4 task 008; uac-r2 review 2026-11-13, condition B), so the two cannot name
+/// different rows. Verified on spaarkedev1 2026-10-22.</para>
+/// <para>Other private copies of the same id remain in the AI task node, the Daily Briefing collector and the workspace
+/// portfolio service; they are not part of this definition yet.</para>
+/// </remarks>
+public static class EventTypeRef
+{
+    /// <summary>The entity SET name of <c>sprk_eventtype_ref</c> (live metadata "Collection Name").</summary>
+    public const string EntitySet = "sprk_eventtype_refs";
+
+    /// <summary>The Task row of <c>sprk_eventtype_ref</c>.</summary>
+    public const string TaskId = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    /// <summary>The Task row id as a <see cref="Guid"/>.</summary>
+    public static readonly Guid Task = new(TaskId);
+}
+
+/// <summary>
 /// The "my events" narrowing of the caller-scoped event list (task 097 round 8; owner decision B, 2026-10-06): an event is
 /// the caller's when it is OWNED by them, OR ASSIGNED to their linked contact (<c>sprk_assignedto</c>, task 152 S1), OR
 /// CREATED by them (<c>sprk_createdbyperson</c>, a SYSTEMUSER lookup — <see cref="RecordCreatorPersonColumn"/>, task 146

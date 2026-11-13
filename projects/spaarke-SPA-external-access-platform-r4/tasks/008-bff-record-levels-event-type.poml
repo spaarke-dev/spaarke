@@ -4,7 +4,7 @@
     <title>BFF: matter/WA access levels on /me; event type "task" on create; isTask on event lists (owner E2E rework)</title>
     <phase>1 Record template and actions (post-E2E rework)</phase>
     <gate>uac-r2 UAC review of the proposal (sent 2026-11-13) recorded BEFORE any BFF code</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code (tags bff-api, auth-adjacent: access level display and a new readable column)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -85,6 +85,8 @@
     <criterion testable="true">uac-r2's review is recorded; BFF builds; external-access tests and route-ledger arch tests pass; publish-size delta and CVE check recorded.</criterion>
   </acceptance-criteria>
 
+  <notes>Implemented per uac-r2 review (PASS with changes; C placement confirmed; canCreateTask accepted). /me records[], eventType "task" (closed set, B1 probe), isTask + canCreateTask on event lists. Review: 1 adversarial pass, round 1 fixed F2-1 (canCreateTask), F2-2 (vacuous test), K4 (create isTask test). Out-of-scope: D-14 #2809. Detail: notes/task-008-notes.md.
+rework: fix-round-1 task 008</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>

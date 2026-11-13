@@ -250,6 +250,28 @@ public class ExternalDataService
     internal static readonly IReadOnlySet<int> ExternalCreatableStatuses =
         new HashSet<int> { EventStatusCode.Draft, EventStatusCode.Open };
 
+    /// <summary>
+    /// spaarke-SPA-external-access-platform-r4 task 008 (uac-r2 review 2026-11-13, condition B): the ONE event type an external
+    /// caller may create (<see cref="CreateExternalEventRequest.EventType"/>), matched exactly. It binds the Task row of
+    /// <c>sprk_eventtype_ref</c> (<see cref="EventTypeRef.Task"/>). The closed set is the authorization for a contact caller;
+    /// a Dataverse-decided caller is also asked AppendTo on that row by the create route.
+    /// </summary>
+    internal const string TaskEventType = "task";
+
+    /// <summary>The stable <c>errorCode</c> of a create whose <c>eventType</c> is outside the closed set (ADR-019).</summary>
+    internal const string EventTypeNotAllowedErrorCode = "sdap.event.type_not_allowed";
+
+    /// <summary>Whether <paramref name="eventType"/> may be sent on an external event create: omitted (null), or
+    /// <see cref="TaskEventType"/>. Anything else — another type, a different spelling, an empty string — is not.</summary>
+    internal static bool IsCreatableEventType(string? eventType) =>
+        eventType is null || string.Equals(eventType, TaskEventType, StringComparison.Ordinal);
+
+    /// <summary>The lookup value column of <c>sprk_event.sprk_eventtype_ref</c>: read server-side only, never on the wire (task 008).</summary>
+    internal const string EventTypeValueColumn = "_sprk_eventtype_ref_value";
+
+    /// <summary>The create bind of <c>sprk_event.sprk_eventtype_ref</c> (the shape Signals' assign-task writes).</summary>
+    internal const string EventTypeBindKey = "sprk_eventtype_ref@odata.bind";
+
     private sealed class EventRow
     {
         [JsonPropertyName("sprk_eventid")] public string? SprkEventid { get; set; }
@@ -257,6 +279,8 @@ public class ExternalDataService
         [JsonPropertyName("sprk_duedate")] public string? SprkDuedate { get; set; }
         [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
+        // Task 008 (uac-r2 C): compared to EventTypeRef.Task to derive ExternalEventDto.IsTask; the id itself is never mapped.
+        [JsonPropertyName(EventTypeValueColumn)] public string? EventTypeValue { get; set; }
         // Task 039: the other two root lookups, read so a list can withhold an event also filed to a record the caller
         // cannot read (see ReadableEvents). Never mapped onto the wire DTO.
         // Task 130-0 fix round 3d: each setter records that its column was PRESENT in the row (an explicit JSON null included);
@@ -3356,9 +3380,14 @@ public class ExternalDataService
 
         // Task 032 (FR-26): both creator stamps, so the SPA offers Delete only on the caller's own events.
         // Task 039: all three root lookups, so a row also filed to a root the caller cannot read can be withheld.
+        // R4 task 008 (FR-18; UAC review uac-r2 2026-11-13, condition C): plus the event type lookup, read server-side ONLY to
+        // derive ExternalEventDto.IsTask (compared to EventTypeRef.Task). Neither the id nor the type's name is ever mapped onto
+        // the wire. sprk_event has no external module, so this $select is the column list this read is allowed: nothing in the
+        // module allow-lists (ExternalAccessModule ReadableColumns) changes, and the generic module seam still refuses sprk_event.
         var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,"
                      + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,"
                      + CreatorStampSelect
+                     + "," + EventTypeValueColumn
                      + LiveParentSelectSuffix(EventTable); // task 187: the parents whose live roots the rule takes in
         select = WithInvoiceLinkColumns(select, EventTable); // task 130-0 fix round 1: an event follows its invoice
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
@@ -3397,6 +3426,11 @@ public class ExternalDataService
             throw new ArgumentOutOfRangeException(nameof(request), status,
                 "sprk_status must be Draft (1) or Open (659490001).");
 
+        // R4 task 008 (uac-r2 B): the closed event-type set, enforced here too — the route refuses first with a 400.
+        if (!IsCreatableEventType(request.EventType))
+            throw new ArgumentOutOfRangeException(nameof(request), request.EventType,
+                "eventType must be \"task\" or omitted.");
+
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
             body[EventNameColumn] = request.SprkName;
@@ -3412,6 +3446,10 @@ public class ExternalDataService
         // and the entity set come from the same binding row (R4 task 002).
         body[binding.BindKey] = $"/{binding.EntitySet}({rootId})";
         body[OwnerBindKey] = $"/teams({owningTeamId})";
+
+        // R4 task 008: "task" binds the Task type row (the ONE shared id, EventTypeRef); omitted binds no type, as before.
+        if (request.EventType is TaskEventType)
+            body[EventTypeBindKey] = $"/{EventTypeRef.EntitySet}({EventTypeRef.TaskId})";
         return body;
     }
 
@@ -4720,6 +4758,8 @@ public class ExternalDataService
         SprkRegardingprojectValue = r.SprkRegardingprojectValue,
         SprkCreatedbypersonValue = r.CreatedByPersonValue,
         SprkCreatedbycontactValue = r.CreatedByContactValue,
+        // R4 task 008 (uac-r2 C): only the comparison leaves; an absent, null or unparsable lookup is not a Task.
+        IsTask = Guid.TryParse(r.EventTypeValue, out var eventType) && eventType == EventTypeRef.Task,
         // task 130-0 fix round 1; never serialized. F3b fix round 1: plus the invoices of the rows it is filed under.
         InvoiceLinks = InvoiceLinksOf(EventTable, r.Extra).Concat(ancestorLinks ?? Array.Empty<Guid>()).Distinct().ToList(),
     };

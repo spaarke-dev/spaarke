@@ -231,3 +231,23 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 - Delete the routes.
 - Update the route ledger and the external route counts.
 - Remove the routes' contract tests, with the ADR-038 A3 evidence.
+
+## D-14 — Task event-type GUID still duplicated in three BFF files (#2809)
+
+**Where.** `TaskActionCore.cs:68`, `DailyBriefingCollector.cs:128`, `PortfolioService.cs:99`. Each has its own literal Task type id. Task 008 introduced the shared `EventTypeRef.Task` (`Spaarke.Dataverse/Models.cs`).
+
+**Effect.** Nothing changes today. If the id differs per environment or the constant changes, the AI task action, the daily briefing and the portfolio silently create tasks of the wrong type, or miss them.
+
+**Why deferred.** These files are outside R4 and belong to other projects.
+
+**Fix shape.** Replace the three literals with `EventTypeRef.Task`. Optionally add an ArchTest that bans the literal elsewhere.
+
+## D-15 — Project header icons and dashboard Tasks button do nothing
+
+**Where.** The external SPA project page header (Mail, Tasks and Notifications icons) and the dashboard's "Tasks" button. The code already worked this way before task 009.
+
+**Effect.** Clicking one of them does nothing, which reads as a dead action. That breaks the hide-don't-disable rule.
+
+**Why deferred.** Found by task 009; outside its scope.
+
+**Fix shape.** Wire each control to its destination (Tasks after task 011) or hide it. Add a test.

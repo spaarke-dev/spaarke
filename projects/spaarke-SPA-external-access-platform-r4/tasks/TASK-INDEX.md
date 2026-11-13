@@ -15,7 +15,7 @@
 | 004 | Child dialogs inside the parent SprkModal (FR-03) | 1 | ✅ [done] | 005 | — | sonnet / high |
 | 006 | Per-record access, hide-don't-disable, "Your access" (FR-06, FR-07) | 1 | ✅ [done] | 002, 004 | — | opus / high |
 | 007 | Submit invoice record action (FR-10) | 1 | ✅ [done] | 006 | — | sonnet / high |
-| 008 | BFF: matter/WA levels on /me; event type "task"; isTask (E2E rework; uac-r2 PASS w/ changes) | 1 | 🔲 [open] | 007 | Group R | opus / high |
+| 008 | BFF: matter/WA levels on /me; event type "task"; isTask (E2E rework; uac-r2 PASS w/ changes) | 1 | ✅ [done] | 007 | Group R | opus / high |
 | 009 | Record view: section actions; remove To Do; empty states; Documents columns D-12 (E2E rework) | 1 | 🔲 [open] | 007 | Group R | opus / high |
 | 010 | Submit invoice modal over record (locked record) + Invoices grid toolbar (E2E rework; ebilling agree w/ changes) | 1 | 🔲 [open] | 009 | — | sonnet / high |
 | 011 | SPA: Manage Access labels everywhere; Tasks = Task events; Add task (E2E rework, D-6, D-11) | 1 | 🔲 [open] | 008, 009 | — | sonnet / high |
