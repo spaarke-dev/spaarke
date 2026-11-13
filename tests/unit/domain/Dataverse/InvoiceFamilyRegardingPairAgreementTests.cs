@@ -438,6 +438,55 @@ public class InvoiceFamilyRegardingPairAgreementTests
         kept.Keys.Should().Equal("sprk_regardingmatter");
     }
 
+    // ── Fix round 4: an admitted record URL is stored in the server's canonical form ─────────────────────────────────
+
+    [Theory]
+    [MemberData(nameof(FamilyCores))]
+    public async Task Gate_AnAgreeingRecordUrlInAnyForm_IsWrittenInTheCanonicalForm(string table, string column, string core)
+    {
+        var canonical = $"/main.aspx?pagetype=entityrecord&etn={core}&id={Core.ToString("D").ToLowerInvariant()}";
+        foreach (var sent in new object[]
+                 {
+                     $"https://other.example/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn={core}&id={Core:B}",
+                     $"ftp://other.example/main.aspx?pagetype=entityrecord&etn={core.ToUpperInvariant()}&id={Core.ToString("D").ToUpperInvariant()}",
+                     JsonSerializer.SerializeToElement(UrlOf(core, Core.ToString("B")) + "#tab"),
+                 })
+        {
+            var payload = new Dictionary<string, object?> { ["sprk_regardingrecordurl"] = sent };
+            var (written, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+                table, Row, payload, AppOnly(table, column, core, Core).Object, CancellationToken.None);
+
+            refusal.Should().BeNull(sent.ToString());
+            written["sprk_regardingrecordurl"].Should().Be(canonical, "an admitted URL is stored as the server writes it: " + sent);
+        }
+    }
+
+    [Fact]
+    public async Task Gate_ACanonicalRecordUrl_IsWrittenUnchanged()
+    {
+        var url = UrlOf("sprk_matter", Core.ToString("D").ToLowerInvariant());
+        var payload = new Dictionary<string, object?> { ["sprk_regardingrecordurl"] = url };
+
+        var (written, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            "sprk_invoice", Row, payload, AppOnly("sprk_invoice", "sprk_matter", "sprk_matter", Core).Object, CancellationToken.None);
+
+        refusal.Should().BeNull();
+        written["sprk_regardingrecordurl"].Should().Be(url);
+        InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl("sprk_matter", Core).Should().Be(url);
+    }
+
+    [Fact]
+    public async Task Gate_AClearedRecordUrl_IsWrittenAsAClear()
+    {
+        var payload = new Dictionary<string, object?> { ["sprk_regardingrecordurl"] = null };
+
+        var (written, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            "sprk_invoice", Row, payload, AppOnly("sprk_invoice", "sprk_matter", "sprk_matter", Core).Object, CancellationToken.None);
+
+        refusal.Should().BeNull();
+        written["sprk_regardingrecordurl"].Should().BeNull();
+    }
+
     public static TheoryData<string, string, string, string> TwoCoreLookupsOfEachTable()
     {
         var rows = new TheoryData<string, string, string, string>();

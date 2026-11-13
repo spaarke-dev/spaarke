@@ -361,17 +361,62 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Patches.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "045e (URL): the chat tool writes a family row's absolute URL of its own matter, as sent")]
+    private static string CanonicalUrlOfTheMatter =>
+        $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={OrdinaryMatter.ToString("D").ToLowerInvariant()}";
+
+    [Theory(DisplayName = "045e (URL): the chat tool writes a family row's absolute URL of its own matter on another host in the canonical form")]
     [MemberData(nameof(PairFamilyTables))]
-    public async Task UpdateRecordTool_AFamilyRowAbsoluteUrlOfItsMatter_IsWrittenAsSent(string table, string column)
+    public async Task UpdateRecordTool_AFamilyRowAbsoluteUrlOfItsMatter_IsWrittenCanonical(string table, string column)
     {
         StoredFamilyRowUnderTheMatter(table, column, PairFamilyRow);
-        var url = $"https://org.crm.dynamics.com/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={OrdinaryMatter.ToString("B").ToUpperInvariant()}";
+        var url = $"https://other.example/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={OrdinaryMatter.ToString("B").ToUpperInvariant()}";
 
         var result = await UpdateRecord(table, PairFamilyRow, ("sprk_regardingrecordurl", JsonSerializer.SerializeToElement(url)));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        BodyOf(_user.Patches.Should().ContainSingle().Subject.Body)["sprk_regardingrecordurl"].GetString().Should().Be(url);
+        BodyOf(_user.Patches.Should().ContainSingle().Subject.Body)["sprk_regardingrecordurl"].GetString().Should().Be(CanonicalUrlOfTheMatter);
+    }
+
+    [Theory(DisplayName = "045e (URL): the chat tool writes a URL of the row's matter in the canonical form, whatever its scheme")]
+    [InlineData("ftp://other.example/main.aspx?pagetype=entityrecord&etn=SPRK_MATTER&id={0}")]
+    [InlineData("/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={0}")]
+    public async Task UpdateRecordTool_AnApprovalUrlOfItsMatter_IsWrittenCanonical(string form)
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoiceapproval", "sprk_regardingmatter", PairFamilyRow);
+
+        var result = await UpdateRecord("sprk_invoiceapproval", PairFamilyRow, ("sprk_regardingrecordurl",
+            JsonSerializer.SerializeToElement(string.Format(System.Globalization.CultureInfo.InvariantCulture, form, OrdinaryMatter.ToString("D").ToLowerInvariant()))));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        BodyOf(_user.Patches.Should().ContainSingle().Subject.Body)["sprk_regardingrecordurl"].GetString().Should().Be(CanonicalUrlOfTheMatter);
+    }
+
+    [Fact(DisplayName = "045e (URL): PATCH of an invoice with an agreeing pair and an absolute URL of its matter writes the canonical URL")]
+    public async Task ChildRefile_AnAgreeingInvoicePairWithAnAbsoluteUrlOfItsMatter_IsWrittenCanonical()
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoice", "sprk_matter", PairFamilyRow);
+        var sent = InvoicePair(OrdinaryMatter, RecordTypeMatter);
+        sent["sprk_regardingrecordurl"] = $"https://other.example/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={OrdinaryMatter:B}";
+
+        var result = await RefileChild("sprk_invoice", PairFamilyRow, sent);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        BodyOf(_user.Patches.Should().ContainSingle().Subject.Body)["sprk_regardingrecordurl"].GetString().Should().Be(CanonicalUrlOfTheMatter);
+    }
+
+    [Fact(DisplayName = "045e (core move): the chat tool moving an approval with a URL naming another record writes the derived URL")]
+    public async Task UpdateRecordTool_AnApprovalMovedToAnotherMatter_WithAForeignUrl_IsWrittenWithTheDerivedUrl()
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoiceapproval", "sprk_regardingmatter", PairFamilyRow);
+        _world.WithRecord("sprk_matter", RederiveMatter, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await UpdateRecord("sprk_invoiceapproval", PairFamilyRow,
+            Lookup("sprk_regardingmatter", "sprk_matter", RederiveMatter),
+            ("sprk_regardingrecordurl", JsonSerializer.SerializeToElement($"https://other.example/main.aspx?pagetype=entityrecord&etn=sprk_project&id={PairOtherMatter:D}")));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        BodyOf(_user.Patches.Should().ContainSingle().Subject.Body)["sprk_regardingrecordurl"].GetString()
+            .Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={RederiveMatter.ToString("D").ToLowerInvariant()}");
     }
 
     // ── D-68: an external identifier filed under its invoice alone (no core lookup) ─────────────────────────────────

@@ -862,18 +862,21 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <summary>
     /// Task 045e (fix round 1, F2): <paramref name="payload"/> with every text value under the pair id column replaced by
     /// <paramref name="admitted"/>'s record id in canonical form (lower-case "D"). Call only after
-    /// <see cref="CheckRegardingPairAgreesAsync"/> admitted the pair, so the text named that same id.
+    /// <see cref="CheckRegardingPairAgreesAsync"/> admitted the pair, so the text named that same id. Fix round 4: a sent record
+    /// URL (admitted, so it named that same record) is written in canonical form too (<see cref="CanonicalRecordUrl"/>).
     /// </summary>
     internal static Dictionary<string, object?> WithCanonicalPairId(Dictionary<string, object?> payload, InvoiceFamilyCoreRecord admitted)
     {
         if (admitted.Regarding is not { } regarding)
             return payload;
         var canonical = CanonicalPairId(regarding.Id);
+        var canonicalUrl = CanonicalRecordUrl(regarding.LogicalName, regarding.Id);
         var written = new Dictionary<string, object?>(payload, payload.Comparer);
         foreach (var key in payload.Keys)
         {
+            var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
             // Every value the pair view reads as an id (OwnedChildWrite.PairChangeOf): text, a Guid, or a JSON string (fix round 3).
-            if (string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key), Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, StringComparison.Ordinal)
+            if (string.Equals(column, Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, StringComparison.Ordinal)
                 && payload[key] switch
                 {
                     string text => !string.IsNullOrWhiteSpace(text),
@@ -884,9 +887,29 @@ public static class InvoiceFamilyCoreRecordGuard
             {
                 written[key] = canonical;
             }
+            else if (string.Equals(column, RegardingPairWrite.RecordUrlColumn, StringComparison.OrdinalIgnoreCase)
+                && payload[key] switch
+                {
+                    string text => !string.IsNullOrWhiteSpace(text),
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => !string.IsNullOrWhiteSpace(element.GetString()),
+                    _ => false,
+                })
+            {
+                written[key] = canonicalUrl;
+            }
         }
 
         return written;
+    }
+
+    /// <summary>
+    /// Task 045e (fix round 4): a record URL as the server writes it — <c>RegardingRecordType.BuildRecordUrl</c> of the table
+    /// (lower case) and the canonical id (<see cref="CanonicalPairId"/>), the form 045d's derive writes.
+    /// </summary>
+    public static string CanonicalRecordUrl(string table, Guid id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        return RegardingRecordType.BuildRecordUrl(table.Trim().ToLowerInvariant(), CanonicalPairId(id));
     }
 
     /// <summary>Task 045e: a pair id as the server writes it — lower-case "D", the form 045d's derive writes.</summary>
@@ -1484,8 +1507,19 @@ public readonly record struct RegardingPairWrite(bool SetsId, string? IdText, bo
     /// form (<c>RegardingRecordType.BuildRecordUrl</c>) and a client's absolute form with an app id both read alike. A URL
     /// without exactly one of each, or whose id is not an id, names no record: false.
     /// </summary>
-    public static bool UrlNamesRecord(string? url, string table, Guid id)
+    public static bool UrlNamesRecord(string? url, string table, Guid id) =>
+        TryReadRecordUrl(url, out var named, out var namedId)
+        && string.Equals(named, table?.Trim(), StringComparison.OrdinalIgnoreCase)
+        && namedId == id;
+
+    /// <summary>
+    /// Task 045e (fix round 4): the table and record a record URL names, read as <see cref="UrlNamesRecord"/> reads them (exactly
+    /// one non-blank <c>etn</c>, exactly one <c>id</c> that parses as an id); false when it names no record.
+    /// </summary>
+    public static bool TryReadRecordUrl(string? url, out string table, out Guid id)
     {
+        table = string.Empty;
+        id = Guid.Empty;
         if (string.IsNullOrWhiteSpace(url))
             return false;
         var start = url.IndexOf('?');
@@ -1515,8 +1549,10 @@ public readonly record struct RegardingPairWrite(bool SetsId, string? IdText, bo
             }
         }
 
-        return etns == 1 && ids == 1
-            && string.Equals(etn, table?.Trim(), StringComparison.OrdinalIgnoreCase)
-            && Guid.TryParse(idText, out var named) && named == id;
+        if (etns != 1 || ids != 1 || string.IsNullOrWhiteSpace(etn) || !Guid.TryParse(idText, out var named))
+            return false;
+        table = etn;
+        id = named;
+        return true;
     }
 }

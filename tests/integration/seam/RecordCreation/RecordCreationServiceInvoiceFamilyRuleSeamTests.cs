@@ -264,6 +264,24 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         outcome.Steps.Single(s => s.Step == RecordCreationStep.PreWriteRules).Note.Should().Contain("5 column(s) derived");
     }
 
+    /// <summary>Task 045e (fix round 4): a create's URL is the derive's, whatever URL the caller sends.</summary>
+    [Fact]
+    public async Task CreateAsync_AnInvoiceSendingAUrlOfAnotherRecord_IsCreatedWithTheDerivedUrl()
+    {
+        CallerReadsTheMatterAs("Acme v Beta", "MAT-000013");
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "One core record",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+            sprk_regardingrecordurl = "https://other.example/main.aspx?pagetype=entityrecord&etn=sprk_project&id=a0170000-0000-4000-8000-0000000045e4",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        Describe(_creates.Should().ContainSingle().Subject.Fields["sprk_regardingrecordurl"])
+            .Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={MatterId}");
+    }
+
     /// <summary>Task 045e (owner decision 2026-11-13): a create whose regarding pair names another record than its core lookup is
     /// refused at step 5½ with the guard's code (400), before the derive, and nothing is written.</summary>
     [Fact]

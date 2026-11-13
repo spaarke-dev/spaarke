@@ -1055,18 +1055,33 @@ internal static class OwnedChildWrite
     /// canonical form (lower-case "D", <see cref="InvoiceFamilyCoreRecordGuard.CanonicalPairId"/>), so the D-68 alternate key
     /// never takes another spelling of the same id. Whether that id may be written is the guard's agreement check, later in the
     /// re-file core; text that is not an id is left for it to refuse. Other tables: unchanged.
+    /// Fix round 4: a record URL the caller sends that names a record (<see cref="RegardingPairWrite.TryReadRecordUrl"/>) is
+    /// written in canonical form (<see cref="InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl"/>) of the table and id it names, so
+    /// the agreement check decides the same record and an admitted URL is stored as the server writes it; a URL that names no
+    /// record is left for the check to refuse.
     /// </summary>
     internal static DataverseWriteItemMapper.MappedItem WithCanonicalFamilyPairId(string table, DataverseWriteItemMapper.MappedItem item)
     {
         if (InvoiceFamilyCoreRecordGuard.ColumnsToRead(table) is null)
             return item;
+        var columns = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var pair = PairOf(item);
-        if (!pair.SetsId || pair.IdText is not { } text || !Guid.TryParse(text.Trim(), out var id))
-            return item;
-        var canonical = InvoiceFamilyCoreRecordGuard.CanonicalPairId(id);
-        return string.Equals(text, canonical, StringComparison.Ordinal)
-            ? item
-            : WithColumnsSet(table, item, new Dictionary<string, object?> { [SecureRootInheritance.PairIdColumn] = canonical });
+        if (pair.SetsId && pair.IdText is { } text && Guid.TryParse(text.Trim(), out var id)
+            && InvoiceFamilyCoreRecordGuard.CanonicalPairId(id) is var canonical
+            && !string.Equals(text, canonical, StringComparison.Ordinal))
+        {
+            columns[SecureRootInheritance.PairIdColumn] = canonical;
+        }
+
+        var url = PairWriteOf(item);
+        if (url.SetsUrl && RegardingPairWrite.TryReadRecordUrl(url.UrlText, out var urlTable, out var urlId)
+            && InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(urlTable, urlId) is var canonicalUrl
+            && !string.Equals(url.UrlText, canonicalUrl, StringComparison.Ordinal))
+        {
+            columns[RegardingPairWrite.RecordUrlColumn] = canonicalUrl;
+        }
+
+        return columns.Count == 0 ? item : WithColumnsSet(table, item, columns);
     }
 
     /// <summary>

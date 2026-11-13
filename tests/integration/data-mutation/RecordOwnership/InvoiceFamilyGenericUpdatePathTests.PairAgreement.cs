@@ -193,20 +193,35 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         RefusedAsDisagreeing(outcome);
     }
 
-    [Theory]
-    [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
-    public async Task AnAgreeingPairWithAnAbsoluteRecordUrlOfTheCoreRecord_IsWrittenAsSent(GenericPath path)
+    /// <summary>A record URL of the matter core: the server's form, a client's absolute form on another host, another scheme.</summary>
+    public enum MatterUrlForm { Canonical, AbsoluteOnAnotherHost, AnotherScheme }
+
+    private static string MatterUrl(MatterUrlForm form) => form switch
     {
-        var url = $"https://org.crm.dynamics.com/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={Matter.ToString("B").ToUpperInvariant()}";
-        var sent = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = Matter.ToString("D"), ["sprk_regardingrecordurl"] = url };
+        MatterUrlForm.Canonical => $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={Matter.ToString("D").ToLowerInvariant()}",
+        MatterUrlForm.AbsoluteOnAnotherHost =>
+            $"https://other.example/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={Matter.ToString("B").ToUpperInvariant()}",
+        _ => $"ftp://other.example/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={Matter:D}",
+    };
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate, MatterUrlForm.Canonical)]
+    [InlineData(GenericPath.PlaybookUpdate, MatterUrlForm.AbsoluteOnAnotherHost)]
+    [InlineData(GenericPath.PlaybookUpdate, MatterUrlForm.AnotherScheme)]
+    [InlineData(GenericPath.OutputOrchestrator, MatterUrlForm.Canonical)]
+    [InlineData(GenericPath.OutputOrchestrator, MatterUrlForm.AbsoluteOnAnotherHost)]
+    [InlineData(GenericPath.OutputOrchestrator, MatterUrlForm.AnotherScheme)]
+    public async Task AnAgreeingPairWithARecordUrlOfTheCoreRecord_IsWrittenWithTheCanonicalUrl(GenericPath path, MatterUrlForm form)
+    {
+        var sent = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = Matter.ToString("D"), ["sprk_regardingrecordurl"] = MatterUrl(form) };
 
         var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))), sent,
             StoredUnderTheMatter("sprk_invoiceapproval").Object);
 
         outcome.Code.Should().BeNull(outcome.Message);
         WrittenOnce("sprk_invoiceapproval", FamilyRow);
-        SentPayload("sprk_invoiceapproval", FamilyRow)["sprk_regardingrecordurl"].Should().Be(url);
+        SentPayload("sprk_invoiceapproval", FamilyRow)["sprk_regardingrecordurl"].Should().Be(MatterUrl(MatterUrlForm.Canonical),
+            "an admitted URL is stored as the server writes it");
     }
 
     [Theory]
