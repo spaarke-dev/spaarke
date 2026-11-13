@@ -285,6 +285,16 @@ export function ruleChoiceNeeds(r: RuleItem, choice: RuleChoice): ChoiceNeeds {
 /** Whether a choice makes any call at all. */
 export const needsAny = (needs: ChoiceNeeds): boolean => needs.remove || needs.create;
 
+/**
+ * Whether a wizard is read-only: some offered choice makes a call, and none of those is allowed. A row none of whose choices makes a call
+ * (each refused by its own blocker, e.g. a rule changed on the parent) is NOT read-only: there is nothing the answers deny, and the choices
+ * give their own reasons (084g fix round 1 re-check, R1).
+ */
+export function noAllowedCall<T>(offered: readonly T[], needsOf: (choice: T) => ChoiceNeeds, blockerOf: (choice: T) => string | null): boolean {
+  const making = offered.filter(c => needsAny(needsOf(c)));
+  return making.length > 0 && !making.some(c => blockerOf(c) === null);
+}
+
 export const NOT_ALLOWED_BOTH = 'You can view this, but not change it.';
 export const NOT_ALLOWED_REMOVE = "Not available to you: it removes this record's own override, which you cannot do here.";
 export const NOT_ALLOWED_CREATE = 'Not available to you: you cannot save an override on this record.';

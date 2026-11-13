@@ -25,7 +25,7 @@ import {
   MAX_REASON_CHARS,
   allowedBlocker,
   currentRuleChoice,
-  needsAny,
+  noAllowedCall,
   planWithin,
   ruleChoiceNeeds,
   excludeBlocker,
@@ -241,9 +241,10 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
     ),
   });
 
-  // 084g: read-only only when no offered choice that makes a call is allowed. A choice the answers do not allow is disabled with the reason
-  // and without its fields (a choice its own blocker refuses keeps that reason); read-only, every choice is disabled.
-  const readOnly = !options.some(o => needsAny(ruleChoiceNeeds(row, o.value)) && blockerOf(o.value) === null);
+  // 084g: read-only only when some offered choice makes a call and none of those is allowed (R1: a row whose choices all make no call, e.g.
+  // a rule changed on the parent, keeps the normal frame). A choice the answers do not allow is disabled with the reason and without its
+  // fields (a choice its own blocker refuses keeps that reason); read-only, every choice is disabled.
+  const readOnly = noAllowedCall(options.map(o => o.value), c => ruleChoiceNeeds(row, c), blockerOf);
   const shown = options.map(o => {
     const blocker = blockerOf(o.value);
     return blocker !== null ? { ...o, caption: blocker, disabled: true, body: undefined } : readOnly ? { ...o, disabled: true, body: undefined } : o;

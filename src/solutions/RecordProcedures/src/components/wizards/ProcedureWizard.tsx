@@ -23,7 +23,7 @@ import {
   MAX_REASON_CHARS,
   allowedBlocker,
   currentProcedureChoice,
-  needsAny,
+  noAllowedCall,
   ownOverride,
   parentOverrides,
   planProcedure,
@@ -105,8 +105,8 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
   // ── What each choice needs, and whether the lists' answers allow it (084g fix round 1, B1) ──
   const offered = procedureChoices(row);
   const blockerOf = (c: ProcedureChoice) => allowedBlocker(procedureChoiceNeeds(row, c), allowed);
-  // Read-only only when no offered choice that makes a call is allowed.
-  const readOnly = !offered.some(c => needsAny(procedureChoiceNeeds(row, c)) && blockerOf(c) === null);
+  // Read-only only when some offered choice makes a call and none of those is allowed (R1: a row with no such choice is not read-only).
+  const readOnly = noAllowedCall(offered, c => procedureChoiceNeeds(row, c), blockerOf);
 
   // ── The Pin picker's versions (task 081's read), asked for when Pin is the selected choice ──
   const [versions, setVersions] = React.useState<Versions | null>(null);

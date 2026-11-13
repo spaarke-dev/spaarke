@@ -10,6 +10,7 @@ import {
   NOT_ALLOWED_CREATE,
   NOT_ALLOWED_REMOVE,
   allowedBlocker,
+  noAllowedCall,
   planProcedure,
   planRule,
   planWithin,
@@ -23,7 +24,7 @@ import {
 } from '../components/wizards/plan';
 import type { AllowedSteps } from '../services/model';
 import type { ProcedureItem, RecordProceduresView, RuleItem, WritePermissions } from '../services/recordProceduresApi';
-import { FENWICK, MATTER, PROJECT, V, mark, matterProcedures, matterRules, override, projectProcedures, projectRules, waProcedures, waRules } from './fixtures';
+import { FENWICK, MATTER, PROJECT, V, WRITE_ALL, mark, matterProcedures, matterRules, override, projectProcedures, projectRules, waProcedures, waRules } from './fixtures';
 import { button, chooseRadio, createdBody, next, openProcedure, openRule, previewBody, radio, refusal, removedBody, renderHarness, respond, toChoices, toConfirm, typeReason } from './wizardHarness';
 
 const NONE: WritePermissions = { assignOrExclude: false, remove: false, change: false };
@@ -202,6 +203,59 @@ describe('B1 must-fire: no plan step can ever require a kind of call its choice 
     expect(allowedBlocker({ remove: true, create: true }, { remove: false, create: true })).toBe(NOT_ALLOWED_REMOVE);
     expect(allowedBlocker({ remove: true, create: true }, { remove: true, create: false })).toBe(NOT_ALLOWED_CREATE);
     expect(allowedBlocker({ remove: false, create: false }, { remove: false, create: false })).toBeNull();
+  });
+});
+
+describe('R1: read-only means the answers deny a call, not that the row has none', () => {
+  // A rule changed on the parent: "Run the published rule" and "Exclude here" are each refused by their own blocker (P-3), so no choice
+  // makes a call. (No Procedure fixture has such a row: Pin and Exclude always create.)
+  const parentChanged: RuleItem = {
+    ...matterRules.rules[0],
+    policyId: 'r-pchg',
+    code: 'PCHG',
+    name: 'Changed upstream',
+    marks: [mark('Changed', { distance: 1, chainRecord: { ...PROJECT, distance: 1 }, reason: 'Project rates' })],
+  };
+  const withRule = (permissions: WritePermissions) => ({
+    procedures: withPermissions(matterProcedures, permissions),
+    rules: { ...matterRules, permissions, rules: [parentChanged, ...matterRules.rules] },
+  });
+  const stepLabels = (d: HTMLElement) => within(d).getAllByRole('listitem', { hidden: true }).map(li => li.textContent ?? '').join(' | ');
+
+  async function expectNormalFrame(d: HTMLElement) {
+    expect(stepLabels(d)).toMatch(/Impact/);
+    expect(stepLabels(d)).toMatch(/Confirm/);
+    await toChoices(d);
+    expect(within(d).queryByTestId('read-only-reason')).not.toBeInTheDocument();
+    expect(within(d).queryByText(NOT_ALLOWED_BOTH)).not.toBeInTheDocument();
+    // The choices give their own reasons, and nothing can go on.
+    expect(caption(d, 'exclude')).toHaveTextContent('Changed on the parent; change it there.');
+    expect(radio(d, /^Run the published rule/)).toBeDisabled();
+    expect(next(d)).toBeDisabled();
+  }
+
+  it('must-fire: full rights on a rule changed on the parent show the normal frame, not "You can view this, but not change it."', async () => {
+    renderHarness(withRule(WRITE_ALL));
+    await expectNormalFrame(await openRule('r-pchg', 'PCHG · Changed upstream'));
+  });
+
+  it('must-not-fire: the same row with nothing allowed is still the normal frame (there is nothing to deny)', async () => {
+    renderHarness(withRule(NONE));
+    await expectNormalFrame(await openRule('r-pchg', 'PCHG · Changed upstream'));
+  });
+
+  it('a row with a call-making choice and nothing allowed is still read-only', async () => {
+    renderHarness(withRule(NONE));
+    await expectReadOnly(await openRule('r-block', 'BLOCK · Block billing'));
+  });
+
+  it('noAllowedCall: read-only only when some choice makes a call and none of those is allowed', () => {
+    const needs = (c: string): ChoiceNeeds => (c === 'none' ? { remove: false, create: false } : { remove: false, create: true });
+    expect(noAllowedCall(['none'], needs, () => null)).toBe(false);
+    expect(noAllowedCall(['none'], needs, () => 'blocked')).toBe(false);
+    expect(noAllowedCall(['none', 'call'], needs, c => (c === 'call' ? 'blocked' : null))).toBe(true);
+    expect(noAllowedCall(['none', 'call'], needs, () => null)).toBe(false);
+    expect(noAllowedCall([], needs, () => null)).toBe(false);
   });
 });
 
