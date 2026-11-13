@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Access;
 /// once the writer's step has returned a message unfiled from a Secure record to the Direct team, the reconcile's pass over its
 /// content rows moves them to the Direct team (3a's resolver rule for a Direct-owned message); while the Direct team cannot be
 /// identified no content row is re-owned; a message that kept the Secure team keeps its content rows where they are; and an
-/// ordinary message's unfile re-owns nothing (its owner is Unchanged pending #2722).
+/// ordinary message's unfile re-owns nothing here (with no recorded creator its owner is kept, #2722).
 /// </summary>
 /// <remarks>The REAL <see cref="SecureChildReconciler"/> over <see cref="SecureChildShareWorld"/>, its resolver composed with the
 /// REAL <see cref="DirectMessageOwnerTeam"/> over <see cref="DirectMessageOwnerTeamDouble"/> as the host composes it.</remarks>
@@ -89,7 +89,7 @@ public class SecureChildReconcilerDirectUnfileCascadeTests
 
         await Reconciler(_directory.Lookup()).AfterRefileAsync("sprk_communication", message, () => Task.FromResult(false), CancellationToken.None);
 
-        _world.OwnerWrites.Should().BeEmpty("an ordinary communication's unfile is Unchanged pending #2722");
+        _world.OwnerWrites.Should().BeEmpty("an ordinary communication with no recorded creator keeps its owner (#2722)");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
