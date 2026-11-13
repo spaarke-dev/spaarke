@@ -9,10 +9,10 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
-/// unified-access-control-r2 ruling on RecordFamilyEdges (2026-10-28), end to end through each generic update path: an invoice
-/// moved under a work assignment that is itself filed under that invoice (<c>sprk_workassignment.sprk_regardinginvoice</c>) is
-/// refused with <see cref="InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode"/> and nothing is written; a work assignment
-/// filed under another invoice, or under none, takes the invoice as before.
+/// unified-access-control-r2 ruling on RecordFamilyEdges (2026-10-28), end to end through each generic update path. Since task
+/// 045g (owner, EB-D-231) an update never files an invoice under a work assignment: its core record is fixed at create, so the
+/// move is <see cref="InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode"/> wherever the work assignment is filed, and the
+/// work assignment is not read. The cycle (<see cref="InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode"/>) is answered on the create.
 /// </summary>
 public partial class InvoiceFamilyGenericUpdatePathTests
 {
@@ -40,44 +40,35 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         return app;
     }
 
-    /// <summary>
-    /// The move under the work assignment. The playbook update and the output orchestrator clear the matter in the same write;
-    /// the push cannot clear a lookup, so it moves an invoice stored under no core record.
-    /// </summary>
-    private Task<PathOutcome> MoveUnderTheWorkAssignmentAsync(GenericPath path, Guid? workAssignmentFiledUnder)
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate, "this invoice")]
+    [InlineData(GenericPath.PlaybookUpdate, "another invoice")]
+    [InlineData(GenericPath.PlaybookUpdate, "no invoice")]
+    [InlineData(GenericPath.OutputOrchestrator, "this invoice")]
+    [InlineData(GenericPath.OutputOrchestrator, "another invoice")]
+    [InlineData(GenericPath.OutputOrchestrator, "no invoice")]
+    [InlineData(GenericPath.FieldMappingPush, "this invoice")]
+    [InlineData(GenericPath.FieldMappingPush, "another invoice")]
+    [InlineData(GenericPath.FieldMappingPush, "no invoice")]
+    public async Task AnInvoiceMovedUnderAWorkAssignment_IsRefusedCoreRecordFixed_AndTheWorkAssignmentIsNotRead(GenericPath path, string filedUnder)
     {
-        var clearsMatter = path != GenericPath.FieldMappingPush;
-        var lookups = clearsMatter
+        // Task 045g rule 1 (owner, EB-D-231): an invoice's core record is fixed at create, so an update never files it under a
+        // work assignment, wherever that work assignment is filed; the cycle is answered on the create.
+        var app = CycleWorld(filedUnder switch
+        {
+            "this invoice" => Invoice,
+            "another invoice" => OtherInvoice,
+            _ => null,
+        }, storedUnderMatter: path != GenericPath.FieldMappingPush);
+        var lookups = path != GenericPath.FieldMappingPush
             ? Lookups(("sprk_matter", null), ("sprk_regardingworkassignment", new EntityReference("sprk_workassignment", CycleWorkAssignment)))
             : Lookups(("sprk_regardingworkassignment", new EntityReference("sprk_workassignment", CycleWorkAssignment)));
-        return RunAsync(path, "sprk_invoice", Invoice, lookups, NoPlain, CycleWorld(workAssignmentFiledUnder, clearsMatter).Object);
-    }
 
-    [Theory]
-    [InlineData(GenericPath.PlaybookUpdate)]
-    [InlineData(GenericPath.OutputOrchestrator)]
-    [InlineData(GenericPath.FieldMappingPush)]
-    public async Task AnInvoiceMovedUnderAWorkAssignmentFiledUnderThatInvoice_IsRefusedWithTheCycleCode_AndNothingIsWritten(GenericPath path)
-    {
-        var outcome = await MoveUnderTheWorkAssignmentAsync(path, workAssignmentFiledUnder: Invoice);
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice, lookups, NoPlain, app.Object);
 
-        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode);
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         NoGuid(outcome);
         NothingWritten();
-    }
-
-    [Theory]
-    [InlineData(GenericPath.PlaybookUpdate, true)]
-    [InlineData(GenericPath.PlaybookUpdate, false)]
-    [InlineData(GenericPath.OutputOrchestrator, true)]
-    [InlineData(GenericPath.OutputOrchestrator, false)]
-    [InlineData(GenericPath.FieldMappingPush, true)]
-    [InlineData(GenericPath.FieldMappingPush, false)]
-    public async Task AnInvoiceMovedUnderAWorkAssignmentFiledUnderAnotherInvoiceOrNone_IsWritten(GenericPath path, bool filedUnderAnotherInvoice)
-    {
-        var outcome = await MoveUnderTheWorkAssignmentAsync(path, filedUnderAnotherInvoice ? OtherInvoice : null);
-
-        outcome.Code.Should().BeNull(outcome.Message);
-        WrittenOnce("sprk_invoice", Invoice);
+        app.Verify(a => a.RetrieveAsync("sprk_workassignment", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

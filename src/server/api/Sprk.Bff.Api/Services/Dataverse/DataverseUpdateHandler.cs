@@ -138,7 +138,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // a lookup this guard decides on (it writes the pair and its display columns only), so the decision is the same.
         if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
                     entityLogicalName, recordId, fields, _genericEntityService, ct,
-                    writeIsImpersonated: impersonateSystemUserId is not null)
+                    writeIsImpersonated: impersonateSystemUserId is not null,
+                    // Task 045g: on a person's write, a refusal of rules 1-3 is decided on the rows as that person reads them.
+                    asPerson: OwnedChildWrite.PersonRowReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
                 .ConfigureAwait(false) is { RefusalCode: { } familyCode })
         {
             // Code only: the guard read as the app, so its reason can name records the caller has not read.

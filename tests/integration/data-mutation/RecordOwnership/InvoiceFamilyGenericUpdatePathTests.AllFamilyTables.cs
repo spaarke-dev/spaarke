@@ -189,13 +189,17 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
     [InlineData(GenericPath.FieldMappingPush)]
-    public async Task AnExternalIdentifierUnderAMatter_GivenAnInvoice_IsWritten_ItsMatterStillDecides(GenericPath path)
+    public async Task AnExternalIdentifierUnderAMatter_GivenAnInvoiceOfThatMatter_IsWritten_ItsMatterStillDecides(GenericPath path)
     {
-        // The guard has no rule comparing an external identifier's core record with its invoice's: with a core lookup set,
-        // that lookup decides (D-68 applies only to a row with none).
+        // With a core lookup set, that lookup decides (D-68 applies only to a row with none); task 045g rule 2: the invoice it is
+        // given regards the same matter, so it is written.
+        var app = FamilyRowUnderAMatter("sprk_externalidentifier");
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", Invoice) { ["sprk_matter"] = MatterRef(Matter) });
+
         var outcome = await RunAsync(path, "sprk_externalidentifier", FamilyRow,
             Lookups((InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn, new EntityReference("sprk_invoice", Invoice))), NoPlain,
-            FamilyRowUnderAMatter("sprk_externalidentifier").Object);
+            app.Object);
 
         outcome.Code.Should().BeNull(outcome.Message);
         WrittenOnce("sprk_externalidentifier", FamilyRow);

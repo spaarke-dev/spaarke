@@ -163,15 +163,15 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.PlaybookUpdate, false)]
     [InlineData(GenericPath.OutputOrchestrator, true)]
     [InlineData(GenericPath.OutputOrchestrator, false)]
-    public async Task D96_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedLineMismatch_NotForThePair(GenericPath path, bool agrees)
+    public async Task AnInvoiceMovedWithAPairSent_IsRefusedCoreRecordFixed_NotForThePair(GenericPath path, bool agrees)
     {
-        // D-96 is decided first: the pair a core-moving write sends — agreeing with the record the row will name, or not —
-        // never answers in its place.
+        // Task 045g rule 1 is decided first: the pair a core-moving write sends — agreeing with the record the row would name,
+        // or not — never answers in its place.
         var outcome = await RunAsync(path, "sprk_invoice", Invoice,
             Lookups(("sprk_matter", MatterRef(OtherMatter)), PairType(CatalogRowOf("sprk_matter"))),
             PairId(agrees ? OtherMatter : Project), WorldWithLines(OtherMatter, Matter).Object);
 
-        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode, outcome.Message);
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode, outcome.Message);
         NoGuid(outcome);
         NothingWritten();
     }

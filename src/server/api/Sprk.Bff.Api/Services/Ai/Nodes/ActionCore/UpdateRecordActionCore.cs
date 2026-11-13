@@ -247,10 +247,15 @@ internal sealed class UpdateRecordActionCore
         if (InvoiceFamilyCoreRecordGuard.GuardedLookups(input.EntityLogicalName) is not null)
         {
             using var familyScope = _scopeFactory.CreateScope();
+            var guardEntities = familyScope.ServiceProvider.GetService<IGenericEntityService>();
             if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
                     input.EntityLogicalName, input.RecordId, updatePayload,
-                    familyScope.ServiceProvider.GetService<IGenericEntityService>(), cancellationToken,
-                    writeIsImpersonated: input.ImpersonateSystemUserId is not null).ConfigureAwait(false)
+                    guardEntities, cancellationToken,
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null,
+                    // Task 045g: on a person's run, a refusal of rules 1-3 is decided on the rows as that person reads them.
+                    asPerson: OwnedChildWrite.PersonRowReader(
+                        familyScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
+                        guardEntities, input.ImpersonateSystemUserId)).ConfigureAwait(false)
                 is { RefusalCode: { } familyCode })
             {
                 // Code only: the guard read as the app, so its reason can name records the caller has not read.

@@ -129,6 +129,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 var select = Regex.Match(odata!, @"\$select=([^&]+)").Groups[1].Value.Split(',');
                 var filter = Regex.Match(odata!, @"\$filter=(\w+)id eq ([0-9a-fA-F-]{36})");
                 var table = filter.Groups[1].Value;
+                if (_personRows is not null && select.All(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
+                    return Task.FromResult(PersonRowAnswer(table, Guid.Parse(filter.Groups[2].Value), select));
                 _deriveReads.Add($"record:{table}");
                 if (_callerFault is { } fault)
                     throw fault;
@@ -151,6 +153,32 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     /// <summary>What the person's query answers, when it differs from the app's read (<see cref="_recordAnswer"/>).</summary>
     private Func<string, Guid, string[], Entity?>? _personAnswer;
+
+    /// <summary>
+    /// Task 045g: a row's lookups as the person reads them (the guard's re-decision on a person's run): the row, or null when
+    /// the person cannot read it. A throw is the read's fault. Unset, a lookup read is answered as any other person read.
+    /// </summary>
+    private Func<string, Guid, Entity?>? _personRows;
+
+    /// <summary>The person's lookup read: each selected <c>_{column}_value</c> as the row's reference id (null when unset).</summary>
+    private IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> PersonRowAnswer(string table, Guid id, string[] select)
+    {
+        _personRowReads.Add($"{table}:{id:D}");
+        if (_personRows!(table, id) is not { } row)
+            return [];
+        return
+        [
+            select.ToDictionary(c => c, c =>
+            {
+                var column = c[1..^"_value".Length];
+                return System.Text.Json.JsonSerializer.SerializeToElement(
+                    row.Attributes.TryGetValue(column, out var value) && value is EntityReference reference ? reference.Id.ToString("D") : null);
+            }),
+        ];
+    }
+
+    /// <summary>Each row the person's lookup read asked for (<c>table:id</c>).</summary>
+    private readonly List<string> _personRowReads = [];
 
     /// <summary>Task 045d: the harness catalog's fixed row id for a core table.</summary>
     private static Guid CatalogRowOf(string table) =>

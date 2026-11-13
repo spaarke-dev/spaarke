@@ -1142,11 +1142,16 @@ internal static class OwnedChildWrite
 
         // An update that re-names the record the row already names (the same table and id) moves nothing: the row keeps the
         // fields it has, as the pair planner keeps a pair that does not move (045b rule 4).
-        if (InvoiceFamilyCoreRecordGuard.NamesTheSameRecord(decided,
-                InvoiceFamilyCoreRecordGuard.Check(table, column => stored.TryGetValue(column, out var kept) ? kept : null)))
+        var before = InvoiceFamilyCoreRecordGuard.Check(table, column => stored.TryGetValue(column, out var kept) ? kept : null);
+        if (InvoiceFamilyCoreRecordGuard.NamesTheSameRecord(decided, before))
         {
             return (item, null);
         }
+
+        // Task 045g rule 1: an invoice's core record is never moved, so nothing is derived for it; the re-file core's guard refuses
+        // the write with its own code and fixed text.
+        if (InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordChanges(decided, before))
+            return (item, null);
 
         var derived = await InvoiceFamilyCoreRecordGuard.DeriveGenericResolverFieldsAsync(
             decided, CallerRecordReader(user, table, entitySetName, recordId), CallerRecordTypeReader(user), ct).ConfigureAwait(false);
@@ -1691,6 +1696,59 @@ internal static class OwnedChildWrite
                 var status = ex is HttpRequestException { StatusCode: { } code } ? (int)code : 500;
                 return new RegardingPairRead<RegardingPairRow>(null, status is 403 or 404 ? status : 500, null);
             }
+        };
+    }
+
+    /// <summary>
+    /// Task 045g: the invoice-family guard's row reader AS THE PERSON an app-only path's write runs as (the playbook node or the
+    /// output orchestrator impersonating a user), the pattern of <see cref="PersonStoredRowReader"/>: a refusal of rules 1-3 is
+    /// decided again on what that person can read (<see cref="InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync"/>). Null when
+    /// the write is not run as a person. A row the person cannot read, or that is not there for them, is null; a lookup the answer
+    /// does not carry, any other fault, or no person query throws (the guard's read-failed answer). Cancellation propagates.
+    /// </summary>
+    internal static InvoiceFamilyCoreRecordGuard.PersonRowLookup? PersonRowReader(
+        Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? query, IGenericEntityService? entities, Guid? person)
+    {
+        if (person is not { } personId || personId == Guid.Empty)
+            return null;
+
+        return async (table, id, lookups, ct) =>
+        {
+            if (query is null || entities is null)
+                throw new InvalidOperationException("No reader as the person.");
+            var name = table.Trim().ToLowerInvariant();
+            IReadOnlyList<Dictionary<string, JsonElement>> rows;
+            try
+            {
+                var entitySet = await entities.GetEntitySetNameAsync(name, ct).ConfigureAwait(false);
+                rows = await query.QueryAsync(
+                        entitySet,
+                        $"$select={string.Join(",", lookups.Select(l => $"_{l.Column}_value"))}&$filter={name}id eq {id:D}", personId, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            if (rows.Count == 0)
+                return null;
+
+            var row = new Microsoft.Xrm.Sdk.Entity(name, id);
+            foreach (var (column, target) in lookups)
+            {
+                if (!rows[0].TryGetValue($"_{column}_value", out var value))
+                    throw new InvalidOperationException("A lookup was not returned.");
+                row[column] = value.ValueKind switch
+                {
+                    JsonValueKind.Null => null,
+                    JsonValueKind.String when Guid.TryParse(value.GetString(), out var reference) =>
+                        reference == Guid.Empty ? null : new Microsoft.Xrm.Sdk.EntityReference(target, reference),
+                    _ => throw new InvalidOperationException("A lookup is not a record id."),
+                };
+            }
+
+            return row;
         };
     }
 
@@ -2489,8 +2547,8 @@ internal static class OwnedChildWrite
     /// </summary>
     internal sealed record InvoiceFamilyStep(InvoiceFamilyCoreRecord? Refusal, DataverseUserResponse? ClientFailure, bool ParentUnavailable);
 
-    /// <summary>The invoice line table, and the invoice table's entity set (the one table a line's invoice lookup targets).</summary>
-    private const string LineTable = "sprk_billingevent";
+    /// <summary>The invoice table, and its entity set (the one table every family row's invoice lookup targets).</summary>
+    private const string InvoiceTable = "sprk_invoice";
 
     private const string InvoiceEntitySet = "sprk_invoices";
 
@@ -2629,15 +2687,17 @@ internal static class OwnedChildWrite
             column => effective.TryGetValue(column, out var value) ? value : null,
             async (invoice, token) =>
             {
-                // The other invoice is the one an invoice supersedes or the one a line belongs to (task 026). The bind names
-                // its entity set; one kept from the stored row is in the invoice set — for an invoice, the written table's.
+                // The other invoice is the one an invoice supersedes, or the one a line, an approval, a submission, a correction
+                // or an external identifier belongs to (task 026; task 045g). The bind names its entity set; one kept from the
+                // stored row is in the invoice set — for an invoice, the written table's.
                 var entitySet = item.Lookups.FirstOrDefault(l =>
                                     (string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, StringComparison.OrdinalIgnoreCase)
-                                     || string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, StringComparison.OrdinalIgnoreCase))
+                                     || string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.LineInvoiceColumn, StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(l.Column, InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn, StringComparison.OrdinalIgnoreCase))
                                     && l.RecordId == invoice.Id)?.RelatedEntitySet
                                 ?? (stored is null ? null
-                                    : string.Equals(table, LineTable, StringComparison.OrdinalIgnoreCase) ? InvoiceEntitySet
-                                    : stored.Value.EntitySetName);
+                                    : string.Equals(table, InvoiceTable, StringComparison.OrdinalIgnoreCase) ? stored.Value.EntitySetName
+                                    : InvoiceEntitySet);
                 if (entitySet is null)
                 {
                     return InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
@@ -2674,7 +2734,9 @@ internal static class OwnedChildWrite
             // UAC-r2 ruling (RecordFamilyEdges, 2026-10-28): nor be filed under a work assignment that is filed under it (as the app).
             stored is { } refiled && InvoiceFamilyCoreRecordGuard.WritesCoreLookup(table, written)
                 ? InvoiceFamilyCoreRecordGuard.WorkAssignmentFiledUnderInvoice(appOnlyEntities, refiled.RecordId)
-                : null).ConfigureAwait(false);
+                : null,
+            // Task 045g rules 1 and 3: on an update, the stored lookups (read as the caller above) decide what cannot change.
+            stored is null ? null : column => before.TryGetValue(column, out var kept) ? kept : null).ConfigureAwait(false);
 
         if (supersededUnavailable)
             return InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(null, null, true));

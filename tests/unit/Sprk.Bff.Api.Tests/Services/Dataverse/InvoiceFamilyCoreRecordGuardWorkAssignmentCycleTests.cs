@@ -134,25 +134,25 @@ public class InvoiceFamilyCoreRecordGuardWorkAssignmentCycleTests
         ["sprk_RegardingWorkAssignment@odata.bind"] = $"/sprk_workassignments({WorkAssignmentId:D})",
     };
 
-    [Fact]
-    public async Task GenericUpdate_AnInvoiceMovedToAWorkAssignmentFiledUnderIt_IsRefusedWithTheCycleCode()
-    {
-        var result = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
-            MoveToTheWorkAssignment(), AppOnly(new EntityReference("sprk_invoice", InvoiceId)).Object);
-
-        result!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode);
-    }
-
+    // Task 045g rule 1 (owner, EB-D-231): an invoice's core record is fixed at create, so an update never moves it under a work
+    // assignment; the cycle is answered on the create (above) and never reached by an update.
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task GenericUpdate_AnInvoiceMovedToAWorkAssignmentFiledElsewhereOrNowhere_IsAllowed(bool filedUnderAnotherInvoice)
+    [InlineData("this invoice")]
+    [InlineData("another invoice")]
+    [InlineData("no invoice")]
+    public async Task GenericUpdate_AnInvoiceMovedToAWorkAssignment_IsRefusedCoreRecordFixed_AndTheWorkAssignmentIsNotRead(string filedUnder)
     {
-        var app = AppOnly(filedUnderAnotherInvoice ? new EntityReference("sprk_invoice", OtherInvoiceId) : null);
+        var app = AppOnly(filedUnder switch
+        {
+            "this invoice" => new EntityReference("sprk_invoice", InvoiceId),
+            "another invoice" => new EntityReference("sprk_invoice", OtherInvoiceId),
+            _ => null,
+        });
 
-        (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToTheWorkAssignment(), app.Object))
-            .Should().BeNull();
-        app.Verify(a => a.RetrieveAsync("sprk_workassignment", WorkAssignmentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+        var result = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToTheWorkAssignment(), app.Object);
+
+        result!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        app.Verify(a => a.RetrieveAsync("sprk_workassignment", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -37,36 +37,27 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private Task<RouteReply> DecisionRouteUpdate(string table, Guid id, Dictionary<string, object?> payload) =>
         new DecisionRouteCores().UpdateChildAsync(DecisionRouteHttp(), table, id, Payload(payload), CancellationToken.None);
 
-    [Fact]
-    public async Task DecisionRoute_AnInvoiceMovedToAProject_WhileALineStaysOnTheMatter_IsRefusedLineMismatch_AsTheOtherPathsRefuseIt()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DecisionRoute_AnInvoiceMovedToAProject_IsRefusedCoreRecordFixed_AsTheOtherPathsRefuseIt(bool aLineStaysBehind)
     {
-        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
-        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
-        AppLine(GuardInvoice, "sprk_project", "sprk_project", OrdinaryProject);
-        AppLine(GuardInvoice, "sprk_matter", "sprk_matter", OrdinaryMatter);
-
-        var reply = await DecisionRouteUpdate("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
-
-        reply.Status.Should().Be(StatusCodes.Status400BadRequest, reply.Detail);
-        reply.ReasonCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode,
-            "D-96 through the decision route, not a read failure for want of the app-only reader");
-        reply.Detail.Should().Contain("To move an invoice that has lines, or a line of one, detach each line").And.Contain("re-attach the lines to the invoice");
-        _user.Patches.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task DecisionRoute_AnInvoiceMovedToAProject_WhoseLinesAreAllOnIt_IsWritten()
-    {
+        // Task 045g rule 1 (owner, EB-D-231): wherever its lines are, an invoice is never moved; the reply says what is done instead.
         StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
         _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
         ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
         AppLine(GuardInvoice, "sprk_project", "sprk_project", OrdinaryProject);
+        if (aLineStaysBehind)
+            AppLine(GuardInvoice, "sprk_matter", "sprk_matter", OrdinaryMatter);
 
         var reply = await DecisionRouteUpdate("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
 
-        reply.Status.Should().Be(StatusCodes.Status204NoContent, reply.Detail);
-        _user.Patches.Should().ContainSingle();
-        _appLineQueries.Should().ContainSingle("the lines are counted once, as the app");
+        reply.Status.Should().Be(StatusCodes.Status400BadRequest, reply.Detail);
+        reply.ReasonCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode,
+            "through the decision route, not a read failure for want of the app-only reader");
+        reply.Detail.Should().Contain(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint);
+        _user.Patches.Should().BeEmpty();
+        _appLineQueries.Should().BeEmpty("decided on the stored row before any other read");
     }
 
     [Fact]
@@ -81,7 +72,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         reply.Status.Should().Be(StatusCodes.Status400BadRequest, reply.Detail);
         reply.ReasonCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
-        reply.Detail.Should().Contain("or a line of one, detach each line");
+        reply.Detail.Should().Contain(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint);
         _user.Patches.Should().BeEmpty();
     }
 }

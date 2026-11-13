@@ -178,9 +178,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     /// <summary>
-    /// The master merge of 2026-10-18 (uac-r2 #2094): the push re-files an invoice whose lookup it moves, and the update-only write
-    /// runs INSIDE that re-file (the per-child Write delegate). A row deleted after the guard read still fails THIS child with the
-    /// guard's not-found code, and nothing is created.
+    /// The master merge of 2026-10-18 (uac-r2 #2094): the push re-files an invoice whose core lookup it writes, and the update-only
+    /// write runs INSIDE that re-file (the per-child Write delegate). A row deleted after the guard read still fails THIS child with
+    /// the guard's not-found code, and nothing is created. Task 045g: an invoice's core record is fixed at create, so the lookup
+    /// written names the matter the invoice already regards.
     /// </summary>
     [Fact]
     public async Task TheFieldMappingPush_ReFilingAnInvoiceDeletedAfterTheGuardRead_IsRefusedRecordNotFound_InsideTheReFile()
@@ -188,7 +189,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         TheRowIsDeletedAfterTheGuardRead();
 
         var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice,
-            Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, WorldWithLines(OtherMatter).Object);
+            Lookups(("sprk_matter", MatterRef(Matter))), NoPlain, WorldWithLines(Matter).Object);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
         outcome.Message.Should().Be(
