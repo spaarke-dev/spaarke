@@ -271,6 +271,26 @@ public sealed class RecordRepairPassJobTests
         direct.NeedsRetry.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task WithTheCustomerUnitSettingUnset_AContactIsNotReOwned_NeitherToItsCreatorsTeamNorToAnyDefaultTeam()
+    {
+        // ExternalAccess:CustomerBusinessUnitId is unset on dev today: the rule must refuse cleanly. The store HAS a default
+        // team for the unit, so only the setting decides.
+        var store = new InMemoryContactIdentityStore();
+        store.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = [CustomerContactOwnerTests.CustomerTeam];
+        World.CustomerContactOwner = IdentityBindingTestKit.OwnerAwareBinder(store, customerBusinessUnitId: null);
+        var id = _pass.NativeContact();
+
+        var result = await _pass.RunAsync();
+
+        World.Writes.Should().BeEmpty("nothing is written");
+        World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild), "the row keeps the owner it had");
+        store.Reads.Should().NotContain("owner-team", "no default team is looked up without the setting");
+        PassWorld.Count(result, "ownerRefused").Should().Be(1);
+        result.Success.Should().BeFalse("the contact waits for the setting");
+    }
+
     // =====================================================================================
     // AC5 (must fire): the per-table claim
     // =====================================================================================
@@ -371,6 +391,7 @@ public sealed class RecordRepairPassJobTests
         _pass.WhoAmICalls.Should().Be(0);
         _pass.ScanQueries.Should().BeEmpty();
         World.Writes.Should().BeEmpty();
+        _pass.Job().Tables.Should().AllSatisfy(t => _pass.State(t).Should().BeNull("no watermark or other state is written"));
         PassWorld.Status(result).Should().Be(RecordRepairPassJob.StatusNotConfigured);
         _pass.Log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains(RecordRepairPassJob.GoLiveConfigKey));
     }
@@ -510,6 +531,9 @@ public sealed class RecordRepairPassJobTests
 
         /// <summary>Every scan query the job sent.</summary>
         public List<QueryExpression> ScanQueries { get; } = [];
+
+        /// <summary>A table's saved state (watermark, sweep, retries), or <c>null</c> when none was written.</summary>
+        public string? State(string table) => _cache.GetString($"{RecordRepairPassJob.JobIdConstant}:{table}:state");
 
         public RecordRepairPassContext Context() =>
             new(GoLive, new HashSet<Guid> { BffIdentity, RetiredIdentity });

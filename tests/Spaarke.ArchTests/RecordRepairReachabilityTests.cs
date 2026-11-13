@@ -93,7 +93,7 @@ internal sealed class RepairReachabilityControlCallsTheWrapper(RepairReachabilit
 /// <summary>MUST FIRE: Repair taken as a method group.</summary>
 internal sealed class RepairReachabilityControlMethodGroup(RecordCreationService creation)
 {
-    internal Func<string, Guid, CancellationToken, Task<RecordRepairOutcome>> Take() => creation.RepairAsync;
+    internal Func<string, Guid, CancellationToken, RecordRepairPassContext?, Task<RecordRepairOutcome>> Take() => creation.RepairAsync;
 }
 
 /// <summary>MUST FIRE: Repair called inside a lambda (counted for the member it is written in).</summary>

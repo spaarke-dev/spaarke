@@ -135,6 +135,24 @@ public sealed class CustomerContactOwnerTests
     }
 
     [Fact]
+    public async Task WithTheSettingUnset_TheRefusalIsLogged_AndNoTeamIsNamed()
+    {
+        // ExternalAccess:CustomerBusinessUnitId is unset on dev today. The store has a default team: only the setting decides.
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+        var log = new Sprk.Bff.Api.Tests.Services.Communication.CapturingLogger<RecordOwnershipResolver>();
+        var resolver = _directory.Resolver(
+            logger: log, customerContactOwner: IdentityBindingTestKit.OwnerAwareBinder(_store, customerBusinessUnitId: null));
+
+        var answer = await resolver.ResolveOwnerAsync(AContact(), CancellationToken.None);
+
+        answer.RefusalCode.Should().Be(RecordOwnerRefusal.CustomerContactTeamUnresolved);
+        answer.OwningTeamId.Should().BeNull("neither the creator's team nor any default team");
+        log.Entries.Should().Contain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error
+                                          && e.Message.Contains("ExternalAccess:CustomerBusinessUnitId"));
+        _store.Reads.Should().NotContain("owner-team");
+    }
+
+    [Fact]
     public async Task AResolverComposedWithoutTheLookup_RefusesEveryContact()
     {
         _store.DefaultTeams[CustomerBu] = [CustomerTeam];
