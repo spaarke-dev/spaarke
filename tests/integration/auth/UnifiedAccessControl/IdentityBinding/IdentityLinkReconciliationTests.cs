@@ -792,6 +792,49 @@ public class IdentityLinkReconciliationTests
     }
 
     [Fact]
+    public async Task ARegistryRowNamingAnotherBffsAppService_IsLeftToThatBff_AndTheRunIsClean()
+    {
+        // #2761: the stamp's environment has no store, so reconciling it here would fault the run (as WhoAmI 403 did on dev).
+        var demo = new InMemoryContactIdentityStore();
+        var stamp = new DataverseEnvironmentRecord
+        {
+            DataverseUrl = OtherDemoEnvironment,
+            IsActive = true,
+            SetupStatus = EnvironmentSetupStatus.Ready,
+            AppServiceName = "sprk-acme-prod-api",
+            CustomerId = "acme",
+        };
+
+        var result = await RunAsync(writes: false, targets: new() { [DemoEnvironment] = demo },
+            registry: new[] { DemoEnvironment }, registryRecords: new[] { stamp }, ownAppService: "spaarke-bff-dev");
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        TargetEnvironments(result).Should().Equal(DemoEnvironment);
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("provisioningTargets").GetProperty("registryRowsServedByAnotherBff").GetInt32().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ARegistryRowNamingThisBffsAppService_IsStillATarget()
+    {
+        // Must-fire control for the test above: the same row, on the BFF it names, is reconciled (and faults here, having no store).
+        var stamp = new DataverseEnvironmentRecord
+        {
+            DataverseUrl = OtherDemoEnvironment,
+            IsActive = true,
+            SetupStatus = EnvironmentSetupStatus.Ready,
+            AppServiceName = "sprk-acme-prod-api",
+        };
+
+        var result = await RunAsync(writes: false, targets: new(),
+            registryRecords: new[] { stamp }, ownAppService: "SPRK-ACME-PROD-API");
+
+        TargetEnvironments(result).Should().Equal(OtherDemoEnvironment);
+        TargetStatus(result, OtherDemoEnvironment).Should().Be("error");
+        result.Success.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task WithoutDATAVERSE_URL_ThereAreNoProvisioningTargets_AndTheRunIsClean()
     {
         var result = await RunAsync(writes: true);
@@ -954,9 +997,12 @@ public class IdentityLinkReconciliationTests
         string[]? registry = null,
         string? registrationEnvironment = null,
         bool registryFails = false,
-        ContactIdentityBinder? ownerAwareBinder = null)
+        ContactIdentityBinder? ownerAwareBinder = null,
+        DataverseEnvironmentRecord[]? registryRecords = null,
+        string? ownAppService = null)
     {
         var settings = new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = OwnEnvironment };
+        if (ownAppService is not null) settings[IdentityLinkReconciliationJob.OwnAppServiceConfigKey] = ownAppService;
         if (writes is { } w) settings["IdentityLink:Reconciliation:WritesEnabled"] = w ? "true" : "false";
         if (rawSwitch is not null) settings["IdentityLink:Reconciliation:WritesEnabled"] = rawSwitch;
         if (targets is not null) settings["DATAVERSE_URL"] = registrationEnvironment ?? OwnEnvironment;
@@ -982,7 +1028,8 @@ public class IdentityLinkReconciliationTests
                 new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
                     NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance)));
             services.AddSingleton<DataverseEnvironmentService>(
-                new RegistryDouble(configuration, registry ?? Array.Empty<string>(), registryFails));
+                new RegistryDouble(configuration, registry ?? Array.Empty<string>(), registryFails,
+                    registryRecords ?? Array.Empty<DataverseEnvironmentRecord>()));
         }
 
         using var provider = services.BuildServiceProvider();
@@ -1064,7 +1111,8 @@ public class IdentityLinkReconciliationTests
     }
 
     /// <summary>The environment registry at its virtual read (no HTTP double).</summary>
-    private sealed class RegistryDouble(IConfiguration configuration, string[] activeUrls, bool fails)
+    private sealed class RegistryDouble(
+        IConfiguration configuration, string[] activeUrls, bool fails, DataverseEnvironmentRecord[] extraRecords)
         : DataverseEnvironmentService(
             configuration,
             Mock.Of<TokenCredential>(),
@@ -1074,6 +1122,7 @@ public class IdentityLinkReconciliationTests
         public override Task<List<DataverseEnvironmentRecord>> GetActiveEnvironmentsAsync(CancellationToken ct = default)
             => fails
                 ? Task.FromException<List<DataverseEnvironmentRecord>>(new HttpRequestException("registry unavailable"))
-                : Task.FromResult(activeUrls.Select(u => new DataverseEnvironmentRecord { DataverseUrl = u, IsActive = true }).ToList());
+                : Task.FromResult(activeUrls.Select(u => new DataverseEnvironmentRecord { DataverseUrl = u, IsActive = true })
+                    .Concat(extraRecords).ToList());
     }
 }
