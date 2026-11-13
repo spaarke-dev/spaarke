@@ -15,7 +15,18 @@ FR-23 (the regarding pair stays pushable) is amended for the six invoice-family 
    app-only, on every path. An agreeing id is WRITTEN in canonical form (lowercase, "D": `CanonicalPairId`) on every path,
    because the pair is a column of the external identifier's alternate key (D-68) and must not take another spelling of the
    same id (fix round 1, F2). Canonicalising was chosen over refusing: the id names the right record, and every reader
-   already parses it, so refusing would reject a correct write over its spelling.
+   already parses it, so refusing would reject a correct write over its spelling. The id is canonicalised whether it is
+   sent as text, a `Guid` or a JSON string (fix round 3, K4).
+2a. The record URL (`sprk_regardingrecordurl`), when an update sends it, must name the effective core record too (fix
+   round 3, F4; ebilling-r1's decision: refuse). It is decided without a read beyond the row's core lookups:
+   `RegardingPairWrite.UrlNamesRecord` parses the query (after `?`, any `#` fragment dropped, each part unescaped) and
+   requires exactly one `etn` equal to the core table (any case) and exactly one `id` that parses as a GUID equal to the core
+   record's id (any case, braces allowed). The string is never compared, so the server's relative form
+   (`RegardingRecordType.BuildRecordUrl`) and a client's absolute form with an `appid` both agree. A URL that names another
+   table or record, or that cannot be parsed, is refused with the same code, after the pair's own halves are decided. A URL
+   sent alone (no pair) is decided too.
+   A sent clear (null or blank) of the URL is not refused: it names no other record. On a create, and on a write that moves
+   the core lookup, the URL is not checked: it is dropped and the derive writes it (rule 5).
 3. A write that disagrees is refused through the path's existing refusal form, with ONE code
    (`invoice_family_regarding_pair_core_record_mismatch`), and nothing is written:
    - create (`RecordCreationService` step 5½, `RecordTableRules.InvoiceFamilyRule`): `PreWriteRefusal.Refused`, 400;
@@ -76,6 +87,7 @@ reason, which is this code's intended status. No per-path code.
 | Fix round 1: `InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync` (the app-only gate) | The guard's early pair check in `CheckGenericUpdateCoreAsync` (removed: it saw the request, not the planned payload). | It replaces that check, moved after the planner into the one function every app-only path already calls (`KeepInvoiceFamilyResolverFieldsAppOnlyAsync`); no call site changes. | A pair the planner writes is never checked (K2), and a sent pair on a core move could be written when the derive derives nothing (K1). |
 | Fix round 1: `CanonicalPairId`, `WithCanonicalPairId` (guard), `OwnedChildWrite.WithCanonicalFamilyPairId` | 045d's derive already writes the canonical id on a move; `WithColumnsSet`. | One formatter, applied by the app-only gate and by the caller-path planner entry over the existing `WithColumnsSet`. | Another spelling of the same id is stored in the D-68 alternate key (F2). |
 | Fix round 1: `aCoreMoveIsChecked` parameter (optional) on `CheckRegardingPairAgreesAsync` | The move exemption. | Optional flag; the caller paths pass it because their derive runs before the check. | On the caller paths a sent pair on a move would be exempt even when the derive did not write over it. |
+| Fix round 3: `RegardingPairWrite.UrlNamesRecord` (pure), `SetsUrl` / `UrlText` / `DecidesAnything`, `RecordUrlColumn` | 045d's derive and the planner write the URL (`RegardingRecordType.BuildRecordUrl`); nothing parsed one. | Extends the existing carrier and check; the parse lives beside them, with no read. | A write could keep a pair naming the core record and a URL naming another, and a reader that opens the URL lands on the wrong record. |
 | Test-only: `EntitySetNameFixtures` pins `sprk_recordtype_ref` → `sprk_recordtype_refs` | The fixture's pinned set names. | One entry. | The playbook path's tests cannot bind the pair type. |
 
 ## What changed
@@ -100,10 +112,13 @@ reason, which is this code's intended status. No per-path code.
     correction and an app-only catalog answer in `AppEntities()`.
   - `tests/integration/seam/RecordCreation/RecordCreationServiceInvoiceFamilyRuleSeamTests.cs` — one create through the
     real service and problem map.
-  - Existing test changed: `ActionSeamTests.UpdateRecordAsync_AnInvoiceWhosePairPlannerReadFails_AfterTheFamilyGuardPassed_WritesNothing`.
-    It sent a pair-only write to a stored invoice with no core record, which the guard now refuses (`no_core_record`) before
-    the planner. Its stored invoice now has a matter and its pair names that matter, so the guard still passes and the
-    planner's read failure is still what it tests.
+  - Existing test: `ActionSeamTests.UpdateRecordAsync_AnInvoiceWhosePairPlannerReadFails_AfterTheFamilyGuardPassed_WritesNothing`
+    was changed by the first commit and is restored unchanged in fix round 3 (K5). Since fix round 1 the app-only pair check
+    runs after the planner, so the planner's read fault comes first and the original test passes as written (ActionSeamTests:
+    56 passed with it restored).
+- Fix round 3: `InvoiceFamilyCoreRecordGuard.cs` (the URL check in `CheckRegardingPairAgreesAsync`, the gate asks it for a
+  URL-only write, `WithCanonicalPairId` handles `Guid` and JSON-string ids, `RegardingPairWrite` URL members);
+  `OwnedChildWrite.cs` (`PairWriteOf` reads a sent URL; the pair-only update branch asks on `DecidesAnything`).
 
 ## Evidence
 
@@ -160,6 +175,41 @@ The 7 that pass both ways pin behaviour the round keeps: a core move with a disa
   the `aCoreMoveIsChecked` argument removed. The opposite order (old, then new) cannot reach the flag: the derive then writes
   the derived pair over the sent one, and the decision sees no move.
 
+### Fix round 3 evidence
+
+| Set | Tests | Failed before |
+|---|---|---|
+| F3: D-96 answered ahead of the pair (generic playbook update + output orchestrator, PATCH, chat; each with an agreeing and a disagreeing pair) | 8 | 4 of 8 with the pair check moved ahead of `CheckWriteAsync` (a temporary edit, reverted): every disagreeing variant. The 4 agreeing variants pass both ways: an agreeing pair cannot hide D-96, so they pin the answer only. |
+| F4 URL, domain (must fire: another id, another table, no `id`, no `etn`, not a URL, ×2 with and without a pair; gate URL alone; external identifier's invoice) | 16 | 16, with a temporary switch making `UrlNamesRecord` answer true |
+| F4 URL, integration (generic with an agreeing pair ×2; PATCH ×1; chat URL alone ×6) | 9 | 9, same switch |
+| F4 URL must-not-fire (relative, absolute with `appid`, upper-case id, braced id, escaped with a fragment; a clear; create; a URL on a core move; generic absolute ×2; chat absolute ×6) | 34 | 0 (they pass both ways, as they must) |
+| K4: a `Guid` or JSON-string id written canonical (gate, every family table and core lookup) | 19 | 19, with the new branches of `WithCanonicalPairId` switched off |
+
+- F3 setup on the caller paths: the disagreeing variant reads the core lookups twice (derive, then decision) and answers the
+  move done to the derive and the stored core to the decision. Without that, the caller-path derive writes the derived pair
+  over the sent one before the decision, so the sent disagreeing pair never reaches it.
+- Order: the URL is decided after the pair's own halves (the type is still compared through the catalog first), so a write
+  whose type disagrees keeps its existing evidence (`ChildRefile_AnInvoicePairOfItsMattersIdUnderAnotherType_IsRefusedMismatch`
+  asserts the catalog read; it failed when the URL was decided first, because the planner's display URL then refused it).
+- Filtered suites (as in round 1): 10156 passed, 0 failed, 3 skipped.
+- ebilling-r1 filters: 8170 passed, 0 failed, 4 skipped.
+- ArchTests (alone, unfiltered): 2539 passed.
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `dotnet format whitespace --verify-no-changes` on the touched files: clean.
+
+### Fix round 3: record URL writers (inventory before the rule)
+
+Every writer of `sprk_regardingrecordurl` to the six tables writes a URL with `etn` and `id`, so none is refused by rule 2a:
+
+- Server: the guard's derive (`InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync`, used by the Finance services,
+  `InvoiceSubmissionEndpoints` and `RecordCreationService`) and the planner's display derive in `OwnedChildWrite` both use
+  `RegardingRecordType.BuildRecordUrl`: relative `/main.aspx?pagetype=entityrecord&etn={table}&id={id}`.
+- The field-mapping push never writes it (`CreateTimeFieldMapping` skips the pair and resolver targets, rule 8).
+- Client: `PolymorphicResolverService.buildRecordUrl` (absolute with `appid`, relative fallback), used by the RegardingResolver
+  PCF and the wizards through `Xrm.WebApi`, not through these paths; the PCF also clears it (null), which rule 2a allows.
+- Playbooks (daily-update notifications) read it only. The other server writers (`ExternalDataService`,
+  `TodoRegardingBuilder`, `DataverseWebApiService`, `EventEndpoints`, the communication and thread writers, `OfficeService`)
+  write other tables.
+
 ## Known limits (K)
 
 - K1: on a create, a type-only pair that step 4½ clears (no agreeing lookup) is not refused; the derive writes the pair.
@@ -185,9 +235,10 @@ The 7 that pass both ways pin behaviour the round keeps: a core move with a disa
   (`invoice_family_regarding_pair_core_record_mismatch`), whose text speaks of a pair naming another record. The type itself
   agrees; what is refused is the pair the planner clears. The code is kept (one code, fixed text); the wording is imprecise for
   this case. ebilling-r1 confirmed none of its flows sends a type-only pair (K5b accepted).
-- K5d (fix round 2): a write that sends only display columns (`sprk_regardingrecordname`, `…url`, `…number`) and no pair is
-  written as sent, as before this task; the gate decides a pair only when one is sent (or the core record moves, when the
-  display columns are dropped for the derive).
+- K5d (fix round 2; narrowed in fix round 3): the URL is now decided (rule 2a). A write that sends only the name or number
+  (`sprk_regardingrecordname`, `sprk_regardingrecordnumber`) and no pair or URL is written as sent, as before this task:
+  deciding them would need a read of the core record's name and number. A URL clear is not refused (rule 2a). A URL-only
+  write to a row that names no single core record is refused with the guard's own code, as K4b says of a pair.
 - K6b (fix round 1): extra reads on the app-only paths: one stored-row read (app-only) when the planned payload carries a
   pair or display column; on the caller paths, one app-only catalog read when a core move also sends a type.
 - K3: the type agrees only with the catalog row the app reads as active for the core table (top 1). A pair naming another
@@ -204,3 +255,9 @@ The 7 that pass both ways pin behaviour the round keeps: a core move with a disa
 - K8: the field-mapping push maps no pair on any table (the engine's FR-05(e) skip), although `PushMayWrite` answers true for
   the pair columns. This task does not change either; a family child's pair moves on the push only with its core lookup.
 - K9: model-driven form edits of a family row's pair do not pass through these paths and are not covered.
+
+Accepted in fix round 3 (the review's numbering, recorded as accepted limits):
+
+- Review K3 (= K1 above): a type-only pair on a create is not refused; the 045d derive writes the pair over it.
+- Review K6: a pair type sent as a reference to a table other than the record-type catalog is not decided by this check;
+  Dataverse rejects the bind, so nothing is written.
