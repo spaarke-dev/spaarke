@@ -15,9 +15,17 @@
  * Task 084g (EB-D-221): both views carry `permissions`, the caller's own answer to "may I make 089's writes on this record". It is a hint the
  * panel uses to open the wizards read-only; the write routes still decide every write. A body without it (an older BFF), or with a flag that is
  * not `true`, reads as "may not write".
+ *
+ * Task 084d-5b adds the third read, for the Assign Procedure wizard (task 084d-5a's route, EB-D-227..230):
+ *
+ *   - GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures/assignable?firmId=&date=&q=   -> RecordAssignableProceduresView
+ *
+ * It is asked with the lists' own query (the firm only when the user picked it, and the date), under the same timeout and abort as the
+ * dry run (`raceTimeout`); its failures are the panel's (`toFailure`, `failureKind`), so a 503 is the panel's "unavailable".
  */
 
 import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from '@spaarke/auth';
+import { ABANDONED_FAILURE, READ_TIMEOUT_MS, TIMED_OUT_FAILURE, raceTimeout } from './overridesApi';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Wire types (task 084's JSON). Enum-like members are strings; a value this page does not know is rendered, never dropped.
@@ -325,13 +333,82 @@ export interface ProceduresQuery {
 export interface RecordProceduresApi {
   procedures(core: CoreRoute, recordId: string, query: ProceduresQuery): Promise<ApiResult<RecordProceduresView>>;
   rulesInForce(core: CoreRoute, recordId: string, query: ProceduresQuery): Promise<ApiResult<RecordRulesInForceView>>;
+  /**
+   * Task 084d-5b: the Procedures the record could be assigned, for the lists' query, narrowed by name when `q` is given. `signal` abandons the
+   * read (a newer search, or the wizard closed); a read longer than the client's timeout is a failure with `client.timed_out`.
+   */
+  readAssignable(core: CoreRoute, recordId: string, query: ProceduresQuery, q?: string | null, signal?: AbortSignal): Promise<ApiResult<RecordAssignableProceduresView>>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Assignable Procedures (task 084d-5b; the server's `RecordAssignableProceduresView`, task 084d-5a)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** EB-D-230: why an offered Procedure would be a Gap on the date (`kind`, `text`) and what assigning it does (`warning`, O-22), in the server's words. */
+export interface AssignableGap {
+  kind: string;
+  text: string;
+  warning: string;
+}
+
+/** One Procedure that can be assigned: the server's projection of its "if assigned" list item. `statusIfAssigned`: InForce | Gap | NotYetInForce. */
+export interface AssignableProcedureItem {
+  id: string;
+  name: string;
+  type: string | null;
+  appliesTo: string;
+  firm: FirmRef | null;
+  statusIfAssigned: string;
+  versionInForce: VersionView | null;
+  gap: AssignableGap | null;
+}
+
+/** A Procedure that is not offered, and why (`reason`: OwnRow, the record already has an override row for it). */
+export interface NotOfferedProcedure {
+  id: string;
+  name: string | null;
+  reason: string;
+}
+
+/**
+ * The assignable list. `procedures` is null exactly when `tooMany` (more than `bound` match, EB-D-227): never a partial list. `label` is the
+ * server's "If assigned now".
+ */
+export interface RecordAssignableProceduresView {
+  record: ChainRecord;
+  date: string;
+  firm: FirmRef | null;
+  firmSource: FirmSource;
+  q: string | null;
+  bound: number;
+  tooMany: boolean;
+  procedures: AssignableProcedureItem[] | null;
+  notOffered: NotOfferedProcedure[];
+  label: string;
+}
+
+/** The server's longest name search after trimming (`ProcedureAssignmentService.MaxNameSearchChars`); longer is 400. */
+export const MAX_NAME_SEARCH_CHARS = 100;
+
+/** The name search as the route takes it: control characters dropped (the route refuses them), trimmed, at most the server's length; null when empty. */
+export function nameSearchOf(q: string | null | undefined): string | null {
+  // eslint-disable-next-line no-control-regex
+  const s = (q ?? '').replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim().slice(0, MAX_NAME_SEARCH_CHARS).trim();
+  return s.length > 0 ? s : null;
+}
+
+/** The assignable route: the lists' query, plus `q` when there is a name search. */
+export function assignableUrl(bffBaseUrl: string, core: CoreRoute, recordId: string, query: ProceduresQuery, q?: string | null): string {
+  const search = nameSearchOf(q);
+  const base = recordUrl(bffBaseUrl, core, recordId, 'procedures/assignable', query);
+  return search ? `${base}&q=${encodeURIComponent(search)}` : base;
 }
 
 function trimBase(bffBaseUrl: string): string {
   return bffBaseUrl.replace(/\/+$/, '');
 }
 
-function recordUrl(bffBaseUrl: string, core: CoreRoute, recordId: string, leaf: 'procedures' | 'rules-in-force', q: ProceduresQuery): string {
+function recordUrl(bffBaseUrl: string, core: CoreRoute, recordId: string, leaf: 'procedures' | 'rules-in-force' | 'procedures/assignable', q: ProceduresQuery): string {
   const params: string[] = [];
   if (q.firmId) params.push(`firmId=${encodeURIComponent(q.firmId.toLowerCase())}`);
   params.push(`date=${encodeURIComponent(q.date)}`);
@@ -383,8 +460,38 @@ export function readRulesView(body: unknown): RecordRulesInForceView | null {
   };
 }
 
-export function createRecordProceduresApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string): RecordProceduresApi {
+/**
+ * An assignable body that is the view: `tooMany` a boolean, `procedures` an array (null exactly when `tooMany`), `notOffered` an array. Null
+ * when it is not the view: a list that is neither a list nor "too many" is never read as empty.
+ */
+export function readAssignableView(body: unknown): RecordAssignableProceduresView | null {
+  if (!isObject(body) || typeof body.tooMany !== 'boolean') return null;
+  const view = body as unknown as RecordAssignableProceduresView;
+  if (body.tooMany) return { ...view, procedures: null, notOffered: list(body.notOffered) };
+  if (!Array.isArray(body.procedures)) return null;
+  return { ...view, procedures: body.procedures as AssignableProcedureItem[], notOffered: list(body.notOffered) };
+}
+
+/** A read the client gave up on after its timeout, or one the page abandoned (as the dry run's: `client.timed_out` / `client.abandoned`). */
+const clientReadFailure = (errorCode: string | null): ApiFailure => ({ status: 0, errorCode, detail: null, signInFailed: false });
+
+export function createRecordProceduresApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string, options: { timeoutMs?: number } = {}): RecordProceduresApi {
+  const timeoutMs = options.timeoutMs ?? READ_TIMEOUT_MS;
   return {
+    async readAssignable(core, recordId, query, q, signal) {
+      try {
+        const raced = await raceTimeout(timeoutMs, signal, async s => {
+          const res = await fetchFn(assignableUrl(bffBaseUrl, core, recordId, query, q), { method: 'GET', signal: s });
+          return readAssignableView((await res.json()) as unknown);
+        });
+        if (raced.kind === 'timeout') return { ok: false, failure: clientReadFailure(TIMED_OUT_FAILURE.errorCode) };
+        if (raced.kind === 'aborted') return { ok: false, failure: clientReadFailure(ABANDONED_FAILURE.errorCode) };
+        return raced.value ? { ok: true, value: raced.value } : { ok: false, failure: BAD_BODY };
+      } catch (err) {
+        return { ok: false, failure: toFailure(err) };
+      }
+    },
+
     async procedures(core, recordId, query) {
       try {
         const res = await fetchFn(proceduresUrl(bffBaseUrl, core, recordId, query), { method: 'GET' });

@@ -735,11 +735,15 @@ describe('reads', () => {
   it('the READ modules have no 089 route, no write verb and no Dataverse write call (control: the scan sees one)', () => {
     const root = path.join(__dirname, '..');
     const files = ['services/recordProceduresApi.ts', 'services/firmChoices.ts', 'services/model.ts', 'components/ProcedureList.tsx', 'components/RuleList.tsx', 'components/rowOpen.ts'];
-    const forbidden = /procedure-assignments|rule-overrides|removal-preview|\/overrides|method:\s*['"](POST|PUT|PATCH|DELETE)['"]|\.(createRecord|updateRecord|deleteRecord)\(/;
+    // 084d-5b: `/overrides` is the route, not the module name: recordProceduresApi.ts imports the read helper `raceTimeout` from './overridesApi'.
+    const forbidden = /procedure-assignments|rule-overrides|removal-preview|\/overrides(?![A-Za-z])|method:\s*['"](POST|PUT|PATCH|DELETE)['"]|\.(createRecord|updateRecord|deleteRecord)\(/;
     for (const f of files) expect([f, forbidden.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false]);
     expect(forbidden.test("fetch(url, { method: 'POST' })")).toBe(true);
     expect(forbidden.test('/matters/1/procedure-assignments')).toBe(true);
     expect(forbidden.test('webApi.createRecord(x)')).toBe(true);
+    expect(forbidden.test('`${base}/overrides/${id}`')).toBe(true);
+    expect(forbidden.test("'/api/finance/matters/1/overrides'")).toBe(true);
+    expect(forbidden.test("import { raceTimeout } from './overridesApi';")).toBe(false);
   });
 
   it('no Xrm read of the Procedure, override or rule tables (only sprk_invoice and sprk_organization are read)', () => {

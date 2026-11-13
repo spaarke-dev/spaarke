@@ -28,6 +28,8 @@ export interface HarnessOptions {
   dryRun?: WriteHandler;
   /** Review round 1: the clients' timeout in ms (the real one is 20 s), so a test of a read that never answers need not wait for it. */
   timeoutMs?: number;
+  /** Task 084d-5b: the assignable list's answers. Absent: the read is refused with a 503. */
+  assignable?: WriteHandler;
 }
 
 export function renderHarness(o: HarnessOptions = {}) {
@@ -38,6 +40,7 @@ export function renderHarness(o: HarnessOptions = {}) {
     rules: asHandler(o.rules, matterRules),
     writes: o.writes,
     dryRun: o.dryRun,
+    assignable: o.assignable,
   });
   const firmChoices: FirmChoices = { invoicedBy: jest.fn(() => Promise.resolve({ firms: [{ id: OKAFOR.id, name: OKAFOR.name! }], complete: true })) };
   const view = render(
@@ -46,7 +49,7 @@ export function renderHarness(o: HarnessOptions = {}) {
         core={k.core}
         table={k.table}
         recordId={k.id}
-        api={createRecordProceduresApi(server.fetchFn, BASE)}
+        api={createRecordProceduresApi(server.fetchFn, BASE, { timeoutMs: o.timeoutMs })}
         overrides={createOverridesApi(server.fetchFn, BASE, { timeoutMs: o.timeoutMs })}
         dryRun={createDryRunApi(server.fetchFn, BASE, { timeoutMs: o.timeoutMs })}
         firmChoices={firmChoices}

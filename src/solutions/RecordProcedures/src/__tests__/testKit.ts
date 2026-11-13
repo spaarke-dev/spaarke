@@ -33,7 +33,7 @@ export interface Call {
 
 /** One call to a route of task 089 (or task 081's read of a Procedure), as the wizards make it. `body` is the parsed JSON body (undefined for GET and DELETE). */
 export interface WriteCall {
-  route: 'assign' | 'exclude' | 'change' | 'ruleset' | 'preview' | 'remove' | 'procedure' | 'dryrun' | 'other';
+  route: 'assign' | 'exclude' | 'change' | 'ruleset' | 'preview' | 'remove' | 'procedure' | 'dryrun' | 'assignable' | 'other';
   method: string | undefined;
   url: string;
   pathname: string;
@@ -65,6 +65,8 @@ function classify(url: string, init?: RequestInit): WriteCall | null {
   if (a === 'overrides' && parts.length === 6) return { ...base, ...rec, route: 'remove', overrideId: b };
   // Task 084d-4: the dry run (POST .../procedures/dry-run), recorded apart from the writes.
   if (a === 'procedures' && b === 'dry-run') return { ...base, ...rec, route: 'dryrun' };
+  // Task 084d-5b: the assignable list (GET .../procedures/assignable), recorded apart from the writes and the two list reads.
+  if (a === 'procedures' && b === 'assignable') return { ...base, ...rec, route: 'assignable' };
   if (a === 'procedures' || a === 'rules-in-force') return null;
   return { ...base, ...rec, route: 'other' };
 }
@@ -73,12 +75,20 @@ function classify(url: string, init?: RequestInit): WriteCall | null {
  * A fake `authenticatedFetch`: routes `.../{core}/{id}/procedures` and `.../rules-in-force` to the two handlers. A handler returns the
  * body, or an Error to be thrown (as `authenticatedFetch` does for a non-2xx). Every call is recorded.
  */
-export function serverFake(handlers: { procedures: Handler; rules: Handler; writes?: WriteHandler; dryRun?: WriteHandler }) {
+export function serverFake(handlers: { procedures: Handler; rules: Handler; writes?: WriteHandler; dryRun?: WriteHandler; assignable?: WriteHandler }) {
   const calls: Call[] = [];
   const writeCalls: WriteCall[] = [];
   const dryRunCalls: WriteCall[] = [];
+  const assignableCalls: WriteCall[] = [];
   const fetchFn = jest.fn(async (url: string, init?: RequestInit) => {
     const write = classify(url, init);
+    if (write?.route === 'assignable') {
+      assignableCalls.push(write);
+      if (!handlers.assignable) throw problem(503, 'procedures.unavailable', { title: 'No assignable list in this test' });
+      const out = await handlers.assignable(write);
+      if (out instanceof Error) throw out;
+      return jsonResponse(out);
+    }
     if (write?.route === 'dryrun') {
       dryRunCalls.push(write);
       // No dry-run handler: the dry run is refused as a 503 (the Impact step shows the refusal, Confirm still works, and a plan that removes
@@ -106,7 +116,7 @@ export function serverFake(handlers: { procedures: Handler; rules: Handler; writ
     if (out instanceof Error) throw out;
     return jsonResponse(out);
   });
-  return { fetchFn: fetchFn as never, calls, writeCalls, dryRunCalls, mock: fetchFn };
+  return { fetchFn: fetchFn as never, calls, writeCalls, dryRunCalls, assignableCalls, mock: fetchFn };
 }
 
 export { ApiError, AuthError };

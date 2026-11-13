@@ -82,6 +82,8 @@ export interface WizardFrameProps {
   /** The first step ("Procedure" / "Rule"): the row as the server describes it. */
   reviewLabel: string;
   reviewStep: React.ReactNode;
+  /** Task 084d-5b: false holds Next on the first step (the Assign wizard until a Procedure is chosen). Absent: the user may always go on. */
+  reviewCanAdvance?: boolean;
   /** The second step: the choices. */
   modeStep: React.ReactNode;
   /** True when the choice differs from now and its inputs are complete: the user may go on. */
@@ -305,7 +307,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   }, []);
 
   // ── Steps ────────────────────────────────────────────────────────────────
-  const review: IWizardStepConfig = { id: 'review', label: props.reviewLabel, renderContent: () => live.current.reviewStep, canAdvance: () => true };
+  const review: IWizardStepConfig = { id: 'review', label: props.reviewLabel, renderContent: () => live.current.reviewStep, canAdvance: () => live.current.reviewCanAdvance !== false };
   const readOnlySteps: IWizardStepConfig[] = [
     review,
     {

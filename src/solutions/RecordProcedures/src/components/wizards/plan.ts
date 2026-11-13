@@ -139,6 +139,25 @@ export function planProcedure(p: ProcedureItem, choice: ProcedureChoice, input: 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Assign a Procedure (task 084d-5b)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** "On this record" for a Procedure not yet on it: `follow` (Follow latest) or `pin` (Pin a version). */
+export type AssignChoice = 'follow' | 'pin';
+
+/**
+ * The one call that assigns a Procedure the record does not have yet: Follow latest (`{ procedureId, mode }`), or Pin a version with a
+ * reason (`{ procedureId, mode, pinnedVersionId, reason }`), whose version must be one the route accepts (`input.pinnable`). Nothing to remove:
+ * the assignable list never offers a Procedure the record already has a row for. An incomplete pin plans nothing.
+ */
+export function planAssign(procedureId: string | null | undefined, choice: AssignChoice, input: ProcedureInput): Plan {
+  if (!procedureId) return NO_CHANGE;
+  if (choice === 'follow') return { steps: [{ kind: 'assign', procedureId, mode: 'FollowLatest' }] };
+  if (!procedureInputValid('pin', input)) return NO_CHANGE;
+  return { steps: [{ kind: 'assign', procedureId, mode: 'Pinned', pinnedVersionId: input.versionId, reason: input.reason!.trim() }] };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Rules
 // ─────────────────────────────────────────────────────────────────────────────
 

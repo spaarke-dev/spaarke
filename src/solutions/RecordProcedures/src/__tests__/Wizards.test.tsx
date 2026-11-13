@@ -684,7 +684,7 @@ describe('theme', () => {
     const root = path.join(__dirname, '..');
     const forms = fs.readdirSync(path.join(root, 'components/wizards/ruleForms')).map(f => `components/wizards/ruleForms/${f}`);
     expect(forms.length).toBeGreaterThan(14);
-    for (const f of ['components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx', 'components/rowOpen.ts', ...forms]) {
+    for (const f of ['components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx', 'components/wizards/AssignProcedureWizard.tsx', 'components/rowOpen.ts', ...forms]) {
       expect([f, colour.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false]);
     }
     expect(colour.test('color: #fff;')).toBe(true);
