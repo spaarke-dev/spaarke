@@ -22,6 +22,12 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// the record is known readable). 503 <c>ebilling.disabled</c>. 503 <c>procedures.unavailable</c>: the rows could not be read or resolved,
 /// or the caller cannot Read a row the answer would expose, or the rights could not be established.</para>
 /// <para><b>Query.</b> <c>firmId</c> (default: the record's billing firm, else none) and <c>date</c> (<c>yyyy-MM-dd</c>, default today UTC).</para>
+/// <para><b>Write permissions (task 084g, EB-D-221).</b> A 200 also carries <c>permissions</c> {assignOrExclude, remove, change}: the caller's
+/// rights for each write of <see cref="ProcedureAssignmentEndpoints"/> on this record, from those routes' own record and privilege
+/// declarations (<see cref="ProcedureAssignmentEndpoints.WritePermissionsForCallerAsync"/>), asked after the list is complete. A hint for the
+/// client only; a fault there makes a flag false and never changes the list or its status. The flags are computed per request for this
+/// caller; the record-rights answer comes from the per-caller 60-second cache the write route also uses, and the privilege questions are
+/// uncached.</para>
 /// <para><b>Known limit.</b> These routes are internal-only (step 0). Opening them to external callers needs the external-visibility
 /// predicate first (task 191).</para>
 /// </remarks>
@@ -43,7 +49,7 @@ public static class RecordProcedureEndpoints
         // ── Matter ──────────────────────────────────────────────────────────────────────────────────────────────
         group.MapGet("/matters/{recordId:guid}/procedures",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
-                    Procedures(http, service, ProcedureAssignmentEndpoints.MatterTable, recordId, firmId, date, ct))
+                    Procedures(http, service, ProcedureAssignmentEndpoints.MatterTable, FinanceAuthorizationFilter.MatterEntitySet, recordId, firmId, date, ct))
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .RequireEbillingEnabled()
             .WithName("GetMatterProcedures")
@@ -51,7 +57,7 @@ public static class RecordProcedureEndpoints
 
         group.MapGet("/matters/{recordId:guid}/rules-in-force",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
-                    Rules(http, service, ProcedureAssignmentEndpoints.MatterTable, recordId, firmId, date, ct))
+                    Rules(http, service, ProcedureAssignmentEndpoints.MatterTable, FinanceAuthorizationFilter.MatterEntitySet, recordId, firmId, date, ct))
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .RequireEbillingEnabled()
             .WithName("GetMatterRulesInForce")
@@ -60,7 +66,7 @@ public static class RecordProcedureEndpoints
         // ── Project ─────────────────────────────────────────────────────────────────────────────────────────────
         group.MapGet("/projects/{recordId:guid}/procedures",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
-                    Procedures(http, service, ProcedureAssignmentEndpoints.ProjectTable, recordId, firmId, date, ct))
+                    Procedures(http, service, ProcedureAssignmentEndpoints.ProjectTable, FinanceAuthorizationFilter.ProjectEntitySet, recordId, firmId, date, ct))
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .RequireEbillingEnabled()
             .WithName("GetProjectProcedures")
@@ -68,7 +74,7 @@ public static class RecordProcedureEndpoints
 
         group.MapGet("/projects/{recordId:guid}/rules-in-force",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
-                    Rules(http, service, ProcedureAssignmentEndpoints.ProjectTable, recordId, firmId, date, ct))
+                    Rules(http, service, ProcedureAssignmentEndpoints.ProjectTable, FinanceAuthorizationFilter.ProjectEntitySet, recordId, firmId, date, ct))
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .RequireEbillingEnabled()
             .WithName("GetProjectRulesInForce")
@@ -77,7 +83,7 @@ public static class RecordProcedureEndpoints
         // ── Work assignment ─────────────────────────────────────────────────────────────────────────────────────
         group.MapGet("/workassignments/{recordId:guid}/procedures",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
-                    Procedures(http, service, ProcedureAssignmentEndpoints.WorkAssignmentTable, recordId, firmId, date, ct))
+                    Procedures(http, service, ProcedureAssignmentEndpoints.WorkAssignmentTable, FinanceAuthorizationFilter.WorkAssignmentEntitySet, recordId, firmId, date, ct))
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .RequireEbillingEnabled()
             .WithName("GetWorkAssignmentProcedures")
@@ -85,7 +91,7 @@ public static class RecordProcedureEndpoints
 
         group.MapGet("/workassignments/{recordId:guid}/rules-in-force",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
-                    Rules(http, service, ProcedureAssignmentEndpoints.WorkAssignmentTable, recordId, firmId, date, ct))
+                    Rules(http, service, ProcedureAssignmentEndpoints.WorkAssignmentTable, FinanceAuthorizationFilter.WorkAssignmentEntitySet, recordId, firmId, date, ct))
             .AddFinanceAuthorizationFilter("finance.read", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
             .RequireEbillingEnabled()
             .WithName("GetWorkAssignmentRulesInForce")
@@ -95,7 +101,8 @@ public static class RecordProcedureEndpoints
     }
 
     private static async Task<IResult> Procedures(
-        HttpContext http, RecordProcedureReadService service, string table, Guid recordId, string? firmId, string? date, CancellationToken ct)
+        HttpContext http, RecordProcedureReadService service, string table, string entitySet, Guid recordId, string? firmId, string? date,
+        CancellationToken ct)
     {
         if (!TryParseQuery(http, firmId, date, out var firm, out var day, out var invalid))
         {
@@ -103,11 +110,17 @@ public static class RecordProcedureEndpoints
         }
 
         var result = await service.ListProceduresAsync(table, recordId, firm, day, TokenHelper.ExtractBearerTokenOrNull(http), ct).ConfigureAwait(false);
+        if (result is { Status: RecordProcedureReadStatus.Done, Value: { } view })
+        {
+            result = result with { Value = view with { Permissions = await ProcedureAssignmentEndpoints.WritePermissionsForCallerAsync(http, entitySet, recordId, ct).ConfigureAwait(false) } };
+        }
+
         return Answer(http, result);
     }
 
     private static async Task<IResult> Rules(
-        HttpContext http, RecordProcedureReadService service, string table, Guid recordId, string? firmId, string? date, CancellationToken ct)
+        HttpContext http, RecordProcedureReadService service, string table, string entitySet, Guid recordId, string? firmId, string? date,
+        CancellationToken ct)
     {
         if (!TryParseQuery(http, firmId, date, out var firm, out var day, out var invalid))
         {
@@ -115,6 +128,11 @@ public static class RecordProcedureEndpoints
         }
 
         var result = await service.ListRulesInForceAsync(table, recordId, firm, day, TokenHelper.ExtractBearerTokenOrNull(http), ct).ConfigureAwait(false);
+        if (result is { Status: RecordProcedureReadStatus.Done, Value: { } view })
+        {
+            result = result with { Value = view with { Permissions = await ProcedureAssignmentEndpoints.WritePermissionsForCallerAsync(http, entitySet, recordId, ct).ConfigureAwait(false) } };
+        }
+
         return Answer(http, result);
     }
 

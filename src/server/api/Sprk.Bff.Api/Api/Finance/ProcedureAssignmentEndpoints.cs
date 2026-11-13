@@ -84,7 +84,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/matters/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.AssignProcedureAsync(MatterTable, recordId, body, oid, ct), v => v.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("AssignProcedureToMatter")
@@ -94,7 +94,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/matters/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.ExcludeRuleAsync(MatterTable, recordId, body, oid, ct), v => v.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("ExcludeRuleForMatter")
@@ -104,7 +104,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/matters/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.ChangeRuleAsync(MatterTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("ChangeRuleForMatter")
@@ -114,7 +114,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapGet("/matters/{recordId:guid}/overrides/{overrideId:guid}/removal-preview",
                 (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     AsCaller(http, () => service.PreviewRemovalAsync(MatterTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(PreviewRemovalTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .RequireReadOnTheOverridesSubject(MatterTable)
@@ -125,7 +125,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapDelete("/matters/{recordId:guid}/overrides/{overrideId:guid}",
                 (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     AsCaller(http, () => service.RemoveAsync(MatterTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.MatterEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .RequireReadOnTheOverridesSubject(MatterTable)
@@ -137,7 +137,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/projects/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.AssignProcedureAsync(ProjectTable, recordId, body, oid, ct), v => v.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("AssignProcedureToProject")
@@ -147,7 +147,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/projects/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.ExcludeRuleAsync(ProjectTable, recordId, body, oid, ct), v => v.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("ExcludeRuleForProject")
@@ -157,7 +157,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/projects/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.ChangeRuleAsync(ProjectTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("ChangeRuleForProject")
@@ -167,7 +167,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapGet("/projects/{recordId:guid}/overrides/{overrideId:guid}/removal-preview",
                 (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     AsCaller(http, () => service.PreviewRemovalAsync(ProjectTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(PreviewRemovalTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .RequireReadOnTheOverridesSubject(ProjectTable)
@@ -178,7 +178,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapDelete("/projects/{recordId:guid}/overrides/{overrideId:guid}",
                 (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     AsCaller(http, () => service.RemoveAsync(ProjectTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.ProjectEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .RequireReadOnTheOverridesSubject(ProjectTable)
@@ -190,7 +190,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/workassignments/{recordId:guid}/procedure-assignments",
                 (Guid recordId, ProcedureAssignmentRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.AssignProcedureAsync(WorkAssignmentTable, recordId, body, oid, ct), v => v.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(AssignTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("AssignProcedureToWorkAssignment")
@@ -200,7 +200,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/workassignments/{recordId:guid}/rule-overrides/exclude",
                 (Guid recordId, RuleExcludeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.ExcludeRuleAsync(WorkAssignmentTable, recordId, body, oid, ct), v => v.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ExcludeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("ExcludeRuleForWorkAssignment")
@@ -210,7 +210,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapPost("/workassignments/{recordId:guid}/rule-overrides/change",
                 (Guid recordId, RuleChangeRequest body, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     Created(http, oid => service.ChangeRuleAsync(WorkAssignmentTable, recordId, body, oid, TokenHelper.ExtractBearerTokenOrNull(http), ct), v => v.Override.Id))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(ChangeTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .WithName("ChangeRuleForWorkAssignment")
@@ -220,7 +220,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapGet("/workassignments/{recordId:guid}/overrides/{overrideId:guid}/removal-preview",
                 (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     AsCaller(http, () => service.PreviewRemovalAsync(WorkAssignmentTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(PreviewRemovalTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .RequireReadOnTheOverridesSubject(WorkAssignmentTable)
@@ -231,7 +231,7 @@ public static class ProcedureAssignmentEndpoints
         group.MapDelete("/workassignments/{recordId:guid}/overrides/{overrideId:guid}",
                 (Guid recordId, Guid overrideId, ProcedureAssignmentService service, HttpContext http, CancellationToken ct) =>
                     AsCaller(http, () => service.RemoveAsync(WorkAssignmentTable, recordId, overrideId, TokenHelper.ExtractBearerTokenOrNull(http), ct)))
-            .AddFinanceAuthorizationFilter("ebilling.record.override", FinanceAuthorizationFilter.WorkAssignmentEntitySet, RecordRouteKey, FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(context => RecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
             .AddFinanceAuthorizationFilter(RemoveTargets, FinanceDenial.Forbidden)
             .RequireEbillingEnabled()
             .RequireReadOnTheOverridesSubject(WorkAssignmentTable)
@@ -243,8 +243,135 @@ public static class ProcedureAssignmentEndpoints
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Authorization declarations (the subject and the role; the record is the route's first filter)
+    // Authorization declarations. Each route: the record (its first filter, RecordTargets), then the subject and the role (*Targets). The
+    // record and privilege parts are declared once below and shared with the write permissions the record read routes return (task 084g).
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The record check of every route here: Write and AppendTo on the route's core record (<c>ebilling.record.override</c>), as the caller.
+    /// The route's first filter declares it through <see cref="RecordTargets"/>, and <see cref="WritePermissionChecks"/> starts with it.
+    /// </summary>
+    internal static FinanceAuthorizationCheck RecordWriteCheck(string coreEntitySet, Guid recordId) => new()
+    {
+        Path = FinanceCheckPath.Record,
+        EntitySetName = coreEntitySet,
+        RecordId = recordId,
+        Operation = "ebilling.record.override",
+        Source = "route." + RecordRouteKey,
+    };
+
+    /// <summary>
+    /// The route's first filter: <see cref="RecordWriteCheck"/> on the route value <c>recordId</c>. An unreadable or empty id yields no check,
+    /// which the filter denies (as <see cref="FinanceAuthorizationTargets.FromRoute"/>).
+    /// </summary>
+    internal static FinanceAuthorizationTargets RecordTargets(EndpointFilterInvocationContext context, string coreEntitySet) =>
+        context.HttpContext.Request.RouteValues.TryGetValue(RecordRouteKey, out var raw) && Guid.TryParse(raw?.ToString(), out var id) && id != Guid.Empty
+            ? FinanceAuthorizationTargets.Authorize(RecordWriteCheck(coreEntitySet, id))
+            : FinanceAuthorizationTargets.Authorize();
+
+    /// <summary>Assign and Exclude rule, beside the subject's Read: the billing-admin privilege (<see cref="BillingAdminAuthorization.Admin"/>, no second marker).</summary>
+    internal static IReadOnlyList<FinanceAuthorizationCheck> AssignOrExcludePrivileges() => BillingAdminAuthorization.Admin().Checks;
+
+    /// <summary>
+    /// Change rule, beside the subject's Read: the privileges of what the change creates, composed from the existing declarations (Create and
+    /// Write on rule set, Create on policy, Create and Write on policy version; the billing-admin marker, Write on rule set, is among them),
+    /// plus Write on policy: the change switches its record rule on, as a removal switches it off. The filter cannot tell whether the
+    /// record's set exists yet, so Create on rule set is always required.
+    /// </summary>
+    internal static IReadOnlyList<FinanceAuthorizationCheck> ChangePrivileges() =>
+        BillingAdminAuthorization.CreateRuleSet().Checks
+            .Concat(BillingAdminAuthorization.DraftRules().Checks)
+            .Concat(BillingAdminAuthorization.EditRule().Checks)
+            .Append(FinanceAuthorizationCheck.CallerPrivilege(BillingAdminAuthorization.WritePolicyPrivilege, PolicyEntitySet, "billing admin"))
+            .Distinct()
+            .ToArray();
+
+    /// <summary>Removal preview: the billing-admin privilege (the Read on the row's subject is a later filter).</summary>
+    internal static IReadOnlyList<FinanceAuthorizationCheck> PreviewRemovalPrivileges() => BillingAdminAuthorization.Admin().Checks;
+
+    /// <summary>Remove: the billing-admin privilege and Write on <c>sprk_policy</c> (a changed rule's removal switches the record rule Off).</summary>
+    internal static IReadOnlyList<FinanceAuthorizationCheck> RemovePrivileges() =>
+        BillingAdminAuthorization.Admin().Checks
+            .Append(FinanceAuthorizationCheck.CallerPrivilege(BillingAdminAuthorization.WritePolicyPrivilege, PolicyEntitySet, "billing admin"))
+            .ToArray();
+
+    /// <summary>The writes the record read routes report a permission for (task 084g, EB-D-221).</summary>
+    internal enum WriteFlag
+    {
+        /// <summary><c>procedure-assignments</c> and <c>rule-overrides/exclude</c>.</summary>
+        AssignOrExclude,
+
+        /// <summary><c>DELETE overrides/{id}</c>, and its <c>removal-preview</c> (whose checks are a subset).</summary>
+        Remove,
+
+        /// <summary><c>rule-overrides/change</c>.</summary>
+        Change,
+    }
+
+    /// <summary>
+    /// Task 084g: the checks one permission flag evaluates, in the route's order: <see cref="RecordWriteCheck"/>, then the route's privileges.
+    /// It is the write route's own declaration without the per-subject Read (the read already asks the caller's Read on every subject it
+    /// exposes, EB-D-218). RecordWritePermissionsContractTests holds each route's declaration equal to its flag's plus that Read.
+    /// </summary>
+    internal static IReadOnlyList<FinanceAuthorizationCheck> WritePermissionChecks(WriteFlag flag, string coreEntitySet, Guid recordId)
+    {
+        var privileges = flag switch
+        {
+            WriteFlag.AssignOrExclude => AssignOrExcludePrivileges(),
+            WriteFlag.Remove => RemovePrivileges(),
+            WriteFlag.Change => ChangePrivileges(),
+            _ => throw new ArgumentOutOfRangeException(nameof(flag), flag, null),
+        };
+        return privileges.Prepend(RecordWriteCheck(coreEntitySet, recordId)).ToArray();
+    }
+
+    /// <summary>
+    /// Task 084g (EB-D-221): the caller's write permissions on one core record, for the record read routes. Each flag holds only when every
+    /// check of <see cref="WritePermissionChecks"/> is answered and held, through the Finance filter's own evaluator for the caller
+    /// (<see cref="FinanceAuthorizationFilter.EvaluateCheckForCallerAsync"/>: the caller's token, no app-only branch, no role lookup). Two
+    /// rounds (084g fix round 1, reviews B4 and A4): first <see cref="RecordWriteCheck"/>, which every flag starts with, so a caller who may
+    /// not write the record is asked nothing more (as the write route's first filter refuses before its privileges); then every other
+    /// distinct check of the three flags at once, each asked once whatever number of flags use it. Each check has its own verdict, so a fault
+    /// in one makes false only the flags that declare it (U-5). Fail closed: a check that is denied, faulted or not answered gives false, and
+    /// any fault here gives every flag false, logged at Warning. Never throws except on a cancelled request. A hint for the client: no write
+    /// route reads it; the routes still decide.
+    /// </summary>
+    internal static async Task<RecordWritePermissions> WritePermissionsForCallerAsync(
+        HttpContext http, string coreEntitySet, Guid recordId, CancellationToken ct)
+    {
+        var logger = http.RequestServices.GetService<ILogger<FinanceAuthorizationFilter>>();
+        var flags = new[] { WriteFlag.AssignOrExclude, WriteFlag.Remove, WriteFlag.Change };
+
+        try
+        {
+            var record = RecordWriteCheck(coreEntitySet, recordId);
+            if (await FinanceAuthorizationFilter.EvaluateCheckForCallerAsync(http, record, logger, ct).ConfigureAwait(false) != FinanceCheckVerdict.Allowed)
+            {
+                return RecordWritePermissions.None;
+            }
+
+            var rest = flags.SelectMany(f => WritePermissionChecks(f, coreEntitySet, recordId)).Where(c => c != record).Distinct().ToArray();
+            // Known limit (uac-r2, 084g fix round 1): these checks run concurrently on ONE HttpContext and its request scope. That is safe only
+            // while every scoped service this path reaches (IAccessDataSource and its cache, CallerRecordAccessProbe, the IAuthorizationRule
+            // set) stays safe for concurrent use within a request, and while nothing on the path writes HttpContext.Items. A per-request cache
+            // that writes, or an Items write, would make this a race: then ask the checks one at a time.
+            var answers = await Task.WhenAll(rest.Select(c => FinanceAuthorizationFilter.EvaluateCheckForCallerAsync(http, c, logger, ct))).ConfigureAwait(false);
+            var verdicts = rest.Zip(answers).ToDictionary(x => x.First, x => x.Second);
+            verdicts[record] = FinanceCheckVerdict.Allowed;
+
+            bool Holds(WriteFlag flag) => WritePermissionChecks(flag, coreEntitySet, recordId).All(c => verdicts[c] == FinanceCheckVerdict.Allowed);
+
+            return new RecordWritePermissions(
+                AssignOrExclude: Holds(WriteFlag.AssignOrExclude),
+                Remove: Holds(WriteFlag.Remove),
+                Change: Holds(WriteFlag.Change));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger?.LogWarning(ex, "Record write permissions on a {CoreEntitySet} could not be computed; every flag is false", coreEntitySet);
+            return RecordWritePermissions.None;
+        }
+    }
 
     private static FinanceAuthorizationCheck ReadOn(string entitySet, Guid id, string source) => new()
     {
@@ -255,9 +382,9 @@ public static class ProcedureAssignmentEndpoints
         Source = source,
     };
 
-    /// <summary>The subject's Read check, then the billing-admin privilege composed from <see cref="BillingAdminAuthorization.Admin"/> (no second marker).</summary>
+    /// <summary>The subject's Read check, then <see cref="AssignOrExcludePrivileges"/>.</summary>
     private static FinanceAuthorizationTargets SubjectAndAdmin(FinanceAuthorizationCheck subject) =>
-        FinanceAuthorizationTargets.Authorize(BillingAdminAuthorization.Admin().Checks.Prepend(subject).ToArray());
+        FinanceAuthorizationTargets.Authorize(AssignOrExcludePrivileges().Prepend(subject).ToArray());
 
     /// <summary>Assign: Read on the body's Procedure and the billing-admin privilege. No body or no id is a 400 before any Dataverse call.</summary>
     internal static FinanceAuthorizationTargets AssignTargets(EndpointFilterInvocationContext context)
@@ -277,12 +404,7 @@ public static class ProcedureAssignmentEndpoints
             : FinanceAuthorizationTargets.Reject(Required("policyId"));
     }
 
-    /// <summary>
-    /// Change rule: Read on the body's rule (its policy), then the privileges of what the change creates, composed from the existing
-    /// declarations (Create and Write on rule set, Create on policy, Create and Write on policy version; the billing-admin marker, Write on
-    /// rule set, is among them), plus Write on policy: the change switches its record rule on, as a removal switches it off. The filter
-    /// cannot tell whether the record's set exists yet, so Create on rule set is always required.
-    /// </summary>
+    /// <summary>Change rule: Read on the body's rule (its policy), then <see cref="ChangePrivileges"/>.</summary>
     internal static FinanceAuthorizationTargets ChangeTargets(EndpointFilterInvocationContext context)
     {
         var body = context.Arguments.OfType<RuleChangeRequest>().FirstOrDefault();
@@ -291,22 +413,16 @@ public static class ProcedureAssignmentEndpoints
             return FinanceAuthorizationTargets.Reject(Required("policyId"));
         }
 
-        var privileges = BillingAdminAuthorization.CreateRuleSet().Checks
-            .Concat(BillingAdminAuthorization.DraftRules().Checks)
-            .Concat(BillingAdminAuthorization.EditRule().Checks)
-            .Append(FinanceAuthorizationCheck.CallerPrivilege(BillingAdminAuthorization.WritePolicyPrivilege, PolicyEntitySet, "billing admin"))
-            .Distinct();
-        return FinanceAuthorizationTargets.Authorize(privileges.Prepend(ReadOn(PolicyEntitySet, id, "body.policyId")).ToArray());
+        return FinanceAuthorizationTargets.Authorize(ChangePrivileges().Prepend(ReadOn(PolicyEntitySet, id, "body.policyId")).ToArray());
     }
 
-    /// <summary>Removal preview: the billing-admin privilege (the Read on the row's subject is the next filter).</summary>
-    internal static FinanceAuthorizationTargets PreviewRemovalTargets(EndpointFilterInvocationContext context) => BillingAdminAuthorization.Admin();
+    /// <summary>Removal preview: <see cref="PreviewRemovalPrivileges"/> (the Read on the row's subject is the next filter).</summary>
+    internal static FinanceAuthorizationTargets PreviewRemovalTargets(EndpointFilterInvocationContext context) =>
+        FinanceAuthorizationTargets.Authorize(PreviewRemovalPrivileges().ToArray());
 
-    /// <summary>Remove: the billing-admin privilege and Write on <c>sprk_policy</c> (a changed rule's removal switches the record rule Off).</summary>
+    /// <summary>Remove: <see cref="RemovePrivileges"/> (the Read on the row's subject is the next filter).</summary>
     internal static FinanceAuthorizationTargets RemoveTargets(EndpointFilterInvocationContext context) =>
-        FinanceAuthorizationTargets.Authorize(BillingAdminAuthorization.Admin().Checks
-            .Append(FinanceAuthorizationCheck.CallerPrivilege(BillingAdminAuthorization.WritePolicyPrivilege, PolicyEntitySet, "billing admin"))
-            .ToArray());
+        FinanceAuthorizationTargets.Authorize(RemovePrivileges().ToArray());
 
     /// <summary>
     /// Task 089c (089b "089c must"): before a removal or its preview, the caller's own Read on what the stored override row overrides. That

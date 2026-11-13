@@ -10,6 +10,7 @@ import * as React from 'react';
 import { Button, Caption1, MessageBar, MessageBarBody, MessageBarTitle, Radio, RadioGroup, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import type { RemovalPreview, WriteFailure } from '../../services/overridesApi';
 import { failureText } from '../../services/overridesApi';
+import { NOT_ALLOWED_BOTH } from './plan';
 
 export const useWizardStyles = makeStyles({
   step: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalL, maxWidth: '640px' },
@@ -25,6 +26,9 @@ export const useWizardStyles = makeStyles({
 /** Task O-21 (revised 2026-10-21): a change re-checks nothing. Shown on the Impact step and on the success screen of every change. */
 export const O21_LINE =
   'Nothing is re-checked automatically. Affected open invoices show "The procedures that apply to this invoice have changed; re-check to apply them." Invoices checked from now on use the change.';
+
+/** Task 084g (EB-D-221): the reason a read-only wizard gives, above its disabled choices (the same words a choice needing both kinds of call gives). */
+export const READ_ONLY_LINE = NOT_ALLOWED_BOTH;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Key / value block

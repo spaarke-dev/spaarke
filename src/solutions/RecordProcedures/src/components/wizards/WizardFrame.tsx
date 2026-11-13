@@ -14,16 +14,21 @@
  * While a save runs the frame blocks the header ‹ › and the close (the shared shell only disables its own footer buttons), so a result or a
  * partial-save message can never land under another row, and the user is never left unaware of a half-done switch. After a partial save the
  * wizard holds the row it was opened on, which is out of date: Finish stays off until the panel hands back the re-read row.
+ *
+ * Read-only (task 084g, EB-D-221): when the wizard has no choice left that makes a call the lists' answers allow (fix round 1, B1), it
+ * shows the row and its choices with every choice disabled and the reason above them, and has no Impact or Confirm step and no Finish: Back,
+ * Next and Close only. With `readOnly` false the frame is exactly 084b's,
+ * and a refusal at Finish is still shown with its title (the flag is a hint; the route decides).
  */
 
 import * as React from 'react';
-import { Button } from '@fluentui/react-components';
+import { Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { CheckmarkCircle48Filled } from '@fluentui/react-icons';
-import { WizardShell, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
+import { WizardShell, type IWizardShellProps, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
 import type { CoreRoute } from '../../services/recordProceduresApi';
 import { failureText, type OverridesApi, type RemovalPreview, type WriteFailure } from '../../services/overridesApi';
 import { executePlan, removalOf, type Plan, type PlanRun } from './plan';
-import { ConfirmStep, ImpactStep, O21_LINE, type PreviewState } from './steps';
+import { ConfirmStep, ImpactStep, O21_LINE, READ_ONLY_LINE, useWizardStyles, type PreviewState } from './steps';
 
 /**
  * Told to the panel after a write: `done` (the plan ran to its end) or `partial` (its first call was accepted and the next refused). For a
@@ -47,6 +52,8 @@ export interface WizardFrameProps {
   api: OverridesApi;
   core: CoreRoute;
   recordId: string;
+  /** Task 084g: the wizard only shows (choices disabled, the reason, no Impact, no Confirm, no Finish). The wizards disable their choices. */
+  readOnly: boolean;
 
   /** The first step ("Procedure" / "Rule"): the row as the server describes it. */
   reviewLabel: string;
@@ -77,7 +84,8 @@ export interface WizardFrameProps {
 }
 
 export const WizardFrame: React.FC<WizardFrameProps> = props => {
-  const { title, resetKey, nav, api, core, recordId, plan } = props;
+  const { title, resetKey, nav, api, core, recordId, plan, readOnly } = props;
+  const s = useWizardStyles();
 
   // Live values for the step predicates and `onFinish`: the shell keeps calling the closures it was handed on an earlier render.
   const live = React.useRef(props);
@@ -129,6 +137,8 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   // ── The write ────────────────────────────────────────────────────────────
   const onFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     const p = live.current;
+    // A read-only wizard has no Finish; should one ever be reached, it writes nothing.
+    if (p.readOnly) throw new Error(READ_ONLY_LINE);
     saving.current = true;
     let run: PlanRun;
     try {
@@ -174,8 +184,25 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   }, []);
 
   // ── Steps ────────────────────────────────────────────────────────────────
-  const steps: IWizardStepConfig[] = [
-    { id: 'review', label: props.reviewLabel, renderContent: () => live.current.reviewStep, canAdvance: () => true },
+  const review: IWizardStepConfig = { id: 'review', label: props.reviewLabel, renderContent: () => live.current.reviewStep, canAdvance: () => true };
+  const readOnlySteps: IWizardStepConfig[] = [
+    review,
+    {
+      id: 'mode',
+      label: 'On this record',
+      renderContent: () => (
+        <div className={s.step}>
+          <MessageBar intent="info" data-testid="read-only-reason">
+            <MessageBarBody>{READ_ONLY_LINE}</MessageBarBody>
+          </MessageBar>
+          {live.current.modeStep}
+        </div>
+      ),
+      canAdvance: () => false,
+    },
+  ];
+  const steps: IWizardStepConfig[] = readOnly ? readOnlySteps : [
+    review,
     { id: 'mode', label: 'On this record', renderContent: () => live.current.modeStep, canAdvance: () => live.current.canChoose },
     {
       id: 'impact',
@@ -202,17 +229,45 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     if (!saving.current) live.current.onClose();
   }, []);
 
+  // Read-only: Back · Next through the two steps, and Close on the last; no Cancel, no Finish. The shell takes its steps at open and at a
+  // reset, so a change of mode is a reset (its own key).
+  const readOnlyFooter = React.useCallback<NonNullable<IWizardShellProps['footer']>>(
+    ctx => ({
+      start: null,
+      end: (
+        <>
+          {!ctx.isFirstStep && (
+            <Button appearance="secondary" onClick={ctx.goBack}>
+              Back
+            </Button>
+          )}
+          {ctx.isLastStep ? (
+            <Button appearance="primary" onClick={ctx.close}>
+              Close
+            </Button>
+          ) : (
+            <Button appearance="primary" onClick={ctx.goNext}>
+              Next
+            </Button>
+          )}
+        </>
+      ),
+    }),
+    []
+  );
+
   return (
     <WizardShell
       open
       title={title}
       steps={steps}
       nav={guardedNav}
-      resetKey={resetKey}
+      resetKey={readOnly ? `${resetKey}:read-only` : resetKey}
       onClose={guardedClose}
       onFinish={onFinish}
       finishLabel={props.finishLabel}
       finishingLabel="Saving…"
+      footer={readOnly ? readOnlyFooter : undefined}
     />
   );
 };

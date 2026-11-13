@@ -10,6 +10,8 @@
  *   - O-20: a rule that names one firm can only be excluded for that firm; the firm field is fixed.
  *
  * The wizard does not know whether the caller may write: the route decides, and a refusal is shown with its title with the wizard still open.
+ * The panel says which kinds of call the lists' answers allow (task 084g, `allowed`): a choice that needs another kind is disabled with the
+ * reason and without its fields; with no choice left that makes a call, the wizard is read-only and the frame has no Confirm (fix round 1, B1).
  */
 
 import * as React from 'react';
@@ -18,10 +20,14 @@ import { StatusBadge } from '@spaarke/ui-components';
 import type { CoreRoute, RuleItem, RuleMark } from '../../services/recordProceduresApi';
 import type { OverridesApi } from '../../services/overridesApi';
 import type { FirmOption } from '../../services/firmChoices';
-import { levelLabel, recordWords, ruleBadges, versionLabel } from '../../services/model';
+import { levelLabel, recordWords, ruleBadges, versionLabel, type AllowedSteps } from '../../services/model';
 import {
   MAX_REASON_CHARS,
+  allowedBlocker,
   currentRuleChoice,
+  noAllowedCall,
+  planWithin,
+  ruleChoiceNeeds,
   excludeBlocker,
   fixedFirmId,
   inheritedOverride,
@@ -43,6 +49,8 @@ export interface RuleWizardProps {
   record: { table: string; name: string | null };
   /** The firms the "For invoices from" field offers besides "All firms". */
   firms: readonly FirmOption[];
+  /** Task 084g: the kinds of call the lists' answers allow; a choice needing another is disabled, and none left is read-only. */
+  allowed: AllowedSteps;
   api: OverridesApi;
   nav?: WizardNav;
   onChanged: OnChanged;
@@ -78,7 +86,7 @@ export function ruleNow(r: RuleItem): string {
   return r.parameterSummary ? `${badges} · ${r.parameterSummary}` : badges;
 }
 
-export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, record, firms, api, nav, onChanged, onClose }) => {
+export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, record, firms, allowed, api, nav, onChanged, onClose }) => {
   const s = useWizardStyles();
   const [form, setForm] = React.useState<Form>(() => initialForm(row));
   const [seen, setSeen] = React.useState(ruleKey(row));
@@ -95,8 +103,11 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
   const keepBlock = keepBlocker(row);
   const excludeBlock = excludeBlocker(row);
   const fixedFirm = row.firmScope;
+  // ── What each choice needs, and whether the lists' answers allow it (084g fix round 1, B1) ──
+  const blockerOf = (c: RuleChoice) => allowedBlocker(ruleChoiceNeeds(row, c), allowed);
   const plan = planRule(row, form.choice, { reason: form.reason, firmId: form.firmId });
-  const canChoose = plan.steps.length > 0;
+  // A plan goes on only when its choice is allowed and every call it makes is one the choice was said to need.
+  const canChoose = plan.steps.length > 0 && blockerOf(form.choice) === null && planWithin(plan, ruleChoiceNeeds(row, form.choice));
   const recordLabel = recordWords(record.table, record.name);
   const sendsFirmId = fixedFirmId(row) ?? (form.firmId || null);
   const firmName = fixedFirm?.name ?? firms.find(f => f.id.toLowerCase() === form.firmId.toLowerCase())?.name ?? null;
@@ -230,9 +241,18 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
     ),
   });
 
+  // 084g: read-only only when some offered choice makes a call and none of those is allowed (R1: a row whose choices all make no call, e.g.
+  // a rule changed on the parent, keeps the normal frame). A choice the answers do not allow is disabled with the reason and without its
+  // fields (a choice its own blocker refuses keeps that reason); read-only, every choice is disabled.
+  const readOnly = noAllowedCall(options.map(o => o.value), c => ruleChoiceNeeds(row, c), blockerOf);
+  const shown = options.map(o => {
+    const blocker = blockerOf(o.value);
+    return blocker !== null ? { ...o, caption: blocker, disabled: true, body: undefined } : readOnly ? { ...o, disabled: true, body: undefined } : o;
+  });
+
   const modeStep = (
     <div className={s.step} data-testid="mode-step">
-      <ChoiceGroup ariaLabel="On this record" options={options} value={form.choice} onChange={choice => set({ choice })} />
+      <ChoiceGroup ariaLabel="On this record" options={shown} value={form.choice} onChange={choice => set({ choice })} />
     </div>
   );
 
@@ -270,6 +290,7 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       api={api}
       core={core}
       recordId={recordId}
+      readOnly={readOnly}
       reviewLabel="Rule"
       reviewStep={reviewStep}
       modeStep={modeStep}

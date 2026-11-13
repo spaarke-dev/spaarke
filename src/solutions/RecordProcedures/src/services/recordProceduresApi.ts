@@ -11,6 +11,10 @@
  * `@spaarke/auth` guards. Mirrors `src/solutions/InvoiceFiles/src/services/invoiceFilesApi.ts`.
  *
  * Read-only by construction: this module has no write method and no route of task 089 (procedure assignments, rule overrides).
+ *
+ * Task 084g (EB-D-221): both views carry `permissions`, the caller's own answer to "may I make 089's writes on this record". It is a hint the
+ * panel uses to open the wizards read-only; the write routes still decide every write. A body without it (an older BFF), or with a flag that is
+ * not `true`, reads as "may not write".
  */
 
 import { isApiError, isAuthFailure, problemOf, type AuthenticatedFetchFn } from '@spaarke/auth';
@@ -101,6 +105,17 @@ export interface GapView {
   overrides: OverrideView[];
 }
 
+/**
+ * Task 084g (EB-D-221): one flag per kind of 089 write on this record, for the caller: `assignOrExclude` (assign a Procedure, exclude a rule),
+ * `remove` (preview and remove an override) and `change` (change a rule, task 084c). A flag the server did not answer `true` is false, as an
+ * unanswered check is false on the server.
+ */
+export interface WritePermissions {
+  assignOrExclude: boolean;
+  remove: boolean;
+  change: boolean;
+}
+
 export interface RecordProceduresView {
   record: ChainRecord;
   date: string;
@@ -108,6 +123,7 @@ export interface RecordProceduresView {
   firmSource: FirmSource;
   procedures: ProcedureItem[];
   gaps: GapView[];
+  permissions: WritePermissions;
 }
 
 export interface VersionRef {
@@ -188,6 +204,7 @@ export interface RecordRulesInForceView {
   firmSource: FirmSource;
   rules: RuleItem[];
   gaps: GapView[];
+  permissions: WritePermissions;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -325,6 +342,12 @@ const BAD_BODY: ApiFailure = { status: 200, errorCode: null, detail: 'The server
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const list = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
+/** The `permissions` of a body: each flag is true only when the server said `true`; a missing or malformed object is all false (084g). */
+export function readPermissions(value: unknown): WritePermissions {
+  if (!isObject(value)) return { assignOrExclude: false, remove: false, change: false };
+  return { assignOrExclude: value.assignOrExclude === true, remove: value.remove === true, change: value.change === true };
+}
+
 /** A Procedures body that is the view, with the arrays a reader walks always arrays. Null when it is not the view. */
 export function readProceduresView(body: unknown): RecordProceduresView | null {
   if (!isObject(body) || !Array.isArray(body.procedures)) return null;
@@ -332,6 +355,7 @@ export function readProceduresView(body: unknown): RecordProceduresView | null {
   return {
     ...view,
     gaps: list(body.gaps),
+    permissions: readPermissions(body.permissions),
     procedures: (body.procedures as ProcedureItem[]).map(p => ({ ...p, sources: list(p.sources), overrides: list(p.overrides) })),
   };
 }
@@ -343,6 +367,7 @@ export function readRulesView(body: unknown): RecordRulesInForceView | null {
   return {
     ...view,
     gaps: list(body.gaps),
+    permissions: readPermissions(body.permissions),
     rules: (body.rules as RuleItem[]).map(r => ({ ...r, marks: list(r.marks) })),
   };
 }

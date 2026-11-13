@@ -70,6 +70,19 @@ public sealed record ProcedureVersionView2(Guid Id, int Number, string Status, D
 /// <summary>A policy version by id and number (the rule's own version chain).</summary>
 public sealed record PolicyVersionRefView(Guid Id, int Number);
 
+/// <summary>
+/// Task 084g (EB-D-221): the caller's write permissions on the record, one per write of ProcedureAssignmentEndpoints:
+/// <see cref="AssignOrExclude"/> (procedure-assignments and rule-overrides/exclude), <see cref="Remove"/> (removal-preview and DELETE
+/// overrides/{id}) and <see cref="Change"/> (rule-overrides/change). Each is computed for the caller from that route's own record and
+/// privilege declarations, without its per-subject Read. A hint for the client only: the write routes still decide. False when a check is
+/// denied, faulted or not answered.
+/// </summary>
+public sealed record RecordWritePermissions(bool AssignOrExclude, bool Remove, bool Change)
+{
+    /// <summary>Every flag false: the fail-closed answer.</summary>
+    public static readonly RecordWritePermissions None = new(false, false, false);
+}
+
 // ── Procedures list (model 6.6, questions a-e) ──────────────────────────────────────────────────────────────────
 
 /// <summary>
@@ -79,7 +92,11 @@ public sealed record PolicyVersionRefView(Guid Id, int Number);
 /// </summary>
 public sealed record RecordProceduresView(
     ChainRecordView Record, DateOnly Date, FirmView? Firm, string FirmSource,
-    IReadOnlyList<ProcedureListItem> Procedures, IReadOnlyList<ProcedureGapView> Gaps);
+    IReadOnlyList<ProcedureListItem> Procedures, IReadOnlyList<ProcedureGapView> Gaps)
+{
+    /// <summary>Task 084g: the caller's write permissions on the record (set by the route; all false until then).</summary>
+    public RecordWritePermissions Permissions { get; init; } = RecordWritePermissions.None;
+}
 
 /// <summary>
 /// One Procedure on the record. <see cref="Status"/>: <c>InForce</c> (a version applies; <see cref="VersionInForce"/> says which and whether
@@ -126,7 +143,11 @@ public sealed record ProcedureGapView(
 /// </summary>
 public sealed record RecordRulesInForceView(
     ChainRecordView Record, DateOnly Date, FirmView? Firm, string FirmSource,
-    IReadOnlyList<RuleInForceView> Rules, IReadOnlyList<ProcedureGapView> Gaps);
+    IReadOnlyList<RuleInForceView> Rules, IReadOnlyList<ProcedureGapView> Gaps)
+{
+    /// <summary>Task 084g: the caller's write permissions on the record (set by the route; all false until then).</summary>
+    public RecordWritePermissions Permissions { get; init; } = RecordWritePermissions.None;
+}
 
 /// <summary>A Procedure by id and name, with the Procedure Version that supplied a rule and whether it is pinned.</summary>
 public sealed record RuleProcedureView(Guid Id, string Name, ProcedureVersionView2? Version, bool Pinned);

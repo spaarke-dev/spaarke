@@ -12,6 +12,7 @@
 import type { OverrideView, ProcedureItem, RuleItem, RuleMark } from '../../services/recordProceduresApi';
 import type { AssignMode, OverridesApi, WriteFailure } from '../../services/overridesApi';
 import type { CoreRoute } from '../../services/recordProceduresApi';
+import type { AllowedSteps } from '../../services/model';
 
 export type PlanStep =
   | { kind: 'remove'; overrideId: string }
@@ -224,6 +225,93 @@ export function planRule(r: RuleItem, choice: RuleChoice, input: RuleInput): Pla
       return { steps: [...removeOwn, { kind: 'excludeRule', policyId: r.policyId, reason: input.reason!.trim(), firmId }] };
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Which kinds of call a choice needs (task 084g fix round 1, review B1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The kinds of call a choice's plan can contain, from the row and the choice alone (never from the inputs): `remove` (the removal of this
+ * record's own override, and its preview) and `create` (an assignment or a rule exclusion). Every step of every plan the choice can make is
+ * one of these (`planWithin` checks it; a test runs it over every fixture row, choice and input). The panel says which kinds the lists'
+ * answers allow (`AllowedSteps`); a choice that needs a kind they do not allow is disabled with the reason, and only a wizard with no
+ * choice left that makes a call is read-only.
+ */
+export interface ChoiceNeeds {
+  remove: boolean;
+  create: boolean;
+}
+
+const NEEDS_NOTHING: ChoiceNeeds = { remove: false, create: false };
+
+/** What a Procedure choice's plans need: a removal exactly when the record has its own override row, a create when a row is saved. */
+export function procedureChoiceNeeds(p: ProcedureItem, choice: ProcedureChoice): ChoiceNeeds {
+  const own = ownOverride(p);
+  const parents = parentOverrides(p);
+  switch (choice) {
+    case 'parent':
+    case 'remove':
+      return { remove: !!own, create: false };
+    case 'follow': {
+      const keepsRow = (isManual(p) && !!own && parents.length === 0) || parents.some(o => o.mode !== 'FollowLatest');
+      if (!keepsRow) return { remove: !!own, create: false };
+      if (own?.mode === 'FollowLatest') return NEEDS_NOTHING;
+      return { remove: !!own, create: true };
+    }
+    case 'pin':
+    case 'exclude':
+      return { remove: !!own, create: true };
+  }
+}
+
+/** What a rule choice's plans need. A choice its own blocker refuses plans nothing, so it needs nothing. */
+export function ruleChoiceNeeds(r: RuleItem, choice: RuleChoice): ChoiceNeeds {
+  switch (choice) {
+    case 'parent':
+    case 'changed':
+      return NEEDS_NOTHING;
+    case 'keep':
+      return keepBlocker(r) ? NEEDS_NOTHING : { remove: !!ownRuleOverrideId(r), create: false };
+    case 'exclude': {
+      if (excludeBlocker(r)) return NEEDS_NOTHING;
+      const own = ownExclude(r);
+      if (own && !own.overrideRowId) return NEEDS_NOTHING;
+      return { remove: !!own?.overrideRowId, create: true };
+    }
+  }
+}
+
+/** Whether a choice makes any call at all. */
+export const needsAny = (needs: ChoiceNeeds): boolean => needs.remove || needs.create;
+
+/**
+ * Whether a wizard is read-only: some offered choice makes a call, and none of those is allowed. A row none of whose choices makes a call
+ * (each refused by its own blocker, e.g. a rule changed on the parent) is NOT read-only: there is nothing the answers deny, and the choices
+ * give their own reasons (084g fix round 1 re-check, R1).
+ */
+export function noAllowedCall<T>(offered: readonly T[], needsOf: (choice: T) => ChoiceNeeds, blockerOf: (choice: T) => string | null): boolean {
+  const making = offered.filter(c => needsAny(needsOf(c)));
+  return making.length > 0 && !making.some(c => blockerOf(c) === null);
+}
+
+export const NOT_ALLOWED_BOTH = 'You can view this, but not change it.';
+export const NOT_ALLOWED_REMOVE = "Not available to you: it removes this record's own override, which you cannot do here.";
+export const NOT_ALLOWED_CREATE = 'Not available to you: you cannot save an override on this record.';
+
+/** Why a choice is not available from what the answers allow, or null when it is. */
+export function allowedBlocker(needs: ChoiceNeeds, allowed: AllowedSteps): string | null {
+  const noRemove = needs.remove && !allowed.remove;
+  const noCreate = needs.create && !allowed.create;
+  if (noRemove && noCreate) return NOT_ALLOWED_BOTH;
+  if (noRemove) return NOT_ALLOWED_REMOVE;
+  if (noCreate) return NOT_ALLOWED_CREATE;
+  return null;
+}
+
+/** True when every step of the plan is of a kind the choice was said to need. */
+export function planWithin(plan: Plan, needs: ChoiceNeeds): boolean {
+  return plan.steps.every(s => (s.kind === 'remove' ? needs.remove : needs.create));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

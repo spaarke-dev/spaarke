@@ -4,7 +4,7 @@
     <title>Procedures on the record: the read routes return the caller's write permissions, and 084b's wizards open read-only from them (EB-D-221)</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217, EB-D-221)</phase>
     <gate>startable: 084 closed and 084b merged into work. uac-r2 reviews the BFF diff before merge.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF read-route change that reports authorization outcomes (tags bff-api, auth), plus the .tsx client.</rigor-reason>
     <model-tier>opus</model-tier>

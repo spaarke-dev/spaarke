@@ -447,6 +447,72 @@ internal sealed class RecordProcedureRig
 
         public IEnumerable<(string EntitySet, Guid RecordId)> Asked => Batches.SelectMany(b => b);
 
+        /// <summary>Task 084g: the table privileges the caller holds (none by default, so the write permissions are false).</summary>
+        public HashSet<string> Held { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Task 084g: privileges whose question gets no answer (<see cref="CallerPrivilegeAnswer.Faulted"/>).</summary>
+        public HashSet<string> PrivilegeFaults { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Task 084g: when set, every privilege question throws it.</summary>
+        public Exception? PrivilegeThrows { get; set; }
+
+        private readonly List<(string Privilege, bool HasToken)> _privilegeCalls = new();
+        private int _inFlight;
+        private int _maxInFlight;
+
+        /// <summary>Task 084g: every privilege asked, in the order the questions started, with whether the caller's token came with it.</summary>
+        public IReadOnlyList<(string Privilege, bool HasToken)> PrivilegeCalls
+        {
+            get
+            {
+                lock (_privilegeCalls)
+                {
+                    return _privilegeCalls.ToArray();
+                }
+            }
+        }
+
+        /// <summary>084g fix round 1: when set, each privilege answer takes this long, so overlapping questions can be seen.</summary>
+        public TimeSpan? PrivilegeDelay { get; set; }
+
+        /// <summary>084g fix round 1: the most privilege questions that were in flight at the same moment.</summary>
+        public int MaxPrivilegeQuestionsInFlight => Volatile.Read(ref _maxInFlight);
+
+        public override async Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            lock (_privilegeCalls)
+            {
+                _privilegeCalls.Add((privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
+            }
+
+            var now = Interlocked.Increment(ref _inFlight);
+            int seen;
+            while ((seen = Volatile.Read(ref _maxInFlight)) < now && Interlocked.CompareExchange(ref _maxInFlight, now, seen) != seen)
+            {
+            }
+
+            try
+            {
+                if (PrivilegeDelay is { } delay)
+                {
+                    await Task.Delay(delay, ct);
+                }
+
+                if (PrivilegeThrows is not null)
+                {
+                    throw PrivilegeThrows;
+                }
+
+                return string.IsNullOrEmpty(callerBearerToken) || PrivilegeFaults.Contains(privilegeName) ? CallerPrivilegeAnswer.Faulted
+                    : Held.Contains(privilegeName) ? CallerPrivilegeAnswer.Held
+                    : CallerPrivilegeAnswer.NotHeld;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
+        }
+
         public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
         {
             CallerLookups++;
