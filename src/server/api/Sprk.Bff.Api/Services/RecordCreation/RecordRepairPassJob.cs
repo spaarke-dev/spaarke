@@ -5,6 +5,8 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 
@@ -18,18 +20,22 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// </summary>
 /// <remarks>
 /// <para><b>Which rows (forward-only, task 050's marker).</b> Per table, rows with <c>createdon</c> in
-/// [max(go-live, watermark), now − <see cref="SettleTime"/>) whose <c>createdby</c> is not a product principal: the BFF's own
-/// identity (WhoAmI), the ontology writer's when it is configured, and the retired identities in
+/// [max(go-live, watermark − <see cref="WindowOverlap"/>), now − <see cref="SettleTime"/>) whose <c>createdby</c> is not a product
+/// principal: the BFF's own
+/// identity (WhoAmI), its Dataverse Web API client's managed identity when <see cref="WebApiIdentityConfigKey"/> is set, the ontology
+/// writer's when it is configured, and the retired identities in
 /// <see cref="ProductPrincipalIdsConfigKey"/>. People are never in the set. The rule is asked three times: by the query, by this
 /// job over every scanned row, and by Repair over the row it read (<see cref="RecordRepairPassContext"/>), before any write. A
 /// run that cannot decide the set (WhoAmI or the writer's identity faulted, a configured id that does not parse) reads no table
 /// and writes nothing, and fails.</para>
-/// <para><b>Off until configured.</b> With <see cref="GoLiveConfigKey"/> unset the job reads and writes nothing and logs an error
-/// each run; an unparseable value does the same and the run fails. Nothing in this repository sets it.</para>
+/// <para><b>Off until configured.</b> With <see cref="GoLiveConfigKey"/> unset the job reads and writes nothing and logs a warning
+/// each run; a value that is not an ISO 8601 round-trip instant ("O") logs an error and the run fails. Nothing in this repository
+/// sets it.</para>
 /// <para><b>Tables.</b> Every registry table (<see cref="RecordTableRules.All"/>) except <see cref="ExcludedTables"/>: the owner's
 /// exclusions (<c>task</c>, <c>account</c>), the tables only their own writer creates, the append-only Decision Record, and the
 /// Procedure Version (created by its own service). A <c>contact</c> is owner-only: no mapping (its registry entry), owned by the
-/// customer business unit's default team through <c>IRecordOwnershipResolver</c>.</para>
+/// customer business unit's default team through <c>IRecordOwnershipResolver</c>. While that team cannot be resolved (asked once
+/// per run, review F2-b) the contact table is not swept: its watermark stays and its rows wait, and the run is partial.</para>
 /// <para><b>Claims (ADR-036 A1 rule 3).</b> The host's lease holds the tick. Each table is a unit: an owner-scoped claim
 /// (<c>IIdempotencyService</c>, owner = the run id) and, once the table is done for the run, a marker keyed to the run, so a host
 /// retry of the run no-ops a marked table. A table another runner holds is not read; the run reports it and fails.</para>
@@ -37,7 +43,8 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// completed window), the window and cursor of a sweep the row cap stopped, and the rows to ask again with their attempt count.
 /// Without a readable state store a table is not swept (every row is still kept for a later run).</para>
 /// <para><b>Retry (A1 rule 4, NFR-04).</b> A row whose outcome <see cref="RecordRepairOutcome.NeedsRetry"/> is asked again by the
-/// next run, up to <see cref="MaxAttempts"/> times, then logged as abandoned. The job itself does not throw: the next tick is the
+/// next run, up to <see cref="MaxAttempts"/> faults, then logged as abandoned (a contact that waits for the customer team's
+/// configuration uses no attempt; the retry set is not capped, review K8). The job itself does not throw: the next tick is the
 /// retry. <b>Heartbeat</b> (A1 rule 5): one structured line per attempt, with the counts and the correlation id, also in the
 /// result JSON. A run is successful only when every table finished with nothing left to ask again.</para>
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process <c>Spaarke.Scheduling</c> host, registered with
@@ -67,6 +74,23 @@ public sealed class RecordRepairPassJob : IScheduledJob
 
     /// <summary>The ontology writer's identity setting: when set, the writer's <c>systemuser</c> is a product principal.</summary>
     internal const string OntologyWriterIdentityConfigKey = "Ontology:Writer:ManagedIdentityClientId";
+
+    /// <summary>
+    /// Review K6: the managed identity the BFF's Dataverse Web API client authenticates as (<c>DataverseWebApiService</c> reads
+    /// this key first, then <see cref="WebApiIdentityFallbackConfigKey"/>). When set, the application user whose
+    /// <c>applicationid</c> is that client id is a product principal: rows the Web API client creates are stamped with it.
+    /// </summary>
+    internal const string WebApiIdentityConfigKey = "ManagedIdentity:ClientId";
+
+    /// <summary>Review K6: <c>DataverseWebApiService</c>'s fallback for <see cref="WebApiIdentityConfigKey"/>.</summary>
+    internal const string WebApiIdentityFallbackConfigKey = "Graph:ManagedIdentity:ClientId";
+
+    /// <summary>Review K5: each window starts this long before the watermark (Repair is fill-only and idempotent, so a row
+    /// read twice is written at most once), so a row whose <c>createdon</c> lands just behind a saved watermark is not missed.</summary>
+    internal static readonly TimeSpan WindowOverlap = TimeSpan.FromMinutes(15);
+
+    /// <summary>Review F2-b: the table the customer-team gate applies to.</summary>
+    internal const string ContactTable = RecordOwnershipResolver.ContactEntity;
 
     internal const int DefaultMaxRowsPerTable = 200;
 
@@ -150,19 +174,22 @@ public sealed class RecordRepairPassJob : IScheduledJob
         var rawGoLive = _configuration[GoLiveConfigKey];
         if (string.IsNullOrWhiteSpace(rawGoLive))
         {
-            // Off: nothing is read, nothing is written. Logged as an error so a deployment that meant to turn it on sees it.
-            _logger.LogError(
+            // Off: nothing is read, nothing is written. Logged as a warning (review K9): off is the default until go-live is
+            // chosen, so it is not an error; the heartbeat says not_configured each run.
+            _logger.LogWarning(
                 "{Prefix} {Key} is not configured, so the repair pass is off: nothing was read or written. correlationId={CorrelationId}",
                 LogPrefix, GoLiveConfigKey, context.CorrelationId);
             return Finish(StatusNotConfigured, success: true, counts, ["The repair pass is not configured (" + GoLiveConfigKey + " is unset)."],
                 context, started, goLive: null);
         }
 
-        if (!DateTimeOffset.TryParse(rawGoLive, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+        // Review K7: exactly the ISO 8601 round-trip form ("O", which carries its offset); no culture-dependent or partial form.
+        if (!DateTimeOffset.TryParseExact(rawGoLive.Trim(), "O", CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal,
                 out var goLive))
         {
             _logger.LogError(
-                "{Prefix} {Key} does not parse as an instant, so the repair pass is off: nothing was read or written. correlationId={CorrelationId}",
+                "{Prefix} {Key} is not an ISO 8601 round-trip instant (\"O\", for example 2026-11-01T00:00:00.0000000+00:00), so the "
+                + "repair pass is off: nothing was read or written. correlationId={CorrelationId}",
                 LogPrefix, GoLiveConfigKey, context.CorrelationId);
             return Finish(StatusError, success: false, counts, [GoLiveConfigKey + " does not parse as an instant; nothing was read or written."],
                 context, started, goLive: null);
@@ -197,6 +224,16 @@ public sealed class RecordRepairPassJob : IScheduledJob
                 foreach (var table in Tables)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    // Review F2-b: the contact table waits, untouched, while the customer team cannot be resolved.
+                    if (string.Equals(table, ContactTable, StringComparison.OrdinalIgnoreCase)
+                        && !await CustomerContactTeamResolvesAsync(services, context, cancellationToken).ConfigureAwait(false))
+                    {
+                        counts.TablesWaiting++;
+                        problems.Add($"{table}: the customer business unit's default Owner team cannot be resolved; not swept this run.");
+                        continue;
+                    }
+
                     await RunTableAsync(table, entities, idempotency, state, repair, pass, until, counts, problems, context, cancellationToken)
                         .ConfigureAwait(false);
                 }
@@ -206,6 +243,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
             status = counts.ScanFailures > 0 || counts.StateFailures > 0
                 ? StatusError
                 : counts.ClaimHeld > 0 || counts.Truncated > 0 || counts.Failed > 0 || counts.PendingRetry > 0 || counts.OutsidePass > 0
+                  || counts.TablesWaiting > 0
                     ? StatusPartial
                     : StatusOk;
         }
@@ -223,6 +261,40 @@ public sealed class RecordRepairPassJob : IScheduledJob
         }
 
         return Finish(status, success: status == StatusOk, counts, problems, context, started, goLive);
+    }
+
+    /// <summary>
+    /// Review F2-b: whether the customer business unit's single default Owner team resolves, asked ONCE per run before the contact
+    /// table (the identity-contact creates' own lookup, <see cref="ContactIdentityBinder.ResolveCreateOwnerAsync"/>). It decides no
+    /// owner — each contact's owner is still the resolver's answer — it only says whether sweeping the table can re-own anything.
+    /// When it does not resolve (unset, not one default team, no lookup composed, or the lookup faulted) the table is not swept: its
+    /// watermark does not move and no row's attempt is counted, so the rows wait for the configuration. One line is logged.
+    /// </summary>
+    private async Task<bool> CustomerContactTeamResolvesAsync(IServiceProvider services, JobRunContext context, CancellationToken ct)
+    {
+        var lookup = services.GetService<ContactIdentityBinder>();
+        ContactIdentityBinder.OwnerTeamStatus status;
+        try
+        {
+            status = lookup is null
+                ? ContactIdentityBinder.OwnerTeamStatus.Unconfigured
+                : (await lookup.ResolveCreateOwnerAsync("Repair pass", "the contact table", ct).ConfigureAwait(false)).Status;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "{Prefix} The customer business unit's default Owner team could not be read; the {Table} table is not "
+                                   + "swept this run. correlationId={CorrelationId}", LogPrefix, ContactTable, context.CorrelationId);
+            return false;
+        }
+
+        if (status == ContactIdentityBinder.OwnerTeamStatus.Resolved)
+            return true;
+
+        _logger.LogWarning(
+            "{Prefix} The customer business unit's default Owner team cannot be resolved ({Status}; check {Key}); the {Table} table is not "
+            + "swept and its rows wait. correlationId={CorrelationId}",
+            LogPrefix, status, ExternalAccessOptionsValidator.CustomerBusinessUnitKey, ContactTable, context.CorrelationId);
+        return false;
     }
 
     /// <summary>
@@ -257,6 +329,33 @@ public sealed class RecordRepairPassJob : IScheduledJob
             }
 
             principals.Add(self);
+
+            // Review K6: the Web API client's identity, when it runs as a configured managed identity.
+            var webApiClientId = !string.IsNullOrWhiteSpace(_configuration[WebApiIdentityConfigKey])
+                ? _configuration[WebApiIdentityConfigKey]
+                : _configuration[WebApiIdentityFallbackConfigKey];
+            if (!string.IsNullOrWhiteSpace(webApiClientId))
+            {
+                if (!Guid.TryParse(webApiClientId.Trim(), out var applicationId) || applicationId == Guid.Empty)
+                {
+                    _logger.LogError("{Prefix} {Key} is not a client id; the run writes nothing. correlationId={CorrelationId}",
+                        LogPrefix, WebApiIdentityConfigKey, context.CorrelationId);
+                    return null;
+                }
+
+                var query = new QueryExpression("systemuser") { ColumnSet = new ColumnSet("systemuserid"), TopCount = 2, NoLock = true };
+                query.Criteria.AddCondition("applicationid", ConditionOperator.Equal, applicationId);
+                var users = (await entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
+                if (users.Count != 1 || users[0].Id == Guid.Empty)
+                {
+                    _logger.LogError(
+                        "{Prefix} The Web API client's identity ({Key}) matches {Count} application users, not one; the run writes nothing. "
+                        + "correlationId={CorrelationId}", LogPrefix, WebApiIdentityConfigKey, users.Count, context.CorrelationId);
+                    return null;
+                }
+
+                principals.Add(users[0].Id);
+            }
 
             if (!string.IsNullOrWhiteSpace(_configuration[OntologyWriterIdentityConfigKey]))
             {
@@ -343,26 +442,28 @@ public sealed class RecordRepairPassJob : IScheduledJob
                 counts.Retried++;
                 var outcome = await repair.RepairAsync(table, id, ct, pass).ConfigureAwait(false);
                 Count(outcome, counts);
+                var counted = attempts + AttemptOf(outcome);
                 if (!outcome.NeedsRetry)
                 {
                     state.Retry.Remove(id);
                 }
-                else if (attempts + 1 >= MaxAttempts)
+                else if (counted >= MaxAttempts)
                 {
                     state.Retry.Remove(id);
                     counts.Abandoned++;
                     _logger.LogError(
                         "{Prefix} {Table} {Id} was not repaired after {Attempts} runs ({Status} {Reason}); it is no longer asked. correlationId={CorrelationId}",
-                        LogPrefix, table, id, attempts + 1, outcome.Status, ReasonOf(outcome), context.CorrelationId);
+                        LogPrefix, table, id, counted, outcome.Status, ReasonOf(outcome), context.CorrelationId);
                 }
                 else
                 {
-                    state.Retry[id] = attempts + 1;
+                    state.Retry[id] = counted;
                 }
             }
 
-            // The sweep: a window that an earlier run started and the cap stopped continues; otherwise a new one.
-            var since = Max(pass.GoLive, state.Watermark is { } mark && mark <= until ? mark : pass.GoLive);
+            // The sweep: a window that an earlier run started and the cap stopped continues; otherwise a new one, starting
+            // WindowOverlap before the watermark (review K5), never before go-live.
+            var since = Max(pass.GoLive, state.Watermark is { } mark && mark <= until ? mark - WindowOverlap : pass.GoLive);
             var windowEnd = state.SweepUntil ?? until;
             var scan = await ScanAsync(entities, table, since, windowEnd, pass.ProductPrincipals, state.SweepAfter, MaxRowsPerTable, ct)
                 .ConfigureAwait(false);
@@ -394,7 +495,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     Count(outcome, counts);
                     if (outcome.NeedsRetry)
                     {
-                        state.Retry[row.Id] = 1;
+                        state.Retry[row.Id] = AttemptOf(outcome);
                     }
                 }
 
@@ -543,6 +644,14 @@ public sealed class RecordRepairPassJob : IScheduledJob
 
     private static string? ReasonOf(RecordRepairOutcome outcome) => outcome.ReasonCode ?? outcome.OwnerRefusal?.Code;
 
+    /// <summary>
+    /// Review F2-b: what one more ask of a row counts toward <see cref="MaxAttempts"/> — 1 for a fault, 0 for a contact that waits
+    /// for the customer team's configuration (<see cref="RecordOwnerRefusal.CustomerContactTeamUnresolved"/>): only real faults
+    /// use up a row's attempts.
+    /// </summary>
+    private static int AttemptOf(RecordRepairOutcome outcome) =>
+        outcome.OwnerRefusal?.Code == RecordOwnerRefusal.CustomerContactTeamUnresolved ? 0 : 1;
+
     private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a >= b ? a : b;
 
     /// <summary>The table's state, a new one when there is none, or <c>null</c> when the store faulted or the entry is unreadable.</summary>
@@ -587,16 +696,16 @@ public sealed class RecordRepairPassJob : IScheduledJob
         var duration = _timeProvider.GetElapsedTime(started);
 
         _logger.Log(
-            status == StatusOk ? LogLevel.Information : status == StatusNotConfigured ? LogLevel.Error : LogLevel.Warning,
+            status == StatusOk ? LogLevel.Information : LogLevel.Warning,
             "{Prefix} heartbeat status={Status} attempt={Attempt} goLive={GoLive} scanned={Scanned} repaired={Repaired} noOp={NoOp} "
             + "skipped={Skipped} failed={Failed} ownerRefused={OwnerRefused} ownerAssignCascades={OwnerAssignCascades} "
-            + "outsidePass={OutsidePass} retried={Retried} "
+            + "tablesWaiting={TablesWaiting} outsidePass={OutsidePass} retried={Retried} "
             + "pendingRetry={PendingRetry} abandoned={Abandoned} claimHeld={ClaimHeld} alreadyDone={AlreadyDone} truncated={Truncated} "
             + "scanFailures={ScanFailures} stateFailures={StateFailures} metadataReads={MetadataReads} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, context.Attempt, goLive?.ToString("O", CultureInfo.InvariantCulture) ?? "(unset)", counts.Scanned,
             counts.Repaired, counts.NoOp, counts.Skipped, counts.Failed, counts.OwnerRefused, counts.OwnerAssignCascades,
-            counts.OutsidePass, counts.Retried,
+            counts.TablesWaiting, counts.OutsidePass, counts.Retried,
             counts.PendingRetry, counts.Abandoned, counts.ClaimHeld, counts.AlreadyDone, counts.Truncated, counts.ScanFailures,
             counts.StateFailures, counts.MetadataReads, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
             context.CorrelationId);
@@ -620,6 +729,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     counts.Failed,
                     counts.OwnerRefused,
                     counts.OwnerAssignCascades,
+                    counts.TablesWaiting,
                     counts.OutsidePass,
                     counts.Retried,
                     counts.PendingRetry,
@@ -662,6 +772,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
         public int Failed;
         public int OwnerRefused;
         public int OwnerAssignCascades;
+        public int TablesWaiting;
         public int OutsidePass;
         public int Retried;
         public int PendingRetry;

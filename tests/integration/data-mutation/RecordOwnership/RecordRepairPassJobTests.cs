@@ -372,24 +372,35 @@ public sealed class RecordRepairPassJobTests
     // =====================================================================================
 
     [Fact]
-    public async Task AContactWhoseCustomerTeamCannotBeResolved_KeepsItsOwner_IsReported_AndIsAskedAgain()
+    public async Task AContactWhoseCustomerTeamCannotBeResolved_KeepsItsOwner_AndWaits_UntilTheTeamResolves()
     {
+        // Review F2-b: the table is not swept while the team cannot be resolved — its watermark does not move, so the contact is
+        // repaired by the first run after the team resolves.
         _pass.CustomerTeamUnresolvable();
         var id = _pass.NativeContact();
 
         var first = await _pass.RunAsync();
-        var second = await _pass.RunAsync();
 
         World.Writes.Should().BeEmpty("never given its creator's team in place of the customer team");
         World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
-        first.Success.Should().BeFalse("the contact is kept for the next run");
-        PassWorld.Count(first, "ownerRefused").Should().Be(1);
-        PassWorld.Count(first, "pendingRetry").Should().Be(1);
-        PassWorld.Count(second, "retried").Should().Be(1, "the next run asks it again");
-        var direct = await World.RepairAsync("contact", id, _pass.Context());
-        direct.OwnerRefusal!.Code.Should().Be(RecordOwnerRefusal.CustomerContactTeamUnresolved);
-        direct.NeedsRetry.Should().BeTrue();
+        first.Success.Should().BeFalse("the contact table waits");
+        PassWorld.Status(first).Should().Be(RecordRepairPassJob.StatusPartial);
+        PassWorld.Count(first, "tablesWaiting").Should().Be(1);
+        PassWorld.Count(first, "ownerRefused").Should().Be(0, "no contact is asked");
+        PassWorld.Count(first, "pendingRetry").Should().Be(0, "no attempt is counted");
+        _pass.State("contact").Should().BeNull("the watermark does not move");
+        _pass.ScanQueries.Should().NotContain(q => q.EntityName == "contact");
+        _pass.Log.Entries.Where(e => e.Message.Contains("cannot be resolved") && e.Message.Contains("contact"))
+            .Should().ContainSingle("one line per run");
+
+        _pass.Time.Advance(TimeSpan.FromMinutes(5));
+        _pass.CustomerTeamResolves();
+        var second = await _pass.RunAsync();
+
+        PassWorld.Count(second, "tablesWaiting").Should().Be(0);
+        World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam), "repaired once the team resolves");
     }
 
     [Fact]
@@ -408,8 +419,45 @@ public sealed class RecordRepairPassJobTests
         World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild), "the row keeps the owner it had");
         store.Reads.Should().NotContain("owner-team", "no default team is looked up without the setting");
-        PassWorld.Count(result, "ownerRefused").Should().Be(1);
+        PassWorld.Count(result, "tablesWaiting").Should().Be(1);
         result.Success.Should().BeFalse("the contact waits for the setting");
+        var direct = await World.RepairAsync("contact", id, _pass.Context());
+        direct.OwnerRefusal!.Code.Should().Be(RecordOwnerRefusal.CustomerContactTeamUnresolved, "Repair itself still refuses");
+    }
+
+    [Fact]
+    public async Task ACustomerTeamLookupThatFaults_LeavesTheContactTableUnswept()
+    {
+        var store = new InMemoryContactIdentityStore { FailTeamLookup = true };
+        store.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = [CustomerContactOwnerTests.CustomerTeam];
+        World.CustomerContactOwner = IdentityBindingTestKit.OwnerAwareBinder(store, CustomerContactOwnerTests.CustomerBu);
+        _pass.NativeContact();
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Count(result, "tablesWaiting").Should().Be(1);
+        _pass.State("contact").Should().BeNull();
+        World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AContactRefusedForTheCustomerTeam_UsesNoAttempt_OnlyFaultsDo()
+    {
+        // The gate saw the team, the row's own answer did not (the setting changed between the two): the row waits in the retry
+        // set without using up an attempt, so it is never abandoned for a configuration.
+        var gateStore = new InMemoryContactIdentityStore();
+        gateStore.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = [CustomerContactOwnerTests.CustomerTeam];
+        _pass.GateLookup = IdentityBindingTestKit.OwnerAwareBinder(gateStore, CustomerContactOwnerTests.CustomerBu);
+        _pass.CustomerTeamUnresolvable();
+        var id = _pass.NativeContact();
+        var nearTheLimit = RecordRepairPassJob.MaxAttempts - 1;
+        _pass.SeedState("contact", "{\"retry\":{\"" + id.ToString("D") + "\":" + nearTheLimit + "}}");
+
+        var result = await _pass.RunAsync();
+
+        PassWorld.Count(result, "abandoned").Should().Be(0, "a configuration wait is not a fault");
+        PassWorld.Count(result, "pendingRetry").Should().Be(1);
+        _pass.State("contact").Should().Contain($"\"{id:D}\":{nearTheLimit}", "the attempt count did not move");
     }
 
     // =====================================================================================
@@ -446,22 +494,6 @@ public sealed class RecordRepairPassJobTests
         World.Writes.Should().ContainSingle("the second run writes nothing");
         PassWorld.Count(second, "scanned").Should().Be(0, "the watermark moved past the first run's window");
         second.Success.Should().BeTrue(second.ErrorMessage);
-    }
-
-    [Fact]
-    public async Task AHostRetryOfTheSameRun_ReadsNothingForATableItMarkedDone()
-    {
-        _pass.NativeEvent();
-        var run = Guid.NewGuid();
-        await _pass.RunAsync(run);
-        var scansBefore = _pass.ScanQueries.Count;
-        _pass.Time.Advance(TimeSpan.FromMinutes(1));
-
-        var retry = await _pass.RunAsync(run, attempt: 2);
-
-        _pass.ScanQueries.Count.Should().Be(scansBefore, "every table is marked done for the run");
-        PassWorld.Count(retry, "alreadyDone").Should().Be(_pass.Job().Tables.Count);
-        World.Writes.Should().ContainSingle();
     }
 
     // =====================================================================================
@@ -502,7 +534,7 @@ public sealed class RecordRepairPassJobTests
     // =====================================================================================
 
     [Fact]
-    public async Task WithGoLiveUnset_TheJobReadsAndWritesNothing_AndLogsAnError()
+    public async Task WithGoLiveUnset_TheJobReadsAndWritesNothing_AndLogsAWarning()
     {
         _pass.Settings.Remove(RecordRepairPassJob.GoLiveConfigKey);
         _pass.NativeEvent();
@@ -514,7 +546,132 @@ public sealed class RecordRepairPassJobTests
         World.Writes.Should().BeEmpty();
         _pass.Job().Tables.Should().AllSatisfy(t => _pass.State(t).Should().BeNull("no watermark or other state is written"));
         PassWorld.Status(result).Should().Be(RecordRepairPassJob.StatusNotConfigured);
-        _pass.Log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains(RecordRepairPassJob.GoLiveConfigKey));
+        // Review K9: off is the default until go-live is chosen — a warning, never an error.
+        _pass.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains(RecordRepairPassJob.GoLiveConfigKey));
+        _pass.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Error);
+    }
+
+    [Theory]
+    [InlineData("next tuesday")]
+    [InlineData("11/01/2026")]
+    [InlineData("2026-11-01")]
+    [InlineData("2026-11-01T00:00:00")]
+    public async Task WithGoLiveNotAnIsoRoundTripInstant_TheJobReadsAndWritesNothing(string value)
+    {
+        // Review K7: only the "O" form, which carries its offset — never a culture's date or a local time read as UTC.
+        _pass.Settings[RecordRepairPassJob.GoLiveConfigKey] = value;
+        _pass.NativeEvent();
+
+        var result = await _pass.RunAsync();
+
+        result.Success.Should().BeFalse();
+        _pass.ScanQueries.Should().BeEmpty();
+        World.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WithGoLiveAsAnIsoRoundTripInstant_InAnotherOffset_ThePassUsesThatInstant()
+    {
+        _pass.Settings[RecordRepairPassJob.GoLiveConfigKey] = PassWorld.GoLive.ToOffset(TimeSpan.FromHours(-5)).ToString("O");
+        _pass.NativeEvent();
+
+        var result = await _pass.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _pass.ScanQueries.First(q => q.EntityName == "sprk_event").Criteria.Conditions
+            .Single(c => c.Operator == ConditionOperator.GreaterEqual).Values[0]
+            .Should().Be(PassWorld.GoLive.UtcDateTime);
+    }
+
+    // =====================================================================================
+    // Review K5: each window overlaps the last by 15 minutes
+    // =====================================================================================
+
+    [Fact]
+    public async Task ANewWindow_StartsAQuarterHourBeforeTheWatermark_AndARowReadTwiceIsWrittenOnce()
+    {
+        var id = _pass.NativeEvent();
+        await _pass.RunAsync();
+        var firstEnd = (DateTime)_pass.ScanQueries.Last(q => q.EntityName == "sprk_event").Criteria.Conditions
+            .Single(c => c.Operator == ConditionOperator.LessThan).Values[0];
+        _pass.Time.Advance(TimeSpan.FromMinutes(5));
+
+        await _pass.RunAsync();
+
+        var second = _pass.ScanQueries.Last(q => q.EntityName == "sprk_event").Criteria.Conditions
+            .Single(c => c.Operator == ConditionOperator.GreaterEqual).Values[0];
+        second.Should().Be(firstEnd - RecordRepairPassJob.WindowOverlap);
+        World.Writes.Where(w => w.Id == id).Should().ContainSingle("Repair is fill-only: the second read writes nothing");
+    }
+
+    [Fact]
+    public async Task TheOverlap_NeverReachesBeforeGoLive()
+    {
+        var goLive = PassWorld.Now - TimeSpan.FromMinutes(10);
+        _pass.Settings[RecordRepairPassJob.GoLiveConfigKey] = goLive.ToString("O");
+        await _pass.RunAsync();
+        _pass.Time.Advance(TimeSpan.FromMinutes(5));
+
+        await _pass.RunAsync();
+
+        var sinces = _pass.ScanQueries.Where(q => q.EntityName == "sprk_event")
+            .Select(q => (DateTime)q.Criteria.Conditions.Single(c => c.Operator == ConditionOperator.GreaterEqual).Values[0])
+            .ToList();
+        sinces.Should().HaveCount(2);
+        sinces.Should().OnlyContain(since => since == goLive.UtcDateTime, "a watermark eight minutes after go-live less 15 is before it");
+    }
+
+    // =====================================================================================
+    // Review K6: the Web API client's managed identity is a product principal
+    // =====================================================================================
+
+    [Fact]
+    public async Task TheWebApiClientsManagedIdentity_IsAProductPrincipal_ItsRowsAreNotRepaired()
+    {
+        var clientId = Guid.Parse("a052b000-0000-4000-8000-0000000000d1");
+        var webApiUser = Guid.Parse("a052b000-0000-4000-8000-0000000000d2");
+        _pass.Settings[RecordRepairPassJob.WebApiIdentityConfigKey] = clientId.ToString("D");
+        _pass.ApplicationUsers[clientId] = [webApiUser];
+        _pass.NativeEvent(createdBy: webApiUser);
+        var native = _pass.NativeEvent();
+
+        var result = await _pass.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        World.Writes.Should().ContainSingle().Which.Id.Should().Be(native, "the Web API client's row is the product's");
+        _pass.ScanQueries.First(q => q.EntityName == "sprk_event").Criteria.Conditions
+            .Single(c => c.Operator == ConditionOperator.NotIn).Values.Should().Contain(webApiUser);
+    }
+
+    [Fact]
+    public async Task TheFallbackKey_NamesTheWebApiClientsIdentity_WhenThePrimaryIsUnset()
+    {
+        var clientId = Guid.Parse("a052b000-0000-4000-8000-0000000000d3");
+        var webApiUser = Guid.Parse("a052b000-0000-4000-8000-0000000000d4");
+        _pass.Settings[RecordRepairPassJob.WebApiIdentityFallbackConfigKey] = clientId.ToString("D");
+        _pass.ApplicationUsers[clientId] = [webApiUser];
+        _pass.NativeEvent(createdBy: webApiUser);
+
+        await _pass.RunAsync();
+
+        World.Writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task AWebApiIdentityThatIsNotOneApplicationUser_ReadsNoTable(int matches)
+    {
+        var clientId = Guid.Parse("a052b000-0000-4000-8000-0000000000d5");
+        _pass.Settings[RecordRepairPassJob.WebApiIdentityConfigKey] = clientId.ToString("D");
+        _pass.ApplicationUsers[clientId] = Enumerable.Range(0, matches).Select(_ => Guid.NewGuid()).ToList();
+        _pass.NativeEvent();
+
+        var result = await _pass.RunAsync();
+
+        result.Success.Should().BeFalse("the product principals cannot be decided");
+        _pass.ScanQueries.Should().BeEmpty();
+        World.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -622,6 +779,7 @@ public sealed class RecordRepairPassJobTests
         public PassWorld()
         {
             Claims = new IdempotencyService(_cache, NullLogger<IdempotencyService>.Instance, Time);
+            CustomerTeamResolves(); // the configured environment; a test that needs the team unresolvable says so
         }
 
         public RepairWorld World { get; } = new();
@@ -655,6 +813,16 @@ public sealed class RecordRepairPassJobTests
 
         /// <summary>A table's saved state (watermark, sweep, retries), or <c>null</c> when none was written.</summary>
         public string? State(string table) => _cache.GetString($"{RecordRepairPassJob.JobIdConstant}:{table}:state");
+
+        /// <summary>Seeds <paramref name="table"/>'s state as an earlier run would have saved it.</summary>
+        public void SeedState(string table, string json) =>
+            _cache.SetString($"{RecordRepairPassJob.JobIdConstant}:{table}:state", json);
+
+        /// <summary>Review F2-b: the customer-team lookup the job's gate asks, when it differs from the resolver's.</summary>
+        public ContactIdentityBinder? GateLookup { get; set; }
+
+        /// <summary>Review K6: the application users by <c>applicationid</c> (the Web API client's managed identity).</summary>
+        public Dictionary<Guid, List<Guid>> ApplicationUsers { get; } = [];
 
         public RecordRepairPassContext Context() =>
             new(GoLive, new HashSet<Guid> { BffIdentity, RetiredIdentity });
@@ -699,9 +867,16 @@ public sealed class RecordRepairPassJobTests
         {
             var store = new InMemoryContactIdentityStore();
             store.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = [CustomerContactOwnerTests.CustomerTeam];
-            World.Directory.WithTeam(CustomerContactOwnerTests.CustomerTeam, CustomerContactOwnerTests.CustomerBu, isDefault: true, teamType: 0);
+            if (!_customerTeamSeeded)
+            {
+                World.Directory.WithTeam(CustomerContactOwnerTests.CustomerTeam, CustomerContactOwnerTests.CustomerBu, isDefault: true, teamType: 0);
+                _customerTeamSeeded = true;
+            }
+
             World.CustomerContactOwner = IdentityBindingTestKit.OwnerAwareBinder(store, CustomerContactOwnerTests.CustomerBu);
         }
+
+        private bool _customerTeamSeeded;
 
         public void CustomerTeamUnresolvable() =>
             World.CustomerContactOwner = IdentityBindingTestKit.OwnerAwareBinder(new InMemoryContactIdentityStore(), CustomerContactOwnerTests.CustomerBu);
@@ -720,12 +895,14 @@ public sealed class RecordRepairPassJobTests
             entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(Scan(query)));
 
-            var services = new ServiceCollection()
+            var collection = new ServiceCollection()
                 .AddSingleton(entities.Object)
                 .AddSingleton<IIdempotencyService>(Claims)
                 .AddSingleton<IDistributedCache>(_cache)
-                .AddScoped(_ => World.ServiceForAPass())
-                .BuildServiceProvider();
+                .AddScoped(_ => World.ServiceForAPass());
+            if ((GateLookup ?? World.CustomerContactOwner) is { } lookup)
+                collection.AddSingleton(lookup);
+            var services = collection.BuildServiceProvider();
 
             return new RecordRepairPassJob(
                 services.GetRequiredService<IServiceScopeFactory>(), Time,
@@ -743,6 +920,13 @@ public sealed class RecordRepairPassJobTests
         /// <summary>The job's window scan over the seeded rows: each condition of the query applied, ordered by id, capped.</summary>
         private EntityCollection Scan(QueryExpression query)
         {
+            if (query.EntityName == "systemuser")
+            {
+                var applicationId = (Guid)query.Criteria.Conditions.Single(c => c.AttributeName == "applicationid").Values[0];
+                return new EntityCollection(ApplicationUsers.GetValueOrDefault(applicationId, [])
+                    .Select(id => new Entity("systemuser", id)).ToList());
+            }
+
             ScanQueries.Add(query);
             var idColumn = query.EntityName + "id";
             var rows = _seeded
