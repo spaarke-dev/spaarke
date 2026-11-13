@@ -538,6 +538,9 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       searchMatterTypes: handleSearchMatterTypes,
       searchPracticeAreas: handleSearchPracticeAreas,
 
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
       getAssignWorkDefaults: () => ({
         // Projects don't have a matterTypeId; seed practice area from the project form
         assignWorkPracticeAreaId: formValuesRef.current.practiceAreaId,
