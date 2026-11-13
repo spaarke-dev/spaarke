@@ -4,7 +4,7 @@
     <title>Invoice-family rows re-derive their five resolver fields on a generic create and on an update that sets or changes their core lookup (Q8 (a))</title>
     <phase>2 W2 Unified RecordCreationService (follow-up to 045, 045b, 045c)</phase>
     <gate>045a, 045b and 045c merged into the work branch (c1afee6e02 or later). Owner go 2026-11-12. UAC-r2 reviews the diff before merge.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what the generic create and the generic update paths write on six tables (.cs, bff-api); changes the pre-write rule contract; access-rule adjacent; modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -100,7 +100,8 @@ Decision (main session, 2026-11-12; the proposal's open point 2): a derive failu
     <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-045d-notes.md</output>
   </outputs>
 
-  <notes>Added 2026-11-12 from the owner's go on Q8 (a). Create half from 045c's notes, update half from 045b's notes.</notes>
+  <notes>Added 2026-11-12 from the owner's go on Q8 (a). Create half from 045c's notes, update half from 045b's notes.
+Completed 2026-11-13: merged into the work branch at 0af492ed1c (task/fm-045d 9e772af961, five fix rounds; UAC-r2 re-PASS, ebilling-r1 PASS). Option (b): type, id and URL always written; name and number written when present, cleared when blank. Fixture follow-up 24bfd4a8e3 (SearchIndexDefaultTests answers the record-type catalog read). Gates on 24bfd4a8e3: sln 0 warnings; ArchTests 2539; project suites 8842/0/7. Publish at 0af492ed1c: +35,546 B vs fresh master d8b53ec0c3 (40.15 MB, 191 = 191 files); no vulnerable packages. Evidence and known limits: notes/task-045d-notes.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
