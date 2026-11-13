@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open. Decided by the owner (EB-D-231, 2026-11-13); the builder is being agreed with field-mapping-r1. |
+| **Status** | In progress. Decided by the owner (EB-D-231, 2026-11-13). Built by field-mapping-r1 as task 045g (branch task/fm-045g, after PR #2790), with line detach also refused; ebilling-r1 reviews before merge. |
 | **Urgency** | now |
 | **Filed** | 2026-11-13 |
 | **Source** | Owner question 2 (follow-on from #2772 / ISS-017); owner chose return-and-resubmit |
