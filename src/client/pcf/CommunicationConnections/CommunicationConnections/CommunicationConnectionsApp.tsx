@@ -43,7 +43,7 @@ import { ArrowClockwiseRegular, Dismiss24Regular, Search20Regular } from '@fluen
 import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
-  readRelativeRecordTarget,
+  readSameOriginRecordTarget,
   resolveRecordDisplayNameFieldName,
   type IPolymorphicWebApi,
   OOB_MODAL_SIZES,
@@ -329,7 +329,7 @@ async function handleRefreshInternal(): Promise<void> {
 /**
  * Resolve the entity + id the Row-2 record-number Link should open (the primary
  * regarding record). Primary source is the denormalized `sprk_regardingrecordurl`
- * (parse `etn` + `id`) when it is a same-origin relative record URL;
+ * (parse `etn` + `id`) when it is a same-origin record URL;
  * fallback matches a filed association by the primary record name. Returns null
  * when no target can be resolved. Never throws.
  */
@@ -338,9 +338,9 @@ function resolvePrimaryOpenTarget(
   filed: IFiledAssociation[],
   primaryName: string | null
 ): { entityName: string; entityId: string } | null {
-  // Only a same-origin relative record URL is read; any other stored value is never opened (the filed-association
+  // Only a same-origin record URL is read; any other stored value is never opened (the filed-association
   // fallback below, built from the row's own regarding lookups, takes over).
-  const fromUrl = readRelativeRecordTarget(url);
+  const fromUrl = readSameOriginRecordTarget(url);
   if (fromUrl) return fromUrl;
   if (primaryName) {
     const hit = filed.find(f => f.recordName === primaryName);

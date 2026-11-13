@@ -11,7 +11,7 @@ import {
   OOB_MODAL_SIZES,
   cleanGuid,
   getXrm,
-  readRelativeRecordTarget,
+  readSameOriginRecordTarget,
   resolveRegardingPairTable,
   safeRegardingRecordUrl,
 } from '@spaarke/ui-components';
@@ -153,7 +153,7 @@ export function openEventRecord(eventId: string): void {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Navigate to a parent record. Only a same-origin relative record URL is opened; any other value is refused
+ * Navigate to a parent record. Only a same-origin record URL is opened; any other value is refused
  * (nothing is navigated) and the URL passed on is rebuilt in the canonical form.
  */
 export function navigateToParentRecord(storedUrl: string): boolean {
@@ -187,7 +187,7 @@ export function navigateToParentRecord(storedUrl: string): boolean {
 }
 
 /**
- * The URL the Parent button may open: the stored regarding record URL when it is a same-origin relative record URL
+ * The URL the Parent button may open: the stored regarding record URL when it is a same-origin record URL
  * that names the row's regarding record; otherwise the URL built from the row's pair (the record type's table and the
  * record id); otherwise `null` (do not navigate).
  */
@@ -196,7 +196,7 @@ export async function resolveParentRecordUrl(
   recordTypeId: string | null | undefined,
   recordId: string | null | undefined
 ): Promise<string | null> {
-  const stored = readRelativeRecordTarget(storedUrl);
+  const stored = readSameOriginRecordTarget(storedUrl);
   const pairId = cleanGuid(recordId);
   // The stored value is a record URL that names the pair's record (or there is no pair to compare): no lookup needed.
   if (stored && (!pairId || stored.entityId === pairId)) {

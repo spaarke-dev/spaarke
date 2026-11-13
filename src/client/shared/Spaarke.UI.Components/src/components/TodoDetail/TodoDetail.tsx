@@ -718,7 +718,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       if (!record) return;
       const typeName = record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] ?? '';
       const pairEntityName = RECORD_TYPE_ENTITY_MAP[typeName];
-      // Path 1: the host is handed only a same-origin relative record URL: the stored value when it is one, else the
+      // Path 1: the host is handed only a same-origin record URL: the stored value when it is one, else the
       // URL built from the row's pair (FR-13, ADR-024 resolver-field path). Any other stored value is never passed on.
       if (onOpenRegardingUrl) {
         const safeUrl = safeRegardingRecordUrl(

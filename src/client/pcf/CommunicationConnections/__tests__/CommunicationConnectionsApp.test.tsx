@@ -39,10 +39,8 @@ jest.mock('@spaarke/ui-components', () => {
     __esModule: true,
     TODO_REGARDING_CATALOG,
     cleanGuid: (id: string) => String(id).replace(/[{}]/g, '').toLowerCase(),
-    // The ONE regarding-record-URL reader (task 045f): real implementation, from TS source.
-    readRelativeRecordTarget: jest.requireActual(
-      '../../../shared/Spaarke.UI.Components/src/utils/safeRegardingRecordUrl'
-    ).readRelativeRecordTarget,
+    // The ONE regarding-record-URL rule (task 045f): real implementation, from TS source.
+    ...jest.requireActual('../../../shared/Spaarke.UI.Components/src/utils/safeRegardingRecordUrl'),
     resolveRecordDisplayNameFieldName: jest.fn().mockResolvedValue(null),
     // task 081 (C-8): the App resolves Xrm through the shared cross-frame
     // walker. Pass the REAL implementation through (from TS source) — the
@@ -94,7 +92,8 @@ function buildContext(overrides?: {
   const denorm = overrides?.denorm ?? {
     number: 'MTR-2025-0001',
     name: 'Acme v. Beta',
-    url: '/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    // What the shared client writer stores today: an absolute URL on the org's own origin.
+    url: `${window.location.origin}/main.aspx?appid=11111111-1111-1111-1111-111111111111&pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`,
   };
 
   // The denorm effect retrieves the host communication WITHOUT $select (opts === undefined);
@@ -238,14 +237,43 @@ describe('CommunicationConnectionsApp — RegardingResolver card parity (task 13
     expect(navOptions).toMatchObject({ target: 2 });
   });
 
+  it('number Link opens a relative record URL from the denorm field', async () => {
+    const navigateTo = jest.fn().mockResolvedValue(undefined);
+    (global as { Xrm?: unknown }).Xrm = {
+      WebApi: { retrieveRecord: jest.fn(), retrieveMultipleRecords: jest.fn() },
+      Navigation: { navigateTo },
+      Page: { data: { entity: { getId: () => HOST_ID } } },
+    };
+
+    const { context } = buildContext({
+      denorm: {
+        number: 'MTR-2025-0001',
+        name: 'Acme v. Beta',
+        url: '/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      },
+    });
+    renderApp(context);
+
+    fireEvent.click(await screen.findByTestId('cc-record-number'));
+    await waitFor(() => expect(navigateTo).toHaveBeenCalled());
+    expect(navigateTo.mock.calls[0][0]).toMatchObject({
+      entityName: 'sprk_matter',
+      entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    });
+  });
+
   it.each([
     [
       'an absolute URL on another host',
       'https://evil.example/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     ],
     [
-      'an absolute URL on the org host',
+      'an absolute URL on another origin (https host vs the page origin)',
       'https://test.crm.dynamics.com/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    ],
+    [
+      'the page host over the other scheme',
+      `${window.location.origin.startsWith('https') ? 'http' : 'https'}://${window.location.host}/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`,
     ],
     ['a javascript scheme', 'javascript:alert(1)'],
     ['a protocol-relative URL', '//evil.example/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'],

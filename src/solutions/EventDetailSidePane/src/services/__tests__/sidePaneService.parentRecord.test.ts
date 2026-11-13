@@ -10,6 +10,8 @@ const MATTER_ID = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
 const OTHER_ID = '11111111-2222-3333-4444-555555555555';
 const TYPE_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 const CANONICAL = `/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=${MATTER_ID}`;
+const ORG = 'https://org.crm.dynamics.com';
+const ABSOLUTE = `${ORG}/main.aspx?appid=11111111-1111-1111-1111-111111111111&pagetype=entityrecord&etn=sprk_matter&id=${MATTER_ID}`;
 
 const openUrl = jest.fn();
 const retrieveRecord = jest.fn();
@@ -21,6 +23,7 @@ beforeEach(() => {
   jest.spyOn(console, 'warn').mockImplementation(() => undefined);
   jest.spyOn(console, 'error').mockImplementation(() => undefined);
   (globalThis as unknown as { window: unknown }).window = {
+    location: { origin: ORG },
     Xrm: { Navigation: { openUrl }, WebApi: { retrieveRecord } },
   };
   (globalThis as unknown as { window: { parent: unknown } }).window.parent = (globalThis as unknown as { window: unknown })
@@ -51,6 +54,29 @@ describe('navigateToParentRecord', () => {
   });
 });
 
+describe('same-origin absolute stored URL (what the shared client writer stores)', () => {
+  it('is opened in its canonical relative form without reading the pair', async () => {
+    await expect(openParentRecord(ABSOLUTE, TYPE_ID, MATTER_ID)).resolves.toBe(true);
+    expect(openUrl).toHaveBeenCalledWith({ url: CANONICAL });
+    expect(retrieveRecord).not.toHaveBeenCalled();
+  });
+
+  it('navigateToParentRecord opens it relative; the host and appid never reach openUrl', () => {
+    expect(navigateToParentRecord(ABSOLUTE)).toBe(true);
+    expect(openUrl).toHaveBeenCalledWith({ url: CANONICAL });
+  });
+
+  it('is not opened when the page origin differs (http vs https on the same host)', async () => {
+    (globalThis as unknown as { window: { location: { origin: string } } }).window.location.origin =
+      'http://org.crm.dynamics.com';
+    expect(navigateToParentRecord(ABSOLUTE)).toBe(false);
+    expect(openUrl).not.toHaveBeenCalled();
+    await expect(openParentRecord(ABSOLUTE, TYPE_ID, MATTER_ID)).resolves.toBe(true);
+    expect(openUrl).toHaveBeenCalledWith({ url: CANONICAL }); // built from the pair
+    expect(retrieveRecord).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('openParentRecord', () => {
   it('opens the stored URL when it is a same-origin relative record URL naming the pair, without a lookup', async () => {
     await expect(openParentRecord(CANONICAL, TYPE_ID, MATTER_ID)).resolves.toBe(true);
@@ -60,7 +86,7 @@ describe('openParentRecord', () => {
 
   it.each([
     ['another host', `https://evil.example/main.aspx?pagetype=entityrecord&etn=contact&id=${OTHER_ID}`],
-    ['an absolute URL on the org host', `https://org.crm.dynamics.com/main.aspx?etn=sprk_matter&id=${MATTER_ID}`],
+    ['an absolute URL on another origin', `https://other.crm.dynamics.com/main.aspx?etn=sprk_matter&id=${MATTER_ID}`],
     ['a javascript scheme', 'javascript:alert(1)'],
     ['a protocol-relative URL', `//evil.example/main.aspx?etn=sprk_matter&id=${MATTER_ID}`],
     ['a relative URL naming another record', `/main.aspx?etn=contact&id=${OTHER_ID}`],

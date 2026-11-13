@@ -284,7 +284,7 @@ import type { ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components/di
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
 import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import {
-  readRelativeRecordTarget,
+  readSameOriginRecordTarget,
   resolveRegardingPairTable,
 } from '@spaarke/ui-components/dist/utils/safeRegardingRecordUrl';
 
@@ -685,8 +685,8 @@ async function resolveClickTarget(
   try {
     const result = await webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl');
     const urlValue = result?.sprk_regardingrecordurl;
-    // Only a same-origin relative record URL is read; any other stored value is never opened.
-    const fromUrl = readRelativeRecordTarget(typeof urlValue === 'string' ? urlValue : null);
+    // Only a same-origin record URL is read; any other stored value is never opened.
+    const fromUrl = readSameOriginRecordTarget(typeof urlValue === 'string' ? urlValue : null);
     if (fromUrl) return fromUrl;
 
     // Otherwise build the target from the row's pair: the record id and the table of its record type.

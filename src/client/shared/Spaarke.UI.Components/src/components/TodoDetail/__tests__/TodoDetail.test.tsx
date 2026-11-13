@@ -355,6 +355,14 @@ describe('TodoDetail — open regarding record', () => {
     });
   };
 
+  it('passes a same-origin absolute stored URL (with appid) to the host in its relative form', async () => {
+    const onOpenRegardingUrl = jest.fn();
+    const absolute = `${window.location.origin}/main.aspx?appid=11111111-1111-1111-1111-111111111111&pagetype=entityrecord&etn=sprk_matter&id=${MATTER_ID}`;
+    await openRegarding(withRegarding(absolute), onOpenRegardingUrl);
+    expect(onOpenRegardingUrl).toHaveBeenCalledTimes(1);
+    expect(onOpenRegardingUrl).toHaveBeenCalledWith(CANONICAL);
+  });
+
   it('passes a same-origin relative stored URL to the host', async () => {
     const onOpenRegardingUrl = jest.fn();
     await openRegarding(withRegarding(CANONICAL), onOpenRegardingUrl);
