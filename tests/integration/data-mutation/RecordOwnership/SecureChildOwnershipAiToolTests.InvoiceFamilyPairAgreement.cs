@@ -152,7 +152,120 @@ public sealed partial class SecureChildOwnershipAiToolTests
             PairTypeItem(RecordTypeMatter));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        _user.Patches.Should().ContainSingle();
+        var body = BodyOf(_user.Patches.Should().ContainSingle().Subject.Body);
+        body["sprk_regardingrecordid"].GetString().Should().Be(OrdinaryMatter.ToString("D").ToLowerInvariant(),
+            "the pair id is written in its canonical form, whatever spelling was sent");
+    }
+
+    [Fact(DisplayName = "045e (canonical id): PATCH of an invoice whose agreeing pair id is braced and upper-case writes it canonical")]
+    public async Task ChildRefile_AnAgreeingInvoicePairIdInAnotherSpelling_IsWrittenCanonical()
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoice", "sprk_matter", PairFamilyRow);
+        var sent = InvoicePair(OrdinaryMatter, RecordTypeMatter);
+        sent["sprk_regardingrecordid"] = OrdinaryMatter.ToString("B").ToUpperInvariant();
+
+        var result = await RefileChild("sprk_invoice", PairFamilyRow, sent);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        var body = _user.Patches.Should().ContainSingle().Subject.Body;
+        PatchedColumn(body, "sprk_regardingrecordid").GetString().Should().Be(OrdinaryMatter.ToString("D").ToLowerInvariant());
+    }
+
+    // ── A write that moves the core lookup: the derived pair is written; naming the same record is no move ──────────
+
+    [Fact(DisplayName = "045e (core move): PATCH moving an invoice to a project with a pair naming another record writes the derived pair")]
+    public async Task ChildRefile_AnInvoiceMovedToAProject_WithADisagreeingPair_IsWrittenWithTheDerivedPair()
+    {
+        InvoiceOnTheMatter_MovingToTheProject();
+        var sent = MoveGuardInvoiceToTheProject();
+        foreach (var (key, value) in InvoicePair(PairOtherMatter, RecordTypeMatter))
+            sent[key] = value;
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, sent);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        ShouldCarryTheFiveOf(BodyOf(_user.Patches.Should().ContainSingle().Subject.Body), "sprk_project", OrdinaryProject,
+            "sprk_regardingrecordtype");
+    }
+
+    [Fact(DisplayName = "045e (core move): PATCH binding an invoice's matter to the matter it names, with a pair naming another, is refused")]
+    public async Task ChildRefile_AnInvoiceMatterBoundToTheSameMatter_WithADisagreeingPair_IsRefusedMismatch()
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoice", "sprk_matter", PairFamilyRow);
+        var sent = InvoicePair(PairOtherMatter, RecordTypeMatter);
+        sent["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})";
+
+        var result = await RefileChild("sprk_invoice", PairFamilyRow, sent);
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "045e (core move): the chat tool moving an approval to another matter with a pair naming the old one writes the derived pair")]
+    public async Task UpdateRecordTool_AnApprovalMovedToAnotherMatter_WithADisagreeingPair_IsWrittenWithTheDerivedPair()
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoiceapproval", "sprk_regardingmatter", PairFamilyRow);
+        _world.WithRecord("sprk_matter", RederiveMatter, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await UpdateRecord("sprk_invoiceapproval", PairFamilyRow,
+            Lookup("sprk_regardingmatter", "sprk_matter", RederiveMatter), PairIdItem(OrdinaryMatter), PairTypeItem(RecordTypeMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var body = BodyOf(_user.Patches.Should().ContainSingle().Subject.Body);
+        body["sprk_regardingrecordid"].GetString().Should().Be(RederiveMatter.ToString("D").ToLowerInvariant());
+        body["sprk_RegardingRecordType@odata.bind"].GetString().Should().Be($"/sprk_recordtype_refs({RecordTypeMatter:D})");
+    }
+
+    [Fact(DisplayName = "045e (core move): the chat tool setting an approval's matter to the one it names, with a pair naming another, is refused")]
+    public async Task UpdateRecordTool_AnApprovalMatterSetToTheSameMatter_WithADisagreeingPair_IsRefusedMismatch()
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoiceapproval", "sprk_regardingmatter", PairFamilyRow);
+
+        var result = await UpdateRecord("sprk_invoiceapproval", PairFamilyRow,
+            Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter), PairIdItem(PairOtherMatter), PairTypeItem(RecordTypeMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode, result.ErrorMessage);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    // ── D-68: an external identifier filed under its invoice alone (no core lookup) ─────────────────────────────────
+
+    private void StoredInvoiceOnlyExternalIdentifier()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _user.RowValues[PairFamilyRow] = new Dictionary<string, object?> { ["_sprk_regardinginvoice_value"] = GuardInvoice.ToString("D") };
+        _world.WithRecord("sprk_externalidentifier", PairFamilyRow, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", GuardInvoice) });
+        CatalogKnowsTheMatterType();
+        _user.RecordTypes[ScriptedUserClient.CatalogTypeIdOf("sprk_invoice")] = "sprk_invoice";
+    }
+
+    [Fact(DisplayName = "045e D-68 (must not fire): the chat tool writes an invoice-only identifier's pair naming its invoice, canonical")]
+    public async Task UpdateRecordTool_AnInvoiceOnlyIdentifierPairNamingItsInvoice_IsWrittenCanonical()
+    {
+        StoredInvoiceOnlyExternalIdentifier();
+
+        var result = await UpdateRecord("sprk_externalidentifier", PairFamilyRow,
+            ("sprk_regardingrecordid", JsonSerializer.SerializeToElement(GuardInvoice.ToString("B").ToUpperInvariant())),
+            PairTypeItem(ScriptedUserClient.CatalogTypeIdOf("sprk_invoice")));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        BodyOf(_user.Patches.Should().ContainSingle().Subject.Body)["sprk_regardingrecordid"].GetString().Should()
+            .Be(GuardInvoice.ToString("D").ToLowerInvariant());
+    }
+
+    [Fact(DisplayName = "045e D-68 (must fire): the chat tool refuses an invoice-only identifier's pair naming a matter")]
+    public async Task UpdateRecordTool_AnInvoiceOnlyIdentifierPairNamingAMatter_IsRefusedMismatch()
+    {
+        StoredInvoiceOnlyExternalIdentifier();
+
+        var result = await UpdateRecord("sprk_externalidentifier", PairFamilyRow, PairIdItem(OrdinaryMatter), PairTypeItem(RecordTypeMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode, result.ErrorMessage);
+        _user.Patches.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "045e (must not fire): a rename of a family row reads no catalog and is written")]

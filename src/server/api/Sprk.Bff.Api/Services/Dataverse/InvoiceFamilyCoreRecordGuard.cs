@@ -553,8 +553,11 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <item>A half that names no record (a clear, a blank) disagrees on an update: the row would be left without the pair of its
     /// core record. On a create it is not checked: the server writes the pair from the core record (step 5½).</item>
     /// <item>An update that moves the core record (writes a core lookup, and the row then names another record than it did) is
-    /// not checked: 045d's derive replaces the pair with the one of the record the row will name. An update that re-names the
-    /// record the row already names is checked like any other.</item>
+    /// not checked when <paramref name="aCoreMoveIsChecked"/> is false: the caller (the app-only gate,
+    /// <see cref="KeepRegardingPairAgreeingAsync"/>) removes the pair, and 045d's derive writes the one of the record the row
+    /// will name. The caller update paths run the derive BEFORE this check, so they pass true: the pair as it will be written
+    /// (the derived one, or the one sent when the derive found nothing to move) must name the record the row will name. An
+    /// update that re-names the record the row already names is checked like any other.</item>
     /// <item>A row that names no single core record after the write is refused with the guard's own answer for it.</item>
     /// <item>Fail closed: no catalog reader, or a catalog read that faults, is <see cref="ReadFailedCode"/> (the fault's own
     /// text stays out of the reason); a core table with no active catalog row is <see cref="ResolverFieldsIncompleteCode"/>.
@@ -567,6 +570,7 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <param name="after"><see cref="Check(string, Func{string, object?})"/> on the row as it will be after the write.</param>
     /// <param name="before"><see cref="Check(string, Func{string, object?})"/> on the stored row; null on a create.</param>
     /// <param name="recordTypes">The APP-ONLY catalog reader (the row of a table); null fails closed when the type is checked.</param>
+    /// <param name="aCoreMoveIsChecked">True on a path whose derive has already run (the caller update paths).</param>
     public static async Task<InvoiceFamilyCoreRecord?> CheckRegardingPairAgreesAsync(
         string entityLogicalName,
         IEnumerable<string> writtenColumns,
@@ -574,7 +578,8 @@ public static class InvoiceFamilyCoreRecordGuard
         InvoiceFamilyCoreRecord after,
         InvoiceFamilyCoreRecord? before,
         RecordTypeLookup? recordTypes,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool aCoreMoveIsChecked = false)
     {
         ArgumentNullException.ThrowIfNull(writtenColumns);
         ArgumentNullException.ThrowIfNull(after);
@@ -582,7 +587,7 @@ public static class InvoiceFamilyCoreRecordGuard
             return null;
 
         var create = before is null;
-        if (!create
+        if (!create && !aCoreMoveIsChecked
             && writtenColumns.Select(ColumnOfKey).Any(c => coreColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
             && !NamesTheSameRecord(after, before!))
         {
@@ -696,17 +701,10 @@ public static class InvoiceFamilyCoreRecordGuard
         if (stored is null)
             return InvoiceFamilyCoreRecord.Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written.");
 
-        // Task 045e: the regarding pair the patch sends agrees with the core record the row will name (the catalog read app-only).
-        var pair = RegardingPairWrite.Of(entity, patch);
-        var storedDecision = Check(entity, column => stored.Attributes.TryGetValue(column, out var kept) ? kept : null);
+        // Task 045e: the regarding pair is decided later, on the payload as it will be written (after the pair planner), by
+        // KeepRegardingPairAgreeingAsync — the path's derive step calls it — not here on the payload as sent.
         if (change.Count == 0)
-        {
-            // The row exists and the patch moves no guarded lookup: only the pair it sends is left to decide.
-            return pair.SetsEither
-                ? await CheckRegardingPairAgreesAsync(entity, change.Keys, pair, storedDecision, storedDecision,
-                    AppOnlyRecordTypes(appOnly), ct).ConfigureAwait(false)
-                : null;
-        }
+            return null; // the row exists and the patch moves no guarded lookup: nothing more to decide
 
         object? Effective(string column) =>
             change.TryGetValue(column, out var changed) ? changed
@@ -739,13 +737,140 @@ public static class InvoiceFamilyCoreRecordGuard
             IsInvoice(entity) && WritesCoreLookup(entity, change.Keys) ? WorkAssignmentFiledUnderInvoice(appOnly, recordId) : null)
             .ConfigureAwait(false);
 
-        if (decided.IsRefused)
-            return decided;
-        return pair.SetsEither
-            ? await CheckRegardingPairAgreesAsync(entity, change.Keys, pair, decided, storedDecision, AppOnlyRecordTypes(appOnly), ct)
-                .ConfigureAwait(false)
-            : null;
+        return decided.IsRefused ? decided : null;
     }
+
+    /// <summary>
+    /// Task 045e (fix round 1, K1/K2/F2): the app-only update paths' regarding-pair gate, on the payload as it will be written —
+    /// after the 045b planner (so a pair the planner writes is decided too) and before 045d's derive and the write. Every
+    /// app-only path (playbook update, output orchestrator, field-mapping push) reaches it through its derive step
+    /// (<c>OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync</c>), whose refusal form it answers through.
+    /// <list type="bullet">
+    /// <item>A payload that sends no pair or resolver column, or a table outside the family: unchanged, nothing read.</item>
+    /// <item>A payload that moves the row's core record (writes a core lookup, and the row then names another record than its
+    /// stored one): every pair and resolver column is REMOVED, so only 045d's derive writes them — the pair of the record the
+    /// row will name. A derive that then finds nothing to derive (the core was already moved) leaves the stored pair.</item>
+    /// <item>Otherwise <see cref="CheckRegardingPairAgreesAsync"/> on the stored row (read app-only) overlaid with the payload;
+    /// when it admits a pair id, the id is written as the core record's id in canonical form (lower-case "D"), whatever text
+    /// was sent, so the D-68 alternate key never takes another spelling of the same id.</item>
+    /// <item>Fail closed: no reader, a read that faults, or a missing row writes nothing (the guard's codes).</item>
+    /// </list>
+    /// </summary>
+    public static async Task<(Dictionary<string, object?> Payload, InvoiceFamilyCoreRecord? Refusal)> KeepRegardingPairAgreeingAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> payload,
+        IGenericEntityService? appOnly,
+        CancellationToken ct,
+        bool writeIsImpersonated = false)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (!CoreRecordLookups.ContainsKey(entity)
+            || !payload.Keys.Any(k => !string.IsNullOrWhiteSpace(k)
+                                      && Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns
+                                          .Contains(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k))))
+        {
+            return (payload, null);
+        }
+
+        if (appOnly is null)
+            return (payload, Refused(entity, ReadFailedCode, $"What this {entity} is filed under cannot be read here; nothing was written."));
+
+        var guarded = GuardedLookups(entity)!;
+        Entity? stored;
+        try
+        {
+            stored = await appOnly.RetrieveAsync(entity, recordId, guarded.Select(g => g.Column).ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return (payload, IsRecordNotFound(ex)
+                ? NotFoundAs(Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written."), writeIsImpersonated)
+                : Refused(entity, ReadFailedCode, $"What this {entity} is filed under could not be read ({ex.GetType().Name}); nothing was written."));
+        }
+
+        if (stored is null)
+            return (payload, NotFoundAs(Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written."), writeIsImpersonated));
+
+        var change = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in payload)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var target = guarded.FirstOrDefault(g => string.Equals(g.Column, ColumnOfKey(key), StringComparison.OrdinalIgnoreCase));
+            if (target.Column is not null)
+            {
+                change[target.Column] = value is string bind && IsBindKey(key) && TryParseBind(bind, out var id)
+                    ? new EntityReference(target.Table, id)
+                    : value;
+            }
+        }
+
+        var before = Check(entity, column => stored.Attributes.TryGetValue(column, out var kept) ? kept : null);
+        var after = Check(entity, column =>
+            change.TryGetValue(column, out var changed) ? changed
+            : stored.Attributes.TryGetValue(column, out var kept) ? kept
+            : null);
+
+        if (ColumnsToRead(entity) is { } coreColumns
+            && change.Keys.Any(c => coreColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+            && !after.IsRefused && !NamesTheSameRecord(after, before))
+        {
+            // K1: the core record moves, so the pair and its display are the derive's alone.
+            var dropped = new Dictionary<string, object?>(payload.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in payload)
+            {
+                if (!Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns
+                        .Contains(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key)))
+                {
+                    dropped[key] = value;
+                }
+            }
+
+            return (dropped, null);
+        }
+
+        var pair = RegardingPairWrite.Of(entity, payload);
+        if (!pair.SetsEither)
+            return (payload, null); // display columns only: the pair they describe is not changed by this write
+
+        var disagrees = await CheckRegardingPairAgreesAsync(entity, change.Keys, pair, after, before, AppOnlyRecordTypes(appOnly), ct)
+            .ConfigureAwait(false);
+        if (disagrees is not null)
+            return (payload, disagrees);
+
+        return (WithCanonicalPairId(payload, after), null);
+
+        static InvoiceFamilyCoreRecord Refused(string table, string code, string reason) =>
+            InvoiceFamilyCoreRecord.Refused(table, code, reason);
+    }
+
+    /// <summary>
+    /// Task 045e (fix round 1, F2): <paramref name="payload"/> with every text value under the pair id column replaced by
+    /// <paramref name="admitted"/>'s record id in canonical form (lower-case "D"). Call only after
+    /// <see cref="CheckRegardingPairAgreesAsync"/> admitted the pair, so the text named that same id.
+    /// </summary>
+    internal static Dictionary<string, object?> WithCanonicalPairId(Dictionary<string, object?> payload, InvoiceFamilyCoreRecord admitted)
+    {
+        if (admitted.Regarding is not { } regarding)
+            return payload;
+        var canonical = CanonicalPairId(regarding.Id);
+        var written = new Dictionary<string, object?>(payload, payload.Comparer);
+        foreach (var key in payload.Keys)
+        {
+            if (string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key), Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, StringComparison.Ordinal)
+                && payload[key] is string text && !string.IsNullOrWhiteSpace(text))
+            {
+                written[key] = canonical;
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>Task 045e: a pair id as the server writes it — lower-case "D", the form 045d's derive writes.</summary>
+    public static string CanonicalPairId(Guid id) => id.ToString("D").ToLowerInvariant();
 
     /// <summary>
     /// The refusal text the generic update paths surface (task 026 fix-round-2): the stable code and a fixed sentence, never

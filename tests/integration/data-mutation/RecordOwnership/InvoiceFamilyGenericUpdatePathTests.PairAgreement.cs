@@ -141,6 +141,24 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task APairThePathsPlannerClears_IsDecidedAsWritten_AndRefused_NothingIsWritten(GenericPath path)
+    {
+        // The check decides the payload as it will be written, after the path's pair planner. A type-only write of the matter type
+        // to an approval: the planner (045b rule 2) finds no agreeing lookup of that table on this row and clears the pair — a
+        // payload that would leave the row without the pair of its core record, which the request itself never sent.
+        var app = StoredUnderTheMatter("sprk_invoiceapproval");
+        app.Setup(a => a.RetrieveAsync("sprk_recordtype_ref", CatalogRowOf("sprk_matter"), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", CatalogRowOf("sprk_matter")) { ["sprk_recordlogicalname"] = "sprk_matter" });
+
+        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))), NoPlain,
+            app.Object);
+
+        RefusedAsDisagreeing(outcome);
+    }
+
+    [Theory]
     [MemberData(nameof(InvoiceFamilyTables))]
     public async Task APushRuleAimedAtThePair_IsSkipped_AndNothingIsWritten(string table)
     {
@@ -158,14 +176,57 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [MemberData(nameof(EveryPairWritingPathAndFamilyTable))]
-    public async Task ThePairOfTheCoreRecord_IsWrittenAsSent(GenericPath path, string table)
+    public async Task ThePairOfTheCoreRecord_IsWritten_WithItsIdInCanonicalForm(GenericPath path, string table)
     {
-        var outcome = await RunAsync(path, table, FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))), PairId(Matter),
+        var sent = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = Matter.ToString("B").ToUpperInvariant() };
+
+        var outcome = await RunAsync(path, table, FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))), sent,
             StoredUnderTheMatter(table).Object);
 
         outcome.Code.Should().BeNull(outcome.Message);
         WrittenOnce(table, FamilyRow);
-        SentPayload(table, FamilyRow)["sprk_regardingrecordid"].Should().Be(Matter.ToString("D"));
+        SentPayload(table, FamilyRow)["sprk_regardingrecordid"].Should().Be(Matter.ToString("D").ToLowerInvariant(),
+            "the D-68 key never takes another spelling of the same id");
+    }
+
+    /// <summary>An external identifier filed under its invoice alone (D-68: no core lookup), as the app reads it.</summary>
+    private static Mock<IGenericEntityService> StoredUnderTheInvoiceOnly()
+    {
+        var app = new Mock<IGenericEntityService>();
+        app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>())).ReturnsAsync(new EntityCollection());
+        app.Setup(a => a.RetrieveAsync("sprk_externalidentifier", FamilyRow, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_externalidentifier", FamilyRow)
+            {
+                [InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn] = new EntityReference("sprk_invoice", Invoice),
+            });
+        return app;
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AnExternalIdentifierFiledUnderAnInvoiceOnly_GivenItsInvoicesPair_IsWritten_WithTheIdCanonical(GenericPath path)
+    {
+        // D-68: the row regards its invoice, so the invoice's pair agrees; it is never refused as naming no core record.
+        var sent = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = Invoice.ToString("N").ToUpperInvariant() };
+
+        var outcome = await RunAsync(path, "sprk_externalidentifier", FamilyRow, Lookups(PairType(CatalogRowOf("sprk_invoice"))), sent,
+            StoredUnderTheInvoiceOnly().Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        WrittenOnce("sprk_externalidentifier", FamilyRow);
+        SentPayload("sprk_externalidentifier", FamilyRow)["sprk_regardingrecordid"].Should().Be(Invoice.ToString("D").ToLowerInvariant());
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AnExternalIdentifierFiledUnderAnInvoiceOnly_GivenAMattersPair_IsRefused(GenericPath path)
+    {
+        var outcome = await RunAsync(path, "sprk_externalidentifier", FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))),
+            PairId(Matter), StoredUnderTheInvoiceOnly().Object);
+
+        RefusedAsDisagreeing(outcome);
     }
 
     [Theory]

@@ -1043,10 +1043,30 @@ internal static class OwnedChildWrite
         IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
         ILogger? logger, CancellationToken ct)
     {
+        item = WithCanonicalFamilyPairId(table, item);
         var kept = await KeepRegardingPairWholeCoreAsync(user, table, entitySetName, recordId, item, logger, ct).ConfigureAwait(false);
         return kept.Refusal is not null
             ? kept
             : await KeepInvoiceFamilyResolverFieldsAsync(user, table, entitySetName, recordId, kept.Item, logger, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 045e (fix round 1, F2): on an invoice-family table, a pair id the caller sends that reads as an id is written in
+    /// canonical form (lower-case "D", <see cref="InvoiceFamilyCoreRecordGuard.CanonicalPairId"/>), so the D-68 alternate key
+    /// never takes another spelling of the same id. Whether that id may be written is the guard's agreement check, later in the
+    /// re-file core; text that is not an id is left for it to refuse. Other tables: unchanged.
+    /// </summary>
+    internal static DataverseWriteItemMapper.MappedItem WithCanonicalFamilyPairId(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        if (InvoiceFamilyCoreRecordGuard.ColumnsToRead(table) is null)
+            return item;
+        var pair = PairOf(item);
+        if (!pair.SetsId || pair.IdText is not { } text || !Guid.TryParse(text.Trim(), out var id))
+            return item;
+        var canonical = InvoiceFamilyCoreRecordGuard.CanonicalPairId(id);
+        return string.Equals(text, canonical, StringComparison.Ordinal)
+            ? item
+            : WithColumnsSet(table, item, new Dictionary<string, object?> { [SecureRootInheritance.PairIdColumn] = canonical });
     }
 
     /// <summary>
@@ -1446,6 +1466,17 @@ internal static class OwnedChildWrite
         ILogger? logger, CancellationToken ct, bool writeIsImpersonated = false)
     {
         ArgumentNullException.ThrowIfNull(displayRecord);
+
+        // Task 045e (fix round 1, K1/K2/F2): first the regarding-pair gate on the payload as it will be written (after the 045b
+        // planner the path ran just before): a pair and its display are removed when the core record moves (only the derive
+        // below writes them), and otherwise must name the row's core record, its id written in canonical form.
+        var gated = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(table, recordId, payload, entities, ct,
+                writeIsImpersonated)
+            .ConfigureAwait(false);
+        if (gated.Refusal is { } pairRefusal)
+            return (payload, pairRefusal.RefusalCode ?? InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        payload = gated.Payload;
+
         var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync(table, recordId, payload, entities,
                 CallerDisplayRecords(entities, displayRecord), ct, writeIsImpersonated)
             .ConfigureAwait(false);
@@ -2175,11 +2206,12 @@ internal static class OwnedChildWrite
             return InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(decided, null, false));
 
         // Task 045e: the regarding pair the write sends agrees with the core record the row will name. On a create, before step
-        // 5½'s derive; on an update, after the planner and 045d's derive (a core-record move is not checked: the derive's pair
-        // replaced the one sent).
+        // 5½'s derive (which writes the pair from the core record). On an update, after the planner and 045d's derive, so a
+        // core-record move is checked too (fix round 1, K1): the pair is the derived one, or — when the derive found nothing to
+        // move — the one sent, which must then name the record the row will name.
         var disagrees = await InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync(table, written, pair, decided,
                 stored is null ? null : InvoiceFamilyCoreRecordGuard.Check(table, column => before.TryGetValue(column, out var kept) ? kept : null),
-                recordTypes, ct)
+                recordTypes, ct, aCoreMoveIsChecked: stored is not null)
             .ConfigureAwait(false);
         return disagrees is not null
             ? InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(disagrees, null, false))

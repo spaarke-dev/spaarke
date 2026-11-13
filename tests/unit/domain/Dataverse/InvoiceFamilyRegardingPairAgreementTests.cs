@@ -165,14 +165,165 @@ public class InvoiceFamilyRegardingPairAgreementTests
         _reads.Should().Equal("catalog:" + core);
     }
 
-    [Fact]
-    public async Task AnIdInAnotherCase_OrBraced_Agrees()
+    // ── Fix round 1: the app-only gate on the payload as it will be written (F2 canonical id, K1 move, K2 planned pair) ──
+
+    private static readonly Guid Row = Guid.Parse("a045e000-0000-4000-8000-0000000000a1");
+
+    /// <summary>The app-only reader: the stored row answers <paramref name="storedCores"/> in turn (the last one again after),
+    /// filed through <paramref name="column"/>; the catalog's active row of every table is <see cref="CatalogRow"/>.</summary>
+    private Mock<IGenericEntityService> AppOnly(string table, string column, string core, params Guid[] storedCores)
     {
-        foreach (var text in new[] { Core.ToString("D").ToUpperInvariant(), Core.ToString("B"), $"  {Core:D} " })
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var reads = 0;
+        app.Setup(a => a.RetrieveAsync(table, Row, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var at = Math.Min(reads++, storedCores.Length - 1);
+                _reads.Add("stored");
+                return new Entity(table, Row) { [column] = new EntityReference(core, storedCores[at]) };
+            });
+        app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+            {
+                _reads.Add("catalog:" + q.Criteria.Conditions[0].Values[0]);
+                return new EntityCollection(new List<Entity> { new("sprk_recordtype_ref", CatalogRow) });
+            });
+        return app;
+    }
+
+    private static Dictionary<string, object?> PairPayload(string idText, Guid? type = null)
+    {
+        var payload = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = idText };
+        if (type is { } typeId)
+            payload["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+        return payload;
+    }
+
+    [Theory]
+    [MemberData(nameof(FamilyCores))]
+    public async Task Gate_AnAgreeingIdInAnotherSpelling_IsWrittenInCanonicalForm(string table, string column, string core)
+    {
+        foreach (var text in new[] { Core.ToString("D").ToUpperInvariant(), Core.ToString("B"), $"  {Core:D} ", Core.ToString("N") })
         {
-            (await PairOnlyUpdate("sprk_invoice", "sprk_matter", "sprk_matter",
-                new RegardingPairWrite(SetsId: true, text, SetsType: false, null, Unreadable: false))).Should().BeNull(text);
+            var (payload, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+                table, Row, PairPayload(text, CatalogRow), AppOnly(table, column, core, Core).Object, CancellationToken.None);
+
+            refusal.Should().BeNull(text);
+            payload["sprk_regardingrecordid"].Should().Be(Core.ToString("D").ToLowerInvariant(),
+                "the D-68 key never takes another spelling of the same id: " + text);
         }
+    }
+
+    [Fact]
+    public async Task Gate_ACanonicalAgreeingId_IsWrittenAsSent()
+    {
+        var (payload, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            "sprk_invoice", Row, PairPayload(Core.ToString("D")), AppOnly("sprk_invoice", "sprk_matter", "sprk_matter", Core).Object,
+            CancellationToken.None);
+
+        refusal.Should().BeNull();
+        payload["sprk_regardingrecordid"].Should().Be(Core.ToString("D"));
+    }
+
+    [Theory]
+    [MemberData(nameof(FamilyCores))]
+    public async Task Gate_APlannedPairNamingAnotherRecord_IsRefused(string table, string column, string core)
+    {
+        // K2: the gate decides the payload as the path's planner left it, whatever the request sent.
+        var (_, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            table, Row, PairPayload(OtherCore.ToString("D"), CatalogRow), AppOnly(table, column, core, Core).Object, CancellationToken.None);
+
+        RefusedAsDisagreeing(refusal);
+    }
+
+    [Theory]
+    [MemberData(nameof(FamilyCores))]
+    public async Task Gate_ACoreMove_RemovesThePairAndItsDisplay_SoOnlyTheDeriveWritesThem(string table, string column, string core)
+    {
+        var payload = PairPayload(Guid.NewGuid().ToString("D"), OtherCatalogRow);
+        payload[column] = new EntityReference(core, OtherCore);
+        payload["sprk_regardingrecordname"] = "Sent";
+        payload["sprk_regardingrecordurl"] = "/sent";
+        payload["sprk_regardingrecordnumber"] = "SENT-1";
+
+        var (kept, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            table, Row, payload, AppOnly(table, column, core, Core).Object, CancellationToken.None);
+
+        refusal.Should().BeNull();
+        kept.Keys.Should().Equal(column);
+        _reads.Should().Equal(["stored"], "a move is not checked: the catalog is not read");
+    }
+
+    [Fact]
+    public async Task Gate_NoPairOrDisplayColumn_ReadsNothing()
+    {
+        var app = AppOnly("sprk_invoice", "sprk_matter", "sprk_matter", Core);
+        var payload = new Dictionary<string, object?> { ["sprk_name"] = "Renamed" };
+
+        var (kept, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            "sprk_invoice", Row, payload, app.Object, CancellationToken.None);
+
+        refusal.Should().BeNull();
+        kept.Should().BeSameAs(payload);
+        _reads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Gate_AStoredReadThatFaults_IsReadFailed_WithoutItsText()
+    {
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", Row, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("socket 10.0.0.9 timed out"));
+
+        var (_, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            "sprk_invoice", Row, PairPayload(Core.ToString("D")), app.Object, CancellationToken.None);
+
+        refusal!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        refusal.Reason.Should().NotContain("10.0.0.9");
+    }
+
+    [Fact]
+    public async Task Derive_AMoveTheDeriveFindsAlreadyDone_LeavesTheStoredPair_AndWritesNoSentPair()
+    {
+        // K1: the gate's read sees the move and removes the pair; the derive's later read finds the core already moved (a
+        // concurrent write) and derives nothing — so the stored pair is left, never the one the request sent.
+        var app = AppOnly("sprk_invoiceapproval", "sprk_regardingmatter", "sprk_matter", Core, OtherCore);
+        var payload = PairPayload(Guid.NewGuid().ToString("D"), OtherCatalogRow);
+        payload["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherCore);
+
+        var (written, code) = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+            app.Object, "sprk_invoiceapproval", Row, payload, "TEST",
+            (_, _, _, _) => throw new InvalidOperationException("no display read: nothing is derived"), null, CancellationToken.None);
+
+        code.Should().BeNull();
+        written.Keys.Should().Equal("sprk_regardingmatter");
+    }
+
+    [Fact]
+    public async Task Derive_APlannedPairNamingAnotherRecord_IsRefusedWithTheMismatchCode()
+    {
+        // K2: a pair the planner wrote (no core move) reaches the gate in the derive step and is refused.
+        var app = AppOnly("sprk_invoicecorrection", "sprk_regardingmatter", "sprk_matter", Core);
+
+        var (_, code) = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+            app.Object, "sprk_invoicecorrection", Row, PairPayload(OtherCore.ToString("D"), CatalogRow), "TEST",
+            (_, _, _, _) => throw new InvalidOperationException("not reached"), null, CancellationToken.None);
+
+        code.Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode);
+    }
+
+    [Theory]
+    [MemberData(nameof(FamilyCores))]
+    public async Task OnACallerPath_ACoreMoveIsChecked_ThePairMustNameTheRecordTheRowWillName(string table, string column, string core)
+    {
+        // K1 on the caller paths: their derive runs before the check, so the pair as it will be written is checked on a move too.
+        var before = Decided(table, column, core, Core);
+        var after = Decided(table, column, core, OtherCore);
+
+        RefusedAsDisagreeing(await InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync(table, [column],
+            Pair(id: Core, type: CatalogRow), after, before, Catalog(), aCoreMoveIsChecked: true));
+        (await InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync(table, [column],
+            Pair(id: OtherCore, type: CatalogRow), after, before, Catalog(), aCoreMoveIsChecked: true)).Should().BeNull();
     }
 
     [Fact]
