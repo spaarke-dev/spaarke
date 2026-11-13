@@ -588,3 +588,84 @@ Reviews B1–B7 (correctness and client) and A1–A4 (authorization). Commits `4
   - "Read-only user": a user who can read the lists but may not write the record sees every choice disabled, "You can view this, but not change it.", and no Confirm.
   - A user with assign/exclude but without remove: on a row with no own override, Exclude, Follow and Pin are enabled; on a row with one, the choices that remove it are disabled with the reason.
   - A rule changed on the parent, opened by a billing admin: the normal frame, with each choice's own reason.
+
+## 084c
+
+Branch `task/ebilling-084c`, from `90da03b6ab`. Rigor FULL. Client and ArchTests only: no BFF change, no new route, no new package, no DI registration, no ledger change (the BFF publish size is unchanged).
+
+### What was built
+
+- **The flow.** Rule wizard: Rule, On this record, **New values**, Impact, Confirm. "Change for this record" is a third choice beside Run the published rule and Exclude here. "On this record" asks the firm scope (as Exclude does) and the reason. "New values" is a dynamic step the shell inserts while Change is chosen (`WizardFrame` `valuesStep`, through `IWizardShellHandle.addDynamicStep`) and removes when another choice is picked. Finish is "Save record rule"; the success screen carries the O-21 line and the server's `message` / `affectedText`.
+- **One form per billing rule type** (`src/solutions/RecordProcedures/src/components/wizards/ruleForms/`): 13 `<RuleType>.form.ts` files (data only, one field per line), `types.ts` (the form model), `body.ts` (pure: `toFormValues`, `buildBody`, `sameBody`, `describeBody`, `serverFieldErrors`), `RuleValuesForm.tsx` (Fluent v9 Input, Dropdown, Checkbox, Textarea; no new package, no new shared component) and `index.ts` (`RULE_FORMS`, `formFor`).
+
+  | Rule type | Fields (kind) | Change offered |
+  |---|---|---|
+  | ApprovedTimekeeper | none | no: "no values to change", Exclude instead |
+  | ApprovedRate (rate card) | tolerancePercent (number) | no: rates come from the version's rate card; pin that version of the Procedure |
+  | TimeIncrement | incrementHours | yes |
+  | DailyHoursCap | maxHoursPerDay | yes |
+  | NonBillableActivity | codes (code list) | yes |
+  | ExpenseRule | nonReimbursableCodes (code list), maxAmountPerItem; at least one | yes |
+  | InvoiceAge | maxAgeDays (whole number) | yes |
+  | CoreRecordWindow | graceDays (whole number) | yes |
+  | Duplicate | matchFields (set) | yes |
+  | RequiredData | fields (set) | yes |
+  | AiObservation | observation (choice), minConfidence | yes |
+  | AddedFee | feeKind, allowance (choices); feeCodes, capAmount or capPercent when Capped; afterDays when After N days | yes, but "Not allowed" and "Allowed after N days" are listed disabled ("not available yet") with the server's reason |
+  | Discount | discountPercent, tolerancePercent (optional) | yes |
+  | SubmissionIntegrity (system) | no form | no ("no form for the rule type") |
+
+  Any type the page has no form for (the read model's display words in old fixtures, a type added to the server later) offers no Change, with the reason.
+- **Prefill.** The read model carries only `parameterSummary`, not the values, so the wizard reads the published rule's body from Rule Review's `GET /api/finance/rulesets/{ruleSetId}` (the proposal with the row's `policyId`) when Change is chosen. No server change. If the read fails, or the version is not the one in force, the step says "The published values could not be read (...). Enter the values below." and starts empty. The form shows "Published rule: X." under a field whose value differs, and "Start from the published values" restores them. Next waits until the body is complete and differs from the published one.
+- **The call.** `changeRule` in `overridesApi.ts`: `POST .../rule-overrides/change` with `{ policyId, reason (trimmed), firmId?, ruleBody }`, `ruleBody` being the whole new body as JSON TEXT (the route's member), the type member included. The 201 is checked for `override.id` and `recordRule`. A rule that names one firm is changed for that firm (O-20, as Exclude). A rule with this record's own Exclude plans `[remove (own Exclude), changeRule]`: 089 keeps one row per record and rule, so a change over an Exclude is 409 `assignment.duplicate`.
+- **A refusal.** `WriteFailure.fieldErrors` keeps the 400's `errors[{ field, message, reason }]`. `serverFieldErrors` puts a `ruleBody` error worded `/<member>: <message>` (RuleBodySchemaValidator) on the field it names, "Required properties [a, b]" on each, `firmId` on the firm field, and everything else (reason, consequence, template, a pointer to a member the form lacks) in an error bar on New values: nothing the server said is dropped. The error bar at Confirm says "Go back to New values"; an edit of any field clears the server's messages. A refusal re-reads nothing (as 084b); a partial save (the removal done, the change refused) re-reads, as 084b.
+- **Permission mapping** (084g). Change needs the `change` flag; when it also removes the rule's own Exclude it needs `remove` too. `ChoiceNeeds` gains `change`; `allowedBlocker` names the one missing right (`NOT_ALLOWED_CHANGE`), or the "view only" words when more than one is missing. The choice is disabled with the reason, as 084g's others.
+
+### Decisions and deviations
+
+1. **400, not 422.** The POML says a 422 refusal. Task 089's change route answers 400 `ruleoverride.invalid`-style ProblemDetails with `errors[]` (and 409 for a duplicate). The client reads the field errors from the body whatever the 4xx status; the test uses 400.
+2. **"Rate card" = the ApprovedRate type.** The POML's "rate cards offer no Change" is read as the rule type whose rates come from the Procedure Version's rate card (ApprovedRate). ApprovedTimekeeper (no parameters) is also not changeable. If the owner meant another set of rules, it is a one-line change in the two form files (`noChange`).
+3. **Re-changing a changed rule is not offered.** The read model's `Changed` mark names the record rule's `policyId` but not the BASE rule's, and the change route takes the base rule's policy id. A rule already changed here is therefore "Run the published rule first, then change it again" (its choice is disabled with that reason). Offering the direct re-change (and the stale-rule refresh the POML's cost-of-doing-nothing mentions) needs the base policy id on the `Changed` mark (`basePolicyId`). That is a read-model addition in 084/084e code, outside this task; filed below.
+4. **Prefill needs Admin() on the rule-set read.** `GET /api/finance/rulesets/{id}` is declared `Admin()`; the change route's privileges are CreateRuleSet, DraftRules, EditRule and Write on policy. A caller who may change but not read rule sets sees the "could not be read" fallback and enters the values. Check at 112 with the intended billing-admin role.
+5. **Bounds are the schema's, as a convenience.** The page checks the bounds so a user is told early; the server's answer is the authority. The ArchTest pins the page's bounds to the schemas.
+6. **Copied, not imported, from RuleReview.** `src/solutions/RuleReview/src/services/ruleTypes.ts` was the model for the field catalogue and the body builder; RuleReview is a separate package, so the forms are new here, not imported (no cross-solution import).
+7. **Process note.** One bare `python` call hung and was stopped (no process remains); everything else used node scripts.
+
+### Acceptance criteria, mapped to tests
+
+1. **Every billing RuleType has exactly one form; the agreement test passes; a seeded extra server property fails it, then is removed.** `RecordProceduresRuleFormAgreementTests` (ArchTests, 39 tests): "every authorable billing type has exactly one form file and one entry in the table; no other form file exists", "the system type ... has no form", "each form agrees with its server schema" (13 types: properties, requirements, bounds, integer, vocabularies, code pattern and limit, at-least-one / exactly-one), "a form with no fields says it is not changed; AddedFee refuses exactly the allowances the server refuses". Must-fire: "a drift in the server schema fails the agreement" (10 seeds, including an extra server property `newServerProperty`), "a drift in a form fails the agreement" (10 seeds), "an extra field line, a missing field line and a field split over two lines are caught", "the code pattern ... (must-fire on a changed pattern)". Each seed is applied to an in-memory copy; nothing on disk changed. The first run caught two gaps in the test itself (a `required` entry that is not a property, and a comment in `index.ts` naming the system type); both fixed and re-run green.
+2. **A valid change sends 089's request with values, firm scope and reason, and re-reads both lists.** `WizardsChange.test.tsx`: "prefills the form from the published values, sends the whole new body as JSON text with the reason, and re-reads both lists", "a firm scope chosen on the first step is sent as firmId", "a rule excluded on this record is un-excluded first (preview, DELETE), then changed ...". `overridesApi.test.ts`: "change rule: POST rule-overrides/change with { policyId, reason, firmId?, ruleBody } where ruleBody is JSON TEXT, not an object".
+3. **A refusal shows its field errors on the matching fields; nothing is re-read (negative).** `WizardsChange.test.tsx`: "a 400 puts each field error on its field, keeps the wizard open, and re-reads nothing; Back to New values shows them" (the message is on the input's `aria-describedby`, the input is `aria-invalid`; a general error shows in the bar; an edit clears it), "a 409 duplicate is shown with the hint ...; nothing is re-read". `ruleForms.test.ts`: "the server's refusal goes back on the fields it names" (3).
+4. **Rate cards offer no Change; AddedFee's two refused modes are disabled with the reason (negative).** `WizardsChange.test.tsx`: "a rate card rule (ApprovedRate) offers no Change: the choice is disabled with the reason and the pin hint", "a rule with no values (ApprovedTimekeeper) ...", "Not allowed and Allowed after N days are in the list but cannot be chosen; Capped can". `ruleForms.test.ts`: "AddedFee: only the allowance the server checks can be saved". `planChange.test.ts`: "who can be changed" (5).
+5. **Build, ArchTests.** See Verification. The ui-tests run after 112 deploys.
+6. **Edge cases beyond the contract (one line each):** Change disabled without the `change` flag (`WizardsChange` "without the change right ..."; `WizardsAllowed` property tests now cover the `change` kind over every fixture row, with a real-type variant of each); a rule already changed here (P-3 and own change) is blocked; an own Exclude with no row id plans nothing; values equal to the published ones do not advance; out-of-range values are stopped by the page's own check (`WizardsChange` "the page's own checks ...", `ruleForms.test.ts` bounds table, 20 cases); unreadable published values fall back to an empty form.
+
+### Verification
+
+- `npx jest` in `src/solutions/RecordProcedures`: 15 suites, 322 tests, all pass (was 12 suites, 243 tests). New: `ruleForms.test.ts` (46), `planChange.test.ts` (16), `WizardsChange.test.tsx` (13), plus additions in `overridesApi.test.ts`, `WizardsAllowed.test.tsx`, `WizardsReadOnly.test.tsx`, `Wizards.test.tsx`. Updated for the new shapes: the `AllowedSteps` / `ChoiceNeeds` / `WriteFailure` literals; the negative "no Change choice / no change route" assertions of 084b became "Change is disabled with the reason on a type without a form" and "no dry-run read".
+- `npm run build`: succeeds (check-html-css-reset; tsc-surface-gate 0 errors in the page's own files, 98 pre-existing in shared libs; vite build). No package added.
+- `dotnet test tests/Spaarke.ArchTests`: 2555 passed, 0 failed (includes the new `RecordProceduresRuleFormAgreementTests`, 39 tests).
+- **Fail-before, by mutation** (the feature did not exist before, so the new files do not compile against the old code; each key behaviour was also broken on the new code, the new and affected suites run, then restored):
+
+  | Mutation | Tests failing |
+  |---|---|
+  | A change over an own Exclude no longer removes it first | 4 |
+  | A refusal is not told to the wizard (no field errors on fields) | 1 |
+  | ApprovedRate no longer says no-change | 5 |
+  | A refused AddedFee allowance is accepted | 1 |
+  | Change no longer needs the `change` right | 11 |
+  | `ruleBody` sent as an object, not text | 3 |
+  | Published values not prefilled | 2 |
+
+### For task 112 (ui-tests after deploy)
+
+- "Change a limit": on a matter, open a daily-hours rule, choose Change for this record, set a value, a firm scope and a reason, confirm. Expect the success screen with the O-21 line, then the Changed badge with the new value after the lists re-read. Needs a caller with the change right and, for the prefill, the Rule Review read (decision 4).
+- "Server refusal": the page mirrors the schema's bounds (the ArchTest pins them), so an out-of-range value such as 24.5 hours is stopped on the field before anything is sent, with the same wording style. A refusal only the server can give: change the same rule from a second tab after saving in the first (409, shown in the bar), or use a firm id the server does not know. The field-level display of a server 400 is covered by the jest test, not reachable from the UI by design.
+- "Rate card": open an approved-rate rule: Change is disabled with the rate-card reason and the pin hint.
+- "Dark Mode Compliance (ADR-021)": switch to the dark theme and repeat "Change a limit". No colour literal exists in the wizard or form files (a scan in `Wizards.test.tsx` covers `ruleForms/`).
+- A rule with the record's own Exclude: choose Change; Impact shows the removal preview, Confirm lists two calls, and the result is a Changed rule.
+
+### Filed for the owner (not done here)
+
+- Add `basePolicyId` (the policy the Exclude/Changed row was made on) to the `Changed` mark of the rules-in-force read, so a rule already changed here can be changed again directly and the stale-rule refresh gets a surface (decision 3). Read-model change in 084/084e code.
+- The POML says 422; the route answers 400 (decision 1): reword the POML criterion.

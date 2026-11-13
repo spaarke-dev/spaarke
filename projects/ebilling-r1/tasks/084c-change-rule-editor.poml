@@ -4,7 +4,7 @@
     <title>Procedures on the record (B3): "Change for this record", with a typed parameter form per billing rule type</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
     <gate>084b and 084g merged into work (084g gives the Change choice its permission flag).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend code (.tsx) that writes record rules through a BFF route, plus a client/server agreement test.</rigor-reason>
     <model-tier>sonnet</model-tier>
