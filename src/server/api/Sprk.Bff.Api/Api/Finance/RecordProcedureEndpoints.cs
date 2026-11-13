@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.AspNetCore.Mvc;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
@@ -28,6 +29,14 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// client only; a fault there makes a flag false and never changes the list or its status. The flags are computed per request for this
 /// caller; the record-rights answer comes from the per-caller 60-second cache the write route also uses, and the privilege questions are
 /// uncached.</para>
+/// <para><b>Dry run (task 084d-2a, uac-r2 C5).</b> <c>POST .../procedures/dry-run?firmId=&amp;date=</c> with a
+/// <see cref="ProcedureDryRunRequest"/>: both lists now, and "if saved now" with one proposed override, nothing written. Filters, in the write
+/// routes' order: step 0; ONE record filter, uniform 404, asking <c>finance.read</c> and the write routes' record check
+/// (<see cref="ProcedureAssignmentEndpoints.DryRunRecordTargets"/>); then (403) the planned writes' own subject and privilege checks, from the
+/// declarations the write routes use (<see cref="ProcedureAssignmentEndpoints.DryRunTargets"/>); the kill switch; for a removal or a replaced
+/// override, the caller's Read on the stored row's subject (the write routes' helper). Then 401 for a non-GUID caller, the query, the planning
+/// (the write's own refusals) and ONE batched Read check over both sides (503 <c>procedures.unavailable</c>). Both checks are stricter than
+/// the removal preview's: the dry run also needs <c>finance.read</c>, and a removal needs the remove route's privileges.</para>
 /// <para><b>Known limit.</b> These routes are internal-only (step 0). Opening them to external callers needs the external-visibility
 /// predicate first (task 191).</para>
 /// </remarks>
@@ -63,6 +72,16 @@ public static class RecordProcedureEndpoints
             .WithName("GetMatterRulesInForce")
             .WithSummary("The rules in force on this matter, for a firm and a date");
 
+        group.MapPost("/matters/{recordId:guid}/procedures/dry-run",
+                (Guid recordId, ProcedureDryRunRequest body, string? firmId, string? date, [FromServices] RecordProcedureReadService service,
+                    [FromServices] ProcedureAssignmentService planner, HttpContext http, CancellationToken ct) =>
+                    DryRun(http, service, planner, ProcedureAssignmentEndpoints.MatterTable, recordId, body, firmId, date, ct))
+            .AddFinanceAuthorizationFilter(context => ProcedureAssignmentEndpoints.DryRunRecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ProcedureAssignmentEndpoints.DryRunTargets, FinanceDenial.Forbidden)
+            .RequireEbillingEnabled()
+            .RequireReadOnTheDryRunsOverridesSubject(ProcedureAssignmentEndpoints.MatterTable)
+            .WithName("DryRunMatterProcedureOverride")
+            .WithSummary("The Procedures and rules on this matter now, and if one proposed override were saved now (nothing is written)");
         // ── Project ─────────────────────────────────────────────────────────────────────────────────────────────
         group.MapGet("/projects/{recordId:guid}/procedures",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
@@ -80,6 +99,16 @@ public static class RecordProcedureEndpoints
             .WithName("GetProjectRulesInForce")
             .WithSummary("The rules in force on this project, for a firm and a date");
 
+        group.MapPost("/projects/{recordId:guid}/procedures/dry-run",
+                (Guid recordId, ProcedureDryRunRequest body, string? firmId, string? date, [FromServices] RecordProcedureReadService service,
+                    [FromServices] ProcedureAssignmentService planner, HttpContext http, CancellationToken ct) =>
+                    DryRun(http, service, planner, ProcedureAssignmentEndpoints.ProjectTable, recordId, body, firmId, date, ct))
+            .AddFinanceAuthorizationFilter(context => ProcedureAssignmentEndpoints.DryRunRecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ProcedureAssignmentEndpoints.DryRunTargets, FinanceDenial.Forbidden)
+            .RequireEbillingEnabled()
+            .RequireReadOnTheDryRunsOverridesSubject(ProcedureAssignmentEndpoints.ProjectTable)
+            .WithName("DryRunProjectProcedureOverride")
+            .WithSummary("The Procedures and rules on this project now, and if one proposed override were saved now (nothing is written)");
         // ── Work assignment ─────────────────────────────────────────────────────────────────────────────────────
         group.MapGet("/workassignments/{recordId:guid}/procedures",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
@@ -97,6 +126,16 @@ public static class RecordProcedureEndpoints
             .WithName("GetWorkAssignmentRulesInForce")
             .WithSummary("The rules in force on this work assignment, for a firm and a date");
 
+        group.MapPost("/workassignments/{recordId:guid}/procedures/dry-run",
+                (Guid recordId, ProcedureDryRunRequest body, string? firmId, string? date, [FromServices] RecordProcedureReadService service,
+                    [FromServices] ProcedureAssignmentService planner, HttpContext http, CancellationToken ct) =>
+                    DryRun(http, service, planner, ProcedureAssignmentEndpoints.WorkAssignmentTable, recordId, body, firmId, date, ct))
+            .AddFinanceAuthorizationFilter(context => ProcedureAssignmentEndpoints.DryRunRecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ProcedureAssignmentEndpoints.DryRunTargets, FinanceDenial.Forbidden)
+            .RequireEbillingEnabled()
+            .RequireReadOnTheDryRunsOverridesSubject(ProcedureAssignmentEndpoints.WorkAssignmentTable)
+            .WithName("DryRunWorkAssignmentProcedureOverride")
+            .WithSummary("The Procedures and rules on this work assignment now, and if one proposed override were saved now (nothing is written)");
         return app;
     }
 
@@ -134,6 +173,32 @@ public static class RecordProcedureEndpoints
         }
 
         return Answer(http, result);
+    }
+
+    /// <summary>
+    /// Task 084d-2a: the dry run, after the route's filters (step 0; the record's Read and Write+AppendTo, uniform 404; the planned writes'
+    /// subject and privilege checks, 403; the kill switch; for a removal or a replacement, the caller's Read on the stored row's subject). Then
+    /// 401 for a caller whose <c>oid</c> is not a GUID (as the write routes), the query, and the service: a planning refusal is the write's own
+    /// answer (<see cref="ProcedureAssignmentEndpoints.Map{T}"/>); a refused or faulted row is 503 <c>procedures.unavailable</c>.
+    /// </summary>
+    private static async Task<IResult> DryRun(
+        HttpContext http, RecordProcedureReadService service, ProcedureAssignmentService planner, string table, Guid recordId,
+        ProcedureDryRunRequest body, string? firmId, string? date, CancellationToken ct)
+    {
+        if (ProcedureAssignmentEndpoints.CallerOid(http) is null)
+        {
+            return ProcedureAssignmentEndpoints.NoRequester();
+        }
+
+        if (!TryParseQuery(http, firmId, date, out var firm, out var day, out var invalid))
+        {
+            return invalid!;
+        }
+
+        var result = await service.DryRunAsync(planner, table, recordId, body, firm, day, TokenHelper.ExtractBearerTokenOrNull(http), ct).ConfigureAwait(false);
+        return result.Status == RecordProcedureReadStatus.PlanRefused
+            ? ProcedureAssignmentEndpoints.RefusalOf(result.Refusal!, http)
+            : Answer(http, new RecordProcedureReadResult<ProcedureDryRunView>(result.Status, result.Value));
     }
 
     private static IResult Answer<T>(HttpContext http, RecordProcedureReadResult<T> result) where T : class => result.Status switch

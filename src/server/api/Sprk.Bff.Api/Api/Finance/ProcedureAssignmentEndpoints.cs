@@ -386,43 +386,156 @@ public static class ProcedureAssignmentEndpoints
     private static FinanceAuthorizationTargets SubjectAndAdmin(FinanceAuthorizationCheck subject) =>
         FinanceAuthorizationTargets.Authorize(AssignOrExcludePrivileges().Prepend(subject).ToArray());
 
+    // ── The per-write checks, declared once (task 084d-2a, uac-r2 C5). Each write route's target declaration and the dry run's
+    //    (DryRunTargets) are built from these, so a dry run asks exactly what the matching write asks, never less.
+
     /// <summary>Assign: Read on the body's Procedure and the billing-admin privilege. No body or no id is a 400 before any Dataverse call.</summary>
-    internal static FinanceAuthorizationTargets AssignTargets(EndpointFilterInvocationContext context)
-    {
-        var body = context.Arguments.OfType<ProcedureAssignmentRequest>().FirstOrDefault();
-        return body?.ProcedureId is { } id && id != Guid.Empty
+    internal static FinanceAuthorizationTargets AssignChecks(ProcedureAssignmentRequest? body) =>
+        body?.ProcedureId is { } id && id != Guid.Empty
             ? SubjectAndAdmin(ReadOn(BillingAdminAuthorization.ProcedureEntitySet, id, "body.procedureId"))
             : FinanceAuthorizationTargets.Reject(Required("procedureId"));
-    }
 
     /// <summary>Exclude rule: Read on the body's rule (its policy) and the billing-admin privilege.</summary>
-    internal static FinanceAuthorizationTargets ExcludeTargets(EndpointFilterInvocationContext context)
-    {
-        var body = context.Arguments.OfType<RuleExcludeRequest>().FirstOrDefault();
-        return body?.PolicyId is { } id && id != Guid.Empty
+    internal static FinanceAuthorizationTargets ExcludeChecks(RuleExcludeRequest? body) =>
+        body?.PolicyId is { } id && id != Guid.Empty
             ? SubjectAndAdmin(ReadOn(PolicyEntitySet, id, "body.policyId"))
             : FinanceAuthorizationTargets.Reject(Required("policyId"));
-    }
 
     /// <summary>Change rule: Read on the body's rule (its policy), then <see cref="ChangePrivileges"/>.</summary>
-    internal static FinanceAuthorizationTargets ChangeTargets(EndpointFilterInvocationContext context)
-    {
-        var body = context.Arguments.OfType<RuleChangeRequest>().FirstOrDefault();
-        if (body?.PolicyId is not { } id || id == Guid.Empty)
-        {
-            return FinanceAuthorizationTargets.Reject(Required("policyId"));
-        }
+    internal static FinanceAuthorizationTargets ChangeChecks(RuleChangeRequest? body) =>
+        body?.PolicyId is { } id && id != Guid.Empty
+            ? FinanceAuthorizationTargets.Authorize(ChangePrivileges().Prepend(ReadOn(PolicyEntitySet, id, "body.policyId")).ToArray())
+            : FinanceAuthorizationTargets.Reject(Required("policyId"));
 
-        return FinanceAuthorizationTargets.Authorize(ChangePrivileges().Prepend(ReadOn(PolicyEntitySet, id, "body.policyId")).ToArray());
-    }
+    /// <summary>Remove: <see cref="RemovePrivileges"/> (the Read on the row's subject is a later filter, <see cref="RequireReadOnTheOverridesSubject{TBuilder}"/>).</summary>
+    internal static FinanceAuthorizationTargets RemoveChecks() => FinanceAuthorizationTargets.Authorize(RemovePrivileges().ToArray());
+
+    /// <summary>Assign: <see cref="AssignChecks"/> on the bound body.</summary>
+    internal static FinanceAuthorizationTargets AssignTargets(EndpointFilterInvocationContext context) =>
+        AssignChecks(context.Arguments.OfType<ProcedureAssignmentRequest>().FirstOrDefault());
+
+    /// <summary>Exclude rule: <see cref="ExcludeChecks"/> on the bound body.</summary>
+    internal static FinanceAuthorizationTargets ExcludeTargets(EndpointFilterInvocationContext context) =>
+        ExcludeChecks(context.Arguments.OfType<RuleExcludeRequest>().FirstOrDefault());
+
+    /// <summary>Change rule: <see cref="ChangeChecks"/> on the bound body.</summary>
+    internal static FinanceAuthorizationTargets ChangeTargets(EndpointFilterInvocationContext context) =>
+        ChangeChecks(context.Arguments.OfType<RuleChangeRequest>().FirstOrDefault());
 
     /// <summary>Removal preview: <see cref="PreviewRemovalPrivileges"/> (the Read on the row's subject is the next filter).</summary>
     internal static FinanceAuthorizationTargets PreviewRemovalTargets(EndpointFilterInvocationContext context) =>
         FinanceAuthorizationTargets.Authorize(PreviewRemovalPrivileges().ToArray());
 
-    /// <summary>Remove: <see cref="RemovePrivileges"/> (the Read on the row's subject is the next filter).</summary>
-    internal static FinanceAuthorizationTargets RemoveTargets(EndpointFilterInvocationContext context) =>
-        FinanceAuthorizationTargets.Authorize(RemovePrivileges().ToArray());
+    /// <summary>Remove: <see cref="RemoveChecks"/>.</summary>
+    internal static FinanceAuthorizationTargets RemoveTargets(EndpointFilterInvocationContext context) => RemoveChecks();
+
+    // ── The dry run (task 084d-2a, design notes/084d-dry-run-design.md §3, uac-r2 C5) ─────────────────────────────────────
+
+    /// <summary>
+    /// The dry run's record filter (uniform 404): Read on the record (<c>finance.read</c>, as 084's list routes ask it) and then
+    /// <see cref="RecordWriteCheck"/> (as every write route's first filter asks it). Both in ONE filter, so an unknown record, an unreadable
+    /// one and one the caller may not write all get the same 404, before any 403. An unreadable or empty id yields no check, which the filter
+    /// denies.
+    /// </summary>
+    internal static FinanceAuthorizationTargets DryRunRecordTargets(EndpointFilterInvocationContext context, string coreEntitySet) =>
+        context.HttpContext.Request.RouteValues.TryGetValue(RecordRouteKey, out var raw) && Guid.TryParse(raw?.ToString(), out var id) && id != Guid.Empty
+            ? FinanceAuthorizationTargets.Authorize(DryRunRecordChecks(coreEntitySet, id).ToArray())
+            : FinanceAuthorizationTargets.Authorize();
+
+    /// <summary>The dry run's record checks: <c>finance.read</c>, then <see cref="RecordWriteCheck"/>.</summary>
+    internal static IReadOnlyList<FinanceAuthorizationCheck> DryRunRecordChecks(string coreEntitySet, Guid recordId) =>
+    [
+        new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record, EntitySetName = coreEntitySet, RecordId = recordId, Operation = "finance.read", Source = "route." + RecordRouteKey,
+        },
+        RecordWriteCheck(coreEntitySet, recordId),
+    ];
+
+    /// <summary>The dry run's subject and privilege filter (403): <see cref="DryRunChecks"/> on the bound body.</summary>
+    internal static FinanceAuthorizationTargets DryRunTargets(EndpointFilterInvocationContext context) =>
+        DryRunChecks(context.Arguments.OfType<ProcedureDryRunRequest>().FirstOrDefault());
+
+    /// <summary>
+    /// What a dry run asks beside the record: the union, in plan order, of the checks of every write it plans, from the same declarations the
+    /// write routes use. Assign: <see cref="AssignChecks"/>; rule exclude: <see cref="ExcludeChecks"/>; rule change: <see cref="ChangeChecks"/>;
+    /// a removal, or a create that replaces an override (<c>replacesOverrideId</c>): <see cref="RemoveChecks"/> as well. A missing kind or id is
+    /// the same 400 as on the write. Stricter than the removal preview, which asks only the billing-admin privilege.
+    /// </summary>
+    internal static FinanceAuthorizationTargets DryRunChecks(ProcedureDryRunRequest? body)
+    {
+        var parts = new List<FinanceAuthorizationTargets>();
+        switch (body?.Kind)
+        {
+            case ProcedureDryRunRequest.KindAssign:
+                parts.Add(AssignChecks(body.Assign));
+                break;
+            case ProcedureDryRunRequest.KindExcludeRule:
+                parts.Add(ExcludeChecks(body.ExcludeRule));
+                break;
+            case ProcedureDryRunRequest.KindChangeRule:
+                parts.Add(ChangeChecks(body.ChangeRule));
+                break;
+            case ProcedureDryRunRequest.KindRemove:
+                if (body.OverrideId is not { } removed || removed == Guid.Empty)
+                {
+                    return FinanceAuthorizationTargets.Reject(Required("overrideId"));
+                }
+
+                if (body.ReplacesOverrideId is not null)
+                {
+                    return FinanceAuthorizationTargets.Reject(ProblemDetailsHelper.ValidationProblem(new Dictionary<string, string[]>
+                    {
+                        ["replacesOverrideId"] = ["replacesOverrideId goes with a write that creates a row, not with a removal."],
+                    }));
+                }
+
+                parts.Add(RemoveChecks());
+                break;
+            default:
+                return FinanceAuthorizationTargets.Reject(Required("kind"));
+        }
+
+        if (body.ReplacesOverrideId is { } replaced)
+        {
+            if (replaced == Guid.Empty)
+            {
+                return FinanceAuthorizationTargets.Reject(Required("replacesOverrideId"));
+            }
+
+            parts.Add(RemoveChecks());
+        }
+
+        return parts.FirstOrDefault(p => p.Rejection is not null)
+            ?? FinanceAuthorizationTargets.Authorize(parts.SelectMany(p => p.Checks).Distinct().ToArray());
+    }
+
+    /// <summary>
+    /// The dry run's removal step: when the body removes an override (<c>kind</c> Remove with <c>overrideId</c>) or replaces one
+    /// (<c>replacesOverrideId</c>), the caller's own Read on what that stored row overrides, through the same helper as the write routes'
+    /// <see cref="RequireReadOnTheOverridesSubject{TBuilder}"/> (<see cref="RefuseUnlessCallerReadsOverridesSubjectAsync"/>): the same 404
+    /// <c>assignment.override_not_found</c> and the same 403 <c>system_failure</c>. Added after <c>RequireEbillingEnabled</c>, as on the
+    /// write routes. A body that removes nothing passes.
+    /// </summary>
+    internal static TBuilder RequireReadOnTheDryRunsOverridesSubject<TBuilder>(this TBuilder builder, string coreTable)
+        where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
+        {
+            var http = context.HttpContext;
+            var body = context.Arguments.OfType<ProcedureDryRunRequest>().FirstOrDefault();
+            var overrideId = body?.Kind == ProcedureDryRunRequest.KindRemove ? body.OverrideId : body?.ReplacesOverrideId;
+            if (overrideId is not { } id)
+            {
+                return await next(context);
+            }
+
+            if (!Guid.TryParse(http.Request.RouteValues[RecordRouteKey]?.ToString(), out var recordId))
+            {
+                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            }
+
+            return await RefuseUnlessCallerReadsOverridesSubjectAsync(http, coreTable, recordId, id) ?? await next(context);
+        });
 
     /// <summary>
     /// Task 089c (089b "089c must"): before a removal or its preview, the caller's own Read on what the stored override row overrides. That
@@ -446,51 +559,63 @@ public static class ProcedureAssignmentEndpoints
         builder.AddEndpointFilter(async (context, next) =>
         {
             var http = context.HttpContext;
-            var services = http.RequestServices;
-            var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>()
-                ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
             if (!Guid.TryParse(http.Request.RouteValues[RecordRouteKey]?.ToString(), out var recordId)
                 || !Guid.TryParse(http.Request.RouteValues[OverrideRouteKey]?.ToString(), out var overrideId))
             {
                 return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
             }
 
-            OverrideSubject? subject;
-            try
-            {
-                subject = await services.GetRequiredService<ProcedureAssignmentService>()
-                    .SubjectOfOverrideAsync(coreTable, recordId, overrideId, http.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Override {OverrideId}: its subject could not be read for the Read check; denying (fail closed)", overrideId);
-                return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
-            }
-
-            if (subject is null)
-            {
-                // No row (or not this record's): the filter answers, so the service never reads the row a second time and acts on whatever is
-                // there by then. Override ids are derived from the subject, so a row created later at this id has the subject that would have
-                // been checked here (089c pass 2).
-                return Map(ProcedureAssignmentService.OverrideNotFound<object>(), http);
-            }
-
-            var caller = new InvoiceContextService.InvoiceCaller(
-                CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
-            var outcome = await CallerReadCheck.CheckAsync(
-                services.GetRequiredService<AuthorizationService>(), caller, subject.EntitySet, "read", subject.Id, logger,
-                $"Override {overrideId}: caller read on what it overrides", http.RequestAborted);
-            if (outcome == CallerReadOutcome.Readable)
-            {
-                return await next(context);
-            }
-
-            // Override ids are derived (AssignmentIdFor), so a 403 here against a 404 for a missing row would tell a caller whether an override
-            // exists for a subject they cannot Read. An unreadable subject therefore answers exactly what a missing row does (089c review K1).
-            return outcome == CallerReadOutcome.Refused
-                ? Map(ProcedureAssignmentService.OverrideNotFound<object>(), http)
-                : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+            return await RefuseUnlessCallerReadsOverridesSubjectAsync(http, coreTable, recordId, overrideId) ?? await next(context);
         });
+
+    /// <summary>
+    /// The body of <see cref="RequireReadOnTheOverridesSubject{TBuilder}"/>, shared with the dry run (task 084d-2a): reads the stored override
+    /// row of <paramref name="recordId"/> app-only and asks the caller's own Read on what it overrides. Null when the caller may Read it (the
+    /// request goes on). Otherwise the answer: the 404 <c>assignment.override_not_found</c> for no row, a row of another record, or an
+    /// unreadable subject (one answer, so it is no existence oracle); the 403 <c>system_failure</c> for a fault or no answer.
+    /// </summary>
+    internal static async Task<IResult?> RefuseUnlessCallerReadsOverridesSubjectAsync(HttpContext http, string coreTable, Guid recordId, Guid overrideId)
+    {
+        var services = http.RequestServices;
+        var logger = services.GetService<ILogger<FinanceAuthorizationFilter>>()
+            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<FinanceAuthorizationFilter>.Instance;
+
+        OverrideSubject? subject;
+        try
+        {
+            subject = await services.GetRequiredService<ProcedureAssignmentService>()
+                .SubjectOfOverrideAsync(coreTable, recordId, overrideId, http.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Override {OverrideId}: its subject could not be read for the Read check; denying (fail closed)", overrideId);
+            return ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+        }
+
+        if (subject is null)
+        {
+            // No row (or not this record's): the filter answers, so the service never reads the row a second time and acts on whatever is
+            // there by then. Override ids are derived from the subject, so a row created later at this id has the subject that would have
+            // been checked here (089c pass 2).
+            return Map(ProcedureAssignmentService.OverrideNotFound<object>(), http);
+        }
+
+        var caller = new InvoiceContextService.InvoiceCaller(
+            CallerResolution.ResolveObjectId(http.User) ?? string.Empty, TokenHelper.ExtractBearerTokenOrNull(http));
+        var outcome = await CallerReadCheck.CheckAsync(
+            services.GetRequiredService<AuthorizationService>(), caller, subject.EntitySet, "read", subject.Id, logger,
+            $"Override {overrideId}: caller read on what it overrides", http.RequestAborted);
+        if (outcome == CallerReadOutcome.Readable)
+        {
+            return null;
+        }
+
+        // Override ids are derived (AssignmentIdFor), so a 403 here against a 404 for a missing row would tell a caller whether an override
+        // exists for a subject they cannot Read. An unreadable subject therefore answers exactly what a missing row does (089c review K1).
+        return outcome == CallerReadOutcome.Refused
+            ? Map(ProcedureAssignmentService.OverrideNotFound<object>(), http)
+            : ProblemDetailsHelper.Forbidden(FinanceAuthorizationFilter.SystemFailureReasonCode, traceId: http.TraceIdentifier);
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Responses (ADR-019: ProblemDetails with a stable errorCode)
@@ -517,11 +642,17 @@ public static class ProcedureAssignmentEndpoints
     private static async Task<IResult> AsCaller<T>(HttpContext http, Func<Task<RuleSetOutcome<T>>> call) where T : class =>
         CallerOid(http) is null ? NoRequester() : Map(await call(), http);
 
-    private static IResult NoRequester() => Results.Problem(
+    internal static IResult NoRequester() => Results.Problem(
         statusCode: StatusCodes.Status401Unauthorized,
         title: "Unauthorized",
         detail: "User identity not found",
         type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+
+    /// <summary>
+    /// <see cref="Map{T}"/> for callers in other files (the dry run's planning refusal is the write's own answer). Named apart because the
+    /// route guard reads any <c>.Map(</c> member call as a route registration it cannot scan.
+    /// </summary>
+    internal static IResult RefusalOf<T>(RuleSetOutcome<T> outcome, HttpContext http) where T : class => Map(outcome, http);
 
     internal static IResult Map<T>(RuleSetOutcome<T> outcome, HttpContext http) where T : class =>
         outcome.Kind switch
@@ -547,7 +678,7 @@ public static class ProcedureAssignmentEndpoints
     private static IResult Required(string field) =>
         ProblemDetailsHelper.ValidationProblem(new Dictionary<string, string[]> { [field] = [$"{field} is required."] });
 
-    private static Guid? CallerOid(HttpContext http) =>
+    internal static Guid? CallerOid(HttpContext http) =>
         Guid.TryParse(CallerResolution.ResolveObjectId(http.User), out var oid) ? oid : null;
 
     private static RouteHandlerBuilder ProducesOverride<T>(this RouteHandlerBuilder builder, int status) =>

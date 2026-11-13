@@ -438,6 +438,144 @@ public sealed class RecordWritePermissionsContractTests
         host.Assignments.VerifyNoOtherCalls();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 084d-2a: the dry run asks what the writes it plans ask (one declaration each, DryRunTargets over the *Checks)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid ReplacedId = Guid.Parse("084d2a00-0000-4000-8000-0000000000b1");
+
+    /// <summary>A dry-run body: the proposal's kind, plus a replaced override (a switch or re-change) when <paramref name="replaces"/>.</summary>
+    private static ProcedureDryRunRequest DryRunBody(Write write, bool replaces) => write switch
+    {
+        Write.Assign => new ProcedureDryRunRequest(ProcedureDryRunRequest.KindAssign, replaces ? ReplacedId : null,
+            Assign: new ProcedureAssignmentRequest(ProcedureId, null, null, null)),
+        Write.Exclude => new ProcedureDryRunRequest(ProcedureDryRunRequest.KindExcludeRule, replaces ? ReplacedId : null,
+            ExcludeRule: new RuleExcludeRequest(PolicyId, "x", null)),
+        Write.Change => new ProcedureDryRunRequest(ProcedureDryRunRequest.KindChangeRule, replaces ? ReplacedId : null,
+            ChangeRule: new RuleChangeRequest(PolicyId, "x", null, null, null, "Cap", null)),
+        _ => new ProcedureDryRunRequest(ProcedureDryRunRequest.KindRemove, OverrideId: OverrideId),
+    };
+
+    /// <summary>What the dry-run route's two AddFinanceAuthorizationFilter declarations ask, in order.</summary>
+    private static List<FinanceAuthorizationCheck> DryRunDeclares(ProcedureDryRunRequest body, string set, Guid recordId)
+    {
+        var context = ContextFor(recordId, body);
+        var second = ProcedureAssignmentEndpoints.DryRunTargets(context);
+        second.Rejection.Should().BeNull("a complete body");
+        return ProcedureAssignmentEndpoints.DryRunRecordTargets(context, set).Checks.Concat(second.Checks).ToList();
+    }
+
+    /// <summary>The guard's expectation: finance.read on the record, then the write routes' own declarations of every write the dry run plans.</summary>
+    private static List<FinanceAuthorizationCheck> PlannedWritesDeclare(Write write, bool replaces, string set, Guid recordId)
+    {
+        var read = ProcedureAssignmentEndpoints.DryRunRecordChecks(set, recordId)[0];
+        var writes = RouteDeclares(write, set, recordId).AsEnumerable();
+        if (replaces)
+        {
+            writes = writes.Concat(RouteDeclares(Write.Remove, set, recordId));
+        }
+
+        return new[] { read }.Concat(writes).Distinct().ToList();
+    }
+
+    /// <summary>Same checks, no duplicates, and finance.read then the record's write check first (the uniform-404 filter).</summary>
+    private static bool SameChecks(IReadOnlyList<FinanceAuthorizationCheck> dryRun, IReadOnlyList<FinanceAuthorizationCheck> expected) =>
+        dryRun.Count == dryRun.Distinct().Count()
+        && dryRun.ToHashSet().SetEquals(expected)
+        && dryRun.Take(2).SequenceEqual(expected.Take(2));
+
+    public static TheoryData<string, string, bool> DryRunGuardCases
+    {
+        get
+        {
+            var data = new TheoryData<string, string, bool>();
+            foreach (var core in Cores)
+            {
+                foreach (var write in new[] { Write.Assign, Write.Exclude, Write.Change })
+                {
+                    data.Add(write.ToString(), core.Set, false);
+                    data.Add(write.ToString(), core.Set, true);
+                }
+
+                data.Add(nameof(Write.Remove), core.Set, false);
+            }
+
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "084d-2a guard (declaration equality): each dry run declares exactly finance.read plus the write routes' own declarations of every write it plans (a replaced override adds the removal's); must-fire: a check added to or dropped from either side fails")]
+    [MemberData(nameof(DryRunGuardCases))]
+    public void EachDryRun_DeclaresExactlyThePlannedWritesChecks(string writeName, string set, bool replaces)
+    {
+        var write = Enum.Parse<Write>(writeName);
+        var id = Cores.First(c => c.Set == set).Id;
+        var dryRun = DryRunDeclares(DryRunBody(write, replaces), set, id);
+        var expected = PlannedWritesDeclare(write, replaces, set, id);
+
+        SameChecks(dryRun, expected).Should().BeTrue(
+            $"{write}{(replaces ? " replacing" : "")} on {set}: dry run [{string.Join(", ", dryRun.Select(c => c.Operation))}] vs writes [{string.Join(", ", expected.Select(c => c.Operation))}]");
+        dryRun[0].Operation.Should().Be("finance.read");
+        dryRun[1].Should().Be(ProcedureAssignmentEndpoints.RecordWriteCheck(set, id), "the write check is the uniform-404 filter's, before any 403");
+
+        // Must-fire controls: the comparison is not vacuous.
+        var extra = FinanceAuthorizationCheck.CallerPrivilege("prvCreatesprk_somethingelse", "sprk_somethingelses", "control");
+        SameChecks(dryRun.Append(extra).ToList(), expected).Should().BeFalse("a check added to the dry run only must fail the guard");
+        SameChecks(dryRun, expected.Append(extra).ToList()).Should().BeFalse("a check added to a write only must fail the guard");
+        SameChecks(dryRun.Where(c => c != expected[^1]).ToList(), expected).Should().BeFalse("a check dropped from the dry run must fail the guard");
+        SameChecks(dryRun.Skip(1).ToList(), expected).Should().BeFalse("dropping finance.read must fail the guard");
+    }
+
+    [Fact(DisplayName = "084d-2a guard must-fire: a switch (Assign replacing an override) that dropped the removal's checks would ask less than the writes it plans")]
+    public void DryRunGuard_FiresWhenAReplacementDropsTheRemovalsChecks()
+    {
+        var (set, id) = (Cores[0].Set, Cores[0].Id);
+        var withoutRemoval = DryRunDeclares(DryRunBody(Write.Assign, replaces: false), set, id);
+
+        SameChecks(withoutRemoval, PlannedWritesDeclare(Write.Assign, replaces: true, set, id)).Should().BeFalse(
+            "the remove flag's privileges are not all among assign's, so a replacement without them must fail the guard");
+    }
+
+    public static TheoryData<string, string, string, bool> AllDryRunRoutes
+    {
+        get
+        {
+            var data = new TheoryData<string, string, string, bool>();
+            foreach (var row in DryRunGuardCases)
+            {
+                var set = (string)row[1];
+                var core = Cores.First(c => c.Set == set);
+                data.Add($"/api/finance/{core.Segment}/{core.Id}/procedures/dry-run", set, (string)row[0], (bool)row[2]);
+            }
+
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "084d-2a guard (behaviour): every dry-run route, through its real filter chain, asks the caller exactly its declared record checks, subject Read and privileges, in order")]
+    [MemberData(nameof(AllDryRunRoutes))]
+    public async Task EachDryRunRoute_AsksTheCaller_ExactlyItsDeclaredChecks(string url, string set, string writeName, bool replaces)
+    {
+        // eBilling off: the record and privilege filters run, then the kill switch answers 503 before the override's subject Read or the service.
+        await using var host = await Host.StartAsync(ebillingEnabled: false);
+        var write = Enum.Parse<Write>(writeName);
+        var id = Cores.First(c => c.Set == set).Id;
+        var body = DryRunBody(write, replaces);
+
+        var response = await host.Client.SendAsync(Send("POST", url, JsonContent.Create(body)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        (await Json(response))["errorCode"]!.GetValue<string>().Should().Be("ebilling.disabled");
+        var declared = DryRunDeclares(body, set, id);
+        host.Rig.Probe.PrivilegeCalls.Select(c => c.Privilege).Should().Equal(
+            declared.Where(c => c.Path == FinanceCheckPath.Privilege).Select(c => c.Operation), "the route asks the privileges the planned writes declare");
+        host.Access.Calls.Where(c => c.Set == set).Should().NotBeEmpty().And.OnlyContain(c => c.Id == id, "the record checks, on this record only");
+        host.Access.Calls.Where(c => c.Set != set).Select(c => (c.Set, c.Id)).Should().Equal(
+            PerSubjectRead(write) is { } subject ? new[] { (subject.EntitySetName, subject.RecordId) } : Array.Empty<(string, Guid)>(),
+            "beyond the record checks, only the planned write's per-subject Read");
+        host.Assignments.VerifyNoOtherCalls();
+    }
+
     /// <summary>Fix round 1 (A1): every write route × a record right short of Write and AppendTo (Read and Write without AppendTo; Read alone).</summary>
     public static TheoryData<string, string, string, string, string> AllWriteRoutesShortOfTheRecordRights
     {

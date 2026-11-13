@@ -819,3 +819,60 @@ Planning without writes. Server only; there is no route, DI registration or clie
 Each seed fails at least one test: S1 3 (unplaceable-query cases), S2 2 (the replaced-row test and the real-resolver test), S3 2 contract + 1 IL guard, S4 2 (by-id reads), S5 1 (the change plan's no-owner check), S6 1 (the lambda transaction control).
 
 **Publish size.** N/A for this slice: no package, no DI registration and no route; two internal types and internal methods only. 084d-2 adds the route and measures the delta against a fresh master build.
+
+## 084d-2a
+
+The dry run's access, read and routes. Branch `task/084d-2a`, from `3a9130b7be`. 084d-2b adds `closes`, `affectedOpenInvoices` and firm `reach`; they are left out of the response, not stubbed.
+
+**Placement.** The routes sit in `Api/Finance/RecordProcedureEndpoints.cs` beside each core's other Procedure reads, on the same group (step 0, `RequireInternalFinanceCaller`). The access declarations sit in `Api/Finance/ProcedureAssignmentEndpoints.cs` beside the write routes' own, so one file holds every check a write or its dry run asks. The read is `RecordProcedureReadService.DryRunAsync`, beside the two reads it composes. No DI registration changes: the planner is taken by the handler with `[FromServices]`. No package.
+
+**What was built:**
+- `AssignChecks`, `ExcludeChecks`, `ChangeChecks` and `RemoveChecks`: the write routes' subject and privilege declarations, single-sourced. `AssignTargets`, `ExcludeTargets`, `ChangeTargets` and `RemoveTargets` now delegate to them, unchanged in behaviour.
+- `DryRunRecordChecks` / `DryRunRecordTargets`: `finance.read` on the record, then `RecordWriteCheck` (uniform 404). `DryRunTargets` / `DryRunChecks`: the union, in plan order, of the `*Checks` of every write the dry run plans; a replaced override (`replacesOverrideId`) adds `RemoveChecks`. A missing kind or id is the write's 400.
+- `RefuseUnlessCallerReadsOverridesSubjectAsync`: the removal routes' stored-row subject Read, extracted so the write filter and the dry-run filter (`RequireReadOnTheDryRunsOverridesSubject`) share it.
+- `RefusalOf`: `Map` for callers in other files (the route guard reads any `.Map(` member call as an unscannable registration).
+- Three `POST .../procedures/dry-run` routes in the write routes' filter order: record (404) → subject and privileges (403) → kill switch → the removed or replaced override's subject Read → 401 → service. A planning refusal is the write's own answer.
+- `DryRunAsync`: plans the proposal through the 084d-1 planning service (a removal first, then the create over an overlay of it), loads the created ids app-only by id, reads Now and After (After over `ProcedureRowOverlay`), exempts only the created ids that do not exist, exposes a request-named firm, and runs ONE caller check over Now ∪ After. Any refusal or fault is 503 `procedures.unavailable`.
+- DTOs: `ProcedureDryRunRequest`, `ProcedureDryRunView`, `ProcedureDryRunProposalView`, `ProcedureDryRunSideView`, `ProcedureDryRunDisclosureView`.
+
+**Response shape.** `{ record, date, firm, firmSource, proposal { kind, overrideKind, replacesOverrideId, overrideId, proposedRowIds }, now { procedures, rules }, after { procedures, rules }, afterLabel: "If saved now", disclosure { predictsOwnerRefusal: false, readAtOneInstant: false, requestFirmAsked, notes[3] } }`. The sides' permission flags are all false: the dry run is not where a write is offered.
+
+**§11 justification:**
+- `ProcedureDryRunRequest` and the view records:
+  - *Existing:* the write requests and `RecordProceduresView` / `RecordRulesInForceView`.
+  - *Extension:* the request wraps the three write requests unchanged; the view holds the two existing views twice. Only the proposal and disclosure records are new.
+  - *Cost of doing nothing:* there is no way to send a proposal without writing it, and the client cannot tell Now from After or show the disclaimers.
+- `DryRunAsync`:
+  - *Existing:* the two record reads (`GetProceduresAsync`, the rules-in-force read) and the 084d-1 plans.
+  - *Extension:* it is built from the same `ReadAsync` with a row-source parameter; a second resolver or read path is avoided.
+  - *Cost of doing nothing:* 084d-1's overlay has no reader, and the admin confirms an override blind.
+- `DryRunTargets` / `*Checks` / `DryRunRecordChecks`:
+  - *Existing:* the write routes' `*Targets`.
+  - *Extension:* the `*Targets` bodies became the `*Checks`, so the write and the dry run share one declaration each.
+  - *Cost of doing nothing:* a dry run with its own list drifts from the write's, so a caller sees rules a write would refuse them.
+- `RequireReadOnTheDryRunsOverridesSubject`:
+  - *Existing:* `RequireReadOnTheOverridesSubject` on the removal routes.
+  - *Extension:* its body became the shared helper; the new filter only reads the id from the body instead of the route.
+  - *Cost of doing nothing:* a dry-run removal of an override whose subject the caller cannot Read would answer with that subject's rules.
+- The three routes:
+  - *Existing:* none answers "if saved now".
+  - *Extension:* a query flag on a write route would put a read behind write semantics, and the write routes return the written row.
+  - *Cost of doing nothing:* 084d-4 has nothing to call.
+
+**Build conditions → code → tests:**
+- **uac-r2 C1** (the synthetic set is decided by an app-only by-id load; a fault is 503 and nothing is exempted): `RecordProcedureReadService.cs` `SyntheticRowsAsync` (≈562), called at ≈455 before any `Exempt` (≈474). Test: `SyntheticLoadFault_Is503_AndNothingIsExempted`.
+- **uac-r2 C2** (only the exact synthetic rows are exempt; a created id that exists is real and asked): `Reading.Exempt` / `Expose` (≈651-657), `SyntheticRowsAsync` drops found ids. Tests: `Assign_NowWithout_AfterWith_OneCheck_NothingWritten`, `ExcludeRule_ExemptsExactlyTheSyntheticRow`, `Switch_TheRecreatedIdIsReal_Asked_AndHasNoCreatorAfter` (deny that row alone → 503).
+- **uac-r2 C3** (ONE combined check over Now ∪ After): `DryRunAsync` ≈488-490. Tests: the Assign theory (`Batches` single), the dry-run `Every200Guid` guard.
+- **uac-r2 C4** (the dry run asks what the writes it plans ask, from one declaration): `ProcedureAssignmentEndpoints.cs` `*Checks` (393-411), `DryRunChecks` (465). Tests: `EachDryRun_DeclaresExactlyThePlannedWritesChecks`, `DryRunGuard_FiresWhenAReplacementDropsTheRemovalsChecks`, `EachDryRunRoute_AsksTheCaller_ExactlyItsDeclaredChecks`.
+- **uac-r2 C5** (the write routes' filter order; uniform 404 before any 403): `RecordProcedureEndpoints.cs` 75-140. Tests: `RecordFilter_IsTheUniform404_BeforeAny403`, `SubjectAndPrivilegeFilter_Is403`, `FlagOff_Is503Disabled`, `UnreadableOverrideSubject_IsTheWritesNotFound`, `StepZero_RefusesFirst`.
+- **ontology-r1 F3** (a proposed row has no creator; no person exposed for it): `ReadAsync` `proposedRowIds` (≈729). Tests: `ExcludeRule_ExemptsExactlyTheSyntheticRow` (stamp `byId` null), the switch test (After null, Now the original creator).
+- **R5 / R10** (no owner prediction; not one instant): disclosure flags and notes. Test: the Assign theory.
+- **R6** (a request-named firm is asked as a query firm): `DryRunAsync` ≈482-486. Test: `RequestFirm_IsAskedAsAQueryFirm`.
+- **Label** ("If saved now"; nothing presents After as a promise): `AfterLabel`. Test: the Assign theory.
+
+**Known limits:**
+- **K1.** `reach`, `closes` and `affectedOpenInvoices` are 084d-2b's.
+- **K2.** Change-kind HTTP tests are not added here: change planning is covered by the 084d-1 tests, and the change parity is 084d-3's. The change routes are covered by the two declaration guards.
+- **K3.** Both sides run the future-date probe, so a Procedure that opens after the date can make the dry run 503 when its overlap does, exactly as the record read does.
+- **K4.** In a switch, Now still shows the replaced row's creator (it is real and asked). F3 removes the creator from After only; the test asserts both.
+- **K5.** The sides' permission flags are all false. The client offers writes from the record read, not from the dry run.
