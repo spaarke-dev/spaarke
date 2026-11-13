@@ -57,6 +57,36 @@ Pass-1 known limits that were kept:
 - **The creator is read through field security.** If the app user cannot read `sprk_createdbyperson`, the unfile keeps its owner (safe).
 - **A fault while reading the facts logs twice:** a Warning and then an Information entry.
 
+## Adversarial pass 2 (Opus): open items for the coordinator
+
+Three F1 findings need an owner or design decision, so they were not guessed at.
+
+1. **The common unlink path never reaches the rule.**
+   - An email in a record thread anchored to its matter still counts as filed under the matter through that thread after its matter link is cleared. So the re-file is not an unfile: `parents = [M]`, and the settle keeps M's team.
+   - The filing reconcile (`ThreadResolver`, "unlink" branch → `MoveUnfiledEmailOutAsync`) then moves it to the per-user master thread. That join has no anchor and does not call `ReparentAsync`, so nothing re-decides the owner.
+   - Result: #2722 fires only for a communication that is in no record thread.
+   - Fix options:
+     - (a) the move-out re-decides the owner through `ReparentAsync` with `UnfiledCommunication`, so `filedUnderBefore` holds the thread's parents;
+     - (b) the resolver treats "own filing empty, and the reconcile will leave the thread" as an unfile.
+   - Either way this touches `ThreadResolver`, whose join the guard lists as `NeverUnfiles`.
+2. **Content rows stay with the old owner.** When an email moves to its creator's team, its attachments, participant rows and review logs keep the matter team. (The Direct path moves them with `MoveContentRowsAsync`.) Do we move them, reusing the Direct step's move, or record this as a known limit beside the document one?
+3. **A user-owned message can be moved to a whole business unit.**
+   - This happens when the Direct owner rule is off: a message owned by a person (not a team) that is left linked to nothing goes to its creator's default team, which widens who can read it.
+   - Proposed: keep the owner when the row is owned by a user. This fails closed and follows "a re-file never loosens".
+
+### Fixed in pass 2
+
+| Finding | Fix |
+|---|---|
+| F3: the writer-level test passed only because no creator was recorded | Renamed it to the no-creator case. Added `UpdateHandler_UnfilingACommunicationThatIsNotADirectMessage_WithARecordedCreator_MovesItToTheCreatorsTeam`, which runs end to end through `DataverseUpdateHandler`. |
+| Stale "pending #2722" text | Fixed in `DirectUnfileGenericPathTests` and `SecureChildReconcilerDirectUnfileCascadeTests`. |
+| K2: the parent-unreadable test didn't check the reason | It now asserts the reason "could not be read". Also removed the ignored argument of `Unfile(Guid?)`. |
+
+### Pass-2 known limits
+
+- **K1:** path (a)'s catch can log "keeps its former owner" when the owner write landed but its read-back failed. No writer acts on the difference: the writers read only `IsRefused`, `DirectUnfile`, `ParentsUnchanged` and `SecureExitPermitted`. Only the log text and the reason are wrong.
+- **K3:** the guard does not pin that `ReparentAsync` sets `RowBeforeChange.Unfiled` on both paths. The path (a) and path (b) must-fire unit tests cover this.
+- **K4:** `ResolveFromUserAsync` reads the systemuser with `NoLock = true`. This predates the change.
 ## #2728: root cause (for 197a-2)
 
 The issue's premise is false: `sprk_relatedcommunication` is already a document link. It is in `DocumentLinkFields.All` (Models.cs), and it is not in `SecureChildLineage.DocumentLinksThatAreNotFiling`, so it counts as filing.

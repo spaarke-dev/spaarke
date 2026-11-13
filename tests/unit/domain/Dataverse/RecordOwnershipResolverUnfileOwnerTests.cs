@@ -113,7 +113,7 @@ public class RecordOwnershipResolverUnfileOwnerTests
         // The message is still owned in an ordinary unit (a stale owner), so only the parent can keep it.
         var directory = World().WithMessageFiledUnder(matter, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
             .WithRecordedCreator();
-        var request = Unfile(matter) with { SecureExitCaller = CallerHoldingFullAccess() };
+        var request = Unfile() with { SecureExitCaller = CallerHoldingFullAccess() };
 
         var resolution = await Resolver(directory).ReparentAsync(request, Applies(directory, request), CancellationToken.None);
 
@@ -174,6 +174,7 @@ public class RecordOwnershipResolverUnfileOwnerTests
         resolution.IsRefused.Should().BeFalse("the unfile is never refused for it");
         resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
         Owner(directory).Should().Be(FakeDirectory.ChildTeam);
+        resolution.Reason.Should().Contain("could not be read");
         directory.ConditionalWrites.Should().BeEmpty();
         _log.Entries.Should().Contain(e => e.Event.Id == RecordOwnershipResolver.UnfileKeepsOwnerEvent.Id);
     }
@@ -308,7 +309,7 @@ public class RecordOwnershipResolverUnfileOwnerTests
         .WithMaskedSecureFlag("sprk_matter", MaskedFlagMatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam);
 
     /// <summary>The unfile a writer sends: the matter cleared, for a person, with the unfiled-communication rule.</summary>
-    private static RecordReparent Unfile(Guid? _ = null) => new()
+    private static RecordReparent Unfile() => new()
     {
         EntityLogicalName = "sprk_communication",
         RecordId = MessageId,

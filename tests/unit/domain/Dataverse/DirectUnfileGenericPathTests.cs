@@ -29,8 +29,8 @@ namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
 /// <see cref="DataverseUpdateHandler"/> and the Update Record node's <see cref="UpdateRecordActionCore"/>) take the one unfile rule
 /// (<see cref="DirectMessageOwnerStep.UnfiledOwnershipFor"/>) when they act for a person: an eligible Direct message returns to the
 /// Direct team after the change, its participants granted first; one whose Direct team cannot be confirmed is refused before
-/// anything is written; any other unfiled communication is Unchanged pending #2722 — no owner is written, neither the acting
-/// user's business-unit team nor its creator. A write that acts for nobody keeps its refusal.
+/// anything is written; any other communication left linked to nothing goes to its recorded creator's business-unit team
+/// (uac-r2 197a, #2722) or keeps its owner — never the acting user's team. A write that acts for nobody keeps its refusal.
 /// </summary>
 /// <remarks>The REAL <see cref="RecordOwnershipResolver"/> over <see cref="FakeDirectory"/>, the REAL
 /// <see cref="DirectMessageOwnerStep"/> over the same directory, and the REAL <see cref="DirectMessageOwnerTeam"/> over
@@ -49,9 +49,10 @@ public class DirectUnfileGenericPathTests
     // ── DataverseUpdateHandler ───────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task UpdateHandler_UnfilingACommunicationThatIsNotADirectMessage_AsAPerson_WritesNoOwner()
+    public async Task UpdateHandler_UnfilingACommunicationThatIsNotADirectMessage_WithNoRecordedCreator_WritesNoOwner()
     {
-        // UAC-r2: the generic path no longer hands an unfiled communication to the acting user's business-unit team.
+        // UAC-r2: the generic path never hands an unfiled communication to the acting user's business-unit team; with no
+        // recorded creator (sprk_createdbyperson) it keeps its owner (197a, #2722).
         var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email);
         var (handler, writes) = UpdateHandler(world, Resolved());
 
@@ -59,10 +60,26 @@ public class DirectUnfileGenericPathTests
             impersonateSystemUserId: Person);
 
         writes.Should().ContainSingle("the unfile itself is written");
-        world.Assignments.Should().BeEmpty("Unchanged pending #2722: no owner is written");
+        world.Assignments.Should().BeEmpty("no recorded creator: the former owner is kept (#2722)");
         world.ConditionalWrites.Should().BeEmpty();
         OwningTeam(world).Should().Be(FakeDirectory.ChildTeam).And.NotBe(FakeDirectory.GeneralTeam);
         _calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingACommunicationThatIsNotADirectMessage_WithARecordedCreator_MovesItToTheCreatorsTeam()
+    {
+        // uac-r2 197a (#2722), end to end through a writer: the creator's business-unit team, written by the settle.
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator();
+        var (handler, writes) = UpdateHandler(world, Resolved());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+
+        writes.Should().ContainSingle("the unfile itself is written");
+        OwningTeam(world).Should().Be(FakeDirectory.CustomerChildTeam).And.NotBe(FakeDirectory.GeneralTeam);
+        _calls.Should().BeEmpty("not a Direct message: no participant grant");
     }
 
     [Fact]
