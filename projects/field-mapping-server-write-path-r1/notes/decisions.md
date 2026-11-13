@@ -1125,3 +1125,10 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
 - **FR-23 amended for these tables.** The regarding pair stays pushable, but on an invoice-family table a pushed pair that disagrees with the child's core lookup is refused per child. On every other table FR-23 is unchanged.
 - **Views.** ebilling-r1 recommended (a). unified-access-control-r2: either option; there is no access effect while `SecureRootInheritance.BffManagedPairTables` holds no family table (pinned by 045d).
 - **Work:** task 045e, after 045d merges (same files).
+
+## 2026-11-13 — Invoice family: a filed invoice is never moved; children name their invoice's core record (owner, EB-D-231, #2794)
+
+Owner decision EB-D-231 (ebilling-r1, filed as #2794): a wrongly filed invoice is returned to the firm and resubmitted on the right record; it is never moved. Confirmed in this session 2026-11-13, with two answers:
+- **Builder:** this project builds it as task 045g (it owns `InvoiceFamilyCoreRecordGuard` through 045d/045e/045f); ebilling-r1 and unified-access-control-r2 review.
+- **Line detach:** clearing an invoice line's invoice is refused too, unless 045g's inventory finds a legitimate flow that needs it (then stop and ask).
+Rules: (1) every change to an invoice's core record after create is refused (the detach/move/reattach hint is replaced by "return and resubmit on the right record"); (2) approval, submission, correction and external-identifier rows name their invoice's core record, as lines already do; (3) a line's invoice is not cleared. 045g goes to master in its own PR after #2790.

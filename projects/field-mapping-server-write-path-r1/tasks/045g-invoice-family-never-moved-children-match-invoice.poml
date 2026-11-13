@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045g" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Invoice family: a filed invoice is never moved; approval, submission, correction and external-identifier rows name their invoice's core record; a line's invoice is not cleared (EB-D-231, #2794)</title>
+    <phase>3 W3 (follow-up to 045e)</phase>
+    <gate>045f merged into the work branch (40c5e85d48 or later). Owner confirmation 2026-11-13 in this session (notes/decisions.md). Merge into the work branch only after PR #2790 merges, so #2790 is not changed under review. ebilling-r1 and unified-access-control-r2 review the diff before merge.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what every write path admits on the six invoice-family tables (.cs, bff-api); refusal behaviour; modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-closed reasoning in the guard every family write path calls, beside the 045d derive and the 045e agreement check.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceFamilyCoreRecordGuard, which 045d/045e/045f also edit.</parallel-reason>
+    <deps>045e, 045f</deps>
+    <tags>bff-api, field-mapping, invoice-family, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision EB-D-231 (#2794), confirmed in this session 2026-11-13 (notes/decisions.md): a wrongly filed invoice is returned to the firm and resubmitted on the right record; it is never moved. Rules, all in `InvoiceFamilyCoreRecordGuard`, decided on every path that writes a family row (create, child-record PATCH, chat tool, UpdateRecordActionCore, DataverseUpdateHandler, the push, and the Finance services that go through the guard):
+(1) A change to an invoice's core record after create is refused. This replaces D-96's "refused while a line names another core" for invoices; the DetachMoveReattachHint text is replaced by fixed text saying the invoice is returned and resubmitted on the right record.
+(2) An approval, submission, correction or external-identifier row names its invoice's core record, as an invoice line already does (create and update). An external identifier with no invoice keeps 045e's D-68 decision.
+(3) Clearing an invoice line's invoice after create is refused.</prompt>
+  <role>SPAARKE platform developer, BFF write path. Security fails closed. Follow ADRs strictly.</role>
+  <goal>No write path moves a filed invoice to another core record, leaves a family child naming a core record other than its invoice's, or detaches a line from its invoice.</goal>
+
+  <context>
+    <background>
+045d derives the five resolver fields on a core move; 045e decides the regarding pair and URL against the core record (`CheckRegardingPairAgreesAsync`); D-96 (`invoice_family_line_invoice_core_record_mismatch`) refuses an invoice core change while a line names another core and carries the detach/move/reattach hint. After 045g an invoice core move is always refused, and a child's core is its invoice's core, so 045d's derive on an invoice core move becomes unreachable; keep it for the create and for children whose core is set together with their invoice, and say so in the notes. ebilling-r1 owns the Finance services and the submission writers; they review and confirm their flows (return-and-resubmit) never move a filed invoice or detach a line.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs, Services/RecordCreation/RecordCreationService.cs, Services/Finance/** (callers; edit only if a caller must pass new state)</file>
+      <file role="read">projects/field-mapping-server-write-path-r1/notes/task-045d-notes.md, task-045e-notes.md, decisions.md (EB-D-231)</file>
+      <file role="test">tests/integration/data-mutation/RecordOwnership/InvoiceFamily*.cs, tests/unit/domain/Dataverse/InvoiceFamily*.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-045g origin/work/field-mapping-server-write-path-r1`, then confirm this POML exists on the branch. Do not push to the work branch; the main session merges after PR #2790 merges.</constraint>
+    <constraint source="first, inventory">Before implementing, inventory every flow that changes an invoice's core lookup after create, sets a child's core different from its invoice's, or clears a line's invoice (server, Finance services, submission writers, wizards and PCFs through the BFF, playbooks, push, repair pass). If any legitimate flow needs one of these, STOP and report.</constraint>
+    <constraint source="one rule, one place">Each rule is decided once in the guard, beside `Check` / `CheckWriteAsync`; paths call it. Reuse existing codes where one already states the rule (D-96's code for a child that does not name its invoice's core); add at most one new code per rule with fixed text that names no record, with §11 answers. Each path refuses through its existing form.</constraint>
+    <constraint source="fail closed">A fault reading the stored row or the invoice writes nothing; cancellation is rethrown. On a run acting as a person, reads that decide the answer are made as that person where 045f does so (no refusal may depend on a row the person cannot read).</constraint>
+    <constraint source="no other change">045e's pair/URL rule, 045f's URL rule and the submission writers' own derive are unchanged except where a rule above refuses. Do not edit UAC-r2's files (`SecureRootInheritance.cs` read only; `DirectThreadAccessService.cs`, `DirectMessageParticipantShares.cs`, `SecureChildShareReconciliationJob.cs`, `SecureChildReconciler.cs`).</constraint>
+    <constraint source="public repo">Commit messages, comments, test names and notes state rules only, never a hole.</constraint>
+    <constraint source="ADR-038 / §10 / §11">Tests under KEEP paths. Never run Sprk.Bff.Api.Tests unfiltered; add `&amp;FullyQualifiedName!~Api.Office.`. The publish delta is the main session's. No deploys.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; read 045d/045e notes, D-96 and EB-D-231.</step>
+    <step order="1">Inventory (stop on a legitimate flow that needs a move, a mismatched child or a detach).</step>
+    <step order="2">Rules 1-3 in the guard; wire into every family path; replace the hint text.</step>
+    <step order="3">Tests (AC1-AC5), each must-fire run once with its rule off to show it fails. Build (0 warnings), ArchTests alone, filtered suites, ebilling-r1's filters (Finance, ProcedureAssignment, InvoiceFamily), format check. Notes in `notes/task-045g-notes.md` (rules, inventory, §11, evidence, which 045d derive paths become unreachable, known limits). Commit on `task/fm-045g` and push that branch.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (rule 1, must fire): on each path, an update that changes an invoice's core lookup (any of its core lookups) is refused, with or without lines, and nothing is written; the refusal text says the invoice is returned and resubmitted on the right record and names no record.</criterion>
+    <criterion testable="true">AC2 (rule 2, must fire): on each path, a create or update of an approval, submission, correction or external identifier (with an invoice) whose core record differs from its invoice's is refused, and nothing is written; this includes changing the child's invoice to one with another core.</criterion>
+    <criterion testable="true">AC3 (rule 3, must fire): on each path, an update that clears an invoice line's invoice is refused.</criterion>
+    <criterion testable="true">AC4 (must not fire): an invoice create; a child create naming its invoice's core; updates that touch neither the core nor the invoice; an external identifier with no invoice (045e D-68); every existing invoice-family, Finance, submission and push test — all behave as today except where AC1-AC3 refuse (each changed expectation listed in the notes with its reason).</criterion>
+    <criterion testable="true">AC5 (fail closed): a fault reading the stored row or the invoice writes nothing; cancellation is rethrown; on a person run no refusal depends on a row the person cannot read.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-13 in the main session from EB-D-231 (#2794), relayed by ebilling-r1 and confirmed by the owner in this session (builder: this project; line detach: refused). Releases the "child core equals invoice core" rule held out of 045e.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
