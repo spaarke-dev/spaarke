@@ -1071,3 +1071,25 @@ Branch `task/084d-2b-fix1`, from `97e8a59a2a`. Rule applied to every count: a co
 - Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede): 8341 passed, 4 skipped, 0 failed (8331 before this round).
 - ArchTests: 2570/2570 passed.
 - `dotnet format whitespace --verify-no-changes` clean on the four touched code files and the test file.
+
+### 084d-1 / 2a / 2b close (2026-11-13)
+
+Merged into work at `c313c6c211`: 2a `224007eda7`, 2a fix1 `475c05ed8e`, 2b `97e8a59a2a`, 2b fix1 `4c5d562619`.
+
+**Reviews**
+- Opus adversarial pass on 084d-1 + 2a, then fix round 1.
+- Sonnet scoped pass on 2b, then fix round 1.
+- uac-r2: PASS on 2a, 2a fix1, 2b and 2b fix1.
+- ontology-r1: Opus review OK on 084d-1, on 2a + fix1 and on 2b + fix1. No F-class finding and no Signals change.
+
+**Known limits accepted at review**
+- **uac-r2:** K-d and the 1000-invoice dry-run bound are the same class: aggregate-size signals on the total of In Review invoices in reach ("more than a page" / "more than 1000").
+  - Both need a record the caller can already Read and Write (the route's 404 filter).
+  - Neither carries an id or any fact about a single invoice.
+  - They are inherent: narrowing first would need the rights call that the bound exists to cap.
+- **ontology-r1, to take into 084d-3 / 084d-4:**
+  - **O-K1a:** the rows of the resolution comparison join the one caller check. So one unreadable child override row turns the whole preview into a 503, not just the count. 084d-3 considers nulling the count instead; that needs a uac-r2 look, because it changes what the check covers.
+  - **O-K1b:** a null count carries no reason; past the bound and a fault look the same. 084d-4 must show null as "can't be counted", never as 0 or blank.
+  - **O-K3:** no test pins that the dry-run cancellation token never reaches a write read. 084d-3 extends the write-side guard (`ProcedureAssignmentServiceTests` ~2246) to the `sprk_invoice`, `sprk_billingevent` and core-table reads.
+  - **O-K4a:** an overlay refusal surfaces as 503 `assignment.read_failed` "Try again", although it is deterministic. No real path reaches it today.
+  - **O-K4b:** the child-fault log line is written after the Signal select, so it is lost if that select throws. Operator log only.
