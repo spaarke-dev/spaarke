@@ -61,6 +61,19 @@ public sealed record DecisionReview
 
     /// <summary>Resume a review whose first attempt FAILED before its record: the steps that landed are not run again.</summary>
     public bool Retry { get; init; }
+
+    /// <summary>
+    /// Ontology task 191 (D-223): the person's choice for a resumed review whose budget inquiry email MAY have been sent
+    /// (<see cref="DecisionCommitResult.SendChoiceRequired"/>): <see cref="SendAgain"/> or <see cref="RecordWithoutSending"/>. Sent
+    /// only with <see cref="Retry"/>; refused anywhere else. Like <see cref="Retry"/>, it is not part of the review's content hash.
+    /// </summary>
+    public string? SendChoice { get; init; }
+
+    /// <summary>D-223: send the inquiry email once more (it may then arrive twice), reusing the landed service request.</summary>
+    public const string SendAgain = "send-again";
+
+    /// <summary>D-223: send nothing; the Decision Record lists the inquiry step as not sent, by the person's choice.</summary>
+    public const string RecordWithoutSending = "record-without-sending";
 }
 
 /// <summary>One offered action: taken or skipped, with the wizard's values (keyed by the catalog's parameter codes).</summary>
@@ -127,7 +140,8 @@ public sealed record DecisionCommitRef(string Entity, Guid Id);
 /// <param name="Key">Stable within the review (<c>action:revise-budget</c>, <c>next-step:add-todo#0</c>), used to resume.</param>
 /// <param name="Code">The catalog code.</param>
 /// <param name="Phase">D-17 step: 2 Dataverse writes of taken actions, 3 Next-step creators, 4 messages (the inquiry last).</param>
-/// <param name="Status">Done, Refused or Failed (<see cref="DecisionActionStatus"/>).</param>
+/// <param name="Status">Done, Refused or Failed (<see cref="DecisionActionStatus"/>), or NotSentByChoice for a budget inquiry the
+/// person chose to record without sending (D-223, <see cref="DecisionCommitService.NotSentByChoiceStatus"/>).</param>
 public sealed record DecisionCommitStep(
     string Key,
     string Code,
@@ -187,11 +201,22 @@ public sealed record DecisionCommitResult
     /// <summary>A failed first attempt that <see cref="DecisionReview.Retry"/> may resume.</summary>
     public bool Resumable { get; init; }
 
+    /// <summary>Ontology task 191 (D-223): a resumable failure whose budget inquiry email MAY have been sent. It resumes only with
+    /// the person's <see cref="DecisionReview.SendChoice"/>; a retry without one is refused (409) and sends and writes nothing.</summary>
+    public bool SendChoiceRequired { get; init; }
+
     public IReadOnlyList<string> Warnings { get; init; } = [];
 
     /// <summary>True when this is the stored first outcome of a repeated review id.</summary>
     public bool Replayed { get; init; }
 }
+
+/// <summary>Task 191 fix round 1 (criterion 134): the caller's unfinished review of a Signal, as the decision-plan read returns it: the
+/// review exactly as posted (post it again with <c>retry</c> to finish it) and its stored failure (the steps, what landed, whether the
+/// person's send choice is needed), marked <c>Replayed</c>.</summary>
+/// <param name="SignalId">Task 191 fix round 2: the Signal the review was posted to (the primary item); the review is finished by
+/// posting it there, also when it was opened from one of its "also resolve" items.</param>
+public sealed record UnfinishedDecision(Guid ReviewId, Guid SignalId, DecisionReview Review, DecisionCommitResult Failure);
 
 /// <summary>Stable reason codes the commit route returns.</summary>
 public static class DecisionCommitReasons
@@ -225,6 +250,15 @@ public static class DecisionCommitReasons
     public const string IdempotencyUnavailable = "ontology.decision.idempotency_unavailable";
     public const string ReviewChanged = "ontology.decision.review_changed";
     public const string NotResumable = "ontology.decision.not_resumable";
+
+    /// <summary>Ontology task 191 (D-223): the review's inquiry email may have been sent, and the retry named no
+    /// <see cref="DecisionReview.SendChoice"/> (409; nothing sent or written).</summary>
+    public const string SendChoiceRequired = "ontology.decision.send_choice_required";
+
+    /// <summary>Ontology task 191 fix round 1 (criterion 134): a review on this Signal is unfinished (a resumable failure whose writes
+    /// landed), so a NEW review would run those writes again. 409; nothing done. The unfinished review is finished from the item: the
+    /// decision-plan read returns it to the person who made it (<see cref="DecisionCommitService.ReadUnfinishedAsync"/>).</summary>
+    public const string ReviewUnfinished = "ontology.decision.review_unfinished";
     public const string NotAuthorized = "ontology.decision.not_authorized";
     public const string CoreChanged = "ontology.decision.core_changed";
 
@@ -366,6 +400,27 @@ public sealed class DecisionCommitService
     /// resume that ends without a write puts it back instead of forgetting the steps that landed.</remarks>
     internal sealed record LedgerEntry(bool InProgress, DateTimeOffset ReviewStart, string ContentHash, DecisionCommitResult? Outcome);
 
+    /// <summary>Task 191 fix round 1 (criterion 134): the per-Signal key family that names a Signal's unfinished review, on the same
+    /// tenant cache as the ledger (ADR-009). One entry per covered Signal, written with the review's Failed outcome and removed when it
+    /// is recorded or can no longer be resumed; it expires with the outcome (<see cref="OutcomeTtl"/>).</summary>
+    internal const string UnfinishedResource = "decision-unfinished";
+    internal const int UnfinishedVersion = 1;
+
+    /// <summary>A Signal's unfinished review: whose, on which primary Signal, the review exactly as posted (without <c>retry</c> and
+    /// <c>sendChoice</c>, so posting it again has the same content hash) and the stored failure.</summary>
+    /// <param name="StartedBy">Task 191 fix round 3: the author's display name from their token, when it carries one (no read).</param>
+    /// <param name="StartedOn">Task 191 fix round 3: when the unfinished review was started (its review start).</param>
+    internal sealed record UnfinishedEntry(
+        Guid ReviewId, string CallerObjectId, Guid SignalId, DecisionReview Review, DecisionCommitResult Failure,
+        string? StartedBy = null, DateTimeOffset? StartedOn = null);
+
+    internal static string UnfinishedKey(Guid signalId) => signalId.ToString("D");
+
+    /// <summary>Task 191 fix round 1: a review is unfinished when its first outcome failed AFTER writes landed and it can be resumed.
+    /// A new review would run those writes again; resuming it runs only what did not land.</summary>
+    internal static bool IsUnfinished(DecisionCommitResult result) =>
+        result is { Status: DecisionCommitStatus.Failed, Resumable: true, Landed.Count: > 0 };
+
     /// <summary>What the route read about one Signal, app-only (server-written columns; never from the request).</summary>
     public sealed record SignalRow(
         Guid Id,
@@ -390,11 +445,16 @@ public sealed class DecisionCommitService
 
         public bool IsOpen => Status is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged;
 
-        /// <summary>Resolved by the SYSTEM (not a person) at or after <paramref name="since"/>.</summary>
-        public bool SystemClosedSince(DateTimeOffset since) =>
+        /// <summary>Resolved by the SYSTEM (not a person) at or after <paramref name="since"/>. Task 191 fix round 2: with
+        /// <paramref name="clearedSince"/> (an unfinished review being finished, its own start), a ConditionCleared closure at or after
+        /// THAT time also counts; Superseded and PolicyRetired never reach past <paramref name="since"/> (the plan-read window).</summary>
+        public bool SystemClosedSince(DateTimeOffset since, DateTimeOffset? clearedSince = null) =>
             Status == SignalWriter.SignalStatusResolved
-            && Resolution is SignalWriter.ResolutionConditionCleared or SignalWriter.ResolutionSuperseded or SignalWriter.ResolutionPolicyRetired
-            && ResolvedOn is { } on && DateTime.SpecifyKind(on, DateTimeKind.Utc) >= since.UtcDateTime;
+            && ResolvedOn is { } on
+            && ((Resolution is SignalWriter.ResolutionConditionCleared or SignalWriter.ResolutionSuperseded or SignalWriter.ResolutionPolicyRetired
+                 && DateTime.SpecifyKind(on, DateTimeKind.Utc) >= since.UtcDateTime)
+                || (clearedSince is { } cleared && Resolution == SignalWriter.ResolutionConditionCleared
+                    && DateTime.SpecifyKind(on, DateTimeKind.Utc) >= cleared.UtcDateTime));
     }
 
     /// <summary>One step of the execution plan, in D-17 order.</summary>
@@ -635,6 +695,10 @@ public sealed class DecisionCommitService
             && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
             return notMine;
 
+        // D-223 (task 191): a send choice is one of the two the item offers; anything else is a malformed review (no I/O, nothing done).
+        if (review.SendChoice is { } choice && choice is not (DecisionReview.SendAgain or DecisionReview.RecordWithoutSending))
+            return Refused(review.ReviewId, DecisionCommitReasons.ReviewInvalid, "The send choice is not one this item offers; nothing was done.");
+
         DecisionCommitResult? resume = null;
         if (prior is { InProgress: true })
             return InProgress(review.ReviewId);
@@ -650,22 +714,67 @@ public sealed class DecisionCommitService
             // the item, and the first attempt passed the check before it ran (task 150 review F1).
             var mineNeeded = !mineConfirmed && !OwnReassignLanded(first);
             if (first.Status == DecisionCommitStatus.Recorded)
-                return await ReplayRecordedAsync(first, prior, Bounded(prior.ReviewStart, now), ids, lanes, review, http, tenantId, ledgerKey, mineNeeded, ct).ConfigureAwait(false);
+            {
+                var replay = await ReplayRecordedAsync(first, prior, Bounded(prior.ReviewStart, now), ids, lanes, review, http, tenantId, ledgerKey, mineNeeded, ct).ConfigureAwait(false);
+                // Task 191 fix round 1: a pointer whose removal failed when the review was recorded is removed now.
+                await TrackUnfinishedAsync(tenantId, callerObjectId, signalId, ids, review, first, null, prior.ReviewStart).ConfigureAwait(false);
+                return replay;
+            }
+
             if (!review.Retry || first.Status != DecisionCommitStatus.Failed)
                 return first with { Replayed = true };
             if (!first.Resumable)
                 return first with { Replayed = true, ReasonCode = DecisionCommitReasons.NotResumable };
+            // D-223 (task 191): the inquiry email may have been sent, so only the person's choice resumes this review. Without one
+            // the stored failure is returned as it is (409, see the endpoint), naming the choice: nothing is sent or written.
+            if (first.SendChoiceRequired && review.SendChoice is null)
+            {
+                return first with
+                {
+                    Replayed = true,
+                    ReasonCode = DecisionCommitReasons.SendChoiceRequired,
+                    Detail = "The inquiry email may have been sent. Check Sent Items, then choose Send again or Record without sending. Nothing was done.",
+                };
+            }
+
+            // Task 191 fix round 2: a choice is accepted for ANY resumable inquiry failure whose service request landed (NotSent
+            // included: a send that fails the same way on every retry would otherwise strand the item). Elsewhere it is invalid.
+            if (review.SendChoice is not null && ResumedInquiry(first) is null)
+                return Refused(review.ReviewId, DecisionCommitReasons.ReviewInvalid, "This decision does not need a send choice; nothing was done.");
             if (mineNeeded && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMineOnResume)
+            {
+                // This caller cannot finish it (D-141): the item no longer holds this review. Fix round 3: only a NotFound answer
+                // (not the caller's, or unreadable) releases it; an Unavailable or CallerUnresolved answer is transient, and releasing
+                // on it would let a new review run the landed writes again.
+                if (notMineOnResume.Status == DecisionCommitStatus.NotFound)
+                    await RemoveUnfinishedAsync(tenantId, callerObjectId, ids, review.ReviewId).ConfigureAwait(false);
                 return notMineOnResume;
+            }
             resume = first;
         }
 
+        // D-223: a send choice only finishes an earlier attempt that asked for one.
+        if (resume is null && review.SendChoice is not null)
+            return Refused(review.ReviewId, DecisionCommitReasons.ReviewInvalid, "A send choice only finishes an earlier attempt; nothing was done.");
+
+        // Task 191 fix round 1 (criterion 134): a NEW review on a Signal another review left unfinished would run that review's landed
+        // writes again (a second revision, a second service request), whatever client sent it. Refused; nothing is done.
+        if (resume is null && await RefuseWhileUnfinishedAsync(tenantId, callerObjectId, review.ReviewId, ids, ct).ConfigureAwait(false) is { } held)
+            return held;
+
         // The review started when the SERVER last served this caller the plan (K4: never a client-sent time); a resume keeps
         // the first attempt's start, but never earlier than the plan-read window (K3); no stamp means it started now (any earlier
-        // system closure is then a conflict).
+        // system closure is then a conflict). Task 191 fix round 1 (D-222): resuming an UNFINISHED review keeps its start unbounded.
+        // Its own landed writes (the budget revision) are what the trigger acts on when it closes the Signal, so the decision being
+        // finished is what resolved it, and step 6 re-closes that system closure however long the person took (within the outcome TTL).
+        // Fix round 2 (K2 raised): only a ConditionCleared closure is matched against that unbounded start; Superseded and
+        // PolicyRetired keep the window and its defined refusal (criterion 143). The ledger keeps the unbounded start.
+        DateTimeOffset? clearedSince = prior is { } unfinishedPrior && resume is not null && IsUnfinished(resume) ? unfinishedPrior.ReviewStart : null;
         var reviewStart = prior is { } resumed
             ? Bounded(resumed.ReviewStart, now)
             : await _planReads.ReadAsync(tenantId, callerObjectId, signalId, ct).ConfigureAwait(false) ?? now;
+        var storedStart = clearedSince ?? reviewStart;
+        var startedBy = http.User.FindFirst("name")?.Value;
 
         if (!review.Confirmed)
             return Refused(review.ReviewId, DecisionCommitReasons.NotConfirmed, "The decision was not confirmed; nothing was done.");
@@ -674,7 +783,7 @@ public sealed class DecisionCommitService
         // the failure it resumes inside the marker: if this attempt ends without a write outcome, that failure is put back.
         // Written uncancellable: a cancellation during the write must not leave a marker the try below never releases (it
         // would block this review for InProgressTtl). A cancellation is seen inside the try, which frees the marker.
-        var marked = await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(true, reviewStart, hash, resume), InProgressTtl, CancellationToken.None).ConfigureAwait(false);
+        var marked = await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(true, storedStart, hash, resume), InProgressTtl, CancellationToken.None).ConfigureAwait(false);
         if (!marked)
             return Unavailable(review.ReviewId);
 
@@ -682,13 +791,13 @@ public sealed class DecisionCommitService
         var progress = new CommitProgress();
         try
         {
-            result = await CommitCoreAsync(ids, lanes, review, http, now, reviewStart, hash, resume, progress, ct).ConfigureAwait(false);
+            result = await CommitCoreAsync(ids, lanes, review, http, now, reviewStart, clearedSince, hash, resume, progress, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Only reachable before the first write: from then on the writes run uncancellable (CommitCoreAsync). Nothing new
             // landed, so free the review id (or put back the failure being resumed).
-            await ReleaseLedgerAsync(tenantId, ledgerKey, reviewStart, hash, resume).ConfigureAwait(false);
+            await ReleaseLedgerAsync(tenantId, ledgerKey, storedStart, hash, resume).ConfigureAwait(false);
             throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -726,7 +835,7 @@ public sealed class DecisionCommitService
         // same review id may be corrected and sent again.
         if (result.Status is DecisionCommitStatus.Recorded or DecisionCommitStatus.Failed)
         {
-            if (!await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(false, reviewStart, hash, result), OutcomeTtl, CancellationToken.None).ConfigureAwait(false))
+            if (!await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(false, storedStart, hash, result), OutcomeTtl, CancellationToken.None).ConfigureAwait(false))
             {
                 if (result.Status == DecisionCommitStatus.Recorded)
                 {
@@ -741,10 +850,35 @@ public sealed class DecisionCommitService
                         review.ReviewId, string.Join(", ", result.Landed.Select(l => $"{l.Entity}:{l.Id:D}")));
                 }
             }
+
+            await TrackUnfinishedAsync(tenantId, callerObjectId, signalId, ids, review, result, startedBy, storedStart).ConfigureAwait(false);
         }
         else
         {
-            await ReleaseLedgerAsync(tenantId, ledgerKey, reviewStart, hash, resume).ConfigureAwait(false);
+            await ReleaseLedgerAsync(tenantId, ledgerKey, storedStart, hash, resume).ConfigureAwait(false);
+            if (resume is not null)
+            {
+                // Task 191 fix rounds 2-3: the pointer is never removed while landed writes are unrecorded and the Signal is open,
+                // unless the item is gone for good: only an item already closed (signal_not_open) or no longer the caller's / readable
+                // (NotFound) releases it. Every other outcome (a fault, in progress, a refusal, a missing right) keeps it, renewed with
+                // the ledger entry just put back so the two expire together: a blocked item with a clear explanation beats a silent
+                // second budget revision.
+                if (result is { Status: DecisionCommitStatus.Conflict, ReasonCode: DecisionCommitReasons.SignalNotOpen } or { Status: DecisionCommitStatus.NotFound })
+                {
+                    await RemoveUnfinishedAsync(tenantId, callerObjectId, ids, review.ReviewId).ConfigureAwait(false);
+                }
+                else
+                {
+                    if (result.Status is DecisionCommitStatus.Refused or DecisionCommitStatus.Forbidden && IsUnfinished(resume))
+                    {
+                        _logger.LogError(DecisionCommitEvents.StepFailed,
+                            "Decision commit: unfinished review {ReviewId} was refused on resume ({ReasonCode}); it keeps holding the item. Landed: {Landed}.",
+                            review.ReviewId, result.ReasonCode, string.Join(", ", resume.Landed.Select(l => $"{l.Entity}:{l.Id:D}")));
+                    }
+
+                    await TrackUnfinishedAsync(tenantId, callerObjectId, signalId, ids, review, resume, startedBy, storedStart).ConfigureAwait(false);
+                }
+            }
         }
 
         return result;
@@ -841,11 +975,12 @@ public sealed class DecisionCommitService
     /// <summary>Closes (or links) <paramref name="signalIds"/> with an already-written record. Uncancellable: these are writes
     /// after the record.</summary>
     private async Task<IReadOnlyList<DecisionCommitSignal>> CloseAllAsync(
-        IReadOnlyList<Guid> signalIds, Resolution resolution, string? dismissalText, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart)
+        IReadOnlyList<Guid> signalIds, Resolution resolution, string? dismissalText, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart,
+        DateTimeOffset? clearedSince = null)
     {
         var signals = new List<DecisionCommitSignal>();
         foreach (var id in signalIds)
-            signals.Add(await CloseSignalAsync(id, resolution, dismissalText, recordId, confirmedBy, reviewStart, CancellationToken.None).ConfigureAwait(false));
+            signals.Add(await CloseSignalAsync(id, resolution, dismissalText, recordId, confirmedBy, reviewStart, CancellationToken.None, clearedSince).ConfigureAwait(false));
         return signals;
     }
 
@@ -904,6 +1039,141 @@ public sealed class DecisionCommitService
         }
     }
 
+    /// <summary>
+    /// Task 191 fix round 1 (criterion 134): this caller's unfinished review of <paramref name="signalId"/>, for the decision-plan read,
+    /// so reopening the item resumes it instead of starting a new review that would run its landed writes again. Null when there is none,
+    /// when it is another person's (their commit is refused while it stands, <see cref="DecisionCommitReasons.ReviewUnfinished"/>), or
+    /// when the cache cannot be read (logged; never fails the plan read: the commit
+    /// route's own check then fails closed).
+    /// </summary>
+    public async Task<UnfinishedDecision?> ReadUnfinishedAsync(HttpContext http, Guid signalId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        var tenantId = DecisionPlanReadStamp.TenantId(http);
+        var callerObjectId = CallerResolution.ResolveObjectId(http.User);
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(callerObjectId))
+            return null;
+
+        UnfinishedEntry? entry;
+        try
+        {
+            entry = await _ledger.GetAsync<UnfinishedEntry>(tenantId, UnfinishedResource, UnfinishedKey(signalId), UnfinishedVersion, ct: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision plan: the unfinished-review pointer could not be read ({ExceptionType}); none is offered.", ex.GetType().Name);
+            return null;
+        }
+
+        // Fix round 2: returned for EVERY Signal the review covers (an "also resolve" item is held too), naming the primary Signal
+        // the review is posted to.
+        return entry is { } e && string.Equals(e.CallerObjectId, callerObjectId, StringComparison.Ordinal)
+            ? new UnfinishedDecision(e.ReviewId, e.SignalId, e.Review, e.Failure with { Replayed = true })
+            : null;
+    }
+
+    /// <summary>Task 191 fix round 1: a NEW review (no stored outcome under its id) on a Signal whose pointer names another review, or
+    /// the same review id of another caller, is refused (409, nothing done). A pointer that cannot be read refuses too (503, fail closed,
+    /// as the ledger read does).</summary>
+    private async Task<DecisionCommitResult?> RefuseWhileUnfinishedAsync(
+        string tenantId, string callerObjectId, Guid reviewId, IReadOnlyList<Guid> ids, CancellationToken ct)
+    {
+        foreach (var id in ids)
+        {
+            UnfinishedEntry? entry;
+            try
+            {
+                entry = await _ledger.GetAsync<UnfinishedEntry>(tenantId, UnfinishedResource, UnfinishedKey(id), UnfinishedVersion, ct: ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Decision commit: the unfinished-review pointer could not be read for review {ReviewId} ({ExceptionType}); refusing (fail closed).",
+                    reviewId, ex.GetType().Name);
+                return Unavailable(reviewId);
+            }
+
+            if (entry is null)
+                continue;
+            var mine = string.Equals(entry.CallerObjectId, callerObjectId, StringComparison.Ordinal);
+            if (mine && entry.ReviewId == reviewId)
+                continue;
+            return new DecisionCommitResult
+            {
+                Status = DecisionCommitStatus.Conflict,
+                ReviewId = reviewId,
+                ReasonCode = DecisionCommitReasons.ReviewUnfinished,
+                Detail = mine
+                    ? "An earlier decision on this item is unfinished. Close this and open the item again to finish it. Nothing was done."
+                    : HeldByAnotherDetail(entry),
+            };
+        }
+
+        return null;
+    }
+
+    /// <summary>Task 191 fix round 3: who started the unfinished decision and when, so the person refused can ask them to finish it.
+    /// The name is the one their token carried (no read); without it, "Another user".</summary>
+    internal static string HeldByAnotherDetail(UnfinishedEntry entry)
+    {
+        var who = string.IsNullOrWhiteSpace(entry.StartedBy) ? "Another user" : entry.StartedBy;
+        var when = entry.StartedOn is { } on
+            ? " on " + on.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture)
+            : "";
+        return $"{who} started a decision on this item{when} that is unfinished. Ask them to finish it first. Nothing was done.";
+    }
+
+    /// <summary>Task 191 fix round 1: after a review's outcome is stored, points every covered Signal at it while it is unfinished
+    /// (<see cref="IsUnfinished"/>), and otherwise removes a pointer that names it. Best effort: a pointer that cannot be written is
+    /// logged at Error (a new review on the item is then not held back); one that cannot be removed expires with the outcome.</summary>
+    private async Task TrackUnfinishedAsync(
+        string tenantId, string callerObjectId, Guid signalId, IReadOnlyList<Guid> ids, DecisionReview review, DecisionCommitResult result,
+        string? startedBy, DateTimeOffset startedOn)
+    {
+        // Fix round 2 (D-141): once the review's own reassign landed, the item is someone else's work. Its author's plan read is the
+        // uniform 404, so the review could never be reached from the item; holding the item would block its new owner for the TTL.
+        // The item is released (the author can still finish the review from the wizard that is open).
+        if (IsUnfinished(result) && !OwnReassignLanded(result))
+        {
+            var entry = new UnfinishedEntry(review.ReviewId, callerObjectId, signalId, review with { Retry = false, SendChoice = null }, result, startedBy, startedOn);
+            foreach (var id in ids)
+            {
+                try
+                {
+                    await _ledger.SetAsync(tenantId, UnfinishedResource, UnfinishedKey(id), UnfinishedVersion, entry, OutcomeTtl, ct: CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(DecisionCommitEvents.StepFailed,
+                        "Decision commit: the unfinished review {ReviewId} could not be recorded on Signal {SignalId} ({ExceptionType}); a new review of it is not held back.",
+                        review.ReviewId, id, ex.GetType().Name);
+                }
+            }
+
+            return;
+        }
+
+        await RemoveUnfinishedAsync(tenantId, callerObjectId, ids, review.ReviewId).ConfigureAwait(false);
+    }
+
+    /// <summary>Task 191 fix round 2: removes each covered Signal's pointer that names this caller's review. Best effort.</summary>
+    private async Task RemoveUnfinishedAsync(string tenantId, string callerObjectId, IReadOnlyList<Guid> ids, Guid reviewId)
+    {
+        foreach (var id in ids)
+        {
+            try
+            {
+                var entry = await _ledger.GetAsync<UnfinishedEntry>(tenantId, UnfinishedResource, UnfinishedKey(id), UnfinishedVersion, ct: CancellationToken.None).ConfigureAwait(false);
+                if (entry is not null && entry.ReviewId == reviewId && string.Equals(entry.CallerObjectId, callerObjectId, StringComparison.Ordinal))
+                    await _ledger.RemoveAsync(tenantId, UnfinishedResource, UnfinishedKey(id), UnfinishedVersion, ct: CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Decision commit: the unfinished-review pointer of Signal {SignalId} could not be removed ({ExceptionType}); it expires with the outcome.",
+                    id, ex.GetType().Name);
+            }
+        }
+    }
+
     /// <summary>Whether a commit has reached its first write (set once, before step 2).</summary>
     private sealed class CommitProgress
     {
@@ -919,7 +1189,7 @@ public sealed class DecisionCommitService
 
     private async Task<DecisionCommitResult> CommitCoreAsync(
         IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, DecisionReview review, HttpContext http,
-        DateTimeOffset now, DateTimeOffset reviewStart, string hash, DecisionCommitResult? resume, CommitProgress progress, CancellationToken ct)
+        DateTimeOffset now, DateTimeOffset reviewStart, DateTimeOffset? clearedSince, string hash, DecisionCommitResult? resume, CommitProgress progress, CancellationToken ct)
     {
         var reviewId = review.ReviewId;
 
@@ -967,7 +1237,7 @@ public sealed class DecisionCommitService
 
         var finishing = existingRecord is not null && resume is null;
         var createBudgetLanded = (resume?.Steps ?? []).Any(s => s.Key == $"action:{ResolvedDecisionPlan.CreateBudgetCode}" && s.Status == nameof(DecisionActionStatus.Done));
-        var prepared = await PrepareAsync(review, rows, lanes, reviewStart, finishing ? existingRecord!.Id : null, createBudgetLanded, resume is not null, ct).ConfigureAwait(false);
+        var prepared = await PrepareAsync(review, rows, lanes, reviewStart, clearedSince, finishing ? existingRecord!.Id : null, createBudgetLanded, resume is not null, ct).ConfigureAwait(false);
         if (prepared.Refusal is { } refusal)
             return refusal with { ReviewId = reviewId };
         var p = prepared.Ready!;
@@ -983,7 +1253,7 @@ public sealed class DecisionCommitService
             // The ledger forgot the outcome (or never got it): the record answers, validated and authorized as above, and any
             // Signal not yet closed with it is closed with the RECORD's resolution (never the body's).
             var (resolution, dismissalText) = existingRecord!.RecordedResolution();
-            var closedNow = await CloseAllAsync(ids, resolution, dismissalText, existingRecord.Id, confirmedBy, reviewStart).ConfigureAwait(false);
+            var closedNow = await CloseAllAsync(ids, resolution, dismissalText, existingRecord.Id, confirmedBy, reviewStart, clearedSince).ConfigureAwait(false);
             var finishWarnings = closedNow.Where(x => x.Warning is not null).Select(x => x.Warning!).ToList();
             finishWarnings.AddRange(await SuppressAfterRepairAsync(resolution, p.Resolved, closedNow).ConfigureAwait(false));
             return new DecisionCommitResult
@@ -1021,16 +1291,27 @@ public sealed class DecisionCommitService
             return Unavailable(reviewId, DecisionCommitReasons.RecordRefused, "The deciding user could not be identified right now; nothing was done. Try again shortly.");
 
         // ---- (1d) Every executor's preflight, as the caller. A resumed review skips the steps that already landed. ------
-        var done = (resume?.Steps ?? []).Where(s => s.Status == nameof(DecisionActionStatus.Done)).ToDictionary(s => s.Key, StringComparer.Ordinal);
+        var done = (resume?.Steps ?? [])
+            .Where(s => s.Status is nameof(DecisionActionStatus.Done) or NotSentByChoiceStatus)
+            .ToDictionary(s => s.Key, StringComparer.Ordinal);
+
+        // D-223 (task 191): the inquiry step of a resumed review whose service request landed and whose email did not go out (or
+        // may have). Its retry never creates a second service request: it sends once, with the landed id, or (the person's
+        // choice for a maybe-sent email) is recorded as not sent and runs nothing.
+        var landedInquiry = ResumedInquiry(resume);
+        var recordWithoutSending = landedInquiry is not null && review.SendChoice == DecisionReview.RecordWithoutSending;
         foreach (var step in p.Steps.Where(s => !done.ContainsKey(s.Key)))
         {
+            if (recordWithoutSending && step.Key == landedInquiry!.Key)
+                continue;
+
             if (!_executors.TryGet(step.Def.Code, out var executor))
                 return Refused(reviewId, DecisionCommitReasons.UnresolvedAction, $"'{step.Def.Code}' cannot be carried out here.", step.Def.Code);
 
             DecisionActionOutcome? refused;
             try
             {
-                refused = await executor.PreflightAsync(Request(http, p, step), ct).ConfigureAwait(false);
+                refused = await executor.PreflightAsync(Request(http, p, step, LandedFor(step, landedInquiry)), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -1113,11 +1394,19 @@ public sealed class DecisionCommitService
                 continue;
             }
 
+            if (recordWithoutSending && step.Key == landedInquiry!.Key)
+            {
+                // The person chose to record the decision without sending: the landed service request stands, nothing is sent.
+                executed.Add(new DecisionCommitStep(step.Key, step.Def.Code, step.Phase, NotSentByChoiceStatus, landedInquiry.Written, [], null,
+                    "Recorded without sending, by the user's choice."));
+                continue;
+            }
+
             _executors.TryGet(step.Def.Code, out var executor);
             DecisionActionOutcome outcome;
             try
             {
-                outcome = await executor.ExecuteAsync(Request(http, p, step), writeCt).ConfigureAwait(false);
+                outcome = await executor.ExecuteAsync(Request(http, p, step, LandedFor(step, landedInquiry)), writeCt).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1178,7 +1467,7 @@ public sealed class DecisionCommitService
         var warnings = new List<string>();
         foreach (var row in p.Resolved)
         {
-            var closed = await CloseSignalAsync(row.Id, p.Resolution, p.DismissalText, recordId, confirmedBy, reviewStart, writeCt).ConfigureAwait(false);
+            var closed = await CloseSignalAsync(row.Id, p.Resolution, p.DismissalText, recordId, confirmedBy, reviewStart, writeCt, clearedSince).ConfigureAwait(false);
             signals.Add(closed);
             if (closed.Warning is { } warning)
                 warnings.Add(warning);
@@ -1258,7 +1547,7 @@ public sealed class DecisionCommitService
 
     private async Task<(DecisionCommitResult? Refusal, Prepared? Ready)> PrepareAsync(
         DecisionReview review, IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, SignalAccessDecision> access,
-        DateTimeOffset reviewStart, Guid? linkedRecord, bool createBudgetLanded, bool resumed, CancellationToken ct)
+        DateTimeOffset reviewStart, DateTimeOffset? clearedSince, Guid? linkedRecord, bool createBudgetLanded, bool resumed, CancellationToken ct)
     {
         static (DecisionCommitResult?, Prepared?) No(string reason, string detail, string? action = null, DecisionCommitStatus status = DecisionCommitStatus.Refused) =>
             (new DecisionCommitResult { Status = status, ReasonCode = reason, Detail = detail, ActionCode = action }, null);
@@ -1276,7 +1565,7 @@ public sealed class DecisionCommitService
             if (access[row.Id].CoreTypeId != row.CoreTypeId || access[row.Id].CoreId != row.CoreId)
                 return No(DecisionCommitReasons.CoreChanged, "An item's matter or project changed while the decision was made; nothing was done.");
             // A Signal already closed WITH the record being finished (a stored-record repeat) is not a conflict: its close is done.
-            if (!row.IsOpen && !row.SystemClosedSince(reviewStart) && !(linkedRecord is { } link && row.DecisionRecordId == link))
+            if (!row.IsOpen && !row.SystemClosedSince(reviewStart, clearedSince) && !(linkedRecord is { } link && row.DecisionRecordId == link))
                 return No(DecisionCommitReasons.SignalNotOpen, "This item was already resolved; nothing was done.", status: DecisionCommitStatus.Conflict);
         }
 
@@ -1933,13 +2222,36 @@ public sealed class DecisionCommitService
 
     // ── Steps and the record ─────────────────────────────────────────────────────────────────────────────────────────
 
-    private static DecisionActionRequest Request(HttpContext http, Prepared p, ExecStep step) =>
+    private static DecisionActionRequest Request(HttpContext http, Prepared p, ExecStep step, IReadOnlyList<DecisionRecordRef>? landed = null) =>
         new(http,
             p.Primary.Id,
             p.Primary.SubjectEntity is { Length: > 0 } entity && p.Primary.SubjectId is { } id ? new DecisionRecordRef(entity, id) : null,
             p.Core,
             p.MatterId,
-            step.Values);
+            step.Values,
+            landed);
+
+    /// <summary>Step status for an inquiry the person chose to record without sending (D-223). Carried forward like Done.</summary>
+    internal const string NotSentByChoiceStatus = "NotSentByChoice";
+
+    /// <summary>
+    /// D-223: the failed inquiry step of a resumable stored failure whose service request landed (and nothing else did for it).
+    /// Null for every other resume: those carry only Done steps forward and run the failed step again from the start.
+    /// </summary>
+    private static DecisionCommitStep? ResumedInquiry(DecisionCommitResult? resume) =>
+        resume is { Resumable: true }
+            ? resume.Steps.LastOrDefault(s =>
+                s.Code == BudgetInquiryExecutor.ActionCode
+                && s.Status == nameof(DecisionActionStatus.Failed)
+                && s.PossiblyWritten.Count == 0
+                && s.Written.Count == 1
+                && string.Equals(s.Written[0].Entity, BudgetInquiryExecutor.Table, StringComparison.OrdinalIgnoreCase))
+            : null;
+
+    private static IReadOnlyList<DecisionRecordRef>? LandedFor(ExecStep step, DecisionCommitStep? landedInquiry) =>
+        landedInquiry is not null && step.Key == landedInquiry.Key
+            ? landedInquiry.Written.Select(w => new DecisionRecordRef(w.Entity, w.Id)).ToList()
+            : null;
 
     private static DecisionCommitStep ToStep(ExecStep step, DecisionActionOutcome outcome) =>
         new(step.Key,
@@ -2054,9 +2366,19 @@ public sealed class DecisionCommitService
         // Only a step that was REFUSED (by contract: nothing written) can resume. A Failed step may have landed (a create that
         // timed out after committing, a message that went out, a revision whose amount was then refused), so running it again
         // could write it twice; a thrown step is Failed. The steps that landed in full before it are never repeated.
-        var resumable = outcome.Status == DecisionActionStatus.Refused
-                        && possibly.Count == 0
-                        && outcome.Written.Count == 0;
+        // D-223 (task 191) adds ONE Failed case: the budget inquiry whose service request landed and whose email failed with a
+        // known send outcome. Its retry reuses the landed id (no second create) and sends once; when the email MAY have gone out
+        // (Unknown) the retry also needs the person's choice (Send again / Record without sending).
+        var refusedCleanly = outcome.Status == DecisionActionStatus.Refused
+                             && possibly.Count == 0
+                             && outcome.Written.Count == 0;
+        var inquiryResume = step.Def.Code == BudgetInquiryExecutor.ActionCode
+                            && outcome.Status == DecisionActionStatus.Failed
+                            && outcome.SendFailure is not null
+                            && possibly.Count == 0
+                            && outcome.Written.Count == 1
+                            && string.Equals(outcome.Written[0].Entity, BudgetInquiryExecutor.Table, StringComparison.OrdinalIgnoreCase);
+        var resumable = refusedCleanly || inquiryResume;
         return new DecisionCommitResult
         {
             Status = DecisionCommitStatus.Failed,
@@ -2070,6 +2392,7 @@ public sealed class DecisionCommitService
             PossiblyLanded = possibly,
             GateTier = p.GateTier,
             Resumable = resumable,
+            SendChoiceRequired = inquiryResume && outcome.SendFailure == DecisionSendFailure.Unknown,
         };
     }
 
@@ -2125,7 +2448,8 @@ public sealed class DecisionCommitService
     /// Row-version conditional; a concurrent change is re-read once.
     /// </summary>
     private async Task<DecisionCommitSignal> CloseSignalAsync(
-        Guid signalId, Resolution resolution, string? dismissalText, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart, CancellationToken ct)
+        Guid signalId, Resolution resolution, string? dismissalText, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart, CancellationToken ct,
+        DateTimeOffset? clearedSince = null)
     {
         var state = resolution.ToString();
         for (var attempt = 0; attempt < 2; attempt++)
@@ -2138,7 +2462,7 @@ public sealed class DecisionCommitService
                 return new DecisionCommitSignal(signalId, state, null); // already done (a resumed review)
 
             var open = row.IsOpen;
-            var systemClosed = row.SystemClosedSince(reviewStart);
+            var systemClosed = row.SystemClosedSince(reviewStart, clearedSince);
             if (!open && !(systemClosed && resolution != Resolution.InquirySent))
             {
                 return Warn(signalId, row.Status == SignalWriter.SignalStatusResolved && !systemClosed ? "resolved_by_another_decision" : "closed_during_review",

@@ -41,6 +41,7 @@ import {
   withValue,
 } from '../decisionDraft';
 import type { StepScope } from '../decisionDraft';
+import { lockedNoteText } from '../decisionDisplay';
 import { useDecisionItem } from '../decisionItemContext';
 import type { DecisionAction, DecisionParameter } from '../decisionWizardTypes';
 import { EMAIL_COPY_CODES, EMAIL_MESSAGE_CODES, EmailMessageFields, declaresCopies } from './EmailMessageFields';
@@ -58,14 +59,15 @@ const INVALID: Partial<Record<DecisionParameter['kind'], string>> = {
 };
 
 /** Shown on a step while a failed attempt pins the review: the route has seen this exact decision, so it cannot change. */
-export const LockedNote: React.FC = () => (
-  <MessageBar intent="info" data-testid="locked-note">
-    <MessageBarBody>
-      An earlier attempt to record this decision did not finish, so it cannot be changed now. Record the same decision
-      again, or close without recording.
-    </MessageBarBody>
-  </MessageBar>
-);
+export const LockedNote: React.FC = () => {
+  // Task 191 fix round 1 (F2): the way on the item offers for the attempt that pinned the review (choice, resume or repeat).
+  const { lockedBy } = useDecisionItem();
+  return (
+    <MessageBar intent="info" data-testid="locked-note">
+      <MessageBarBody>{lockedNoteText(lockedBy)}</MessageBarBody>
+    </MessageBar>
+  );
+};
 
 interface FieldProps {
   parameter: DecisionParameter;

@@ -23,13 +23,15 @@ import { ConfirmModal } from '../SprkModal/presets/ConfirmModal';
 import type { SprkModalNav } from '../SprkModal/SprkModal.types';
 import { DecisionItemWizard, hasRecordedDecision } from './DecisionItemWizard';
 import type { DecisionItemView } from './DecisionItemWizard';
-import { buildReview, emptyDraft, hasUnrecordedChoices, newReviewId } from './decisionDraft';
+import { buildReview, draftFromReview, emptyDraft, hasUnrecordedChoices, newReviewId } from './decisionDraft';
 import type { ItemDraft } from './decisionDraft';
 import type { DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import {
+  canRecordWithoutSending,
   closesSignal,
   failureKeepsReview,
   isFailedOutcome,
+  needsSendChoice,
   resolutionFromRecord,
   reviewKey,
 } from './decisionRecording';
@@ -44,6 +46,8 @@ import type {
   DecisionOpenRecord,
   DecisionPlan,
   DecisionResolution,
+  DecisionReview,
+  DecisionSendChoice,
   DecisionWizardItem,
   DecisionWizardService,
   SuppressionStatus,
@@ -140,10 +144,23 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   live.current = { service, loadItem, loaded, drafts, failures, recorded, onRecorded };
   const recordingRef = React.useRef<string | null>(null);
   // Per item: the review a failed attempt posted. Once a failure keeps the review id it is PINNED: the id never changes again,
-  // the review cannot be edited, and `pinning` is the Failed outcome whose `resumable` decides `retry`.
+  // the review cannot be edited, and `pinning` is the Failed outcome whose `resumable` decides `retry`. `posted` is the review
+  // itself when it came from the server (an unfinished review the plan read returned, task 191 fix round 1): it is posted back
+  // exactly as stored, so its content is the content the route holds.
   const attempts = React.useRef<
     Partial<
-      Record<string, { key: string; pinned: boolean; pinning: DecisionCommitFailure | null; sent: ItemDraft | null }>
+      Record<
+        string,
+        {
+          key: string;
+          pinned: boolean;
+          pinning: DecisionCommitFailure | null;
+          sent: ItemDraft | null;
+          posted?: DecisionReview;
+          /** Fix round 2: the item the stored review is posted to (its primary), when it was opened from another item. */
+          postTo?: string;
+        }
+      >
     >
   >({});
   const closedNow = React.useRef<(id: string) => boolean>(() => false);
@@ -159,19 +176,18 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const loadOne = React.useCallback(async (id: string) => {
     setLoaded(prev => ({ ...prev, [id]: { status: 'loading' } }));
     try {
-      const item = await live.current.loadItem(id);
-      const decided = hasRecordedDecision(item.resolution);
-      const open = !item.resolution;
-      const needPlan = open || decided;
+      const loadedItem = await live.current.loadItem(id);
+      const decided = hasRecordedDecision(loadedItem.resolution);
+      const open = !loadedItem.resolution;
+      // Every item's plan is read (task 191 fix round 1): a closed item the person did not decide may hold their UNFINISHED
+      // decision (the budget-revision trigger closes the Signal after the revision lands), which the plan read returns.
       const [plan, suppression] = await Promise.all([
-        needPlan
-          ? live.current.service.getPlan(id).catch(err => {
-              // A decided item replays from its record; without the plan it still shows the record, the status bar and the
-              // fact snapshot, just no per-action steps. An open item needs the plan to be decided at all.
-              if (open) throw err;
-              return emptyPlan(item);
-            })
-          : Promise.resolve(emptyPlan(item)),
+        live.current.service.getPlan(id).catch(err => {
+          // A decided item replays from its record; without the plan it still shows the record, the status bar and the
+          // fact snapshot, just no per-action steps. An open item needs the plan to be decided at all.
+          if (open) throw err;
+          return emptyPlan(loadedItem);
+        }),
         open
           ? live.current.service.getSuppression(id).then(
               s => ({ s, failed: false }),
@@ -180,11 +196,30 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           : Promise.resolve({ s: null, failed: false }),
       ]);
       if (!mounted.current) return;
+      // Task 191 fix round 1 (criterion 134): the person's unfinished review of this item is RESUMED, never started over (a new
+      // review id would run its landed writes again; the route refuses one anyway). The item is open for them until it is
+      // finished, also when the system closed it meanwhile: finishing it re-closes the Signal with the decision.
+      const unfinished = !decided ? (plan.unfinished ?? null) : null;
+      const item = unfinished ? { ...loadedItem, resolution: null } : loadedItem;
+      if (unfinished && !attempts.current[id]?.pinned) {
+        const shown = draftFromReview(plan, unfinished.review);
+        attempts.current[id] = {
+          key: reviewKey(unfinished.review),
+          pinned: true,
+          pinning: unfinished.failure,
+          sent: shown,
+          posted: unfinished.review,
+          postTo: unfinished.signalId,
+        };
+        setDrafts(prev => ({ ...prev, [id]: shown }));
+        setPinned(prev => ({ ...prev, [id]: unfinished.failure }));
+        setFailures(prev => ({ ...prev, [id]: unfinished.failure }));
+      }
       setLoaded(prev => ({
         ...prev,
         [id]: { status: 'ready', item, plan, suppression: suppression.s, suppressionFailed: suppression.failed },
       }));
-      if (open) {
+      if (open || unfinished) {
         setDrafts(prev =>
           prev[id] ? prev : { ...prev, [id]: withTemplatedDefaults(emptyDraft(newReviewId()), plan, item) }
         );
@@ -211,7 +246,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
 
   // ---- Record: the ONE write, single-flight --------------------------------------------------------------
   const record = React.useCallback(
-    async (id: string) => {
+    async (id: string, choice?: DecisionSendChoice) => {
       if (recordingRef.current) return; // a second click while a request is out sends nothing
       const l = live.current.loaded[id];
       const draft = live.current.drafts[id];
@@ -231,7 +266,24 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         const stillOpen = draft.alsoResolve.filter(x => !closedNow.current(x));
         if (stillOpen.length !== draft.alsoResolve.length) sendDraft = { ...draft, alsoResolve: stillOpen };
       }
-      let review = buildReview(l.plan, sendDraft, { retry });
+      // A review the server returned as unfinished is posted back exactly as it stored it (task 191 fix round 1).
+      let review: DecisionReview =
+        isPinned && previous.posted
+          ? { ...previous.posted, ...(retry ? { retry: true } : {}) }
+          : buildReview(l.plan, sendDraft, { retry });
+      // Task 191 (D-223): the inquiry email of the pinned attempt may have been sent; the person's choice goes on the same POST.
+      // Without a choice such a retry would only get the stored failure back, so it is not sent at all.
+      if (retry && needsSendChoice(previous.pinning)) {
+        if (!choice) {
+          recordingRef.current = null;
+          setRecording(null);
+          return;
+        }
+        review = { ...review, sendChoice: choice };
+      } else if (retry && choice && canRecordWithoutSending(previous.pinning)) {
+        // Fix round 2: an inquiry that was not sent may be recorded without sending (or retried) on the same POST.
+        review = { ...review, sendChoice: choice };
+      }
       // An edit after a plain refusal (nothing stored) is a different decision and gets its own review id. A pinned review
       // is never edited and never changes id: a new id would run the steps that already landed again.
       if (previous && !isPinned && previous.key !== reviewKey(review)) {
@@ -241,7 +293,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       }
 
       try {
-        const result = await live.current.service.commit(id, review);
+        const result = await live.current.service.commit(isPinned && previous.postTo ? previous.postTo : id, review);
         if (!mounted.current) return;
         const resolution = resolutionFromRecord(l.plan, l.item, sendDraft, review, result, new Date());
         delete attempts.current[id];
@@ -259,7 +311,11 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           return next;
         });
         // Only what the route says it closed (Acted or Dismissed) counts as closed here; an item it left open stays open.
-        const also = (review.alsoResolve ?? []).filter(x => closesSignal(result, x));
+        // Fix round 2: a review finished from one of its "also resolve" items was posted to its primary item, which it closes too;
+        // the item it was opened from is this one (recorded above), never one of the others.
+        const target = isPinned && previous.postTo ? previous.postTo : id;
+        const covered = target !== id ? [target, ...(review.alsoResolve ?? [])] : (review.alsoResolve ?? []);
+        const also = covered.filter(x => x !== id && closesSignal(result, x));
         if (also.length > 0) {
           setAlsoClosed(prev => [...prev, ...also.filter(x => !prev.includes(x))]);
           // Their cached copies are open; a later visit must read them again.
@@ -299,6 +355,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           pinned: isNowPinned,
           pinning,
           sent: wasPinned ? (prior.sent ?? sendDraft) : sendDraft,
+          posted: wasPinned ? prior.posted : undefined,
+          postTo: wasPinned ? prior.postTo : undefined,
         };
         setFailures(prev => ({ ...prev, [id]: failure }));
         setPinned(prev => {
@@ -340,6 +398,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const hasUnrecorded = Object.entries(drafts).some(
     ([id, d]) => d !== undefined && !recorded[id] && !alsoClosed.includes(id) && hasUnrecordedChoices(d)
   );
+  // Task 191: a pinned attempt that landed writes is an unfinished decision, not choices that write nothing when discarded.
+  const unfinishedWrites = Object.values(pinned).some(f => f !== undefined && f.landed.length > 0);
   const requestClose = React.useCallback(() => {
     if (recordingRef.current) return;
     if (hasUnrecorded) setConfirmClose(true);
@@ -411,7 +471,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         closedIds,
         recordResult: done?.result ?? null,
         recording: recording === currentId,
-        onRecord: () => record(currentId),
+        onRecord: (choice?: DecisionSendChoice) => record(currentId, choice),
         lookup: itemLookup,
         openLookup: itemOpenLookup,
         openRecord: openRecord ?? null,
@@ -449,7 +509,11 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
             onClose();
           }}
           title="Discard unrecorded choices?"
-          message="Some choices have not been recorded. Closing now discards them, and nothing is written."
+          message={
+            unfinishedWrites
+              ? 'An earlier attempt to record a decision already carried out part of it. Closing now leaves it unfinished: what was carried out stands, and the decision is not recorded.'
+              : 'Some choices have not been recorded. Closing now discards them, and nothing is written.'
+          }
           confirmLabel="Discard and close"
           cancelLabel="Keep deciding"
           destructive
