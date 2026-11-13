@@ -947,6 +947,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_invoice", "sprk_invoice", "sprk_Invoice"),
             },
+            // fm task 052b: a contact may be filed under an invoice (an ownership parent, docs/data-model/oob-customizations.yaml).
+            ["contact"] = new[] { ("sprk_invoice", "sprk_invoice", "sprk_Invoice") },
             // A polymorphic lookup: one navigation property per target table (task 147 r1c-v1: a clear goes through one).
             ["task"] = new[]
             {

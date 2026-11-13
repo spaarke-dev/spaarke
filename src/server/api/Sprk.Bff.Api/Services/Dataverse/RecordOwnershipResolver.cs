@@ -1699,6 +1699,18 @@ public static class RecordOwnerRefusal
     /// Nothing was written; the caller tries again. HTTP 503.
     /// </summary>
     public const string DirectTeamUnavailable = "record_owner_direct_team_unavailable";
+
+    /// <summary>
+    /// fm task 052b (owner 2026-11-08): a contact's owner — the single default Owner team of
+    /// <c>ExternalAccess:CustomerBusinessUnitId</c> — cannot be resolved: the setting is unset, names the Secure Record business
+    /// unit, or the unit has no single default Owner team (or no lookup is composed). Nothing is written; the contact is never
+    /// given its creator's team instead. An administrator fixes the setting. HTTP 409.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="NoDefaultOwnerTeam"/> and
+    /// <see cref="ActingUserUnresolved"/>, which describe a parent's or the acting user's unit, not the configured customer unit.
+    /// (2) Extension — one more code in the set every create and Repair already render. (3) Cost of doing nothing — a refused
+    /// contact would carry a code naming the wrong cause, and the repair pass could not tell it from a refusal it need not retry.</remarks>
+    public const string CustomerContactTeamUnresolved = "record_owner_customer_contact_team_unresolved";
 }
 
 /// <summary>
@@ -1961,6 +1973,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private const string IsSecureColumn = "sprk_issecure";
     private const string DocumentEntity = "sprk_document";
 
+    /// <summary>fm task 052b: the table whose rows <see cref="CustomerContactOwnerAsync"/> owns (the owner-only contact rule).</summary>
+    internal const string ContactEntity = "contact";
+
     /// <summary>
     /// Owner-team teamtype. Dataverse defines 0 = Owner, 1 = Access. BOTH this and <c>isdefault</c> are
     /// required: dev contains non-default Owner teams (auto-created, GUID-shaped names) AND Access teams,
@@ -2164,16 +2179,23 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// DI composes it (<c>CommunicationModule</c>); a construction without it leaves that rule off.</summary>
     private readonly DirectMessageOwnerTeam? _directMessageOwnerTeam;
 
+    /// <summary>fm task 052b: the identity-contact creates' owner lookup (<see cref="ContactIdentityBinder.ResolveCreateOwnerAsync"/>),
+    /// which <see cref="CustomerContactOwnerAsync"/> asks for every contact. Production DI composes it (the binder is registered
+    /// unconditionally, <c>ExternalAccessModule</c>); a construction without it refuses every contact (fail closed).</summary>
+    private readonly ContactIdentityBinder? _customerContactOwner;
+
     public RecordOwnershipResolver(
         IGenericEntityService dataverse,
         IConfiguration configuration,
         ILogger<RecordOwnershipResolver> logger,
-        DirectMessageOwnerTeam? directMessageOwnerTeam = null)
+        DirectMessageOwnerTeam? directMessageOwnerTeam = null,
+        ContactIdentityBinder? customerContactOwner = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _directMessageOwnerTeam = directMessageOwnerTeam;
+        _customerContactOwner = customerContactOwner;
     }
 
     /// <inheritdoc />
@@ -2232,6 +2254,77 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return null;
     }
 
+    /// <summary>
+    /// fm task 052b (owner 2026-11-08): the owner of a contact — the single default Owner team of
+    /// <c>ExternalAccess:CustomerBusinessUnitId</c>, answered by the identity-contact creates' own lookup
+    /// (<see cref="ContactIdentityBinder.ResolveCreateOwnerAsync"/>; reused, not forked). A setting that is unset, names the
+    /// Secure Record business unit, or a unit without exactly one default Owner team refuses
+    /// (<see cref="RecordOwnerRefusal.CustomerContactTeamUnresolved"/>); so does a resolver composed without the lookup. A lookup
+    /// that could not be read is a fault and propagates (each caller's retryable answer). Never the creator, never the acting
+    /// user's team.
+    /// </summary>
+    private async Task<RecordOwnerResolution> CustomerContactOwnerAsync(CancellationToken ct)
+    {
+        if (_customerContactOwner is null)
+        {
+            _logger.LogError(
+                "Refusing to resolve a contact's owner: no customer contact owner lookup is composed into this resolver, so the "
+                + "default Owner team of {Key} cannot be read. The contact is not given its creator's team instead.",
+                ExternalAccessOptionsValidator.CustomerBusinessUnitKey);
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.CustomerContactTeamUnresolved, "no customer contact owner lookup is configured");
+        }
+
+        var answer = await _customerContactOwner.ResolveCreateOwnerAsync("Contact owner", "a contact", ct).ConfigureAwait(false);
+        switch (answer.Status)
+        {
+            case ContactIdentityBinder.OwnerTeamStatus.Resolved when answer.TeamId != Guid.Empty:
+                return RecordOwnerResolution.Owned(answer.TeamId);
+
+            case ContactIdentityBinder.OwnerTeamStatus.LookupFailed:
+                // As every resolver read: a fault propagates, never a refusal that blames the configuration.
+                throw new InvalidOperationException(
+                    "The default Owner team of the customer business unit could not be read, so a contact's owner cannot be decided right now.");
+
+            default:
+                // The lookup logged the cause (unset, the Secure Record unit, not one default team).
+                _logger.LogError(
+                    "Refusing to resolve a contact's owner: the default Owner team of {Key} cannot be used ({Status}). The contact is "
+                    + "not given its creator's team instead.", ExternalAccessOptionsValidator.CustomerBusinessUnitKey, answer.Status);
+                return RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.CustomerContactTeamUnresolved,
+                    "the customer business unit's default Owner team cannot be resolved (check ExternalAccess:CustomerBusinessUnitId)");
+        }
+    }
+
+    /// <summary>
+    /// fm task 052b: the owner of a contact. The secure decision comes first, so the customer-team rule never moves a contact
+    /// out of a secure record's isolation: a contact filed under records (its <c>sprk_invoice</c> is an ownership parent) is
+    /// asked today's question over them, and a secure answer, or a refusal (a parent that cannot be read, a filing that cannot be
+    /// decided), stands; so does a secure answer over its Secure-only parents. A contact filed under nothing, or only under
+    /// records that are not secure, is owned by the customer business unit's default Owner team
+    /// (<see cref="CustomerContactOwnerAsync"/>). A fault propagates, as every resolver read does.
+    /// </summary>
+    private async Task<RecordOwnerResolution> ContactOwnerAsync(
+        IReadOnlyList<RecordOwnershipParent> parents, RecordOwnershipContext context, bool committedParentReads,
+        CancellationToken ct)
+    {
+        if (parents.Count > 0)
+        {
+            var filed = await ResolveFromParentsAsync(parents, context, committedParentReads, ct).ConfigureAwait(false);
+            if (filed.IsRefused || filed.IsSecureOwner)
+                return filed;
+        }
+        else if (context.SecureOnlyParents.Count > 0
+                 && await SecureDecisionAsync(Array.Empty<ParentFacts>(), context, committedParentReads, ct).ConfigureAwait(false)
+                     is { } secureOnlyDecided)
+        {
+            return secureOnlyDecided;
+        }
+
+        return await CustomerContactOwnerAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>The owner decision alone — <see cref="ResolveOwnerAsync"/> without the person who asked.</summary>
     /// <param name="committedParentReads">#2143 round 3 (K1): <c>true</c> on the re-file path only — every parent fact
     /// (owning business unit, owning team, <c>sprk_issecure</c>, a parent's own filing) is read committed
@@ -2240,6 +2333,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         RecordOwnershipContext context, bool committedParentReads, CancellationToken ct)
     {
         var parents = CollectParents(context);
+
+        // fm task 052b (owner 2026-11-08): a contact is owned by the customer business unit's default Owner team — AFTER the
+        // secure decision (ContactOwnerAsync).
+        if (string.Equals(context.ChildEntityLogicalName, ContactEntity, StringComparison.OrdinalIgnoreCase))
+            return await ContactOwnerAsync(parents, context, committedParentReads, ct).ConfigureAwait(false);
 
         // #2468: a DOCUMENT whose primary parent is a communication filed under nothing. Such a communication keeps its
         // creating identity (E1: the application user, or a root team) — a technical owner, never the family the document

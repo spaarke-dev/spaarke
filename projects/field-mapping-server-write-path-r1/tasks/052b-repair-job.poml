@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052b" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Repair pass IScheduledJob: 5-minute, forward-only, leased; contact owner rule (FR-25, NFR-03, NFR-04)</title>
+    <phase>5 W5 Records created outside the product</phase>
+    <gate>052a on master (#2629); 032b-1 shared gates on the work branch. Nothing here enables the pass on any environment.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-critical: a background job that writes existing Dataverse rows as the system principal, and an owner rule for contacts; .cs in Sprk.Bff.Api; new tests at KEEP paths.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Forward-only guarantee, claim and watermark design, and an owner rule where a mistake re-owns the wrong rows.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 045d, which edits RecordTableRules, InvoiceFamily, OwnedChildWrite, RecordCreationService.cs (create step 5½) and the update planner. 052b reads those files and edits none of them.</parallel-reason>
+    <deps>052a, 032b-1, 050</deps>
+    <tags>bff-api, jobs, security, ownership, testing</tags>
+    <estimated-effort>1-2 sessions</estimated-effort>
+  </metadata>
+
+  <prompt>Slice b of task 052 (split 052a-e; 052c on-demand trigger, 052d report and 052e cascade design are later tasks). Add the scheduled repair pass: an `IScheduledJob` registered with `AddScheduledJob`, every 5 minutes. Per table it selects rows with `createdon` in [max(go-live, watermark), now - settle) whose `createdby` is not a product principal (task 050's marker: the BFF identity by WhoAmI, the ontology writer when configured, and a configured list of retired identities), and calls Repair mode (`RecordCreationService.RepairAsync`) on each row with a pass context that re-checks the row after Repair's own read and carries the per-pass column-metadata cache 052a requires. Owner decisions 2026-11-08: task and account are excluded; contacts get an owner-only rule (the single default Owner team of `ExternalAccess:CustomerBusinessUnitId`, resolved by the identity-contact creates' own lookup; refuse and log when it cannot be resolved; never the creator; no mapping), and the chat contact create takes the same owner.</prompt>
+  <role>SPAARKE platform developer, .NET 10 BFF, ADR-036 scheduled jobs, Dataverse ownership. Security fails closed.</role>
+  <goal>A row created outside the product after go-live gets its mapping, owner and stamp within about 10 minutes; a row created before go-live, or by a product principal, is never written; a second run writes nothing; the pass is claimed per table, heartbeated, observable and off until the go-live instant is configured.</goal>
+
+  <context>
+    <background>
+- Parent: `tasks/052-repair-pass-scheduled-job.poml` (job design, canonical references, ADR constraints). 052a (`notes/task-052a-notes.md`): Repair reads both tables' column metadata app-only per row; "052b must not ship without a per-pass metadata cache" that keeps successful reads only, for one pass.
+- Marker (task 050, `notes/w5-open-questions.md` Q1, decisions 2026-11-02): `createdby NOT IN ProductPrincipals`; people are never in the set; resolve identities at runtime, never from a dev GUID.
+- Contacts (decisions 2026-11-08, ownership matrix row `contact`): the four identity-contact creates resolve the owner with `ContactIdentityBinder.ResolveCreateOwnerAsync` (unset, the Secure Record unit, or not exactly one default team refuses; an unreadable answer is LookupFailed). Step 7 of the create and of Repair asks `IRecordOwnershipResolver`; `NoServerCodeForgesAnOwnedResolution` forbids an Owned resolution outside the resolver. So the contact rule sits in the resolver (as the Direct message rule does, an optional composed lookup) and calls the binder's lookup: one rule for the chat create (step 7) and for Repair's owner step, no new owner-write site.
+- Repair on a contact is already owner-only: `contact` carries `ChatPlatformTableIsNotMapped` (mapping excluded) and no stamp. Repair keeps a team-owned row's owner (fill-only); a systemuser-owned contact is re-owned.
+- RecordRepairReachabilityTests requires the first production caller of Repair to list itself.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorStampReconciliationJob.cs (claim, marker, cursor in IDistributedCache, heartbeat, RunCounts)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs (result shape, Success=false on incomplete work)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityBinder.cs (ResolveCreateOwnerAsync: reused, not changed)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairPassJob.cs (the job)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordRepairPassContext.cs (pass re-check + per-pass metadata cache)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.Repair.cs (optional pass argument; task/account excluded; metadata through the cache; NeedsRetry)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (contact rule: optional composed binder)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/OfficeModule.cs (AddScheduledJob beside the RecordCreationService registration)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RecordRepairReachabilityTests.cs (list the job)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/RecordRepairPassJobTests.cs</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/CustomerContactOwnerTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-036 A1 / ADR-052">Registered only through `AddScheduledJob`; no timer BackgroundService, no Function, no new store or package. The host's lease holds the tick; each table is a unit claimed with an owner lock (`IIdempotencyService`, owner = run id); no per-run marker (the host retries a run only when the job throws, which it never does; review K10 and re-check F4). One heartbeat line per attempt. A run that could not decide its principal set or that left work incomplete returns Success=false.</constraint>
+    <constraint source="forward-only">No row with `createdon` before the go-live instant is written: the query bounds it, the job re-checks the scanned row, and Repair re-checks the row it read (pass context) before any write. A row whose `createdon` or `createdby` cannot be read is not written. The go-live instant is configuration (`RecordRepair:Pass:GoLive`, ISO 8601 round-trip "O" only); unset = the job writes nothing and logs a warning; unparseable = the same (logged as an error), and the run fails. Each window starts 15 minutes before the watermark, never before go-live.</constraint>
+    <constraint source="owner 2026-11-08">task and account are never repaired by the pass (excluded from the table list AND refused by Repair). Contacts: owner-only, the `ExternalAccess:CustomerBusinessUnitId` default Owner team through `ContactIdentityBinder.ResolveCreateOwnerAsync`; unset or ambiguous refuses (logged), a lookup fault is retried; never the creator; never mapped. The chat contact create takes the same answer.</constraint>
+    <constraint source="scope">Do not edit SecureRootInheritance.cs, UAC-r2's files (DirectThreadAccessService.cs, DirectMessageParticipantShares.cs, SecureChildShareReconciliationJob.cs, SecureChildReconciler.cs), 045d's files (RecordTableRules.cs, InvoiceFamily*, OwnedChildWrite.cs, RecordCreationService.cs, the update planner) or anything under `.claude/`. The on-demand trigger, the report and the cascade are 052c/d/e.</constraint>
+    <constraint source="public repo">Commits, comments, test names and notes state rules only.</constraint>
+    <constraint source="ADR-038 / §10 / §11">Tests at KEEP paths (`tests/integration/**`, `tests/unit/domain/**`, ArchTests). Each must-fire is shown to fail with its rule switched off. Never run Sprk.Bff.Api.Tests unfiltered (`&amp;FullyQualifiedName!~Api.Office.`). §11 answers and a Placement Justification in the notes; publish delta and CVE check are the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch `task/fm-052b` from the work branch; FULL rigor; read the parent POML, 052a notes, decisions, ADR-036/052, both canonical jobs.</step>
+    <step order="1">Pass context and metadata cache; Repair's optional pass argument, re-check after its read, task/account refusal, NeedsRetry.</step>
+    <step order="2">Contact rule in the resolver (optional composed binder; refusal code; fault propagates).</step>
+    <step order="3">The job: principal set, per-table state (watermark, sweep cursor, retry ids) in IDistributedCache, claim/marker, counters, heartbeat; registration; Repair reachability entry.</step>
+    <step order="4">Tests (ACs below), each must-fire run once with its rule switched off. Build (0 warnings), ArchTests, filtered suites, `dotnet format whitespace --verify-no-changes`; `notes/task-052b-notes.md`. Commit on `task/fm-052b`; do not push.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (must fire, forward-only): a row created before go-live is never written, whether the scan returns it or Repair is handed it with the pass context; a row with no readable `createdon` is never written.</criterion>
+    <criterion testable="true">AC2 (must fire, marker): a row created by the BFF identity (WhoAmI) or by a configured product principal is never written; a run that cannot resolve WhoAmI, or whose configured principal list does not parse, writes nothing and fails.</criterion>
+    <criterion testable="true">AC3 (must fire, exclusions): task and account rows are never read or written by the pass, and Repair refuses both (`record_repair.table_excluded`).</criterion>
+    <criterion testable="true">AC4 (must fire, contact): a systemuser-owned contact whose customer team cannot be resolved (setting unset, the Secure Record unit, or not exactly one default team) keeps its owner, is reported with `record_owner_customer_contact_team_unresolved` (`RecordOwnerRefusal.CustomerContactTeamUnresolved`), and is retried; it is never given its creator's team. A chat contact create in that state is refused and nothing is created.</criterion>
+    <criterion testable="true">AC5 (must fire, claim): while another runner holds a table's claim, the run writes nothing to that table and returns Success=false.</criterion>
+    <criterion testable="true">AC6 (must fire, idempotent): a second run over the same rows writes nothing.</criterion>
+    <criterion testable="true">AC7 (must not fire): a native row created after go-live by a person is repaired (mapping, owner, stamp) in one write; a systemuser-owned contact is re-owned to the customer team, with nothing mapped; a chat contact create is owned by the customer team.</criterion>
+    <criterion testable="true">AC8 (cache): within one pass a table's column metadata is read once however many rows need it; a faulted read is not kept and is asked again.</criterion>
+    <criterion testable="true">AC9 (off): with `RecordRepair:Pass:GoLive` unset, the job reads and writes nothing and logs a warning; not an ISO 8601 round-trip instant, the same and the run fails.</criterion>
+    <criterion testable="true">AC10 (retry, observable): a row whose repair failed is kept for the next run (up to a bounded number of attempts, then logged as abandoned) and the run reports Success=false; counts scanned / repaired / no-op / skipped / failed and a correlation id appear in the heartbeat and the result JSON.</criterion>
+    <criterion testable="true">AC12 (review F1-b, must fire): a contact filed under a secure parent takes the secure decision (owner or refusal), never the customer team, through the chat create, Repair and Reparent; under an ordinary parent it takes the customer team.</criterion>
+    <criterion testable="true">AC13 (review F1-a, must fire): Repair writes no owner on a table with a one-to-many relationship that cascades on Assign to a child not on the (empty) allow-list; the reason is non-transient, logged once per pass, and the mapping is still written; a table with no cascade is re-owned (must not fire); a metadata fault writes no owner and is retried.</criterion>
+    <criterion testable="true">AC13a (re-check F3 and K): relationship metadata that does not come back (no entity, or no one-to-many relationships) is a fault, never "nothing cascades"; an empty list is "none". A failed read is kept as unknown for the rest of the pass and logged once per table.</criterion>
+    <criterion testable="true">AC14 (review F2-a, re-check F4, must fire): an owner-resolution fault, a fault before the row's filing is known (its thread unread) and an unreadable mapping source are retried and map nothing; a deterministic owner refusal is not retried.</criterion>
+    <criterion testable="true">AC15 (review F2-b, must fire): while the customer team cannot be resolved or its lookup faults, the contact table is not swept, its watermark does not move, no attempt is counted and the run is partial; only faults count toward MaxAttempts.</criterion>
+    <criterion testable="true">AC16 (review K6): the Dataverse Web API client's managed identity (`ManagedIdentity:ClientId`, then `Graph:ManagedIdentity:ClientId`) is a product principal; a value that matches other than one application user reads nothing.</criterion>
+    <criterion testable="true">AC11: registered only via `AddScheduledJob` with `*/5 * * * *`; RecordRepairReachabilityTests lists the job; owner-write census unchanged; build 0 warnings; ArchTests and affected suites green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Split from task 052 (TASK-INDEX: 052a-e). Brief from the coordinator, 2026-11-12. Review of 1e72d50962 (F1-a, F1-b, F2-a, F2-b, K5-K10) and the UAC-r2 conditions on the resolver change are fixed on the branch (AC12-AC16); one line in RecordCreationService.cs (RepairOwnerAsync's fault branch) was edited for F2-a, and Spaarke.Dataverse gained GetAssignCascadesAsync. Read each environment's live Assign-cascade metadata before enabling the pass. Re-check of 1e72d50962..4e22a086b5 (F3, three F4s, Ks) fixed: AC13a, AC14; the per-run marker is deleted; a contact's parent refusal wins (K10). Detail: notes/task-052b-notes.md.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
