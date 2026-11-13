@@ -178,3 +178,38 @@ Both sides run through the real resolver. Mutation proofs: dropping `createdon`,
   1. The planning by-id load that decides "synthetic" runs app-only. A load that faults, is throttled or is refused never counts as "found nothing"; it refuses with 503. Test: when the by-id load faults, the answer is 503 and `Exempt` is never called.
   2. A synthetic id that collides with an existing real row takes the "real, asked" path. Test: a deny-alone on that row gives 503.
 - **Before merge:** send uac-r2 the diff with the access files listed at the top.
+
+## Review: ontology-r1 (2026-11-13): OK with conditions F1–F4 (binding for the build)
+
+No Signals diff. Keep the chunk rule (§1). Drop the `ReadRowsAsync`-parameter fallback.
+
+- **F1, planning can write.**
+  - The change path sends while it is still planning: the set is created at `ProcedureAssignmentService` ~1095 and the policy at ~1128, then the conflict checks read those rows back (~1101-1104, ~1131-1137).
+  - The dry-run extraction stops before those sends and runs the same checks against the image.
+  - Planning gets its own write-throwing `IGenericEntityService`. No-write must not rest on a strict mock, since the IL scan cannot cover a type that writes.
+  - Add `UpdateIfRowVersionMatchesAsync`, `BulkUpdateAsync` and `BulkUpdateIfRowVersionsMatchAsync` (`IGenericEntityService.cs` ~66, 95, 113) to the overlay's throw list.
+- **F2, R2 text.** Write no new text. Reuse `ChangeCloseCompleteMessage` / `ChangeCloseChildrenOpenMessage` (PAS ~726). Those messages carry two scope limits:
+  - the close also reaches the records directly under this one;
+  - it covers only invoices whose work is all dated on or after the change.
+- **F3, creator on replaced rows.**
+  - In a switch or re-change the new row keeps id X. `RecordProcedureReadService` ~454-457 then fills the creator from X's old row and adds it to Exposed.
+  - That shows the wrong creator, and gives a 503 for a caller who cannot read that person.
+  - Fix: for After, null the creator on proposed row ids and leave it out of Exposed.
+  - Test it; the parity test normalises stamps, so it misses this.
+- **F4, the overlay fails closed.**
+  - "Replaced" means any id that has an after-image. Otherwise a duplicate id throws at `ProcedureResolver` ~1231 or ~422.
+  - The chunk rule matches the `sprk_ruleset` / `sprk_policy` In condition exactly, and throws if that condition is absent.
+  - `RetrieveAsync`, Fetch reads and alternate-key reads on the four tables throw rather than pass through.
+  - Invariant to test: each version after-image is appended exactly once.
+- **§2 holds.**
+  - The policy image is built with `sprk_enabled=false`, so the overlay also applies the switch-on (PAS ~629).
+  - Use one `createdon` per request, Kind Utc. Each version after-image pairs with an Exclude row carrying the same stamp.
+- **§5 parity conditions.**
+  - (a) A seed larger than one 5000-row page (PR ~882), or a smaller page size in the rig.
+  - (b) The parent policy sits in a chunk other than the last; assert each after-image is appended once.
+  - (c) The rig clock is later than every seeded `createdon`.
+- **Known limits, accepted:**
+  - K1: the in-force date comes from the dry run's clock. Label the view "if saved now".
+  - K2: Now and After are not read atomically (R10).
+  - K3: clock skew does not matter.
+- Send ontology-r1 the diff before merge.
