@@ -53,6 +53,7 @@
   - PR #2790 to master is open. It carries 045d/e/f and 052b, which we reviewed (045f: PASS).
   - They are building **045g** (EB-D-231 / ISS-020 #2794, branch `task/fm-045g`, after #2790): no invoice move, children match their invoice's core record, and no line detach. We review before merge.
   - We sent them 7 Finance flows to keep legal. Among them, the commit undo clears the submission's invoice; it must stay allowed.
+  - 2026-11-13: answered their rule-2 question. Finance writers hold rule 2 by construction; no Finance service moves an invoice core or clears a line invoice. Asked them to cover the 4 child tables on the 3 generic update routes (CheckGenericUpdateAsync ignores them). Open for us: no `sprk_externalidentifier` writer exists in src/server (044 comments are stale); check whether D-68 needs one before 112.
 - **uac-r2:**
   - Gates 084d-5a's merge (one Opus pass on our side first).
   - Its 095g conditions are in `notes/095g-assign-firm.md`.
