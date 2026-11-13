@@ -1966,10 +1966,11 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 >   the `Spaarke Ontology Writer` copy or a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
 >   customer's unit and the units below it (another customer's admin would read this customer's rules); or if a holder of
 >   **another** customer top unit's copy is homed outside that unit and the units below it. The script also refuses to run, in
->   every mode and before any write, when the business-unit tree is not the expected shape: `Secure Record` must be a direct
->   child of the root and outside every customer subtree (D-123), and so must the ontology writer's unit
->   `Spaarke Ontology Writer` (task 267). That unit is never a customer unit (task 269): naming it (by name or id) is refused,
->   it is never counted as another customer top unit, and a declared team in it is drift; two units of that name refuse.
+>   every mode and before any write, when `Secure Record` or the ontology writer's unit `Spaarke Ontology Writer` (task 267)
+>   sits inside the named customer's subtree (each must be outside every customer subtree, D-123; each customer's own run
+>   checks its subtree). The ontology writer's unit is never a customer unit (task 269): naming it (by name or id) is
+>   refused, it is never counted as another customer top unit, a declared team in or below it is drift, two units of that
+>   name refuse, and a `-SecureBusinessUnitName` that names it refuses.
 > - **Live-proof gate.** Before the first customer with a child unit relies on this, an admin homed in a child unit and holding
 >   the top unit's copy must be able to read (and exclude) a Billing rule owned in the customer's top unit, and must **not** be
 >   able to read a rule owned by `Secure Record Owners` (still 403). See Phase 7a. Until the admin holds the role, that
