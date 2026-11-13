@@ -40,6 +40,27 @@ public class EmailChannelSenderSendOutcomeTests
         failure.Extensions![EmailChannelSender.SendOutcomeExtension].Should().Be(EmailChannelSender.SendOutcomeUnknown);
     }
 
+    /// <summary>Task 191 fix round 2: the request left and the connection broke or timed out with no answer. Graph may have
+    /// delivered it, so it is Unknown and sent once.</summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ATransportFaultOrTimeoutOnSendMail_IsSentOnce_AndIsAnUnknownOutcome(bool userMode, bool timeout)
+    {
+        var transport = new Transport(HttpStatusCode.Accepted)
+        {
+            Fault = timeout ? new TaskCanceledException("The request timed out.", new TimeoutException()) : new HttpRequestException("The connection was reset."),
+        };
+
+        var failure = await SendAndFail(transport, userMode);
+
+        transport.SendMailRequests.Should().Be(1, "a request that may have reached Graph is never sent again");
+        failure.Code.Should().Be("GRAPH_SEND_FAILED");
+        failure.Extensions![EmailChannelSender.SendOutcomeExtension].Should().Be(EmailChannelSender.SendOutcomeUnknown);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -117,6 +138,9 @@ public class EmailChannelSenderSendOutcomeTests
     {
         public int SendMailRequests { get; private set; }
 
+        /// <summary>When set, every sendMail throws it after the request is counted (a transport fault or a timeout).</summary>
+        public Exception? Fault { get; init; }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (!request.RequestUri!.AbsolutePath.EndsWith("/sendMail", StringComparison.OrdinalIgnoreCase))
@@ -124,6 +148,8 @@ public class EmailChannelSenderSendOutcomeTests
 
             var status = statuses[Math.Min(SendMailRequests, statuses.Length - 1)];
             SendMailRequests++;
+            if (Fault is not null)
+                return Task.FromException<HttpResponseMessage>(Fault);
             return Task.FromResult((int)status < 300
                 ? new HttpResponseMessage(status)
                 : Json(status, """{"error":{"code":"Failed","message":"send failed"}}"""));

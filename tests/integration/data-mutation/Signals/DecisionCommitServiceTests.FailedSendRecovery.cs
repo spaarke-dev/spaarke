@@ -198,17 +198,18 @@ public sealed partial class DecisionCommitServiceTests
     [Fact]
     public async Task ASendChoice_WhereNoneIsNeeded_IsRefused_AndDoesNothing()
     {
-        var notSent = new Rig();
-        notSent.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
-        var review = PathBReview();
-        await notSent.CommitAsync(review);
-        var log = notSent.Log.Count;
+        // Fix round 2: a resumable failure with no landed inquiry (the To Do refused) has nothing to send or not send.
+        var noInquiry = new Rig();
+        noInquiry.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = PathBReview(inquiry: false);
+        (await noInquiry.CommitAsync(review)).Resumable.Should().BeTrue();
+        var log = noInquiry.Log.Count;
 
-        var choiceOnNotSent = await notSent.CommitAsync(review with { Retry = true, SendChoice = DecisionReview.RecordWithoutSending });
+        var choiceWithoutInquiry = await noInquiry.CommitAsync(review with { Retry = true, SendChoice = DecisionReview.RecordWithoutSending });
 
-        choiceOnNotSent.Status.Should().Be(DecisionCommitStatus.Refused);
-        choiceOnNotSent.ReasonCode.Should().Be(DecisionCommitReasons.ReviewInvalid);
-        notSent.Log.Should().HaveCount(log);
+        choiceWithoutInquiry.Status.Should().Be(DecisionCommitStatus.Refused);
+        choiceWithoutInquiry.ReasonCode.Should().Be(DecisionCommitReasons.ReviewInvalid);
+        noInquiry.Log.Should().HaveCount(log);
 
         var fresh = new Rig();
         var firstWithChoice = await fresh.CommitAsync(PathBReview() with { SendChoice = DecisionReview.SendAgain });
@@ -390,6 +391,88 @@ public sealed partial class DecisionCommitServiceTests
         (await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None)).Should().BeNull("the plan read never fails on it");
     }
 
+    // ── Fix round 2 ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ANotSentSendThatKeepsFailing_IsFinishedByRecordWithoutSending_AndTheItemIsReleased()
+    {
+        // e.g. 403 SendAsDenied: the same NotSent on every retry. The person records the decision without sending.
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        var review = PathBReview();
+        await rig.CommitAsync(review);
+        (await rig.CommitAsync(review with { Retry = true })).Status.Should().Be(DecisionCommitStatus.Failed);
+        (await rig.CommitAsync(review with { Retry = true })).Resumable.Should().BeTrue("it keeps failing NotSent");
+
+        var recorded = await rig.CommitAsync(review with { Retry = true, SendChoice = DecisionReview.RecordWithoutSending });
+
+        recorded.Status.Should().Be(DecisionCommitStatus.Recorded, recorded.Detail);
+        recorded.Steps.Should().Contain(s => s.Code == "send-budget-inquiry" && s.Status == DecisionCommitService.NotSentByChoiceStatus);
+        Count(rig, "execute:send-budget-inquiry").Should().Be(3, "the record-without-sending attempt sends nothing");
+        Count(rig, "execute:revise-budget").Should().Be(1);
+        rig.Records.Should().ContainSingle();
+        (await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None)).Should().BeNull("the item no longer holds it");
+        (await rig.CommitAsync(PathBReview())).ReasonCode.Should().NotBe(DecisionCommitReasons.ReviewUnfinished);
+    }
+
+    [Fact]
+    public async Task AnAlsoResolveItem_HeldByTheUnfinishedReview_OffersIt_NamingThePrimary_AndPostingThereFinishesBoth()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        var review = PathBReview(also: [Second]);
+        await rig.CommitAsync(review);
+
+        (await rig.CommitAsync(PathBReview(), Second)).ReasonCode.Should().Be(DecisionCommitReasons.ReviewUnfinished);
+        var offered = await rig.Service().ReadUnfinishedAsync(Http(), Second, CancellationToken.None);
+
+        offered.Should().NotBeNull("reopening the also-resolve item must offer the review that holds it");
+        offered!.ReviewId.Should().Be(review.ReviewId);
+        offered.SignalId.Should().Be(Primary, "the review is finished on its primary item");
+        rig.Executors["send-budget-inquiry"].Result = null;
+        var finished = await rig.CommitAsync(offered.Review with { Retry = true }, offered.SignalId);
+        finished.Status.Should().Be(DecisionCommitStatus.Recorded, finished.Detail);
+        rig.LinkedRecord(Second).Should().Be(RecordId);
+        (await rig.Service().ReadUnfinishedAsync(Http(), Second, CancellationToken.None)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ALateResume_DoesNotOverwriteASupersededClosure_ItIsTheWindowsRefusal_AndReleasesTheItem()
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        var review = PathBReview();
+        await rig.CommitAsync(review);
+        CloseByTheSystem(rig, TimeSpan.FromSeconds(33), SignalWriter.ResolutionSuperseded);
+        rig.Clock.Advance(TimeSpan.FromHours(5));
+        rig.Executors["send-budget-inquiry"].Result = null;
+        var log = rig.Log.Count;
+
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Conflict);
+        retried.ReasonCode.Should().Be(DecisionCommitReasons.SignalNotOpen);
+        rig.Log.Should().HaveCount(log, "nothing runs");
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionSuperseded, "a supersede is never turned into Acted");
+        (await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None)).Should().BeNull("a resume that cannot proceed releases the item");
+    }
+
+    [Fact]
+    public async Task ADoReviewWhoseOwnReassignLanded_DoesNotHoldTheItem_D141()
+    {
+        var rig = ReassignRig();
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = ReassignThenAddTodo();
+        var failed = await rig.CommitAsync(review, DoSignal);
+        failed.Resumable.Should().BeTrue();
+
+        (await rig.Service().ReadUnfinishedAsync(Http(), DoSignal, CancellationToken.None)).Should().BeNull(
+            "its author's plan read is the uniform 404 now, so the item is released to its new owner");
+        rig.Executors["add-todo"].Result = null;
+        (await rig.CommitAsync(review with { Retry = true }, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded, "the open wizard still finishes it");
+    }
+
     private sealed class UnfinishedFaultLedger(ITenantCache inner) : ITenantCache
     {
         public Task<T?> GetAsync<T>(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default) =>
@@ -434,11 +517,11 @@ public sealed partial class DecisionCommitServiceTests
         problem.Title.Should().Be("The decision was not recorded");
     }
 
-    private static void CloseByTheSystem(Rig rig, TimeSpan after)
+    private static void CloseByTheSystem(Rig rig, TimeSpan after, int resolution = SignalWriter.ResolutionConditionCleared)
     {
         rig.Clock.Advance(after);
         rig.Signals[Primary]["sprk_signalstatus"] = new OptionSetValue(Resolved);
-        rig.Signals[Primary]["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionConditionCleared);
+        rig.Signals[Primary]["sprk_resolutiontype"] = new OptionSetValue(resolution);
         rig.Signals[Primary]["sprk_resolvedon"] = rig.Clock.GetUtcNow().UtcDateTime;
         rig.Versions[Primary]++;
     }
