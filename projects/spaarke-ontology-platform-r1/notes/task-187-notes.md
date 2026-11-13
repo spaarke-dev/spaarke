@@ -36,3 +36,12 @@ The side pane (`Xrm.Utility.lookupObjects`) lists every row the user can read in
 - `RuleWizard.test.tsx`: 2 new (pane opens for the subject table and no inline input, only the normalised id is sent; cancel and rejected pane leave scope as it was). Both fail on the old `ScopeNoiseStep`.
 - `OntologyAdminWorkspaceWidget.test.tsx`: 2 new (navigation service passed when Xrm can look up; none without Xrm).
 - `RuleReview/src/__tests__/assignmentPanelFirmPicker.test.ts`: 4 new (entity `sprk_organization` + navigation service passed, inline fallback, no picker for client default, `createFirmLookup` carries the service). Two fail on the old `AssignmentPanel`.
+
+## Merge
+
+PR [#2754](https://github.com/spaarke-dev/spaarke/pull/2754) squash-merged to master as `e9208abc5e` (owner: merge on green, 2026-11-12). SPE Admin pickers unchanged per owner **D-221**.
+
+- Fix round 1: CI "Xrm Capability Guard (getXrm AST scan)" failed: `getXrm('lookupObjects')` used only as a presence probe has no reached use. Both hosts now probe `getXrm('lookupObjects')?.Utility?.lookupObjects` before building the navigation service (no allow-list entry). Guard 85/85, widget 7/7, RuleReview 64/64.
+- Dev check (Console rule wizard, Rule Review Firm picker, light and dark) runs with task 185's deploy verification.
+
+rework: fix-round-1 task 187
