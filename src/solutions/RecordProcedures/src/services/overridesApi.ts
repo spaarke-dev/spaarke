@@ -20,7 +20,7 @@
  * Change form's values was removed in its fix round 1: the rules-in-force rows now carry `ruleBody`.)
  *
  * The page decides nothing about authorization: every refusal (400, 403, 404, 409, 422, 503 ...) comes back as a {@link WriteFailure} carrying
- * the ProblemDetails `title` and `detail`, and the wizard shows them. There is no dry-run read of any kind (task 084d).
+ * the ProblemDetails `title` and `detail`, and the wizard shows them. The dry-run read is not here: it is `dryRunApi.ts` (task 084d-4).
  *
  * Mirrors `recordProceduresApi.ts`: `authenticatedFetch` THROWS on any non-2xx (`ApiError`) and on an exhausted 401 (`AuthError`).
  */
@@ -182,6 +182,54 @@ export function toWriteFailure(err: unknown): WriteFailure {
   return { status: 0, errorCode: null, title: null, detail: err instanceof Error ? err.message : null, problems: [], fieldErrors: [], signInFailed: isAuthFailure(err) };
 }
 
+/** How long a read the wizard only advises with may take before it is given up on (task 084d-4 review round 1): Confirm is never held longer. */
+export const READ_TIMEOUT_MS = 20_000;
+
+/** The `errorCode` of the failure a read that took longer than its timeout becomes (client-made: no response arrived). */
+export const CODE_TIMED_OUT = 'client.timed_out';
+
+/** The `errorCode` of a read the page itself abandoned (the wizard closed, or moved to another row). Nobody is shown it. */
+export const CODE_ABANDONED = 'client.abandoned';
+
+const clientFailure = (errorCode: string): WriteFailure => ({ status: 0, errorCode, title: null, detail: null, problems: [], fieldErrors: [], signInFailed: false });
+export const TIMED_OUT_FAILURE: WriteFailure = clientFailure(CODE_TIMED_OUT);
+export const ABANDONED_FAILURE: WriteFailure = clientFailure(CODE_ABANDONED);
+
+export type Raced<T> = { kind: 'value'; value: T } | { kind: 'timeout' } | { kind: 'aborted' };
+
+/**
+ * Run `start` with an abort signal that fires after `timeoutMs` or when `outer` aborts, and answer whichever comes first. The race does not
+ * depend on `start` honouring the signal: a call that ignores it is still given up on at the timeout. A rejection of `start` before either
+ * propagates; one after is dropped. The timer and the listener are always released.
+ */
+export async function raceTimeout<T>(timeoutMs: number, outer: AbortSignal | undefined, start: (signal: AbortSignal) => Promise<T>): Promise<Raced<T>> {
+  const ctrl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onOuter: (() => void) | undefined;
+  const stop = new Promise<Raced<T>>(resolve => {
+    timer = setTimeout(() => {
+      resolve({ kind: 'timeout' });
+      ctrl.abort();
+    }, timeoutMs);
+    if (outer) {
+      onOuter = () => {
+        resolve({ kind: 'aborted' });
+        ctrl.abort();
+      };
+      if (outer.aborted) onOuter();
+      else outer.addEventListener('abort', onOuter, { once: true });
+    }
+  });
+  const work = start(ctrl.signal).then((value): Raced<T> => ({ kind: 'value', value }));
+  work.catch(() => undefined); // a rejection after the race was decided is not an error
+  try {
+    return await Promise.race([work, stop]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (outer && onOuter) outer.removeEventListener('abort', onOuter);
+  }
+}
+
 /**
  * The sentence the wizard shows for a refused or failed call: the ProblemDetails title first (the server's own words), then its detail and the
  * field problems. Only a failure with no title at all (no response, or a body that was not ProblemDetails) gets a sentence of ours.
@@ -202,7 +250,8 @@ export interface OverridesApi {
   excludeRule(core: CoreRoute, recordId: string, body: ExcludeRuleRequest): Promise<WriteResult<OverrideCreated>>;
   /** Task 084c: change a rule for the record (and one firm's invoices when `firmId` is given). */
   changeRule(core: CoreRoute, recordId: string, body: ChangeRuleRequest): Promise<WriteResult<RuleChanged>>;
-  removalPreview(core: CoreRoute, recordId: string, overrideId: string): Promise<WriteResult<RemovalPreview>>;
+  /** `signal` abandons the read (the wizard closed); a read that takes longer than the client's timeout is a failure with {@link CODE_TIMED_OUT}. */
+  removalPreview(core: CoreRoute, recordId: string, overrideId: string, signal?: AbortSignal): Promise<WriteResult<RemovalPreview>>;
   removeOverride(core: CoreRoute, recordId: string, overrideId: string): Promise<WriteResult<Removed>>;
   /** The versions of a Procedure, for the Pin picker (task 081's read). */
   procedureVersions(procedureId: string): Promise<WriteResult<PinnableVersion[]>>;
@@ -232,7 +281,8 @@ function compact<T extends object>(body: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined && v !== null && !(typeof v === 'string' && v.trim() === '')));
 }
 
-export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string): OverridesApi {
+export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string, options: { timeoutMs?: number } = {}): OverridesApi {
+  const timeoutMs = options.timeoutMs ?? READ_TIMEOUT_MS;
   async function run<T>(url: string, init: RequestInit, read: (body: unknown) => T | null): Promise<WriteResult<T>> {
     try {
       const res = await fetchFn(url, init);
@@ -272,10 +322,20 @@ export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: st
         b => (isObject(b) && isObject(b.override) && typeof b.override.id === 'string' && isObject(b.recordRule) ? (b as unknown as RuleChanged) : null)
       ),
 
-    removalPreview: (core, recordId, overrideId) =>
-      run(removalPreviewUrl(bffBaseUrl, core, recordId, overrideId), { method: 'GET' }, b =>
-        isObject(b) && typeof b.overrideId === 'string' ? (b as unknown as RemovalPreview) : null
-      ),
+    removalPreview: async (core, recordId, overrideId, signal) => {
+      try {
+        const raced = await raceTimeout(timeoutMs, signal, async s => {
+          const res = await fetchFn(removalPreviewUrl(bffBaseUrl, core, recordId, overrideId), { method: 'GET', signal: s });
+          const b = (await res.json()) as unknown;
+          return isObject(b) && typeof b.overrideId === 'string' ? (b as unknown as RemovalPreview) : null;
+        });
+        if (raced.kind === 'timeout') return { ok: false, failure: TIMED_OUT_FAILURE };
+        if (raced.kind === 'aborted') return { ok: false, failure: ABANDONED_FAILURE };
+        return raced.value === null ? { ok: false, failure: BAD_BODY } : { ok: true, value: raced.value };
+      } catch (err) {
+        return { ok: false, failure: toWriteFailure(err) };
+      }
+    },
 
     removeOverride: (core, recordId, overrideId) =>
       run(overrideUrl(bffBaseUrl, core, recordId, overrideId), { method: 'DELETE' }, b =>

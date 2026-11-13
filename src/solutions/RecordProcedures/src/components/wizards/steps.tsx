@@ -4,13 +4,19 @@
  * wizards own the form, the plan and the calls.
  *
  * Fluent v9 semantic tokens only (ADR-021). Nothing here decides who may write: a refusal is shown by the wizard with the server's title.
+ *
+ * Task 084d-4: the Impact step shows the dry run (084d-2a/2b) in place of 084b's interim before/after: Now -> "If saved now" for both lists,
+ * the D-170 and section 15 warnings and the change's close message (the server's words), and the affected open invoices ("can't be
+ * counted" when the count is null). The choice's own before/after line shows only while there is no answer. 089's removal preview is shown
+ * only when the dry run of a plan that removes was refused (WizardFrame says why).
  */
 
 import * as React from 'react';
 import { Button, Caption1, MessageBar, MessageBarBody, MessageBarTitle, Radio, RadioGroup, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
 import type { RemovalPreview, WriteFailure } from '../../services/overridesApi';
-import { failureText } from '../../services/overridesApi';
+import type { DryRunView } from '../../services/dryRunApi';
 import { NOT_ALLOWED_BOTH } from './plan';
+import { ADVISORY_LINE, NOT_LISTED, UNCHECKED_CLOSE_LINE, affectedLine, dryRunFailureText, impactChanges, previewFailureText, type ImpactChange } from './impact';
 
 export const useWizardStyles = makeStyles({
   step: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalL, maxWidth: '640px' },
@@ -129,18 +135,158 @@ export function previewLines(p: RemovalPreview): string[] {
   return lines;
 }
 
+/**
+ * The dry run of the proposal (task 084d-4): not asked for (the plan changes nothing, or has no dry-run shape), loading, answered, or refused.
+ * `requestNamesFirm` scopes R6's wording to a refusal of a request that names a firm.
+ */
+export type DryRunState =
+  | { state: 'none' }
+  | { state: 'loading' }
+  | { state: 'ready'; value: DryRunView }
+  | { state: 'failed'; failure: WriteFailure; requestNamesFirm: boolean };
+
+const ChangeRows: React.FC<{ title: string; rows: readonly ImpactChange[]; testId: string }> = ({ title, rows, testId }) => {
+  const s = useWizardStyles();
+  if (rows.length === 0) return null;
+  return (
+    <div className={s.stack} data-testid={testId}>
+      <Caption1 className={s.muted}>{title}</Caption1>
+      {rows.map(r => (
+        <span key={r.key} className={s.change} data-testid={`${testId}-row`}>
+          <Text weight="semibold">{r.label}</Text>
+          <Text>{r.now ?? NOT_LISTED}</Text>
+          <Text className={s.arrow}>→</Text>
+          <Text>{r.after ?? NOT_LISTED}</Text>
+        </span>
+      ))}
+    </div>
+  );
+};
+
+/** The dry run's answer: Now -> After of both lists under the server's label, what closes, the affected open invoices, and the disclosure notes. */
+const DryRunAnswer: React.FC<{ view: DryRunView }> = ({ view }) => {
+  const s = useWizardStyles();
+  const changes = impactChanges(view);
+  const { closes } = view;
+  return (
+    <div className={s.step} data-testid="dryrun">
+      <div className={s.stack}>
+        {/* The server's label ("If saved now"): After is what the lists would show, never a promise that saving succeeds. */}
+        <Caption1 className={s.muted} data-testid="dryrun-label">
+          Now → {view.afterLabel}
+        </Caption1>
+        {changes.procedures.length === 0 && changes.rules.length === 0 && <Text data-testid="dryrun-same">The lists read the same.</Text>}
+      </div>
+      <ChangeRows title="Procedures" rows={changes.procedures} testId="impact-procedures" />
+      <ChangeRows title="Rules" rows={changes.rules} testId="impact-rules" />
+      {closes.d170 && (
+        <MessageBar intent="warning" layout="multiline" data-testid="impact-d170">
+          <MessageBarBody>
+            <MessageBarTitle>Open findings close</MessageBarTitle>
+            {closes.warning}
+          </MessageBarBody>
+        </MessageBar>
+      )}
+      {!closes.d170 && closes.warning && (
+        <MessageBar intent="warning" layout="multiline" data-testid="impact-warning">
+          <MessageBarBody>{closes.warning}</MessageBarBody>
+        </MessageBar>
+      )}
+      {closes.message && (
+        <MessageBar intent="info" layout="multiline" data-testid="impact-message">
+          <MessageBarBody>{closes.message}</MessageBarBody>
+        </MessageBar>
+      )}
+      <Text data-testid="impact-affected">{affectedLine(view.affectedOpenInvoices)}</Text>
+      {view.disclosure.notes.length > 0 && (
+        <div className={s.stack} data-testid="dryrun-notes">
+          {view.disclosure.notes.map(n => (
+            <Caption1 key={n} className={s.muted}>
+              {n}
+            </Caption1>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * A refused dry run, with no fallback behind it (the plan removes nothing, or the refusal is not one the removal preview stands in for): one
+ * warning bar with the reason, the advisory line in its own element, and Retry.
+ */
+const DryRunFailed: React.FC<{ failure: WriteFailure; requestNamesFirm: boolean; onRetry: () => void }> = ({ failure, requestNamesFirm, onRetry }) => (
+  // Advisory: a refused or failed preview never blocks Confirm. The write route decides the save (WizardFrame's canAdvance).
+  <MessageBar intent="warning" layout="multiline" role="alert" data-testid="dryrun-failed">
+    <MessageBarBody>
+      <MessageBarTitle>The preview is not shown</MessageBarTitle>
+      <div data-testid="dryrun-failed-text">{dryRunFailureText(failure, requestNamesFirm)}</div>
+      <div data-testid="dryrun-advisory">{ADVISORY_LINE}</div>
+    </MessageBarBody>
+    <Button size="small" onClick={onRetry} data-testid="dryrun-retry">
+      Retry
+    </Button>
+  </MessageBar>
+);
+
+/**
+ * The removal preview standing in for a refused dry run: ONE message either way. Answered, it is the preview alone (what removing the override
+ * affects), with a note that the lists' preview was not available; it never sits under "The preview is not shown". Refused or failed, it is one
+ * error bar saying both reads failed, with the advisory line in its own element and one Retry that asks for the dry run again.
+ */
+const RemovalFallback: React.FC<{ dryRun: Extract<DryRunState, { state: 'failed' }>; preview: PreviewState; onRetry: () => void }> = ({ dryRun, preview, onRetry }) => {
+  const s = useWizardStyles();
+  if (preview.state === 'loading') return <Spinner size="tiny" label="Checking what removing the override affects…" data-testid="preview-loading" />;
+  if (preview.state === 'ready') {
+    return (
+      <MessageBar intent={preview.value.closesRule ? 'warning' : 'info'} layout="multiline" data-testid="removal-preview">
+        <MessageBarBody>
+          <MessageBarTitle>Removing the current override</MessageBarTitle>
+          <div>{previewLines(preview.value).join(' ')}</div>
+          <Caption1 className={s.muted} data-testid="removal-preview-note">
+            The full preview of the lists could not be read, so only this was checked.
+          </Caption1>
+        </MessageBarBody>
+      </MessageBar>
+    );
+  }
+  if (preview.state !== 'failed') return null;
+  return (
+    <MessageBar intent="error" layout="multiline" role="alert" data-testid="preview-failed">
+      <MessageBarBody>
+        <MessageBarTitle>The preview is not shown</MessageBarTitle>
+        <div data-testid="dryrun-failed-text">{dryRunFailureText(dryRun.failure, dryRun.requestNamesFirm)}</div>
+        <div data-testid="preview-failed-text">What removing the override affects could not be checked either. {previewFailureText(preview.failure)}</div>
+        <div data-testid="dryrun-advisory">{ADVISORY_LINE}</div>
+      </MessageBarBody>
+      <Button size="small" onClick={onRetry} data-testid="preview-retry">
+        Retry
+      </Button>
+    </MessageBar>
+  );
+};
+
 export const ImpactStep: React.FC<{
+  /** The choice in the row's own words, shown only when the dry run has no answer (it is the choice, not a prediction). */
   before: string;
   after: string;
+  dryRun: DryRunState;
+  /** Ask for the dry run. Idempotent for one proposal: the frame ignores a second ask while one is in flight. */
+  onLoadDryRun: () => void;
+  /** Forget a failed answer (and the fallback's) so the dry run is asked for again. */
+  onRetryDryRun: () => void;
+  /** 089's removal preview: asked only after a dry run of a plan that removes was refused with 403, 404 or 503 (see WizardFrame). */
   preview: PreviewState;
   /** Ask for the preview. Idempotent: the wizard ignores a second ask while one is in flight. */
   onLoadPreview: () => void;
-  /** Forget a failed answer so the preview is asked for again. */
-  onRetryPreview: () => void;
   extra?: React.ReactNode;
-}> = ({ before, after, preview, onLoadPreview, onRetryPreview, extra }) => {
+}> = ({ before, after, dryRun, onLoadDryRun, onRetryDryRun, preview, onLoadPreview, extra }) => {
   const s = useWizardStyles();
-  // The preview is asked for when the step is shown with no answer yet (and again after Retry); the wizard holds the answer.
+  // Each read is asked for when the step is shown with no answer yet for the current proposal; the frame holds the answers.
+  const dryRunWaiting = dryRun.state === 'loading';
+  React.useEffect(() => {
+    if (dryRunWaiting) onLoadDryRun();
+  }, [dryRunWaiting, onLoadDryRun]);
   const waiting = preview.state === 'loading';
   React.useEffect(() => {
     if (waiting) onLoadPreview();
@@ -148,35 +294,24 @@ export const ImpactStep: React.FC<{
 
   return (
     <div className={s.step} data-testid="impact-step">
-      <div className={s.stack}>
-        <Caption1 className={s.muted}>This record</Caption1>
-        <span className={s.change} data-testid="impact-change">
-          <Text>{before}</Text>
-          <Text className={s.arrow}>→</Text>
-          <Text weight="semibold">{after}</Text>
-        </span>
-      </div>
+      {dryRun.state !== 'ready' && (
+        <div className={s.stack}>
+          <Caption1 className={s.muted}>Your choice</Caption1>
+          <span className={s.change} data-testid="impact-change">
+            <Text>{before}</Text>
+            <Text className={s.arrow}>→</Text>
+            <Text weight="semibold">{after}</Text>
+          </span>
+        </div>
+      )}
       {extra}
-      {preview.state === 'loading' && <Spinner size="tiny" label="Checking what removing the override affects…" data-testid="preview-loading" />}
-      {preview.state === 'ready' && (
-        <MessageBar intent={preview.value.closesRule ? 'warning' : 'info'} layout="multiline" data-testid="removal-preview">
-          <MessageBarBody>
-            <MessageBarTitle>Removing the current override</MessageBarTitle>
-            {previewLines(preview.value).join(' ')}
-          </MessageBarBody>
-        </MessageBar>
-      )}
-      {preview.state === 'failed' && (
-        <MessageBar intent="error" layout="multiline" role="alert" data-testid="preview-failed">
-          <MessageBarBody>
-            <MessageBarTitle>The removal could not be checked</MessageBarTitle>
-            {failureText(preview.failure)}
-          </MessageBarBody>
-          <Button size="small" onClick={onRetryPreview} data-testid="preview-retry">
-            Retry
-          </Button>
-        </MessageBar>
-      )}
+      {/* What a screen reader should hear: the answer, or the reason there is none. Busy while a read is in flight. */}
+      <div aria-live="polite" aria-busy={dryRun.state === 'loading' || preview.state === 'loading'} className={s.step} data-testid="impact-result">
+        {dryRun.state === 'loading' && <Spinner size="tiny" label="Reading what the lists would show…" data-testid="dryrun-loading" />}
+        {dryRun.state === 'ready' && <DryRunAnswer view={dryRun.value} />}
+        {dryRun.state === 'failed' && preview.state === 'none' && <DryRunFailed failure={dryRun.failure} requestNamesFirm={dryRun.requestNamesFirm} onRetry={onRetryDryRun} />}
+        {dryRun.state === 'failed' && preview.state !== 'none' && <RemovalFallback dryRun={dryRun} preview={preview} onRetry={onRetryDryRun} />}
+      </div>
       <Caption1 className={s.muted} data-testid="o21-line">
         {O21_LINE}
       </Caption1>
@@ -188,10 +323,19 @@ export const ImpactStep: React.FC<{
 // Confirm
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ConfirmStep: React.FC<{ rows: ReadonlyArray<readonly [string, React.ReactNode]> }> = ({ rows }) => {
+export const ConfirmStep: React.FC<{
+  rows: ReadonlyArray<readonly [string, React.ReactNode]>;
+  /** A removal that neither the dry run nor the removal preview could check: say so (it does not block). */
+  uncheckedClose?: boolean;
+}> = ({ rows, uncheckedClose }) => {
   const s = useWizardStyles();
   return (
     <div className={s.step} data-testid="confirm-step">
+      {uncheckedClose && (
+        <MessageBar intent="warning" layout="multiline" data-testid="confirm-unchecked">
+          <MessageBarBody>{UNCHECKED_CLOSE_LINE}</MessageBarBody>
+        </MessageBar>
+      )}
       <KeyValues rows={rows} />
       <Caption1 className={s.muted}>{O21_LINE}</Caption1>
     </div>

@@ -36,6 +36,7 @@ import { setRuntimeConfig, getBffBaseUrl } from './config/runtimeConfig';
 import { ensureAuthInitialized, authenticatedFetch } from './services/authInit';
 import { createRecordProceduresApi } from './services/recordProceduresApi';
 import { createOverridesApi } from './services/overridesApi';
+import { createDryRunApi } from './services/dryRunApi';
 import { createFirmChoices, type WebApiLike } from './services/firmChoices';
 import { parseLaunch } from './services/launch';
 
@@ -139,6 +140,7 @@ function Root() {
   // Built once the runtime config is set (getBffBaseUrl throws before that).
   const api = React.useMemo(() => (ready ? createRecordProceduresApi(authenticatedFetch, getBffBaseUrl()) : null), [ready]);
   const overrides = React.useMemo(() => (ready ? createOverridesApi(authenticatedFetch, getBffBaseUrl()) : null), [ready]);
+  const dryRun = React.useMemo(() => (ready ? createDryRunApi(authenticatedFetch, getBffBaseUrl()) : null), [ready]);
 
   let body: React.ReactNode;
   if (!launch.ok) {
@@ -152,14 +154,14 @@ function Root() {
         onRetry={() => setAttempt(n => n + 1)}
       />
     );
-  } else if (!api || !overrides) {
+  } else if (!api || !overrides || !dryRun) {
     body = (
       <div className={s.centered} data-testid="recordprocedures-bootstrapping">
         <Spinner size="small" label="Loading procedures…" />
       </div>
     );
   } else {
-    body = <ProceduresPanel core={launch.core} table={launch.table} recordId={launch.recordId} api={api} overrides={overrides} firmChoices={firmChoices} />;
+    body = <ProceduresPanel core={launch.core} table={launch.table} recordId={launch.recordId} api={api} overrides={overrides} dryRun={dryRun} firmChoices={firmChoices} />;
   }
 
   // The FluentProvider carries only the theme; the surface colours sit on a wrapper div (project gotcha F-10).

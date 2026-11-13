@@ -48,6 +48,7 @@ import {
   type GapView,
   type PanelFailureKind,
   type ProcedureItem,
+  type ProceduresQuery,
   type RecordProceduresApi,
   type RecordProceduresView,
   type RecordRulesInForceView,
@@ -71,6 +72,7 @@ import {
   type RuleFilter,
 } from '../services/model';
 import type { OverridesApi } from '../services/overridesApi';
+import type { DryRunApi } from '../services/dryRunApi';
 import { ProcedureList } from './ProcedureList';
 import { RuleList } from './RuleList';
 import { ProcedureWizard } from './wizards/ProcedureWizard';
@@ -102,6 +104,8 @@ export interface ProceduresPanelProps {
   api: RecordProceduresApi;
   /** The writes of the Procedure and rule wizards (task 084b), on task 089's routes. */
   overrides: OverridesApi;
+  /** Task 084d-4: the dry run every wizard's Impact step reads. */
+  dryRun: DryRunApi;
   /** Where the picker finds the firms that have invoiced the record (wired to Xrm.WebApi in `main.tsx`). */
   firmChoices: FirmChoices;
   /** Today as yyyy-MM-dd; defaults to the user's own today. Injected by the tests. */
@@ -129,15 +133,21 @@ const RETRYABLE: ReadonlySet<PanelFailureKind> = new Set(['signin', 'unavailable
  * `allowed` (084g) is taken from the same answers.
  */
 type OpenRow =
-  | { kind: 'procedure'; key: string; row: ProcedureItem; gaps: GapView[]; date: string; allowed: AllowedSteps }
-  | { kind: 'rule'; key: string; row: RuleItem; allowed: AllowedSteps };
+  | { kind: 'procedure'; key: string; row: ProcedureItem; gaps: GapView[]; date: string; allowed: AllowedSteps; query: ProceduresQuery }
+  | { kind: 'rule'; key: string; row: RuleItem; allowed: AllowedSteps; query: ProceduresQuery };
 
 const allowedOf = (procedures: RecordProceduresView, rules: RecordRulesInForceView): AllowedSteps => allowedSteps(procedures.permissions, rules.permissions);
+
+/**
+ * Task 084d-4: the query the answer was read with, for the dry run: a firm the user picked is sent again (`Query`); the record's billing firm
+ * or no firm is the server's default, so no firmId is sent, as the list read did.
+ */
+const queryOf = (v: RecordProceduresView): ProceduresQuery => ({ firmId: v.firmSource === 'Query' && v.firm ? v.firm.id : null, date: v.date });
 
 const procedureKey = (p: ProcedureItem): string => p.id.toLowerCase();
 const ruleKey = (r: RuleItem): string => `${r.policyId}:${r.policyVersionId ?? ''}`.toLowerCase();
 
-export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, recordId, api, overrides, firmChoices, today }) => {
+export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, recordId, api, overrides, dryRun, firmChoices, today }) => {
   const s = useStyles();
   const todayStr = React.useMemo(() => today ?? todayIso(), [today]);
 
@@ -199,12 +209,12 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
             if (cur.kind === 'procedure') {
               const row = procedures.value.procedures.find(p => procedureKey(p) === cur.key);
               if (!row) return false;
-              setOpen({ kind: 'procedure', key: cur.key, row, gaps: procedures.value.gaps, date: procedures.value.date, allowed });
+              setOpen({ kind: 'procedure', key: cur.key, row, gaps: procedures.value.gaps, date: procedures.value.date, allowed, query: cur.query });
               return true;
             }
             const row = rules.value.rules.find(r => ruleKey(r) === cur.key);
             if (!row) return false;
-            setOpen({ kind: 'rule', key: cur.key, row, allowed });
+            setOpen({ kind: 'rule', key: cur.key, row, allowed, query: cur.query });
             return true;
           }
           const [first, second] = [procedures, rules].flatMap(r => (r.ok ? [] : [r.failure]));
@@ -313,11 +323,12 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         gaps: readyLoad.procedures.gaps,
         date: readyLoad.procedures.date,
         allowed: allowedOf(readyLoad.procedures, readyLoad.rules),
+        query: queryOf(readyLoad.procedures),
       });
     }
   };
   const openRule = (r: RuleItem) => {
-    if (readyLoad) setOpen({ kind: 'rule', key: ruleKey(r), row: r, allowed: allowedOf(readyLoad.procedures, readyLoad.rules) });
+    if (readyLoad) setOpen({ kind: 'rule', key: ruleKey(r), row: r, allowed: allowedOf(readyLoad.procedures, readyLoad.rules), query: queryOf(readyLoad.procedures) });
   };
 
   /** ‹ › through the list as the user sees it (filters applied); absent when the open row is not in it any more. */
@@ -359,6 +370,8 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         date={open.date}
         allowed={open.allowed}
         api={overrides}
+        dryRunApi={dryRun}
+        firmId={open.query.firmId ?? null}
         nav={navFor(shownProcedureRows, procedureKey, open.key, openProcedure)}
         onChanged={refresh}
         onClose={closeWizard}
@@ -372,6 +385,8 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         firms={ruleFirms}
         allowed={open.allowed}
         api={overrides}
+        dryRunApi={dryRun}
+        query={open.query}
         nav={navFor(shownRuleRows, ruleKey, open.key, openRule)}
         onChanged={refresh}
         onClose={closeWizard}

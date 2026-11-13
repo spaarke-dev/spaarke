@@ -6,6 +6,7 @@ import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-com
 import { ProceduresPanel } from '../components/ProceduresPanel';
 import { createRecordProceduresApi } from '../services/recordProceduresApi';
 import { createOverridesApi } from '../services/overridesApi';
+import { createDryRunApi } from '../services/dryRunApi';
 import type { FirmChoices, InvoicedFirms } from '../services/firmChoices';
 import { DIMMED_MARK_KINDS } from '../services/model';
 import {
@@ -54,7 +55,7 @@ function renderPanel(setup: Setup = {}) {
   const overrides = createOverridesApi(server.fetchFn, BASE);
   const view = render(
     <FluentProvider theme={setup.theme ?? webLightTheme}>
-      <ProceduresPanel core={k.core} table={k.table} recordId={k.id} api={api} overrides={overrides} firmChoices={firmChoices} today={TODAY} />
+      <ProceduresPanel core={k.core} table={k.table} recordId={k.id} api={api} overrides={overrides} dryRun={createDryRunApi(server.fetchFn, BASE)} firmChoices={firmChoices} today={TODAY} />
     </FluentProvider>
   );
   return { ...view, ...server, firmChoices };

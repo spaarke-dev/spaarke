@@ -8,6 +8,7 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { ProceduresPanel } from '../components/ProceduresPanel';
 import { createRecordProceduresApi, type RecordProceduresView, type RecordRulesInForceView } from '../services/recordProceduresApi';
 import { createOverridesApi } from '../services/overridesApi';
+import { createDryRunApi } from '../services/dryRunApi';
 import type { FirmChoices } from '../services/firmChoices';
 import { FENWICK, MATTER_ID, OKAFOR, PROJECT_ID, TODAY, WA_ID, matterProcedures, matterRules } from './fixtures';
 import { BASE, problem, serverFake, type Handler, type WriteCall, type WriteHandler } from './testKit';
@@ -23,6 +24,10 @@ export interface HarnessOptions {
   procedures?: Handler | RecordProceduresView;
   rules?: Handler | RecordRulesInForceView;
   writes?: WriteHandler;
+  /** Task 084d-4: the dry run's answers. Absent: every dry run fails (as an unanswered call), so the Impact step shows the refusal. */
+  dryRun?: WriteHandler;
+  /** Review round 1: the clients' timeout in ms (the real one is 20 s), so a test of a read that never answers need not wait for it. */
+  timeoutMs?: number;
 }
 
 export function renderHarness(o: HarnessOptions = {}) {
@@ -32,6 +37,7 @@ export function renderHarness(o: HarnessOptions = {}) {
     procedures: asHandler(o.procedures, matterProcedures),
     rules: asHandler(o.rules, matterRules),
     writes: o.writes,
+    dryRun: o.dryRun,
   });
   const firmChoices: FirmChoices = { invoicedBy: jest.fn(() => Promise.resolve({ firms: [{ id: OKAFOR.id, name: OKAFOR.name! }], complete: true })) };
   const view = render(
@@ -41,7 +47,8 @@ export function renderHarness(o: HarnessOptions = {}) {
         table={k.table}
         recordId={k.id}
         api={createRecordProceduresApi(server.fetchFn, BASE)}
-        overrides={createOverridesApi(server.fetchFn, BASE)}
+        overrides={createOverridesApi(server.fetchFn, BASE, { timeoutMs: o.timeoutMs })}
+        dryRun={createDryRunApi(server.fetchFn, BASE, { timeoutMs: o.timeoutMs })}
         firmChoices={firmChoices}
         today={TODAY}
       />

@@ -1229,3 +1229,166 @@ Test code and this file only; no product code changed. Branch `task/084d-3`, fro
 - **K-5.** The strict-rig control exercises `ExecuteTransactionAsync` only. `WriteRefusingEntityService` refuses first.
 - **K-6.** The O-K3 must-not-fire is weak, by-id reads are not captured, and the window ends at the last `sprk_signal` read.
 - **K-7.** Interleaving happens only at `RetrieveMultipleAsync`, and some shared doubles are unsynchronised on refusal paths only.
+
+## 084d-4
+
+The client half of 084d: every wizard's Impact step on the dry run. Branch: the agent worktree, from `588526e579`. Client only: no server, deploy or web-resource version change.
+
+**STOP hit: the Assign Procedure wizard is not built.** No route lists the Procedures that can be assigned to a record. The routes are:
+- `GET /api/finance/procedures/{id}` (081): reads one Procedure by id.
+- The record's `/procedures` list (084): only the Procedures that already apply to, or are excluded on, this record. That is the wrong set, because the prototype's Choose step offers the catalog MINUS those (`CATALOG.filter(p => !before.procedures.some(...))`). Assigning from it would duplicate the Procedure wizard's Follow/Pin choices, and would never reach an AssignedRecordsOnly Procedure that is not on the chain.
+
+An Xrm.WebApi read is ruled out: 084's POML forbids Xrm reads of the Procedure, override and rule tables. The coordinator split the wizard into **084d-5**: a server list route under EB-D-218, then the wizard. There is no "Assign Procedure" entry point in the UI, not even a disabled stub.
+
+**What was built:**
+- `services/dryRunApi.ts`, new:
+  - the wire types (the DTOs of `RecordProcedureReadService.cs` ~57-130);
+  - `dryRunRequestOf(plan)`, the request mapping;
+  - `requestFirmOf`, for R6's scope;
+  - `dryRunUrl`, on the same prefix and query as the list reads;
+  - `readDryRunView`, where a non-number count reads as null, never 0;
+  - `createDryRunApi`. A refusal is the wizards' `WriteFailure`, with the title, detail and errorCode.
+- `components/wizards/impact.ts`, new, pure:
+  - `impactChanges` (Now → After). Procedures are keyed by id, rules by policy id. Each side is described in the panel's own words (`procedureState` + version; `ruleBadges` + version). A row on one side only is "Not listed".
+  - `affectedLine`, `dryRunFailureText`, and the R6, advisory and null-count sentences.
+- `steps.tsx` `ImpactStep`:
+  - The dry run's answer: the label `Now → {afterLabel}`, the changed Procedures and rules, and the D-170 bar when `closes.d170` (title "Open findings close", body the server's `warning`).
+  - The server's `warning` when it comes without d170, and the server's `message`.
+  - `affectedOpenInvoices`, and the server's disclosure notes.
+  - The O-21 line, always.
+  - The choice's own before → after (084b's interim guess) shows only while there is no answer, captioned "Your choice".
+- `WizardFrame.tsx` asks for the dry run of the plan, for the firm and date the lists were read with. Answers are keyed by the exact body and tagged with a sequence number, so only the latest ask's answer is kept. Moving to another row bumps the sequence.
+- Plumbing:
+  - `ProceduresPanel` gains a `dryRun` prop, and snapshots `query` with the open row (`queryOf`: the firm only when `firmSource` is `Query`).
+  - `ProcedureWizard` gains `dryRunApi` and `firmId`; `RuleWizard` gains `dryRunApi` and `query`.
+  - `main.tsx` builds the client.
+
+**Request mapping** (`plan.ts` step(s) → `ProcedureDryRunRequest`):
+
+| Plan | Request |
+|---|---|
+| `remove X` | `{ kind: Remove, overrideId: X }` |
+| `assign` (FollowLatest / Pinned / Excluded) | `{ kind: Assign, assign: { procedureId, mode, pinnedVersionId?, reason? } }` |
+| `excludeRule` | `{ kind: ExcludeRule, excludeRule: { policyId, reason, firmId? } }` |
+| `changeRule` | `{ kind: ChangeRule, changeRule: { policyId, reason, firmId?, ruleBody } }` |
+| `remove X`, then a create | the create's kind with `replacesOverrideId: X` (`PlanAsync` removes first, then plans the create over the removal) |
+| empty plan | nothing is asked |
+| any other shape (two creates, create then remove, two removes, three calls) | not sent (`unsupported`). No plan the wizards make has this shape: a test runs every fixture row × choice. |
+
+**Wording and its source:**
+- "If saved now": the server's `afterLabel`, shown as given.
+- The disclosure notes (R5, R10, not-a-promise): the server's, shown as given.
+- The section 15 warning (`RemoveChangedWarning`) and the change's close message (`ChangeClose*Message`): the server's, shown as given (ontology-r1 F2).
+- The affected count: the server's `text` (`ProcedureService.AffectedText`).
+- **R6** (084d-dry-run-design, uac-r2 review): "This preview isn't available for this firm." It is scoped to a 503 `procedures.unavailable` on a request that names a firm (`excludeRule.firmId` / `changeRule.firmId`, mirroring the server's `RequestFirmOf`). Any other 503 shows the ProblemDetails title and detail.
+- **O-K1b:** "How many open invoices you can see are affected can't be counted."
+- Chrome of ours, not findings text:
+  - the D-170 bar's title "Open findings close";
+  - "The preview is not shown";
+  - "You can still go on: the preview is only a guide, and the save itself decides.";
+  - "The lists read the same.".
+
+**Decisions and deviations:**
+1. **089's removal preview is superseded, but kept as a fallback.** The dry run carries the same fields (`closes.d170`/`kinds` ≈ `closesRule`, `closes.warning`, `affectedOpenInvoices.count`/`text`), from the same selection (084d-2b). So the preview is not asked when the dry run answers. It is asked only when the dry run of a plan that removes was refused. The reason: the dry run asks more of the caller (finance.read, the remove route's privileges, and one check over every row of both lists, so one unreadable row is a 503: O-K1a). Without the fallback, the section 15 warning would not show at all before a changed rule's removal in that case.
+2. **A refusal never blocks Confirm.** That covers a refused dry run and a refused removal preview. Next waits only while a read is in flight, so an answer (above all a warning) is shown before Confirm. 084b blocked a removal whose preview was refused; that test was changed to match the new behaviour. Reason: the brief, and the design note sets no blocking case.
+3. The dry run is asked with the lists' own query, so Now matches the panel. A firm picked in the panel is re-sent; the billing-firm default is not.
+4. The 084b source guard "no dry-run read" became "the dry-run route is named only in `dryRunApi.ts`". The write-scan guard now allows `dryRunApi.ts`'s single POST, and asserts it names no 089 route.
+5. Test plumbing: `serverFake` records dry runs in `dryRunCalls`, apart from `writeCalls`. With no handler, the dry run fails, so the old tests still exercise the preview fallback. Nine existing `Next` clicks right after Impact now wait for Next to be enabled.
+
+**Criteria → tests:**
+- Request mapping, every kind: `dryRunApi.test.ts` "every plan maps …" (9 cases plus empty and unsupported); the body test; the route test.
+- Every wizard plan has a mapping: "every plan the two wizards make …". *Justification:* it proves the brief's STOP condition for item 1 does not fire.
+- Now → After, label, count, O-21, request and query: `Impact.test.tsx` "sends the plan as the route's request …".
+- Nothing shows "will succeed": "nothing presents After as …".
+- D-170 and the superseded preview: "D-170: removing a changed rule …".
+- The warning without d170, and the message: "a warning without d170 …".
+- A null count: "O-K1b: …".
+- The 503 R6 case, with Confirm and the save working: "R6: …". The 503 outside R6: "a 503 procedures.unavailable for a request that names no firm …".
+- Another refusal, with Confirm working: "another refusal (403) …".
+- Re-ask and the stale race: "Back, a new reason, Next …".
+- The fallback preview after a refused dry run: the existing `Wizards.test.tsx` removal tests, and the changed "a refused removal PREVIEW …".
+- Mutation seeds (each applied, `Impact.test.tsx` run, restored):
+  - the stale-answer check dropped: 1 fails;
+  - the removal preview always asked: 1 fails;
+  - Next blocked on a refusal: 2 fail;
+  - a null count shown as 0: 1 fails;
+  - R6 not scoped to a request firm: 1 fails.
+
+**Known limits:**
+- **K-1.** The Assign Procedure wizard (EB-D-220/221) is not built: STOP, moved to 084d-5.
+- **K-2.** "The firms reached" (POML ui-test "Impact of a pin") is not shown: the server does not return `reach` (084d-2b K-1).
+- **K-3.** O-K4a: an overlay refusal comes back as 503 `assignment.read_failed` "Try again". It is shown with its title and detail like any other refusal; no real path reaches it today.
+- **K-4.** A row is matched across Now and After by Procedure id or policy id. A change shows as the base rule leaving or changing and the record rule appearing, each as its own row.
+- **K-5.** ESLint was not run: `src/solutions/RecordProcedures` has no ESLint config and no local eslint, so `npm run lint` fails here. This is pre-existing. The typecheck gate covers the changed files.
+- **K-6.** Under full parallel load, a few wizard tests (both old and new code paths) occasionally hit testing-library's 1 s `findBy` limit. 1 of 3 full runs had 3 such failures; the other 2 passed 365/365. Each file passes alone.
+
+**Verification:**
+- `npm run typecheck`: surface-owned 0 (98 pre-existing errors in the shared libs).
+- `npm test`: 17 suites, 365/365. 340 before, plus 25 new (16 in `dryRunApi.test.ts`, 9 in `Impact.test.tsx`).
+- `npm run build`: OK.
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors (no server file changed).
+
+### 084d-4 review round 1 (2026-11-13)
+
+Client only: no server file changed. Each item is finding, change, test.
+
+1. **A hung dry run held Next, and Confirm with it.**
+   - *Finding:* `WizardFrame` kept Next off while the dry run loaded, and the fetch had no timeout or abort. A call that never answered blocked Confirm for ever.
+   - *Change:* `raceTimeout` (`overridesApi.ts`) gives a read an abort signal that fires after `READ_TIMEOUT_MS` (20 s; `createDryRunApi` / `createOverridesApi` take `{ timeoutMs }`) or when the caller aborts. The race does not depend on the fetch honouring the signal. A timeout is a failure `client.timed_out`, worded "The preview took too long to come back." (`dryRunFailureText` / `previewFailureText`), so Next is held at most that long. 089's removal preview (the fallback) has the same bound, because Next waits on it too. `WizardFrame` holds one `AbortController` per read, aborts them all when the wizard closes (unmount) or moves to another row, and drops an answer that arrives after either (`mounted`, `epoch`), so nothing sets state after unmount. A client that throws is a failure too (`settle`).
+   - *Tests:* `Impact.test.tsx` "is given up on at the timeout …" (real 80 ms timeout, a never-answering handler: "took too long", Next enabled, Retry, save works), "Confirm is reachable after a timeout …", "closing the wizard abandons the read …" (the fetch's signal fires; a late answer reports nothing), "a removal preview that does not answer is given up on …". `dryRunApi.test.ts` "review round 1: the timeout and the abort signal" (timeout with a fetch that ignores its signal, the caller's signal, a fake-timer check that no timer is left; fake timers are used there only, with no real I/O).
+2. **A failed dry run had no Retry.**
+   - *Change:* the failed bar has Retry (`dryrun-retry`). `retryDryRun` forgets that proposal's cached failure (and the fallback's answer) so the step asks again, as 084b's `retryPreview` did for the preview. Failures stay cached until Retry (Back and Next do not re-ask).
+   - *Tests:* "a failed dry run has a Retry that asks again"; the timeout test above; the changed `Wizards.test.tsx` fallback test (Retry on the combined message).
+3. **One cached answer, evicted by a late one.**
+   - *Change:* answers are a `Map` keyed by the exact request (firm, date, body). A late answer is stored under its own key and cannot replace the live proposal's; there is no sequence number any more. Moving to another row clears the map and bumps `epoch`.
+   - *Test:* "a late answer to an earlier proposal never replaces the live one …" (the two proposals each keep their answer; two asks in all).
+4. **The removal-preview fallback.**
+   - *Change:* `asksRemovalPreview`: asked only after a dry run refused with 403, 404 or 503 (`FALLBACK_STATUSES`); never after 400, 409, a timeout, a network failure or a sign-in failure. When used, the Impact step shows ONE message: the preview alone when it answered (with a note that the lists' preview could not be read; never "The preview is not shown" over a shown preview), or one error bar with `role="alert"` and one Retry when both reads failed.
+   - *Tests:* `Impact.test.tsx` "the removal preview stands in only after …" (403, 404, 503 ask; 400, 409, network, timeout do not; one alert; the combined bar names both failures); `dryRunApi.test.ts` "only 403, 404 and 503 …"; `Wizards.test.tsx` fallback test (one alert, no `dryrun-failed`). Mutation: `asksRemovalPreview` made always true: 5 of the 31 `Impact.test.tsx` tests fail.
+5. **The advisory line ran into the next sentence.**
+   - *Change:* the failure text and the advisory line are separate elements (`dryrun-failed-text`, `dryrun-advisory`).
+   - *Test:* "a refusal with a title and no detail does not run into the advisory line" (the text is exactly "Conflict").
+6. **`affectedLine` composed a count sentence.**
+   - *Change:* the client composes nothing: a number shows the server's `text`; a number with no text shows the number alone; a null count shows "can't be counted".
+   - *Tests:* `dryRunApi.test.ts` "affectedLine shows the server's text …"; `Impact.test.tsx` "a number with no text from the server is shown as the number alone".
+7. **Confirm for an unchecked removal.**
+   - *Change:* when the plan removes an override and the dry run failed and no removal preview answered, Confirm shows `UNCHECKED_CLOSE_LINE`: "What this change closes could not be checked. You can still go on if you choose to; the save itself decides." It does not block. *Beyond the literal brief:* it also shows when the fallback was not asked (a 409, a timeout), because then too nothing said what the removal closes; the strict case (both refused) is a subset.
+   - *Tests:* "Confirm says when what a removal closes could not be checked" (both refused, with the removal saved; a conflict; and not shown when the dry run answered, when the preview answered, or when nothing is removed).
+8. **Accessibility.**
+   - *Change:* the Impact result area is `aria-live="polite"` (`impact-result`) with `aria-busy` while a read is in flight; the failed dry-run bar has `role="alert"`.
+   - *Tests:* "the Impact result area is a live region" (two tests).
+9. **Tests.**
+   - **9a, firm picked in the panel.** `Impact.test.tsx` "the dry-run URL carries the picked firm's firmId". **Mutation proof:** `queryOf` in `ProceduresPanel.tsx` changed to send `firmId: null`; the test fails (`Expected "0a0a0a0a-0000-4000-8000-0000000000a2"`, `Received: null`); the file was restored.
+   - **9b, source guard.** `Wizards.test.tsx` now walks EVERY non-test source file under `src` (not a list), asserts `services/dryRunApi.ts` is the only file naming the dry-run route, and has a must-fire control (two other files naming it are caught) and a must-not-fire control (comments and look-alikes).
+   - **9c, flakiness.** `jest.setup.cjs` has `configure({ asyncUtilTimeout: 5000 })`. The doubled `waitFor(Next enabled)` lines in `WizardsChange.test.tsx` are removed: the file had THREE (not four; old lines 130, 336, 439).
+   - **9d.** The tests listed above. Beyond the named ones, one line of reason each: the `raceTimeout` tests and the abort-on-close test (the contracts of item 1); the `FALLBACK_STATUSES` test (item 4's closed set).
+   - **Test plumbing:** the fake server's default dry run is now a 503 (not a plain `Error`), because a network failure no longer asks the removal preview and the old removal tests rely on the fallback; the harness takes `timeoutMs`; `overridesApi.test.ts` expects the preview read to carry an abort signal.
+
+**Known limits (this round).**
+- **K1 (R6, deliberate).** A 503 `procedures.unavailable` for a request-named firm still reads "This preview isn't available for this firm." uac-r2 accepted it: the design note's "R6 accepted" line says a body firm the caller cannot Read gives 503, worded "this preview isn't available for this firm", not as an outage. The server's 503 is deliberately the same for an unreadable firm and a fault. Not changed.
+- The "unsupported" plan shape shows no explanation. It is unreachable: `dryRunApi.test.ts` "every plan the two wizards make over the fixtures has a dry-run equivalent" runs every fixture row and choice.
+- A change of the reason only reads "The lists read the same." (the lists do not differ).
+- A 200 whose body is not JSON is worded "Check your connection." (it is read as a failure with no status).
+
+**Verification (round 1):**
+- `npm run typecheck`: surface-owned 0 (98 pre-existing errors in the shared libs).
+- `npm test`: 17 suites, 392/392 (365 before, plus 27 new).
+- Parallel runs: 3 of 3 green at 392/392 (106 s, 75 s, 58 s). `--runInBand` runs: 3 of 3 green at 392/392 (253 s, 235 s, 207 s). `asyncUtilTimeout: 5000` removes K-6 of the first round.
+- `npm run build`: OK.
+- Mutations (each applied, run, restored): `queryOf` sending `firmId: null`: 1 fails. `asksRemovalPreview` always true: 5 fail. Both that and the abort-on-close removed: 6 fail (so the abort mutation alone: 1).
+- No server file changed, so no `dotnet build`.
+
+
+### For task 112 (ui-tests after deploy)
+- **Impact of a pin:**
+  - On a matter, open a firm Procedure, choose Pin a version, and reach Impact.
+  - Expect Now → If saved now with the Procedures and rules that change, and the affected open invoice count (or "can't be counted").
+  - "The firms reached" is not shown (K-2).
+- **Removal warning (section 15, D-170):**
+  - Remove a changed-rule override whose rule has open findings ("Run the published rule" on a rule changed here), and reach Impact.
+  - Expect the "Open findings close" bar with the server's section 15 text and the count.
+- **Refusal:**
+  - As a caller who cannot Read a firm, exclude a rule for that firm.
+  - Expect "This preview isn't available for this firm.", and Confirm and the save still work.
+- **Assign Procedure:** not testable here; moved to 084d-5.
+- **Dark mode (ADR-021):** repeat the first test in the dark theme. Every colour comes from Fluent v9 tokens; no colour literal was added.
