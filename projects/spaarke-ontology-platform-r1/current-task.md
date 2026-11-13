@@ -1,25 +1,33 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-11-12 ~17:45Z (by context-handoff, before compaction). State only: history is in git log, task
-> `<completion>` blocks and `notes/handoff-history/2026-11.md` (the previous checkpoint is archived there verbatim). Standing rules:
-> [`CLAUDE.md`](CLAUDE.md) §3 and §6. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-218). Deferred work: one
-> self-contained GitHub issue per item, label `ontology-deferred`, plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-150**). Sub-agents never edit this file.
+> **Last Updated**: 2026-11-13 ~03:40Z (by context-handoff, at 85% context). State only; history in git log, task `<completion>` blocks and
+> `notes/handoff-history/2026-11.md` (previous checkpoint archived there verbatim). Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 and §6.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..**D-221**). Deferred work: one GitHub issue per item, label `ontology-deferred`,
+> plus a DI-nn row in both tables of `notes/defer-issues.md` (next free: **DI-150**). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Role** | Main session `ontology-r1` for ontology R1: orchestrate to completion; independent review of every PR touching ontology-owned files (`Services/Signals/**`, `Api/Signals/**`, `Services/Finance/FinanceBaseValues.cs`, `Services/Signals/Billing/**`); answer peers; hold wrap-up 090 until the owner's UAT is done. Peer messages are not owner approvals. |
+| **Role** | Main session `ontology-r1`: orchestrate R1; review every PR touching ontology-owned files (`Services/Signals/**`, `Api/Signals/**`, `FinanceBaseValues.cs`, `Services/Signals/Billing/**`); answer peers; hold wrap-up 090 until owner UAT done. Peer messages are not owner approvals. |
 | **Working dir** | `C:\code_files\spaarke-wt-spaarke-ontology-platform-r1`, branch `docs/ontology-platform-design` (pushed). |
-| **Active task** | **Wave M done** (178, 179 #2753, 181 #2752, 186, 187 #2754 all merged; D-221 SPE Admin pickers stay). Older text follows — **Wave M**: **181** PR [#2752](https://github.com/spaarke-dev/spaarke/pull/2752) to master (reviewed; worktree `C:/wt181`) — ask owner merge-on-green. **179** (`C:/wt179`) and **187** (`C:/wt187`) implementers still running (branches `fix/ontology-task-NNN`, nothing committed). 179 must create `LookupField/lookupFilters.ts` byte-identical to 181's (diff it against `git show origin/fix/ontology-task-181:src/client/shared/Spaarke.UI.Components/src/components/LookupField/lookupFilters.ts`). **178 ✅**, **186 ✅** (#2744 `76b2930961`). |
-| **Open PR** | None. docs→master [#2674](https://github.com/spaarke-dev/spaarke/pull/2674) (task 177) **merged 2026-11-11 as master `c152d7d0b1`** (merge commit). CI: 43 pass; the non-required `Server tests (office scope) (api-office)` leg hit its 20-min hang guard twice — same stall point as `work/field-mapping-server-write-path-r1` (no 177 code), existing issue **#1504**; locally the same selection on this branch ran 567 pass / 7 skip / 0 fail in 13.9 min with `--blame-hang`. |
-| **Next Action** | (1) Review 179 and 187 when they report → commit → PR → ask owner merge-on-green; on each merge: POML completed + TASK-INDEX `✅ [done]` + notes `task-NNN-notes.md` + drift check + Remove-WorktreeSafe.ps1. `C:/wt186` removal ran in background (verify gone: `git worktree list`). (2) **Create task 189** (D-220, Office add-in email templates + AI): we build BFF `GET /api/communications/templates` = IMPERSONATED caller read (DataverseImpersonation + RetrieveMultipleImpersonatedAsync), route-ledger declared, contract NOT bound to OOB `template` columns (compose-templates-r8 → sprk_template), §10 placement + §11 justification, uac-r2 access review before merge; switch `createXrmEmailComposeHandlers.onListEmailTemplates` to it (both hosts). Then send word-add-in-r1 the merge SHA + handler contract: they do the pane side (EmailView props, `spaarke-send-email-pane.d.ts`, tests, narrow-width check). Note: `/api/communications/draft` has no rate limit. (3) Then 180 (after 179), 182, 188. (4) 084e: review ebilling's Services/Signals/** diff + parity test before merge (O-1..O-7). (5) Owner re-checks Outside Counsel (#2737), then remove `C:/wtorg`. After ~21:30Z nightly: open fee/scope Signal on MAT-34929-0040 → owner sends Budget inquiry (176/160). |
-| **Uncommitted** | None. |
+| **Active** | **Diagnosing the owner's 176/160 dev Budget inquiry run (2026-11-13 03:26Z) on MAT-34929-0040.** Wave M (178 179 181 186 187) all ✅ merged; D-221 SPE Admin pickers stay. 084e reviewed + approved (merged into work/ebilling-r1 `e0b8da419b`). |
+| **Next Action** | (1) Unzip `<scratchpad>/bfflogs/logs.zip` (dev BFF container logs, downloaded ~03:37Z) and grep around 03:26:5x–03:27:3xZ for "Budget inquiry email not sent" / the exception: telemetry sampling dropped the decision operation. (2) Report root cause + fix plan to owner (see Findings). (3) Then write task 189, then 180, 182, 183, 184, 188, 185. |
+
+### 176/160 run findings so far (owner screenshots 2026-11-13)
+- Dev data: budget revision `5e408089…` created 03:26:52Z; service request `e03b4d2e…` "Fee or scope change, no budget revision: Intellectual Asset Management System" 03:26:54Z; **no sprk_communication** created; Signal `48fddf1f…` auto-closed 03:27:27Z by the budget-revision trigger ("resolution 100000002, no Decision Record"). UI: "The service request was created but the email was not sent (decision.action.write_failed)"; retry 03:29:42Z = 500 (replay; "earlier attempt did not finish"), ref 0HNQ162B12DDA:00000015, op 6889d087.
+- First-attempt decision op NOT in App Insights / Log Analytics (25% sampling). No Graph sendMail seen 03:26–03:28Z (not proof: sampled ops drop whole).
+- Graph mailbox **reads** failing 502/503 + 30 s timeouts since ~16:00Z 2026-11-12 (Inbox polling `mailbox-central`, `testuser1`); predates the 02:49Z deploy. Every `POST /me/sendMail` is followed by `GET /me/mailFolders/sentitems/messages` **400** (16:52Z, 17:00Z) → .eml archive lookup likely broken (D-216) — check and file.
+- Deploy diff (e9208abc5e) Message-channel code returns early for Email (`IsUnfiledMessageSend` false) — unlikely cause.
+- Separate: `POST /api/finance/matters/{id}/recalculate` PATCH `sprk_pendingspend` → 400 `0x80048d19` (03:27:38Z) — finance rollup defect, file/route to ebilling.
+- Separate: 03:11Z thread code queried `sprk_regardingreportcard` on `sprk_communicationthread` (column absent) — find caller, file.
+- **Owner UX ask:** inquiry step shows "Cc and Bcc are not sent with this step. Add every recipient to To." Owner: if Cc is offered it must work; alternative pattern = Cc collapsed like Bcc, revealed on click, for ALL email forms. D-219 Q4 already says Cc + Bcc as in Send Email → inquiry executor must send Cc/Bcc end to end (task 182/183 scope check).
+- Owner's half-done decision: budget revised + service request created, no email, no DR, Signal closed. Needs owner choice on clean-up (delete SR? re-raise?) — ask, do not act.
 
 ## Open items
 
 **Owner**
-- **Dev BFF = `6dbe69b9e2`** (uac-r2 deploy 2026-11-12: master `a654da59c4` + mcp-r1 spike, local merge; DLL read by us). Contains 177, #2689, #2691, ebilling 116, **#2695**. 177 re-check had PASSED on the previous build `b3ca99cad5`.
+- **Dev BFF = `9411f604bb`** (uac-r2 2026-11-13 02:49Z: master `e9208abc5e` + mcp-r1 spike `d7369fecf1`; includes #2754). Previous: `6dbe69b9e2` (uac-r2 deploy 2026-11-12: master `a654da59c4` + mcp-r1 spike, local merge; DLL read by us). Contains 177, #2689, #2691, ebilling 116, **#2695**. 177 re-check had PASSED on the previous build `b3ca99cad5`.
 - **#2695 merged to master 2026-11-11 as `25ac8ea931`** (squash; outgoing email association status → Resolved when the send files it; replies Resolved only from a Resolved parent). Not deployed. Dev backfill of 76 existing rows done (owner-approved). Worktree `C:\wtoas` removed.
 - **177 smoke PASSED on dev 2026-11-11** (owner, Assign Work task email): Outgoing, internal-only, `sprk_regardingmatter` set, .eml document on the same matter, shows in Messages + Documents. Sent to uac-r2.
 - **176 smoke NOT RUN:** no open Revise-budget Work Item on dev to send a Budget inquiry from; verify `sprk_regardingmatter` + `sprk_regardingservicerequest`, internal-only, Private thread, .eml on the matter, Messages. Note: after #2695 deploys, inquiry replies auto-file (Resolved) instead of Suggested; `ConfirmSuggestedAssociationAsync` then no-ops (owner-approved).
