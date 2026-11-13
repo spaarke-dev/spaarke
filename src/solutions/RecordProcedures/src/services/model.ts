@@ -18,22 +18,23 @@ import type { GapView, ProcedureItem, RuleItem, RuleMark, SourceView, WritePermi
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The kinds of 089 call the wizards may plan on this record: `remove` (an override's removal and its preview) and `create` (an assignment or
- * a rule exclusion). Task 084g fix round 1 (review B1): the wizards decide per choice from these (`plan.ts` `allowedBlocker`).
+ * The kinds of 089 call the wizards may plan on this record: `remove` (an override's removal and its preview), `create` (an assignment or
+ * a rule exclusion) and `change` (a rule's change for the record, task 084c). Task 084g fix round 1 (review B1): the wizards decide per
+ * choice from these (`plan.ts` `allowedBlocker`).
  */
 export interface AllowedSteps {
   remove: boolean;
   create: boolean;
+  change: boolean;
 }
 
 /**
- * What the wizards may plan, from the `permissions` of the answers the lists came from (both routes answer it): `create` is `assignOrExclude`
- * and `remove` is `remove`, each true only when EVERY answer says `true`; `change` is task 084c's and opens nothing yet. No answer at all
- * allows nothing. A hint only: the write routes still decide.
+ * What the wizards may plan, from the `permissions` of the answers the lists came from (both routes answer it): `create` is `assignOrExclude`,
+ * `remove` is `remove` and `change` is `change`, each true only when EVERY answer says `true`. No answer at all allows nothing. A hint only: the write routes still decide.
  */
 export function allowedSteps(...answers: ReadonlyArray<WritePermissions>): AllowedSteps {
   const all = (flag: (p: WritePermissions) => boolean) => answers.length > 0 && answers.every(p => flag(p) === true);
-  return { remove: all(p => p.remove), create: all(p => p.assignOrExclude) };
+  return { remove: all(p => p.remove), create: all(p => p.assignOrExclude), change: all(p => p.change) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

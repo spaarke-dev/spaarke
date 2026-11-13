@@ -15,6 +15,9 @@
  * partial-save message can never land under another row, and the user is never left unaware of a half-done switch. After a partial save the
  * wizard holds the row it was opened on, which is out of date: Finish stays off until the panel hands back the re-read row.
  *
+ * Task 084c adds an optional fifth step, "New values", between "On this record" and Impact: the rule wizard asks for it (`valuesStep.active`)
+ * while "Change for this record" is chosen, and the shell inserts and removes it as a dynamic step.
+ *
  * Read-only (task 084g, EB-D-221): when the wizard has no choice left that makes a call the lists' answers allow (fix round 1, B1), it
  * shows the row and its choices with every choice disabled and the reason above them, and has no Impact or Confirm step and no Finish: Back,
  * Next and Close only. With `readOnly` false the frame is exactly 084b's,
@@ -24,7 +27,7 @@
 import * as React from 'react';
 import { Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { CheckmarkCircle48Filled } from '@fluentui/react-icons';
-import { WizardShell, type IWizardShellProps, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
+import { WizardShell, type IWizardShellHandle, type IWizardShellProps, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
 import type { CoreRoute } from '../../services/recordProceduresApi';
 import { failureText, type OverridesApi, type RemovalPreview, type WriteFailure } from '../../services/overridesApi';
 import { executePlan, removalOf, type Plan, type PlanRun } from './plan';
@@ -42,6 +45,17 @@ export interface WizardNav {
   index: number;
   total: number;
   onNavigate: (dir: 'prev' | 'next') => void;
+}
+
+/** The step order of the shell, for the dynamic "New values" step. */
+const STEP_ORDER = ['review', 'mode', 'values', 'impact', 'confirm'];
+
+/** The optional "New values" step (task 084c): its content, and whether the user may leave it. */
+export interface ValuesStep {
+  /** True while the choice that needs the step is selected. */
+  active: boolean;
+  content: React.ReactNode;
+  canAdvance: boolean;
 }
 
 export interface WizardFrameProps {
@@ -81,6 +95,10 @@ export interface WizardFrameProps {
   onClose: () => void;
   /** Words added to a refusal's text (a hint for one code), or null. */
   refusalHint?: (failure: WriteFailure) => string | null;
+  /** Task 084c: the "New values" step, for the choice that needs one. */
+  valuesStep?: ValuesStep;
+  /** Told of every refusal of the write (before the error bar shows it), so a form can put the server's field errors on its fields. */
+  onRefused?: (failure: WriteFailure) => void;
 }
 
 export const WizardFrame: React.FC<WizardFrameProps> = props => {
@@ -148,6 +166,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     }
     if (!run.ok) {
       const failure = run.failure as WriteFailure;
+      p.onRefused?.(failure);
       const text = [failureText(failure), p.refusalHint?.(failure)].filter((x): x is string => !!x).join(' ');
       if (run.completed > 0) {
         // The first call of the plan was accepted and the second was refused: the record's override changed, so the lists are read again,
@@ -162,7 +181,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       throw new Error(text);
     }
     void p.onChanged('done');
-    const notes = run.removed.flatMap(r => [r.message, r.affectedText]).filter((x): x is string => !!x);
+    const notes = [...run.removed, ...run.changed].flatMap(r => [r.message, r.affectedText]).filter((x): x is string => !!x);
     return {
       icon: <CheckmarkCircle48Filled />,
       title: p.successTitle,
@@ -201,9 +220,33 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       canAdvance: () => false,
     },
   ];
+  // The "New values" step is added and removed through the shell's handle, which the "On this record" step hands over when it renders (the
+  // user can only choose there). Its config reads the live props like every other step.
+  const handle = React.useRef<IWizardShellHandle | null>(null);
+  const valuesConfig = React.useRef<IWizardStepConfig>({
+    id: 'values',
+    label: 'New values',
+    renderContent: () => live.current.valuesStep?.content,
+    canAdvance: () => live.current.valuesStep?.canAdvance === true,
+  });
+  const valuesActive = !readOnly && props.valuesStep?.active === true;
+  React.useEffect(() => {
+    if (!handle.current) return;
+    if (valuesActive) handle.current.addDynamicStep(valuesConfig.current, STEP_ORDER);
+    else handle.current.removeDynamicStep('values');
+  }, [valuesActive]);
+
   const steps: IWizardStepConfig[] = readOnly ? readOnlySteps : [
     review,
-    { id: 'mode', label: 'On this record', renderContent: () => live.current.modeStep, canAdvance: () => live.current.canChoose },
+    {
+      id: 'mode',
+      label: 'On this record',
+      renderContent: h => {
+        handle.current = h;
+        return live.current.modeStep;
+      },
+      canAdvance: () => live.current.canChoose,
+    },
     {
       id: 'impact',
       label: 'Impact',
