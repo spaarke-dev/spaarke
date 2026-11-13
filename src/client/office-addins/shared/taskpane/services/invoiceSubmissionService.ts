@@ -92,8 +92,8 @@ export interface InvoiceFromEmailRequestBody {
   targetEntity: InvoiceSubmissionTarget;
   email: OfficeSaveRequestBody['email'];
   marks: InvoiceWireMarkEntry[];
-  /** Always present on the wire: the firm, or `null` for an invoice submitted without one (§2, EB-D-185). */
-  firmId: string | null;
+  /** Always a firm id: the pane never sends an invoice without one (the server refuses it). */
+  firmId: string;
   firmInvoiceNumber: string;
   poNumber: string | null;
   mode: 'New' | 'Correction';
@@ -740,6 +740,10 @@ function readPreviousSubmission(json: Record<string, unknown> | null): InvoicePr
   const by =
     json.submittedBy && typeof json.submittedBy === 'object' ? (json.submittedBy as Record<string, unknown>) : null;
   const submittedBy = stringOrUndefined(by?.name)?.trim() || null;
+  // The firm is read tolerantly (the server may not send it yet): a missing, null or malformed `firm`, or one with a
+  // blank name, adds nothing, and never makes the body unreadable.
+  const firm = json.firm && typeof json.firm === 'object' ? (json.firm as Record<string, unknown>) : null;
+  const firmName = stringOrUndefined(firm?.name)?.trim() || null;
   return {
     submissionId,
     statusUrl: `${SUBMISSIONS_BY_EMAIL_ROUTE}/${encodeURIComponent(cleanGuid(submissionId))}`,
@@ -754,6 +758,7 @@ function readPreviousSubmission(json: Record<string, unknown> | null): InvoicePr
     submittedOn: stringOrUndefined(json.submittedOn) || null,
     submittedBy,
     isCorrection: json.isCorrection === true,
+    ...(firmName ? { firmName } : {}),
   };
 }
 

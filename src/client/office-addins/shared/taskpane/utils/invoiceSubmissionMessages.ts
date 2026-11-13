@@ -91,6 +91,17 @@ export const FIRM_MISSING_CODE = 'ebilling.submission.firm_missing';
 export const FIRM_MISSING_MESSAGE = 'Submitted without a firm. A reviewer will add the firm before approval.';
 
 /**
+ * Owner ruling 2026-11-13: an invoice is never submitted without a firm (the server refuses it, `firm_invalid`). When the
+ * chosen record has no linked firm the Firm field says so and how to fix it; the pane does not offer a submit.
+ */
+export const NO_FIRM_LINKED_MESSAGE =
+  'No firm is linked to this record. Add a firm to the record in Spaarke, then submit.';
+
+/** A correction of an invoice that has no firm cannot be sent from the pane (a correction keeps the invoice's firm). */
+export const CORRECTION_NO_FIRM_MESSAGE =
+  'This invoice has no firm. Set its firm in Spaarke, then submit the correction.';
+
+/**
  * The sentence for an Accepted submission: none without a code, the replaced-by-correction sentence for
  * {@link REPLACED_BY_CORRECTION_CODE}, {@link FIRM_MISSING_MESSAGE} for {@link FIRM_MISSING_CODE}, and
  * {@link HELD_FOR_REVIEW_MESSAGE} for any other code.
