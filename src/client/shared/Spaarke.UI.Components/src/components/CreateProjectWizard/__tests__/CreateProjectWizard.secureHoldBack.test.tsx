@@ -20,6 +20,7 @@ import { CreateProjectWizard } from '../CreateProjectWizard';
 import { describeHeldBackForSecure } from '../provisioningService';
 import { ASSIGNED_ACCESS_SYNC_PATH } from '../../../services/assignedAccessSync';
 import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
+import { EMPTY_COMPOSED_EMAIL } from '../../EmailComposer/composeOnlySend';
 
 const mockShell: { config?: ICreateRecordWizardConfig } = {};
 jest.mock('../../CreateRecordWizard', () => ({
@@ -134,10 +135,21 @@ const everything: IFinishContext = {
     emailTo: 'client@example.test',
     emailSubject: 'Hello',
     emailBody: 'Body',
+    // Task 182: the composed email the wizard sends through the composer's request path.
+    email: {
+      ...EMPTY_COMPOSED_EMAIL,
+      to: [{ email: 'client@example.test' }],
+      bcc: [{ email: 'records@example.test' }],
+      subject: 'Hello',
+      body: 'Body',
+    },
   } as unknown as IFollowOnState,
   association: null,
   selectedExistingRecord: null,
 };
+
+/** Task 182: the bodies the wizard posted to /api/communications/send. */
+const mockEmailRequests: Record<string, unknown>[] = [];
 
 const ADDS = ['work-assignment', 'event', 'upload', 'document-records', 'email'];
 
@@ -148,7 +160,13 @@ const ADDS = ['work-assignment', 'event', 'upload', 'document-records', 'email']
  */
 // authenticatedFetch THROWS ApiError for a non-2xx: the double turns a refused provision answer into that failure.
 const bffFetch = (provisionResponse: Response) =>
-  throwingAuthenticatedFetch(async (url: string) => {
+  throwingAuthenticatedFetch(async (url: string, init?: RequestInit) => {
+    // Task 182: the follow-on email goes through the composer's request path (POST /api/communications/send).
+    if (String(url).endsWith('/api/communications/send')) {
+      mockCalls.push('email');
+      mockEmailRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return { ok: true, status: 200, json: async () => ({ communicationId: 'comm-1' }) } as unknown as Response;
+    }
     if (String(url).endsWith(ASSIGNED_ACCESS_SYNC_PATH)) {
       mockCalls.push('assigned-access-sync');
       return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
@@ -223,10 +241,22 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
   it('secure not requested: provisioning is never called and everything is added', async () => {
     const authFetch = bffFetch(provisioned);
 
+    mockEmailRequests.length = 0;
     await finish(false, authFetch);
 
     expect(mockCalls).not.toContain('provision');
     expect(mockCalls).toEqual(expect.arrayContaining(['create-project', ...ADDS]));
+    // Task 182: the email went through the composer's request path, Bcc included, filed under the project.
+    expect(mockEmailRequests).toHaveLength(1);
+    expect(mockEmailRequests[0]).toEqual(
+      expect.objectContaining({
+        to: ['client@example.test'],
+        bcc: ['records@example.test'],
+        sendMode: 'SharedMailbox',
+        bodyFormat: 'PlainText',
+        associations: [expect.objectContaining({ entityType: 'sprk_project' })],
+      })
+    );
   });
 
   it.each([true, false])(

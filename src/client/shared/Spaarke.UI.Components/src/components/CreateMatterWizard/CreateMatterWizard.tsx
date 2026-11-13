@@ -56,6 +56,7 @@ import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
 import { ProjectFilingChoice, readProjectFiling, type ProjectFiling } from './projectFilingChoice';
+import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -203,6 +204,11 @@ export interface ICreateMatterWizardProps {
    */
   navigationService?: INavigationService;
   /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
+  /**
    * When `embedded={true}`, the wizard relies on the Dataverse modal chrome
    * for the title bar and close button. Default: false.
    */
@@ -323,6 +329,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   authenticatedFetch,
   bffBaseUrl,
   navigationService,
+  emailComposeHandlers,
   embedded,
   uiScale,
   resolveSpeContainerId,
@@ -498,6 +505,9 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
       navigationService,
 
+      // Send Email follow-on: the host's composer handlers (task 182, D-219).
+      emailComposeHandlers,
+
       getAssignWorkDefaults: () => ({
         assignWorkMatterTypeId: step2FormValuesRef.current.matterTypeId,
         assignWorkMatterTypeName: step2FormValuesRef.current.matterTypeName,
@@ -544,11 +554,11 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         };
 
         const followOnActions: IFollowOnActions = {};
-        if (context.selectedActions.includes('send-email') && context.followOn.emailTo.trim()) {
+        if (context.selectedActions.includes('send-email') && context.followOn.email.to.length > 0) {
+          // Task 182 (D-219): the whole composed email; MatterService sends it through the composer's request path.
           followOnActions.sendEmail = {
-            to: context.followOn.emailTo.trim(),
-            subject: context.followOn.emailSubject,
-            body: context.followOn.emailBody,
+            email: context.followOn.email,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           };
         }
 
@@ -815,6 +825,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       onClose,
       onComplete,
       navigationService,
+      emailComposeHandlers,
       resolveSpeContainerId,
       handoffFiles,
       initialAssociation,
