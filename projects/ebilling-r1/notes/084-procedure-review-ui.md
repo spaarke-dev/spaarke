@@ -819,3 +819,255 @@ Planning without writes. Server only; there is no route, DI registration or clie
 Each seed fails at least one test: S1 3 (unplaceable-query cases), S2 2 (the replaced-row test and the real-resolver test), S3 2 contract + 1 IL guard, S4 2 (by-id reads), S5 1 (the change plan's no-owner check), S6 1 (the lambda transaction control).
 
 **Publish size.** N/A for this slice: no package, no DI registration and no route; two internal types and internal methods only. 084d-2 adds the route and measures the delta against a fresh master build.
+
+## 084d-2a
+
+The dry run's access, read and routes. Branch `task/084d-2a`, from `3a9130b7be`. 084d-2b adds `closes`, `affectedOpenInvoices` and firm `reach`; they are left out of the response, not stubbed.
+
+**Placement.** The routes sit in `Api/Finance/RecordProcedureEndpoints.cs` beside each core's other Procedure reads, on the same group (step 0, `RequireInternalFinanceCaller`). The access declarations sit in `Api/Finance/ProcedureAssignmentEndpoints.cs` beside the write routes' own, so one file holds every check a write or its dry run asks. The read is `RecordProcedureReadService.DryRunAsync`, beside the two reads it composes. No DI registration changes: the planner is taken by the handler with `[FromServices]`. No package.
+
+**What was built:**
+- `AssignChecks`, `ExcludeChecks`, `ChangeChecks` and `RemoveChecks`: the write routes' subject and privilege declarations, single-sourced. `AssignTargets`, `ExcludeTargets`, `ChangeTargets` and `RemoveTargets` now delegate to them, unchanged in behaviour.
+- `DryRunRecordChecks` / `DryRunRecordTargets`: `finance.read` on the record, then `RecordWriteCheck` (uniform 404). `DryRunTargets` / `DryRunChecks`: the union, in plan order, of the `*Checks` of every write the dry run plans; a replaced override (`replacesOverrideId`) adds `RemoveChecks`. A missing kind or id is the write's 400.
+- `RefuseUnlessCallerReadsOverridesSubjectAsync`: the removal routes' stored-row subject Read, extracted so the write filter and the dry-run filter (`RequireReadOnTheDryRunsOverridesSubject`) share it.
+- `RefusalOf`: `Map` for callers in other files (the route guard reads any `.Map(` member call as an unscannable registration).
+- Three `POST .../procedures/dry-run` routes in the write routes' filter order: record (404) → subject and privileges (403) → kill switch → the removed or replaced override's subject Read → 401 → service. A planning refusal is the write's own answer.
+- `DryRunAsync`: plans the proposal through the 084d-1 planning service (a removal first, then the create over an overlay of it), loads the created ids app-only by id, reads Now and After (After over `ProcedureRowOverlay`), exempts only the created ids that do not exist, exposes a request-named firm, and runs ONE caller check over Now ∪ After. Any refusal or fault is 503 `procedures.unavailable`.
+- DTOs: `ProcedureDryRunRequest`, `ProcedureDryRunView`, `ProcedureDryRunProposalView`, `ProcedureDryRunSideView`, `ProcedureDryRunDisclosureView`.
+
+**Response shape.** `{ record, date, firm, firmSource, proposal { kind, overrideKind, replacesOverrideId, overrideId, proposedRowIds }, now { procedures, rules }, after { procedures, rules }, afterLabel: "If saved now", disclosure { predictsOwnerRefusal: false, readAtOneInstant: false, requestFirmAsked, notes[3] } }`. The sides' permission flags are all false: the dry run is not where a write is offered.
+
+**§11 justification:**
+- `ProcedureDryRunRequest` and the view records:
+  - *Existing:* the write requests and `RecordProceduresView` / `RecordRulesInForceView`.
+  - *Extension:* the request wraps the three write requests unchanged; the view holds the two existing views twice. Only the proposal and disclosure records are new.
+  - *Cost of doing nothing:* there is no way to send a proposal without writing it, and the client cannot tell Now from After or show the disclaimers.
+- `DryRunAsync`:
+  - *Existing:* the two record reads (`GetProceduresAsync`, the rules-in-force read) and the 084d-1 plans.
+  - *Extension:* it is built from the same `ReadAsync` with a row-source parameter; a second resolver or read path is avoided.
+  - *Cost of doing nothing:* 084d-1's overlay has no reader, and the admin confirms an override blind.
+- `DryRunTargets` / `*Checks` / `DryRunRecordChecks`:
+  - *Existing:* the write routes' `*Targets`.
+  - *Extension:* the `*Targets` bodies became the `*Checks`, so the write and the dry run share one declaration each.
+  - *Cost of doing nothing:* a dry run with its own list drifts from the write's, so a caller sees rules a write would refuse them.
+- `RequireReadOnTheDryRunsOverridesSubject`:
+  - *Existing:* `RequireReadOnTheOverridesSubject` on the removal routes.
+  - *Extension:* its body became the shared helper; the new filter only reads the id from the body instead of the route.
+  - *Cost of doing nothing:* a dry-run removal of an override whose subject the caller cannot Read would answer with that subject's rules.
+- The three routes:
+  - *Existing:* none answers "if saved now".
+  - *Extension:* a query flag on a write route would put a read behind write semantics, and the write routes return the written row.
+  - *Cost of doing nothing:* 084d-4 has nothing to call.
+
+**Build conditions → code → tests:**
+- **uac-r2 C1** (the synthetic set is decided by an app-only by-id load; a fault is 503 and nothing is exempted): `RecordProcedureReadService.cs` `SyntheticRowsAsync` (≈562), called at ≈455 before any `Exempt` (≈474). Test: `SyntheticLoadFault_Is503_AndNothingIsExempted`.
+- **uac-r2 C2** (only the exact synthetic rows are exempt; a created id that exists is real and asked): `Reading.Exempt` / `Expose` (≈651-657), `SyntheticRowsAsync` drops found ids. Tests: `Assign_NowWithout_AfterWith_OneCheck_NothingWritten`, `ExcludeRule_ExemptsExactlyTheSyntheticRow`, `Switch_TheRecreatedIdIsReal_Asked_AndHasNoCreatorAfter` (deny that row alone → 503).
+- **uac-r2 C3** (ONE combined check over Now ∪ After): `DryRunAsync` ≈488-490. Tests: the Assign theory (`Batches` single), the dry-run `Every200Guid` guard.
+- **uac-r2 C4** (the dry run asks what the writes it plans ask, from one declaration): `ProcedureAssignmentEndpoints.cs` `*Checks` (393-411), `DryRunChecks` (465). Tests: `EachDryRun_DeclaresExactlyThePlannedWritesChecks`, `DryRunGuard_FiresWhenAReplacementDropsTheRemovalsChecks`, `EachDryRunRoute_AsksTheCaller_ExactlyItsDeclaredChecks`.
+- **uac-r2 C5** (the write routes' filter order; uniform 404 before any 403): `RecordProcedureEndpoints.cs` 75-140. Tests: `RecordFilter_IsTheUniform404_BeforeAny403`, `SubjectAndPrivilegeFilter_Is403`, `FlagOff_Is503Disabled`, `UnreadableOverrideSubject_IsTheWritesNotFound`, `StepZero_RefusesFirst`.
+- **ontology-r1 F3** (a proposed row has no creator; no person exposed for it): `ReadAsync` `proposedRowIds` (≈729). Tests: `ExcludeRule_ExemptsExactlyTheSyntheticRow` (stamp `byId` null), the switch test (After null, Now the original creator).
+- **R5 / R10** (no owner prediction; not one instant): disclosure flags and notes. Test: the Assign theory.
+- **R6** (a request-named firm is asked as a query firm): `DryRunAsync` ≈482-486. Test: `RequestFirm_IsAskedAsAQueryFirm`.
+- **Label** ("If saved now"; nothing presents After as a promise): `AfterLabel`. Test: the Assign theory.
+
+**Known limits:**
+- **K1.** `reach`, `closes` and `affectedOpenInvoices` are 084d-2b's.
+- **K2.** Change-kind HTTP tests are not added here: change planning is covered by the 084d-1 tests, and the change parity is 084d-3's. The change routes are covered by the two declaration guards.
+- **K3.** Both sides run the future-date probe, so a Procedure that opens after the date can make the dry run 503 when its overlap does, exactly as the record read does.
+- **K4.** In a switch, Now still shows the replaced row's creator (it is real and asked). F3 removes the creator from After only; the test asserts both.
+- **K5.** The sides' permission flags are all false. The client offers writes from the record read, not from the dry run.
+
+**Tests:**
+- `tests/integration/contract/Api/Finance/RecordProcedureDryRunContractTests.cs` (34): the HTTP cases above, plus the dry-run `Every200Guid_WasAskedOfTheCaller_DryRun` guard (four seeds, with a planted-GUID must-fire control) and the dry-run version-row guard (four seeds).
+- `RecordWritePermissionsContractTests.cs` (+36): `EachDryRun_DeclaresExactlyThePlannedWritesChecks` (21 cases, four must-fire controls each), `DryRunGuard_FiresWhenAReplacementDropsTheRemovalsChecks`, and `EachDryRunRoute_AsksTheCaller_ExactlyItsDeclaredChecks` (21 routes × kinds, eBilling off).
+- `RouteAuthorizationGuardTests.Ledger.cs`: the `RequireReadOnTheDryRunsOverridesSubject` credited form; the RecordProcedureEndpoints entry names the dry-run filters.
+
+**Mutation seeds.** Each was applied, built, run against the two test classes and restored:
+- S1 drop the R6 firm exposure: 2 fail (the R6 theory).
+- S2 exempt every created row without the found check: 2 fail (the switch test, the dry-run Every200Guid guard).
+- S3 revert F3: 1 fails (the switch test).
+- S4 swallow the by-id fault and exempt everything created: 1 fails (the condition 1 test). The first version of that test faulted every by-id read of the id, so the later stamp read still produced a 503 and S4 survived; the fault now hits only the synthetic load.
+- S5 drop `RemoveChecks` for a replacement: 6 fail (declaration equality, the replacing cases).
+- S6 swap the record and 403 filters (projects route): 4 fail (the uniform-404 theory, step 0).
+- S7 check After only: 3 fail (the removal test, the dry-run Every200Guid guard).
+
+**Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization) 8233 passed, 4 skipped, 0 failed. `dotnet format whitespace --verify-no-changes` clean on the touched files.
+
+**Publish size** (fresh `origin/master` `2a4b86272d` vs this branch, `dotnet publish -c Release -r linux-x64`, `Compress-Archive -CompressionLevel Optimal`, 191 files each): master 42,072,199 bytes, branch 42,065,181 bytes, delta −7,018 bytes (the branch base lags master; the change itself adds no package and no assembly).
+
+
+### 084d-2a fix round 1 (branch `task/084d-2a-fix1`, from `224007eda7`)
+
+Fix list: the uac-r2 conditional pass and the Opus adversarial pass. Each finding, the change, the test that fails without it.
+
+- **F-1** (the Change kind was never tested through the dry-run routes; the rig could not run it).
+  - *Change:* `RecordProcedureRig` now builds a REAL `RuleSetService` over its own validator (`RuleSets`); the test planner takes it instead of an uninitialised object, so `ValidateRule` no longer throws into a 503. New rig helpers: `Changeable(code)` (a Procedure rule in a Published set with a name and a current version) and `rowVersion` on `AddRule` / `ChangeRuleRows` (a stored policy carries a row version; a plan that updates it needs one).
+  - *Test:* the `DryRunSeeds` for both guards (`Every200Guid_WasAskedOfTheCaller_DryRun`, `EveryVersionRow_IsAsked_OrTheBodyDoesNotDependOnIt_DryRun`) gained `change` and `re-change` (a Change replacing this record's own Change of the same rule). Each asserts a 200, so the guards reach the exposure path. The must-fire control exempts the seed's real base policy version and the verdict reports it.
+- **F-2** (the removed or replaced override's id and kind reached a 200 unasked; a Follow row of a Retired Procedure sits in no view).
+  - *Change:* `RecordProcedureReadService.DryRunAsync` exposes `(sprk_procedureassignments, overrideId | replacesOverrideId)` on the Now reading before the combined check. It is a real row, never exempt.
+  - *Test:* `TheNamedOverride_IsAsked_EvenWhenNoListShowsIt` (remove and replace). The premise is asserted (the id appears in no list), the row is asked, and denying that row alone is 503.
+- **K-3** (the overlay's primary-key match ignored the query's other conditions).
+  - *Change:* `ProcedureRowOverlay.ImagesFor`. The key path answers a query only when the key is the sole top-level condition. With other conditions beside the key, the query throws when the key names an after-image (the overlay never evaluates criteria, so the image would be returned unjudged). A key that names no image reads on, because nothing is returned unjudged; the planning reads of the base rule (a key plus status conditions, over the removal's overlay of a different row) depend on that, and a flat throw would make every re-change a 503. A key inside an Or, a nested filter or a non-Equal/In operator throws.
+  - *Test:* `AKeyReadWithOtherConditions_ThrowsWhenTheKeyNamesAnImage`, `AKeyInsideAnOrOrANestedFilter_Throws` (`ProcedureDryRunPlanningContractTests`).
+- **K-4** (linked entities were not checked).
+  - *Change:* `RetrieveMultipleAsync(QueryExpression)` throws before reading when a link, at any depth, names one of the four tables, or when a query on one of the four carries any link. Table names are compared OrdinalIgnoreCase (`Tables` is now case-insensitive, and the canonical name keys the images).
+  - *Test:* `AQueryThatLinksAnOverrideTable_Throws_BeforeReading` (four shapes, one in another case, one nested) and the must-not-fire `AQueryThatLinksOtherTables_PassesThrough`.
+- **K-5** (the IL no-write scan left out the 2a entry point).
+  - *Change:* `RecordProcedureReadService` is in `DryRunNoWriteGuardTests.DryRunTypes`. Adding it gave no false positive, so the whole type is scanned (no method-level narrowing was needed).
+  - *Test:* `TheDryRunTypes_ReferenceNoWrite`; `TheScan_ReadsTheRealBodies` now also proves `DryRunAsync`, `PlanAsync` and `SyntheticRowsAsync` bodies (their async state machines) are read.
+- **K-7** (the dry-run GUID guard was partly self-referential).
+  - *Change (test only):* the allowed exempt set is `proposal.proposedRowIds` minus the ids that exist in any of the four override tables of the rig's world; `host.Exempted` is only compared against it, matched with its entity set (`ExemptionViolations`): each reported exempt pair must name an override set, must be absent from that set's table, and the exempt ids must equal the derived set.
+  - *Test:* `Every200Guid_WasAskedOfTheCaller_DryRun`. Must-fire controls: a planted GUID, a real base version exempted, and a synthetic row asked (one exemption dropped).
+- **uac-r2 K1** (comment): at the `afterReading.Exempt(...)` call, the exemption relies on `ReadAsync` never calling `Expose`; every exposure happens in `BuildProcedures` / `BuildRulesAsync`, after `Exempt`.
+
+**Mutation seeds** (each applied, run against the named test class, restored):
+- F-2: drop the exposure of the named override: 2 fail (`TheNamedOverride_IsAsked_EvenWhenNoListShowsIt`, remove and replace).
+- K-3: take the key path whatever else the query holds: 1 fails (`AKeyReadWithOtherConditions_ThrowsWhenTheKeyNamesAnImage`).
+- K-4: drop the link check: 4 fail (all four `AQueryThatLinksAnOverrideTable_Throws_BeforeReading` shapes).
+- K-7: exempt every created row without the found check: 2 fail (the switch test, and the `switch` seed of the guard on `ExemptionViolations` itself, ahead of the `AlsoAsked` line).
+
+**Known limit K-6.** The firm-existence oracle: planning's 400 "firm not found" for a request-named firm runs before R6's caller check on that firm, so a caller who may not Read a firm can still learn whether a firm id exists. It is the same as the write route's 400 versus 201, so the dry run adds no new oracle. Accepted.
+
+**Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization) 8246 passed, 4 skipped, 0 failed (8233 before the round: +13). `dotnet format whitespace --verify-no-changes` clean on the touched files.
+
+## 084d-2b
+
+The dry run's impact: `closes` and `affectedOpenInvoices`. Branch `task/084d-2b`, from `475c05ed8e` (084d-2a plus its fix round 1). Firm `reach` is not built (see K-1).
+
+**Placement.** Services/Finance/Procedures only:
+- The selection and count members sit on `ProcedureAssignmentService`, beside the close they share a selection with.
+- The resolution comparison sits on `RecordProcedureReadService`, beside the reader that already holds the overlay and the one combined check.
+- The invoice-id overload sits on `AffectedInvoiceCounter`.
+
+There are no new routes, DI registrations or packages, and nothing changes under `Services/Signals`. The routes are unchanged: the planner the handler already takes carries the closure and the counter.
+
+**What was built:**
+- `SelectBaseFindingsAsync`: the selection half of `SupersedeBaseFindingsAsync`, pulled out unchanged.
+  - The write calls it with its own service after the commit, then logs a children fault and closes.
+  - The dry run calls it with the request's After overlay, so the change's Exclude row decides the records under the record as it will once written.
+  - The four readers it uses (`RecordsInReviewInvoicesAsync`, `ChildrensInReviewInvoicesAsync`, `InvoicesTakingTheChangeAsync`, `LinesOfInvoicesAsync`) now take the entity service.
+- `ProcedureOverridePlan` gains `SwitchedOffRuleId` (set by `PlanRemoveAsync` for a changed rule) and `Supersedes` (set by `PlanChangeRuleAsync`). `PlanAsync` carries the removal's `SwitchedOffRuleId` into a replacement plan, because the two-call write's DELETE closes those findings.
+- `PlanClosesAsync` (selection only):
+  - A changed-rule removal selects with `SelectOpenSignalsOfPolicyAsync(rule, withBillingSubject: true)`, as `PreviewRemovalAsync` does, and carries `RemoveChangedWarning`.
+  - A change selects through `SelectBaseFindingsAsync` and carries the write's own message for that selection: `ChangeCloseCompleteMessage`, `ChangeCloseChildrenOpenMessage`, or `ChangeCloseIncompleteMessage` when the record's own invoices cannot be read. No new text (ontology-r1 F2).
+  - The union is counted by `AffectedInvoiceCounter.CountVisibleOpenInvoicesAsync` unchanged. A selection fault gives a null count, and the kinds and warning still show.
+- `AffectedInvoiceCounter`: `CountVisibleOpenInvoicesAsync(IReadOnlyCollection<Guid> invoiceIds, …)` and `VisibleOpenInvoicesAsync`, pulled out of the Signal overload, which now maps its Signals to invoices and calls them. The behaviour is the same: empty or no open invoice gives 0 without asking the caller; any unknown gives null.
+- `InReviewInvoicesInReachAsync`: the In Review invoices filed on the record and on the records directly under it, with every date each is judged on (the invoice date, and each Fee or Expense line's work date, else the invoice date).
+  - It is bounded by `MaxChildRecords` (100).
+  - More than one page, or any fault, throws, and the count is then null. (Fix round 1: an invoice not filed on exactly one core record, or with no date, is returned flagged, not thrown on; see F-2.)
+- `ResolutionChangedAsync` (in the read service), for kinds that close nothing:
+  1. The reach.
+  2. Narrowed FIRST to the invoices the caller can Read (the counter's own question).
+  3. One resolution per (core record, firm) on each side, at most `MaxComparedResolutions` (10). After reads through the request's overlay.
+  4. An invoice counts when, on any date it is judged on, model 8.2's outcome differs: the Procedures applied, their versions and pins, the rules in force and their versions, the record rule's Exclude row, the excluded rules and Procedures, the gaps, and the deciding override rows (row, mode, chain record, subject, pin, firm; the reason is left out because it decides nothing).
+- DTOs: `ProcedureDryRunClosesView { d170, kinds[], warning, message }` and `ProcedureDryRunAffectedView { count, text, basis }`. `basis` is `FindingsClosed` when anything closes, else `ResolutionChanged`; `text` is `ProcedureService.AffectedText`. `d170` is true exactly when `ChangedRuleRemoved` is among the kinds: a change closes Superseded, not by D-170, and a plain Exclude closes nothing (R1).
+
+**Final response shape:**
+```
+{ record, date, firm, firmSource, proposal, now, after, afterLabel, disclosure,
+  closes: { d170, kinds: ["ChangedRuleRemoved"|"BaseRuleSuperseded"], warning, message },
+  affectedOpenInvoices: { count: int|null, text: string|null, basis: "FindingsClosed"|"ResolutionChanged" } }
+```
+
+**EB-D-218 decision for the counts.**
+- **Resolution count: asked.** Every row the comparison read is added to the ONE combined check (chain records, override rows, Procedures, Procedure Versions, rule sets, policies and policy versions, on both sides, minus the exact synthetic rows). A denial is therefore 503, as for every other row the answer depends on, and the version-row guard's "asked ⇒ denying refuses" holds. Invoices the caller cannot Read are dropped before any resolution is read, so nothing about them, or about the record they are filed on, reaches the count or the check.
+- **Findings-closed count: the write's own counting, unchanged** (design §4: "the selected set goes to `CountVisibleOpenInvoicesAsync` unchanged"). Invoices are narrowed by the caller's Read. The Signal selection and the children's override rows (nearer wins) are app-only, exactly as in 089c's removal preview and 089e's change result, which uac-r2 accepted. The dry run shows that number before the write rather than after it. See K-3.
+
+**§11 justification:**
+- `SelectBaseFindingsAsync`, `SupersedeSelection`:
+  - *Existing:* the write's close.
+  - *Extension:* it is extracted from that close, not added beside it.
+  - *Cost of doing nothing:* a dry run with its own selection drifts from the close it predicts (preview ≠ sweep).
+- `PlanClosesAsync`, `PlannedCloses`, `PlannedSupersede`, the two plan fields:
+  - *Existing:* `PreviewRemovalAsync` (removal only) and the change's close.
+  - *Extension:* both selections are called as they are; the plan only names their inputs.
+  - *Cost of doing nothing:* the Impact step cannot show the D-170 warning or the change's close (POML ui-test "Removal warning").
+- `CountVisibleOpenInvoicesAsync(invoiceIds)`, `VisibleOpenInvoicesAsync`:
+  - *Existing:* the Signal overload.
+  - *Extension:* its second half became these; the Signal overload calls them.
+  - *Cost of doing nothing:* the resolution count would copy the caller-rights rule, and the two could disagree.
+- `InReviewInvoicesInReachAsync`, `InvoiceInReach`:
+  - *Existing:* the close's d0/d1 readers.
+  - *Extension:* those keep only invoices the change decides the base rule on (deciders), which is the wrong set for an assignment. The new reader reuses `ReadChildrenAsync`, `LinesOfInvoicesAsync`, the bound and the judging-date rule.
+  - *Cost of doing nothing:* there is no count for the kinds that close nothing (POML ui-test "Impact of a pin").
+- `ResolutionChangedAsync` and `OutcomeOf`:
+  - *Existing:* nothing compares two resolutions (the 8.2 banner is not built, R9).
+  - *Extension:* the resolver's own `ReadRowsAsync` and `RulesOn` are used, so the comparison adds no second reader.
+  - *Cost of doing nothing:* the same.
+
+**Conditions → code → tests** (line numbers at the commit):
+- **One shared selection** (write and dry run): `ProcedureAssignmentService.cs` `SelectBaseFindingsAsync` ≈961; the write calls it at ≈895 and the dry run at ≈1778. Tests: `Change_SaysWhatWouldClose_WithTheWritesOwnMessageAndSelection` (the child's invoice is selected only because the overlay's Exclude row decides it). `ProcedureAssignmentServiceTests` (the write's close) is unchanged and green.
+- **Removing a changed rule reuses the removal preview's selection and warning**: `PlanClosesAsync` ≈1740, ≈1758-1761. Tests: `RemoveChangedRule_ShowsTheRemovalWarning_AndCountsTheFindingsThatClose`, `ReChange_ClosesTheRemovedRecordRulesFindings_AndSupersedesTheBase`.
+- **D-170 only when a rule is switched Off** (R1): `RecordProcedureReadService.cs` ≈552. Tests: `PlainExclude_ClosesNothing_EvenWithOpenFindings`, the change test (`d170` false), the plain-removal phase of the removal test.
+- **F2, the existing messages only**: `PlanClosesAsync` ≈1778-1786. Test: the change test (`message == ChangeCloseCompleteMessage`).
+- **Resolution count, invoice-id overload, caps → null**: `AffectedInvoiceCounter.cs` ≈86-96; `RecordProcedureReadService.cs` `ResolutionChangedAsync` ≈660, narrowing ≈672-677, bound ≈679; `InReviewInvoicesInReachAsync` ≈1816 (children bound ≈1822). Tests: `Assign_ClosesNothing_CountsTheVisibleInvoicesWhoseResolutionChanges`, `ResolutionCount_PastTheBound_OrUnanswered_IsNull`.
+- **EB-D-218, count rows asked in the ONE check**: `RecordProcedureReadService.cs` ≈533-538. Tests: the Assign count test (must-fire: deny the child record → 503), `Every200Guid_WasAskedOfTheCaller_DryRun` (`exclude for a firm with an invoice` lists the count-only version in AlsoAsked), `EveryVersionRow_IsAsked_OrTheBodyDoesNotDependOnIt_DryRun` (same seed).
+- **No-write**: the closure in the dry-run host is a STRICT mock with only its two selections set up (`VerifyNoOtherCalls` in the new tests); `NoWrites` holds; the IL guard (`DryRunNoWriteGuardTests`) stays green with `RecordProcedureReadService` scanned. `PlanClosesAsync` shares its type with the write, so 084d-1 K2 applies to it too.
+- **DTO key set**: `Assign_NowWithout_AfterWith_OneCheck_NothingWritten` now pins the 11 top-level keys and the keys of `closes` and `affectedOpenInvoices`.
+
+**Guards extended.** `DryRunSeeds` gained four seeds: `assign with invoices`, `exclude for a firm with an invoice`, `remove changed with findings` and `change with findings` (10 in all, each run by both guards).
+- The GUID guard plants a GUID into `closes` and into `affectedOpenInvoices` and must report it (must-fire per field).
+- The version-row guard's must-fire seed is `exclude for a firm with an invoice`. The excluded rule is firm G's, so no list (no firm) shows it; its version is read only by the count's (P, G) resolution, and removing it changes the count.
+
+**Mutation seeds** (each applied, run against `RecordProcedureDryRunContractTests`, restored):
+- M1, the dry run selects over the real service instead of the overlay: 1 fails (the change test).
+- M2, `d170` true for any close: 1 fails (the change test).
+- M3, the compared rows are not asked: 4 fail (the version-row guard, two `Every200Guid` seeds, the Assign count must-fire).
+- M4, judge before narrowing to visible: 1 fails (the Assign count test).
+- M5, no resolution bound: 1 fails (the bounds test).
+- M6, no removal warning: 1 fails (the removal test).
+- M7, the change message dropped: 1 fails (the change test).
+- M8, a replacement drops the removal's switch-off. It first survived (0 failed); the re-change test was then added, and M8 fails it (1 fails).
+
+**Known limits:**
+- **K-1.** Firm `reach` (design §4) is not in this slice's closed scope and is not in the response. The resolution count does not need it: an override for firm F leaves firm G's resolution unchanged, so G's invoices are not counted.
+- **K-2.** A null count from the 100-child bound tells the caller that the record has more than 100 direct children, readable or not. The 089e write's `ChangeCloseChildrenOpenMessage` already says the same.
+- **K-3.** The findings-closed count depends on app-only rows that are not asked: the Signal selection, and for a change, the children's nearer override rows. This is the same count, from the same selection, that the write returns and 089c's preview returns (accepted by uac-r2). It is not narrowed further here, so that preview = sweep.
+- **K-4.** The resolution count reads at most 10 (record, firm) pairs on each side (20 `ReadRowsAsync`) plus the reach reads; R8's cost note applies. Past the bound it is null.
+- **K-5 (corrected in fix round 1).** An In Review invoice that the caller CAN Read and that has no firm, no date, or other than one core lookup makes the resolution count null rather than skipping the invoice. One the caller cannot Read is dropped before it is judged and changes nothing. The number of invoices whose rights are asked is bounded (`AffectedInvoiceCounter.MaxDryRunInvoices`, 1000); past it the count is null and no rights call is made.
+- **K-6.** The change's selection judges dates against the dry run's clock day (ontology-r1 K1, "if saved now").
+
+**Tests.** `RecordProcedureDryRunContractTests.cs` 54 (40 before this slice): 6 new facts plus 4 new seeds × 2 guards, plus the key-set update. The host now builds a REAL `AffectedInvoiceCounter` over the rig's world and probe, and a STRICT closure mock.
+
+**Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede) 8331 passed, 4 skipped, 0 failed. This filter adds `Supersede`, so the number does not compare with 2a's. `dotnet format whitespace --verify-no-changes` clean on the four touched code files.
+
+**Publish size.** Fresh local `master` (`2ef4a17915`, exported with `git archive`) against this branch: `dotnet publish -c Release -r linux-x64`, short output paths, `Compress-Archive -CompressionLevel Optimal`, 191 files each. Master 42,030,897 bytes, branch 42,079,298 bytes, delta +48,401 bytes (≈0.05 MB, far below the +5 MB threshold).
+- The delta is the whole ebilling-r1 branch against master, not this slice alone; the master used here differs from 2a's.
+- No package and no assembly is added: the file counts match.
+
+### 084d-2b fix round 1
+
+Branch `task/084d-2b-fix1`, from `97e8a59a2a`. Rule applied to every count: a count is a number only when it is complete. Past a bound, on a fault, or when a question about the rows the caller can see cannot be answered, it is null, never partial; and a row the caller cannot Read never changes the answer.
+
+**Findings -> change -> test** (all in `Services/Finance/Procedures`; tests in `RecordProcedureDryRunContractTests.cs`):
+- **F-1, a change with unreadable children gave a partial count.** `ProcedureAssignmentService.PlanClosesAsync` (about 1785-1795): when `selection.ChildrenFault` is set, `countable` is now false and the write's `ChangeCloseChildrenOpenMessage` is kept. Before, only the message changed, so past 100 children or on a child-read fault the number covered the record's own invoices only. Tests: `Change_WithUnreadChildren_IsANullCount_NeverAPartialOne` (more than 100 children, a child that cannot be read; must-not-fire: exactly 100 children give 1 and the complete message).
+- **Review finding 4, the change-selection fault branch had no test.** Test: `Change_SelectionFault_IsANullCount_WithTheIncompleteMessage` (null count plus `ChangeCloseIncompleteMessage`). No code change.
+- **F-2 and K-c, an invoice the caller cannot Read could turn the count null.**
+  - `InReviewInvoicesInReachAsync` no longer throws on an invoice with other than one core lookup (FR-05) or with no date. It returns it with `InvoiceInReach.Judgeable == false`, and reads no lines.
+  - `RecordProcedureReadService.ResolutionChangedAsync` (about 673-689) narrows by Read first, then returns null only when a VISIBLE invoice is not judgeable.
+  - The lines are read after the narrowing, for the kept invoices only (`ProcedureAssignmentService.JudgedOnAsync`, new, split out of the reach read). Before, a lines fault or page overflow on an unreadable invoice also changed the answer; the lines of an unreadable invoice are now never read.
+  - Tests: `UnjudgeableInvoice_NullsTheCount_OnlyWhenTheCallerCanReadIt` (no date and two core lookups, each readable -> null, unreadable -> a number); `UnreadableInvoice_ItsLinesAreNeverRead` (an endless lines table does not null a count whose only invoice is unreadable).
+- **F-3, tests that proved nothing.**
+  - `Assign_ClosesNothing_CountsTheVisibleInvoicesWhoseResolutionChanges`: added the decided child (it has its own row for the Procedure, so its resolution is unchanged and it is not counted). Dropped the parent's-invoice control: a parent's invoice is out of reach and the record's assignment cannot change a parent's resolution, so counting it or not gave the same answer.
+  - `ResolutionCount_PastTheBound_OrUnanswered_IsNull`: added exactly 10 resolutions -> a number (catches `>` against `>=`).
+- **K-5, cost bound.** `AffectedInvoiceCounter.MaxDryRunInvoices` (1000, four rights pages of 250). `VisibleOpenInvoicesAsync` and the two `CountVisibleOpenInvoicesAsync` overloads take an optional `maxInvoices` (default none, so 081 and 089 are unchanged). More distinct invoices than the bound gives null before any app read of states or any rights call. The dry run passes it on both counts: the resolution count (`ProcedureAssignmentService.VisibleOpenInvoicesAsync`) and the findings-closed count (`PlanClosesAsync`). Test: `InvoiceCount_PastTheRightsBound_IsNull_AndAtTheBoundANumber` (1001 -> null with no invoice rights asked; exactly 1000 -> 1000 with 1000 asked; the findings-closed count past the bound -> null).
+- **K-5, cancellation.** The request's `CancellationToken` now reaches the shared selection: `SelectBaseFindingsAsync`, `RecordsInReviewInvoicesAsync`, `ChildrensInReviewInvoicesAsync`, `InvoicesTakingTheChangeAsync`, `LinesOfInvoicesAsync` and the closure's subject selection take an optional token. The write calls them without one, so it gets `CancellationToken.None` as before and its behaviour is unchanged. The children side's catch does not swallow a cancellation of the request. No test: the write's path is the one covered, and the dry run only adds the token.
+
+**Mutation seeds** (each applied, `RecordProcedureDryRunContractTests` run, restored):
+- F-1: `countable = false` removed from the children-fault branch -> 2 fail (`Change_WithUnreadChildren...`: more than 100 children, a child that cannot be read).
+- F-2: judge before narrowing (`reach.Any(i => !i.Judgeable)` in place of the narrowed list) -> 2 fail (`UnjudgeableInvoice...`, both unreadable cases). A second seed, the lines read for the whole reach instead of the kept invoices -> 2 fail (`UnreadableInvoice_ItsLinesAreNeverRead` and the Assign count test).
+- K-5 bound: the bound check disabled -> 1 fails (`InvoiceCount_PastTheRightsBound...`).
+
+**Known limits** (084d-2b, as amended):
+- **K-a.** On the findings-closed basis the selection's app-only rows (Signals, and the children's override rows for nearer-wins) are not asked of the caller. The count can depend on a child's override the caller cannot Read, but it counts only invoices the caller CAN Read. This is the write's own response, from the same selection.
+- **K-b.** `ChangeCloseChildrenOpenMessage` tells the caller that not all of the records under the record could be read. The write says the same. With F-1, that case also has no count; whether the children were read can itself depend on invoices on the children that the caller cannot Read (a children read past one page of invoices is a fault), which is the same disclosure the write makes.
+- **K-6.** A dry run is repeatable, so the findings-closed count can be probed (propose, read the count, change the proposal, read again). It is bounded to invoices the caller can Read, as the write's is, so a probe learns nothing about a row the caller cannot Read.
+- **K-5 (corrected).** A visible invoice that has no firm, no date, or other than one core lookup makes the resolution count null. An unreadable one is dropped first and changes nothing. The invoices whose rights are asked are bounded at 1000 (above); the bound is on the total in reach, readable or not, so it discloses only that the total in reach is past 1000, an aggregate of the same kind as K-2.
+- **K-d.** The reach read throws on more than one page of In Review invoices in a batch (the reach is read before any Read can narrow it, and a partial page narrowed to Readable invoices would be a partial count). So the count is null when the total in reach, readable or not, is past one page (5000 in Dataverse). An aggregate only, no row. Paging the reach to narrow it is not done. Between 1001 invoices and a page the rights bound gives the null; past a page the reach read does.
+
+**Gates.**
+- BFF build: 0 warnings, 0 errors.
+- `RecordProcedureDryRunContractTests`: 64 (54 before; 10 new: one fact for the rights bound, one theory of 4 for F-2, one fact for the lines, one theory of 3 for F-1, one fact for the selection fault; the Assign and bound facts changed in place).
+- Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede): 8341 passed, 4 skipped, 0 failed (8331 before this round).
+- ArchTests: 2570/2570 passed.
+- `dotnet format whitespace --verify-no-changes` clean on the four touched code files and the test file.

@@ -392,7 +392,11 @@ public partial class RouteAuthorizationGuardTests
             + "404; the eBilling kill switch runs after it. RecordProcedureReadService then reads the rows once, app-only, and makes ONE batched "
             + "CallerRecordAccessProbe check that the caller can Read EVERY row the answer exposes (chain records, Procedures, versions, rule sets, "
             + "policies, override rows, firms, creators); an unreadable row, an unanswered rights question or a faulted read is 503 "
-            + "procedures.unavailable with no list. Reads only."),
+            + "procedures.unavailable with no list. Reads only. Task 084d-2a adds POST .../procedures/dry-run (the same chain, nothing written): "
+            + "ONE AddFinanceAuthorizationFilter on the route record asking finance.read and ebilling.record.override (uniform 404), then a "
+            + "second AddFinanceAuthorizationFilter (403) with the planned writes' own subject Read and privileges (DryRunTargets, built from the "
+            + "write routes' AssignChecks / ExcludeChecks / ChangeChecks / RemoveChecks), the kill switch, then "
+            + "RequireReadOnTheDryRunsOverridesSubject for a removal or a replaced override; the service's one batched check covers Now and After."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
@@ -1288,6 +1292,11 @@ public partial class RouteAuthorizationGuardTests
             + "CallerReadCheck.CheckAsync with AuthorizationService (:364); denied is the same 404 assignment.override_not_found a missing "
             + "row gets, also when there is no row at all and the filter answers it itself (:359, :375; review K1, pass 2), an unparseable id, a read fault or an unanswered question 403 system_failure (:339, :351, :376) "
             + "(ebilling-r1 089c)."),
+        new CreditedForm("RequireReadOnTheDryRunsOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
+            "The dry run's removal step (ebilling-r1 084d-2a): for a body that removes or replaces an override it calls "
+            + "RefuseUnlessCallerReadsOverridesSubjectAsync, the same body RequireReadOnTheOverridesSubject runs (ProcedureAssignmentEndpoints.cs:537): "
+            + "the stored row read app-only, the caller's own Read on its Procedure or rule, the same 404 assignment.override_not_found and 403 "
+            + "system_failure; an unparseable record id is 403 system_failure (ProcedureAssignmentEndpoints.cs:534)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
             + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "

@@ -23,7 +23,9 @@ namespace Sprk.Bff.Api.Services.Finance.Procedures;
 /// <item>The after-images of the table are appended once, on the last page (<see cref="EntityCollection.MoreRecords"/> false), cut to the
 /// query's columns, as fresh copies.</item>
 /// <item>Which after-images a query gets is decided by one exact condition of the query's top-level AND criteria, never by evaluating the
-/// criteria: a primary-key <c>Equal</c>/<c>In</c> gives the images with those ids; otherwise on <c>sprk_policy</c> the
+/// criteria: a primary-key <c>Equal</c>/<c>In</c> that is the SOLE top-level condition gives the images with those ids (with other conditions
+/// beside it, a query that those ids name an image for throws, since the overlay cannot judge the others; a key inside an Or or a nested filter
+/// throws); a query with any linked entity throws (084d-2a fix round 1, K-3 and K-4); otherwise on <c>sprk_policy</c> the
 /// <c>sprk_ruleset</c> <c>In</c>/<c>Equal</c> condition (the resolver's chunk of rule sets) and on <c>sprk_policyversion</c> the
 /// <c>sprk_policy</c> <c>In</c>/<c>Equal</c> condition (its chunk of policies) give the images whose parent is in that list, so an image is
 /// appended to exactly one chunk. A policy or version query with neither condition, or with more than one, throws (fails closed). On the
@@ -45,8 +47,8 @@ namespace Sprk.Bff.Api.Services.Finance.Procedures;
 /// </remarks>
 internal sealed class ProcedureRowOverlay : WriteRefusingEntityService
 {
-    /// <summary>The four tables the overlay shapes. A plan naming any other table is refused.</summary>
-    internal static readonly IReadOnlySet<string> Tables = new HashSet<string>(StringComparer.Ordinal)
+    /// <summary>The four tables the overlay shapes (names compared case-insensitively). A plan naming any other table is refused.</summary>
+    private static readonly HashSet<string> Tables = new(StringComparer.OrdinalIgnoreCase)
     {
         ProcedureAssignmentEntity.Entity, BillingFactLoader.RuleSetEntity, BillingFactLoader.PolicyEntity, BillingFactLoader.VersionEntity,
     };
@@ -114,16 +116,24 @@ internal sealed class ProcedureRowOverlay : WriteRefusingEntityService
     public override async Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        if (!Tables.Contains(query.EntityName))
+
+        // K-4 (fail closed): a join brings rows of a table into the answer without going through the overlay. Any link naming one of the four
+        // tables, from any query, and any link at all on a query of the four, is refused before it reads (names compared case-insensitively).
+        if (Tables.Contains(query.EntityName) ? query.LinkEntities.Count > 0 : LinksNameAnOverlayTable(query.LinkEntities))
+        {
+            throw Unsupported($"a {query.EntityName} query with linked entities that name or start from an override table");
+        }
+
+        if (!Tables.TryGetValue(query.EntityName, out var table))
         {
             return await Inner.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         }
 
         // Decided before the read, so a query the overlay cannot place fails without reading.
-        var wanted = ImagesFor(query);
+        var wanted = ImagesFor(query, table);
         var page = await Inner.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         var rows = page.Entities
-            .Where(r => !_deleted.Contains((query.EntityName, r.Id)) && !_images.ContainsKey((query.EntityName, r.Id)))
+            .Where(r => !_deleted.Contains((table, r.Id)) && !_images.ContainsKey((table, r.Id)))
             .ToList();
         if (!page.MoreRecords)
         {
@@ -162,19 +172,33 @@ internal sealed class ProcedureRowOverlay : WriteRefusingEntityService
     // ── The match ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The after-images <paramref name="query"/> gets (see the remarks). Throws when a policy or version query names no chunk condition.</summary>
-    private IReadOnlyList<Entity> ImagesFor(QueryExpression query)
+    private IReadOnlyList<Entity> ImagesFor(QueryExpression query, string table)
     {
-        var table = query.EntityName;
         var images = _images.Where(i => i.Key.Table == table).Select(i => i.Value).ToList();
         if (images.Count == 0)
         {
             return images;
         }
 
+        var key = table + "id";
         var top = query.Criteria.FilterOperator == LogicalOperator.And ? query.Criteria.Conditions : (IEnumerable<ConditionExpression>)[];
-        if (OneListCondition(top, table + "id", table) is { } ids)
+        if (OneListCondition(top, key, table) is { } ids)
         {
-            return images.Where(i => ids.Contains(i.Id)).ToList();
+            // K-3: the primary-key path answers a key read and nothing else. When the key is the SOLE top-level condition, the images it names are
+            // the answer. When other conditions ride with it, the overlay cannot judge them (it never evaluates criteria), so an image the key
+            // names would be returned unjudged: that is refused. An image the key does not name cannot match, so a query that names none is safe.
+            var named = images.Where(i => ids.Contains(i.Id)).ToList();
+            if (IsSoleCondition(query.Criteria) || named.Count == 0)
+            {
+                return named;
+            }
+
+            throw Unsupported($"a {table} read by key with other conditions that name a row the proposal changes");
+        }
+
+        if (Mentions(query.Criteria, key))
+        {
+            throw Unsupported($"a {table} query that names the key inside an Or, a nested filter or an operator the overlay does not place");
         }
 
         if (!ChunkParentColumn.TryGetValue(table, out var parentColumn))
@@ -208,6 +232,19 @@ internal sealed class ProcedureRowOverlay : WriteRefusingEntityService
             }).ToHashSet();
     }
 
+    /// <summary>True when the one condition of an And filter with no nested filter is the whole criteria.</summary>
+    private static bool IsSoleCondition(FilterExpression criteria) =>
+        criteria.FilterOperator == LogicalOperator.And && criteria.Filters.Count == 0 && criteria.Conditions.Count == 1;
+
+    /// <summary>True when <paramref name="column"/> is named by any condition of the filter or of its nested filters.</summary>
+    private static bool Mentions(FilterExpression filter, string column) =>
+        filter.Conditions.Any(c => string.Equals(c.AttributeName, column, StringComparison.Ordinal))
+        || filter.Filters.Any(f => Mentions(f, column));
+
+    /// <summary>True when any link, at any depth, joins one of the four tables (case-insensitive).</summary>
+    private static bool LinksNameAnOverlayTable(IEnumerable<LinkEntity> links) =>
+        links.Any(l => Tables.Contains(l.LinkToEntityName) || Tables.Contains(l.LinkFromEntityName) || LinksNameAnOverlayTable(l.LinkEntities));
+
     private static bool NamesAnOverlayTable(string fetchXml)
     {
         XDocument document;
@@ -226,8 +263,8 @@ internal sealed class ProcedureRowOverlay : WriteRefusingEntityService
     }
 
     private static string Scoped(string table) =>
-        Tables.Contains(table)
-            ? table
+        Tables.TryGetValue(table, out var canonical)
+            ? canonical
             : throw new ArgumentException($"A dry run overlays the four override tables only; {table} is not one of them.", nameof(table));
 
     private static Entity Cut(Entity image, ColumnSet columns)

@@ -42,7 +42,84 @@ public enum RecordProcedureReadStatus
     /// answers 503 <c>procedures.unavailable</c>.
     /// </summary>
     Unavailable,
+
+    /// <summary>Task 084d-2a: the dry run's planning refused the proposed override with the write's own status and code.</summary>
+    PlanRefused,
 }
+
+// ── Dry run (task 084d-2a; notes/084d-dry-run-design.md §2-§4) ────────────────────────────────────────────────────
+
+/// <summary>
+/// A proposed override for the dry run: one of the four writes (<see cref="Kind"/>) with that write's own request body, and optionally the
+/// override it replaces (<see cref="ReplacesOverrideId"/>: removed first, as the wizards' two-call plans do). <see cref="OverrideId"/> is the
+/// override a <c>Remove</c> removes. Only the body of the named kind is read.
+/// </summary>
+public sealed record ProcedureDryRunRequest(
+    string? Kind, Guid? ReplacesOverrideId = null, Guid? OverrideId = null,
+    ProcedureAssignmentRequest? Assign = null, RuleExcludeRequest? ExcludeRule = null, RuleChangeRequest? ChangeRule = null)
+{
+    /// <summary>Assign, follow, pin or exclude a Procedure (<c>procedure-assignments</c>).</summary>
+    public const string KindAssign = "Assign";
+
+    /// <summary>Exclude a rule (<c>rule-overrides/exclude</c>).</summary>
+    public const string KindExcludeRule = "ExcludeRule";
+
+    /// <summary>Change a rule (<c>rule-overrides/change</c>).</summary>
+    public const string KindChangeRule = "ChangeRule";
+
+    /// <summary>Remove an override (<c>DELETE overrides/{id}</c>).</summary>
+    public const string KindRemove = "Remove";
+}
+
+/// <summary>
+/// What a proposed override would show. <see cref="Now"/> is the two lists as they read now; <see cref="After"/> is the same two lists read
+/// with the proposed rows in place, labelled <see cref="AfterLabel"/> ("If saved now"). After is never a promise that the save will succeed:
+/// <see cref="Disclosure"/> says what the preview cannot know.
+/// </summary>
+/// <remarks>Task 084d-2b: <see cref="Closes"/> says what the write would close, and <see cref="AffectedOpenInvoices"/> how many open invoices the
+/// caller can see it affects.</remarks>
+public sealed record ProcedureDryRunView(
+    ChainRecordView Record, DateOnly Date, FirmView? Firm, string FirmSource, ProcedureDryRunProposalView Proposal,
+    ProcedureDryRunSideView Now, ProcedureDryRunSideView After, string AfterLabel, ProcedureDryRunDisclosureView Disclosure,
+    ProcedureDryRunClosesView Closes, ProcedureDryRunAffectedView AffectedOpenInvoices);
+
+/// <summary>
+/// Task 084d-2b: what the write would close. <see cref="Kinds"/>: <c>ChangedRuleRemoved</c> (removing a changed rule switches its record rule
+/// Off and closes its open findings: <see cref="D170"/> true, <see cref="Warning"/> the removal warning) and <c>BaseRuleSuperseded</c> (a change
+/// closes its base rule's open findings Superseded: <see cref="Message"/> is the change's own close message, which states its limits). Empty when
+/// nothing closes: a plain Exclude, an assignment and a plain removal close nothing.
+/// </summary>
+public sealed record ProcedureDryRunClosesView(bool D170, IReadOnlyList<string> Kinds, string? Warning, string? Message);
+
+/// <summary>
+/// Task 084d-2b: how many open (In Review) invoices the caller can Read the proposal affects. <see cref="Basis"/> <c>FindingsClosed</c>: the
+/// invoices whose open findings would close (the write's own selection). <c>ResolutionChanged</c>: the invoices filed on the record or directly
+/// under it whose Procedure resolution differs between Now and After (model 8.2's comparison). <see cref="Count"/> is null when it cannot be
+/// told (a fault, a bound, an unanswered rights question): never a guess.
+/// </summary>
+public sealed record ProcedureDryRunAffectedView(int? Count, string? Text, string Basis);
+
+/// <summary>
+/// The proposal as planned: the write (<see cref="Kind"/>), the kind of override row it writes or removes (<see cref="OverrideKind"/>), the
+/// override it removes or replaces, and <see cref="ProposedRowIds"/>, the rows the write would create (their derived ids).
+/// </summary>
+public sealed record ProcedureDryRunProposalView(
+    string Kind, string OverrideKind, Guid? ReplacesOverrideId, Guid? OverrideId, IReadOnlyList<Guid> ProposedRowIds);
+
+/// <summary>One side of a dry run: 084's two lists. Their <c>permissions</c> are not computed in a dry run (all false).</summary>
+public sealed record ProcedureDryRunSideView(RecordProceduresView Procedures, RecordRulesInForceView Rules);
+
+/// <summary>
+/// What the preview does not know (uac-r2 R5, R6, R10; ontology-r1 K1, K2), as fixed flags and fixed text.
+/// <see cref="PredictsOwnerRefusal"/> is always false: the preview asks no owner, so a save can still be refused for ownership (R5).
+/// <see cref="ReadAtOneInstant"/> is always false: Now and After are separate reads (R10). <see cref="RequestFirmAsked"/> is true when the
+/// request names a firm: it was asked of the caller as a query firm, so a firm the caller cannot Read gives 503, not a preview (R6).
+/// </summary>
+public sealed record ProcedureDryRunDisclosureView(
+    bool PredictsOwnerRefusal, bool ReadAtOneInstant, bool RequestFirmAsked, IReadOnlyList<string> Notes);
+
+/// <summary>A dry run's answer: the view, or why there is none (<see cref="Refusal"/> when the planning refused).</summary>
+internal sealed record RecordProcedureDryRunResult(RecordProcedureReadStatus Status, ProcedureDryRunView? Value, RuleSetOutcome<ProcedureOverridePlan>? Refusal = null);
 
 /// <summary>A read model, or why there is none.</summary>
 public sealed record RecordProcedureReadResult<T>(RecordProcedureReadStatus Status, T? Value) where T : class
@@ -338,6 +415,357 @@ public class RecordProcedureReadService
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Dry run (task 084d-2a; notes/084d-dry-run-design.md §2-§4, uac-r2 and ontology-r1 build conditions)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The label of the After side (ontology-r1 K1): the in-force date of a change comes from this request's clock.</summary>
+    internal const string AfterLabel = "If saved now";
+
+    /// <summary>R5 (uac-r2): the preview asks no owner.</summary>
+    internal const string OwnerNote =
+        "This preview does not check who will own the new rows, so saving can still be refused for that reason.";
+
+    /// <summary>R10 (uac-r2), K2 (ontology-r1): Now and After are separate reads.</summary>
+    internal const string SeparateReadsNote =
+        "Now and After are read separately; a change someone else saves in between shows as part of the difference.";
+
+    /// <summary>"If saved now" is what the lists would show; it is not a promise that saving will succeed.</summary>
+    internal const string NotAPromiseNote =
+        "After shows what the lists would show if this change were saved now. It does not mean that saving will succeed.";
+
+    /// <summary>Test seam (084d-2a): told each time a dry run exempts synthetic rows. Production leaves it null.</summary>
+    internal Action<IReadOnlyCollection<(string Set, Guid Id)>>? OnExempt { get; set; }
+
+    /// <summary>
+    /// Task 084d-2a: the two lists of <paramref name="coreTable"/>(<paramref name="recordId"/>) now, and as they would read with one proposed
+    /// override written ("if saved now"), without writing. Planned by <paramref name="planner"/>'s <c>Plan*Async</c> through a
+    /// <see cref="WriteRefusingEntityService"/> (a replaced override is planned first, and the create is planned over its overlay); After is
+    /// read through a per-request <see cref="ProcedureRowOverlay"/> of the plan, by the same reader as Now.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>EB-D-218.</b> ONE batched caller check over Now ∪ After. The only rows not asked are the synthetic ones: the rows the plan
+    /// creates whose by-id load, app-only on the real service, found nothing (exact (entity set, id) pairs). That load runs before any
+    /// exemption, and a fault in it is 503 <c>procedures.unavailable</c> with nothing exempted (uac-r2 condition 1). A created id that exists
+    /// already (a switch or a re-change keeps the derived id) is real, so it is asked (condition 2). A firm the request names is asked as a query
+    /// firm (R6). Proposed rows have no creator in After (ontology-r1 F3).</para>
+    /// <para><b>Refusals.</b> Planning refuses with the write's own status and code (<see cref="RecordProcedureReadStatus.PlanRefused"/>); a
+    /// gone record is the uniform 404; anything else is <see cref="RecordProcedureReadStatus.Unavailable"/>.</para>
+    /// </remarks>
+    internal virtual async Task<RecordProcedureDryRunResult> DryRunAsync(
+        ProcedureAssignmentService planner, string coreTable, Guid recordId, ProcedureDryRunRequest request, Guid? firmId, DateOnly? date,
+        string? callerBearerToken, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(planner);
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            // One instant per request: the created rows' stamp and a change's in-force date ("if saved now").
+            var now = Clock.GetUtcNow().UtcDateTime;
+            var planned = await PlanAsync(planner, coreTable, recordId, request, now, ct).ConfigureAwait(false);
+            if (planned.Kind != RuleSetOutcomeKind.Done)
+            {
+                return new RecordProcedureDryRunResult(RecordProcedureReadStatus.PlanRefused, null, planned);
+            }
+
+            var plan = planned.Value!;
+
+            // uac-r2 condition 1: decided app-only on the real service BEFORE anything is exempted; a fault throws to the 503 below.
+            var synthetic = await SyntheticRowsAsync(plan, ct).ConfigureAwait(false);
+
+            var nowReading = await ReadAsync(coreTable, recordId, firmId, date, probeFutureDate: true, readLegacyRules: true, ct).ConfigureAwait(false);
+            if (nowReading is null)
+            {
+                return new RecordProcedureDryRunResult(RecordProcedureReadStatus.RecordNotFound, null);
+            }
+
+            var proposed = plan.Created.Select(c => c.Id).ToList();
+            var overlay = new ProcedureRowOverlay(_entities, plan, now);
+            var afterReading = await ReadAsync(
+                coreTable, recordId, firmId, date, probeFutureDate: true, readLegacyRules: true, ct,
+                rowSource: overlay, legacyRules: nowReading.LegacyRules, proposedRowIds: proposed).ConfigureAwait(false);
+            if (afterReading is null)
+            {
+                return new RecordProcedureDryRunResult(RecordProcedureReadStatus.RecordNotFound, null);
+            }
+
+            if (synthetic.Count > 0)
+            {
+                // Safe only because ReadAsync never calls Expose: every exposure happens in BuildProcedures / BuildRulesAsync, after this Exempt.
+                afterReading.Exempt(synthetic);
+                OnExempt?.Invoke(synthetic);
+            }
+
+            var nowSide = new ProcedureDryRunSideView(BuildProcedures(nowReading), await BuildRulesAsync(nowReading, ct).ConfigureAwait(false));
+            var afterSide = new ProcedureDryRunSideView(BuildProcedures(afterReading), await BuildRulesAsync(afterReading, ct).ConfigureAwait(false));
+
+            // R6: a firm the request names has nothing vouching for it, so it is asked as a query firm is.
+            var requestFirm = RequestFirmOf(request);
+            if (requestFirm is { } named)
+            {
+                afterReading.Expose(OrganizationSet, named);
+            }
+
+            nowReading.Expose(SetOf(coreTable), recordId);
+
+            // EB-D-218: the proposal names the override a removal removes, or a create replaces, and its kind. Both come from an app-only read of
+            // the stored row, and the row can sit in no list (a Follow row of a Retired Procedure shows in no view), so no view asked about it.
+            // It is a real row, never exempt.
+            if ((request.Kind == ProcedureDryRunRequest.KindRemove ? request.OverrideId : request.ReplacesOverrideId) is { } overrideRow)
+            {
+                nowReading.Expose(ProcedureAssignmentEntity.EntitySet, overrideRow);
+            }
+
+            // 084d-2b: what the write would close (selection only), and the affected count. A closing write counts the invoices whose findings
+            // close (the write's own selection, counted by AffectedInvoiceCounter); any other counts the invoices whose resolution changes, and
+            // every row that comparison read is asked in the ONE check below (EB-D-218), except the synthetic rows.
+            var closes = await planner.PlanClosesAsync(overlay, coreTable, recordId, plan, callerBearerToken, ct).ConfigureAwait(false);
+            ProcedureDryRunAffectedView affected;
+            var exposed = nowReading.Exposed.Concat(afterReading.Exposed).ToHashSet();
+            if (closes.Kinds.Count > 0)
+            {
+                affected = new ProcedureDryRunAffectedView(
+                    closes.VisibleOpenInvoices, ProcedureService.AffectedText(closes.VisibleOpenInvoices), AffectedBasisFindingsClosed);
+            }
+            else
+            {
+                var (count, compared) = await ResolutionChangedAsync(planner, overlay, coreTable, recordId, callerBearerToken, ct).ConfigureAwait(false);
+                compared.ExceptWith(synthetic);
+                exposed.UnionWith(compared);
+                affected = new ProcedureDryRunAffectedView(count, ProcedureService.AffectedText(count), AffectedBasisResolutionChanged);
+            }
+
+            if (!await CallerCanReadAllAsync(exposed, callerBearerToken, ct).ConfigureAwait(false))
+            {
+                return new RecordProcedureDryRunResult(RecordProcedureReadStatus.Unavailable, null);
+            }
+
+            var removes = request.Kind == ProcedureDryRunRequest.KindRemove ? request.OverrideId : null;
+            var view = new ProcedureDryRunView(
+                RecordView(nowReading, recordId), nowReading.Date, nowSide.Procedures.Firm, nowReading.FirmSource,
+                new ProcedureDryRunProposalView(request.Kind!, plan.Kind, request.ReplacesOverrideId, removes, proposed),
+                nowSide, afterSide, AfterLabel,
+                new ProcedureDryRunDisclosureView(
+                    PredictsOwnerRefusal: false, ReadAtOneInstant: false, RequestFirmAsked: requestFirm is not null,
+                    [NotAPromiseNote, OwnerNote, SeparateReadsNote]),
+                new ProcedureDryRunClosesView(
+                    closes.Kinds.Contains(PlannedCloses.ChangedRuleRemoved), closes.Kinds, closes.Warning, closes.Message),
+                affected);
+            return new RecordProcedureDryRunResult(RecordProcedureReadStatus.Done, view);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            LogUnavailable(ex, coreTable);
+            return new RecordProcedureDryRunResult(RecordProcedureReadStatus.Unavailable, null);
+        }
+    }
+
+    /// <summary>
+    /// The plan of the proposal: a removal (or the override a create replaces) first, through the planning service; then the create, through
+    /// an overlay of that removal, so it is checked against the world after the removal (a switch re-creates the same derived id). The two are
+    /// merged: the create's image of a row wins over the removal's (a re-change switches back On the policy the removal switched Off).
+    /// </summary>
+    private async Task<RuleSetOutcome<ProcedureOverridePlan>> PlanAsync(
+        ProcedureAssignmentService planner, string coreTable, Guid recordId, ProcedureDryRunRequest request, DateTime now, CancellationToken ct)
+    {
+        var reads = new WriteRefusingEntityService(_entities);
+        var removeId = request.Kind == ProcedureDryRunRequest.KindRemove ? request.OverrideId : request.ReplacesOverrideId;
+        ProcedureOverridePlan? removal = null;
+        if (removeId is { } id)
+        {
+            var removed = await planner.PlanRemoveAsync(reads, coreTable, recordId, id, ct).ConfigureAwait(false);
+            if (removed.Kind != RuleSetOutcomeKind.Done || request.Kind == ProcedureDryRunRequest.KindRemove)
+            {
+                return removed;
+            }
+
+            removal = removed.Value!;
+        }
+
+        WriteRefusingEntityService createReads = removal is null ? reads : new ProcedureRowOverlay(_entities, removal, now);
+        var created = request.Kind switch
+        {
+            ProcedureDryRunRequest.KindAssign => await planner.PlanAssignProcedureAsync(createReads, coreTable, recordId, request.Assign!, ct).ConfigureAwait(false),
+            ProcedureDryRunRequest.KindExcludeRule => await planner.PlanExcludeRuleAsync(createReads, coreTable, recordId, request.ExcludeRule!, ct).ConfigureAwait(false),
+            ProcedureDryRunRequest.KindChangeRule => await planner.PlanChangeRuleAsync(createReads, coreTable, recordId, request.ChangeRule!, now, ct).ConfigureAwait(false),
+            _ => throw new ArgumentOutOfRangeException(nameof(request), request.Kind, "Not a dry-run kind."),
+        };
+        if (created.Kind != RuleSetOutcomeKind.Done || removal is null)
+        {
+            return created;
+        }
+
+        var plan = created.Value!;
+        var images = removal.AfterImages.ToDictionary(i => (i.LogicalName, i.Id));
+        foreach (var image in plan.AfterImages)
+        {
+            images[(image.LogicalName, image.Id)] = image;
+        }
+
+        // 084d-2b: the removal's switch-off closes the removed changed rule's findings (the two-call plan's first call), whatever the create does.
+        return RuleSetOutcome<ProcedureOverridePlan>.Done(
+            plan with { AfterImages = images.Values.ToList(), Deleted = removal.Deleted, SwitchedOffRuleId = removal.SwitchedOffRuleId });
+    }
+
+    /// <summary>
+    /// The synthetic rows of a plan: the created rows that do not exist yet, by an app-only by-id load on the REAL service (never the overlay),
+    /// as (entity set, id). A created id that is found is real and is not returned (uac-r2 condition 2). A fault throws: it never reads as
+    /// "found nothing" (condition 1).
+    /// </summary>
+    private async Task<HashSet<(string Set, Guid Id)>> SyntheticRowsAsync(ProcedureOverridePlan plan, CancellationToken ct)
+    {
+        var synthetic = new HashSet<(string Set, Guid Id)>();
+        foreach (var table in plan.Created.GroupBy(c => c.LogicalName, StringComparer.Ordinal))
+        {
+            var found = (await ReadByIdsAsync(table.Key, table.Select(c => c.Id), [table.Key + "id"], ct).ConfigureAwait(false))
+                .Select(r => r.Id).ToHashSet();
+            foreach (var row in table.Where(c => !found.Contains(c.Id)))
+            {
+                synthetic.Add((OverrideTableSetOf(table.Key), row.Id));
+            }
+        }
+
+        return synthetic;
+    }
+
+    /// <summary>084d-2b: the affected count's basis when the write closes findings.</summary>
+    internal const string AffectedBasisFindingsClosed = "FindingsClosed";
+
+    /// <summary>084d-2b: the affected count's basis when the write closes nothing.</summary>
+    internal const string AffectedBasisResolutionChanged = "ResolutionChanged";
+
+    /// <summary>
+    /// 084d-2b: the most resolutions (core record and firm pairs, each read twice: Now and After) the affected count compares. Past it the count
+    /// is null. The records under the record are bounded separately (<see cref="ProcedureAssignmentService.MaxChildRecords"/>).
+    /// </summary>
+    internal const int MaxComparedResolutions = 10;
+
+    /// <summary>
+    /// Task 084d-2b: for a write that closes nothing, how many open invoices the caller can Read whose Procedure resolution differs between Now
+    /// and After, and the rows that comparison read (the caller must be able to Read each: they join the ONE check). Model 8.2's comparison: an
+    /// invoice differs when, on any date it is judged on, the Procedures applied and their versions, the rules in force and their versions, the
+    /// exclusions, the gaps, or the override rows that decided them differ.
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item>The In Review invoices filed on the record or directly under it (<see cref="ProcedureAssignmentService.InReviewInvoicesInReachAsync"/>;
+    /// a grandchild's chain does not reach the record, D-172).</item>
+    /// <item>Narrowed FIRST to the ones the caller can Read (<see cref="AffectedInvoiceCounter.VisibleOpenInvoicesAsync"/>): an invoice the caller
+    /// cannot Read is never judged, so nothing about it (or the record it is filed on) reaches the count or the check.</item>
+    /// <item>Only then is anything judged: a VISIBLE invoice that cannot be judged (no date, or not filed on exactly one core record) makes the count
+    /// null; one the caller cannot Read is dropped like any other, and its lines are never read (<see cref="ProcedureAssignmentService.JudgedOnAsync"/>).</item>
+    /// <item>One resolution per (core record, firm) on each side, at most <see cref="MaxComparedResolutions"/>; the After side reads through the
+    /// request's overlay.</item>
+    /// </list>
+    /// Null, with no rows, when the reach cannot be read, a bound is passed (the reach's invoices past <see cref="AffectedInvoiceCounter.MaxDryRunInvoices"/>,
+    /// or the resolutions past <see cref="MaxComparedResolutions"/>), a visible invoice has no firm or cannot be judged, or a resolution faults.
+    /// </remarks>
+    private async Task<(int? Count, HashSet<(string Set, Guid Id)> Compared)> ResolutionChangedAsync(
+        ProcedureAssignmentService planner, ProcedureRowOverlay after, string coreTable, Guid recordId, string? callerBearerToken, CancellationToken ct)
+    {
+        var compared = new HashSet<(string Set, Guid Id)>();
+        try
+        {
+            var reads = new WriteRefusingEntityService(_entities);
+            var reach = await planner.InReviewInvoicesInReachAsync(reads, coreTable, recordId, ct).ConfigureAwait(false);
+            if (reach.Count == 0)
+            {
+                return (0, compared);
+            }
+
+            if (await planner.VisibleOpenInvoicesAsync(reach.Select(i => i.InvoiceId).ToList(), callerBearerToken, ct).ConfigureAwait(false) is not { } visible)
+            {
+                return (null, compared);
+            }
+
+            var kept = reach.Where(i => visible.Contains(i.InvoiceId)).ToList();
+            if (kept.Any(i => !i.Judgeable))
+            {
+                // F-2: decided only now, among the invoices the caller can Read. An invoice the caller cannot Read was dropped above, judgeable or not.
+                _logger.LogInformation("Dry run: an invoice the caller can read cannot be judged (no date, or not filed on one core record); no count is shown");
+                return (null, compared);
+            }
+
+            var judged = (await planner.JudgedOnAsync(reads, kept).ConfigureAwait(false)).ToList();
+            var groups = judged.GroupBy(i => (i.CoreTable, i.CoreId, i.FirmId)).ToList();
+            if (judged.Any(i => i.FirmId is null || i.FirmId == Guid.Empty) || groups.Count > MaxComparedResolutions)
+            {
+                _logger.LogInformation("Dry run: {Groups} resolution(s) to compare (bound {Bound}), or an invoice with no firm; no count is shown",
+                    groups.Count, MaxComparedResolutions);
+                return (null, compared);
+            }
+
+            var differs = 0;
+            foreach (var group in groups)
+            {
+                var core = new CoreRecordReference(KindOf(group.Key.CoreTable), group.Key.CoreId);
+                var before = await ProcedureResolver.ReadRowsAsync(_entities, _logger, core, group.Key.FirmId!.Value, ct).ConfigureAwait(false);
+                var afterRows = await ProcedureResolver.ReadRowsAsync(after, _logger, core, group.Key.FirmId!.Value, ct).ConfigureAwait(false);
+                AddRowsOf(compared, before);
+                AddRowsOf(compared, afterRows);
+                var now = new ProcedureResolution(before);
+                var then = new ProcedureResolution(afterRows);
+                differs += group.Count(i => i.JudgedOn.Any(d => OutcomeOf(now.RulesOn(d)) != OutcomeOf(then.RulesOn(d))));
+            }
+
+            return (differs, compared);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Dry run: the invoices whose resolution changes could not be told ({ExceptionType}); no count is shown", ex.GetType().Name);
+            return (null, new HashSet<(string Set, Guid Id)>());
+        }
+    }
+
+    /// <summary>Every row a resolution was built from, as (entity set, id): what the caller must be able to Read for the count to show.</summary>
+    private static void AddRowsOf(HashSet<(string Set, Guid Id)> rows, ProcedureRows read)
+    {
+        rows.UnionWith(read.Chain.Select(l => (SetOf(l.Table), l.Id)));
+        rows.UnionWith(read.Overrides.Select(o => (ProcedureAssignmentEntity.EntitySet, o.RowId)));
+        rows.UnionWith(read.Procedures.Select(p => (ProcedureEntity.EntitySet, p.Id)));
+        rows.UnionWith(read.Versions.Select(v => (ProcedureEntity.VersionEntitySet, v.Id)));
+        rows.UnionWith(read.Sets.Select(s => (RuleSetSet, s.Id)));
+        rows.UnionWith(read.Policies.Select(p => (PolicySet, p.Id)));
+        rows.UnionWith(read.PolicyVersions.Select(v => (PolicyVersionSet, v.PolicyVersionId)));
+    }
+
+    /// <summary>
+    /// Model 8.2's comparison of one judged date, as one text: the Procedures applied (version, pin), the rules in force (policy version, the
+    /// record rule's Exclude row), the excluded rules and Procedures, the gaps, and the override rows that decided each (row, mode, subject, pin,
+    /// firm). Ordered, so equal outcomes give equal text.
+    /// </summary>
+    private static string OutcomeOf(ProcedureRulesOnDate d)
+    {
+        static string Rows(IEnumerable<ProcedureOverrideRow> rows) =>
+            string.Join(",", rows.Select(o => $"{o.RowId}/{o.Mode}/{o.ChainRecord.Id}/{o.ProcedureId}/{o.PinnedVersionId}/{o.PolicyId}/{o.FirmId}").Order(StringComparer.Ordinal));
+
+        return string.Join("|",
+            d.Procedures.Select(p => $"P{p.ProcedureId}:{p.ProcedureVersionId}:{p.Pinned}:{Rows(p.Overrides)}")
+                .Concat(d.Rules.Select(r => $"R{r.Version.PolicyVersionId}:{r.RecordRule?.BasePolicyVersionId}:{(r.RecordRule?.Exclude is { } x ? Rows([x]) : "")}"))
+                .Concat(d.ExcludedRules.Select(e => $"X{e.Version.PolicyVersionId}:{e.ReplacedByRecordRule}:{Rows(e.Overrides)}"))
+                .Concat(d.ExcludedProcedures.Select(e => $"E{e.ProcedureId}:{Rows(e.Overrides)}"))
+                .Concat(d.Gaps.Select(g => $"G{g.ProcedureId}:{g.Kind}:{Rows(g.Overrides)}"))
+                .Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>The firm the request body names (a rule Exclude's or a change's <c>firmId</c>), for the kind it names.</summary>
+    private static Guid? RequestFirmOf(ProcedureDryRunRequest request) => request.Kind switch
+    {
+        ProcedureDryRunRequest.KindExcludeRule => request.ExcludeRule?.FirmId,
+        ProcedureDryRunRequest.KindChangeRule => request.ChangeRule?.FirmId,
+        _ => null,
+    } is { } firm && firm != Guid.Empty ? firm : null;
+
+    /// <summary>The entity set of one of the four override tables (the sets <see cref="Reading.Expose"/> uses for them).</summary>
+    private static string OverrideTableSetOf(string table) => table switch
+    {
+        ProcedureAssignmentEntity.Entity => ProcedureAssignmentEntity.EntitySet,
+        BillingFactLoader.RuleSetEntity => RuleSetSet,
+        BillingFactLoader.PolicyEntity => PolicySet,
+        BillingFactLoader.VersionEntity => PolicyVersionSet,
+        _ => throw new ArgumentOutOfRangeException(nameof(table), table, "A dry run creates rows of the four override tables only."),
+    };
+
     private void LogUnavailable(Exception ex, string coreTable)
     {
         // K2 (ProcedureResolutionFaultException): its message names row ids for operators, so it is logged and never returned.
@@ -383,15 +811,32 @@ public class RecordProcedureReadService
         /// <summary>Every row the answer exposes, as (entity set, id): what the caller must be able to Read (EB-D-218).</summary>
         public HashSet<(string Set, Guid Id)> Exposed { get; } = new();
 
+        /// <summary>Task 084d-2a: the exempt rows the answer exposes (kept apart for tests; never asked). Empty unless <see cref="Exempt"/> ran.</summary>
+        public HashSet<(string Set, Guid Id)> ExposedExempt { get; } = new();
+
+        private readonly HashSet<(string Set, Guid Id)> _exempt = new();
+
+        /// <summary>
+        /// Task 084d-2a (EB-D-218, uac-r2 conditions 1 and 2): the dry run's synthetic rows, by exact (entity set, id), never a pattern. A row
+        /// the planned write would create and that does not exist yet cannot be asked of Dataverse, so it is recorded in
+        /// <see cref="ExposedExempt"/> instead of <see cref="Exposed"/>. Every other row, a real row the overlay patches included, is asked.
+        /// </summary>
+        public void Exempt(IEnumerable<(string Set, Guid Id)> rows) => _exempt.UnionWith(rows);
+
         public Guid Expose(string set, Guid id)
         {
-            Exposed.Add((set, id));
+            (_exempt.Contains((set, id)) ? ExposedExempt : Exposed).Add((set, id));
             return id;
         }
     }
 
+    /// <param name="rowSource">The resolver's row source: the application service, or (084d-2a) a dry run's per-request overlay.</param>
+    /// <param name="legacyRules">084d-2a: legacy rules already read for this request (the dry run reads them once for both sides).</param>
+    /// <param name="proposedRowIds">084d-2a (ontology-r1 F3): rows the dry run proposes. They have no creator yet: a replaced row keeps its id, so
+    /// the creator read by id would name the OLD row's creator; it is dropped, so the stamp says nobody and no person is exposed.</param>
     private async Task<Reading?> ReadAsync(
-        string coreTable, Guid recordId, Guid? firmId, DateOnly? date, bool probeFutureDate, bool readLegacyRules, CancellationToken ct)
+        string coreTable, Guid recordId, Guid? firmId, DateOnly? date, bool probeFutureDate, bool readLegacyRules, CancellationToken ct,
+        IGenericEntityService? rowSource = null, IReadOnlyList<BillingRuleCandidate>? legacyRules = null, IReadOnlyCollection<Guid>? proposedRowIds = null)
     {
         var kind = KindOf(coreTable);
         var core = (await ReadByIdsAsync(coreTable, [recordId], [NameColumnOf(coreTable), BillingFirmColumn], ct).ConfigureAwait(false))
@@ -407,7 +852,7 @@ public class RecordProcedureReadService
             : ((Guid?)null, "None");
 
         var rows = await ProcedureResolver.ReadRowsAsync(
-            _entities, _logger, new CoreRecordReference(kind, recordId), firm ?? NoFirm, ct).ConfigureAwait(false);
+            rowSource ?? _entities, _logger, new CoreRecordReference(kind, recordId), firm ?? NoFirm, ct).ConfigureAwait(false);
         var resolution = new ProcedureResolution(rows);
         var workDate = date ?? DateOnly.FromDateTime(Clock.GetUtcNow().UtcDateTime);
         var onDate = resolution.RulesOn(workDate);
@@ -426,7 +871,7 @@ public class RecordProcedureReadService
         IReadOnlyList<BillingRuleCandidate> legacy = [];
         if (readLegacyRules)
         {
-            legacy = await _legacyRules.LoadLegacyRulesAsync(firm ?? NoFirm, ct).ConfigureAwait(false);
+            legacy = legacyRules ?? await _legacyRules.LoadLegacyRulesAsync(firm ?? NoFirm, ct).ConfigureAwait(false);
             BillingFactLoader.RequireDisjoint(legacy, resolution);
         }
 
@@ -454,6 +899,11 @@ public class RecordProcedureReadService
         var creators = (await ReadByIdsAsync(
                 ProcedureAssignmentEntity.Entity, rows.Overrides.Select(o => o.RowId), [CreatedByPersonColumn], ct).ConfigureAwait(false))
             .ToDictionary(r => r.Id, r => r.GetAttributeValue<EntityReference>(CreatedByPersonColumn)?.Id);
+        foreach (var proposed in proposedRowIds ?? [])
+        {
+            creators.Remove(proposed);
+        }
+
         var userNames = (await ReadByIdsAsync("systemuser", creators.Values.OfType<Guid>(), ["fullname"], ct).ConfigureAwait(false))
             .ToDictionary(r => r.Id, r => (string?)r.GetAttributeValue<string>("fullname"));
 
@@ -485,17 +935,23 @@ public class RecordProcedureReadService
     /// entry "unknown"), then <see cref="CallerRecordAccessProbe.GetCallerRightsForRecordsOrUnknownAsync"/> in pages. True only when every
     /// row was answered and carries Read. "Dataverse said nothing" is a refusal here, never a quietly shorter answer.
     /// </summary>
-    private async Task<bool> CallerCanReadAsync(Reading reading, string? callerBearerToken, CancellationToken ct)
+    private Task<bool> CallerCanReadAsync(Reading reading, string? callerBearerToken, CancellationToken ct)
     {
         // The route's own record is always part of what is exposed, so the set is never empty and the caller is always established.
         reading.Expose(SetOf(reading.CoreTable), reading.RecordId);
+        return CallerCanReadAllAsync(reading.Exposed, callerBearerToken, ct);
+    }
+
+    /// <summary>The batched check over <paramref name="exposed"/> (the dry run passes Now ∪ After: one check for both sides).</summary>
+    private async Task<bool> CallerCanReadAllAsync(IReadOnlyCollection<(string Set, Guid Id)> exposed, string? callerBearerToken, CancellationToken ct)
+    {
         if (await _probe.GetCallerSystemUserIdAsync(callerBearerToken, ct).ConfigureAwait(false) is not { } caller || caller == Guid.Empty)
         {
             _logger.LogWarning("Record procedures: the caller could not be established; no list is returned");
             return false;
         }
 
-        foreach (var page in reading.Exposed.OrderBy(t => t.Set, StringComparer.Ordinal).ThenBy(t => t.Id).Chunk(RightsPageSize))
+        foreach (var page in exposed.OrderBy(t => t.Set, StringComparer.Ordinal).ThenBy(t => t.Id).Chunk(RightsPageSize))
         {
             var rights = await _probe.GetCallerRightsForRecordsOrUnknownAsync(callerBearerToken, page.ToList(), ct).ConfigureAwait(false);
             if (rights is null || rights.Count != page.Length || rights.Any(r => r is null))

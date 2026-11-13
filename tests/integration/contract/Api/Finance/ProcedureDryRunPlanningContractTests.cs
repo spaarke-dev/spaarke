@@ -533,6 +533,114 @@ public sealed class ProcedureDryRunPlanningContractTests
         inner.Invocations.Should().BeEmpty("the overlay refuses before it reads");
     }
 
+    [Fact(DisplayName = "084d-2a K-3: a key read is answered from the images only when the key is the sole condition; with other conditions beside a key that names an image it throws before it reads; a key that names no image reads on")]
+    public async Task AKeyReadWithOtherConditions_ThrowsWhenTheKeyNamesAnImage()
+    {
+        var (policy, elsewhere, set) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var asked = new List<QueryExpression>();
+        var inner = Inner(asked, new EntityCollection(), new EntityCollection());
+        var overlay = new ProcedureRowOverlay(inner.Object, PlanOf(new[]
+        {
+            Row("sprk_policy", policy, ("sprk_ruleset", new EntityReference("sprk_ruleset", set)), ("sprk_enabled", false)),
+        }), Stamp);
+
+        QueryExpression Keyed(Guid key, bool withOther)
+        {
+            var query = new QueryExpression("sprk_policy") { ColumnSet = new ColumnSet(true) };
+            query.Criteria.AddCondition("sprk_policyid", ConditionOperator.Equal, key);
+            if (withOther)
+            {
+                query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+            }
+
+            return query;
+        }
+
+        (await overlay.RetrieveMultipleAsync(Keyed(policy, withOther: false), Ct)).Entities.Select(e => e.Id).Should().Equal(new[] { policy }, "the key is the sole condition");
+        asked.Should().HaveCount(1);
+
+        await FluentActions.Invoking(() => overlay.RetrieveMultipleAsync(Keyed(policy, withOther: true), Ct)).Should().ThrowAsync<InvalidOperationException>(
+            "the image is switched off and the query asks for enabled rows: the overlay cannot judge that, so it must not return the image");
+        asked.Should().HaveCount(1, "refused before it read");
+
+        (await overlay.RetrieveMultipleAsync(Keyed(elsewhere, withOther: true), Ct)).Entities.Should().BeEmpty("no image is named, so nothing is returned unjudged");
+        asked.Should().HaveCount(2);
+    }
+
+    [Fact(DisplayName = "084d-2a K-3: a key named inside an Or or a nested filter cannot be placed, so the query throws before it reads")]
+    public async Task AKeyInsideAnOrOrANestedFilter_Throws()
+    {
+        var (policy, set) = (Guid.NewGuid(), Guid.NewGuid());
+        var inner = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var overlay = new ProcedureRowOverlay(inner.Object, PlanOf(new[]
+        {
+            Row("sprk_policy", policy, ("sprk_ruleset", new EntityReference("sprk_ruleset", set))),
+        }), Stamp);
+
+        var nested = new QueryExpression("sprk_policy");
+        nested.Criteria.AddCondition("sprk_ruleset", ConditionOperator.In, set);
+        var either = nested.Criteria.AddFilter(LogicalOperator.Or);
+        either.AddCondition("sprk_policyid", ConditionOperator.Equal, policy);
+        either.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+
+        await FluentActions.Invoking(() => overlay.RetrieveMultipleAsync(nested, Ct)).Should().ThrowAsync<InvalidOperationException>();
+        inner.Invocations.Should().BeEmpty("the overlay refuses before it reads");
+    }
+
+    public static TheoryData<string> LinkedQueries() => new()
+    {
+        "other-table-links-policy", "link-name-in-another-case", "nested-link-to-version", "query-of-the-four-links-anything",
+    };
+
+    [Theory(DisplayName = "084d-2a K-4: a query that joins one of the four tables (any depth, any case), or joins anything from one of them, throws before it reads")]
+    [MemberData(nameof(LinkedQueries))]
+    public async Task AQueryThatLinksAnOverrideTable_Throws_BeforeReading(string shape)
+    {
+        var inner = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var overlay = new ProcedureRowOverlay(inner.Object, PlanOf(new[]
+        {
+            Row("sprk_policy", Guid.NewGuid(), ("sprk_ruleset", new EntityReference("sprk_ruleset", Guid.NewGuid()))),
+        }), Stamp);
+        QueryExpression query;
+        switch (shape)
+        {
+            case "other-table-links-policy":
+                query = new QueryExpression("sprk_signal");
+                query.AddLink("sprk_policy", "sprk_policy", "sprk_policyid");
+                break;
+            case "link-name-in-another-case":
+                query = new QueryExpression("sprk_signal");
+                query.AddLink("SPRK_RuleSet", "sprk_ruleset", "sprk_rulesetid");
+                break;
+            case "nested-link-to-version":
+                query = new QueryExpression("sprk_signal");
+                query.AddLink("sprk_matter", "sprk_matter", "sprk_matterid").AddLink("sprk_policyversion", "a", "b");
+                break;
+            default:
+                query = new QueryExpression("sprk_policy");
+                query.Criteria.AddCondition("sprk_ruleset", ConditionOperator.In, Guid.NewGuid());
+                query.AddLink("sprk_ruleset", "sprk_ruleset", "sprk_rulesetid");
+                break;
+        }
+
+        await FluentActions.Invoking(() => overlay.RetrieveMultipleAsync(query, Ct)).Should().ThrowAsync<InvalidOperationException>();
+        inner.Invocations.Should().BeEmpty("the overlay refuses before it reads");
+    }
+
+    [Fact(DisplayName = "084d-2a K-4 (must-not-fire): a query of another table that links only other tables passes through untouched")]
+    public async Task AQueryThatLinksOtherTables_PassesThrough()
+    {
+        var asked = new List<QueryExpression>();
+        var answer = new EntityCollection(new List<Entity> { Row("sprk_signal", Guid.NewGuid()) });
+        var inner = Inner(asked, answer);
+        var overlay = new ProcedureRowOverlay(inner.Object, EmptyPlan, Stamp);
+        var query = new QueryExpression("sprk_signal");
+        query.AddLink("sprk_matter", "sprk_matter", "sprk_matterid");
+
+        (await overlay.RetrieveMultipleAsync(query, Ct)).Should().BeSameAs(answer);
+        asked.Should().ContainSingle();
+    }
+
     public static TheoryData<string> OtherReadsOfTheFourTables() => new()
     {
         "retrieve-policy", "retrieve-assignment", "alternate-key-policy", "fetch-entity", "fetch-link-entity", "fetch-malformed",
