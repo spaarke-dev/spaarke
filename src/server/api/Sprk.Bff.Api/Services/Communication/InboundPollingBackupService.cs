@@ -43,19 +43,19 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// lease. That removes the previous known limit — every scaled-out instance polled every mailbox on its own timer and
 /// enqueued the same messages once per instance.</para>
 /// <para><b>State across runs.</b> This class is the singleton <c>AddScheduledJob</c> registers, so the per-account
-/// cursors (<see cref="_cursors"/>) outlive a run. But consecutive ticks can run on different instances, so an
-/// instance's in-memory watermark can be stale — behind a later one another instance persisted. Every run therefore
-/// re-reads the persisted watermark first and starts from the LATER of it and the in-memory one (see
-/// <see cref="GetCursorAsync"/>). Both are true "everything unread before this point was enqueued" claims, so the later
-/// one is too. A stale cursor alone would only ever point BACKWARD: it would re-list mail another instance already
-/// enqueued (duplicates the processor absorbs), never skip any. Re-reading also stops a stale instance from writing an
-/// older watermark over a newer one, so under the lease the persisted watermark only moves forward — each run writes a
-/// value at or after the one it started from, and a run whose cache read failed writes nothing. (Were a backward write
-/// ever to happen, it too could only re-list: every forward move is made by a run that listed from where it started.)
-/// The in-memory map is kept for its
-/// enqueued-id record (the ids at or after the watermark this instance already enqueued); an instance that did not run
-/// the previous tick lacks the other instance's ids in the watermark's own second and overlap window, and may enqueue
-/// those once more if still unread.</para>
+/// cursors (<see cref="_cursors"/>) outlive a run. Consecutive ticks can run on different instances, so cursors differ
+/// between instances. The rule (see <see cref="GetCursorAsync"/>): an instance that holds an in-memory cursor for an
+/// account uses it and IGNORES the persisted watermark; the persisted watermark is read only when the instance has no
+/// cursor (its first run, or after a restart). The persisted value is not trusted over a live cursor because it can be a
+/// guess: an instance with no cursor whose key was lost (TTL, a cache flush, a replaced Redis) starts from the default
+/// lookback and writes now − 2 minutes, which is not a true "everything before this was enqueued" claim. An instance
+/// holding a real backlog cursor that adopted it would jump past mail it had not yet listed. The cost is duplicates: when
+/// another instance ran later ticks, this one re-lists from its own older cursor and enqueues mail already sent. That
+/// can only point BACKWARD, never skip, and the processor's <c>sprk_graphmessageid</c> check drops the duplicates. Every
+/// run writes its own cursor back, so the persisted value is the last writer's and a restart resumes from it. The
+/// in-memory map also holds the enqueued-id record (the ids at or after the watermark this instance already enqueued).</para>
+/// <para><b>Redis outage.</b> A Redis outage stops the backup poll, because the scheduler cannot take its lease. Polling
+/// resumes from the saved position when Redis returns; the webhook and delta-reconciliation paths keep running.</para>
 /// <para><b>Per-unit idempotency</b> (ADR-036 A1 rule 3; ADR-052). The unit is one Graph message. Its side effect —
 /// a <c>sprk_communication</c> — is created by IncomingCommunicationProcessor: its <c>sprk_graphmessageid</c> check skips
 /// a message already captured, and the create goes through <c>CreateCommunicationRaceProofAsync</c>, whose unique
@@ -115,17 +115,17 @@ public sealed class InboundPollingBackupService : IScheduledJob
     private readonly TimeProvider _timeProvider;
 
     /// <summary>
-    /// Per-account polling cursor (keyed by account ID), kept across runs on this singleton. At the start of every poll
-    /// the persisted watermark is re-read and the cursor moved up to it when it is later (another instance ran a later
-    /// tick); the watermark is written back after every poll. The enqueued-id record is in memory only (after a restart,
-    /// or a tick another instance ran, a message sharing the persisted watermark's second may be enqueued once more, and
-    /// the processor's <c>sprk_graphmessageid</c> check absorbs it).
+    /// Per-account polling cursor (keyed by account ID), kept across runs on this singleton. A cursor, once created, is
+    /// this instance's own claim and is never replaced by the persisted watermark (see <see cref="GetCursorAsync"/>); its
+    /// watermark is written back after every poll. The enqueued-id record is in memory only (after a restart, a message
+    /// sharing the persisted watermark's second may be enqueued once more, and the processor's
+    /// <c>sprk_graphmessageid</c> check absorbs it).
     /// </summary>
     private readonly ConcurrentDictionary<Guid, MailboxCursor> _cursors = new();
 
     /// <summary>
-    /// Lookback used when no watermark exists for an account: first run, a persisted watermark older than its TTL, or a
-    /// cache that cannot be read.
+    /// Lookback used when this instance has no cursor for an account and no watermark is persisted for it: first run, a
+    /// persisted watermark older than its TTL or lost, or a cache that cannot be read.
     /// </summary>
     private static readonly TimeSpan InitialLookbackWindow = TimeSpan.FromMinutes(15);
 
@@ -204,7 +204,9 @@ public sealed class InboundPollingBackupService : IScheduledJob
         CommunicationAccount[] accounts;
         try
         {
-            accounts = await _accountService.QueryReceiveEnabledAccountsAsync(ct);
+            // Strict: a Dataverse fault throws (the lenient method answers an empty list, which would record an outage as a
+            // successful run with no accounts); a cancellation propagates out of the filter below.
+            accounts = await _accountService.QueryReceiveEnabledAccountsStrictAsync(ct);
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
@@ -289,12 +291,13 @@ public sealed class InboundPollingBackupService : IScheduledJob
     /// webhook and delta-reconciliation paths are the backstop.
     /// </para>
     /// <para>
-    /// The persisted watermark is read at the start of every poll and only trusted when the cache answers. A read that
-    /// THROWS (as opposed to the key being absent) polls from this instance's own cursor when it has one, otherwise from
-    /// now − 15 minutes for that cycle only, keeping no cursor for the account; either way it writes no watermark, so a
+    /// The persisted watermark is read only when this instance has no cursor for the account (first run or after a
+    /// restart), and is only trusted when the cache answers. A read that THROWS (as opposed to the key being absent)
+    /// polls from now − 15 minutes for that cycle only, keeping no cursor for the account and writing no watermark, so a
     /// transient cache fault cannot overwrite an older backlog watermark with a later one; the next cycle reads the cache
     /// again. Mail enqueued during a cycle without a cursor is not remembered, so it may be enqueued once more later and
-    /// the processor's <c>sprk_graphmessageid</c> check absorbs it.
+    /// the processor's <c>sprk_graphmessageid</c> check absorbs it. An instance that already has a cursor never reads the
+    /// persisted value, so a cache read fault cannot affect it.
     /// </para>
     /// </remarks>
     /// <returns>Number of messages enqueued.</returns>
@@ -435,39 +438,32 @@ public sealed class InboundPollingBackupService : IScheduledJob
     }
 
     /// <summary>
-    /// This instance's cursor for the account, re-synchronised with the persisted watermark at the start of every poll:
-    /// created on first use from the persisted watermark (or now − 15 minutes when there is none or the cache cannot be
-    /// read), and moved up to the persisted watermark when that is later than the in-memory one — another instance ran a
-    /// later tick (see the class remarks for why the later of the two is safe and the earlier is not needed).
+    /// This instance's cursor for the account. When the instance already has one it is returned as it is and the persisted
+    /// watermark is neither read nor used: the persisted value may be another instance's guess (a lost key restarts from
+    /// the default lookback), and adopting it could carry a real backlog cursor past mail not yet listed. The persisted
+    /// value is used only when there is no in-memory cursor (first run, or after a restart): the cursor is then created
+    /// from it, or from now − 15 minutes when there is none. A cache read that throws gives a transient default cursor
+    /// that is not stored. See the class remarks for the rule and its cost (duplicates the processor absorbs).
     /// </summary>
     private async Task<(MailboxCursor Cursor, bool CacheReadFailed)> GetCursorAsync(
         Guid accountId, DateTimeOffset pollStartTime, CancellationToken ct)
     {
+        if (_cursors.TryGetValue(accountId, out var existing))
+            return (existing, false);
+
         var read = await TryGetWatermarkAsync(accountId, ct);
-        _cursors.TryGetValue(accountId, out var existing);
 
         if (read.Failed)
         {
-            // This instance's own cursor is still a valid starting point (at worst behind a newer persisted one, which
-            // only re-lists). Without one, a transient cursor is NOT stored: a cursor kept for the instance's life would
-            // make a transient cache fault permanent, and the poll would then persist a later watermark over an older
-            // backlog one. The caller writes no watermark either way.
-            return (existing ?? new MailboxCursor(pollStartTime - InitialLookbackWindow), true);
+            // A transient cursor is NOT stored: a cursor kept for the instance's life would make a transient cache fault
+            // permanent, and the poll would then persist a later watermark over an older backlog one. The caller writes no
+            // watermark either.
+            return (new MailboxCursor(pollStartTime - InitialLookbackWindow), true);
         }
 
-        if (existing is null)
-        {
-            var cursor = _cursors.GetOrAdd(
-                accountId, _ => new MailboxCursor(read.Value ?? pollStartTime - InitialLookbackWindow));
-            return (cursor, false);
-        }
-
-        // An absent key (TTL, cache flush) keeps the in-memory cursor; an older persisted value (this instance's own
-        // write failed) keeps it too. Only a later one moves it — never backwards.
-        if (read.Value is { } persisted && MailboxCursor.Floor(persisted) > existing.Watermark)
-            existing.Advance(persisted);
-
-        return (existing, false);
+        var cursor = _cursors.GetOrAdd(
+            accountId, _ => new MailboxCursor(read.Value ?? pollStartTime - InitialLookbackWindow));
+        return (cursor, false);
     }
 
     /// <summary>
@@ -495,9 +491,8 @@ public sealed class InboundPollingBackupService : IScheduledJob
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogWarning(ex,
-                "Failed to read inbound poll watermark for account {AccountId}; polling this cycle from this instance's " +
-                "cursor, or the default lookback when it has none, without saving a watermark, will re-read the cache " +
-                "next cycle",
+                "Failed to read inbound poll watermark for account {AccountId}; polling this cycle from the default " +
+                "lookback without saving a watermark, will re-read the cache next cycle",
                 accountId);
             return (null, true);
         }
@@ -513,10 +508,10 @@ public sealed class InboundPollingBackupService : IScheduledJob
                 new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = WatermarkTtl },
                 ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogWarning(ex,
-                "Failed to persist inbound poll watermark for account {AccountId}; a restart polls from the default lookback",
+                "Failed to persist inbound poll watermark for account {AccountId}; a restart resumes from the older persisted watermark",
                 accountId);
         }
     }

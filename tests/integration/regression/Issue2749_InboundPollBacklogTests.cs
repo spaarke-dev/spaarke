@@ -12,8 +12,8 @@
 //
 // The same PR moved the poll from a hand-rolled PeriodicTimer BackgroundService to an IScheduledJob on ScheduledJobHost
 // (ADR-052 §1, ADR-036). Each test drives the job's run entry, ExecuteAsync(JobRunContext): one dispatch = one poll of
-// every receive-enabled account. Consecutive ticks can run on different instances under the host's lease, so a run
-// re-reads the persisted watermark and starts from the later of it and its own in-memory cursor.
+// every receive-enabled account. Consecutive ticks can run on different instances under the host's lease; an instance that
+// holds an in-memory cursor uses it and ignores the persisted watermark, which it reads only when it has no cursor.
 //
 // Double: the Kiota IRequestAdapter — the Graph SDK's own boundary, which GraphServiceClient is built from (the
 // SpeContainerGraphStub / DocumentVersionListPagingTests precedent). The adapter below is a small mailbox that applies the
@@ -461,12 +461,12 @@ public class Issue2749_InboundPollBacklogTests
     }
 
     [Fact]
-    public async Task Run_AfterAnotherInstanceRanALaterTick_StartsFromThePersistedWatermarkNotItsStaleCursor()
+    public async Task Run_AfterAnotherInstanceRanALaterTick_ReListsFromItsOwnCursorAndTheProcessorAbsorbsTheDuplicate()
     {
         // Under the host's lease each tick runs on ONE instance, not always the same one. Instance B polls, instance A
-        // runs the next tick and advances the persisted watermark, then B runs again with its own older cursor still in
-        // memory. B must start from A's watermark: from its stale one it re-lists mail A already enqueued that the
-        // processor has not marked read yet, and enqueues it a second time.
+        // runs the next tick and advances the persisted watermark, then B runs again with its own older cursor in memory.
+        // B trusts its own cursor and ignores the persisted value (which could be a guess), so it re-lists from there and
+        // enqueues m2 a second time, which the processor's sprk_graphmessageid check drops. Nothing is skipped.
         var mailbox = new FakeMailbox();
         mailbox.Add("m1", Now.AddMinutes(-3));
         var cache = NewCache();
@@ -478,15 +478,116 @@ public class Issue2749_InboundPollBacklogTests
 
         mailbox.Add("m2", Now.AddMinutes(1));
         time.Advance(TimeSpan.FromMinutes(5));
-        await instanceA.PollAsync(); // 10:05 — resumes from B's 09:58, enqueues m2, watermark 10:03
+        await instanceA.PollAsync(); // 10:05 — no cursor yet, resumes from B's persisted 09:58, enqueues m2, watermark 10:03
 
         time.Advance(TimeSpan.FromMinutes(5));
         var bSecondRun = mailbox.Queries.Count;
-        await instanceB.PollAsync(); // 10:10 — B's in-memory cursor still says 09:58
+        await instanceB.PollAsync(); // 10:10 — B's own cursor says 09:58
 
-        mailbox.Queries[bSecondRun].From.Should().Be(Now.AddMinutes(3), "the later persisted watermark wins");
-        instanceB.EnqueuedMessageIds.Concat(instanceA.EnqueuedMessageIds).Should().BeEquivalentTo(mailbox.AllIds)
-            .And.OnlyHaveUniqueItems("m2 is not enqueued again by the instance that did not run its tick");
+        mailbox.Queries[bSecondRun].From.Should().Be(Now.AddMinutes(-2), "B starts from its own cursor, not A's persisted watermark");
+        instanceB.EnqueuedMessageIds.Should().Equal("m1", "m2");
+        instanceA.EnqueuedMessageIds.Should().Equal("m2");
+        instanceB.EnqueuedMessageIds.Concat(instanceA.EnqueuedMessageIds).Distinct().Should().BeEquivalentTo(mailbox.AllIds,
+            "the only cost of ignoring the persisted watermark is the duplicate m2");
+    }
+
+    [Fact]
+    public async Task Run_WhenTheWatermarkKeyIsLostAndAnotherInstanceWritesADefaultLookbackWatermark_TheBacklogHolderStillEnqueuesTheBacklog()
+    {
+        // Instance A is draining a backlog older than the 15-minute default lookback and holds a real backlog cursor.
+        // The persisted key is then lost (TTL, a cache flush). Instance B, with no cursor, starts from the default
+        // lookback, finds nothing, and writes now - 2 min. That is a guess, not a claim that everything before it was
+        // enqueued. A must not adopt it: its next run still enqueues the backlog.
+        var total = InboundPollingBackupService.MaxMessagesPerPoll + 120;
+        var mailbox = new FakeMailbox();
+        for (var i = 0; i < total; i++)
+            mailbox.Add($"m{i:D4}", Now.AddMinutes(-60).AddSeconds(i));
+        var cache = NewCache();
+        cache.SetString(WatermarkKey, Now.AddMinutes(-61).ToString("O", CultureInfo.InvariantCulture));
+        var time = new FakeTimeProvider(Now);
+        var instanceA = new Fixture(mailbox, cache: cache, time: time, processorMarksRead: true);
+        var instanceB = new Fixture(mailbox, cache: cache, time: time, processorMarksRead: true);
+
+        await instanceA.PollAsync(); // capped: 500 of 620 enqueued, cursor stays inside the backlog
+        instanceA.EnqueuedMessageIds.Should().HaveCount(InboundPollingBackupService.MaxMessagesPerPoll);
+
+        cache.Remove(WatermarkKey);
+        time.Advance(TimeSpan.FromMinutes(5));
+        await instanceB.PollAsync(); // 10:05 — no key, no cursor: lists from 09:50, finds nothing, writes 10:03
+        instanceB.EnqueuedMessageIds.Should().BeEmpty("the backlog is older than B's default lookback");
+        DateTimeOffset.Parse(cache.GetString(WatermarkKey)!, CultureInfo.InvariantCulture).Should().Be(Now.AddMinutes(3));
+
+        time.Advance(TimeSpan.FromMinutes(5));
+        await instanceA.PollAsync(); // 10:10 — must use its own backlog cursor, not B's 10:03
+
+        instanceA.EnqueuedMessageIds.Should().BeEquivalentTo(mailbox.AllIds, "A still reaches the 120 messages left in the backlog");
+        instanceA.EnqueuedMessageIds.Should().OnlyHaveUniqueItems();
+        mailbox.UnreadIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Run_WhenTheAccountQueryFaults_RecordsAFailedRunAndLogsAnErrorWithoutAnAddress()
+    {
+        // The lenient account query swallows a Dataverse fault and answers an empty list, which recorded a Dataverse
+        // outage as a successful run with no accounts. The strict query throws, so the run reports the outage.
+        var mailbox = new FakeMailbox();
+        mailbox.Add("one", Now.AddMinutes(-3));
+        var fixture = new Fixture(mailbox, accountQueryFault: new InvalidOperationException("Dataverse unavailable (test)"));
+
+        var result = await fixture.PollAsync();
+
+        result.Success.Should().BeFalse("a Dataverse outage is not a successful run");
+        result.ErrorMessage.Should().NotBeNullOrEmpty().And.NotContain(Mailbox);
+        result.ProcessedItems.Should().Be(0);
+        result.ResultJson.Should().Contain("\"accountQueryFailed\":true");
+        fixture.Logs.Should().Contain(l => l.Level == LogLevel.Error && l.Message.Contains("Failed to query receive-enabled accounts"));
+        fixture.Logs.Should().NotContain(l => l.Message.Contains(Mailbox, StringComparison.OrdinalIgnoreCase));
+        mailbox.Queries.Should().BeEmpty("no mailbox is polled without accounts");
+
+        fixture.AccountQueryFault = null;
+        fixture.Advance(TimeSpan.FromMinutes(5));
+        var retry = await fixture.PollAsync();
+        retry.Success.Should().BeTrue("the next run retries the query");
+        fixture.EnqueuedMessageIds.Should().Equal("one");
+    }
+
+    [Fact]
+    public async Task Run_WhenCancelledDuringTheAccountQuery_PropagatesTheCancellation()
+    {
+        // The lenient account query also swallowed a cancellation, so a shutdown during the query looked like an empty run.
+        using var cts = new CancellationTokenSource();
+        var fixture = new Fixture(new FakeMailbox(), accountQueryFault: new OperationCanceledException(cts.Token));
+        await cts.CancelAsync();
+
+        var run = () => fixture.PollAsync(cts.Token);
+
+        await run.Should().ThrowAsync<OperationCanceledException>("the host records a cancelled run (NFR-07)");
+        fixture.Logs.Should().NotContain(l => l.Level >= LogLevel.Warning, "a shutdown is not a failed account query");
+    }
+
+    [Fact]
+    public async Task Run_WhenCancelledWhileSavingTheWatermark_PropagatesTheCancellationWithoutAWarning()
+    {
+        // A shutdown that lands on the watermark write is a cancelled run, not a "failed to persist" warning.
+        using var cts = new CancellationTokenSource();
+        var mailbox = new FakeMailbox();
+        mailbox.Add("one", Now.AddMinutes(-3));
+        var cache = new Mock<IDistributedCache>();
+        cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((byte[]?)null);
+        cache.Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, byte[], DistributedCacheEntryOptions, CancellationToken>((_, _, _, token) =>
+            {
+                cts.Cancel();
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            });
+        var fixture = new Fixture(mailbox, cache: cache.Object);
+
+        var run = () => fixture.PollAsync(cts.Token);
+
+        await run.Should().ThrowAsync<OperationCanceledException>();
+        fixture.Logs.Should().NotContain(l => l.Level >= LogLevel.Warning);
     }
 
     [Fact]
@@ -556,18 +657,23 @@ public class Issue2749_InboundPollBacklogTests
         private int _accountQueries;
 
         public Fixture(
-            FakeMailbox mailbox, IDistributedCache? cache = null, FakeTimeProvider? time = null, bool processorMarksRead = false)
+            FakeMailbox mailbox, IDistributedCache? cache = null, FakeTimeProvider? time = null, bool processorMarksRead = false,
+            Exception? accountQueryFault = null)
         {
             _time = time ?? new FakeTimeProvider(Now);
+            AccountQueryFault = accountQueryFault;
             var graph = new GraphServiceClient(mailbox);
             _sut = new InboundPollingBackupService(
-                CreateAccountService(() => _accountQueries++),
+                CreateAccountService(() => _accountQueries++, () => AccountQueryFault),
                 Mock.Of<IGraphClientFactory>(f => f.ForApp() == graph),
                 CreateJobSubmission(_jobs, processorMarksRead ? mailbox : null),
                 cache ?? NewCache(),
                 _logger,
                 _time);
         }
+
+        /// <summary>What the Dataverse account query throws while set (an outage, or a cancellation).</summary>
+        public Exception? AccountQueryFault { get; set; }
 
         public IReadOnlyList<string> EnqueuedMessageIds
             => _jobs.Select(j => j.SubjectId!).ToList();
@@ -639,7 +745,7 @@ public class Issue2749_InboundPollBacklogTests
         public Task RemoveAsync(string key, CancellationToken token = default) => inner.RemoveAsync(key, token);
     }
 
-    private static CommunicationAccountService CreateAccountService(Action onQuery)
+    private static CommunicationAccountService CreateAccountService(Action onQuery, Func<Exception?> fault)
     {
         var account = new DataverseEntity("sprk_communicationaccount") { Id = AccountId };
         account["sprk_emailaddress"] = Mailbox;
@@ -653,8 +759,11 @@ public class Issue2749_InboundPollBacklogTests
                 It.Is<string>(f => f.Contains("sprk_receiveenabled")),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Callback(onQuery)
-            .ReturnsAsync(new[] { account });
+            .Returns<string, string, CancellationToken>((_, _, _) =>
+            {
+                onQuery();
+                return fault() is { } thrown ? throw thrown : Task.FromResult(new[] { account });
+            });
 
         return new CommunicationAccountService(
             dataverse.Object,
