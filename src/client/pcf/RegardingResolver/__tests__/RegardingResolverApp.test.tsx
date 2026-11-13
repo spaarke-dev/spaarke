@@ -1085,8 +1085,8 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // record id is derivable via Xrm.Page.data.entity.getId(); context.webAPI
       // returns the sprk_regardingrecordurl for the host row when queried.
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
-      const preLoadedUrl =
-        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      // The shared client writer stores an absolute URL on the org's own origin (with appid).
+      const preLoadedUrl = `${window.location.origin}/main.aspx?appid=11111111-1111-1111-1111-111111111111&pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`;
       const retrieveRecordMock = jest.fn().mockResolvedValue({ sprk_regardingrecordurl: preLoadedUrl });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1124,7 +1124,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       expect(retrieveRecordMock).toHaveBeenCalledWith(
         'sprk_todo',
         '22222222-2222-2222-2222-222222222222',
-        '?$select=sprk_regardingrecordurl'
+        '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value'
       );
       expect(navigateToMock).toHaveBeenCalledWith(
         {
@@ -1142,14 +1142,191 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       );
     });
 
+    test.each([
+      [
+        'an absolute URL on another host',
+        'https://evil.example/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ],
+      [
+        'an absolute URL on another origin (https host vs the page origin)',
+        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      ],
+      ['a javascript scheme', 'javascript:alert(1)'],
+    ])(
+      'stored URL is %s — never opened; the target is built from the row pair (record type table + record id)',
+      async (_label, storedUrl) => {
+        const navigateToMock = jest.fn().mockResolvedValue(undefined);
+        const retrieveRecordMock = jest.fn().mockImplementation((entity: string, _id: string, opts?: string) => {
+          if (entity === 'sprk_recordtype_ref') return Promise.resolve({ sprk_recordlogicalname: 'sprk_matter' });
+          if (opts === '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value') {
+            return Promise.resolve({
+              sprk_regardingrecordurl: storedUrl,
+              sprk_regardingrecordid: '{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}',
+              _sprk_regardingrecordtype_value: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+            });
+          }
+          return Promise.resolve({});
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).Xrm = {
+          WebApi: xrmWebApiStub(),
+          Navigation: { navigateTo: navigateToMock },
+          Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+        };
+        const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.3.6"
+          />
+        );
+        fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+        await waitFor(() => {
+          expect(navigateToMock).toHaveBeenCalledTimes(1);
+        });
+        expect(navigateToMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            entityName: 'sprk_matter',
+            entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          }),
+          expect.anything()
+        );
+      }
+    );
+
+    test('pre-loaded record — a relative stored URL is opened without reading the pair', async () => {
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const retrieveRecordMock = jest.fn().mockResolvedValue({
+        sprk_regardingrecordurl:
+          '/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
+        Navigation: { navigateTo: navigateToMock },
+        Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+      };
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.6"
+        />
+      );
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      await waitFor(() => {
+        expect(navigateToMock).toHaveBeenCalledTimes(1);
+      });
+      expect(navigateToMock).toHaveBeenCalledWith(
+        expect.objectContaining({ entityName: 'sprk_matter', entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
+        expect.anything()
+      );
+      // The stored URL names the row's pair (none is known here): no record-type read.
+      expect(retrieveRecordMock).not.toHaveBeenCalledWith('sprk_recordtype_ref', expect.anything(), expect.anything());
+    });
+
+    test('a same-origin stored URL that names another record than the row pair — the pair wins', async () => {
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const retrieveRecordMock = jest.fn().mockImplementation((entity: string, _id: string, opts?: string) => {
+        if (entity === 'sprk_recordtype_ref') return Promise.resolve({ sprk_recordlogicalname: 'sprk_matter' });
+        if (opts === '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value') {
+          return Promise.resolve({
+            // Names project bbb ...
+            sprk_regardingrecordurl: `${window.location.origin}/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`,
+            // ... but the row's pair is matter aaa.
+            sprk_regardingrecordid: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            _sprk_regardingrecordtype_value: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+          });
+        }
+        return Promise.resolve({});
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
+        Navigation: { navigateTo: navigateToMock },
+        Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+      };
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.6"
+        />
+      );
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      await waitFor(() => {
+        expect(navigateToMock).toHaveBeenCalledTimes(1);
+      });
+      expect(navigateToMock).toHaveBeenCalledWith(
+        expect.objectContaining({ entityName: 'sprk_matter', entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
+        expect.anything()
+      );
+    });
+
+    test('stored URL is off-origin and the row pair cannot be read — nothing is opened', async () => {
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const retrieveRecordMock = jest.fn().mockImplementation((_entity: string, _id: string, opts?: string) => {
+        if (opts === '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value') {
+          return Promise.resolve({
+            sprk_regardingrecordurl:
+              'https://evil.example/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+          });
+        }
+        return Promise.resolve({});
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        WebApi: xrmWebApiStub(),
+        Navigation: { navigateTo: navigateToMock },
+        Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+      };
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.6"
+        />
+      );
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      await waitFor(() => {
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cannot open modal'), ...([] as unknown[]));
+      });
+      expect(navigateToMock).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
     test('fresh picker selection wins — WebAPI NOT called (regression guard)', async () => {
       // Belt-and-suspenders: even when the host record's URL would parse to a
       // DIFFERENT target, a fresh picker selection takes priority. Because
       // Priority 1 returns synchronously, the WebAPI call is never made — this
       // guards both the priority ordering AND the WebAPI-avoidance short-circuit.
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
-      const staleUrl =
-        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+      const staleUrl = `${window.location.origin}/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb`;
       const retrieveRecordMock = jest.fn().mockResolvedValue({ sprk_regardingrecordurl: staleUrl });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1198,7 +1375,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       expect(retrieveRecordMock).not.toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
-        '?$select=sprk_regardingrecordurl'
+        '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value'
       );
       expect(navigateToMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1291,7 +1468,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         expect(retrieveRecordMock).toHaveBeenCalledWith(
           'sprk_todo',
           '22222222-2222-2222-2222-222222222222',
-          '?$select=sprk_regardingrecordurl'
+          '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value'
         );
       });
       await waitFor(() => {

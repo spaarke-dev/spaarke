@@ -169,7 +169,9 @@ export const EVENT_HEADER_SELECT_FIELDS = [
   "statecode", // Keep for backward compatibility / archive detection
   "statuscode", // OOB status reason — used by StatusSection
   "_sprk_eventtype_ref_value",
+  "_sprk_regardingrecordtype_value",
   "sprk_regardingrecordname",
+  "sprk_regardingrecordid",
   "sprk_regardingrecordurl",
 ].join(",");
 
