@@ -533,6 +533,12 @@ public sealed class RecordRepairPassJob : IScheduledJob
         {
             counts.OwnerRefused++;
         }
+
+        // Review F1-a: the owner was not written because the table cascades on Assign.
+        if (outcome.Fields.Any(f => f.ReasonCode == RecordRepairReason.OwnerAssignCascades))
+        {
+            counts.OwnerAssignCascades++;
+        }
     }
 
     private static string? ReasonOf(RecordRepairOutcome outcome) => outcome.ReasonCode ?? outcome.OwnerRefusal?.Code;
@@ -583,12 +589,14 @@ public sealed class RecordRepairPassJob : IScheduledJob
         _logger.Log(
             status == StatusOk ? LogLevel.Information : status == StatusNotConfigured ? LogLevel.Error : LogLevel.Warning,
             "{Prefix} heartbeat status={Status} attempt={Attempt} goLive={GoLive} scanned={Scanned} repaired={Repaired} noOp={NoOp} "
-            + "skipped={Skipped} failed={Failed} ownerRefused={OwnerRefused} outsidePass={OutsidePass} retried={Retried} "
+            + "skipped={Skipped} failed={Failed} ownerRefused={OwnerRefused} ownerAssignCascades={OwnerAssignCascades} "
+            + "outsidePass={OutsidePass} retried={Retried} "
             + "pendingRetry={PendingRetry} abandoned={Abandoned} claimHeld={ClaimHeld} alreadyDone={AlreadyDone} truncated={Truncated} "
             + "scanFailures={ScanFailures} stateFailures={StateFailures} metadataReads={MetadataReads} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, context.Attempt, goLive?.ToString("O", CultureInfo.InvariantCulture) ?? "(unset)", counts.Scanned,
-            counts.Repaired, counts.NoOp, counts.Skipped, counts.Failed, counts.OwnerRefused, counts.OutsidePass, counts.Retried,
+            counts.Repaired, counts.NoOp, counts.Skipped, counts.Failed, counts.OwnerRefused, counts.OwnerAssignCascades,
+            counts.OutsidePass, counts.Retried,
             counts.PendingRetry, counts.Abandoned, counts.ClaimHeld, counts.AlreadyDone, counts.Truncated, counts.ScanFailures,
             counts.StateFailures, counts.MetadataReads, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
             context.CorrelationId);
@@ -611,6 +619,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     counts.Skipped,
                     counts.Failed,
                     counts.OwnerRefused,
+                    counts.OwnerAssignCascades,
                     counts.OutsidePass,
                     counts.Retried,
                     counts.PendingRetry,
@@ -652,6 +661,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
         public int Skipped;
         public int Failed;
         public int OwnerRefused;
+        public int OwnerAssignCascades;
         public int OutsidePass;
         public int Retried;
         public int PendingRetry;

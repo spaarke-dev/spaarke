@@ -175,6 +175,17 @@ internal sealed partial class RecordCreationService
         // Review F1-b: the owner (and what the row's filing resolves to) is decided BEFORE the mapping, which it may block.
         var ownerParents = new List<RecordOwnershipParent>();
         var owner = await RepairOwnerAsync(table, rule, row, patch, report, ownerParents, stamp, ct).ConfigureAwait(false);
+
+        // Task 052b (review F1-a): an owner write is an Assign, which Dataverse cascades to child rows. Not written for a table
+        // with a relationship that cascades on Assign; the mapping and the stamp are still repaired.
+        if (patch.ContainsKey(OwnerColumn)
+            && await AssignCascadeRefusalAsync(table, id, pass, ct).ConfigureAwait(false) is { } cascades)
+        {
+            patch.Remove(OwnerColumn);
+            report.RemoveAll(f => f.Part == RecordRepairPart.Owner);
+            report.Add(RecordRepairField.Skipped(RecordRepairPart.Owner, OwnerColumn, cascades));
+        }
+
         if (owner.MappingBlocked is { } blocked)
         {
             _logger.LogInformation("[RECORD-REPAIR] {Table} {Id}: nothing was mapped ({Reason})", table, id, blocked);
@@ -262,6 +273,65 @@ internal sealed partial class RecordCreationService
         _logger.LogInformation("[RECORD-REPAIR] {Table} {Id} repaired ({Columns})", table, id,
             string.Join(", ", patch.Keys.Order(StringComparer.Ordinal)));
         return Outcome(RecordRepairStatus.Repaired, null);
+    }
+
+    /// <summary>
+    /// Task 052b (review F1-a): the one-to-many relationships an owner write may cascade along — parent table to child table,
+    /// each with the reason it is safe. EMPTY: no cascade is accepted until one is reasoned here, so Repair re-owns no row of a
+    /// table whose live metadata shows a relationship that cascades on Assign (the <c>-AcceptedAssignCascade</c> list of
+    /// <c>scripts/Migrate-DirectMessagesToOwnerTeam.ps1</c>, which also starts empty). Key: <c>"{table}->{child table}"</c>.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> AcceptedAssignCascades =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task 052b (review F1-a): why <paramref name="table"/>'s owner must not be written — a relationship that cascades on
+    /// Assign to a child the allow-list does not accept (<see cref="RecordRepairReason.OwnerAssignCascades"/>), or relationship
+    /// metadata that could not be read (<see cref="RecordRepairReason.OwnerAssignCascadeUnknown"/>, fail closed) — or <c>null</c>.
+    /// Read app-only, once per pass when a pass is given (only a successful read is kept); a refusal is logged once per pass.
+    /// </summary>
+    private async Task<string?> AssignCascadeRefusalAsync(string table, Guid id, RecordRepairPassContext? pass, CancellationToken ct)
+    {
+        IReadOnlyList<AssignCascadeRelationship> cascades;
+        if (pass is not null && pass.TryGetAssignCascades(table, out var kept))
+        {
+            cascades = kept;
+        }
+        else
+        {
+            try
+            {
+                cascades = await _entities.GetAssignCascadesAsync(table, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[RECORD-REPAIR] the relationship metadata of {Table} could not be read, so whether an owner " +
+                                       "write of {Id} would cascade cannot be told; the owner was not changed", table, id);
+                return RecordRepairReason.OwnerAssignCascadeUnknown;
+            }
+
+            pass?.KeepAssignCascades(table, cascades);
+        }
+
+        var refused = cascades
+            .Where(c => !AcceptedAssignCascades.ContainsKey($"{table}->{c.ReferencingEntity}"))
+            .ToArray();
+        if (refused.Length == 0)
+            return null;
+
+        if (pass is null || pass.FirstAssignCascadeRefusal(table))
+        {
+            _logger.LogWarning(
+                "[RECORD-REPAIR] {Table} rows are not re-owned: an owner write is an Assign, and it cascades along {Relationships} " +
+                "(not on the accepted list); the mapping and the stamp are still repaired", table,
+                string.Join(", ", refused.Select(c => $"{c.SchemaName} -> {c.ReferencingEntity} ({c.Assign ?? "unstated"})")));
+        }
+
+        return RecordRepairReason.OwnerAssignCascades;
     }
 
     /// <summary>The row, read committed with every column (the reparent's whole-row read); <c>null</c> when it does not exist.</summary>
@@ -1019,6 +1089,8 @@ internal sealed record RecordRepairOutcome
         RecordRepairReason.MappingSourceMetadataUnavailable,
         RecordRepairReason.MappingTargetMetadataUnavailable,
         RecordRepairReason.StampUnavailable,
+        // Review F1-a: the relationship metadata that says whether an owner write cascades could not be read.
+        RecordRepairReason.OwnerAssignCascadeUnknown,
     };
 
     internal static RecordRepairOutcome Row(string table, Guid id, RecordRepairStatus status, string reason) =>
@@ -1127,6 +1199,15 @@ internal static class RecordRepairReason
 
     /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
     internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";
+
+    /// <summary>Task 052b (review F1-a): the table has a one-to-many relationship that cascades on Assign to a child table the
+    /// allow-list does not accept (<see cref="RecordCreationService.AcceptedAssignCascades"/>), so an owner write would re-own
+    /// child rows too — the owner is not written (an answer: not asked again until the metadata or the allow-list changes).</summary>
+    internal const string OwnerAssignCascades = "record_repair.owner_assign_cascades";
+
+    /// <summary>Task 052b (review F1-a): the table's relationship metadata could not be read, so whether an owner write would
+    /// cascade cannot be told — the owner is not written, and the row is asked again (a fault).</summary>
+    internal const string OwnerAssignCascadeUnknown = "record_repair.owner_assign_cascade_unknown";
 
     internal const string StampUnavailable = "record_repair.stamp_unavailable";
     internal const string StampNothingMissing = "record_repair.stamp_nothing_missing";

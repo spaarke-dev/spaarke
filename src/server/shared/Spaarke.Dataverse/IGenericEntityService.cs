@@ -157,6 +157,23 @@ public interface IGenericEntityService
     Task<IReadOnlyDictionary<string, ColumnMetadata>> GetColumnMetadataAsync(string entityLogicalName, CancellationToken ct = default) =>
         throw new NotSupportedException(
             "GetColumnMetadataAsync is implemented by DataverseServiceClientImpl only; a substitute must model column metadata.");
+
+    /// <summary>
+    /// The one-to-many relationships of <paramref name="entityLogicalName"/> along which an Assign cascades to the child rows:
+    /// every relationship whose Assign cascade is not <c>NoCascade</c>, one whose metadata states none included (published
+    /// metadata, read under this connection's identity — app-only in the BFF). Uncached: each call is one metadata read.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for field-mapping-server-write-path-r1 task 052b (review F1-a): Repair's owner write is an Assign, and Dataverse
+    /// re-owns the child rows of every relationship that cascades on Assign, so the repair pass re-owns no row of a table that
+    /// has one (the Assign-cascade check of <c>scripts/Migrate-DirectMessagesToOwnerTeam.ps1</c>, in C#).</para>
+    /// <para>A fault, or a table Dataverse does not know, is thrown; the caller fails closed. The default body throws, as
+    /// <see cref="GetColumnMetadataAsync"/>'s does: a substitute that does not model relationships fails loudly instead of reading
+    /// as "nothing cascades".</para>
+    /// </remarks>
+    Task<IReadOnlyList<AssignCascadeRelationship>> GetAssignCascadesAsync(string entityLogicalName, CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "GetAssignCascadesAsync is implemented by DataverseServiceClientImpl only; a substitute must model relationship metadata.");
     Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
     Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default);
 

@@ -247,6 +247,94 @@ public sealed class RecordRepairPassJobTests
     }
 
     // =====================================================================================
+    // Review F1-a: an owner write is an Assign — never written where it would cascade
+    // =====================================================================================
+
+    private static readonly AssignCascadeRelationship ContactTasks = new("Contact_Tasks", "task", "Cascade");
+
+    [Fact]
+    public async Task AContactTableThatCascadesAssignToAChild_IsNotReOwned_IsReportedAsAnAnswer_AndLoggedOncePerPass()
+    {
+        _pass.CustomerTeamResolves();
+        World.AssignCascades["contact"] = [ContactTasks];
+        var first = _pass.NativeContact();
+        var second = _pass.NativeContact();
+
+        var result = await _pass.RunAsync();
+
+        World.Writes.Should().NotContain(w => w.Fields.ContainsKey("ownerid"), "re-owning a contact would re-own its tasks too");
+        World.Directory.Row("contact", first).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        World.Directory.Row("contact", second).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        PassWorld.Count(result, "ownerAssignCascades").Should().Be(2);
+        PassWorld.Count(result, "pendingRetry").Should().Be(0, "an answer, not a fault: not asked again");
+        World.AssignCascadeReads.Where(t => t == "contact").Should().ContainSingle("the relationships are read once per pass");
+        World.Log.Entries.Where(e => e.Message.Contains("Contact_Tasks -> task")).Should().ContainSingle("logged once per pass");
+
+        var direct = await World.RepairAsync("contact", first, _pass.Context());
+        direct.Fields.Should().ContainSingle(f => f.Part == RecordRepairPart.Owner)
+            .Which.ReasonCode.Should().Be(RecordRepairReason.OwnerAssignCascades);
+        direct.NeedsRetry.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ATableThatCascadesAssign_StillGetsItsMapping_WithoutTheOwner()
+    {
+        World.AssignCascades["sprk_event"] = [new AssignCascadeRelationship("sprk_event_children", "sprk_memo", null)];
+        var id = _pass.NativeEvent();
+
+        var result = await _pass.RunAsync();
+
+        var write = World.Writes.Should().ContainSingle().Subject;
+        write.Id.Should().Be(id);
+        write.Fields["sprk_clientname"].Should().Be(RepairWorld.MatterClient, "the mapping is still applied");
+        write.Fields.Should().NotContainKey("ownerid", "an Assign cascade that the metadata does not state counts as cascading");
+        PassWorld.Count(result, "ownerAssignCascades").Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AContactTableWithNoCascadingRelationship_IsReOwned()
+    {
+        _pass.CustomerTeamResolves();
+        World.AssignCascades["contact"] = [];
+        var id = _pass.NativeContact();
+
+        var result = await _pass.RunAsync();
+
+        World.Writes.Should().ContainSingle().Which.Fields["ownerid"]
+            .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam));
+        PassWorld.Count(result, "ownerAssignCascades").Should().Be(0);
+        World.AssignCascadeReads.Should().Contain("contact");
+        World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam));
+    }
+
+    [Fact]
+    public void TheAcceptedAssignCascadeList_StartsEmpty()
+    {
+        RecordCreationService.AcceptedAssignCascades.Should().BeEmpty("a child is allowed only by a reasoned entry");
+    }
+
+    [Fact]
+    public async Task ATableWhoseRelationshipMetadataCannotBeRead_IsNotReOwned_AndIsAskedAgain()
+    {
+        _pass.CustomerTeamResolves();
+        World.AssignCascadeFaults["contact"] = new TimeoutException("metadata read timed out");
+        var id = _pass.NativeContact();
+
+        var first = await _pass.RunAsync();
+        World.AssignCascadeFaults.Clear();
+        var second = await _pass.RunAsync();
+
+        PassWorld.Count(first, "pendingRetry").Should().Be(1, "a fault is asked again");
+        first.Success.Should().BeFalse("work is incomplete");
+        PassWorld.Count(second, "retried").Should().Be(1);
+        World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam), "the next run re-owned it");
+    }
+
+    // =====================================================================================
     // Review F1-b: the secure decision comes first for a contact filed under an invoice
     // =====================================================================================
 

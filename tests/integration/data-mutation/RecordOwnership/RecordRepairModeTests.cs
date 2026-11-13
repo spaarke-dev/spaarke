@@ -1402,6 +1402,15 @@ internal sealed partial class RepairWorld
     /// <summary>Task 052a: every table whose column metadata the service read, in order.</summary>
     public List<string> ColumnMetadataReads { get; } = [];
 
+    /// <summary>Task 052b (review F1-a): per table, the relationships that cascade on Assign (none by default).</summary>
+    public Dictionary<string, IReadOnlyList<AssignCascadeRelationship>> AssignCascades { get; } = [];
+
+    /// <summary>Task 052b (review F1-a): per table, the fault reading its relationship metadata throws.</summary>
+    public Dictionary<string, Exception> AssignCascadeFaults { get; } = [];
+
+    /// <summary>Task 052b (review F1-a): every table whose relationship metadata the service read, in order.</summary>
+    public List<string> AssignCascadeReads { get; } = [];
+
     /// <summary>Task 052a: the column lists the service asked of mapping sources (the system principal's app-only read).</summary>
     public List<(string Table, string[] Columns)> SourceReads { get; } = [];
 
@@ -1829,6 +1838,15 @@ internal sealed partial class RepairWorld
         entities
             .Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns((string table, CancellationToken _) => ColumnMetadataOf(table));
+        entities
+            .Setup(e => e.GetAssignCascadesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, CancellationToken _) =>
+            {
+                AssignCascadeReads.Add(table);
+                return AssignCascadeFaults.TryGetValue(table, out var fault)
+                    ? Task.FromException<IReadOnlyList<AssignCascadeRelationship>>(fault)
+                    : Task.FromResult(AssignCascades.GetValueOrDefault(table) ?? Array.Empty<AssignCascadeRelationship>());
+            });
         return entities.Object;
     }
 

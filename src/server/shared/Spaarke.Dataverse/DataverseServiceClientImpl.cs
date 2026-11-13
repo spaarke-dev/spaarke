@@ -1833,6 +1833,37 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return ColumnMetadataOf(response.EntityMetadata);
     }
 
+    /// <inheritdoc />
+    /// <remarks>One <c>RetrieveEntityRequest</c> (relationships, published metadata), projected by <see cref="AssignCascadesOf"/>.
+    /// A fault propagates: the caller fails closed.</remarks>
+    public async Task<IReadOnlyList<AssignCascadeRelationship>> GetAssignCascadesAsync(
+        string entityLogicalName, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        var request = new Microsoft.Xrm.Sdk.Messages.RetrieveEntityRequest
+        {
+            LogicalName = entityLogicalName.Trim().ToLowerInvariant(),
+            EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Relationships,
+        };
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveEntityResponse)await Task.Run(() =>
+            _serviceClient.Execute(request), ct).ConfigureAwait(false);
+        return AssignCascadesOf(response.EntityMetadata);
+    }
+
+    /// <summary>
+    /// The one-to-many relationships of <paramref name="entity"/> whose Assign cascade is not <c>NoCascade</c> — one whose
+    /// cascade configuration or Assign value the metadata does not state is included (fail closed). Pure, and
+    /// <c>public static</c> for direct testability (the <see cref="ColumnMetadataOf"/> precedent).
+    /// </summary>
+    public static IReadOnlyList<AssignCascadeRelationship> AssignCascadesOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity) =>
+        (entity?.OneToManyRelationships ?? [])
+            .Where(r => r is not null
+                        && r.CascadeConfiguration?.Assign != Microsoft.Xrm.Sdk.Metadata.CascadeType.NoCascade)
+            .Select(r => new AssignCascadeRelationship(
+                r.SchemaName ?? string.Empty, r.ReferencingEntity ?? string.Empty, r.CascadeConfiguration?.Assign?.ToString()))
+            .ToArray();
+
     /// <summary>
     /// The columns of <paramref name="entity"/> as <see cref="ColumnMetadata"/>, keyed by logical name (case-insensitive): the
     /// type's name, the update and field-security flags as stated, a text or memo column's maximum length, a number or Money
