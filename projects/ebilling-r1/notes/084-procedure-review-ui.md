@@ -894,3 +894,38 @@ The dry run's access, read and routes. Branch `task/084d-2a`, from `3a9130b7be`.
 **Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization) 8233 passed, 4 skipped, 0 failed. `dotnet format whitespace --verify-no-changes` clean on the touched files.
 
 **Publish size** (fresh `origin/master` `2a4b86272d` vs this branch, `dotnet publish -c Release -r linux-x64`, `Compress-Archive -CompressionLevel Optimal`, 191 files each): master 42,072,199 bytes, branch 42,065,181 bytes, delta −7,018 bytes (the branch base lags master; the change itself adds no package and no assembly).
+
+
+### 084d-2a fix round 1 (branch `task/084d-2a-fix1`, from `224007eda7`)
+
+Fix list: the uac-r2 conditional pass and the Opus adversarial pass. Each finding, the change, the test that fails without it.
+
+- **F-1** (the Change kind was never tested through the dry-run routes; the rig could not run it).
+  - *Change:* `RecordProcedureRig` now builds a REAL `RuleSetService` over its own validator (`RuleSets`); the test planner takes it instead of an uninitialised object, so `ValidateRule` no longer throws into a 503. New rig helpers: `Changeable(code)` (a Procedure rule in a Published set with a name and a current version) and `rowVersion` on `AddRule` / `ChangeRuleRows` (a stored policy carries a row version; a plan that updates it needs one).
+  - *Test:* the `DryRunSeeds` for both guards (`Every200Guid_WasAskedOfTheCaller_DryRun`, `EveryVersionRow_IsAsked_OrTheBodyDoesNotDependOnIt_DryRun`) gained `change` and `re-change` (a Change replacing this record's own Change of the same rule). Each asserts a 200, so the guards reach the exposure path. The must-fire control exempts the seed's real base policy version and the verdict reports it.
+- **F-2** (the removed or replaced override's id and kind reached a 200 unasked; a Follow row of a Retired Procedure sits in no view).
+  - *Change:* `RecordProcedureReadService.DryRunAsync` exposes `(sprk_procedureassignments, overrideId | replacesOverrideId)` on the Now reading before the combined check. It is a real row, never exempt.
+  - *Test:* `TheNamedOverride_IsAsked_EvenWhenNoListShowsIt` (remove and replace). The premise is asserted (the id appears in no list), the row is asked, and denying that row alone is 503.
+- **K-3** (the overlay's primary-key match ignored the query's other conditions).
+  - *Change:* `ProcedureRowOverlay.ImagesFor`. The key path answers a query only when the key is the sole top-level condition. With other conditions beside the key, the query throws when the key names an after-image (the overlay never evaluates criteria, so the image would be returned unjudged). A key that names no image reads on, because nothing is returned unjudged; the planning reads of the base rule (a key plus status conditions, over the removal's overlay of a different row) depend on that, and a flat throw would make every re-change a 503. A key inside an Or, a nested filter or a non-Equal/In operator throws.
+  - *Test:* `AKeyReadWithOtherConditions_ThrowsWhenTheKeyNamesAnImage`, `AKeyInsideAnOrOrANestedFilter_Throws` (`ProcedureDryRunPlanningContractTests`).
+- **K-4** (linked entities were not checked).
+  - *Change:* `RetrieveMultipleAsync(QueryExpression)` throws before reading when a link, at any depth, names one of the four tables, or when a query on one of the four carries any link. Table names are compared OrdinalIgnoreCase (`Tables` is now case-insensitive, and the canonical name keys the images).
+  - *Test:* `AQueryThatLinksAnOverrideTable_Throws_BeforeReading` (four shapes, one in another case, one nested) and the must-not-fire `AQueryThatLinksOtherTables_PassesThrough`.
+- **K-5** (the IL no-write scan left out the 2a entry point).
+  - *Change:* `RecordProcedureReadService` is in `DryRunNoWriteGuardTests.DryRunTypes`. Adding it gave no false positive, so the whole type is scanned (no method-level narrowing was needed).
+  - *Test:* `TheDryRunTypes_ReferenceNoWrite`; `TheScan_ReadsTheRealBodies` now also proves `DryRunAsync`, `PlanAsync` and `SyntheticRowsAsync` bodies (their async state machines) are read.
+- **K-7** (the dry-run GUID guard was partly self-referential).
+  - *Change (test only):* the allowed exempt set is `proposal.proposedRowIds` minus the ids that exist in any of the four override tables of the rig's world; `host.Exempted` is only compared against it, matched with its entity set (`ExemptionViolations`): each reported exempt pair must name an override set, must be absent from that set's table, and the exempt ids must equal the derived set.
+  - *Test:* `Every200Guid_WasAskedOfTheCaller_DryRun`. Must-fire controls: a planted GUID, a real base version exempted, and a synthetic row asked (one exemption dropped).
+- **uac-r2 K1** (comment): at the `afterReading.Exempt(...)` call, the exemption relies on `ReadAsync` never calling `Expose`; every exposure happens in `BuildProcedures` / `BuildRulesAsync`, after `Exempt`.
+
+**Mutation seeds** (each applied, run against the named test class, restored):
+- F-2: drop the exposure of the named override: 2 fail (`TheNamedOverride_IsAsked_EvenWhenNoListShowsIt`, remove and replace).
+- K-3: take the key path whatever else the query holds: 1 fails (`AKeyReadWithOtherConditions_ThrowsWhenTheKeyNamesAnImage`).
+- K-4: drop the link check: 4 fail (all four `AQueryThatLinksAnOverrideTable_Throws_BeforeReading` shapes).
+- K-7: exempt every created row without the found check: 2 fail (the switch test, and the `switch` seed of the guard on `ExemptionViolations` itself, ahead of the `AlsoAsked` line).
+
+**Known limit K-6.** The firm-existence oracle: planning's 400 "firm not found" for a request-named firm runs before R6's caller check on that firm, so a caller who may not Read a firm can still learn whether a firm id exists. It is the same as the write route's 400 versus 201, so the dry run adds no new oracle. Accepted.
+
+**Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization) 8246 passed, 4 skipped, 0 failed (8233 before the round: +13). `dotnet format whitespace --verify-no-changes` clean on the touched files.
