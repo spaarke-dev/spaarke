@@ -32,6 +32,10 @@ Status: **dev SPA deployed 2026-11-12 (run 43324493710); E2E not started (needs 
 PASS, no faults: 45 BFF requests, 0 5xx, 1 4xx, **0 on external routes** (new matter/WA event routes and `canCreate` not
 yet exercised). Tell uac-r2 when the E2E is done; it re-reads the external routes.
 
+**Mid-E2E BFF redeploy (uac-r2, owner's go):** E2E paused; dev BFF now `9411f604bb` (local merge of master
+`e9208abc5e` + mcp-r1 spike `d7369fecf1`; contains `c53452bb0c`, verified locally). Read-back 02:49:36Z all as expected;
+rollback snapshot `4e64670ea0`. No external-access files in the spike. SPA unchanged (same BFF host).
+
 ## E2E results — part 1, write-capable partner (owner driving, 2026-11-12)
 
 | # | Check | Result |
@@ -42,7 +46,15 @@ yet exercised). Tell uac-r2 when the E2E is done; it re-reads the external route
 | 4 | Upload document on the project | PASS |
 | 5 | Submit invoice from the project → record preselected → invoice created, linked to the project, amount + date extracted | PASS |
 | 6 | Submitted invoice appears in the Invoices grid (INV-123456.7, In Review) | PASS |
-| — | Refresh / Copy link / console / New message / Add event / matter + WA / #2658 aria-hidden snippet | not yet reported |
+| 7 | Refresh; Copy link (opens the same record in a new tab) | PASS |
+| 8 | New message, both directions SPA ↔ model-driven app | PASS |
+| 9 | Add event | PASS |
+| 10 | Console free of errors | PASS |
+| 11 | Matter and work assignment: "Your access" = "Can contribute"; upload, messages both ways, add event | PASS (no 403) |
+| — | Add to-do; #2658 snippet | skipped: to-do is being removed; Submit invoice becomes a modal (owner 2026-11-12) |
+
+Not R4: the internal model-driven app's Create New Event wizard → Send Email failed with a raw Polly TimeoutPolicy message
+on BFF `9411f604bb` (possibly a cold start after the restart) → **#2778**, reported to uac-r2 for its gate.
 
 **Defect E-1 = D-12 #2769 (R4):** the record's Documents section overlaps columns at the record-modal width — the name runs into the
 Type badge and Date Added (screenshot 2026-11-12).
@@ -59,6 +71,15 @@ SPA stops using them; retirement is a filed follow-up.**
 - R4/ebilling: on the Invoices grid, Submit invoice belongs in the grid toolbar (with Refresh / Export), not its own button.
 - ebilling: invoice files beyond PDF (Excel / data files); "Submit other files" (supporting files not treated as the
   invoice); several invoices in one submission.
+
+## FR-33 evidence so far
+
+- (2) Held-invoice Review detail: **deferred to task 028** (R4 P1 does not render `sprk_reviewdetail`; FR-11 is P2 and
+  the column stays out of every read until ebilling 082c-2 is live — project gotcha).
+- (3) `85fbba3f64` "not set up" text: **deployed** — `OWNER_UNCONFIGURED_TITLE` "Sign-in is not set up yet" is in the
+  live `/assets/app.js` (checked 2026-11-12). Rendering needs an organization whose sign-in owner is unconfigured, which
+  dev does not have; covered by `tests/workforce-home-auth.test.ts`.
+- (1) WorkforceHome invite 409 and (4) external-route counts: in part 2 / from uac-r2's gate.
 
 ## E2E (steps 6–9) — accounts and records needed (owner to supply/confirm)
 
