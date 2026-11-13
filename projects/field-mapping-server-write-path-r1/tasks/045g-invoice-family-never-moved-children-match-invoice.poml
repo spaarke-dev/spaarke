@@ -34,6 +34,7 @@
       <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs, Services/RecordCreation/RecordCreationService.cs, Services/Finance/** (callers; edit only if a caller must pass new state)</file>
       <file role="read">projects/field-mapping-server-write-path-r1/notes/task-045d-notes.md, task-045e-notes.md, decisions.md (EB-D-231)</file>
       <file role="test">tests/integration/data-mutation/RecordOwnership/InvoiceFamily*.cs, tests/unit/domain/Dataverse/InvoiceFamily*.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx (remove the Invoice option from Associate To; owner 2026-11-13) and its tests</file>
     </relevant-files>
   </context>
 
