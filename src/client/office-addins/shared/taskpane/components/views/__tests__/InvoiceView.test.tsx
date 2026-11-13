@@ -513,6 +513,30 @@ describe('InvoiceView — New invoice (task 133)', () => {
   );
 
   it(
+    'must-fire: after a firm is added in Spaarke, "Check again" lists it and the invoice can be submitted',
+    async () => {
+      withOrgUrl(ORG_URL);
+      const loadFirms = jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([{ firmId: FIRM_ID, name: 'Contoso LLP' }]);
+      const { onSubmit } = renderView({ loadFirms });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      expect(await screen.findByText(NO_FIRM_LINKED)).toBeInTheDocument();
+      await userEvent.click(screen.getByTestId('invoice-no-firm-recheck'));
+      await waitFor(() => expect(screen.queryByText(NO_FIRM_LINKED)).toBeNull());
+      expect(loadFirms).toHaveBeenCalledTimes(2);
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: /Firm/ }), FIRM_ID);
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    },
+    TIMEOUT
+  );
+
+  it(
     'ORG_URL unset: the no-firm message shows with no link and no error',
     async () => {
       withOrgUrl(undefined);
@@ -1013,6 +1037,25 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       // The link in the message opens the INVOICE record.
       await userEvent.click(within(details).getByRole('button', { name: 'Open in Spaarke' }));
       expect(openSpy).toHaveBeenCalledWith(recordUrl('sprk_invoice', INVOICE_ID), '_blank');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: after the invoice firm is set in Spaarke, "Check again" reads the prefill again and the correction can go',
+    async () => {
+      withOrgUrl(ORG_URL);
+      const loadCorrectionPrefill = jest
+        .fn()
+        .mockResolvedValueOnce({ ...PREFILL, firm: null })
+        .mockResolvedValue(PREFILL);
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      await screen.findByTestId('invoice-correction-no-firm');
+      await userEvent.click(screen.getByTestId('invoice-correction-no-firm-recheck'));
+      await waitFor(() => expect(screen.queryByTestId('invoice-correction-no-firm')).toBeNull());
+      expect(loadCorrectionPrefill).toHaveBeenCalledTimes(2);
+      expect(within(await screen.findByTestId('invoice-correction-details')).queryByText('Firm: none')).toBeNull();
     },
     TIMEOUT
   );
