@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>SPA: Manage Access labels on every record; Tasks = events of type Task ("Add task"); Add event without the unsent type select (owner E2E rework, D-6)</title>
+    <phase>1 Record template and actions (post-E2E rework)</phase>
+    <gate>after 008 (BFF fields) and 009 (section actions)</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>.tsx files</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Consumes fixed BFF fields with existing access helpers</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same record template files as 009/010</parallel-reason>
+    <deps>008, 009</deps>
+    <tags>frontend, react, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Show "View Only" / "Collaborate" / "Full Access" for the caller's access on every record (from /me), never "Can contribute"; list Task-typed events as the record's Tasks with an "Add task" section action; the Add event dialog drops the type select it never sent.</prompt>
+  <goal>"Your access" and read-only lines use ACCESS_LEVEL_LABELS from /me `projects`/`records`; unknown shows nothing; Tasks shows events with `isTask`; Add task creates `eventType: "task"`; Add event creates an untyped event; D-6 #2703 closed.</goal>
+
+  <constraints>
+    <constraint source="FR-06/FR-07">Labels are display only; create visibility still follows each list's canCreate; unknown = nothing shown.</constraint>
+    <constraint source="uac-r2 A2">For callers with `writeAccessPerRecord` the label is the composed READ view; it never hides or shows write actions for them (they keep asking the record's canCreate). Same rule as project labels; test it.</constraint>
+    <constraint source="owner 2026-11-13">One label set everywhere: the five duplicated label maps (D-11 #2718) use ACCESS_LEVEL_LABELS.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read 008's final contract from its notes.</step>
+    <step order="2">recordAccess.ts: level for matter/WA from /me `records`; remove the "Can contribute" inference; fold D-11's copies.</step>
+    <step order="3">Tasks list from isTask events; Add task section action (eventType "task"); Add event without the type select.</step>
+    <step order="4">Tests (must-fire/must-not-fire), typecheck, lint, vitest; TASK-INDEX, POML status, drift check, notes; close D-6/D-11 issues.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Collaborate caller on a matter sees "Collaborate"; a View Only caller "View Only"; a record missing from /me shows no value.</criterion>
+    <criterion testable="true">No "Can contribute" string remains in the SPA.</criterion>
+    <criterion testable="true">Add task sends eventType "task" and the new item appears under Tasks; Add event sends no type and appears under Events.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

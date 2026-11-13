@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Submit invoice as a modal over the record (record fixed) in the Invoices section; Submit invoice in the Invoices grid toolbar (owner E2E rework)</title>
+    <phase>1 Record template and actions (post-E2E rework)</phase>
+    <gate>ebilling-r1 agreement on the wizard hosting contract (sent 2026-11-13); dataset-grid owners' agreement on a DataGrid custom-command slot</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>.tsx in the SPA and the shared library</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive prop on an existing wizard and hosting in an existing modal pattern, with a fixed contract</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the record template files after 009</parallel-reason>
+    <deps>009</deps>
+    <tags>frontend, react, fluent-ui, shared-lib</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>From a matter, project or work assignment, Submit invoice opens the submission wizard in a modal over the record (same size and position) with that record fixed and no record step; on the Invoices grid, Submit invoice is a grid toolbar command.</prompt>
+  <goal>The action sits in the Invoices section header; the wizard renders in a child SprkModal with `lockedRecord`; Done closes it and refreshes the Invoices section; no navigation away from the record; the Invoices widget's own button becomes a DataGrid toolbar command with the same gating.</goal>
+
+  <context>
+    <background>Owner 2026-11-12. Wizard props `InvoiceSubmissionWizard.tsx:123-152` (`open`, `embedded`, `initialRecord`, `doneLabel`); no locked-record prop. `SubmitInvoiceAction.tsx:88-123` navigates today (#2658 risk disappears). `InvoicesWidget.tsx:55-72` renders its own button; shared `DataGrid` command bar (`DataGrid.tsx:1484`) has no custom-command prop. Record-to-firm rule `submitInvoiceRightOf` unchanged.</background>
+  </context>
+
+  <constraints>
+    <constraint source="ebilling review">Implement only the agreed contract; record ebilling-r1's agreement and diff review in the notes. `lockedRecord` absent = today's behaviour exactly; the page path and `?invoiceRecord=` stay.</constraint>
+    <constraint source="ebilling FR-17/FR-20">The wizard previews only; submit sends exactly what it sends today.</constraint>
+    <constraint source="ADR-012">The DataGrid command slot is additive, generic (no entity literals), tested, agreed with the dataset-grid owners.</constraint>
+    <constraint source="FR-03/ADR-050">The wizard modal is a SprkModal child of the record modal (same chrome family, focus/Esc test).</constraint>
+    <constraint source="ebilling-r1 review 2026-11-13 (1)">Host the wizard with `embedded` inside the child SprkModal (one dialog owner); SprkModal close/Escape wire to the wizard's `onClose`. Build from master (work/ebilling-r1 has no unmerged InvoiceSubmission changes).</constraint>
+    <constraint source="ebilling-r1 (2a)">The fixed "can't take invoices" message only when the firm's record list is COMPLETE and lacks the locked record. A partial/truncated/thrown read shows today's read-failure/partial message with Retry, Back and Cancel.</constraint>
+    <constraint source="ebilling-r1 (2b-2e)">Match the locked record on kind + id (as `initialRecord`). Re-check on every firm change (message cleared; stale list never counts). `lockedRecord` wins over `initialRecord` (JSDoc). Step captions "Step n of 2" (n of 3 with the firm step), phone caption included.</constraint>
+    <constraint source="ebilling-r1 (3)">Once `onSubmitted` has fired, refresh the record's Invoices section on ANY close, not only Done.</constraint>
+    <constraint source="ebilling-r1 (4)">Grid toolbar gating on firms non-empty is a convenience only; the server refuses no-firm submissions (EB-D-223). Send the diff to ebilling-r1 for review as in 007.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Gates: ebilling-r1 agreement; dataset-grid owners' agreement. Record both.</step>
+    <step order="2">Shared lib: `lockedRecord` prop with tests (record step omitted; firm whose list lacks it shows the fixed message, never a picker).</step>
+    <step order="3">SPA: Submit invoice in the Invoices section header; opens the child modal; Done closes and refreshes the section.</step>
+    <step order="4">DataGrid custom command slot; InvoicesWidget uses it (gating unchanged); remove the standalone button.</step>
+    <step order="5">Tests, typecheck, lint, vitest, shared-lib Jest; TASK-INDEX, POML status, drift check, notes.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">From a firm-linked matter/project/WA, Submit invoice opens the wizard over the record without a record step and submits for that record; the URL does not change.</criterion>
+    <criterion testable="true">Closed test set (ebilling 2f): locked + offered → no Record step, submit carries that record; locked + not offered with a complete list → fixed message, no record picker anywhere, submit never called; locked + partial/truncated/thrown read → the read message, not the fixed one; a firm switch re-checks; absent prop → existing suite unchanged.</criterion>
+    <criterion testable="true">Closing the wizard after `onSubmitted` (Done or any other close) refreshes the Invoices section.</criterion>
+    <criterion testable="true">The Invoices grid shows Submit invoice in its toolbar only when firms is non-empty; no standalone button.</criterion>
+    <criterion testable="true">The page path still works (existing InvoiceSubmitPage tests pass).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

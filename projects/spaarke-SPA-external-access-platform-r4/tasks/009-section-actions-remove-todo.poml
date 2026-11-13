@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Record view: create actions in their sections; remove To Do from the SPA; empty states; Documents columns (owner E2E rework, D-12)</title>
+    <phase>1 Record template and actions (post-E2E rework)</phase>
+    <gate>none (SPA only)</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx files and many tests</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting refactor of the record template's action model plus a feature removal across SPA and tests</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>SPA files only; 008 touches BFF files only</parallel-reason>
+    <deps>007</deps>
+    <tags>frontend, react, fluent-ui, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Apply the owner's E2E directives to the record view: each create action lives in its own section's header; the record header keeps only record-level actions; To Do (sprk_todo) leaves the SPA; empty states stop pointing at the toolbar; the Documents columns stop overlapping.</prompt>
+  <role>SPAARKE external-SPA developer. Fluent v9, ADR-021, ADR-050.</role>
+  <goal>Upload sits in the Documents section header, New message in Messages, Add event in Tasks &amp; events; the header toolbar shows Refresh, Copy link (and type-specific record actions such as Download/Delete); no to-do list, Add to-do or to-do client code remains in the SPA; the same hide-don't-disable rules (recordAccess.ts) decide each section action; tests prove it.</goal>
+
+  <context>
+    <background>Owner 2026-11-12 (project CLAUDE.md §3; notes/task-018-notes.md). Today create actions reach the header through `CreateActionReporter` (`createAction.tsx`) and `recordTemplates.ts:8` toolbar arrays; `RecordTemplateModal.tsx:439-507` builds the bar; `RecordSectionCard.tsx:47-62` already takes `actions` (HeaderToolbar iconSlots, unused). To-do surface: `SmartTodo.tsx`, `TasksEventsSection.tsx:25,94-101`, `ProjectPage.tsx:259-275`, `addTodo` in recordAccess/types/createAction/templates, `web-api-client.ts:774-843`, mocks, ~13 tests. Empty-state texts: `SmartTodo.tsx:902`, EventsCalendar ("Use Add event in the toolbar"). Documents grid `DocumentLibrary.tsx:897-1037,1165` has no column sizing (D-12 #2769). Submit invoice moves to the Invoices section in task 010 (keep its current header placement until then).</background>
+  </context>
+
+  <constraints>
+    <constraint source="FR-06/NFR-04">Visibility rules unchanged: each section action follows its list's `canCreate` via recordAccess.ts; unknown = hidden; no disabled controls; no offered action answers 403.</constraint>
+    <constraint source="FR-03">Child dialogs still open inside the record SprkModal via useChildDialog; focus returns to the section action (else the record dialog).</constraint>
+    <constraint source="owner 2026-11-12">Remove sprk_todo from the SPA UI and client API; do not touch the BFF to-do routes (retirement is a filed follow-up issue, created in this task).</constraint>
+    <constraint source="ADR-012/FR-04">RecordCommandBar stays the header bar; section actions use RecordSectionCard `actions` (HeaderToolbar slots) — no hand-built buttons; icons from RECORD_ACTION_ICONS.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Load knowledge, declare rigor/model; read the files above.</step>
+    <step order="2">Route each create action to its section card instead of the header (keep the reporter contract or replace it with a section-local equivalent); header keeps record-level actions.</step>
+    <step order="3">Remove SmartTodo and every to-do path from the SPA (record view, ProjectPage, client API, mocks, tests); the Tasks area shows nothing until task 011 lists Task-typed events. File the BFF to-do route retirement issue (defer-issue tracking).</step>
+    <step order="4">Empty states describe the section action, not "the toolbar"; no "Add to-do".</step>
+    <step order="5">Documents columns: explicit column sizing and truncation at the modal width (D-12); a layout test.</step>
+    <step order="6">typecheck, lint, vitest; App/arch guards; TASK-INDEX, POML status, drift check, notes.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Upload, New message and Add event render in their section headers only when the existing rules allow; the header no longer shows them.</criterion>
+    <criterion testable="true">No to-do UI, create, update or list call remains in `src/client/external-spa/src` (a source-scan test).</criterion>
+    <criterion testable="true">Empty states mention no toolbar and no to-do.</criterion>
+    <criterion testable="true">Documents name/type/date do not overlap at the record modal width (layout test).</criterion>
+    <criterion testable="true">Child dialog focus/Esc tests pass from section actions; the full SPA suite passes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

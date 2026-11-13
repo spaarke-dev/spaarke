@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>BFF: matter/WA access levels on /me; event type "task" on create; isTask on event lists (owner E2E rework)</title>
+    <phase>1 Record template and actions (post-E2E rework)</phase>
+    <gate>uac-r2 UAC review of the proposal (sent 2026-11-13) recorded BEFORE any BFF code</gate>
+    <status>open</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code (tags bff-api, auth-adjacent: access level display and a new readable column)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared external-access BFF surface; UAC-reviewed; must not widen what is readable</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>BFF files only; 009 touches SPA files only</parallel-reason>
+    <deps>007</deps>
+    <tags>bff-api, api, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the external SPA what it needs to (a) label a caller's access on matter and work-assignment records with the Manage Access levels, and (b) create and list events of type Task instead of sprk_todo to-dos.</prompt>
+  <role>SPAARKE BFF developer, external-access plane. Follow ADRs and the UAC review strictly.</role>
+  <goal>`/me` carries `records[{recordType, recordId, accessLevel}]` for matters and work assignments; `POST /{projects|matters|workassignments}/{id}/events` accepts optional `eventType: "task"`; the three event lists return `isTask`; contract tests prove each with must-fire and must-not-fire pairs.</goal>
+
+  <context>
+    <background>Owner directives 2026-11-12/13 (project CLAUDE.md §3): access labels match Manage Access everywhere; no To Do in the SPA, external users work with sprk_event of type Task (resolves D-6 #2703). Today `/me` emits project levels only (`ExternalUserContextEndpoint.cs:75`); `CreateExternalEventRequest` (`ExternalProjectDtos.cs:468`) has name/duedate/status; `BuildEventCreatePayload` (`ExternalDataService.cs:3383`) binds no type; `ExternalEventDto` (`ExternalProjectDtos.cs:415`) has no type. The Task type id exists once: `DecisionExec.TaskEventTypeId` (`Services/Signals/Actions/DecisionActionExecutors.cs:204`); the bind shape is `sprk_eventtype_ref@odata.bind` → `/sprk_eventtype_refs({id})` (`DecisionActionExecutors.cs:1491`). Matter/WA grant levels are composed in `AccessibleRecordSetService.cs` (~:718; None keys documented there).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalUserContextEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalProjectDtos.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Api/ExternalAccess/ExternalRootEventCreateContractTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="UAC review">Implement only the shape uac-r2 approved; record the approval (and any changes it asked for) in the task notes before code.</constraint>
+    <constraint source="ADR-028 / NFR-04">A level is emitted only for a key the read routes admit; None keys and vetoed keys are never emitted. The SPA treats it as display; every action stays server-checked.</constraint>
+    <constraint source="FR-18">`_sprk_eventtype_ref_value` is read server-side only; the wire carries `isTask` (boolean), never the lookup id. The ReadableColumns addition is part of the UAC review.</constraint>
+    <constraint source="ADR-019">An unsupported `eventType` answers 400 ProblemDetails with a stable errorCode; omitted keeps today's behaviour exactly.</constraint>
+    <constraint source="§11 reuse">One Task type id constant shared by Signals and external access — no second literal.</constraint>
+    <constraint source="NFR-05">No new DI registration, package or background work; publish-size delta vs a fresh master build recorded.</constraint>
+    <constraint source="uac-r2 review 2026-11-13 (A)">Source of `records`: the principal's own `MatterAccess` / `WorkAssignmentAccess` filtered to Read — the same derived view as `AccessibleMatterIds` / `AccessibleWorkAssignmentIds` — written ONCE as a helper next to `ReadableProjects`, each entry through `ExternalAccessLevels.ToDisplayLevel`. Not AccessibleRecordSetService, not a fresh RightsForRoot call.</constraint>
+    <constraint source="uac-r2 A1">Parity test: a principal holding project, matter and WA roots at each level plus a None key and a vetoed key — every emitted label == ToDisplayLevel(RightsForRoot(kind, id)); the None and vetoed ids appear nowhere in the response body.</constraint>
+    <constraint source="uac-r2 A2">For `WriteAccessPerRecord` = true callers the label is the composed READ view, as for projects; test it. (SPA side, task 011: the label never decides write actions for them.)</constraint>
+    <constraint source="uac-r2 A3">Additive only: `projects` unchanged; no new reads on /me.</constraint>
+    <constraint source="uac-r2 B / B1">Closed set {"task"}, otherwise 400 `sdap.event.type_not_allowed`. Move `DecisionExec.TaskEventTypeId` to ONE shared constant used by both. For a DataverseConfirmsWrites caller (systemuser), ask AppendTo on the Task type row through the existing probe (app-only, naming the systemuser) before the create: no → 403 with the existing create refusal; unanswered → 503. A contact: the closed set is the authorization. Test both.</constraint>
+    <constraint source="uac-r2 C">`_sprk_eventtype_ref_value` read server-side only, compared to the shared constant; only the boolean is emitted (never id or name); FR-18 ReadableColumns entry with its review note.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Gate: wait for uac-r2's review of the proposal sent 2026-11-13; record it in notes/task-008-notes.md.</step>
+    <step order="2">Load knowledge, declare rigor/model per task-execute Step 0.5; run /conflict-check (shared external-access surface).</step>
+    <step order="3">/me records[] from the approved source; contract tests incl. None-key exclusion.</step>
+    <step order="4">eventType on the three event creates; shared Task id constant; 400 for other values; contract tests.</step>
+    <step order="5">isTask on the three event lists (ReadableColumns entry); contract tests.</step>
+    <step order="6">Build BFF; run external-access unit/contract tests and the route-ledger arch tests; publish-size delta; vulnerable-package check.</step>
+    <step order="7">Update TASK-INDEX and this POML's status; run the drift check; notes.</step>
+  </steps>
+
+  <justification>
+    <existing>`/me` project levels; the three event create routes; `DecisionExec.TaskEventTypeId`.</existing>
+    <extension>Yes — all three are additive fields on existing routes and DTOs; no new route.</extension>
+    <cost-of-doing-nothing>The SPA can only guess "Can contribute" on matters/WAs (owner rejected) and cannot offer Tasks without sprk_todo (owner rejected).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/me` lists each admitted matter/WA with its display level; a None-key grant and a vetoed record are absent.</criterion>
+    <criterion testable="true">`eventType: "task"` creates an event bound to the Task type on project, matter and WA; omitted creates one with no type; any other value is 400 with the stable errorCode and creates nothing.</criterion>
+    <criterion testable="true">The event lists return `isTask` true only for Task-typed events; the lookup id is not on the wire.</criterion>
+    <criterion testable="true">A systemuser caller without AppendTo on the Task type row gets 403 (existing create refusal) and nothing is created; an unanswered probe gives 503; a contact caller is not probed.</criterion>
+    <criterion testable="true">uac-r2's review is recorded; BFF builds; external-access tests and route-ledger arch tests pass; publish-size delta and CVE check recorded.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

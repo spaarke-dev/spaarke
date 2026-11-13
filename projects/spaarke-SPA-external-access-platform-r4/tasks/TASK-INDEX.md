@@ -15,7 +15,11 @@
 | 004 | Child dialogs inside the parent SprkModal (FR-03) | 1 | ✅ [done] | 005 | — | sonnet / high |
 | 006 | Per-record access, hide-don't-disable, "Your access" (FR-06, FR-07) | 1 | ✅ [done] | 002, 004 | — | opus / high |
 | 007 | Submit invoice record action (FR-10) | 1 | ✅ [done] | 006 | — | sonnet / high |
-| 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) | 1 | 🔲 [open] | 002, 004, 005, 006, 007 | — (live) | sonnet / high |
+| 008 | BFF: matter/WA levels on /me; event type "task"; isTask (E2E rework; uac-r2 PASS w/ changes) | 1 | 🔲 [open] | 007 | Group R | opus / high |
+| 009 | Record view: section actions; remove To Do; empty states; Documents columns D-12 (E2E rework) | 1 | 🔲 [open] | 007 | Group R | opus / high |
+| 010 | Submit invoice modal over record (locked record) + Invoices grid toolbar (E2E rework; ebilling agree w/ changes) | 1 | 🔲 [open] | 009 | — | sonnet / high |
+| 011 | SPA: Manage Access labels everywhere; Tasks = Task events; Add task (E2E rework, D-6, D-11) | 1 | 🔲 [open] | 008, 009 | — | sonnet / high |
+| 018 | P1 deploy (BFF via uac-r2, SPA dev) + E2E + first-E2E checks (FR-33) — redeploy + retest after 008–011 | 1 | 🔲 [open] | 002, 004, 005, 006, 007, 008, 009, 010, 011 | — (live) | sonnet / high |
 | 020 | Review detail (082c) + held-Accepted badge (FR-11, FR-12) | 2 | 🔲 [open] | 018 | Group B | sonnet / high |
 | 022 | Inline PDF/image preview (FR-14) | 2 | 🔲 [open] | 018 | Group B | sonnet / high |
 | 023 | Documents with no file + Documents on shared DataGrid (FR-15, FR-16) | 2 | 🔲 [open] | 018, 022 | — | sonnet / xhigh |
@@ -79,6 +83,7 @@ Tasks in the same group can run simultaneously once prerequisites are met.
 | Group | Tasks | Prerequisite | Files Touched | Safe to Parallelize |
 |-------|-------|--------------|---------------|---------------------|
 | A | 001, 002 | none | Shared lib `RecordCommandBar/` vs BFF `ExternalProjectDataEndpoints.cs` + `DocumentOperationsEndpoints.cs` | ✅ Yes |
+| R | 008, 009 | 007 ✅ | BFF `ExternalUserContextEndpoint.cs` / `ExternalDataService.cs` / DTOs vs SPA record view + to-do removal | ✅ Yes |
 | B | 020, 022 | 018 ✅ | Invoice widget/sections vs Document preview section | ✅ Yes |
 | C | 031, 032, 034 | 030 ✅ (031), 028 ✅ | BFF `ExternalAccessModule.cs` + Information section vs shared `DataGrid` vs `RecordMessages.tsx` | ✅ Yes |
 | D | 033, 035 | 032 ✅, 034 ✅ | Shared `DataGrid` vs `RecordMessages.tsx` | ✅ Yes |
