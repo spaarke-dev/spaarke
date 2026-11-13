@@ -102,7 +102,48 @@ public sealed class RecordProceduresRuleFormAgreementTests
         Assert.Equal(new[] { "capAmount", "capPercent" }, fee.ExactlyOneOf.OrderBy(x => x, StringComparer.Ordinal).ToArray());
         Assert.True(fee.Fields.Single(f => f.Key == "feeCodes").HasShowWhen);
         Assert.False(fee.Fields.Single(f => f.Key == "feeKind").HasShowWhen);
+        Assert.Equal(("allowance", "cap"), (fee.Fields.Single(f => f.Key == "feeCodes").ShowWhenKey, fee.Fields.Single(f => f.Key == "feeCodes").ShowWhenEquals));
+        Assert.Equal(("allowance", "afterDays"), (fee.Fields.Single(f => f.Key == "afterDays").ShowWhenKey, fee.Fields.Single(f => f.Key == "afterDays").ShowWhenEquals));
+        Assert.Null(fee.Fields.Single(f => f.Key == "feeKind").ShowWhenKey);
+
+        // A showWhen the parser cannot read in full fails (no silent skip).
+        var unreadable = ReadForm("AddedFee").Replace("showWhen: { key: 'allowance', equals: 'afterDays' }", "showWhen: { key: 'allowance' }");
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => ParseForm(unreadable));
     }
+
+    // ── The server's refusal words the page reads (084c fix round 1, item 5) ──
+
+    /// <summary>One body's single refusal from the server's validator.</summary>
+    private static string Validate(RuleType type, string body)
+    {
+        var result = new RuleBodySchemaValidator().Validate(type, body);
+        Assert.False(result.IsValid);
+        return Assert.Single(result.Errors);
+    }
+
+    [Fact(DisplayName = "084c fix 1: the page's tests use the validator's real refusal words (a member's pointer, and the root's Required properties)")]
+    public void ThePagesTests_UseTheValidatorsRealMessages()
+    {
+        // The validator's real messages: a member's problem is "<pointer>: <message>"; a missing member is reported at the root ("").
+        var overMaximum = Validate(RuleType.DailyHoursCap, "{\"type\":\"DailyHoursCap\",\"maxHoursPerDay\":30}");
+        var missingMembers = Validate(RuleType.AiObservation, "{\"type\":\"AiObservation\"}");
+
+        // The two shapes serverFieldErrors (ruleForms/body.ts) reads.
+        Assert.Matches(@"^/maxHoursPerDay: \S", overMaximum);
+        Assert.Matches(@"^: Required properties \[[^\]]*\]", missingMembers);
+        Assert.Contains("\"observation\"", missingMembers, StringComparison.Ordinal);
+        Assert.Contains("\"minConfidence\"", missingMembers, StringComparison.Ordinal);
+
+        var tests = Path.Combine(RepoRoot(), "src", "solutions", "RecordProcedures", "src", "__tests__");
+        var ruleForms = File.ReadAllText(Path.Combine(tests, "ruleForms.test.ts"));
+        var wizard = File.ReadAllText(Path.Combine(tests, "WizardsChange.test.tsx"));
+        Assert.Contains(JsString(overMaximum), ruleForms, StringComparison.Ordinal);
+        Assert.Contains(JsString(missingMembers), ruleForms, StringComparison.Ordinal);
+        Assert.Contains(JsString(overMaximum), wizard, StringComparison.Ordinal);
+    }
+
+    /// <summary>The message as a single-quoted JavaScript string literal (the page's tests' convention).</summary>
+    private static string JsString(string text) => "'" + text.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("'", "\\'", StringComparison.Ordinal) + "'";
 
     // ── Must-fire controls: each pin fails on a seeded drift (the seed is applied to an in-memory copy; nothing on disk changes) ──
 
@@ -119,6 +160,10 @@ public sealed class RecordProceduresRuleFormAgreementTests
         new object[] { "ExpenseRule", "\"pattern\": \"^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$\"", "\"pattern\": \"^[A-Za-z0-9]{0,19}$\"" },
         new object[] { "AiObservation", "\"vagueDescription\"", "\"vagueDescription\", \"other\"" },
         new object[] { "Discount", "\"exclusiveMaximum\": 100", "\"maximum\": 100" },
+        // 084c fix round 1 (item 5): the conditional fields are the schema's allOf branches.
+        new object[] { "AddedFee", "\"const\": \"cap\"", "\"const\": \"capped\"" },
+        new object[] { "AddedFee", "\"required\": [\"afterDays\"],", "\"required\": [\"afterDays\", \"feeCodes\"]," },
+        new object[] { "AddedFee", "\"required\": [\"feeCodes\"],", "\"required\": []," },
     };
 
     [Theory(DisplayName = "084c: a drift in the server schema fails the agreement (must-fire)")]
@@ -144,6 +189,10 @@ public sealed class RecordProceduresRuleFormAgreementTests
         new object[] { "ExpenseRule", "atLeastOneOf: ['nonReimbursableCodes', 'maxAmountPerItem']", "atLeastOneOf: ['nonReimbursableCodes']" },
         new object[] { "AddedFee", "exactlyOneOf: ['capAmount', 'capPercent']", "exactlyOneOf: ['capAmount']" },
         new object[] { "Discount", "key: 'tolerancePercent'", "key: 'toleranceX'" },
+        // 084c fix round 1 (item 5): a conditional field shown on the wrong value, on the wrong key, or always.
+        new object[] { "AddedFee", "equals: 'afterDays'", "equals: 'cap'" },
+        new object[] { "AddedFee", "showWhen: { key: 'allowance', equals: 'afterDays' }", "showWhen: { key: 'feeKind', equals: 'afterDays' }" },
+        new object[] { "AddedFee", "spaces.\", showWhen: { key: 'allowance', equals: 'cap' }", "spaces.\"" },
     };
 
     [Theory(DisplayName = "084c: a drift in a form fails the agreement (must-fire)")]
@@ -189,7 +238,19 @@ public sealed class RecordProceduresRuleFormAgreementTests
     // ── The parser ──────────────────────────────────────────────────────────
 
     internal sealed record FormFieldDef(
-        string Key, string Kind, bool Required, bool Integer, double? Min, bool MinExclusive, double? Max, bool MaxExclusive, bool HasShowWhen, string[] Options, string[] Refused);
+        string Key,
+        string Kind,
+        bool Required,
+        bool Integer,
+        double? Min,
+        bool MinExclusive,
+        double? Max,
+        bool MaxExclusive,
+        bool HasShowWhen,
+        string[] Options,
+        string[] Refused,
+        string? ShowWhenKey = null,
+        string? ShowWhenEquals = null);
 
     internal sealed record FormDef(string RuleType, FormFieldDef[] Fields, bool NoChange, string[] AtLeastOneOf, string[] ExactlyOneOf);
 
@@ -216,8 +277,10 @@ public sealed class RecordProceduresRuleFormAgreementTests
                 raw.Count(c => c == '{') == raw.Count(c => c == '}') && raw.Count(c => c == '[') == raw.Count(c => c == ']'),
                 $"a field must be on one line (balanced braces and brackets): {raw.Trim()}");
             var hasShowWhen = raw.Contains("showWhen:", StringComparison.Ordinal);
+            var showWhen = Regex.Match(raw, @"showWhen:\s*\{\s*key:\s*'(\w+)',\s*equals:\s*'([^']+)'\s*\}");
             var line = Regex.Replace(raw, @"showWhen:\s*\{[^{}]*\}", "");
             var key = Regex.Match(line, @"^\s*\{\s*key:\s*'(\w+)'").Groups[1].Value;
+            Assert.True(!hasShowWhen || showWhen.Success, $"{key}: showWhen must read {{ key: '<field>', equals: '<value>' }}");
             var kind = Regex.Match(line, @"\bkind:\s*'(\w+)'");
             Assert.True(kind.Success, $"{key}: kind not found");
 
@@ -249,7 +312,20 @@ public sealed class RecordProceduresRuleFormAgreementTests
 
             double? Number(string name) => Regex.Match(line, $@"\b{name}:\s*(-?\d+(?:\.\d+)?)") is { Success: true } m ? double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) : null;
             bool Flag(string name) => Regex.IsMatch(line, $@"\b{name}:\s*true");
-            fields.Add(new FormFieldDef(key, kind.Groups[1].Value, Flag("required"), Flag("integer"), Number("min"), Flag("minExclusive"), Number("max"), Flag("maxExclusive"), hasShowWhen, options.ToArray(), refused.ToArray()));
+            fields.Add(new FormFieldDef(
+                key,
+                kind.Groups[1].Value,
+                Flag("required"),
+                Flag("integer"),
+                Number("min"),
+                Flag("minExclusive"),
+                Number("max"),
+                Flag("maxExclusive"),
+                hasShowWhen,
+                options.ToArray(),
+                refused.ToArray(),
+                showWhen.Success ? showWhen.Groups[1].Value : null,
+                showWhen.Success ? showWhen.Groups[2].Value : null));
         }
 
         string[] KeysOf(string name) =>
@@ -324,7 +400,58 @@ public sealed class RecordProceduresRuleFormAgreementTests
                     oneOf.AddRange(SingleRequired(one));
         if (!SameSet(form.ExactlyOneOf, oneOf)) problems.Add($"exactlyOneOf is [{string.Join(",", form.ExactlyOneOf)}] in the form and [{string.Join(",", oneOf)}] in the schema");
 
+        ConditionalFields(problems, form, root);
         return problems;
+    }
+
+    /// <summary>
+    /// 084c fix round 1 (item 5): a field shown only when another field has a value (<c>showWhen: { key, equals }</c>) is the schema's
+    /// <c>allOf[]</c> branch <c>if.properties.&lt;key&gt;.const = equals</c>. The fields a branch shows are exactly the members its
+    /// <c>then</c> needs (<c>then.required</c> plus the single-member <c>then.oneOf</c> entries); a branch that needs none shows none, and
+    /// a field the schema needs only in a branch is never shown always.
+    /// </summary>
+    private static void ConditionalFields(List<string> problems, FormDef form, JsonElement root)
+    {
+        var branches = new List<(string Key, string Value, HashSet<string> Needs)>();
+        if (root.TryGetProperty("allOf", out var all))
+        {
+            foreach (var branch in all.EnumerateArray())
+            {
+                var tests = branch.TryGetProperty("if", out var cond) && cond.TryGetProperty("properties", out var cp)
+                    ? cp.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.Object && p.Value.TryGetProperty("const", out _)).ToList()
+                    : new List<JsonProperty>();
+                if (tests.Count != 1)
+                {
+                    problems.Add("an allOf branch does not test exactly one property's const; the form's showWhen cannot say it");
+                    continue;
+                }
+
+                var needs = new HashSet<string>(StringComparer.Ordinal);
+                if (branch.TryGetProperty("then", out var then))
+                {
+                    if (then.TryGetProperty("required", out var r)) needs.UnionWith(r.EnumerateArray().Select(x => x.GetString()!));
+                    if (then.TryGetProperty("oneOf", out var one)) needs.UnionWith(SingleRequired(one));
+                }
+
+                branches.Add((tests[0].Name, tests[0].Value.GetProperty("const").ToString(), needs));
+            }
+        }
+
+        foreach (var field in form.Fields.Where(f => f.ShowWhenKey is not null))
+        {
+            if (!branches.Any(b => b.Key == field.ShowWhenKey && b.Value == field.ShowWhenEquals))
+                problems.Add($"{field.Key}: shown when {field.ShowWhenKey} is '{field.ShowWhenEquals}', but the schema has no allOf branch on {field.ShowWhenKey} = '{field.ShowWhenEquals}'");
+            var on = form.Fields.FirstOrDefault(f => f.Key == field.ShowWhenKey);
+            if (on is null || !on.Options.Contains(field.ShowWhenEquals))
+                problems.Add($"{field.Key}: shown when {field.ShowWhenKey} is '{field.ShowWhenEquals}', which is not an option of a field of the form");
+        }
+
+        foreach (var (key, value, needs) in branches)
+        {
+            var shown = form.Fields.Where(f => f.ShowWhenKey == key && f.ShowWhenEquals == value).Select(f => f.Key).ToList();
+            if (!SameSet(shown, needs))
+                problems.Add($"when {key} is '{value}' the form shows [{string.Join(",", shown.Order(StringComparer.Ordinal))}] and the schema's branch needs [{string.Join(",", needs.Order(StringComparer.Ordinal))}]");
+        }
     }
 
     private static List<string> SingleRequired(JsonElement array) =>
