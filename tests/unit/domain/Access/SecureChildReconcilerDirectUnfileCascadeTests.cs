@@ -92,6 +92,62 @@ public class SecureChildReconcilerDirectUnfileCascadeTests
         _world.OwnerWrites.Should().BeEmpty("an ordinary communication with no recorded creator keeps its owner (#2722)");
     }
 
+    // ── uac-r2 197a-2 (#2728): a document linked to the message ONLY through sprk_relatedcommunication ──────────────────────
+
+    [Fact(DisplayName = "#2728 must-fire: after a Secure unfile, a document linked only through sprk_relatedcommunication follows its Direct message")]
+    [Trait("status", "issue-2728")]
+    public async Task AfterASecureUnfile_ADocumentLinkedOnlyToTheMessage_FollowsItToTheDirectTeam()
+    {
+        var (message, _) = MessageUnder(SecureMatter(), SecureChildShareWorld.SecureTeam);
+        var document = DocumentOf(message);
+        Unfile(message, toDirectTeam: true);
+
+        await Reconciler(_directory.Lookup()).AfterRefileAsync("sprk_communication", message, () => Task.FromResult(true), CancellationToken.None);
+
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(DirectTeam),
+            "the document follows its Direct-owned message out of the Secure team, as the message's other content rows do");
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: while the Direct team cannot be identified, that document is not re-owned")]
+    [Trait("status", "issue-2728")]
+    public async Task AfterASecureUnfile_WhileTheDirectTeamCannotBeIdentified_TheDocumentIsNotReOwned()
+    {
+        var (message, _) = MessageUnder(SecureMatter(), SecureChildShareWorld.SecureTeam);
+        var document = DocumentOf(message);
+        Unfile(message, toDirectTeam: true);
+        _directory.Faults = true;
+
+        await Reconciler(_directory.Lookup()).AfterRefileAsync("sprk_communication", message, () => Task.FromResult(true), CancellationToken.None);
+
+        _world.OwnerWrites.Should().NotContain(w => w.Table == "sprk_document" && w.Id == document, "never a default team in its place");
+        _world.OwnerOf("sprk_document", document).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
+    }
+
+    [Fact(DisplayName = "#2728 must-not-fire: a message that kept the Secure team keeps that document isolated")]
+    [Trait("status", "issue-2728")]
+    public async Task AfterASecureUnfile_AMessageThatKeptTheSecureTeam_KeepsTheDocumentIsolated()
+    {
+        var (message, _) = MessageUnder(SecureMatter(), SecureChildShareWorld.SecureTeam);
+        var document = DocumentOf(message);
+        Unfile(message, toDirectTeam: false);
+
+        await Reconciler(_directory.Lookup()).AfterRefileAsync("sprk_communication", message, () => Task.FromResult(true), CancellationToken.None);
+
+        _world.OwnerWrites.Should().NotContain(w => w.Table == "sprk_document" && w.Id == document);
+    }
+
+    /// <summary>A document owned by the Secure team, linked to <paramref name="message"/> ONLY through <c>sprk_relatedcommunication</c>
+    /// (an archived .eml or a materialized attachment).</summary>
+    private Guid DocumentOf(Guid message)
+    {
+        var document = Guid.NewGuid();
+        _world.Add("sprk_document", document,
+            ("owningteam", new EntityReference("team", SecureChildShareWorld.SecureTeam)),
+            ("sprk_relatedcommunication", new EntityReference("sprk_communication", message)),
+            ("versionnumber", 1L));
+        return document;
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private Guid SecureMatter()
