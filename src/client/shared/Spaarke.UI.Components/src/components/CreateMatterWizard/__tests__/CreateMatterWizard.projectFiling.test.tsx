@@ -8,7 +8,8 @@
  *     new matter;
  *   - a refused filing is a visible warning carrying the server's words — never swallowed; the link stays;
  *   - a failed N:N write files nothing (its own warning, as before);
- *   - an invoice association files no project;
+ *   - the Associate-To step never offers an invoice, and an invoice association writes nothing (EB-D-231, task 045g:
+ *     an invoice's core record is fixed at create);
  *   - a launch-context association (the subgrid "New Matter" command) reaches the Associate-To step, locked;
  *   - the project's pair is read first: a project already filed under another matter stays there unless the user
  *     chooses "Move" (no filing call; the link is still written); "Move" sends `?move=true`;
@@ -286,12 +287,22 @@ describe('CreateMatterWizard — the linked project is filed under the new matte
     expect((success.warnings ?? []).join('\n')).toMatch(/Matter created, but could not link to "PRJ-1"/);
   });
 
-  it('an invoice association files no project', async () => {
+  it('the Associate-To step offers Project and Account, never Invoice (EB-D-231, task 045g)', () => {
+    const navigationService = { openRecord: jest.fn() } as unknown as INavigationService;
+
+    const config = render(bffFetch(noContent), { navigationService });
+
+    expect(config.associateToStep?.entityTypes.map(t => t.entityType)).toEqual(['sprk_project', 'account']);
+  });
+
+  it('an invoice association (not offered) writes nothing: no invoice re-file, no project filing', async () => {
+    (dataService.updateRecord as jest.Mock).mockClear();
     await render(bffFetch(noContent)).onFinish(
       contextWith({ entityType: 'sprk_invoice', recordId: '22222222-2222-2222-2222-222222222222', recordName: 'INV-1' })
     );
 
-    expect(calls.filter(c => c.includes('sprk_project'))).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(dataService.updateRecord).not.toHaveBeenCalled();
   });
 
   it('a launch-context association (subgrid "New Matter") reaches the Associate-To step, locked', () => {

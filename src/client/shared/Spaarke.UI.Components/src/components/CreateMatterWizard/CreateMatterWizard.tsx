@@ -45,7 +45,7 @@ import {
 } from './matterService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { EventService } from '../CreateEventWizard/eventService';
-import { withBffChildWrites, fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
+import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
@@ -89,12 +89,10 @@ function getDataverseClientUrl(): string {
  *
  * - sprk_project: uses the N:N relationship sprk_Project_Matter_nn
  * - account: uses a direct $ref association on the matter's account lookup
- * - sprk_invoice: updates the SELECTED invoice's own `sprk_Matter` lookup to
- *   point at the new matter (reverse direction from account/project — an
- *   invoice references its matter directly; the matter holds no reference
- *   back. Confirmed live schema per `INVOICE_REGARDING_TARGETS` /
- *   visual-host-create-button-r1 task 030 field manifest. Added
- *   spaarkeai-assistant-enhancements-r1 task 014 / FR-A5.)
+ *
+ * An invoice is not offered: its matter, project or work assignment is fixed when it is created, and a wrongly filed
+ * invoice is returned to the firm and resubmitted on the right record, never moved (EB-D-231; field-mapping-server-write-path-r1
+ * task 045g). Any other entity type, an invoice included, writes nothing.
  *
  * Returns a success/failure result; never throws.
  *
@@ -150,20 +148,6 @@ export async function associateToRecord(
       console.info(
         '[CreateMatterWizard] Account association set:',
         `account(${recordId}) -> sprk_matter(${cleanMatterId})`
-      );
-      return { success: true };
-    }
-
-    if (entityType === 'sprk_invoice') {
-      // For invoice: update the SELECTED invoice's own Matter lookup to point
-      // at the newly created matter. Reverse direction from account/project —
-      // see doc comment above.
-      await dataService.updateRecord('sprk_invoice', recordId, {
-        'sprk_Matter@odata.bind': `/sprk_matters(${cleanMatterId})`,
-      });
-      console.info(
-        '[CreateMatterWizard] Invoice association set:',
-        `sprk_invoice(${recordId}) -> sprk_matter(${cleanMatterId})`
       );
       return { success: true };
     }
@@ -441,16 +425,15 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
 
       // Associate To step — optional step 1.
       // Requires navigationService (for the Dataverse lookup dialog).
-      // Allows linking the new matter to a Project, Account, or Invoice
-      // before creation ("none" = Skip). Invoice added
-      // spaarkeai-assistant-enhancements-r1 task 014 / FR-A5.
+      // Allows linking the new matter to a Project or Account before creation
+      // ("none" = Skip). An invoice is not offered: its core record is fixed at
+      // create (EB-D-231; see associateToRecord).
       ...(navigationService
         ? {
             associateToStep: {
               entityTypes: [
                 { label: 'Project', entityType: 'sprk_project' },
                 { label: 'Account', entityType: 'account' },
-                { label: 'Invoice', entityType: 'sprk_invoice' },
               ],
               navigationService,
               initialAssociation,
@@ -695,14 +678,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         // If the user selected an association in step 1, create the link now.
         // This is a non-blocking operation -- failure produces a warning, not an error.
         if (context.association?.recordId) {
-          // UAC-r2 task 147 r1 (owner round 28 item 1): filing the SELECTED invoice under the new matter is a re-file of
-          // a child record — its owner follows the matter — so it goes through the BFF
-          // (`PATCH /api/v1/child-records/sprk_invoice/{id}`), never Xrm.WebApi.
-          const assocResult = await associateToRecord(
-            withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl),
-            matterId,
-            context.association
-          );
+          const assocResult = await associateToRecord(dataService, matterId, context.association);
           if (!assocResult.success) {
             result.warnings.push(
               `Matter created, but could not link to "${context.association.recordName}". ` +
