@@ -157,7 +157,11 @@ public static class AuthorizationModule
                         "Check AzureAd:ClientId and AgentToken:CopilotAudience configuration.");
                 }
 
-                // Log auth failures with token details for diagnosing Copilot token issues
+                // Log auth failures so Copilot token issues can be diagnosed WITHOUT logging the token's claims.
+                // ADR-028 A10 / ADR-015 allow ids, sizes, timings and reason codes in logs, not token claims, so the
+                // audience, issuer, appid/azp and the validation exception message (which embeds them) are never
+                // logged (#2762). Only a fixed failure class, whether the token's audience is one of the configured
+                // audiences (a bool, never the values) and the request's TraceIdentifier for correlation.
                 var existingOnFailed = options.Events?.OnAuthenticationFailed;
                 options.Events ??= new JwtBearerEvents();
                 options.Events.OnAuthenticationFailed = async context =>
@@ -167,18 +171,41 @@ public static class AuthorizationModule
                     var authHeader = context.HttpContext.Request.Headers.Authorization.ToString();
                     if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer "))
                     {
+                        System.IdentityModel.Tokens.Jwt.JwtSecurityToken? jwt = null;
                         try
                         {
-                            var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-                            var jwt = handler.ReadJwtToken(authHeader["Bearer ".Length..]);
-                            logger.LogWarning(
-                                "JWT auth failed. Audience={Audience}, Issuer={Issuer}, AppId={AppId}, Error={Error}",
-                                string.Join(",", jwt.Audiences),
-                                jwt.Issuer,
-                                jwt.Claims.FirstOrDefault(c => c.Type == "appid")?.Value ?? jwt.Claims.FirstOrDefault(c => c.Type == "azp")?.Value,
-                                context.Exception?.Message);
+                            jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler()
+                                .ReadJwtToken(authHeader["Bearer ".Length..]);
                         }
-                        catch { /* token unreadable — skip logging */ }
+                        catch { /* token unreadable — classified as malformed below */ }
+
+                        var failureClass = jwt is null
+                            ? "malformed"
+                            : context.Exception switch
+                            {
+                                Microsoft.IdentityModel.Tokens.SecurityTokenExpiredException => "expired",
+                                Microsoft.IdentityModel.Tokens.SecurityTokenInvalidSignatureException
+                                    or Microsoft.IdentityModel.Tokens.SecurityTokenSignatureKeyNotFoundException => "bad_signature",
+                                Microsoft.IdentityModel.Tokens.SecurityTokenInvalidAudienceException => "bad_audience",
+                                Microsoft.IdentityModel.Tokens.SecurityTokenInvalidIssuerException => "bad_issuer",
+                                Microsoft.IdentityModel.Tokens.SecurityTokenNotYetValidException => "not_yet_valid",
+                                _ => "other",
+                            };
+
+                        var validation = context.Options.TokenValidationParameters;
+                        var audienceConfigured = jwt is not null && jwt.Audiences.Any(a =>
+                            string.Equals(a, validation.ValidAudience, StringComparison.OrdinalIgnoreCase) ||
+                            (validation.ValidAudiences?.Any(v => string.Equals(a, v, StringComparison.OrdinalIgnoreCase)) ?? false));
+
+                        // Clients present an expired token on every refresh cycle, so `expired` is routine traffic
+                        // (Information); every other class is a rejected credential worth a Warning.
+                        logger.Log(
+                            failureClass == "expired" ? LogLevel.Information : LogLevel.Warning,
+                            "JWT auth failed. FailureClass={FailureClass}, ExceptionType={ExceptionType}, AudienceConfigured={AudienceConfigured}, TraceId={TraceId}",
+                            failureClass,
+                            failureClass == "other" ? context.Exception?.GetType().Name : "-",
+                            audienceConfigured,
+                            context.HttpContext.TraceIdentifier);
                     }
                     if (existingOnFailed != null) await existingOnFailed(context);
                 };
