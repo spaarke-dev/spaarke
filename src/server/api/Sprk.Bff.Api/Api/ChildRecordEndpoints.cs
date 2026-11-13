@@ -807,6 +807,8 @@ public static class ChildRecordEndpoints
                 { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
                     $"The {Noun(entity)} was not saved: {pairInvalid}"),
                 { ParentUnavailable: true } => ParentNotFound(entity),
+                // Task 045d: an invoice-family row's resolver fields that could not be derived — the guard's code, as the re-file core's.
+                { InvoiceFamilyRefusal: { } family } => InvoiceFamilyRefused(family, entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 _ => Problem(StatusCodes.Status500InternalServerError, "child_record.no_decision", "The record was not updated."),
             };

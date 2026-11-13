@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -224,5 +225,238 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
         problem.Detail.Should().Be(guardSaid.Reason);
         AssertNothingWritten();
+    }
+
+    // =====================================================================================
+    // Task 045d (owner ruling Q8 (a)): the row is created with the five resolver fields of its core record
+    // =====================================================================================
+
+    private static string MatterId => OrdinaryMatter.ToString("D").ToLowerInvariant();
+
+    /// <summary>A created column's value as text; null for a value that is absent or written as null (a clear).</summary>
+    private static string? WrittenAs(object? value) => value switch
+    {
+        null => null,
+        JsonElement { ValueKind: JsonValueKind.Null } => null,
+        _ => Describe(value),
+    };
+
+    [Fact]
+    public async Task CreateAsync_AnInvoiceUnderOneMatter_IsCreatedWithTheMattersFiveResolverFields_OverTheCallersOwn()
+    {
+        CallerReadsTheMatterAs("Acme v Beta", "MAT-000013");
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "One core record",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+            sprk_regardingrecordname = "Sent by the caller",
+            sprk_regardingrecordnumber = "SENT-1",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordtype@odata.bind"]).Should().Be($"/sprk_recordtype_refs({CatalogRowOf("sprk_matter"):D})");
+        Describe(fields["sprk_regardingrecordid"]).Should().Be(MatterId);
+        Describe(fields["sprk_regardingrecordname"]).Should().Be("Acme v Beta", "the server's value, never the caller's");
+        Describe(fields["sprk_regardingrecordurl"]).Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={MatterId}");
+        Describe(fields["sprk_regardingrecordnumber"]).Should().Be("MAT-000013", "the number column the catalog row names");
+        outcome.Steps.Single(s => s.Step == RecordCreationStep.PreWriteRules).Note.Should().Contain("5 column(s) derived");
+    }
+
+    [Fact]
+    public async Task CreateAsync_TheDeriveRunsAfterStep5_SoACallerWithoutAppendToTheMatter_CausesNoCatalogOrRecordRead()
+    {
+        _scripted.NoAppendTo.Add(OrdinaryMatter);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Denied at step 5",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        outcome.Refusal.PreWrite.Should().BeNull("step 5 refused it, before the rule");
+        _recordTypes.Invocations.Should().BeEmpty("nothing is derived for a row step 5 refuses");
+        _journal.Should().NotContain(["catalog", "readback"]);
+        AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheCatalogReadFaults_IsUndecided500ReadFailed_AndWritesNothing()
+    {
+        _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("catalog timed out"));
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Catalog down",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Undecided, "never written without its five fields");
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        AssertNothingWritten();
+    }
+
+    [Theory]
+    [InlineData("catalog")]
+    [InlineData("matter, as the caller")]
+    [InlineData("matter's exists-check")]
+    public async Task CreateAsync_AReadFaultInTheDerive_Is500ReadFailed_AndTheFaultsOwnTextIsNotInTheResponse(string faulted)
+    {
+        const string faultText = "socket 10.0.0.9 timed out";
+        switch (faulted)
+        {
+            case "catalog":
+                _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new TimeoutException(faultText));
+                break;
+            case "matter, as the caller":
+                // Fix round 5: the name and number are read as the caller; a read that fails (not a 403 or 404) is a fault.
+                _scripted.GetOverride = path => path.StartsWith($"sprk_matters({OrdinaryMatter:D})?$select=sprk_mattername", StringComparison.Ordinal)
+                    ? DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.BadRequest, faultText)
+                    : null;
+                break;
+            default:
+                // The caller may not read the matter, and the app-only check that it exists faults.
+                _scripted.UnreadableRows.Add(OrdinaryMatter);
+                _readBack
+                    .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new TimeoutException(faultText));
+                break;
+        }
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "A read faults",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        JsonSerializer.Serialize(problem).Should().NotContain("10.0.0.9", "a fault's own text never reaches the response");
+        outcome.Refusal!.Detail.Should().NotContain(faultText);
+        AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheCoreTableHasNoCatalogRow_Is400ResolverFieldsIncomplete_AndWritesNothing()
+    {
+        _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity?)null);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "No catalog row",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Invalid);
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status400BadRequest);
+        problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
+        AssertNothingWritten();
+    }
+
+    [Theory]
+    [InlineData("no number")]
+    [InlineData("no name")]
+    public async Task CreateAsync_WhenTheMatterHasNoNameOrNoNumber_IsCreated_WithTheTypeIdAndUrl_AndWithoutTheBlankOne(string gap)
+    {
+        // Owner, 2026-11-12, option (b): the row takes what the record has (as the caller reads it, fix round 5).
+        CallerReadsTheMatterAs(gap == "no name" ? null : "Acme v Beta", gap == "no number" ? null : "MAT-000013");
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Matter with a blank",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordtype@odata.bind"]).Should().Be($"/sprk_recordtype_refs({CatalogRowOf("sprk_matter"):D})");
+        Describe(fields["sprk_regardingrecordid"]).Should().Be(MatterId);
+        Describe(fields["sprk_regardingrecordurl"]).Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={MatterId}");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordnumber")).Should().Be(gap == "no number" ? null : "MAT-000013");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordname")).Should().Be(gap == "no name" ? null : "Acme v Beta");
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheMatterIsGoneByTheDerive_IsTheUniformNotFound_AndWritesNothing()
+    {
+        // The caller's read finds no matter (404), and the app-only check agrees: it does not exist.
+        _scripted.InvisibleRows.Add(OrdinaryMatter);
+        _readBack
+            .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Matter deleted meanwhile",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        outcome.Refusal.PreWrite!.ParentUnavailable.Should().BeTrue();
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status404NotFound);
+        problem.Extensions["errorCode"].Should().Be(RecordCreationRefusal.NotFoundCode);
+        AssertNothingWritten();
+    }
+
+    // =====================================================================================
+    // Task 045d fix round 5: the name and number are read as the caller
+    // =====================================================================================
+
+    /// <summary>The matter's name and number as the caller reads them (the app-only read answers "Acme v Beta", "MAT-000013").</summary>
+    private void CallerReadsTheMatterAs(string? name, string? number) =>
+        _scripted.RowValues[OrdinaryMatter] = new Dictionary<string, object?>
+        {
+            ["sprk_mattername"] = name,
+            ["sprk_matternumber"] = number,
+        };
+
+    [Fact]
+    public async Task CreateAsync_ACallerWhoMayAppendToTheMatterButNotReadIt_GetsTheRowWithTheTypeIdAndUrl_AndNoNameOrNumber()
+    {
+        // Append without read: step 5 admits the row, but the caller never sees the matter's name or number, so the server does
+        // not copy them into a row the caller can read. The matter is checked to exist (app-only); its name and number are cleared.
+        _scripted.UnreadableRows.Add(OrdinaryMatter);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Appended, not read",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordtype@odata.bind"]).Should().Be($"/sprk_recordtype_refs({CatalogRowOf("sprk_matter"):D})");
+        Describe(fields["sprk_regardingrecordid"]).Should().Be(MatterId);
+        Describe(fields["sprk_regardingrecordurl"]).Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={MatterId}");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordname")).Should().BeNull("the caller may not read the matter's name");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordnumber")).Should().BeNull("the caller may not read the matter's number");
+        _journal.Should().Contain("readback", "the matter is checked to exist, app-only");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ACallerWhoMayReadTheMatter_GetsItsNameAndNumberAsTheyReadThem()
+    {
+        CallerReadsTheMatterAs("As the caller reads it", "C-0001");
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Read by the caller",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordname"]).Should().Be("As the caller reads it", "read as the caller, never app-only");
+        Describe(fields["sprk_regardingrecordnumber"]).Should().Be("C-0001");
     }
 }

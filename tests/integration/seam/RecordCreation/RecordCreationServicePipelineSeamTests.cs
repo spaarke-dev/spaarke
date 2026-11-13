@@ -68,6 +68,9 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     private readonly List<(string Table, Guid Id, Dictionary<string, object?> Fields)> _creates = [];
     private readonly Mock<IFieldMappingDataverseService> _appOnly = new(MockBehavior.Strict);
     private readonly Mock<IGenericEntityService> _readBack = new(MockBehavior.Strict);
+
+    /// <summary>Task 045d: the record-type catalog (app-only) the invoice-family rule derives the pair type and number column from.</summary>
+    private readonly Mock<ICommunicationDataverseService> _recordTypes = new(MockBehavior.Strict);
     private readonly StampWorld _stamps = new StampWorld().Row("sprk_matter", OrdinaryMatter).Row("sprk_matter", SecureMatter);
     private readonly SecureChildShareWorld _shareWorld = SecureChildShareWorld.Standard()
         .OrdinaryRoot("sprk_matter", OrdinaryMatter)
@@ -112,7 +115,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
             .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Callback(() => _journal.Add("readback"))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) =>
-                new Entity(table, id) { ["sprk_matternumber"] = "MAT-000013" });
+                new Entity(table, id) { ["sprk_matternumber"] = "MAT-000013", ["sprk_mattername"] = "Acme v Beta" });
 
         // Task 015 (step 8, FR-10): a search-indexed table's owner team is read for its business unit, and that unit for its
         // search-index defaults — none set in this world. Since task 041 step 8 fills nothing (SearchIndexDefaultTests).
@@ -123,7 +126,18 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         _readBack
             .Setup(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Entity(table, id));
+
+        // Task 045d: one active catalog row per table, naming the table's number column (as the live catalog does for a core table).
+        _recordTypes
+            .Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => _journal.Add("catalog"))
+            .ReturnsAsync((string table, CancellationToken _) =>
+                new Entity("sprk_recordtype_ref", CatalogRowOf(table)) { [RegardingRecordType.RecordNumberFieldColumn] = table + "number" });
     }
+
+    /// <summary>Task 045d: the harness catalog's fixed row id for a table.</summary>
+    private static Guid CatalogRowOf(string table) =>
+        new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("catalog:" + table)));
 
     // =====================================================================================
     // The twelve steps, in order, and exactly one create
@@ -762,7 +776,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
         return new RecordCreationService(
             resolver, _appOnly.Object, _readBack.Object, SecureRootFilingGateFixtures.NothingSecure(), restamper, shares,
-            new JournalingScopes(new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _journal),
+            new JournalingScopes(new ServiceCollection().AddSingleton(_recordTypes.Object).BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), _journal),
             _publisher, _logger)
         {
             TableRules = t => _tableRules(t),
@@ -794,7 +808,7 @@ public sealed partial class RecordCreationServicePipelineSeamTests
                     {
                         _journal.Add("prewrite");
                         asked.Add(row);
-                        return Task.FromResult(decide(row));
+                        return Task.FromResult(PreWriteResult.Of(decide(row)));
                     }),
             ],
         };
