@@ -624,6 +624,24 @@ internal sealed partial class RecordCreationService
             : MappingSourceAccess.Unreadable;
     }
 
+    /// <summary>Task 022c: the column the Restricted-source rule reads on a STORED row (a row Repair maps into, a child a push
+    /// writes), when the row's table carries it (<see cref="InheritedAccessPermission.CarriesColumn"/>); none otherwise. Pure.</summary>
+    internal static IEnumerable<string> StoredRowAccessColumns(string table) =>
+        InheritedAccessPermission.CarriesColumn(table) ? [InheritedAccessPermission.Column] : [];
+
+    /// <summary>
+    /// Task 022c: the one answer to "is this stored row Restricted" for the Restricted-source rule on Repair and on the
+    /// field-mapping push (UAC-r2, 2026-11-12: the row's stored <see cref="InheritedAccessPermission.Column"/> is its answer).
+    /// True only when <paramref name="table"/> carries the column (<see cref="StoredRowAccessColumns"/>) and
+    /// <paramref name="row"/> holds the Restricted option. No row, a table without the column, an absent or null value, a value
+    /// of another type, or any other option is not Restricted (fail closed: a Restricted source then maps nothing). Pure.
+    /// </summary>
+    internal static bool StoredRowIsRestricted(string table, Entity? row) =>
+        row is not null
+        && InheritedAccessPermission.CarriesColumn(table)
+        && row.Attributes.TryGetValue(InheritedAccessPermission.Column, out var value)
+        && value is OptionSetValue { Value: InheritedAccessPermission.Restricted };
+
     /// <summary>
     /// Task 022b (the Restricted-source rule): values mapped from a source whose Access Permission is Restricted — or from a
     /// source table with the column whose value could not be read — are written only into a row that ends Restricted in this
