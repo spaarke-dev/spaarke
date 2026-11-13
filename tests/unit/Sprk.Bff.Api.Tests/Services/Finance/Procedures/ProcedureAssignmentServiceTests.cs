@@ -1171,6 +1171,41 @@ public sealed class ProcedureAssignmentServiceTests
         w.Rows.Should().BeEmpty();
     }
 
+    [Theory(DisplayName = "EB-D-232 must-fire: a rule of a Procedure deactivated in Dataverse (Status Active, statecode 1) is 409 rule_not_in_force, as a Retired one's is, and writes nothing; statecode 0 (or none) is changed (must not fire)")]
+    [InlineData(1, false)]
+    [InlineData(0, true)]
+    [InlineData(null, true)]
+    public async Task Change_ARuleOfADeactivatedProcedure_Is409RuleNotInForce(int? state, bool changes)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(state: state));
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        if (changes)
+        {
+            outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+            return;
+        }
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("assignment.rule_not_in_force");
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Writes.Should().BeEmpty();
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "EB-D-232 (scope): Exclude still accepts a rule of a deactivated Procedure, as it does a retired one's")]
+    public async Task Exclude_StillAcceptsARuleOfADeactivatedProcedure()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(state: 1));
+
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
+    }
+
     [Fact(DisplayName = "089c pass 2 F1: a rule of a set with no Procedure keeps its behaviour (changed), and the Procedure is not read")]
     public async Task Change_ARuleOfASetWithNoProcedure_IsChanged_AndReadsNoProcedure()
     {

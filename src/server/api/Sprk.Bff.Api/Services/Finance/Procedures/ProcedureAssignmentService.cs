@@ -795,8 +795,8 @@ public class ProcedureAssignmentService
         // In force = switched on, in a Published set, with a version of its own (089c review F1): retiring a Procedure switches its rules off
         // (sprk_enabled=false) but leaves statecode and the current version, so the version alone would copy a retired rule.
         // A retired owning Procedure ends it whatever the rule's flags say (pass 2): the retire writes in chunks, so a failed later chunk leaves
-        // the Procedure retired with some rules still enabled.
-        var current = baseRule is { Enabled: true, SetPublished: true, ProcedureRetired: false } && baseRule.CurrentVersionId is { } currentId
+        // the Procedure retired with some rules still enabled. A Procedure deactivated in Dataverse likewise (EB-D-232): the same 409.
+        var current = baseRule is { Enabled: true, SetPublished: true, ProcedureEnded: false } && baseRule.CurrentVersionId is { } currentId
             ? await LoadByIdAsync(entities, VersionTable, currentId, BaseVersionColumns, ct)
             : null;
         if (current is null || current.GetAttributeValue<EntityReference>("sprk_policy")?.Id != policyId)
@@ -2124,7 +2124,7 @@ public class ProcedureAssignmentService
     /// <summary>The rule an Exclude or a change names, as read (the policy and its rule set).</summary>
     private sealed record BaseRule(
         Guid Id, string Name, string Code, Guid? FirmId, bool VisibleToFirms, Guid? CurrentVersionId, int? Priority, int? Lane, int? Severity,
-        bool Enabled, bool SetPublished, bool ProcedureRetired);
+        bool Enabled, bool SetPublished, bool ProcedureEnded);
 
     private static readonly string[] BaseVersionColumns =
     {
@@ -2174,13 +2174,15 @@ public class ProcedureAssignmentService
             return (null, Refused<T>(StatusCodes.Status404NotFound, CodeRuleNotFound, "The rule was not found."));
         }
 
-        // The change reads the owning Procedure's status too, by the constant Assign refuses a retired Procedure with. A read fault here throws
-        // ReadFailedException like every other read, answered 503 by the public method.
-        var procedureRetired = false;
+        // The change reads the owning Procedure's status too, by the constant Assign refuses a retired Procedure with, and its statecode: a
+        // Procedure deactivated in Dataverse has ended just as a Retired one has (EB-D-232 / ISS-021; `is not (null or StateActive)`, as the
+        // resolver and AssignRefusalOf). A read fault here throws ReadFailedException like every other read, answered 503 by the public method.
+        var procedureEnded = false;
         if (readProcedure && set.GetAttributeValue<EntityReference>(RuleSetService.ProcedureColumn)?.Id is { } owningProcedureId)
         {
-            var owner = await LoadByIdAsync(entities, ProcedureEntity.Entity, owningProcedureId, new[] { ProcedureEntity.StatusColumn }, ct);
-            procedureRetired = owner?.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired;
+            var owner = await LoadByIdAsync(entities, ProcedureEntity.Entity, owningProcedureId, new[] { ProcedureEntity.StatusColumn, "statecode" }, ct);
+            procedureEnded = owner?.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired
+                || owner?.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or InvoiceStatusCodes.StateActive);
         }
 
         var code = policy.GetAttributeValue<string>("sprk_policycode") ?? policyId.ToString();
@@ -2196,7 +2198,7 @@ public class ProcedureAssignmentService
             policy.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
             policy.GetAttributeValue<bool?>("sprk_enabled") == true,
             set.GetAttributeValue<OptionSetValue>("statuscode")?.Value == RuleSetService.RuleSetPublished,
-            procedureRetired), null);
+            procedureEnded), null);
     }
 
     /// <summary>A policy version row as the rule-set service's validator reads it.</summary>
