@@ -675,6 +675,14 @@ export interface IEmailComposerProps {
   composeOnly?: boolean;
 
   /**
+   * Compose-only hosts only (spaarke-ontology-platform-r1 task 182, owner D-219 Q2): show the From row — "From:" and the
+   * sender choice (My mailbox / Spaarke shared mailbox, or the fixed sender when {@link sendMode} is set) — WITHOUT the Send
+   * button, so the user picks the mailbox the host will send from. The choice is `state.sendMode` in `onStateChange`.
+   * Ignored without {@link composeOnly}. Omitted (every other compose-only host, e.g. the decision wizard): the row stays hidden.
+   */
+  composeOnlyShowsFrom?: boolean;
+
+  /**
    * Optional override for the chromed (page/dialog mount) header title. When
    * supplied, it REPLACES the mode-derived word ('Reply'/'Forward'/'New
    * Email'/…) — e.g. a caller can show `Reply: <subject>`. Additive/optional:

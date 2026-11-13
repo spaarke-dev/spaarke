@@ -83,6 +83,24 @@ export type { IAssociationChipsProps } from './subcomponents/AssociationChips';
 export { ComposerActionBar } from './subcomponents/ComposerActionBar';
 export type { IComposerActionBarProps } from './subcomponents/ComposerActionBar';
 
+// Compose-only hosts (task 182): the moved plain-text helper, and the collected email + its send at the host's Finish
+export { toPlainText } from './composeOnlyText';
+export {
+  EMPTY_COMPOSED_EMAIL,
+  composedEmailFromState,
+  pendingAttachments,
+  invalidRecipients,
+  isComposedEmailReady,
+  joinRecipientAddresses,
+  sendComposedEmail,
+} from './composeOnlySend';
+export type {
+  IComposedEmail,
+  IEmailComposeHandlers,
+  ISendComposedEmailOptions,
+  ISendComposedEmailResult,
+} from './composeOnlySend';
+
 // Reducer + pure helpers (task 023 unit-tests these directly)
 export {
   emailComposerReducer,
