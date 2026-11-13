@@ -17,9 +17,15 @@ Design: `task-045c-notes.md` "Q8 (a)" (copied, not redesigned). POML: `tasks/045
    the previous record's display. A derive that cannot be done (no catalog row, record missing, a read fault) refuses; the
    row is never written, or moved, without the type, id and URL of the record it names.
 4. An update that touches no core lookup reads nothing more and writes none of the five.
-5. Order: on the create, the derive runs inside step 5½, after step 5's AppendTo on every record the row names, and only
-   when the guard admits the row. On every update path it runs after that path's invoice-family guard and the 045b planner,
-   so their refusals come first and are unchanged.
+5. Order:
+   - On the create, the derive runs inside step 5½, after step 5's AppendTo on every record the row names, and only when
+     the guard admits the row.
+   - On the app-only update paths (playbook update, output mapping, push) it runs after that path's invoice-family guard
+     and the 045b planner, so their refusals come first and are unchanged.
+   - On the caller update paths (child-record PATCH, chat update tool) it runs inside the 045b caller-path planner, which
+     runs BEFORE `RefileAsync`'s guard. It asks the guard's pure `Check` first and derives nothing for a row `Check`
+     refuses, so that refusal is still answered by `RefileAsync`'s guard with its own code. A derive failure on a row
+     `Check` admits answers before the guard's later questions (K3).
 6. The dedicated submission writers are unchanged: their derive still refuses a blank name or number (all five or none).
 7. On the app-only paths the name and number are read as the 045b planner reads a moved pair's display values on that
    path:
@@ -35,6 +41,22 @@ Design: `task-045c-notes.md` "Q8 (a)" (copied, not redesigned). POML: `tasks/045
    detail. The submission writers' text is unchanged.
 9. The derive reads the stored row only to derive from it. A stored row that does not exist gets no derive refusal; the
    path answers it as it answers any missing row. A missing or unreadable NEW core record still refuses.
+10. An update that names the record the row already names (the same table and id, after the change is overlaid on the
+    stored row) derives nothing and writes none of the five, on every update path. The row keeps the fields it has, as the
+    045b planner keeps a pair that does not move (rule 4). A re-run that binds the same matter, an external identifier
+    given only its invoice while its matter decides, or a push by a caller who may append to but not read the matter no
+    longer clears the name and number.
+11. On the app-only update paths a row the derive's own `Check` refuses is refused with that code, through the path's
+    existing form. The path's guard admitted it on its own read, so the row changed in between; the write must not move
+    the core with stale fields. On the caller paths the derive still leaves such a row to `RefileAsync`'s guard, which
+    runs after it (rule 5).
+12. On the create (step 5½) the name and number are read AS THE CALLER, through the same reader as the planner's caller
+    read (`OwnedChildWrite.CallerRecordDisplay`, wrapped by `CallerDisplayRecords`). A caller who may append to the matter
+    but not read it gets the row with the type, id and URL, and with the name and number cleared; the matter is checked to
+    exist app-only, and a missing one refuses as before (the uniform not-found). The catalog row stays app-only: it holds
+    no record's values. The submission writers are unchanged (strict variant).
+13. No generic writer can fall back to an app-only read of the name and number: `DeriveForGenericUpdateAsync`'s `records`
+    and `KeepInvoiceFamilyResolverFieldsAppOnlyAsync`'s `displayRecord` are required parameters.
 
 ## H1 widened, ebilling-r1 + unified-access-control-r2 agreed 2026-11-13
 
@@ -89,8 +111,9 @@ A blank name or number is legitimate data, and refusing it would make such a rec
     `sprk_recordlogicalname` = table, active, top 1);
   - the record's name and number, as the caller or the person (rule 7); app-only only to check, after a 403 or 404, that
     the record exists.
-- It decides with the guard's pure `Check` on the stored values overlaid with the change. A row `Check` refuses is left to the
-  path's existing guard, so there is no new refusal for any table.
+- It decides with the guard's pure `Check` on the stored values overlaid with the change. The path's guard ran first, so a
+  row `Check` refuses here changed in between; it is refused with that code (rule 11). A row whose decided record equals
+  the stored row's derives nothing (rule 10).
 - Payload shapes: one helper, the dictionary overload of `OwnedChildWrite.WithColumnsSet`:
   - the type becomes `{navigation}@odata.bind` = `/sprk_recordtype_refs({id})`, on the table's spelling of the navigation
     property;
@@ -102,6 +125,22 @@ A blank name or number is legitimate data, and refusing it would make such a rec
 - A run as a person (the playbook or output mapping acting as the caller) answers a missing record as `read_failed`, the
   same as the guard on that path (#2081).
 
+## Who reads the name and number (fix round 5 inventory)
+
+Every caller of the derive (`DeriveResolverFieldsAsync`, `DeriveGenericResolverFieldsAsync`, `DeriveForGenericUpdateAsync`)
+and of `PreWriteRow.Records`, found by grep over `src/server`:
+
+| Path | Writes | Name and number read as | Why that is right |
+|---|---|---|---|
+| Create step 5½ (`RecordCreationService.RunPreWriteRulesAsync` → `RecordTableRules.InvoiceFamilyRule`), reached by every route that creates through the service: the child-record route, the chat create tool (`DataverseCreateRecordHandler`), the Office add-in creates (`OfficeService`, both calls) and the other `RecordCreationPrincipal.ForCaller` callers | A family row, as the caller | The caller (fixed in round 5; it was app-only) | The row is the caller's; a value they may not read is not copied into it. A create with no caller (system principal) is refused before any read |
+| Create's mapping-source rebuild (`RecordCreationService.Mapping.cs`, `StripMappedSourceValuesAsync` → `RunPreWriteRulesAsync`) | The same row, rebuilt | The caller (the same `RunPreWriteRulesAsync`, so fixed with it) | As above |
+| Caller update planner (`OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAsync`): child-record PATCH, chat update tool | A family row, as the caller | The caller (`CallerRecordReader`; a record they may not read is refused not-found, K8) | Unchanged since round 1 |
+| Field-mapping push (`KeepInvoiceFamilyResolverFieldsAppOnlyAsync`) | A family row, app-only on the caller's behalf | The caller (`CallerDisplayReader`) | Round 3; the 045b planner reads the same way there |
+| Playbook update, output mapping (`KeepInvoiceFamilyResolverFieldsAppOnlyAsync`) | A family row, as the run's person or app-only | The person the run acts as (`MovedDisplayReader`); with no person, not read (cleared) | Round 4; 045b's rule F-045b-1 |
+| Invoice submission service (`InvoiceSubmissionService`, submission row) and persister (`InvoiceSubmissionPersister`, invoice, lines, approval) | Their own new rows | App-only (strict variant) | Typed system writers that create their own rows, not a person's generic path; app-only by design and unchanged |
+| From-email submission (`SubmitInvoiceFromEmailOperation`) | The submission row | App-only (it takes the submission service's derived fields) | The same submission writer |
+| Submit Invoice step A (`InvoiceSubmissionEndpoints.RefileBodyAsync`) | Not a family row: the source communication's regarding pair, re-filed as the caller | App-only | Outside this task (a communication, ebilling-r1's code); reported to the main session for an owner decision, not changed here |
+
 ## What changed
 
 - `RecordTableRules`:
@@ -110,8 +149,9 @@ A blank name or number is legitimate data, and refusing it would make such a rec
   - `InvoiceFamilyRule` derives after the guard admits, with the generic variant. With no reader it fails closed
     (`read_failed`).
 - `RecordCreationService`: step 5½ merges the rules' columns into the item (`OwnedChildWrite.WithColumnsSet`) before step 6.
-  - The readers are `_entities.RetrieveAsync` and `ICommunicationDataverseService.QueryRecordTypeRefAsync`, from a scope (the
-    readers the dedicated writers use).
+  - The readers: the record's name and number as the caller (fix round 5, rule 12:
+    `CallerDisplayRecords(_entities, CallerRecordDisplay(user))`), and the catalog row by
+    `ICommunicationDataverseService.QueryRecordTypeRefAsync`, from a scope (the dedicated writers' catalog reader).
   - The mapping-source rebuild (`StripMappedSourceValuesAsync`) re-applies them.
 - `InvoiceFamilyCoreRecordGuard`:
   - `DeriveResolverFieldsAsync` (the submission writers) is unchanged in behaviour.
@@ -142,6 +182,8 @@ A blank name or number is legitimate data, and refusing it would make such a rec
 | `WithColumnsSet` (mapped item and dictionary) | `WithoutColumns`, `Merge` | Both reused; a setter is needed for SDK values (an `EntityReference` pair type → bind on the table's navigation property) | The derived columns cannot be set over the caller's payload; the caller's values would win |
 | `CallerDisplayRecords` (push) and the `records` parameter of `DeriveForGenericUpdateAsync` | `CallerDisplayReader` (045b, the push's display read) | Reused: wrapped as the derive's record reader; only the exists-check on a 403 or 404 is new | The push writes app-only display values that the 045b planner, on the same path, reads as the caller |
 | H1: the widened table set of `CheckGenericUpdateAsync` / `IsUpdateOnlyTarget` | The same guard, invoice and line only | Extended in place: the condition reads `CoreRecordLookups`; no new member | A generic update can give an approval, external identifier, correction or submission a second core record, or re-create a deleted one by upsert |
+| `InvoiceFamilyCoreRecordGuard.NamesTheSameRecord` (fix round 5) | `Check`'s `Regarding`; 045b planner rule 4 | A pure comparison of two `Check` answers, shared by the app-only derive and the caller-path derive so the two agree | A write that re-names the record a row already names re-derives, and on a run that cannot read the record clears its name and number every time |
+| `OwnedChildWrite.CallerRecordDisplay` (fix round 5) | The record reader inside `CallerReaders` (045b) | Extracted from it unchanged; `CallerReaders` now calls it, so there is one caller display read | The create reads the name and number app-only and copies them into a row a caller who may not read the record can read |
 | `KeepInvoiceFamilyResolverFieldsAsync` / `…AppOnlyAsync` | 045b planner rule 4 (moves the pair with an agreement lookup) | Runs after the planner; rule 4 does not cover a core-table switch | A family row moved matter → project keeps a stale or cleared pair (045b notes, "What is not covered") |
 
 ## Evidence
@@ -215,11 +257,32 @@ A blank name or number is legitimate data, and refusing it would make such a rec
   exists-check, the guard's person mapping, and `IsUpdateOnlyTarget` narrowed. With them, 44 failed. The 4 that passed are
   the push rows of the moved-record tests (unchanged on the push) and one unrelated test the filter matched. Restored: all
   pass.
-- ebilling-r1's proof (minus `Api.Office.`), fourth round: Finance 7280 passed, 0 failed, 4 skipped; ProcedureAssignment 392
-  passed; InvoiceFamily 502 passed.
+- Fifth round (fix round 5), tests new or changed:
+  - rule 10, must fire: a write that re-names the matter the row already names leaves the name and number out of the
+    payload and reads nothing for the derive — the two handlers with no person and with a person, the push for a caller
+    who may and may not read the matter (6), and the child-record PATCH and chat update tool (2);
+  - rule 10, payload pins: the "core already named" theory and the "external identifier given an invoice" theory now
+    assert that none of the five is in the payload;
+  - rule 11: a row given a second core record between the guard's read and the derive's is refused
+    `invoice_family_multiple_core_records` and nothing is written, on all three paths;
+  - rule 12, create seam: a caller who may append to but not read the matter gets type, id and URL, name and number
+    cleared, and the app-only exists-check ran; a caller who may read it gets the values they read (not the app's); the
+    read-fault theory now faults the caller's read and, separately, the exists-check;
+  - existing create seam tests now script the matter's name and number as the caller reads them;
+  - the "blank name or number" theory runs the two handlers as a person who may read the matter, with both gaps on every
+    path (6 rows, was 3), so "number blank, name kept" is really tested;
+  - the output handler fixture names entity sets from metadata, as the playbook fixture already did.
+- Fail-then-pass (fifth round): `NamesTheSameRecord` forced false, the K2 refusal returned to `null`, and step 5½'s record
+  reader returned to the app-only read. 32 failed. The 2 that passed are the catalog-fault row (unrelated to this round) and
+  the exists-check-fault row (an app-only fault answers `read_failed` either way). Restored: all pass.
+- ebilling-r1's proof (minus `Api.Office.`), fifth round: Finance 7280 passed, 0 failed, 4 skipped; ProcedureAssignment 392
+  passed; InvoiceFamily 514 passed (fourth round 502).
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
 - `dotnet test tests/Spaarke.ArchTests/`: 2536 passed.
-- `Sprk.Bff.Api.Tests` filtered run: 9460 passed, 0 failed, 3 skipped (live tests), run alone (fourth round; third round 9427).
+- `Sprk.Bff.Api.Tests` filtered run: 9477 passed, 0 failed, 3 skipped (live tests), run alone (fifth round; fourth round
+  9460). A wider run of three classes, made earlier in the round, failed once on
+  `CreatePath_ANamedSourceMappedCreate_WithDelayedReads_OverlapsTheMappingReads_AndAnswersAsTheSequentialRun` (a timing bound
+  on a `sprk_event` create, which step 5½ does not touch); it passed on three reruns alone and in the full filtered run.
   - Filter: Invoice | RecordTableRules | PreWrite | RecordCreation | OwnedChildWrite | UpdatePlanner | ChildRecord |
     RegardingPair | SecureChildOwnership | DataverseUpdateRecordHandler | BillingExport | Refusal | ActionSeam | FieldMapping |
     UpdateRecordAction | DataverseUpdateHandler | AiTool | InvoiceSubmission, minus `Api.Office.`.
@@ -231,11 +294,13 @@ A blank name or number is legitimate data, and refusing it would make such a rec
 
 - K1: an update that changes a core lookup costs up to four more reads, plus any metadata read the record reader needs:
   - the stored core lookups and the catalog row: as the caller on a caller path, app-only on an app-only path;
-  - the record's name and number: as the caller on a caller path and on the push, as the person on the two handlers, and
+  - the record's name and number: as the caller on the create, on a caller path and on the push, as the person on the two handlers, and
     not read at all on a handler run with no person (they are cleared);
   - after a 403 or 404 on that read, one app-only read to check that the record exists.
-- K2: the derive's stored-lookup read and the guard's own are separate reads. A row changed between them is decided by the
-  guard on its read, and the five reflect the derive's read. This is the same window as 045b's planner.
+- K2: the derive's stored-lookup read and the guard's own are separate reads. A row changed between them so that the
+  derive's `Check` refuses it is refused with that code (rule 11). A change the derive's `Check` still admits is written
+  with the five of the record the derive's read decided; the guard's other questions (D-96, supersedes) were asked on the
+  guard's read. This is the same window as 045b's planner.
 - K3: when a derive failure and a later refusal both apply on an update, the derive failure is answered. The later refusals
   are the D-96 lines, supersedes, the work-assignment cycle and `RefileAsync`'s shape refusals. Each alone answers as before.
 - K4 (replaced by option (b)): a blank name or number is written as a clear on the generic paths; the submission writers still
@@ -261,4 +326,9 @@ A blank name or number is legitimate data, and refusing it would make such a rec
   the person may not read is written (name and number cleared). The two outcomes differ; Dataverse's bind of the lookup
   shows the same difference.
 - K14: on a handler run with no person, the name and number of a moved family row are cleared, as 045b clears a moved
-  pair's display with no person. Only the type, id and URL describe the record until a write that can read it.
+  pair's display with no person. Only the type, id and URL describe the record until a write that can read it. A run that
+  re-names the record the row already names leaves them as they are (rule 10).
+- K15: a re-name of the same record never refreshes stale name and number values (rule 10, as 045b rule 4). A row whose
+  record was renamed since keeps the old name until a write moves it.
+- K16: on the create, a caller who may append to the matter but not read it costs one more app-only read (the exists-check),
+  plus the caller's metadata read of the record's entity set.
