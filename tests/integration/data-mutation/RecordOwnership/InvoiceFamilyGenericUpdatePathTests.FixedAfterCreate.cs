@@ -325,15 +325,90 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         NothingWritten();
     }
 
+    // ── Fix round 2: on a run as a person, an invoice the write sets is read as that person before any rule compares it ──
+
+    /// <summary>The person reads <see cref="Invoice"/> (under the row's own matter) only when <paramref name="readable"/>, and
+    /// never <see cref="OtherInvoice"/>; every other row as the app does not matter here (none is read).</summary>
+    private void ThePersonReads(bool readable) =>
+        _personRows = (table, id) => table == "sprk_invoice" && id == Invoice && readable
+            ? new Entity("sprk_invoice", Invoice) { ["sprk_matter"] = MatterRef(Matter) }
+            : null;
+
+    /// <summary>Every path, each family table with the column naming its invoice.</summary>
+    public static TheoryData<GenericPath, string, string> EveryPathAndInvoiceReference()
+    {
+        var data = new TheoryData<GenericPath, string, string>();
+        foreach (var path in Enum.GetValues<GenericPath>())
+        {
+            data.Add(path, "sprk_invoiceapproval", "sprk_invoice");
+            data.Add(path, "sprk_invoicecorrection", "sprk_invoice");
+            data.Add(path, "sprk_invoicesubmission", "sprk_invoice");
+            data.Add(path, "sprk_externalidentifier", InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryPathAndInvoiceReference))]
+    public async Task OnAPersonsRun_ARowGivenAnInvoiceOfItsOwnMatterThePersonCannotRead_IsRefusedReadFailed_AndNothingIsWritten(
+        GenericPath path, string table, string invoiceColumn)
+    {
+        ThePersonReads(readable: false);
+
+        var outcome = await RunAsync(path, table, FamilyRow, Lookups((invoiceColumn, new EntityReference("sprk_invoice", Invoice))), NoPlain,
+            ChildWorld(table, invoiceColumn).Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(ExpectedChildRefusal(path, table, InvoiceFamilyCoreRecordGuard.ReadFailedCode, outcome), outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryPathAndInvoiceReference))]
+    public async Task OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatterThePersonCannotRead_IsRefusedReadFailed_AndNothingIsWritten(
+        GenericPath path, string table, string invoiceColumn)
+    {
+        ThePersonReads(readable: false);
+
+        var outcome = await RunAsync(path, table, FamilyRow, Lookups((invoiceColumn, new EntityReference("sprk_invoice", OtherInvoice))), NoPlain,
+            ChildWorld(table, invoiceColumn).Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(ExpectedChildRefusal(path, table, InvoiceFamilyCoreRecordGuard.ReadFailedCode, outcome), outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryPathAndInvoiceReference))]
+    public async Task OnAPersonsRun_ARowGivenAnInvoiceOfItsOwnMatterThePersonReads_IsWritten_ReadingOnlyThatInvoiceAsThePerson(
+        GenericPath path, string table, string invoiceColumn)
+    {
+        ThePersonReads(readable: true);
+
+        var outcome = await RunAsync(path, table, FamilyRow, Lookups((invoiceColumn, new EntityReference("sprk_invoice", Invoice))), NoPlain,
+            ChildWorld(table, invoiceColumn).Object, playbookActsAs: Caller);
+
+        if (CoreLookupIsAnAccessColumnOn(path, table) && outcome.Code == InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)
+        {
+            NothingWritten();
+            return;
+        }
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        _personRowReads.Should().Equal($"sprk_invoice:{Invoice:D}");
+        WrittenOnce(table, FamilyRow);
+    }
+
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
     [InlineData(GenericPath.FieldMappingPush)]
-    public async Task OnAPersonsRun_AWriteNoRuleRefuses_ReadsNoRowAsThePerson(GenericPath path)
+    public async Task OnAPersonsRun_AWriteThatSetsNoInvoice_ReadsNoRowAsThePerson(GenericPath path)
     {
         _personRows = (_, _) => throw new InvalidOperationException("must not be read");
 
-        var outcome = await RunAsync(path, Approval, FamilyRow, Lookups(("sprk_invoice", new EntityReference("sprk_invoice", Invoice))), NoPlain,
+        var outcome = await RunAsync(path, Approval, FamilyRow, Lookups(("sprk_regardingmatter", MatterRef(Matter))), NoPlain,
             ChildWorld(Approval, "sprk_invoice").Object, playbookActsAs: Caller);
 
         outcome.Code.Should().BeNull(outcome.Message);

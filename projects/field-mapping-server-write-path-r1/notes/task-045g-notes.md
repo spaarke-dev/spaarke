@@ -254,6 +254,29 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
     the pin now covers the submission and the external identifier on both handler paths.
   - Harness: on the push, with no person rows given, the caller reads each row's lookups as the app does.
 
+## Fix round 2
+
+- **Rule.** On the push, the playbook update and the output orchestrator run as a person, an invoice the write sets on a
+  family row (`sprk_invoice` on a line, an approval, a submission or a correction; `sprk_regardinginvoice` on an external
+  identifier) is read AS THAT PERSON before any rule compares it (the pattern of 045f's sent record URL). One they cannot
+  read (403, 404, no row, a fault) is `invoice_family_read_failed` and nothing is written, whatever that invoice is filed
+  under. Decided once, in `InvoiceFamilyCoreRecordGuard.CheckGenericUpdateCoreAsync`, beside the person re-decision. A run
+  with no person is unchanged; cancellation is rethrown. A write that sets no invoice reads no invoice as the person.
+- **Tests** (`InvoiceFamilyGenericUpdatePathTests.FixedAfterCreate`, every path × approval, correction, submission,
+  external identifier):
+  - (a) `OnAPersonsRun_ARowGivenAnInvoiceOfItsOwnMatterThePersonCannotRead_IsRefusedReadFailed…`;
+  - (b) `OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatterThePersonCannotRead_IsRefusedReadFailed…`;
+  - (c) `OnAPersonsRun_ARowGivenAnInvoiceOfItsOwnMatterThePersonReads_IsWritten_ReadingOnlyThatInvoiceAsThePerson`;
+  - (d) `OnAPersonsRun_AWriteThatSetsNoInvoice_ReadsNoRowAsThePerson` (replaces `OnAPersonsRun_AWriteNoRuleRefuses_…`, whose
+    write set an invoice and so now reads it).
+  - The submission cells on the playbook update and the orchestrator are answered by those handlers' access-column rule
+    first, as in rule 2's tests; nothing is written either way.
+- **With the read switched off** (temporary local edit, restored byte-identical): (a) **10 of 12 fail** (the 2 that pass
+  are those submission cells); (c) 10 of 12 fail on its read assertion; (b) 12 of 12 still pass (the re-decision already
+  answered them); (d) 3 of 3 pass.
+- **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11851 passed, 4 skipped; ebilling
+  filters 8404 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the two changed .cs files.
+
 ## Known limits
 
 - **K1.** D-96's app-only line count still runs for an invoice update that writes its core lookup with the record it
@@ -262,7 +285,7 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
   caller reads them (fix round 1), as on the playbook update and the output orchestrator when they run as a person. A row
   the push targets that is not found keeps its own answer there (#2081 fix round 2: its ids come from a query the caller
   read). When the guard admits a row, the write itself is made as the caller, and Dataverse applies the caller's own
-  privileges to it.
+  privileges to it. An invoice the push sets is read as the caller first (fix round 2).
 - **K3.** On the two caller paths a non-invoice row's derive (045d) still runs before the guard. A derive failure is
   answered before a rule-2 refusal of the same write. This is the existing K3 order, and nothing is written either way.
 - **K4.** A caller create of an approval, submission, correction or external identifier filed with an invoice needs Read on

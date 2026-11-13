@@ -450,7 +450,9 @@ public static class InvoiceFamilyCoreRecordGuard
     /// the field-mapping push, which writes as its caller), the row reader as that person (<c>OwnedChildWrite.PersonRowReader</c>); null otherwise. A refusal of rules 1-3
     /// (<see cref="InvoiceCoreRecordFixedCode"/>, <see cref="LineInvoiceCoreRecordMismatchCode"/>, <see cref="LineInvoiceClearedCode"/>)
     /// is then decided again on the stored row and the other invoice as the person reads them; a row they cannot read is
-    /// <see cref="ReadFailedCode"/>, so no such refusal turns on a row the person cannot read.</param>
+    /// <see cref="ReadFailedCode"/>, so no such refusal turns on a row the person cannot read. And an invoice the patch sets on a
+    /// family row is read as that person before any rule compares it: one they cannot read is <see cref="ReadFailedCode"/>,
+    /// whatever it is filed under (fix round 2).</param>
     public static async Task<InvoiceFamilyCoreRecord?> CheckGenericUpdateAsync(
         string entityLogicalName,
         Guid recordId,
@@ -766,6 +768,30 @@ public static class InvoiceFamilyCoreRecordGuard
         // KeepRegardingPairAgreeingAsync — the path's derive step calls it — not here on the payload as sent.
         if (change.Count == 0)
             return null; // the row exists and the patch moves no guarded lookup: nothing more to decide
+
+        // Task 045g fix round 2 (the pattern of 045f's sent record URL): on a run as a person, an invoice this patch sets on a
+        // family row is read AS THAT PERSON before any rule compares it. One they cannot read (403, 404, no row, a fault) writes
+        // nothing and is "could not be read", whatever that invoice is filed under. Cancellation is rethrown.
+        if (asPerson is not null
+            && SetInvoiceReference(entity, change) is { } setInvoice)
+        {
+            Entity? readable;
+            try
+            {
+                readable = await asPerson(setInvoice.LogicalName, setInvoice.Id,
+                    CoreRecordLookups[setInvoice.LogicalName].Select(l => (l.Column, l.CoreEntity)).ToArray(), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                readable = null;
+            }
+
+            if (readable is null)
+            {
+                return InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
+                    "The invoice this row would be filed with could not be read; nothing was written.");
+            }
+        }
 
         var decided = await DecideAsync(stored, async (invoice, token) =>
             {
@@ -1451,6 +1477,25 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <summary>The approval, the submission and the correction: filed with an invoice through <see cref="LineInvoiceColumn"/>.</summary>
     private static bool IsInvoiceChild(string entity) =>
         entity.Trim().ToLowerInvariant() is "sprk_invoiceapproval" or "sprk_invoicesubmission" or "sprk_invoicecorrection";
+
+    /// <summary>
+    /// Task 045g fix round 2: the invoice <paramref name="change"/> sets on a family row (<see cref="LineInvoiceColumn"/> on a line,
+    /// an approval, a submission or a correction; <see cref="ExternalIdentifierInvoiceColumn"/> on an external identifier), as a
+    /// reference to <see cref="InvoiceEntity"/>. Null when the change sets none (or clears it, or gives a value the guard's own
+    /// check refuses).
+    /// </summary>
+    private static EntityReference? SetInvoiceReference(string entity, IReadOnlyDictionary<string, object?> change)
+    {
+        var column = IsLine(entity) || IsInvoiceChild(entity)
+            ? LineInvoiceColumn
+            : IsExternalIdentifier(entity) ? ExternalIdentifierInvoiceColumn : null;
+        return column is not null
+               && change.TryGetValue(column, out var value)
+               && TryReadReference(value, InvoiceEntity, out var invoice)
+               && invoice is not null
+            ? new EntityReference(InvoiceEntity, invoice.Id)
+            : null;
+    }
 
     /// <summary>
     /// Task 045g rules 3 and 3b: the rows whose stored invoice (<see cref="LineInvoiceColumn"/>) is never cleared — a line, an
