@@ -79,7 +79,13 @@ function normalizeOrigin(value: string | null | undefined): string | null {
 
 /** `window.location.origin` of the running page, or `undefined` outside a browser. */
 function currentOrigin(): string | undefined {
-  return typeof window !== 'undefined' ? window.location?.origin : undefined;
+  if (typeof window === 'undefined') return undefined;
+  try {
+    // A host without a location object throws here; that counts as no origin.
+    return window.location.origin;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -183,7 +189,8 @@ export async function resolveRegardingPairTable(
   if (!typeId || !webApi || typeof webApi.retrieveRecord !== 'function') return null;
   try {
     const row = await webApi.retrieveRecord('sprk_recordtype_ref', typeId, '?$select=sprk_recordlogicalname');
-    return normalizeTable(row?.sprk_recordlogicalname);
+    // A null row throws here and is caught below: no table.
+    return normalizeTable(row.sprk_recordlogicalname);
   } catch {
     return null;
   }
