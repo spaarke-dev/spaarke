@@ -4,7 +4,7 @@
     <title>Restricted mapping source rule for Repair and the field-mapping push (#2738, DI-027)</title>
     <phase>3 W3 Wizards (follow-up to 022b)</phase>
     <gate>022b merged into the work branch (88ef973e52). UAC-r2 reviews the diff before merge.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what Repair and the push may write (.cs, bff-api); access-rule adjacent; modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -73,5 +73,11 @@ Push (FieldMappingPushSourceGate.cs): the source is read once per push (`ReadSou
     <criterion testable="true">AC5 (fail closed): a fault reading a child, or a child that does not come back, while the source is Restricted means nothing is written to it (`UndeterminedReasonCode`). Every existing Repair and push test passes unchanged.</criterion>
   </acceptance-criteria>
 
-  <notes>Added 2026-11-12 from UAC-r2's Q5 on 022b (#2738, DI-027).</notes>
+  <notes>Added 2026-11-12 from UAC-r2's Q5 on 022b (#2738, DI-027).
+Completed 2026-11-12: merged to the work branch at 74556c46df (`task/fm-022c` c16fd78e03, base 93242e9a39).
+- Restricted source rule on Repair and the push. Access columns are never mapping targets (UAC-r2 ruling): skipped at push with `field_mapping.push.access_column_not_mapped`, payload scrub, and an ArchTest over the seeded rules. The client knows the new push code; the refile and undetermined texts are true for both kinds of source.
+- Reviews: one Opus adversarial pass (no leak, F3 fixed) and a Sonnet re-check of round 2 (no F; K1/K2 fixed). UAC-r2 PASS of 87d9074c3d, then the round-3 additions.
+- Gates at the merge: build 0 warnings; ArchTests 2534; affected classes 2458/0; publish +885 B (40.07 MB, 191 = 191 files); no vulnerable packages.
+- Known limits: `notes/task-022c-notes.md`.
+rework: fix-round-3 task 022c</notes>
 </task>

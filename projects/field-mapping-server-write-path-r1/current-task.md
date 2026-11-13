@@ -3,7 +3,7 @@
 > **Last updated**: 2026-11-12 (checkpoint, desktop session `field-mapping-r1`). Recovery: read Quick Recovery first.
 > Previous version (054 and 022b detail): `notes/handoff-history/current-task-2026-11-12-pre-022c.md`.
 > **Done on master**: 001–006, 010–018, 030, 034, 037–040, 042c, 043, 044, 046, 046b, 046c (repo), 048, 049, 049b, 049c, 052a, 060, 070–075, 076c, 045a, 045b, 045c, 021, 022, 032b-1, 032b-1b, and all of **054** (#2733, merge d878e78a90, 2026-11-12). Nothing deployed.
-> **Done on the work branch, not yet on master:** **022b** (merge 88ef973e52; UAC-r2 approved 2026-11-12).
+> **Done on the work branch, not yet on master:** **022b** (merge 88ef973e52; UAC-r2 approved 2026-11-12) and **022c** (merge 74556c46df; UAC-r2 PASS 2026-11-12; #2738 closes on master).
 > **W3 direction:** named exceptions plus guards, no core redesign in R1.
 
 ## Quick Recovery
@@ -12,8 +12,7 @@
 |---|---|
 | **Session** | Desktop session **`field-mapping-r1`**, worktree `C:\code_files\spaarke-wt-field-mapping-server-write-path-r1`. |
 | **Work branch** | `work/field-mapping-server-write-path-r1` at 308ad2bcb9 + this checkpoint. It includes master a654da59c4; master now also has #2733 and later commits (origin/master 76b2930961). Merge master in before the next PR. |
-| **022c status (2026-11-12)** | POML `tasks/022c-restricted-source-repair-and-push.poml` (93242e9a39). UAC-r2 CONFIRMED both rules (decisions.md, 1fa6328732) and asked for K "Restricted-ness is decided at the write" in the 022b notes (done, K9, 9a726d60e8) and the 022c notes (relayed to the implementer). **The opus implementer is running** in an isolated worktree on branch `task/fm-022c`. Next: its report, then one Opus adversarial pass, then the diff to UAC-r2, then merge `--no-ff`, publish delta, CVE, close. |
-| **Next action (detail)** | **022c (#2738, DI-027), FULL, opus/high.** Apply 022b's predicate (a Restricted or unreadable source maps only into a row that is Restricted) in `RecordCreationService.Repair.cs` and `FieldMappingPushSourceGate`. Step 1: write `tasks/022c-*.poml` (task-create conventions; the KEEP test paths; the brief starts `git switch -c task/fm-022c origin/work/field-mapping-server-write-path-r1`). Step 2: implementer (opus) in an isolated worktree. Step 3: one Opus adversarial pass, then the diff to UAC-r2. Reuse 022b's `InheritedAccessPermission` answer and `AccessPermissionFloor`; do not fork the predicate. |
+| **Next action** | **022c is closed** (merge 74556c46df; gates: build 0 warnings, ArchTests 2534, affected classes 2458/0, publish +885 B to 40.07 MB, no vulnerable packages). Next lanes: **045d** (Q8, invoice family re-derive; proposal in `notes/task-045c-notes.md`), then **052b** (scheduled repair job). 022b and 022c reach master with the next PR to master, which needs the owner's go. Agent worktree `agent-a1381c2373b8d1eee` (022c) is merged and can be removed. |
 | **022b (closed)** | Notes: `notes/task-022b-notes.md`, including the floor property UAC-r2 asked to keep true (every way the floor can be wrong strips, never maps) and K1–K6. Gates at the merge: sln 0 warnings, ArchTests 2530, the 022b classes 348/348, publish +9,579 B (40.07 MB), no vulnerable packages. |
 | **PR #2733** | MERGED (d878e78a90). UAC-r2 has been sent the SHA. The office-scope `rest` job hit its 20-minute limit under load (run 43286164495; a successful run takes about 15 minutes). The job is not a required check, so auto-merge went ahead while its re-run was still going. Check that re-run's result. |
 | **Cleanup due** | Five merged agent worktrees were removed on 2026-11-12. Two remain, locked by this session's Claude process: `agent-a517215addda1d41e` and `agent-a3d7557598f7a6283`, both under `C:\code_files\spaarke\.claude\worktrees\`. They are merged and clean. Remove them with `Remove-WorktreeSafe.ps1` once the lock is released. Snapshot branch `work/field-mapping-server-write-path-r1-054` can go after the owner's OK. |
@@ -38,7 +37,7 @@ After every SpaarkeMaster import on an environment where 054b is applied: `Set-T
 
 ## Other lanes
 
-- **022c:** next (above).
+- **022c:** closed (merge 74556c46df).
 - **045d:** Q8 (invoice family re-derive); proposal in `notes/task-045c-notes.md`.
 - **052b:** scheduled repair job, contact owner rule, chat contact create.
 - **032b-2/032b-3:** on the current `work/ebilling-r1` tip; two adversarial passes; the diff goes to ebilling-r1.

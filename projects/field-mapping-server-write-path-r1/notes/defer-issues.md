@@ -273,4 +273,4 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2738 |
 | **Class** | F1, follow-up task 022c (unified-access-control-r2, round 90: fixed promptly, right after 022b merges) |
 | **Failure** | Rule: values mapped from a source whose `sprk_accesspermission` is Restricted, or cannot be read, are written only into a row that is Restricted. 022b applies it to the create. Repair mode (`RecordCreationService.Repair.cs`) and the field-mapping push (`FieldMappingPushSourceGate`) apply the secure copy gate; 022c applies the same Restricted predicate there. |
-| **Status** | Open — task 022c |
+| **Status** | Fixed on the work branch by task 022c (merge 74556c46df, 2026-11-12; UAC-r2 PASS). #2738 closes when it reaches master. |
