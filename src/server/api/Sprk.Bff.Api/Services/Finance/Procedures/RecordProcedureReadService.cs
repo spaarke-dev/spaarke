@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -158,11 +159,16 @@ public sealed record RuleProcedureView(Guid Id, string Name, ProcedureVersionVie
 /// BASE rule's catalogue code (uac-r2 option (a)), and its <c>changed</c> mark names the base rule. <see cref="FirmScope"/> null: all firms.
 /// <see cref="Level"/> and <see cref="Distance"/> are the source Procedure's rank. <see cref="ParameterSummary"/> is the rule body in
 /// plain language (null when the describer refuses it).
+/// <para>084c fix round 1 (F1-2, item 6): <see cref="RuleBody"/> is the body of <see cref="PolicyVersionId"/> (the version shown) as a JSON
+/// object, so the Change form starts from every published value, optional ones included; <see cref="Consequence"/> is that version's
+/// consequence (<c>Reject</c>, <c>Flag</c>, <c>SuggestAdjustment</c>). Both are null on a row that shows no version (a base-retired record
+/// rule), and the body is null when the stored text is not a JSON object. Both are read from the version row, which the answer asks of the
+/// caller (EB-D-218).</para>
 /// </summary>
 public sealed record RuleInForceView(
     Guid PolicyId, Guid? PolicyVersionId, string Code, string? Name, string? RuleType, string? ParameterSummary, int? VersionNumber,
     DateOnly? InForceFrom, bool InForce, bool RecordRule, Guid? RuleSetId, RuleProcedureView? Procedure, string? Level, int? Distance,
-    FirmView? FirmScope, IReadOnlyList<RuleMarkView> Marks);
+    FirmView? FirmScope, IReadOnlyList<RuleMarkView> Marks, string? Consequence = null, JsonElement? RuleBody = null);
 
 /// <summary>
 /// A mark on a rule. <see cref="Kind"/>: <c>Excluded</c> (the rule was excluded for this record: reason, optional firm, distance, who and
@@ -173,11 +179,16 @@ public sealed record RuleInForceView(
 /// <see cref="By"/> is refused) and <c>CapOutranked</c> (ExpenseRule: the same for its cap only; its code check still runs), each with
 /// <see cref="Text"/> ("Outranked by X" / "Cap outranked by X") and the fixed <see cref="Note"/>. The set is open: a reader must ignore a kind
 /// it does not know. Members a kind does not use are null.
+/// <para>084c fix round 1 (F1-1, F1-2): a <c>Changed</c> mark also names <see cref="BasePolicyId"/>, the base rule the change was made on (the
+/// policy the change route takes, so a rule changed here can be changed again: remove this change, then change the base rule), and, while the
+/// base rule is in force, <see cref="BaseRuleBody"/>: the body of its version in force (<see cref="CurrentBase"/>) as a JSON object, for "Start
+/// from the published values". Both rows are asked of the caller (EB-D-218).</para>
 /// </summary>
 public sealed record RuleMarkView(
     string Kind, string? Reason = null, FirmView? Firm = null, int? Distance = null, ChainRecordView? ChainRecord = null, StampView? Stamp = null,
     Guid? OverrideRowId = null, Guid? RecordRuleId = null, PolicyVersionRefView? BasedOn = null, PolicyVersionRefView? CurrentBase = null,
-    string? BaseCode = null, string? BaseParameterSummary = null, string? Text = null, string? Note = null, IReadOnlyList<OutrankingRuleView>? By = null);
+    string? BaseCode = null, string? BaseParameterSummary = null, string? Text = null, string? Note = null, IReadOnlyList<OutrankingRuleView>? By = null,
+    Guid? BasePolicyId = null, JsonElement? BaseRuleBody = null);
 
 /// <summary>
 /// 084e: one rule that outranks another on the record (R3: every such rule at the top rank is listed). <see cref="Source"/> is
@@ -879,11 +890,12 @@ public class RecordProcedureReadService
             var current = PolicyVersionRef(r, slot.BasePolicyVersionId);
             var baseVersion = r.Rows.PolicyVersions.FirstOrDefault(v => v.PolicyVersionId == slot.BasePolicyVersionId);
             var exclude = slot.Exclude;
-            r.Expose(PolicySet, slot.BasePolicyId);
+            // 084c fix round 1: the base rule's id is in the answer (F1-1), and so is its body in force (F1-2): both through Expose (EB-D-218).
             marks.Add(new RuleMarkView(
                 "Changed", exclude?.Reason, FirmOf(r, exclude?.FirmId, FirmOrigin.Lookup), exclude?.Distance ?? slot.ChainRecord.Distance, ChainRecordOf(r, slot.ChainRecord),
                 exclude is null ? null : StampOf(r, exclude), exclude?.RowId, rule.Version.PolicyId, basedOn, current, slot.BasePolicyCode,
-                baseVersion is null ? null : await SummaryAsync(r, baseVersion, ct).ConfigureAwait(false)));
+                baseVersion is null ? null : await SummaryAsync(r, baseVersion, ct).ConfigureAwait(false),
+                BasePolicyId: r.Expose(PolicySet, slot.BasePolicyId), BaseRuleBody: baseVersion is null ? null : BodyOf(r, baseVersion)));
             if (exclude is not null)
             {
                 r.Expose(ProcedureAssignmentEntity.EntitySet, exclude.RowId);
@@ -936,8 +948,39 @@ public class RecordProcedureReadService
             code, version.ShortHeadline, RuleTypeName(version.RuleType), await SummaryAsync(r, version, ct).ConfigureAwait(false), version.VersionNumber,
             version.InForceFrom, inForce, recordRule, version.RuleSetId,
             new RuleProcedureView(applied.ProcedureId, applied.ProcedureName, VersionView(r, procedureVersion), applied.Pinned),
-            applied.Rank.Level.ToString(), applied.Rank.Distance, FirmOf(r, firm, FirmOrigin.Lookup), marks);
+            applied.Rank.Level.ToString(), applied.Rank.Distance, FirmOf(r, firm, FirmOrigin.Lookup), marks,
+            ConsequenceName(version.Consequence), BodyOf(r, version));
     }
+
+    /// <summary>
+    /// 084c fix round 1 (F1-2): a version's rule body as a JSON object, for the Change form to start from (every published value, optional
+    /// ones included). The body is read from the version row, so the row is part of what the caller must be able to Read (EB-D-218). Null
+    /// when the stored text is empty or is not a JSON object: the form then says it cannot start, never sends a body built without them.
+    /// </summary>
+    private static JsonElement? BodyOf(Reading r, ResolvedPolicyVersion version)
+    {
+        r.Expose(PolicyVersionSet, version.PolicyVersionId);
+        if (string.IsNullOrWhiteSpace(version.RuleBody))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(version.RuleBody);
+            return document.RootElement.ValueKind == JsonValueKind.Object ? document.RootElement.Clone() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>084c fix round 1 (item 6): a version's consequence by name (<see cref="BillingConsequence"/>), the number for a value it does not define, null when unset.</summary>
+    private static string? ConsequenceName(int? value) =>
+        value is not { } number ? null
+        : Enum.IsDefined(typeof(BillingConsequence), number) ? ((BillingConsequence)number).ToString()
+        : number.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Record rules on the chain whose base rule is NOT among the rules the resolver resolved for the date (its Procedure retired, the rule
@@ -995,7 +1038,9 @@ public class RecordProcedureReadService
             views.Add(new RuleInForceView(
                 recordRuleId, null, code, null, null, null, null, null, InForce: false, RecordRule: true, setId, null, null, null, firmView,
                 [
-                    new RuleMarkView("Changed", exclude.Reason, firmView, exclude.Distance, chainRecord, stamp, exclude.RowId, recordRuleId, basedOn, null, code),
+                    // 084c fix round 1 (F1-1): the base rule's id (asked above: the code is read from it). Its body is not given: it is not in force.
+                    new RuleMarkView("Changed", exclude.Reason, firmView, exclude.Distance, chainRecord, stamp, exclude.RowId, recordRuleId, basedOn, null, code,
+                        BasePolicyId: basePolicy),
                     new RuleMarkView("BaseRetired", RecordRuleId: recordRuleId, BasedOn: basedOn, BaseCode: code),
                 ]));
         }
