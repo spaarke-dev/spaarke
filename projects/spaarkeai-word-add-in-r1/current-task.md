@@ -38,6 +38,13 @@
 - Answered ontology on 2026-11-12. This project owns `EmailView.tsx` and `shared/types/spaarke-send-email-pane.d.ts`; nothing in flight. Draft and render have no add-in limit (same NAA audience and CORS as `/send`). Recommended a BFF `GET /api/communications/templates` used by both hosts (Console drops its Xrm listing; ADR-012 host-agnostic decision 2026-10-05; compose-r8 can swap the source server-side), owned by the communications owner and checked by uac-r2. `NO_ADDITIONAL_ATTACHMENT_SOURCES` stays. **Agreed with ontology (2026-11-12):** ontology task 189 builds `GET /api/communications/templates` as an impersonated caller read (uac-r2's condition; its contract is not bound to OOB `template` columns) and switches the Console's `onListEmailTemplates` to it; uac-r2 reviews the route before merge. **This project then does the pane side:** EmailView passes `onDraftWithAi`, `onListEmailTemplates` and `onRenderEmailTemplate`; add those props (and `aiDraftActions` if used) to the `.d.ts` subset; EmailView tests; owner narrow-width check. Trigger: ontology sends the master SHA and the handler contract. Run it as a project task (task-execute) and add it to TASK-INDEX at that point.
 
 ## Invoice tab: owner feedback 2026-11-13 (on 0c06f464e3)
+- **ebilling's answer (owner rulings in their session, EB-D-223..226 at 7a307104f1):**
+  - D-223: no firm in EVERY channel. Refused at intake with 400 `firm_invalid` and nothing written. Invoices already held keep Set firm (095e).
+  - D-224: ebilling builds assign-firm as 095g, to uac-r2's six conditions. Their design note goes to uac-r2 first. The contract comes after uac-r2 agrees, and includes the revoke wording; the pane must confirm a replace.
+  - 095e adds `firm {id, name}` to the 095a view, which matches our B1 reader.
+  - D-225: `correctionNote` in 095f, on from-email Correction and in the review flow. The contract (max length, missing-note rule) and the SHA come later.
+  - D-226: the invoice name becomes "{firm name} - {invoice number}" (095e).
+  - Their order: 084d, 095e, 095f, 095g.
 - **No firm (owner):** do not accept an invoice with no firm. The better fix is to let the user pick a firm in the pane and save it to the record. Facts:
   - A record's firms are `sprk_assignedlawfirm1/2` on the matter, project or work assignment (`CheckFirmLinkAsync`).
   - The same lookups feed the external access model (`ExternalParticipationService.GetReferencedOrganizationIdsAsync`), so setting one from the pane is an access grant to that firm, not just a field write. It needs a server route owned by ebilling/uac-r2.
