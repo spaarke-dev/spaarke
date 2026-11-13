@@ -159,6 +159,57 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Theory]
+    [InlineData(GenericPath.PlaybookUpdate, true)]
+    [InlineData(GenericPath.PlaybookUpdate, false)]
+    [InlineData(GenericPath.OutputOrchestrator, true)]
+    [InlineData(GenericPath.OutputOrchestrator, false)]
+    public async Task D96_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedLineMismatch_NotForThePair(GenericPath path, bool agrees)
+    {
+        // D-96 is decided first: the pair a core-moving write sends — agreeing with the record the row will name, or not —
+        // never answers in its place.
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice,
+            Lookups(("sprk_matter", MatterRef(OtherMatter)), PairType(CatalogRowOf("sprk_matter"))),
+            PairId(agrees ? OtherMatter : Project), WorldWithLines(OtherMatter, Matter).Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode, outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AnAgreeingPairWithARecordUrlNamingAnotherRecord_IsRefused_AndNothingIsWritten(GenericPath path)
+    {
+        var sent = new Dictionary<string, object?>
+        {
+            ["sprk_regardingrecordid"] = Matter.ToString("D"),
+            ["sprk_regardingrecordurl"] = $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={OtherMatter:D}",
+        };
+
+        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))), sent,
+            StoredUnderTheMatter("sprk_invoiceapproval").Object);
+
+        RefusedAsDisagreeing(outcome);
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AnAgreeingPairWithAnAbsoluteRecordUrlOfTheCoreRecord_IsWrittenAsSent(GenericPath path)
+    {
+        var url = $"https://org.crm.dynamics.com/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={Matter.ToString("B").ToUpperInvariant()}";
+        var sent = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = Matter.ToString("D"), ["sprk_regardingrecordurl"] = url };
+
+        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow, Lookups(PairType(CatalogRowOf("sprk_matter"))), sent,
+            StoredUnderTheMatter("sprk_invoiceapproval").Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        WrittenOnce("sprk_invoiceapproval", FamilyRow);
+        SentPayload("sprk_invoiceapproval", FamilyRow)["sprk_regardingrecordurl"].Should().Be(url);
+    }
+
+    [Theory]
     [MemberData(nameof(InvoiceFamilyTables))]
     public async Task APushRuleAimedAtThePair_IsSkipped_AndNothingIsWritten(string table)
     {

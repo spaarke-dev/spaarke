@@ -583,7 +583,7 @@ public static class InvoiceFamilyCoreRecordGuard
     {
         ArgumentNullException.ThrowIfNull(writtenColumns);
         ArgumentNullException.ThrowIfNull(after);
-        if (!pair.SetsEither || ColumnsToRead(entityLogicalName) is not { } coreColumns)
+        if (!pair.DecidesAnything || ColumnsToRead(entityLogicalName) is not { } coreColumns)
             return null;
 
         // A row that will name no single core record is refused with the guard's own answer — never exempted as a move.
@@ -606,35 +606,47 @@ public static class InvoiceFamilyCoreRecordGuard
             return Disagrees(after);
         }
 
-        if (!pair.SetsType || (create && pair.TypeId is null))
-            return null;
-        if (pair.TypeId is not { } typeId || typeId == Guid.Empty)
+        if (pair.SetsType && !(create && pair.TypeId is null))
+        {
+            if (pair.TypeId is not { } typeId || typeId == Guid.Empty)
+                return Disagrees(after);
+            if (recordTypes is null)
+            {
+                return after.Refuse(ReadFailedCode,
+                    $"The record-type row for {regarding.LogicalName} cannot be read here; nothing was written.");
+            }
+
+            Entity? catalogRow;
+            try
+            {
+                catalogRow = await recordTypes(regarding.LogicalName, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return after.Refuse(ReadFailedCode,
+                    $"The record-type row for {regarding.LogicalName} could not be read ({ex.GetType().Name}); nothing was written.");
+            }
+
+            if (catalogRow is null || catalogRow.Id == Guid.Empty)
+            {
+                return after.Refuse(ResolverFieldsIncompleteCode,
+                    $"{regarding.LogicalName} has no active sprk_recordtype_ref row, so the regarding record's type cannot be checked. "
+                    + "Nothing was written.");
+            }
+
+            if (catalogRow.Id != typeId)
+                return Disagrees(after);
+        }
+
+        // Fix round 3 (ebilling-r1, 2026-11-13): a record URL an update sends names the same record — its etn and id, decided
+        // without a read, after the pair's own halves. A clear names no other record; on a create the derive writes the URL.
+        if (pair.SetsUrl && !create && !string.IsNullOrWhiteSpace(pair.UrlText)
+            && !RegardingPairWrite.UrlNamesRecord(pair.UrlText, regarding.LogicalName, regarding.Id))
+        {
             return Disagrees(after);
-        if (recordTypes is null)
-        {
-            return after.Refuse(ReadFailedCode,
-                $"The record-type row for {regarding.LogicalName} cannot be read here; nothing was written.");
         }
 
-        Entity? catalogRow;
-        try
-        {
-            catalogRow = await recordTypes(regarding.LogicalName, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            return after.Refuse(ReadFailedCode,
-                $"The record-type row for {regarding.LogicalName} could not be read ({ex.GetType().Name}); nothing was written.");
-        }
-
-        if (catalogRow is null || catalogRow.Id == Guid.Empty)
-        {
-            return after.Refuse(ResolverFieldsIncompleteCode,
-                $"{regarding.LogicalName} has no active sprk_recordtype_ref row, so the regarding record's type cannot be checked. "
-                + "Nothing was written.");
-        }
-
-        return catalogRow.Id == typeId ? null : Disagrees(after);
+        return null;
 
         static InvoiceFamilyCoreRecord Disagrees(InvoiceFamilyCoreRecord decided) =>
             decided.Refuse(RegardingPairCoreRecordMismatchCode, RegardingPairCoreRecordMismatchReason);
@@ -833,8 +845,8 @@ public static class InvoiceFamilyCoreRecordGuard
         }
 
         var pair = RegardingPairWrite.Of(entity, payload);
-        if (!pair.SetsEither)
-            return (payload, null); // display columns only: the pair they describe is not changed by this write
+        if (!pair.DecidesAnything)
+            return (payload, null); // a name or number only: decided by no read here (known limit)
 
         var disagrees = await CheckRegardingPairAgreesAsync(entity, change.Keys, pair, after, before, AppOnlyRecordTypes(appOnly), ct)
             .ConfigureAwait(false);
@@ -860,8 +872,15 @@ public static class InvoiceFamilyCoreRecordGuard
         var written = new Dictionary<string, object?>(payload, payload.Comparer);
         foreach (var key in payload.Keys)
         {
+            // Every value the pair view reads as an id (OwnedChildWrite.PairChangeOf): text, a Guid, or a JSON string (fix round 3).
             if (string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key), Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, StringComparison.Ordinal)
-                && payload[key] is string text && !string.IsNullOrWhiteSpace(text))
+                && payload[key] switch
+                {
+                    string text => !string.IsNullOrWhiteSpace(text),
+                    Guid => true,
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => !string.IsNullOrWhiteSpace(element.GetString()),
+                    _ => false,
+                })
             {
                 written[key] = canonical;
             }
@@ -1416,11 +1435,88 @@ public readonly record struct RegardingPairWrite(bool SetsId, string? IdText, bo
     /// <summary>The write sends either half of the pair.</summary>
     public bool SetsEither => SetsId || SetsType;
 
+    /// <summary>Task 045e (fix round 3): the write sends <c>sprk_regardingrecordurl</c>.</summary>
+    public bool SetsUrl { get; init; }
+
+    /// <summary>The URL text it writes (null for a clear; a non-text value as its text, which names no record).</summary>
+    public string? UrlText { get; init; }
+
+    /// <summary>The write sends something the agreement check decides: either half of the pair, or the record URL.</summary>
+    public bool DecidesAnything => SetsEither || SetsUrl;
+
     /// <summary>The pair a Web API dictionary sends (a type as a <c>{nav}@odata.bind</c> path or a reference; null clears).</summary>
     public static RegardingPairWrite Of(string entityLogicalName, IEnumerable<KeyValuePair<string, object?>> payload)
     {
         ArgumentNullException.ThrowIfNull(payload);
-        var change = OwnedChildWrite.PairChangeOf(entityLogicalName, payload);
-        return new RegardingPairWrite(change.SetsId, change.IdText, change.SetsType, change.TypeId, change.Unreadable);
+        var pairs = payload as IReadOnlyCollection<KeyValuePair<string, object?>> ?? payload.ToList();
+        var change = OwnedChildWrite.PairChangeOf(entityLogicalName, pairs);
+        var written = new RegardingPairWrite(change.SetsId, change.IdText, change.SetsType, change.TypeId, change.Unreadable);
+        foreach (var (key, value) in pairs)
+        {
+            if (string.IsNullOrWhiteSpace(key)
+                || !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key), RecordUrlColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            written = written with
+            {
+                SetsUrl = true,
+                UrlText = value switch
+                {
+                    null => null,
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined } => null,
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } e => e.GetString(),
+                    _ => value.ToString(),
+                },
+            };
+        }
+
+        return written;
+    }
+
+    /// <summary>The record URL column (ADR-024 display column).</summary>
+    public const string RecordUrlColumn = "sprk_regardingrecordurl";
+
+    /// <summary>
+    /// Task 045e (fix round 3): whether a record URL names <paramref name="table"/>'s record <paramref name="id"/> — read from
+    /// its <c>etn</c> (any case) and <c>id</c> (as an id: any case, braces allowed) query parameters, so the server's relative
+    /// form (<c>RegardingRecordType.BuildRecordUrl</c>) and a client's absolute form with an app id both read alike. A URL
+    /// without exactly one of each, or whose id is not an id, names no record: false.
+    /// </summary>
+    public static bool UrlNamesRecord(string? url, string table, Guid id)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+        var start = url.IndexOf('?');
+        if (start < 0)
+            return false;
+        var query = url[(start + 1)..];
+        var fragment = query.IndexOf('#');
+        if (fragment >= 0)
+            query = query[..fragment];
+
+        string? etn = null, idText = null;
+        int etns = 0, ids = 0;
+        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var equals = part.IndexOf('=');
+            var name = Uri.UnescapeDataString(equals < 0 ? part : part[..equals]).Trim();
+            var value = equals < 0 ? string.Empty : Uri.UnescapeDataString(part[(equals + 1)..].Replace('+', ' ')).Trim();
+            if (string.Equals(name, "etn", StringComparison.OrdinalIgnoreCase))
+            {
+                etns++;
+                etn = value;
+            }
+            else if (string.Equals(name, "id", StringComparison.OrdinalIgnoreCase))
+            {
+                ids++;
+                idText = value;
+            }
+        }
+
+        return etns == 1 && ids == 1
+            && string.Equals(etn, table?.Trim(), StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(idText, out var named) && named == id;
     }
 }

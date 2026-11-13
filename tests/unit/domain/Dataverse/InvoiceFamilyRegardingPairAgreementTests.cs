@@ -312,6 +312,132 @@ public class InvoiceFamilyRegardingPairAgreementTests
         code.Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode);
     }
 
+    // ── Fix round 3 (ebilling-r1): a record URL an update sends names the row's core record ─────────────────────────
+
+    private static string UrlOf(string table, string id) => $"/main.aspx?pagetype=entityrecord&etn={table}&id={id}";
+
+    public static TheoryData<string> UrlsNamingAnotherRecordOrNone() => new()
+    {
+        UrlOf("sprk_matter", OtherCore.ToString("D")), // another record
+        UrlOf("sprk_project", Core.ToString("D")), // the right id under another table
+        "/main.aspx?pagetype=entityrecord&etn=sprk_matter", // no id
+        "/main.aspx?pagetype=entityrecord&id=" + Core.ToString("D"), // no table
+        UrlOf("sprk_matter", "not-an-id"), // an id that is not one
+        "not a url", // nothing to read
+        UrlOf("sprk_matter", Core.ToString("D")) + "&id=" + OtherCore.ToString("D"), // two ids
+    };
+
+    public static TheoryData<string> UrlsNamingTheMatterCore() => new()
+    {
+        UrlOf("sprk_matter", Core.ToString("D")), // the server's relative form (RegardingRecordType.BuildRecordUrl)
+        $"https://org.crm.dynamics.com/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={Core:D}",
+        UrlOf("SPRK_MATTER", Core.ToString("D").ToUpperInvariant()), // upper case
+        UrlOf("sprk_matter", Core.ToString("B")), // braced
+        UrlOf("sprk_matter", Uri.EscapeDataString(Core.ToString("B"))) + "#tab", // escaped, with a fragment
+    };
+
+    [Theory]
+    [MemberData(nameof(UrlsNamingAnotherRecordOrNone))]
+    public async Task AnUpdatesRecordUrl_NamingAnotherRecordOrNone_IsRefused_WithAnAgreeingPair(string url)
+    {
+        RefusedAsDisagreeing(await PairOnlyUpdate("sprk_invoice", "sprk_matter", "sprk_matter",
+            Pair(id: Core, type: CatalogRow) with { SetsUrl = true, UrlText = url }));
+    }
+
+    [Theory]
+    [MemberData(nameof(UrlsNamingAnotherRecordOrNone))]
+    public async Task AnUpdatesRecordUrl_NamingAnotherRecordOrNone_IsRefused_Alone(string url)
+    {
+        RefusedAsDisagreeing(await PairOnlyUpdate("sprk_invoiceapproval", "sprk_regardingmatter", "sprk_matter",
+            new RegardingPairWrite(false, null, false, null, false) { SetsUrl = true, UrlText = url }));
+        _reads.Should().BeEmpty("the URL is decided without a read");
+    }
+
+    [Theory]
+    [MemberData(nameof(UrlsNamingTheMatterCore))]
+    public async Task AnUpdatesRecordUrl_NamingTheCoreRecord_InAnyForm_Agrees(string url)
+    {
+        (await PairOnlyUpdate("sprk_invoice", "sprk_matter", "sprk_matter",
+            Pair(id: Core, type: CatalogRow) with { SetsUrl = true, UrlText = url })).Should().BeNull(url);
+        (await PairOnlyUpdate("sprk_invoicecorrection", "sprk_regardingmatter", "sprk_matter",
+            new RegardingPairWrite(false, null, false, null, false) { SetsUrl = true, UrlText = url })).Should().BeNull(url);
+    }
+
+    [Fact]
+    public async Task AnUpdatesRecordUrl_Cleared_NamesNoOtherRecord_AndIsNotRefused()
+    {
+        (await PairOnlyUpdate("sprk_invoice", "sprk_matter", "sprk_matter",
+            new RegardingPairWrite(false, null, false, null, false) { SetsUrl = true, UrlText = null })).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AnInvoiceOnlyIdentifiersRecordUrl_NamesItsInvoice()
+    {
+        var stored = Decided(InvoiceFamilyCoreRecordGuard.ExternalIdentifierEntity, InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn,
+            "sprk_invoice", Core);
+        var naming = (string url) => new RegardingPairWrite(false, null, false, null, false) { SetsUrl = true, UrlText = url };
+
+        (await InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync(InvoiceFamilyCoreRecordGuard.ExternalIdentifierEntity, [],
+            naming(UrlOf("sprk_invoice", Core.ToString("D"))), stored, stored, Catalog())).Should().BeNull();
+        RefusedAsDisagreeing(await InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync(InvoiceFamilyCoreRecordGuard.ExternalIdentifierEntity, [],
+            naming(UrlOf("sprk_matter", Core.ToString("D"))), stored, stored, Catalog()));
+    }
+
+    [Fact]
+    public async Task ACreatesRecordUrl_IsNotChecked_TheDeriveWritesIt()
+    {
+        var after = Decided("sprk_invoice", "sprk_matter", "sprk_matter", Core);
+
+        (await InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync("sprk_invoice", ["sprk_matter"],
+            new RegardingPairWrite(false, null, false, null, false) { SetsUrl = true, UrlText = UrlOf("sprk_matter", OtherCore.ToString("D")) },
+            after, before: null, Catalog())).Should().BeNull();
+    }
+
+    [Theory]
+    [MemberData(nameof(FamilyCores))]
+    public async Task Gate_AnAgreeingIdSentAsAGuidOrAJsonString_IsWrittenAsCanonicalText(string table, string column, string core)
+    {
+        // K4 (fix round 3): every value the pair view reads as an id becomes the canonical text in the D-68 key column.
+        foreach (var sent in new object[] { Core, JsonSerializer.SerializeToElement(Core.ToString("B").ToUpperInvariant()) })
+        {
+            var payload = new Dictionary<string, object?> { ["sprk_regardingrecordid"] = sent };
+            var (written, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+                table, Row, payload, AppOnly(table, column, core, Core).Object, CancellationToken.None);
+
+            refusal.Should().BeNull(sent.GetType().Name);
+            written["sprk_regardingrecordid"].Should().Be(Core.ToString("D").ToLowerInvariant(), sent.GetType().Name);
+        }
+    }
+
+    [Fact]
+    public async Task Gate_ARecordUrlAloneNamingAnotherRecord_IsRefused()
+    {
+        var payload = new Dictionary<string, object?> { ["sprk_regardingrecordurl"] = UrlOf("sprk_matter", OtherCore.ToString("D")) };
+
+        var (_, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            "sprk_invoicesubmission", Row, payload, AppOnly("sprk_invoicesubmission", "sprk_regardingmatter", "sprk_matter", Core).Object,
+            CancellationToken.None);
+
+        RefusedAsDisagreeing(refusal);
+    }
+
+    [Fact]
+    public async Task Gate_ARecordUrlSentWithACoreMove_IsDropped_TheDeriveWritesIt()
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherCore),
+            ["sprk_regardingrecordurl"] = UrlOf("sprk_matter", Guid.NewGuid().ToString("D")),
+        };
+
+        var (kept, refusal) = await InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync(
+            "sprk_invoiceapproval", Row, payload, AppOnly("sprk_invoiceapproval", "sprk_regardingmatter", "sprk_matter", Core).Object,
+            CancellationToken.None);
+
+        refusal.Should().BeNull();
+        kept.Keys.Should().Equal("sprk_regardingmatter");
+    }
+
     public static TheoryData<string, string, string, string> TwoCoreLookupsOfEachTable()
     {
         var rows = new TheoryData<string, string, string, string>();

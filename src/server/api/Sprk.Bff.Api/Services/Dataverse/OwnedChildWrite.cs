@@ -2078,7 +2078,25 @@ internal static class OwnedChildWrite
     internal static RegardingPairWrite PairWriteOf(DataverseWriteItemMapper.MappedItem item)
     {
         var pair = PairOf(item);
-        return new RegardingPairWrite(pair.SetsId, pair.IdText, pair.SetsType, pair.TypeId, pair.InvalidId);
+        var written = new RegardingPairWrite(pair.SetsId, pair.IdText, pair.SetsType, pair.TypeId, pair.InvalidId);
+        using var body = JsonDocument.Parse(item.JsonBody);
+        foreach (var property in body.RootElement.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, RegardingPairWrite.RecordUrlColumn, StringComparison.OrdinalIgnoreCase))
+                continue;
+            written = written with
+            {
+                SetsUrl = true,
+                UrlText = property.Value.ValueKind switch
+                {
+                    JsonValueKind.Null or JsonValueKind.Undefined => null,
+                    JsonValueKind.String => property.Value.GetString(),
+                    _ => property.Value.GetRawText(),
+                },
+            };
+        }
+
+        return written;
     }
 
     /// <summary>See <see cref="CheckInvoiceFamilyAsync"/>; also returns the admitted decision (task 045d).</summary>
@@ -2105,7 +2123,7 @@ internal static class OwnedChildWrite
         {
             // An update that leaves every guarded lookup as stored: only the regarding pair it sends is decided (task 045e), on
             // the stored core lookups read as the caller; the guard's other questions do not change and are not asked.
-            return pair.SetsEither
+            return pair.DecidesAnything
                 ? await DecidePairOnlyUpdateAsync(user, table, pairOnly, pair, recordTypes, ct).ConfigureAwait(false)
                 : InvoiceFamilyDecision.Proceed;
         }

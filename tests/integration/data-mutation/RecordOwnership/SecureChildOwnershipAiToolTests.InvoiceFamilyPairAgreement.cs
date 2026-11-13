@@ -261,6 +261,119 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Patches.Should().BeEmpty();
     }
 
+    // ── D-96 is decided before the pair: an invoice moved while a line stays behind ──────────────────────────────────
+
+    /// <summary>
+    /// The guard's invoice moved from the ordinary matter to the project while a line stays on the matter (D-96). With
+    /// <paramref name="deriveSeesTheMoveDone"/>, the derive's read of the core lookups (the one that asks no superseded invoice)
+    /// answers the project — it then derives nothing, so the pair the request sends reaches the guard's decision, whose read
+    /// still answers the matter (a move).
+    /// </summary>
+    private void InvoiceMovingToTheProject_WithALineLeftBehind(bool deriveSeesTheMoveDone)
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        AppLine(GuardInvoice, "sprk_project", "sprk_project", OrdinaryProject);
+        AppLine(GuardInvoice, "sprk_matter", "sprk_matter", OrdinaryMatter);
+        CatalogKnowsTheMatterType();
+        _user.RecordTypes[ScriptedUserClient.CatalogTypeIdOf("sprk_project")] = "sprk_project";
+        if (!deriveSeesTheMoveDone)
+            return;
+        _user.GetOverride = path =>
+        {
+            if (path.StartsWith($"sprk_invoices({GuardInvoice:D})?$select=_sprk_matter_value", StringComparison.Ordinal))
+            {
+                _user.RowValues[GuardInvoice] = path.Contains("_sprk_supersedesinvoice_value", StringComparison.Ordinal)
+                    ? new Dictionary<string, object?> { ["_sprk_matter_value"] = OrdinaryMatter.ToString("D") }
+                    : new Dictionary<string, object?> { ["_sprk_project_value"] = OrdinaryProject.ToString("D") };
+            }
+
+            return null;
+        };
+    }
+
+    [Theory(DisplayName = "045e (D-96 first): PATCH moving an invoice while a line stays behind, with a pair sent, is the line refusal")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ChildRefile_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedLineMismatch(bool agrees)
+    {
+        InvoiceMovingToTheProject_WithALineLeftBehind(deriveSeesTheMoveDone: !agrees);
+        var sent = MoveGuardInvoiceToTheProject();
+        foreach (var (key, value) in agrees
+                     ? InvoicePair(OrdinaryProject, ScriptedUserClient.CatalogTypeIdOf("sprk_project"))
+                     : InvoicePair(PairOtherMatter, RecordTypeMatter))
+        {
+            sent[key] = value;
+        }
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, sent);
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "045e (D-96 first): the chat tool moving an invoice while a line stays behind, with a pair sent, is the line refusal")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UpdateRecordTool_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedLineMismatch(bool agrees)
+    {
+        InvoiceMovingToTheProject_WithALineLeftBehind(deriveSeesTheMoveDone: !agrees);
+
+        var result = await UpdateRecord("sprk_invoice", GuardInvoice,
+            ("sprk_matter", JsonSerializer.SerializeToElement<object?>(null)), Lookup("sprk_project", "sprk_project", OrdinaryProject),
+            agrees ? PairIdItem(OrdinaryProject) : PairIdItem(PairOtherMatter),
+            agrees ? PairTypeItem(ScriptedUserClient.CatalogTypeIdOf("sprk_project")) : PairTypeItem(RecordTypeMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode, result.ErrorMessage);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    // ── A record URL sent with an agreeing pair names the same record (fix round 3) ─────────────────────────────────
+
+    [Fact(DisplayName = "045e (URL): PATCH of an invoice with an agreeing pair and a URL naming another record is refused")]
+    public async Task ChildRefile_AnAgreeingInvoicePairWithAUrlNamingAnotherRecord_IsRefusedMismatch()
+    {
+        StoredFamilyRowUnderTheMatter("sprk_invoice", "sprk_matter", PairFamilyRow);
+        var sent = InvoicePair(OrdinaryMatter, RecordTypeMatter);
+        sent["sprk_regardingrecordurl"] = $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={PairOtherMatter:D}";
+
+        var result = await RefileChild("sprk_invoice", PairFamilyRow, sent);
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "045e (URL): the chat tool refuses a family row's URL alone naming another record")]
+    [MemberData(nameof(PairFamilyTables))]
+    public async Task UpdateRecordTool_AFamilyRowUrlAloneNamingAnotherRecord_IsRefusedMismatch(string table, string column)
+    {
+        StoredFamilyRowUnderTheMatter(table, column, PairFamilyRow);
+
+        var result = await UpdateRecord(table, PairFamilyRow, ("sprk_regardingrecordurl",
+            JsonSerializer.SerializeToElement($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={PairOtherMatter:D}")));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode, result.ErrorMessage);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "045e (URL): the chat tool writes a family row's absolute URL of its own matter, as sent")]
+    [MemberData(nameof(PairFamilyTables))]
+    public async Task UpdateRecordTool_AFamilyRowAbsoluteUrlOfItsMatter_IsWrittenAsSent(string table, string column)
+    {
+        StoredFamilyRowUnderTheMatter(table, column, PairFamilyRow);
+        var url = $"https://org.crm.dynamics.com/main.aspx?appid=0a1b2c3d-0000-4000-8000-000000000001&pagetype=entityrecord&etn=sprk_matter&id={OrdinaryMatter.ToString("B").ToUpperInvariant()}";
+
+        var result = await UpdateRecord(table, PairFamilyRow, ("sprk_regardingrecordurl", JsonSerializer.SerializeToElement(url)));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        BodyOf(_user.Patches.Should().ContainSingle().Subject.Body)["sprk_regardingrecordurl"].GetString().Should().Be(url);
+    }
+
     // ── D-68: an external identifier filed under its invoice alone (no core lookup) ─────────────────────────────────
 
     private void StoredInvoiceOnlyExternalIdentifier()
