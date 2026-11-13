@@ -295,10 +295,15 @@ export function stepValid(action: DecisionAction, draft: ItemDraft, scope: StepS
  */
 function composerRecipientsValid(action: DecisionAction, draft: ItemDraft, scope: StepScope): boolean {
   if (action.composer !== 'email' || !action.parameters.some(p => p.code === 'to')) return true;
-  return fieldValue(draft, scope, 'to')
-    .split(/[;,\s]+/)
-    .filter(a => a.trim() !== '')
-    .every(a => EMAIL_RE.test(a.trim()));
+  // Task 190 (D-222): an action that declares `cc` / `bcc` commits them the same way, so they pass the same check.
+  return ['to', 'cc', 'bcc']
+    .filter(code => action.parameters.some(p => p.code === code))
+    .every(code =>
+      fieldValue(draft, scope, code)
+        .split(/[;,\s]+/)
+        .filter(a => a.trim() !== '')
+        .every(a => EMAIL_RE.test(a.trim()))
+    );
 }
 
 /** The values a step sends: only filled fields, Money as a number, everything else as text. */
