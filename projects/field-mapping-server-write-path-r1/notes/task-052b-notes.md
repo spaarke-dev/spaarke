@@ -50,14 +50,16 @@ whether a re-owned parent may re-own those children. Until a relationship is rev
   counts as cascading). The pass keeps the answer for the run (one read per table, an empty answer kept too). If any such
   relationship's child is not on `RecordCreationService.AcceptedAssignCascades` (keyed `"{table}->{child}"`, empty), the owner
   is not written: `record_repair.owner_assign_cascades` (not transient: the answer only changes when the allow-list does),
-  logged once per table per pass, counted `ownerAssignCascades`; the mapping and the stamp are still written. A metadata fault
-  writes no owner and is `record_repair.owner_assign_cascade_unknown` (transient, retried). The cascade reads are not counted
-  as column-metadata reads.
+  logged once per table per pass, counted `ownerAssignCascades`; the mapping and the stamp are still written. Such a row is
+  not revisited by the pass if the allow-list or the metadata changes later (the watermark has passed it); the on-demand
+  repair (052c) is the path. A metadata fault — including a response with no entity or no one-to-many relationships, which
+  is never read as "nothing cascades" (an empty list is) — writes no owner and is `record_repair.owner_assign_cascade_unknown`
+  (transient, retried next run). A failed read is kept as unknown for the rest of the pass (not read again per row) and logged
+  once per table per pass. The cascade reads are not counted as column-metadata reads.
 - **Claims (ADR-036 A1).** The host's lease holds the tick. Each table: an owner-scoped claim
-  (`record-repair-pass:{table}`, owner = run id, 15 min), the marker checked again under the claim, then a per-run marker
-  (`record-repair-pass:{table}:{runId:N}`, 1 h) once the table's state is saved. A table another runner holds is not read; the
-  run fails. The host retries a run only when the job throws, which it never does, so the marker guards a second runner of
-  the same run id, not a host retry.
+  (`record-repair-pass:{table}`, owner = run id, 15 min), released when the table is done. A table another runner holds is
+  not read; the run fails. There is no per-run marker: the host retries a run only when the job throws, which it never does
+  (its every fault is caught and reported), and Repair is fill-only, so a second sweep of a row writes nothing.
 - **State** (distributed cache, `record-repair-pass:{table}:state`, 30 days): the watermark (end of the last finished window),
   a stopped sweep's window end and cursor, and the rows to ask again with their attempt count. No store, or a state that
   cannot be read or saved: the table is not swept (or its progress not kept) and the run fails.
@@ -72,8 +74,9 @@ whether a re-owned parent may re-own those children. Until a relationship is rev
 - **Retry (NFR-04).** `RecordRepairOutcome.NeedsRetry`: the read or write faulted, the row changed under the repair, the owner
   was unavailable, the contact's customer team is unresolved, or a step faulted (`TransientReasons`: mapping unavailable,
   mapping filing unavailable, mapping source unreadable, source or target metadata unavailable, stamp unavailable, Assign
-  cascade unknown). A fault deciding a filed row's owner blocks its mapping as `record_repair.mapping_filing_unavailable`
-  (transient); a deterministic refusal (the resolver's answer) stays `record_repair.mapping_filing_undecided` and is not
+  cascade unknown). A fault deciding a row's owner always blocks its mapping as `record_repair.mapping_filing_unavailable`
+  (transient) — including a fault before the row's filing is known (its thread's parents unread), which is never read as
+  "unfiled"; a deterministic refusal (the resolver's answer) stays `record_repair.mapping_filing_undecided` and is not
   retried. Kept rows are asked first each run. Only faults count toward the 12 attempts (`MaxAttempts`); a contact refused
   for the customer team uses none. At 12 a row is logged (error) as abandoned and dropped. A row whose mapping source does not
   exist (deleted) reads as unreadable and is retried until abandoned.
@@ -191,6 +194,18 @@ delta and the CVE check are the main session's.
 | K10 — the host-retry marker test proved an unreachable path | deleted | — |
 | K8 — the retry set is uncapped | noted (K8 below) | — |
 
+Re-check of 1e72d50962..4e22a086b5 (no F1/F2):
+
+| Finding | Fix | Pinned by |
+|---|---|---|
+| F3 — relationship metadata that did not come back read as "nothing cascades" | the projection throws (→ `owner_assign_cascade_unknown`, transient); an empty list stays "none" | `AssignCascadeProjectionTests.NoEntity_OrRelationshipsNotReturned_IsAFault_*`, `AnEntityWithNoRelationships_GivesNothing` |
+| F4 — a fault before the filing was decided (thread read) was never retried | the fault branch always blocks with `mapping_filing_unavailable` | `RecordRepairModeTests.AThreadReadThatFaults_BeforeTheFilingIsKnown_*` |
+| F4 — a non-secure parent refusal on a contact | precedence kept (every parent refusal wins, as agreed with UAC-r2); behaviour named | `CustomerContactOwnerTests.AContactUnderAnOrdinaryInvoice_WhoseUnitHasNoDefaultOwnerTeam_IsRefused_*`; K10 |
+| F4 — the per-run marker had no reachable path | marker and `alreadyDone` deleted (no path found: the job never throws, so the host never re-runs a run id) | the existing claim and second-run tests |
+| K — `OwnerAssignCascades` doc said the row is revisited | doc corrected: not revisited; 052c is the path | — |
+| K — a failed cascade read was retried and logged per row | kept as unknown for the pass, logged once per table | `RecordRepairPassJobTests.AFailedRelationshipMetadataRead_IsKeptAsUnknownForThePass_*` |
+| K — contact owner rule inert until the cascades are reviewed; overlap inflates counters | noted (K11, K12) | — |
+
 ## Evidence
 
 - **Fail with the rule switched off, then pass** (production code mutated, test project rebuilt, restored with
@@ -209,10 +224,13 @@ delta and the CVE check are the main session's.
   - F2-b and review Ks — the contact-table gate off, `AttemptOf` always 1, no window overlap, the Web API identity not
     added, a culture parse, an error-level log: 14 fail.
   - Restored: all pass.
-- `RecordRepairPassJobTests`: 49/49.
+  - Re-check round, each new must-fire run against the code before its fix: F3 projection 1 of 7 failed
+    (`NoEntity_OrRelationshipsNotReturned_*`); F4 thread fault 1 of 1 failed (`AThreadReadThatFaults_*`: no mapping
+    reason reported); failed-read cache 1 of 50 failed (two reads of `contact` in one pass). After each fix: all pass.
+- `RecordRepairPassJobTests`: 50/50; `RecordRepairPassJobTests` + `RecordRepairModeTests`: 159/159.
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `tests/Spaarke.ArchTests`: 2537/2537.
 - Sprk.Bff.Api.Tests filtered (Repair, RecordOwnership, Scheduled, Job, Contact, ExternalAccess, RecordCreation,
-  SecureChildOwnership, AssignCascade, ColumnMetadata; `!~Api.Office.`): 11620/11620.
+  SecureChildOwnership, AssignCascade, ColumnMetadata; `!~Api.Office.`): 11624/11624 after the re-check fixes.
 - `dotnet format whitespace --verify-no-changes` on every touched .cs file: clean.
 
 ## Known limits (K)
@@ -241,6 +259,16 @@ delta and the CVE check are the main session's.
 - **K9 — Assign cascades not yet reviewed.** With `AcceptedAssignCascades` empty, a table with any cascading-on-Assign
   relationship has its mapping and stamp repaired but no owner written. Read the live metadata and review it before enabling
   (top of this file).
+- **K10 — A contact's parent refusal wins.** A contact filed under a record that is not secure but whose own filing cannot be
+  decided (for example an invoice in a business unit with no default Owner team) is refused
+  (`record_owner_no_default_team`), not given the customer team. Fail closed, as agreed with UAC-r2 ("every parent refusal
+  wins"); the chat create creates nothing and Repair keeps the owner.
+- **K11 — The contact owner rule is inert in the pass until the cascades are reviewed.** Contact's out-of-box relationships
+  are likely to cascade on Assign, so with the allow-list empty the pass re-owns no contact. Until the live cascade metadata
+  is reviewed and `AcceptedAssignCascades` is set, the contact rule decides owners for the chat create only.
+- **K12 — The window overlap inflates the counts.** With a 5-minute tick and a 15-minute overlap, each row is read by about
+  four runs in steady state, so `scanned` (and `noOp`, for rows already repaired) run about 3× above the rows actually
+  created. Writes are not inflated (Repair is fill-only).
 
 ## Deviations from the parent POML (052)
 
@@ -249,6 +277,7 @@ delta and the CVE check are the main session's.
 - The on-demand trigger, the report and the family cascade are deferred to 052c, 052d and 052e (the 052 split).
 - AC4's refusal code is `record_owner_customer_contact_team_unresolved` (the `record_owner_` prefix every resolver refusal
   carries), not the `customer_contact_owner_team_unresolved` first written in the POML; the POML is corrected.
-- One line changed in `RecordCreationService.cs` (045d's file): the fault branch of `RepairOwnerAsync` now sets
-  `blockedOnFault = filed ? RecordRepairReason.MappingFilingUnavailable : null` (review F2-a). No other edit to 045d's files.
+- `RecordCreationService.cs` (045d's file): only the fault branch of `RepairOwnerAsync` is edited. It now sets
+  `const string blockedOnFault = RecordRepairReason.MappingFilingUnavailable;` (review F2-a, then F4: always, not only when
+  `filed`), with a two-line comment. No other edit to 045d's files.
 - Review F2-b and the review Ks are one commit (abfba9f828): they change the same job and test file.
