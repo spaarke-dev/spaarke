@@ -1084,6 +1084,8 @@ public static class ProcedureResolver
         var versions = new List<ProcedureVersionRow>();
         foreach (var chunk in procedureIds.Chunk(BillingFactLoader.MaxInValues))
         {
+            // statecode deliberately not checked (ISS-021 known limit): a version's lifecycle is Status, owned by ProcedureService (Retire is
+            // the supported stop); filtering here would make Follow latest / ByDate fall back silently to an older version's rules.
             var query = new QueryExpression(ProcedureEntity.VersionEntity)
             {
                 ColumnSet = new ColumnSet(
@@ -1227,6 +1229,8 @@ public static class ProcedureResolver
         var versions = new List<ResolvedPolicyVersion>();
         foreach (var chunk in byId.Keys.Order().Chunk(BillingFactLoader.MaxInValues))
         {
+            // statecode deliberately not checked (ISS-021 known limit): only Published versions of active policies are read, and the BFF
+            // deactivates only Drafts (EB-D-216).
             var query = new QueryExpression(BillingFactLoader.VersionEntity)
             {
                 ColumnSet = new ColumnSet(
