@@ -57,7 +57,7 @@
 - **uac-r2:**
   - Gates 084d-5a's merge (one Opus pass on our side first).
   - Its 095g conditions are in `notes/095g-assign-firm.md`.
-  - The dev BFF is `0c06f464e3`, with no 084.
+  - The dev BFF is `b100effac3` (= master c2f366bf52 + mcp spike; includes #2789/#2793 invoice-firm), live 2026-11-13 20:39Z by uac-r2. Still no 084.
 - **ontology-r1:**
   - 084d-3 is OK. Send it the 5a code.
   - Still owed to it: the DEF-059 role note, the DEF-060 Signals diff, and the 176 fixture change.
