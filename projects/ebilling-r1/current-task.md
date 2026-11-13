@@ -41,7 +41,8 @@
 
 ## Owner questions OPEN (asked in chat 2026-11-13; no answer yet)
 
-1. **Pending Spend, ISS-018 / #2777.**
+1. **DONE 2026-11-13: owner said "Yes, run it".** The script was applied on dev and read back, and uac-r2 had notices before and after. Remaining: SpaarkeMaster source, and 112's apply list.
+   **Pending Spend, ISS-018 / #2777.**
    - `sprk_pendingspend` is missing on dev, on both matter and project (confirmed read-only), and from the SpaarkeMaster source.
    - Every recalculate logs a 400 on the Pending Spend PATCH. The counted rollup still saves.
    - Asked: may I run `scripts/ebilling/Deploy-EbillingPendingSpendSchema.ps1` on dev?
