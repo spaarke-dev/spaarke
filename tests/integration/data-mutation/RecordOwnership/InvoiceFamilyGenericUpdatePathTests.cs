@@ -112,6 +112,34 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         [columns[1]] = $"N-{id.ToString("N")[..6]}",
     };
 
+    /// <summary>
+    /// Task 045d fix round 3: the push's caller query (its display read of the record the row will name). It answers the
+    /// selected columns of <see cref="_recordAnswer"/> (journalled as that record's read), no row when that answers null, or
+    /// 403 when <see cref="_callerMayNotRead"/>.
+    /// </summary>
+    private Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery CallerQuery()
+    {
+        var query = new Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(MockBehavior.Strict);
+        query.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), Caller, It.IsAny<CancellationToken>()))
+            .Returns((string _, string? odata, Guid _, CancellationToken _) =>
+            {
+                var select = Regex.Match(odata!, @"\$select=([^&]+)").Groups[1].Value.Split(',');
+                var filter = Regex.Match(odata!, @"\$filter=(\w+)id eq ([0-9a-fA-F-]{36})");
+                var table = filter.Groups[1].Value;
+                _deriveReads.Add($"record:{table}");
+                if (_callerMayNotRead)
+                    throw new HttpRequestException("denied", null, System.Net.HttpStatusCode.Forbidden);
+                IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> rows =
+                    _recordAnswer(table, Guid.Parse(filter.Groups[2].Value), select) is { } row
+                        ? [select.ToDictionary(c => c, c => System.Text.Json.JsonSerializer.SerializeToElement(row.GetAttributeValue<string>(c)))]
+                        : [];
+                return Task.FromResult(rows);
+            });
+        return query.Object;
+    }
+
+    private bool _callerMayNotRead;
+
     /// <summary>Task 045d: the harness catalog's fixed row id for a core table.</summary>
     private static Guid CatalogRowOf(string table) =>
         new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("catalog:" + table)));

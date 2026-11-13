@@ -321,9 +321,9 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
     [InlineData("sprk_invoice", true)]
     [InlineData("SPRK_BILLINGEVENT", true)]
     [InlineData("sprk_todo", false)]
-    [InlineData("sprk_invoicesubmission", false)]
+    [InlineData("sprk_invoicesubmission", true)] // H1 (2026-11-13): every invoice-family table
     [InlineData("", false)]
-    public void IsUpdateOnlyTarget_IsTheTwoGuardedTables_AndNoOther(string table, bool expected) =>
+    public void IsUpdateOnlyTarget_IsEveryInvoiceFamilyTable_AndNoOther(string table, bool expected) =>
         InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table).Should().Be(expected);
 
     // ── The detach, move, re-attach hint (#2081 follow-up): a stable code plus a fixed sentence, no user data ─────────

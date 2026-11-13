@@ -140,11 +140,22 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                     }
 
                     if (app is not null)
+                    {
                         AnswerDeriveReads(app);
+                        // Task 045d fix round 3: the push reads the derived name and number as its caller (CallerDisplayReader),
+                        // which names the record's entity set from metadata.
+                        if (app is IMocked<IGenericEntityService> mocked)
+                        {
+                            mocked.Mock.Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                                .ReturnsAsync((string t, CancellationToken _) => EntitySetNameFixtures.SetOf(t));
+                        }
+                    }
+
                     var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
                 Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                         _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
-                        NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app);
+                        NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app,
+                        callerQuery: CallerQuery());
                     if (failed == 0)
                         return new PathOutcome(null, null);
 
@@ -380,6 +391,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         WrittenOnce("sprk_invoice", Invoice);
         app.Verify(a => a.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_billingevent"), It.IsAny<CancellationToken>()), Times.Once,
             "the lines are counted once, as the app");
+        app.Verify(a => a.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()), Times.Once,
+            "the derive reads the catalog row once");
+        app.Verify(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Exactly(2),
+            "no other query: the lines once and the catalog once");
     }
 
     [Theory]

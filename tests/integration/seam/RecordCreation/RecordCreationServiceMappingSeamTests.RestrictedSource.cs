@@ -471,6 +471,34 @@ public sealed partial class RecordCreationServiceMappingSeamTests
                 w.Code == RecordCreationWarning.MappingSourceRestrictedCode && w.Detail == RecordCreationService.MappingSourceRestrictedStripped);
     }
 
+    /// <summary>
+    /// Task 045d: a stripped invoice is rebuilt from the caller's own values, and the resolver fields the invoice-family rule
+    /// derives are set on the rebuilt row again: the created row names its matter in the pair.
+    /// </summary>
+    [Fact]
+    public async Task RestrictedSource_AStrippedInvoice_IsCreatedWithItsMattersResolverFields_SetAgainOnTheRebuiltRow()
+    {
+        TheRestrictedMatter();
+        Profile("sprk_matter", "sprk_invoice", Rule("sprk_matterdescription", "sprk_description", Memo));
+
+        var outcome = await Service().CreateAsync(
+            Request("sprk_invoice", new Dictionary<string, object?>
+            {
+                ["sprk_invoicenumber"] = "INV-1",
+                ["sprk_Matter@odata.bind"] = $"/sprk_matters({RestrictedMatter:D})",
+            }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.MappingWarnings.Should().Contain(w => w.Code == RecordCreationWarning.MappingSourceRestrictedCode, "the row was stripped");
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        fields.Should().NotContainKey("sprk_description");
+        var id = RestrictedMatter.ToString("D").ToLowerInvariant();
+        StringOf(fields, "sprk_regardingrecordtype@odata.bind").Should().StartWith("/sprk_recordtype_refs(");
+        StringOf(fields, "sprk_regardingrecordid").Should().Be(id);
+        StringOf(fields, "sprk_regardingrecordurl").Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={id}");
+        fields.Should().ContainKey("sprk_regardingrecordname").And.ContainKey("sprk_regardingrecordnumber");
+    }
+
     [Fact]
     public async Task RestrictedSource_AStrippedValueThatFilesTheRow_RefusesTheCreate()
     {

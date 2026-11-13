@@ -157,6 +157,108 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         NothingWritten();
     }
 
+    // ── Fix round 3 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task OnThePush_AMatterTheCallerMayNotRead_IsWrittenWithTheTypeIdAndUrl_AndItsNameAndNumberCleared()
+    {
+        // The push reads display values as its caller (as the 045b planner does there): a record the caller cannot read shows
+        // them nothing, so its name and number are cleared (option (b)); the type, the id and the URL come from the catalog and
+        // the id.
+        _callerMayNotRead = true;
+
+        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
+            NoPlain, WorldWithLines(OtherMatter).Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
+            name: null, number: null);
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
+    public async Task AnApprovalMovedToAnotherMatter_IsWrittenWithThatMattersResolverFields(GenericPath path)
+    {
+        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow,
+            Lookups(("sprk_regardingmatter", MatterRef(OtherMatter))), NoPlain, FamilyRowUnderAMatter("sprk_invoiceapproval").Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoiceapproval", FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
+            OtherMatter, RecordName(OtherMatter), RecordNumber(OtherMatter));
+    }
+
+    [Fact]
+    public async Task AnExternalIdentifierMovedToInvoiceOnly_IsWrittenWithItsInvoicesResolverFields()
+    {
+        // D-68: the core lookup cleared, the invoice kept; the row now regards the invoice.
+        var app = FamilyRowUnderAMatter("sprk_externalidentifier",
+            (InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn, new EntityReference("sprk_invoice", Invoice)));
+
+        var outcome = await RunAsync(GenericPath.OutputOrchestrator, "sprk_externalidentifier", FamilyRow,
+            Lookups(("sprk_regardingmatter", null)), NoPlain, app.Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_externalidentifier", FamilyRow), "sprk_RegardingRecordType", "sprk_invoice",
+            Invoice, RecordName(Invoice), RecordNumber(Invoice));
+    }
+
+    [Fact]
+    public async Task APushThatSendsThePair_AndMovesTheCoreLookup_IsWrittenWithTheDerivedPair_NotThePushedOne()
+    {
+        var pushed = new Dictionary<string, object?>
+        {
+            ["sprk_regardingrecordid"] = Matter.ToString("D"),
+            ["sprk_regardingrecordname"] = "Pushed name",
+            ["sprk_regardingrecordnumber"] = "PUSHED-1",
+        };
+
+        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
+            pushed, WorldWithLines(OtherMatter).Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
+            RecordName(OtherMatter), RecordNumber(OtherMatter));
+    }
+
+    [Fact]
+    public async Task ACancellationDuringTheDerive_IsRethrown_AndNothingIsWritten()
+    {
+        using var cancel = new CancellationTokenSource();
+        _catalogAnswer = _ =>
+        {
+            cancel.Cancel();
+            throw new OperationCanceledException(cancel.Token);
+        };
+
+        var act = () => Handler(WorldWithLines(OtherMatter).Object).UpdateAsync(
+            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_matter"] = MatterRef(OtherMatter) },
+            Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task AStoredRowThatDoesNotExist_DerivesNothing_AndIsLeftToThePath(bool answersNotFoundFault, bool writeIsImpersonated)
+    {
+        // The derive reads the stored row only to derive from it: a row that does not exist gets no derive code of its own
+        // (the guard before it, or the update-only write after it, answers it as any missing row).
+        var app = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var read = app.Setup(a => a.RetrieveAsync("sprk_invoiceapproval", MissingRow, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (answersNotFoundFault) read.ThrowsAsync(ObjectDoesNotExist()); else read.ReturnsAsync((Entity)null!);
+
+        var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync("sprk_invoiceapproval", MissingRow,
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = MatterRef(OtherMatter) }, app.Object, CancellationToken.None,
+            writeIsImpersonated);
+
+        derived.Should().BeNull();
+    }
+
     // ── Must not fire: a write that moves no core lookup reads nothing for the derive ───────────────────────────────
 
     [Theory]

@@ -1415,11 +1415,16 @@ internal static class OwnedChildWrite
     /// The payload unchanged when nothing is derived; the guard's refusal (its code) when the derive cannot be done, which the
     /// path answers through the refusal form it uses for <see cref="InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync"/>.
     /// </summary>
+    /// <param name="displayRecord">The field-mapping push's display read (<see cref="CallerDisplayReader"/>): the record's name
+    /// and number are read as the caller, as the pair planner reads them on the push (<see cref="CallerDisplayRecords"/>). Null:
+    /// read app-only.</param>
     internal static async Task<(Dictionary<string, object?> Payload, string? RefusalCode)> KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
         IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
-        ILogger? logger, CancellationToken ct, bool writeIsImpersonated = false)
+        ILogger? logger, CancellationToken ct, bool writeIsImpersonated = false,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? displayRecord = null)
     {
-        var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync(table, recordId, payload, entities, ct, writeIsImpersonated)
+        var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync(table, recordId, payload, entities, ct, writeIsImpersonated,
+                displayRecord is not null && entities is not null ? CallerDisplayRecords(entities, displayRecord) : null)
             .ConfigureAwait(false);
         if (derived is null)
             return (payload, null);
@@ -1430,6 +1435,37 @@ internal static class OwnedChildWrite
             "[{Path}] the resolver fields of {Table} {RecordId} were derived from the core record it will name", path, table, recordId);
         return (WithColumnsSet(table, payload, fields.ToGenericFields()), null);
     }
+
+    /// <summary>
+    /// Task 045d (fix round 3): the push's record reader for the derive — the name and number as the caller sees them
+    /// (<paramref name="displayRecord"/>), as the 045b planner reads display values on the push. A record the caller may not
+    /// read, or cannot find (403 or 404), is checked to exist app-only: it exists, so its name and number are cleared (owner,
+    /// 2026-11-12, option (b)); it does not, so the derive refuses as for any missing record. Any other failed read throws,
+    /// which the derive refuses as a read failure.
+    /// </summary>
+    internal static InvoiceFamilyCoreRecordGuard.RecordLookup CallerDisplayRecords(
+        IGenericEntityService entities,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>> displayRecord) =>
+        async (table, id, columns, ct) =>
+        {
+            var shown = await displayRecord(table, id, columns, ct).ConfigureAwait(false);
+            if (shown.Value is { } values)
+            {
+                var row = new Microsoft.Xrm.Sdk.Entity(table, id);
+                foreach (var column in columns)
+                    row[column] = values.TryGetValue(column, out var value) ? value : null;
+                return row;
+            }
+
+            if (shown.Status is 403 or 404)
+            {
+                return await entities.RetrieveAsync(table, id, columns, ct).ConfigureAwait(false) is null
+                    ? null
+                    : new Microsoft.Xrm.Sdk.Entity(table, id);
+            }
+
+            throw new InvalidOperationException("The record's name and number could not be read as the caller.");
+        };
 
     /// <summary>One mapped item carrying <paramref name="item"/>'s writes and <paramref name="added"/>'s (which win).</summary>
     private static DataverseWriteItemMapper.MappedItem Merge(DataverseWriteItemMapper.MappedItem item, DataverseWriteItemMapper.MappedItem added)

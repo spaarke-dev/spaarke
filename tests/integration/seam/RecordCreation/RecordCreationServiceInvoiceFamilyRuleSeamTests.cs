@@ -299,6 +299,38 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         AssertNothingWritten();
     }
 
+    [Theory]
+    [InlineData("catalog")]
+    [InlineData("matter")]
+    public async Task CreateAsync_AReadFaultInTheDerive_Is500ReadFailed_AndTheFaultsOwnTextIsNotInTheResponse(string faulted)
+    {
+        const string faultText = "socket 10.0.0.9 timed out";
+        if (faulted == "catalog")
+        {
+            _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException(faultText));
+        }
+        else
+        {
+            _readBack
+                .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException(faultText));
+        }
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "A read faults",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        JsonSerializer.Serialize(problem).Should().NotContain("10.0.0.9", "a fault's own text never reaches the response");
+        outcome.Refusal!.Detail.Should().NotContain(faultText);
+        AssertNothingWritten();
+    }
+
     [Fact]
     public async Task CreateAsync_WhenTheCoreTableHasNoCatalogRow_Is400ResolverFieldsIncomplete_AndWritesNothing()
     {

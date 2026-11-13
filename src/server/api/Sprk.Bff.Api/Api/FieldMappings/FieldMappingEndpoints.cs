@@ -1495,12 +1495,16 @@ public static class FieldMappingEndpoints
                             callerQuery, appOnlyEntities, callerSystemUserId));
 
                     // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family child whose own core
-                    // lookup this push sets takes the resolver fields of the record it will name, in this same child write (read
-                    // app-only, after the pair planner so they win). They are the server's, never copied from the source, so
-                    // they are added after the source gate and the access-column scrub above, and are no access column. A
-                    // derive that cannot be done fails THIS child as the guard above does: its code only.
+                    // lookup this push sets takes the resolver fields of the record it will name, in this same child write (after
+                    // the pair planner so they win). The stored row and the catalog are read app-only; the name and number as
+                    // the caller, as the planner reads display values here (a record the caller cannot read has them cleared).
+                    // They are the server's, never copied from the source, so they are added after the source gate and the
+                    // access-column scrub above, and are no access column. A derive that cannot be done fails THIS child as
+                    // the guard above does: its code only.
                     var familyFields = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
-                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH", logger, ct);
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH", logger, ct,
+                        displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId));
                     if (familyFields.RefusalCode is { } derivedCode)
                     {
                         failed++;
