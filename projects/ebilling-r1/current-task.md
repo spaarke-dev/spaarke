@@ -30,10 +30,8 @@
 
 ## Next action (exact)
 
-1. **Opus adversarial review of `task/084d-5a`**, comparing `3a1d15a50d..task/084d-5a`. Then fix rounds until no F-class finding remains. Then send the diff to uac-r2, which gates the merge, and the code to ontology-r1. Then merge into work, update TASK-INDEX and close out the notes.
-2. **File the pre-existing finding from the 5a build.** A Procedure deactivated in Dataverse (statecode 1) but with Status Active is still applied by the resolver and accepted by 089's write, because neither reads statecode. The fix is in the resolver, which ontology-r1 owns, and in 089's write.
-   - Tell ontology-r1.
-   - File it with `/project-defer-issue-tracking`. That is not done yet.
+1. **084d-5a fix round in progress**: implementer agent a5c9fb9f832058d79 (sonnet, base de52771371) is fixing the Opus findings (padding test, shared Like escaper, parity fields, a K4 note) plus uac-r2's drop-before-judge ruling as a separate commit (batched caller Read over the candidates, dropped before resolver/bound/tooMany; ceiling 1000). Then a scoped Sonnet re-check, the diff to uac-r2 (gates merge) and to ontology-r1, the merge, TASK-INDEX and notes.
+2. **DONE: ISS-021 #2797 filed** (deactivated Procedure still applies and can be assigned); ontology-r1 told 2026-11-13. The 089 refusal half needs the owner's OK; ask when 5a closes.
 3. **084d-5b, the client wizard.** Gate the entry point on `allowedSteps(...).create`. The pick list comes from the assignable route. Offer Follow latest or Pin, with versions from `GET /api/finance/procedures/{id}`. Show the Gap warning, and Impact on the dry run. Write through 089. Then jest, an Opus review, and the uac-r2 and ontology-r1 reviews.
 4. **Then mark 084d ✅** and go to task 112: deploy, ui-tests, the access-invariant check from session memory, and the step 3 probe. Its live changes need the owner's typed OK.
 5. **Then 095e → 095f → 095g** (owner rulings EB-D-223..226; `notes/095g-assign-firm.md`). 095g needs a design note to uac-r2 before any code.
@@ -74,6 +72,7 @@
 - ISS-018 #2777 (Pending Spend)
 - ISS-019 #2782 (NFR-01 named firm)
 - ISS-020 #2794 (no invoice move; built as fm 045g)
+- ISS-021 #2797 (deactivated Procedure still applies)
 - ISS-017 #2772 (decided, built in 045e)
 - DEF-067 #2770
 

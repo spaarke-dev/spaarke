@@ -10,6 +10,35 @@
 
 ## Open (in priority order)
 
+### ISS-021 — A deactivated Procedure (statecode 1, Status Active) still applies and can still be assigned
+
+| Field | Value |
+|---|---|
+| **Status** | Open. The resolver part is ontology-r1's (told 2026-11-13). The 089 assign refusal needs the owner's OK. |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | 084d-5a adversarial review (Opus), pre-existing finding, CONFIRMED |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2797 |
+
+**Description**
+
+A Procedure that is deactivated in Dataverse (`statecode` 1) but still has Status Active is applied by the resolver and accepted by 089's assign write, because neither reads `statecode`. An admin who deactivates a Procedure expects it to stop applying. Instead it keeps judging invoices and can still be assigned. The 084d-5a assignable list reads only `statecode` 0, so the list and the write disagree, though only by the list offering less.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Signals/Billing/ProcedureResolver.cs` ~1033-1041 and ~1062: the Procedure read has no `statecode` filter.
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/ProcedureAssignmentService.cs` ~450 (the row read) and `AssignRefusalOf` ~457-476: no `statecode` check.
+
+**Suggested fix**
+
+The resolver treats `statecode` != 0 as not applicable, through the same path as Retired. The assign write refuses it, which needs the owner's OK, like EB-D-228. Add parity tests for both.
+
+**Estimated effort**: about half a day.
+**Blockers**: none.
+**Related**: EB-D-228, 084d-5a.
+
+---
+
 ### ISS-020 — Invoice family: a filed invoice is never moved; children match their invoice's core record
 
 | Field | Value |
