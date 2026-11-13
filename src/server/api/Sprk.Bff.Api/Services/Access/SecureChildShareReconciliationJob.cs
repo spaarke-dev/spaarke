@@ -468,7 +468,9 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         var reconciler = new DirectMessageParticipantShares(
             dataverse, shares, lookup, configuration,
             services.GetService<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>() is { } resolver ? resolver.ProbeColumnsAsync : null,
-            services.GetService<Spaarke.Dataverse.DataverseWebApiClient>(), _logger);
+            services.GetService<Spaarke.Dataverse.DataverseWebApiClient>(), _logger,
+            // uac-r2 197b: THE external visibility predicate (191h seam) for flagged participants; scoped, so this run's scope.
+            services.GetService<Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility>());
         var incomplete = new List<Guid>();
         int granted = 0, revoked = 0;
         // 198 pass 2 N2 (ontology): a participant this pass grants on the MESSAGE also gets its gate Decision Records (D-215), through the
@@ -479,7 +481,7 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
             ct.ThrowIfCancellationRequested();
             var outcome = await reconciler.ReconcileAsync(id, team, ct).ConfigureAwait(false);
             granted += outcome.Granted.Count;
-            revoked += outcome.Revoked.Count;
+            revoked += outcome.Revoked.Count + (outcome.HiddenRevoked?.Count ?? 0); // 197b: flagged participants on hidden rows too
             if (gateRecords is not null && outcome.Granted.Any(g => g.Table == DirectMessageParticipantShares.CommunicationTable))
                 await gateRecords.MirrorCommunicationSharesAsync(id, ct).ConfigureAwait(false); // never throws (cancellation is logged)
             if (outcome.Complete)

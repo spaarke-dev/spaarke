@@ -49,13 +49,15 @@ public class ExternalTeamShareGuardTests
             "Shares a playbook (sprk_analysisplaybook), not a lineage table: outside the visibility predicate.",
         ["Sprk.Bff.Api.Services.Signals.GateDecisionRecordSharing"] =
             "A gate Decision Record is shared with the users who read its communication, never with a user flagged external " +
-            "or a B2B guest (its own check). Known: the guest test also reads domainname (pre-existing, owner question).",
+            "(its own check: the stored sprk_isexternal only, task 197b; an unreadable flag is never shared).",
         ["Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares"] =
-            "KNOWN GAP (task 191c, owner question): task 198's Direct-message participant shares are not filtered by the " +
-            "predicate; field-mapping-r1 is editing this code, so 191c reports it and leaves it.",
+            "Task 197b: a Direct-team-owned message's participants flagged external are granted a row only when the predicate " +
+            "allows it (DecideForDirectParticipantsAsync, participant-scoped NoRoot exemption); a hidden row's share is revoked.",
         ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
-            "KNOWN GAP (task 191c, owner question): grants a Direct thread's rows (sprk_emailreviewlog included) to its " +
-            "participants without the predicate; left to task 198's owner, reported.",
+            "Task 197b: the Direct-team branch and the other Direct branch ask the predicate for participants flagged external " +
+            "(DecideForDirectParticipantsAsync; the NoRoot exemption only for a member of the stamped pair of a message " +
+            "recognized as an unfiled Direct message, bound i'). KNOWN LIMIT: the thread create share and the record-anchored " +
+            "branch do not (task notes).",
     };
 
     private static readonly string[] GrantMethods =
@@ -172,10 +174,76 @@ public class ExternalTeamShareGuardTests
         Assert.Null(ExternalTeamShareSynchronizer.TeamRightsFor("sprk_procedure"));
     }
 
+    /// <summary>uac-r2 task 197b: the External Collaborators unit has ONE source. The C# constant every reader uses (191c's engine,
+    /// 191e's placement job and census, the ownership resolver) is the role file's name, and the role's.</summary>
     [Fact]
-    public void TheUnitName_IsTheRoleFiles()
+    public void TheUnitName_AndTheRoleName_AreTheRoleFiles()
     {
-        Assert.Equal(ExternalTeamShareSynchronizer.DefaultBusinessUnitName, (string?)RoleFile()["businessUnit"]?["name"]);
+        var file = RoleFile();
+        Assert.Equal(Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.BusinessUnitName,
+            (string?)file["businessUnit"]?["name"]);
+        Assert.Equal(Sprk.Bff.Api.Services.ExternalAccess.ExternalCollaboratorPlacement.RoleName, (string?)file["roleName"]);
+    }
+
+    /// <summary>uac-r2 task 197b: the retired setting is in no checked-in configuration (appsettings, Bicep, parameter files,
+    /// workflows, scripts). Its only mention outside C# and docs would revive a second source of the unit's name.</summary>
+    [Fact]
+    public void TheRetiredUnitNameSetting_IsInNoCheckedInConfiguration()
+    {
+        Assert.Equal("ExternalAccess:ExternalTeamShare:BusinessUnitName", ExternalTeamShareSynchronizer.RetiredBusinessUnitNameConfigKey);
+        var offenders = RetiredSettingMentions(SourceScan.RepoRoot).ToList();
+        Assert.True(offenders.Count == 0, "The retired setting is still configured in:\n" + string.Join("\n", offenders));
+    }
+
+    [Fact]
+    public void Control_TheRetiredSettingScan_FindsTheKeyInEitherForm()
+    {
+        var root = Directory.CreateTempSubdirectory("uac197b-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "appsettings.Test.json"), "{ \"ExternalAccess\": { \"ExternalTeamShare\": { \"BusinessUnitName\": \"x\" } } }");
+            File.WriteAllText(Path.Combine(root, "main.bicep"), "name: 'ExternalAccess__ExternalTeamShare__BusinessUnitName'");
+            File.WriteAllText(Path.Combine(root, "clean.json"), "{ \"ExternalAccess\": { \"ExternalTeamShare\": { \"WritesEnabled\": false } } }");
+
+            Assert.Equal(["appsettings.Test.json", "main.bicep"], RetiredSettingMentions(root).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static readonly string[] ConfigExtensions = [".json", ".bicep", ".bicepparam", ".yml", ".yaml", ".ps1", ".psm1", ".env"];
+
+    private static readonly System.Text.RegularExpressions.Regex RetiredFlat = new(
+        @"ExternalTeamShare(:|__)BusinessUnitName", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    private static readonly System.Text.RegularExpressions.Regex RetiredNested = new(
+        "\"ExternalTeamShare\"\\s*:\\s*\\{[^}]*\"BusinessUnitName\"", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>Configuration files (not C#, not docs, not projects/ notes, not build output) that mention the retired key.</summary>
+    private static IEnumerable<string> RetiredSettingMentions(string root)
+    {
+        var skipped = new[] { "node_modules", "bin", "obj", ".git", "projects", "docs", ".claude", "tests", "dist", ".vs" };
+        var pending = new Stack<string>([root]);
+        while (pending.Count > 0)
+        {
+            var dir = pending.Pop();
+            foreach (var sub in Directory.EnumerateDirectories(dir))
+            {
+                if (!skipped.Contains(Path.GetFileName(sub), StringComparer.OrdinalIgnoreCase))
+                    pending.Push(sub);
+            }
+
+            foreach (var file in Directory.EnumerateFiles(dir))
+            {
+                if (!ConfigExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
+                    continue;
+                var text = File.ReadAllText(file);
+                if (RetiredFlat.IsMatch(text) || RetiredNested.IsMatch(text))
+                    yield return file;
+            }
+        }
     }
 }
 
