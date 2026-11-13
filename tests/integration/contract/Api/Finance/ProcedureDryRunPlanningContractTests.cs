@@ -304,7 +304,7 @@ public sealed class ProcedureDryRunPlanningContractTests
         remove.AfterImages.Should().BeEmpty();
     }
 
-    public static TheoryData<string> Refusals() => new() { "retired-procedure", "non-billing-procedure", "inactive-procedure", "duplicate-exclude", "not-in-force", "no-reason", "set-conflict", "no-override" };
+    public static TheoryData<string> Refusals() => new() { "retired-procedure", "non-billing-procedure", "inactive-procedure", "inactive-owner-change", "duplicate-exclude", "not-in-force", "no-reason", "set-conflict", "no-override" };
 
     [Theory(DisplayName = "084d-1 F1: the plan refuses with the write's own status and code (it runs the write's checks)")]
     [MemberData(nameof(Refusals))]
@@ -333,6 +333,13 @@ public sealed class ProcedureDryRunPlanningContractTests
                 var inactive = new ProcedureAssignmentRequest(w.Procedure(state: 1), null, null, null);
                 plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, inactive, Ct));
                 write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, inactive, Caller, Ct));
+                break;
+            case "inactive-owner-change":
+                // EB-D-232 (ISS-021): a rule change whose owning Procedure is deactivated (statecode 1, Status Active) - plan and write both refuse 409 rule_not_in_force.
+                w.H.Row("sprk_ruleset", w.H.Row("sprk_policy", rule).GetAttributeValue<EntityReference>("sprk_ruleset").Id)["sprk_procedure"] =
+                    new EntityReference("sprk_procedure", w.Procedure(state: 1));
+                plan = async () => Of(await service.PlanChangeRuleAsync(w.Reads(), Matter, MatterId, Change(rule), Now, Ct));
+                write = async () => Of(await service.ChangeRuleAsync(Matter, MatterId, Change(rule), Caller, null, Ct));
                 break;
             case "duplicate-exclude":
                 (await service.ExcludeRuleAsync(Matter, MatterId, new RuleExcludeRequest(rule, "Waived", null), Caller, Ct)).Kind.Should().Be(RuleSetOutcomeKind.Done);
@@ -380,6 +387,11 @@ public sealed class ProcedureDryRunPlanningContractTests
         if (refusal == "inactive-procedure")
         {
             planned.Should().Be((RuleSetOutcomeKind.Refused, 409, ProcedureAssignmentService.CodeProcedureInactive));
+        }
+
+        if (refusal == "inactive-owner-change")
+        {
+            planned.Should().Be((RuleSetOutcomeKind.Refused, 409, "assignment.rule_not_in_force"));
         }
     }
 

@@ -1196,6 +1196,18 @@ public sealed class ProcedureAssignmentServiceTests
         w.Rows.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "EB-D-232 must-fire: the owning-Procedure read of a rule change selects statecode (without it a deactivated owner reads as active)")]
+    public async Task Change_TheOwningProcedureRead_SelectsStatecode()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(state: 1));
+
+        await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        w.H.Queries.Single(q => q.EntityName == "sprk_procedure").ColumnSet.Columns.Should().Contain("statecode");
+    }
+
     [Fact(DisplayName = "EB-D-232 (scope): Exclude still accepts a rule of a deactivated Procedure, as it does a retired one's")]
     public async Task Exclude_StillAcceptsARuleOfADeactivatedProcedure()
     {
