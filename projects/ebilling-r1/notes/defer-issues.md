@@ -10,6 +10,33 @@
 
 ## Open (in priority order)
 
+### ISS-019 — Procedure assign and dry-run routes: one answer for a named firm (NFR-01)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (known limit K-6 for 084d, accepted by uac-r2 2026-11-13) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 |
+| **Source** | 084d-2a adversarial review; uac-r2 asked for one issue covering both routes |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2782 |
+
+**Description**
+
+The order of checks on a firm named in the request body does not yet give NFR-01's single answer for an unknown id and a denied id. It applies to the assign write route and the 084d dry run alike. uac-r2 rated it low sensitivity. The mechanism is not recorded here; it is in the uac-r2 thread.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/Finance/ProcedureAssignmentEndpoints.cs`
+- `src/server/api/Sprk.Bff.Api/Services/Finance/Procedures/RecordProcedureReadService.cs` (`DryRunAsync`)
+
+**Suggested fix**: check the named firm as the caller before planning runs, on both routes, with tests on both.
+
+**Estimated effort**: about half a day.
+**Blockers**: none; not a blocker for 084d.
+**Related**: NFR-01, 084d, uac-r2
+
+---
+
 ### ISS-018 — Pending Spend column missing on dev and from SpaarkeMaster; the rollup's Pending Spend PATCH gets 400
 
 | Field | Value |
