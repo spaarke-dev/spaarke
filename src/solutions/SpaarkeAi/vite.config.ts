@@ -56,12 +56,10 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // (notification-spine client lib) — SpaarkeAi's notificationsBootstrap.ts +
     // the R3 communications widget consume it; resolve to source like the others.
     path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
-    // R2 FR-10 (spaarke-dataset-grid-framework-r2, 2026-07-02, task 022):
-    // Spaarke.LegalWorkspace shared package resolves via a proper file: dep
-    // in package.json (barrel re-exports the LegalWorkspace solution's src).
-    // Both paths need dep-resolution because the re-export follows source
-    // files that still physically live under src/solutions/LegalWorkspace/src.
-    path.resolve(__dirname, "../../client/shared/Spaarke.LegalWorkspace/src"),
+    // The LegalWorkspace solution is a file: dependency ("legal-workspace": "file:../LegalWorkspace",
+    // exports ./src/index.ts). Its source is bundled here, so its bare imports resolve to THIS
+    // project's node_modules. (Until 2026-11-13 a shared legal-workspace facade package re-exported
+    // it — reuse-governance-tightening-r1 task 032 retired the facade.)
     path.resolve(__dirname, "../LegalWorkspace/src"),
     // spaarke-ontology-platform-r1 task 113 (D-26): the Console hosts these code-page wizards
     // in-app (components/shell/inAppWizardRenderers.tsx), so their sources are bundled here and
@@ -148,14 +146,8 @@ export default defineConfig({
         // orchestrator (FR-02 / FR-03).
         path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.ts"),
-        // R2 FR-10 (spaarke-dataset-grid-framework-r2, 2026-07-02, task 022):
-        // transpile the Spaarke.LegalWorkspace shared-package barrel; it
-        // re-exports LegalWorkspace/src (below) — both trees need inclusion.
-        path.resolve(__dirname, "../../client/shared/Spaarke.LegalWorkspace/src/**/*.tsx"),
-        path.resolve(__dirname, "../../client/shared/Spaarke.LegalWorkspace/src/**/*.ts"),
-        // Round 4 Fix 4 (2026-05-21): transpile LegalWorkspace source so
-        // SpaarkeAi can embed LegalWorkspaceApp via the Spaarke.LegalWorkspace
-        // file: dep (which re-exports LegalWorkspace/src via barrel — see R2 task 021 notes).
+        // Round 4 Fix 4 (2026-05-21): transpile LegalWorkspace source so SpaarkeAi can embed
+        // LegalWorkspaceApp via the "legal-workspace" file: dependency on that solution.
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.tsx"),
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.ts"),
         // Task 113 (D-26): in-app hosted code-page wizards (see resolveSharedLibDeps above).
@@ -236,14 +228,11 @@ export default defineConfig({
       "@spaarke/daily-briefing-components/utils": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/utils"),
       "@spaarke/daily-briefing-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
       "@spaarke/daily-briefing-components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
-      // R2 FR-10 (spaarke-dataset-grid-framework-r2, 2026-07-02, task 022):
-      // Two Spaarke.LegalWorkspace source-alias entries were REMOVED here.
-      // Package is now resolved via a proper file: dep in package.json
-      // (`file:../../client/shared/Spaarke.LegalWorkspace`), which re-exports
-      // LegalWorkspace/src via a barrel (see R2 task 021). This closes the
-      // dual-deploy trap where editing shared code in LegalWorkspace/src did
-      // not force a matching SpaarkeAi rebuild. Node resolution now flows
-      // through node_modules symlink -> Spaarke.LegalWorkspace/src/index.ts.
+      // No alias for LegalWorkspace: it is a declared file: dependency ("legal-workspace":
+      // "file:../LegalWorkspace") that resolves through the node_modules symlink to that
+      // solution's `exports` entry (src/index.ts). R2 FR-10 (2026-07-02) replaced the raw source
+      // alias; task 032 of reuse-governance-tightening-r1 (2026-11-13) retired the facade package
+      // FR-10 had put in between.
       // R4 task 102 (E-1, 2026-06-18): @spaarke/sdap-client — pulled in
       // transitively via @spaarke/ui-components/services/EntityCreationService.ts
       // (Phase G of multi-container-multi-index-r1 / PR #369). Mirrors the

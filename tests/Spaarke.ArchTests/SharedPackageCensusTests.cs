@@ -95,9 +95,7 @@ public class SharedPackageCensusTests
             "AI output-pane and source-pane widgets and their registries. Its boundary with the sanctioned "
             + "@spaarke/ai-widgets package has not been assessed."),
         // @spaarke/ai-context: retired 2026-11-13; its types moved to @spaarke/ai-widgets (src/types/aiContext.ts).
-        new CensusEntry("@spaarke/legal-workspace", "Spaarke.LegalWorkspace", PackageStatus.Grandfathered, "ADR-012",
-            "Source-only re-export boundary for the LegalWorkspace section registry (dataset-grid-framework-r2 "
-            + "FR-10), with a single consumer; it exists to break a source-alias trap."),
+        // @spaarke/legal-workspace: retired 2026-11-13; SpaarkeAi depends on the LegalWorkspace solution directly.
     };
 
     private const string ConciseAdrRelativePath = ".claude/adr/ADR-012-shared-components.md";

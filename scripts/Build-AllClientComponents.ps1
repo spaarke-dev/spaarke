@@ -6,8 +6,6 @@
     Orchestrates the build of all Spaarke client components in the required order:
     1. Shared libraries (13 packages in src/client/shared/, in dependency order -- the $SharedLibs list
        below is authoritative; it includes Spaarke.DailyBriefing.Components)
-       NOTE: Spaarke.LegalWorkspace is intentionally excluded -- it is a source-only lib (tsc --noEmit)
-       with @spaarke peerDependencies; type-check happens via the consumer's tsc pass.
     2. Vite solutions (19 projects in src/solutions/)
     3. Webpack code pages (3 projects in src/client/code-pages/)
     4. PCF controls (src/client/pcf/*) - ONE PCF AT A TIME, in production mode (`npm run build:prod`)
@@ -90,12 +88,8 @@ Import-Module (Join-Path $PSScriptRoot "PcfBuildResult.psm1") -Force   # PCF bui
 # rather than silently shipped (the 2026-06-28 TS2307 failure was the peer-only-deps root cause,
 # now fixed in the lib's package.json/tsconfig.json).
 #
-# Spaarke.LegalWorkspace is intentionally EXCLUDED on the same basis (added 2026-07-02 by
-# spaarke-dataset-grid-framework-r2 task 024 / FR-10). Task 020 scaffolded the package; task 021
-# populated src/index.ts as a RE-EXPORT barrel of files that stay under src/solutions/LegalWorkspace/src/.
-# Its `@spaarke/*` deps are peerDependencies and `npm run build` is `tsc --noEmit`; standalone
-# type-check fails with TS2307 "Cannot find module '@spaarke/*'" -- verified in task 020. Type-check
-# is performed by each consumer's tsc pass (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard).
+# (The Spaarke.LegalWorkspace facade, excluded here from 2026-07-02, was retired on 2026-11-13;
+# SpaarkeAi now depends on the LegalWorkspace solution directly.)
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
     @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep -> builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry -> fresh-master SpaarkeAi builds failed on the unbuilt lib).

@@ -2,7 +2,9 @@
 
 > **Purpose**: Operator-side decision guide + step-by-step tutorial for adding a new widget to the SpaarkeAi shell. Walks through the **two-wrapper decision tree first**, then the five archetypes that fall out of it, then the file edits + Dataverse seed + deploy sequence. The canonical worked example is the **Calendar widget** (Pattern D — dual-use, shipped R3 tasks 114 + 115, polished through R13).
 >
-> **Last reviewed**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). §1.1 archetypes table row 3 (dual-use) updated to list Daily Briefing (`@spaarke/daily-briefing-components`, R2 task 010, with `loadNotificationContext` factory option seam) and Smart Todo (`@spaarke/smart-todo-components`) alongside the canonical Calendar example. Previous review: 2026-05-26 (R4 task 011 / W-2; rewritten around the two-wrapper model now codified in [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md)).
+> **Last Reviewed**: 2026-11-13 (reuse-governance-tightening-r1 task 032: the LegalWorkspace dependency and the dual-deploy guidance now reflect the retired facade package).
+>
+> **Earlier review**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). §1.1 archetypes table row 3 (dual-use) updated to list Daily Briefing (`@spaarke/daily-briefing-components`, R2 task 010, with `loadNotificationContext` factory option seam) and Smart Todo (`@spaarke/smart-todo-components`) alongside the canonical Calendar example. Previous review: 2026-05-26 (R4 task 011 / W-2; rewritten around the two-wrapper model now codified in [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md)).
 >
 > **Audience**: A developer who has never built a SpaarkeAi widget. After §1 you should know which wrapper / archetype you need; the rest of the doc is implementation detail per archetype.
 >
@@ -252,7 +254,7 @@ The defining trait: the widget proper lives in a shared lib with **zero LegalWor
 
 #### Step 1 — Decide the shared-lib home
 
-For Calendar it was a NEW lib (`@spaarke/events-components`) because there was a parallel Code Page consumer (EventsPage). For a new widget without an existing parallel consumer, you can put it in `@spaarke/ai-widgets` (general-purpose AI widget home) or `@spaarke/ui-components` (general UI). Avoid putting it in `@spaarke/legal-workspace` — that's the dashboard engine; widgets should not be coupled to it.
+For Calendar it was a NEW lib (`@spaarke/events-components`) because there was a parallel Code Page consumer (EventsPage). For a new widget without an existing parallel consumer, you can put it in `@spaarke/ai-widgets` (general-purpose AI widget home) or `@spaarke/ui-components` (general UI). Avoid putting it in the LegalWorkspace solution (`src/solutions/LegalWorkspace/`) — that's the dashboard engine; widgets should not be coupled to it.
 
 Confirm the closure is portable: only `Xrm.WebApi` + shared services + `authenticatedFetch` (from `@spaarke/auth`). No `FeedTodoSyncContext`. No LW `DataverseService`. No LW-local hooks.
 
@@ -943,7 +945,7 @@ Three hypothetical widgets, each walked through §1 to confirm the tree reaches 
 
 - [`../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) — **the canonical model this guide implements** (three surfaces, two wrappers, four mount sources, dual-use pattern, LegalWorkspace-as-dashboard-engine).
 - [`../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — cold-load → widget render pipeline.
-- [`../architecture/SPAARKEAI-COMPONENT-MODEL.md`](../architecture/SPAARKEAI-COMPONENT-MODEL.md) — `@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/events-components`, `@spaarke/legal-workspace`, `@spaarke/auth` inventory + PaneEventBus contract.
+- [`../architecture/SPAARKEAI-COMPONENT-MODEL.md`](../architecture/SPAARKEAI-COMPONENT-MODEL.md) — `@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/events-components`, `@spaarke/auth` and the `legal-workspace` entry point inventory + PaneEventBus contract.
 - [`../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`](../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) — honest reuse assessment. §2A is the canonical Calendar Pattern D reference.
 - [`SHARED-UI-COMPONENTS-GUIDE.md`](./SHARED-UI-COMPONENTS-GUIDE.md) — `@spaarke/ui-components` consumption guide.
 - [`PCF-DEPLOYMENT-GUIDE.md`](./PCF-DEPLOYMENT-GUIDE.md) — Code Page deploy reference (`Deploy-SpaarkeAi.ps1`, `Deploy-LegalWorkspace.ps1` retirement context per W-6).
@@ -957,6 +959,6 @@ Three hypothetical widgets, each walked through §1 to confirm the tree reaches 
 
 When authoring a workspace widget in one code page's source tree that another code page consumes via `resolve.alias` in its `vite.config.ts`, both code pages must be rebuilt + redeployed for a source edit to reach every runtime. The alias resolves at BUILD time — the consumer bundles the source it saw at its last build, not what's on disk today.
 
-**Full recipe + historical case** (SpaarkeAi ← LegalWorkspace, RESOLVED 2026-07-02 by R2 FR-10): see [`.claude/skills/code-page-deploy/SKILL.md` — Dual-Deploy Warning section](../../.claude/skills/code-page-deploy/SKILL.md#dual-deploy-warning--aliased-source-pairs-added-2026-07-02-by-spaarke-dataset-grid-framework-r2-fr-09).
+**Full recipe + the live case** (SpaarkeAi ← LegalWorkspace, covered on master by the `deploy-spaarke-ai.yml` path trigger): see [`.claude/skills/code-page-deploy/SKILL.md` — Dual-Deploy Warning section](../../.claude/skills/code-page-deploy/SKILL.md#dual-deploy-warning--aliased-source-pairs-added-2026-07-02-by-spaarke-dataset-grid-framework-r2-fr-09).
 
-**Preferred pattern going forward**: instead of aliasing one code page's `src/` from another's `vite.config.ts`, extract the shared surface into a proper shared package under `src/client/shared/{PackageName}/` and consume via a normal `file:` dependency. See `src/client/shared/Spaarke.LegalWorkspace/` as the reference RE-EXPORT-strategy implementation.
+**Preferred pattern going forward**: instead of aliasing one code page's `src/` from another's `vite.config.ts`, declare a `file:` dependency on the other code page and give it an `exports` entry, as SpaarkeAi does with `"legal-workspace": "file:../LegalWorkspace"`. Move code into a shared package under `src/client/shared/` only when it passes ADR-012's three tests; a re-export facade around one solution does not (the `@spaarke/legal-workspace` facade was retired on 2026-11-13). Either way the consumer still bundles the source, so its deploy must follow edits to that source.

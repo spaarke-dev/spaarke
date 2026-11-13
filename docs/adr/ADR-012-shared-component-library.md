@@ -135,7 +135,7 @@ In this codebase the risk is **over-promotion**: feature areas becoming their ow
    - `@spaarke/auth`: ADR-028.
    - `@spaarke/notifications`: ADR-047.
    - `@spaarke/ai-widgets`: ADR-030 and ADR-031.
-3. **Grandfathered — under review** (9 at the census; 8 since 2026-11-13): `@spaarke/sdap-client`, `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`, `@spaarke/compose-components`, `@spaarke/document-operations`, `@spaarke/ai-outputs`, `@spaarke/legal-workspace`. (`@spaarke/ai-context` was retired on 2026-11-13; see "Census changes" below.)
+3. **Grandfathered — under review** (9 at the census; 7 since 2026-11-13): `@spaarke/sdap-client`, `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`, `@spaarke/compose-components`, `@spaarke/document-operations`, `@spaarke/ai-outputs`. (`@spaarke/ai-context` and `@spaarke/legal-workspace` were retired on 2026-11-13; see "Census changes" below.)
    - They may be used and extended.
    - Each one is later either sanctioned by a further amendment or consolidated into a sanctioned package.
    - This list is a ratchet baseline. It may shrink, and nothing is added to it.
@@ -165,6 +165,7 @@ Each change below was approved by the owner in `projects/reuse-governance-tighte
 | Date | Package | Change |
 |---|---|---|
 | 2026-11-13 | `@spaarke/ai-context` | Retired. The package held only six types (`EntityContext`, `EntityType`, `StreamingState`, `AiPaneEvent`, `StreamingCallbacks`, `IChatSession`); they moved to `@spaarke/ai-widgets` (`src/types/aiContext.ts`, exported from the barrel), whose `AiSessionProvider` was their main consumer. |
+| 2026-11-13 | `@spaarke/legal-workspace` | Retired. The package was a one-line `export *` of `src/solutions/LegalWorkspace/src/index.ts` with one consumer (SpaarkeAi), created by dataset-grid-framework-r2 FR-10 to replace a raw Vite source alias. SpaarkeAi now declares a `file:` dependency on the solution itself (package `legal-workspace`, which gained an `exports` entry for `./src/index.ts`), so FR-10's declared-dependency goal holds without a shared package. A solution exposing its entry point to another solution is not a shared package and is not in the census. |
 
 ---
 

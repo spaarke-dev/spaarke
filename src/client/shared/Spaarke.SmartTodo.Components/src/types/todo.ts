@@ -68,7 +68,7 @@ export interface IWebApi {
  * fields from `TODO_SELECT_FIELDS` (priority/effort scores, etc.) flow through
  * untyped via the index signature — the widget does not need them for the
  * minimal Kanban render. A future hoist can replace this with the richer
- * `ITodo` from `@spaarke/legal-workspace` types.
+ * `ITodo` from the LegalWorkspace solution's types.
  */
 export interface ITodoRecord {
   sprk_todoid: string;

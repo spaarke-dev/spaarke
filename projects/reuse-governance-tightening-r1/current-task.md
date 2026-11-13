@@ -13,7 +13,8 @@
 
 **Done (10/19)**: + 030 (2026-11-13). Owner approved all 9 package decisions ("Approve all"); `notes/package-reviews.md` (findings P-1..P-14: 8 Medium, 6 Low, 0 High), `notes/decisions.md` row.
 **Done (11/19)**: + 031 (2026-11-13). `@spaarke/ai-context` retired: types in ai-widgets `src/types/aiContext.ts`; census row + test entry removed; CI `client-typecheck`, deploy trigger, `Build-AllClientComponents.ps1`, `master-deploy` skill fixed. All builds/tests green (`notes/031-ai-context.md`). Item-4 changes stay on the branch — no PR yet (owner decides PR shape; merging auto-deploys SpaarkeAi to DEV).
-**Active task**: none. **Next**: **032** legal-workspace facade retire (FULL; check PR #935), then 033 document-operations (serial), 034 (file the other six + P-findings; can run alongside), 035 DEV deploy (owner OK), 040, 043, 080, 090.
+**Done (12/19)**: + 032 (2026-11-13). `@spaarke/legal-workspace` facade retired; SpaarkeAi declares `"legal-workspace": "file:../LegalWorkspace"` (LegalWorkspace `exports` `./src/index.ts`); census updated; docs + code-page-deploy skill corrected (the dual-deploy trap was never "resolved" — covered by the deploy path trigger). `notes/032-legal-workspace.md`.
+**Active task**: none. **Next**: **033** document-operations → ui-components (FULL; `package-reviews.md` §6 outline incl. SemanticSearch + Compose re-points and the 6 Compose `jest.mock` paths), then 034 (file the other six + P-findings + the pre-existing LegalWorkspace standalone-tsc errors from `notes/032-legal-workspace.md` "Found in passing"), 035 DEV deploy (owner OK), 040, 043, 080, 090.
 - Worktree now has node_modules/dist for all 13 shared libs + SpaarkeAi (from the 031 build) — reuse them for 032/033 verification.
 **Open, reported to owner**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).

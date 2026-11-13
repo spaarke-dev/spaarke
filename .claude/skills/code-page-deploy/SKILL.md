@@ -263,7 +263,7 @@ When the user wants to deploy manually for fastest iteration:
 
 ## Dual-Deploy Warning — Aliased-Source Pairs (added 2026-07-02 by `spaarke-dataset-grid-framework-r2` FR-09)
 
-**The trap**: Code page A's `vite.config.ts` aliases another code page B's source tree (e.g., `resolve.alias: { "@spaarke/legal-workspace": path.resolve(__dirname, "../LegalWorkspace/src") }`). When B's source is edited and B is deployed, A does NOT automatically pick up the change — A keeps whatever it bundled at its own last build. Deploying B alone is a NO-OP for A's consumers.
+**The trap**: Code page A's `vite.config.ts` aliases another code page B's source tree (e.g., `resolve.alias: { "my-workspace": path.resolve(__dirname, "../OtherCodePage/src") }`). When B's source is edited and B is deployed, A does NOT automatically pick up the change — A keeps whatever it bundled at its own last build. Deploying B alone is a NO-OP for A's consumers.
 
 **Recipe to detect aliased-source pairs before deployment:**
 
@@ -279,9 +279,9 @@ grep -rn 'resolve.alias\|__dirname' src/solutions/*/vite.config.ts
 
 If a target code page's `vite.config.ts` aliases into another code page's `src/` tree, BOTH consumers must be rebuilt + redeployed for a source-file edit to reach every runtime.
 
-**Known historical case (RESOLVED)**: `SpaarkeAi` ← `LegalWorkspace` — SpaarkeAi's `vite.config.ts` aliased `@spaarke/legal-workspace` → `../LegalWorkspace/src`. Resolved 2026-07-02 by R2 FR-10: LegalWorkspace's section registry was extracted into a proper shared package at `src/client/shared/Spaarke.LegalWorkspace/` (RE-EXPORT strategy — barrel re-exports source that stays in LegalWorkspace). SpaarkeAi now consumes via a normal `file:` dep. See `projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md`.
+**Live case**: `SpaarkeAi` ← `LegalWorkspace`. SpaarkeAi bundles LegalWorkspace's source through a declared `file:` dependency (`"legal-workspace": "file:../LegalWorkspace"`, resolved via that solution's `exports` entry `./src/index.ts`). History: a raw Vite alias until 2026-07-02, then a `@spaarke/legal-workspace` re-export facade (R2 FR-10) until it was retired on 2026-11-13 (reuse-governance-tightening-r1 task 032). None of the three changes the bundling: an edit under `src/solutions/LegalWorkspace/src/` reaches SpaarkeAi only when SpaarkeAi is rebuilt and redeployed. On master, `deploy-spaarke-ai.yml` covers this with its `src/solutions/LegalWorkspace/**` path trigger; a manual deploy of LegalWorkspace alone does not.
 
-**Why the warning stays even after FR-10 resolved the LegalWorkspace case**: the aliased-source pattern is likely to recur in future workspace-hosting code pages. Any future dual-consumer pattern should either use a proper shared package (preferred) OR the operator must know to redeploy every dependent consumer.
+**Why the warning stays**: any code page that bundles another code page's source, by alias or by `file:` dependency, has this coupling. A dependency declares it; it does not remove it. Either the consumer's deploy trigger includes the source tree it bundles (as `deploy-spaarke-ai.yml` does), or the operator redeploys every dependent consumer. A shared package is the answer only when the code passes ADR-012's three tests.
 
 ---
 

@@ -1,15 +1,17 @@
 # SpaarkeAi Component Model
 
-> **Purpose**: Inventory of the shared libraries (`@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`, `@spaarke/events-components`, `@spaarke/daily-briefing-components`) and solution-local components that compose the SpaarkeAi three-pane shell. Includes the PaneEventBus contract.
+> **Purpose**: Inventory of the shared libraries (`@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/events-components`, `@spaarke/daily-briefing-components`), the LegalWorkspace solution SpaarkeAi embeds, and solution-local components that compose the SpaarkeAi three-pane shell. Includes the PaneEventBus contract.
 >
-> **Last reviewed**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). Added `@spaarke/daily-briefing-components` (§7) as the third Pattern D dual-use shared lib alongside `@spaarke/events-components` and `@spaarke/smart-todo-components`. Previous review: 2026-05-22 (Task 123, Round 13).
+> **Last Reviewed**: 2026-11-13 (reuse-governance-tightening-r1 task 032: the `@spaarke/legal-workspace` facade was retired; §1 and §5 now describe the direct `legal-workspace` dependency).
+>
+> **Earlier review**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). Added `@spaarke/daily-briefing-components` (§7) as the third Pattern D dual-use shared lib alongside `@spaarke/events-components` and `@spaarke/smart-todo-components`. Previous review: 2026-05-22 (Task 123, Round 13).
 
 ---
 
 ## 1. Layering principles (ADR-012)
 
 - **Shared libraries** in `src/client/shared/` are framework-agnostic-ish (React 19 + Fluent v9 only) and consumable by any Code Page or PCF host. They MUST NOT import from any `src/solutions/*` directory.
-- **Solution-local components** live in `src/solutions/<page>/src/components/` and CAN import shared libs. They MUST NOT import from another solution's `src/solutions/*` directory — exception: `@spaarke/legal-workspace` is published as a workspace package and so is importable like any shared lib.
+- **Solution-local components** live in `src/solutions/<page>/src/components/` and CAN import shared libs. They MUST NOT import from another solution's `src/solutions/*` directory — exception: SpaarkeAi imports the LegalWorkspace solution's entry point (`src/index.ts`) through a declared `file:` dependency, `"legal-workspace": "file:../LegalWorkspace"`. Use only that entry point, never deep paths into its `src/`.
 - **PCF-safe vs Code Page only**: anything in `@spaarke/ai-widgets` is React 19, NOT PCF-safe. `@spaarke/ui-components` is largely PCF-safe (verified by individual component docblocks).
 
 ---
@@ -181,14 +183,14 @@ Path: `src/client/shared/Spaarke.Auth/src/`. Per ADR-028 (Spaarke Auth v2):
 
 ---
 
-## 5. `@spaarke/legal-workspace` (the `LegalWorkspaceApp` package)
+## 5. `legal-workspace` (the LegalWorkspace solution's entry point)
 
-LegalWorkspace is its own solution under `src/solutions/LegalWorkspace/` AND exposes its app shell as a workspace package (`@spaarke/legal-workspace`) so SpaarkeAi can embed it. Public exports include:
+LegalWorkspace is its own solution under `src/solutions/LegalWorkspace/`. Its `package.json` (name `legal-workspace`) has an `exports` entry for `./src/index.ts`, and SpaarkeAi declares `"legal-workspace": "file:../LegalWorkspace"` to embed it. It is not a shared package and is not in the ADR-012 census. (A `@spaarke/legal-workspace` re-export facade sat in between from 2026-07-02 until it was retired on 2026-11-13.) Public exports include:
 
 - `LegalWorkspaceApp` — the root component (props: `version`, `allocatedWidth`, `allocatedHeight`, `webApi`, `userId`, `initialWorkspaceId?`, `embedded?`)
 - `setLegalWorkspaceRuntimeConfig(config)` — initializes LegalWorkspace's SEPARATE runtime-config singleton (see §4 of the audit)
 
-The package is consumed by `WorkspaceLayoutWidget` (in `@spaarke/ai-widgets`) which is the SINGLE generic workspace-widget entry point.
+SpaarkeAi's `main.tsx` is the only importer. It wraps `LegalWorkspaceApp` with its section registry (`createLegalWorkspaceSectionRegistry`) and registers that wrapper through `setDefaultWorkspaceRenderer`. `WorkspaceLayoutWidget` (in `@spaarke/ai-widgets`), the single generic workspace-widget entry point, renders whatever renderer is registered and does not import LegalWorkspace.
 
 ---
 
@@ -321,7 +323,7 @@ Path: `src/solutions/LegalWorkspace/src/`. The "monolithic" workspace surface th
 
 | Directory | Purpose | Coupling notes |
 |---|---|---|
-| `LegalWorkspaceApp.tsx` | Root component; embedded-mode branch added Task 087 | Exposed via `@spaarke/legal-workspace` package |
+| `LegalWorkspaceApp.tsx` | Root component; embedded-mode branch added Task 087 | Exposed via the solution's `exports` entry (`legal-workspace`) |
 | `components/Shell/WorkspaceGrid.tsx` | Renders the active layout via `WorkspaceShell` | Calls LegalWorkspace's own `useWorkspaceLayouts` |
 | `components/Shell/PageHeader.tsx` | Standalone-mode header with workspace dropdown | Skipped in embedded mode |
 | `contexts/FeedTodoSyncContext.tsx` | Shared flag state between ActivityFeed + SmartToDo blocks | LegalWorkspace-internal; would have to be reproduced if section factories were hoisted |

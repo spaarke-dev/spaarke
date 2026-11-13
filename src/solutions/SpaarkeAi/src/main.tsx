@@ -76,11 +76,11 @@ import {
   LegalWorkspaceApp,
   createLegalWorkspaceSectionRegistry,
   setLegalWorkspaceRuntimeConfig,
-} from "@spaarke/legal-workspace";
+} from "legal-workspace";
 // R4 task 052 (C-4) + R2 Option D (2026-06-18): register a workspace renderer
 // that wraps `LegalWorkspaceApp` with a SpaarkeAi-specific section registry.
 // `WorkspaceLayoutWidget` in `@spaarke/ai-widgets` consults `setDefaultWorkspaceRenderer`
-// at render time instead of importing `@spaarke/legal-workspace` directly.
+// at render time instead of importing the LegalWorkspace solution directly.
 // `WorkspaceRenderer` is the function signature contract the slot accepts.
 import {
   setDefaultWorkspaceRenderer,

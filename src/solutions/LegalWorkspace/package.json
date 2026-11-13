@@ -3,6 +3,10 @@
   "version": "1.0.2",
   "description": "Legal Operations Workspace - Home Corporate Custom Page",
   "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/corporateworkspace.html');\"",
