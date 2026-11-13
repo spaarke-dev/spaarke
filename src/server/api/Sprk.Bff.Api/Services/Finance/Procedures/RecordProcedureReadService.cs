@@ -121,6 +121,36 @@ public sealed record ProcedureDryRunDisclosureView(
 /// <summary>A dry run's answer: the view, or why there is none (<see cref="Refusal"/> when the planning refused).</summary>
 internal sealed record RecordProcedureDryRunResult(RecordProcedureReadStatus Status, ProcedureDryRunView? Value, RuleSetOutcome<ProcedureOverridePlan>? Refusal = null);
 
+// ── Assignable Procedures (task 084d-5a; notes/084d-dry-run-design.md "084d-5 design", EB-D-227..230) ──────────────
+
+/// <summary>
+/// The Procedures a billing admin could assign (Follow latest) to one core record for a firm and a date, each as it would show "if assigned now"
+/// (<see cref="Label"/>). <see cref="Procedures"/> is null exactly when <see cref="TooMany"/>: more than <see cref="Bound"/> candidates, so the
+/// caller narrows by name (<see cref="Q"/>); it is never a partial list (EB-D-227). <see cref="NotOffered"/> are the candidates the record already
+/// has an override row for (reason <c>OwnRow</c>: the write would answer 409 <c>assignment.duplicate</c>). A Procedure already on the record (any
+/// status in its Procedures list) is neither offered nor listed here: the client holds that list. A Procedure the resolver would not apply
+/// (no published version, another firm, another area) is absent with no reason.
+/// </summary>
+public sealed record RecordAssignableProceduresView(
+    ChainRecordView Record, DateOnly Date, FirmView? Firm, string FirmSource, string? Q, int Bound, bool TooMany,
+    IReadOnlyList<AssignableProcedureItem>? Procedures, IReadOnlyList<NotOfferedProcedureView> NotOffered, string Label);
+
+/// <summary>
+/// One Procedure that can be assigned: a projection of its "if assigned" <see cref="ProcedureListItem"/>, fields copied, never recomputed.
+/// <see cref="StatusIfAssigned"/>: <c>InForce</c>, <c>Gap</c> (with <see cref="Gap"/>, EB-D-230) or <c>NotYetInForce</c>. Pin versions are not
+/// here: the Procedure read (<c>GET /api/finance/procedures/{id}</c>) lists them.
+/// </summary>
+public sealed record AssignableProcedureItem(
+    Guid Id, string Name, string? Type, string AppliesTo, FirmView? Firm, string StatusIfAssigned, ProcedureVersionView2? VersionInForce,
+    AssignableGapView? Gap);
+
+/// <summary>EB-D-230: why an offered Procedure would be a Gap on the date (<see cref="Kind"/>, <see cref="Text"/> as the list words it) and what
+/// assigning it does (<see cref="Warning"/>, O-22).</summary>
+public sealed record AssignableGapView(string Kind, string Text, string Warning);
+
+/// <summary>A candidate that is not offered, and why (<see cref="Reason"/>: <c>OwnRow</c>).</summary>
+public sealed record NotOfferedProcedureView(Guid Id, string? Name, string Reason);
+
 /// <summary>A read model, or why there is none.</summary>
 public sealed record RecordProcedureReadResult<T>(RecordProcedureReadStatus Status, T? Value) where T : class
 {
@@ -628,6 +658,144 @@ public class RecordProcedureReadService
         return synthetic;
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Assignable Procedures (task 084d-5a; notes/084d-dry-run-design.md "084d-5 design" and its binding conditions)
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>EB-D-227: the most Procedures the assignable list offers; past it the list is null and <c>tooMany</c> is set.</summary>
+    internal const int AssignableBound = 50;
+
+    /// <summary>The label of the assignable list (ontology-r1 K1: "if assigned now", from this request's clock).</summary>
+    internal const string AssignableLabel = "If assigned now";
+
+    /// <summary>The reason of a <see cref="NotOfferedProcedureView"/>: the record already has an override row for the Procedure.</summary>
+    internal const string OwnRowReason = "OwnRow";
+
+    /// <summary>EB-D-230 (O-22): what assigning a Procedure that would be a Gap on the date does.</summary>
+    internal const string GapWarning =
+        "No version of this Procedure would apply on this date. If you assign it, invoices checked from then on are held until a version applies.";
+
+    /// <summary>
+    /// Task 084d-5a: the Procedures <paramref name="coreTable"/>(<paramref name="recordId"/>) could be assigned (Follow latest), each as it would
+    /// show if assigned now, for the lists' firm and date. Nothing is written.
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item><b>Now</b>: the record's Procedures list, read and built exactly as <see cref="ListProceduresAsync"/> does. Every Procedure in it, of
+    /// any status, is on the record.</item>
+    /// <item><b>Candidates and own rows</b>: <see cref="ProcedureAssignmentService.PlanAssignCatalogAsync"/> through a
+    /// <see cref="WriteRefusingEntityService"/>, minus the Procedures on the record, then minus the ones the caller cannot Read (dropped BEFORE
+    /// the bound and the resolver, <see cref="ReadableProceduresAsync"/>), bounded (<see cref="AssignableBound"/>).</item>
+    /// <item><b>After</b>: the same reader over a per-request <see cref="ProcedureRowOverlay"/> of the catalog's ONE plan (each candidate's
+    /// Follow-latest row image), with the plan's rows as proposed rows (ontology-r1 F3). <b>Offered</b> = the After items not in Now: the
+    /// resolver decides applicability, firm, the published window and the version (an unpublished Procedure drops out there).</item>
+    /// </list>
+    /// <para><b>EB-D-218, uac-r2 conditions 1-2 and notes 1-2.</b> The synthetic set is decided app-only on the real service before anything is
+    /// exempted (a fault is 503); a colliding real id is asked. ONE batched caller check over Now's exposed rows (the record and a query firm
+    /// among them), After's, and each <c>OwnRow</c> entry's Procedure and own rows (inactive included). It runs on the <c>tooMany</c> path too, over
+    /// Now's. Any refusal, unanswered row or fault is <see cref="RecordProcedureReadStatus.Unavailable"/>: never a partial list.</para>
+    /// <para><b>Candidates (uac-r2 ruling 2026-11-13, replacing 503-on-an-unreadable-candidate).</b> The candidate query is app-only, so the
+    /// caller's Read on each candidate Procedure is asked first, in its own batch (<see cref="ReadableProceduresAsync"/>), and the unreadable
+    /// ones are dropped before the resolver, the bound and <c>tooMany</c>: the answer is the same as if they did not exist, so neither the status
+    /// nor the list nor <c>tooMany</c> can reveal one. That check refused as a whole or faulting is 503, never "drop all". Now's, own rows' and
+    /// the firm's rows stay all-or-nothing, as above. The candidate check stops at the page where bound + 1 offerable readable candidates are
+    /// found (the record's own-row Procedures are set aside first and never count); the caller is resolved on every request. Accepted limit:
+    /// response time varies with the number of matching rows the caller cannot Read (at most
+    /// <see cref="ProcedureAssignmentService.MaxCandidateRows"/>).</para>
+    /// </remarks>
+    internal virtual async Task<RecordProcedureReadResult<RecordAssignableProceduresView>> ListAssignableAsync(
+        ProcedureAssignmentService planner, string coreTable, Guid recordId, Guid? firmId, DateOnly? date, string? nameContains,
+        string? callerBearerToken, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(planner);
+        try
+        {
+            var stamp = Clock.GetUtcNow().UtcDateTime;
+            var nowReading = await ReadAsync(coreTable, recordId, firmId, date, probeFutureDate: true, readLegacyRules: false, ct).ConfigureAwait(false);
+            if (nowReading is null)
+            {
+                return RecordProcedureReadResult<RecordAssignableProceduresView>.NotFound();
+            }
+
+            var nowView = BuildProcedures(nowReading);
+            nowReading.Expose(SetOf(coreTable), recordId);
+            var onRecord = nowView.Procedures.Select(p => p.Id).ToHashSet();
+
+            var catalog = await planner.PlanAssignCatalogAsync(
+                new WriteRefusingEntityService(_entities), coreTable, recordId, nowReading.FirmId, onRecord, nameContains, AssignableBound,
+                (ids, token) => ReadableProceduresAsync(ids, callerBearerToken, token), ct).ConfigureAwait(false);
+            if (catalog.Kind != RuleSetOutcomeKind.Done)
+            {
+                _logger.LogWarning("Record procedures: the assignable Procedures of a {CoreTable} could not be read ({ErrorCode}); 503 {Unavailable}",
+                    coreTable, catalog.ErrorCode, UnavailableErrorCode);
+                return RecordProcedureReadResult<RecordAssignableProceduresView>.Unavailable();
+            }
+
+            var exposed = nowReading.Exposed.ToHashSet();
+            var found = catalog.Value!;
+            IReadOnlyList<AssignableProcedureItem>? offered = null;
+            var notOffered = new List<NotOfferedProcedureView>();
+            if (!found.TooMany)
+            {
+                // uac-r2 note 2: the own row decides the refusal, so it is asked, inactive or not, with its Procedure.
+                foreach (var own in found.OwnRows)
+                {
+                    exposed.Add((ProcedureEntity.EntitySet, own.ProcedureId));
+                    exposed.UnionWith(own.RowIds.Select(id => (ProcedureAssignmentEntity.EntitySet, id)));
+                    notOffered.Add(new NotOfferedProcedureView(own.ProcedureId, own.Name, OwnRowReason));
+                }
+
+                offered = [];
+                if (found.Plan is { Created.Count: > 0 } plan)
+                {
+                    // uac-r2 condition 1: decided app-only on the real service BEFORE anything is exempted; a fault throws to the 503 below.
+                    var synthetic = await SyntheticRowsAsync(plan, ct).ConfigureAwait(false);
+                    var afterReading = await ReadAsync(
+                        coreTable, recordId, firmId, date, probeFutureDate: true, readLegacyRules: false, ct,
+                        rowSource: new ProcedureRowOverlay(_entities, plan, stamp), proposedRowIds: plan.Created.Select(c => c.Id).ToList()).ConfigureAwait(false);
+                    if (afterReading is null)
+                    {
+                        return RecordProcedureReadResult<RecordAssignableProceduresView>.NotFound();
+                    }
+
+                    if (synthetic.Count > 0)
+                    {
+                        // Safe only because ReadAsync never calls Expose: every exposure happens in BuildProcedures, after this Exempt.
+                        afterReading.Exempt(synthetic);
+                        OnExempt?.Invoke(synthetic);
+                    }
+
+                    var afterView = BuildProcedures(afterReading);
+                    exposed.UnionWith(afterReading.Exposed);
+                    var gaps = afterView.Gaps.ToDictionary(g => g.ProcedureId);
+                    offered = afterView.Procedures
+                        .Where(p => !onRecord.Contains(p.Id))
+                        .Select(p => new AssignableProcedureItem(
+                            p.Id, p.Name, p.Type, p.AppliesTo, p.Firm, p.Status, p.VersionInForce,
+                            gaps.TryGetValue(p.Id, out var gap) ? new AssignableGapView(gap.Kind, gap.Text, GapWarning) : null))
+                        .OrderBy(p => p.Name, StringComparer.Ordinal)
+                        .ThenBy(p => p.Id)
+                        .ToList();
+                }
+            }
+
+            // ONE batched check (EB-D-218): on the tooMany path it covers Now's rows, the record and a query firm among them (uac-r2 note 1).
+            if (!await CallerCanReadAllAsync(exposed, callerBearerToken, ct).ConfigureAwait(false))
+            {
+                return RecordProcedureReadResult<RecordAssignableProceduresView>.Unavailable();
+            }
+
+            return RecordProcedureReadResult<RecordAssignableProceduresView>.Of(new RecordAssignableProceduresView(
+                RecordView(nowReading, recordId), nowReading.Date, nowView.Firm, nowReading.FirmSource, nameContains, AssignableBound, found.TooMany,
+                offered, notOffered.OrderBy(n => n.Name, StringComparer.Ordinal).ThenBy(n => n.Id).ToList(), AssignableLabel));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            LogUnavailable(ex, coreTable);
+            return RecordProcedureReadResult<RecordAssignableProceduresView>.Unavailable();
+        }
+    }
+
     /// <summary>084d-2b: the affected count's basis when the write closes findings.</summary>
     internal const string AffectedBasisFindingsClosed = "FindingsClosed";
 
@@ -945,30 +1113,72 @@ public class RecordProcedureReadService
     /// <summary>The batched check over <paramref name="exposed"/> (the dry run passes Now ∪ After: one check for both sides).</summary>
     private async Task<bool> CallerCanReadAllAsync(IReadOnlyCollection<(string Set, Guid Id)> exposed, string? callerBearerToken, CancellationToken ct)
     {
-        if (await _probe.GetCallerSystemUserIdAsync(callerBearerToken, ct).ConfigureAwait(false) is not { } caller || caller == Guid.Empty)
+        var rights = await RightsOfAsync(exposed, callerBearerToken, ct).ConfigureAwait(false);
+        if (rights is null)
         {
-            _logger.LogWarning("Record procedures: the caller could not be established; no list is returned");
             return false;
         }
 
-        foreach (var page in exposed.OrderBy(t => t.Set, StringComparer.Ordinal).ThenBy(t => t.Id).Chunk(RightsPageSize))
+        if (rights.Any(r => (r.Value & AccessRights.Read) != AccessRights.Read))
+        {
+            // Which row it was is not logged with an id: the caller may not be allowed to know it exists (K2).
+            _logger.LogInformation("Record procedures: the caller cannot Read a row the answer would expose; no list is returned");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Task 084d-5a (round 1, item 5; uac-r2 ruling 2026-11-13): of the candidate Procedures <paramref name="ids"/>, the ones the caller can Read,
+    /// by the same batched check (<see cref="RightsOfAsync"/>). The assignable list drops the others BEFORE it judges anything, so an unreadable
+    /// Procedure leaves no trace in the answer. Null when the check could not be answered as a whole (the caller not established, a row with no
+    /// answer): the list is then 503, never "drop all". A fault propagates to the list's 503. The planner calls it once for the own-row
+    /// Procedures (always, even with no ids: the caller is resolved, and no rights request is made for none) and then once per page of
+    /// <see cref="RightsPageSize"/> candidates, stopping early.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>?> ReadableProceduresAsync(IReadOnlyList<Guid> ids, string? callerBearerToken, CancellationToken ct)
+    {
+        var asked = ids.Select(id => (ProcedureEntity.EntitySet, id)).ToList();
+        var rights = await RightsOfAsync(asked, callerBearerToken, ct).ConfigureAwait(false);
+        if (rights is null)
+        {
+            return null;
+        }
+
+        return rights.Where(r => (r.Value & AccessRights.Read) == AccessRights.Read).Select(r => r.Row.Id).ToHashSet();
+    }
+
+    /// <summary>
+    /// The one rights question behind both checks: the caller first (unestablished: null), then the rows in pages. One entry per row, with the
+    /// caller's rights, or null when any row went unanswered ("Dataverse said nothing" is never read as "cannot Read" or as "can").
+    /// </summary>
+    private async Task<List<((string Set, Guid Id) Row, AccessRights Value)>?> RightsOfAsync(
+        IReadOnlyCollection<(string Set, Guid Id)> rows, string? callerBearerToken, CancellationToken ct)
+    {
+        if (await _probe.GetCallerSystemUserIdAsync(callerBearerToken, ct).ConfigureAwait(false) is not { } caller || caller == Guid.Empty)
+        {
+            _logger.LogWarning("Record procedures: the caller could not be established; no list is returned");
+            return null;
+        }
+
+        var answered = new List<((string Set, Guid Id) Row, AccessRights Value)>(rows.Count);
+        foreach (var page in rows.OrderBy(t => t.Set, StringComparer.Ordinal).ThenBy(t => t.Id).Chunk(RightsPageSize))
         {
             var rights = await _probe.GetCallerRightsForRecordsOrUnknownAsync(callerBearerToken, page.ToList(), ct).ConfigureAwait(false);
             if (rights is null || rights.Count != page.Length || rights.Any(r => r is null))
             {
                 _logger.LogWarning("Record procedures: the caller's rights on {Count} row(s) were not answered; no list is returned", page.Length);
-                return false;
+                return null;
             }
 
-            if (rights.Any(r => (r!.Value & AccessRights.Read) != AccessRights.Read))
+            for (var i = 0; i < page.Length; i++)
             {
-                // Which row it was is not logged with an id: the caller may not be allowed to know it exists (K2).
-                _logger.LogInformation("Record procedures: the caller cannot Read a row the answer would expose; no list is returned");
-                return false;
+                answered.Add((page[i], rights[i]!.Value));
             }
         }
 
-        return true;
+        return answered;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════

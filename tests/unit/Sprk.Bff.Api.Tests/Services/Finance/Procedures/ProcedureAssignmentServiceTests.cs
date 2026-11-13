@@ -268,13 +268,19 @@ public sealed class ProcedureAssignmentServiceTests
             H.Ownership.Invocations.Where(i => i.Method.Name == nameof(IRecordOwnershipResolver.ResolveOwnerAsync))
                 .Select(i => (RecordOwnershipContext)i.Arguments[0]).ToList();
 
-        public Guid Procedure(int status = ProcedureEntity.StatusActive)
+        /// <summary>A Procedure; Billing-area unless <paramref name="area"/> says otherwise (0 leaves the Area empty).</summary>
+        public Guid Procedure(int status = ProcedureEntity.StatusActive, int area = RuleDomains.PolicyDomainBilling)
         {
             var p = new Entity("sprk_procedure", Guid.NewGuid())
             {
                 ["sprk_name"] = "Acme OCG",
                 ["sprk_status"] = new OptionSetValue(status),
             };
+            if (area != 0)
+            {
+                p[ProcedureEntity.AreaColumn] = new OptionSetValue(area);
+            }
+
             H.Seed(p);
             return p.Id;
         }
@@ -491,6 +497,50 @@ public sealed class ProcedureAssignmentServiceTests
         missing.StatusCode.Should().Be(404);
         missing.ErrorCode.Should().Be("assignment.procedure_not_found");
         w.H.Transactions.Should().BeEmpty();
+    }
+
+    /// <summary>A Procedure Area that is not Billing (the Ontology area of O-24).</summary>
+    private const int OtherArea = RuleDomains.PolicyDomainBilling + 1;
+
+    [Theory(DisplayName = "EB-D-228 must-fire: a Procedure whose Area is not Billing (or empty) is 409 assignment.procedure_not_billing in every mode, and writes nothing")]
+    [InlineData(OtherArea, null)]
+    [InlineData(OtherArea, "Pinned")]
+    [InlineData(OtherArea, "Excluded")]
+    [InlineData(0, null)]
+    public async Task Assign_AProcedureOfAnotherArea_Is409NotBilling_AndWritesNothing(int area, string? mode)
+    {
+        var w = new World();
+        var procedure = w.Procedure(area: area);
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
+
+        var refused = await w.Service().AssignProcedureAsync(
+            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, default);
+
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(ProcedureAssignmentService.CodeProcedureNotBilling);
+        refused.Detail.Should().Be(ProcedureAssignmentService.NotBillingDetail);
+        w.H.Transactions.Should().BeEmpty();
+        w.OwnerContexts.Should().BeEmpty("the area refuses before the owner question");
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "EB-D-228 must-not-fire: a Billing Procedure is assigned, also when its only versions are Drafts (ahead of publication) or it has none")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Assign_ABillingProcedure_IsAccepted_EvenWithOnlyDraftVersions(bool draftOnly)
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        if (draftOnly)
+        {
+            w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusDraft);
+            w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusDraft);
+        }
+
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.Rows.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_procedure").Id.Should().Be(procedure);
     }
 
     [Fact]

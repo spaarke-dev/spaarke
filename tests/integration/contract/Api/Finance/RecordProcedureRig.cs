@@ -140,6 +140,7 @@ internal sealed class RecordProcedureRig
             (ProcedureEntity.StatusColumn, Option(status)),
             (ProcedureEntity.NameColumn, name),
             (ProcedureEntity.AppliesToColumn, Option((int)appliesTo)),
+            ("statecode", Option(0)), // 084d-5a: the assignable list asks for active rows, as a stored row is
         };
         if (firm is { } f) columns.Add((ProcedureEntity.FirmColumn, Ref("sprk_organization", f)));
         if (type is { } t) columns.Add((ProcedureEntity.TypeColumn, Option((int)t)));
@@ -471,6 +472,9 @@ internal sealed class RecordProcedureRig
 
         public bool Throws { get; set; }
 
+        /// <summary>When set, answers a batch in place of the default; it may throw, and returns null to leave the batch to the default answer (for a fault, an answer of the wrong length, or one batch only).</summary>
+        public Func<IReadOnlyList<(string EntitySet, Guid RecordId)>, IReadOnlyList<AccessRights?>?>? Answer { get; set; }
+
         /// <summary>When set, the rights check throws this (instead of the default <see cref="InvalidOperationException"/> of <see cref="Throws"/>).</summary>
         public Exception? Fault { get; set; }
 
@@ -569,6 +573,11 @@ internal sealed class RecordProcedureRig
             if (Throws)
             {
                 throw new InvalidOperationException("RetrievePrincipalAccess faulted");
+            }
+
+            if (Answer?.Invoke(targets) is { } stated)
+            {
+                return Task.FromResult(stated);
             }
 
             IReadOnlyList<AccessRights?> answer = targets

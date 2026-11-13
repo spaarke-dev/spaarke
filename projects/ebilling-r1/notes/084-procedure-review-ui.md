@@ -1406,3 +1406,167 @@ Merged into work at `cd869e3050`: `029428af92` (build) + `7af227b4c8` (review ro
   - K5: the 20 s timeout also covers the token step; the worst-case Next hold is 40 s (a dry-run 503 after 20 s, then the fallback).
   - K6: the source guard's comment stripper is approximate.
 - The Assign Procedure wizard is NOT in 084d-4; it moved to 084d-5 (no route lists assignable Procedures).
+
+## 084d-5a
+
+The server half of 084d-5: the route that lists the Procedures a record could be assigned, and 089's assign refusing a non-Billing Procedure. Spec: `notes/084d-dry-run-design.md` "084d-5 design" and "084d-5 design: answers and binding conditions (2026-11-13)" (EB-D-227..230, ontology-r1 conditions 1-3, uac-r2 Q2, Q3 and notes 1-5). From `3a1d15a50d`. The client wizard is 084d-5b; nothing under `src/solutions` changed.
+
+**Commits.** `ca8d1f01ea` fix: 089 assign refuses a non-Billing Procedure (EB-D-228). `4dac394f2a` feat: the assignable route.
+
+**Placement.** No new service, DI registration, package or file under `src/server`:
+- The candidate query, the own-row read and the ONE plan sit on `ProcedureAssignmentService`, beside the assign write whose checks and row builder they share.
+- The Now / After read, the projection and the one batched check sit on `RecordProcedureReadService`, beside `DryRunAsync`, which already holds the overlay, the synthetic-row load and the exemption.
+- The three routes sit in `RecordProcedureEndpoints` beside the dry run. Their filters come from `ProcedureAssignmentEndpoints` declarations.
+- Nothing under `Services/Signals` changed: the resolver decides applicability, the published window, the version and the firm's final say.
+
+**What was built:**
+- `GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures/assignable?firmId=&date=&q=`, one literal route per core table (`RecordProcedureEndpoints.cs:92`, `:129`, `:166`). Filters, in order:
+  1. Step 0 on the group.
+  2. `DryRunRecordTargets` (finance.read + `RecordWriteCheck`), the uniform 404.
+  3. `AssignableTargets` = `AssignOrExcludePrivileges()` = `Admin()` (403; `ProcedureAssignmentEndpoints.cs:519`).
+  4. `RequireEbillingEnabled`.
+  5. The handler `Assignable` (`RecordProcedureEndpoints.cs:245`): 401 for a non-GUID oid, `TryParseQuery`, `TryParseNameSearch` (`:273`), then the service.
+- `ProcedureAssignmentService.PlanAssignCatalogAsync` (`:1645`):
+  - Candidates are Status Active, `statecode` 0, Area Billing, and Firm null OR the list's firm (`:1666`), with an optional escaped `Like` on the name, ordered by name then id.
+  - `TopCount = bound + 1 + |onRecord|` (`:1658`); past the bound, `AssignableCatalog.Over` (`:1682`).
+  - Own rows of any state come from `OwnRowQuery` (`:2218`, which is now also the duplicate refusal's query in `HasRowAsync`).
+  - Each other candidate gets the write's Follow-latest image (`ProcedureRowOf` `:478`, the image-only builder), all in ONE `ProcedureOverridePlan`.
+- `AssignRefusalOf` (`:457`): the write's Procedure-row refusals (404 not found, 409 retired, 409 not billing), shared by the write and the list. `RecordContainerResolver.EscapeForLike`, the one shared Like escaper (round 1): `%`, `_` and `[` become `[%]`, `[_]`, `[[]`.
+- `RecordProcedureReadService.ListAssignableAsync` (`:697`):
+  - Now = `ReadAsync` + `BuildProcedures`, as `ListProceduresAsync`.
+  - The catalog through a `WriteRefusingEntityService`.
+  - On tooMany, only the check over Now's exposed rows.
+  - Otherwise, own rows are exposed with their Procedures. `SyntheticRowsAsync(plan)` runs app-only on the real service before any exemption (`:742`). After = `ReadAsync` over `ProcedureRowOverlay(plan, stamp)` with the plan's rows as proposed rows. Offered = After − Now (`:762`), ordered by name (ordinal) then id.
+  - ONE `CallerCanReadAllAsync` (`:773`). Any refusal or fault is a 503.
+- DTOs: `RecordAssignableProceduresView { record, date, firm, firmSource, q, bound, tooMany, procedures|null, notOffered[{id,name,reason}], label }`, `AssignableProcedureItem { id, name, type, appliesTo, firm, statusIfAssigned, versionInForce, gap }`, `AssignableGapView { kind, text, warning }`. `label` is "If assigned now"; `reason` is `OwnRow`. There are no pin versions.
+- Ledger: `RecordProcedureEndpoints.cs`'s reason now names the three GETs; the file count stays 153.
+
+**§11 justification (one line each):**
+- `PlanAssignCatalogAsync`. Existing: `PlanAssignAsync` plans one named Procedure. Extension: it is that planner fanned out over a query, reusing `AssignRefusalOf`, `ProcedureRowOf` and the image builder. Without it: no route can list what is assignable (the 084d-4 STOP).
+- `AssignRefusalOf` / `ProcedureRowOf`. Existing: the inline checks and constructor in `PlanAssignmentRowAsync`. Extension: pulled out unchanged (pure modification). Without it: the list and the write could disagree on what is refused.
+- `OwnRowQuery`. Existing: `HasRowAsync`'s inline query. Extension: the same predicate for many ids. Without it: an own-row candidate would be planned onto an id the write refuses as a duplicate.
+- `RecordContainerResolver.EscapeForLike` and `MaxNameSearchChars`. Existing: `RecordContainerResolver.EscapeForLike` (the Like escaper the container lookups use; round 1 corrected this line, which had said there was none in the BFF, and removed the duplicate `EscapeLike` this task had added). Extension: it is now `internal` and called from the planner. Without it: `q` of `%` or `_` matches everything (uac-r2 note 4).
+- `AssignableCatalog` / `AssignableOwnRow`. Existing: `ProcedureOverridePlan` holds a plan only. Without it: the tooMany state and the own rows have no carrier.
+- `ListAssignableAsync` and the four DTOs. Existing: `DryRunAsync` (one proposal) and `ListProceduresAsync`. Extension: the same reader, overlay and check, with one plan holding many rows. Without it: no answer shape for the wizard.
+- `AssignableTargets` and the three routes. Existing: `DryRunTargets` (body-driven). Extension: no body to read here, so it states the assign write's privileges directly. Without it: the list would offer what the caller cannot assign (uac-r2 Q3).
+
+**Conditions → code → tests** (`RecordAssignableProceduresContractTests.cs`, line numbers at the commit):
+
+| Condition | Code | Test |
+|---|---|---|
+| EB-D-227: at most 50, stable order, null + tooMany past it | `PlanAssignCatalogAsync` `:1658`, `:1682`; `ListAssignableAsync` `:762` | `Bound_At50_And51` (419), `Order_IsByNameThenId` (466) |
+| EB-D-228: non-Billing refused; Draft-only allowed | `AssignRefusalOf` `:457` | commit 1 tests; parity (841) asserts the 409 `procedure_not_billing` is seen and that Draft-only is written but never gained |
+| EB-D-229: the list follows the panel's firm | `:1666`; Now's `FirmId` passed in | `Firm_NarrowsTheCandidates` (363) |
+| EB-D-230: Gap offered with a warning | `GapWarning`, projection | `Gap_IsOffered_WithItsWarning` (268) |
+| ontology-r1 1: Area/Firm/Billing constants; firm = resolver's | `:1662-1672` | `FirmPreFilter_IsTheResolversFirmCondition` (392), which pins `FirmConditionHolds` by reflection |
+| ontology-r1 2: order, truncated flag, parity over the bound | as above | `Parity_OfferedIffTheRealAssignAddsIt` (841), 14 cases, 2 past the bound |
+| ontology-r1 3: unpublished drops through the resolver | no publication condition in the query | `Unpublished_IsPlanned_ButNotOffered` (292) |
+| uac-r2 Q2: an unreadable candidate is a 503. SUPERSEDED 2026-11-13: dropped before judging (round 1, item 5) | the one check `:773` | `DeniedCandidate_IsDropped_NotA503` and the byte-identity tests (round 1) |
+| uac-r2 Q3: `RecordWriteCheck` + `Admin()` after finance.read | routes; `AssignableTargets` | `NoAdminPrivilege_Is403` (586, every route), `Filters_AreTheWritesDeclarations` (600) |
+| uac-r2 note 1: tooMany still asks Now and the firm | `:773` runs on both paths | `TooMany_StillAsksNowRows` (439), `DeniedNowRow_OrFault_Is503` (638) |
+| uac-r2 note 2: OwnRow asks the row and its Procedure, inactive too | `:735`; `OwnRowQuery` has no state filter | `OwnRow_IncludingInactive_IsNotOffered_AndAsked` (331) |
+| uac-r2 note 3: one 404 for unknown, unreadable, unwritable and step 0, before 403, no read | `DryRunRecordTargets` first | `RecordFilter_IsTheUniform404_BeforeAny403` (542, every route), `StepZero_RefusesFirst_WithTheUniform404` (564) |
+| uac-r2 note 4: `q` escaped; control characters, empty or over-long give 400 | `RecordContainerResolver.EscapeForLike`; `TryParseNameSearch` | `Q_MatchesTheNameAsTyped` (491), `BadQ_Is400` (513), `Q_AtTheLimit_IsAccepted_AndOtherBadInputIs400` (523) |
+| uac-r2 note 5: ledger names the three GETs; count 153 | Ledger.cs | ArchTests |
+| EB-D-218 guards | — | `Every200Guid_WasAskedOfTheCaller_Assignable` (713), `EveryVersionRow_IsAsked_OrTheBodyDoesNotDependOnIt_Assignable` (736) |
+
+**Test support.**
+- `RecordProcedureRig.AddProcedure` now seeds `statecode` 0, as a stored row has it.
+- `SecureChildShareWorld`'s `Like` now understands `[...]` sets, so `[%]` is a literal, as in Dataverse and SQL.
+
+**Mutation proofs.** Each was applied to the product code, built, run against `RecordAssignableProceduresContractTests`, and restored:
+- M1, drop the firm narrowing: 2 tests fail (the firm test and the `FirmConditionHolds` pin).
+- M2, skip the batched check when tooMany: 1 fails (`TooMany_StillAsksNowRows`).
+- M3, drop the `AssignableTargets` filter from the project route: 2 fail (the 403 test and the kill-switch order). The 403 test then became a theory over all three routes.
+- M4, offer every planned candidate instead of After − Now: 16 fail (14 parity cases, the unpublished test and the GUID guard).
+
+**Known limits:**
+- **K1, finding (pre-existing).** A Procedure deactivated in Dataverse (`statecode` 1) but still Status Active and Billing is applied by the resolver and accepted by the assign write: neither reads `statecode`. The list drops it, by the binding `statecode` 0 condition. It is kept out of the parity seeds and reported, not fixed here: the resolver is ontology-r1's code.
+- **K2 (superseded 2026-11-13, round 1 item 5: the padding is gone; see K5).** `TopCount` was `51 + |Procedures on the record|`. A record with more than about 4,949 Procedures in Now would pass Dataverse's 5,000 and get a 503.
+- **K3.** The bound counts candidates before the resolver. Draft-only Procedures, or Procedures that would not apply, count toward 50, so `tooMany` can show although fewer than 50 would be offered. With `q` narrowing, the list stays usable.
+- **K4.** A Procedure the record has a row for, but that is not a candidate (Retired, another firm, another area), is not in `notOffered`. It is not offered either.
+
+**Deviations from the design:**
+- D1: `AssignRefusalOf(procedure)` takes the row only. The own-row (duplicate) check stays where the write has it, after the pin checks, so the write's refusal order is unchanged.
+- D2: `gap` carries `warning` beside `{kind, text}` (EB-D-230). A `NotYetInForce` candidate is offered with `gap` null (it is not a gap).
+
+**Gates.**
+- BFF build: 0 warnings, 0 errors.
+- `RecordAssignableProceduresContractTests`: 56 passed.
+- Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede): 8608 passed, 4 skipped, 0 failed.
+- ArchTests: 2570/2570, ledger count 153.
+- `dotnet format whitespace --verify-no-changes`: clean on the eight touched code files.
+- `dotnet list package --vulnerable --include-transitive`: no vulnerable package. No package was added.
+- Publish size: fresh `origin/master` `c2f366bf52` against the branch head `4dac394f2a`, both exported with `git archive` to short paths. `dotnet publish -c Release -r linux-x64`, `Compress-Archive -CompressionLevel Optimal`, 191 files each. Master 42,088,927 bytes, branch 42,089,205 bytes: a delta of +278 bytes.
+
+**For task 112 (ui-tests after deploy).** These run through the 084d-5b wizard; the server route alone has no UI:
+- On a matter, open Assign Procedure. The list shows active Billing Procedures not already on the matter, by name, at most 50, labelled "If assigned now".
+- Type a name containing `%` or `_`: only names containing it literally match.
+- With more than 50, expect "too many" and no list until the search narrows it.
+- A Procedure with a hole between versions on the panel date shows the Gap warning.
+- A Procedure the matter has an inactive row for shows as not offered (OwnRow).
+- As a caller without the billing-admin privileges, expect the 403 state, not a list.
+
+### 084d-5a review round 1 (2026-11-13)
+
+Each item: finding, then change, then test.
+
+**1. (F2) The `+ onRecord.Count` padding in the candidate `TopCount` was untested.**
+- Change: none to product code (the padding was right). It is pinned by a test, and see item 5 below, which replaces the padding.
+- Test: `Bound_OnRecordRowSortingFirst_NeverMakesAPartialList`. A Procedure on the record that sorts first ("A on the record"), plus 51 candidates: `tooMany` is true and `procedures` is null.
+- Mutation `TopCount = bound + 1`: the new test fails (1 failed, 57 passed); restored, 58 passed.
+
+**2. (F2) `EscapeLike` duplicated `RecordContainerResolver.EscapeForLike`.**
+- Change: `RecordContainerResolver.EscapeForLike` is now `internal static` (it was `private`) and is the one Like escaper. `ProcedureAssignmentService.EscapeLike` is deleted; the planner calls the shared helper. The two gave identical output (`[`, `%`, `_` each become a one-character class). The §11 line above ("no Like escaper in the BFF") is corrected. No new public surface, no new file.
+- Test: `Q_MatchesTheNameAsTyped` (the `%`, `_` and `[` cases) goes through the shared helper and is unchanged. The existing `RecordContainerResolver` tests are unchanged and green (counts under Gates).
+
+**3. (F4) The parity test checked only that a Procedure is offered.**
+- Change: test only. When the real write gains P, the offered item's `statusIfAssigned` and `versionInForce` must equal the post-write list item's `Status` and `VersionInForce`, with a guard that the comparison ran. The 14 parity cases compare InForce, Gap and NotYetInForce items.
+- New test: `Bound_CountsOnlyCandidates` (50 candidates plus a Retired, another-area, another-firm and an inactive one: not `tooMany`, 50 offered).
+- Design §6 mutation seeds (each applied, run, restored):
+
+| Seed | Result |
+|---|---|
+| Drop the OwnRow step (`candidates.Count < 0` on the own-row query) | 15 fail (OwnRow tests and the parity cases) |
+| The query includes Retired (the Active condition removed) | survived the existing tests; added `Bound_CountsOnlyCandidates`, which now fails it (1 failed) |
+| No `ExposeVersionsOf` (empty loop) | 1 fails: `EveryVersionRow_IsAsked_OrTheBodyDoesNotDependOnIt_Assignable` |
+| Offered from the candidates instead of After - Now | killed in 084d-5a as M4 (16 fail) |
+
+**4. (K4, notes only) EB-D-228 reach.** `AssignRefusalOf` also refuses a Pin, a Procedure-level Exclude and an empty Area, not only a non-Billing Procedure. Name this as a known limit in the PR. It is harmless: the resolver never reads such rows, so they never change what applies.
+
+**5. (uac-r2 ruling, 2026-11-13) Candidates the caller cannot Read are dropped before judging.**
+- **Ruling.** uac-r2 Q2 for candidates changes from "503 on an unreadable candidate" to "drop-before-judge". Finding: the candidate query is app-only, so a 503-versus-200 answer, combined with `q`, revealed the names of Procedures the caller cannot Read.
+- **Change.**
+  - `RecordProcedureReadService.ReadableProceduresAsync`: the existing batched Read check (`RightsOfAsync`, split out of `CallerCanReadAllAsync`, which behaves as before) over the candidate Procedure ids. No impersonation (EB-D-218).
+  - `ProcedureAssignmentService.PlanAssignCatalogAsync` takes it as `readable` and drops the unreadable candidates BEFORE the own-row step, the resolver, the 50 bound and `tooMany`. An unreadable Procedure then looks like one that does not exist: no 503, no `tooMany`, no `notOffered` entry, and its own-row rows are never asked.
+  - The `+ onRecord.Count` padding is gone. The candidate fetch is not capped before the filter: it asks for every matching row up to `MaxCandidateRows` (1000, named constant). Past it, the answer is `tooMany`.
+  - Faults: the candidate check faulting, or refused as a whole (the caller not established, any row unanswered), is 503 `procedures.unavailable`; never "drop all", never an empty 200. Now's rows, own rows and the firm stay all-or-nothing 503.
+  - The candidate batch is a second rights call, so the request now makes two (candidates, then Now ∪ After); each is paged at 250 rows as before.
+- **Tests** (`RecordAssignableProceduresContractTests`):
+  - `UnreadableCandidate_OnlyMatchOfQ_IsByteIdenticalToItsAbsence` (a): two worlds differing only by one unreadable published, Billing, unfirmed, in-reach Procedure matching `q`; the status and body are byte-identical (traceId excluded). Readable control: it is offered.
+  - `UnreadableCandidate_DoesNotTipTheBound_ByteIdenticalToItsAbsence` (b): 50 readable + 1 unreadable equals the 50 alone (not `tooMany`, a list of 50). Control: a readable 51st is `tooMany`.
+  - `NoPreFilterCap_AndTheCeilingIsTooMany`: 951 unreadable rows sorting first plus 49 readable offer the 49, and 1000 rows are asked; 1001 rows (1000 unreadable) are `tooMany`, with nothing asked but Now.
+  - `CandidateReadCheck_FaultOrRefusal_Is503`: a throw, an unanswered row, and an unestablished caller.
+  - `NowOwnRowAndFirm_Unreadable_StillAre503`; `DeniedCandidate_IsDropped_NotA503`. `OwnRow_IncludingInactive_IsNotOffered_AndAsked` now expects a dropped own-row Procedure (200, absent) and a denied own ROW as 503.
+- **Mutations** (each applied, run against the class, restored; baseline 63 passed):
+
+| Mutation | Result |
+|---|---|
+| M5a: no drop (judge every candidate) | 5 fail: (a), (b), `DeniedCandidate_IsDropped_NotA503`, the crowd and ceiling test, and the OwnRow test |
+| M5b: a pre-filter cap again (`TopCount = bound + 1 + onRecord.Count`) | 1 fails: the crowd and ceiling test |
+| M5c: `TopCount = bound + 1` | 2 fail: `Bound_OnRecordRowSortingFirst_NeverMakesAPartialList` and the crowd and ceiling test |
+| M5d: a refused check drops all instead of 503 | 1 fails: `CandidateReadCheck_FaultOrRefusal_Is503` |
+| M5e: no ceiling answer | 1 fails: the crowd and ceiling test |
+
+- **Known limits (name in the PR).**
+  - **K5.** The ceiling is `MaxCandidateRows` = 1000. A matching set past it is answered `tooMany`, which counts rows the caller cannot Read; narrowing by `q` brings it back. Replaces K2's padding limit (K2 is gone: there is no `+ |onRecord|` padding).
+  - K6: response time varies with the number of matching rows the caller cannot Read (accepted by uac-r2, 2026-11-13).
+
+**Round 1 gates (final state).** BFF build 0 warnings, 0 errors. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede, RecordContainer, ContainerDocument): 8988 passed, 4 skipped, 0 failed (`RecordContainer` alone: 363 passed, after item 2). `RecordAssignableProceduresContractTests`: 63 passed. ArchTests: 2570/2570. `dotnet format whitespace --verify-no-changes` on the changed files: no finding except ENDOFLINE, which the working tree's LF checkout raises on every line of every file (git converts at commit).
+
+### 084d-5a review round 2 (2026-11-13, uac-r2 T1)
+
+- **Change.** `PlanAssignCatalogAsync` (1) always resolves the caller: the own-row Procedures get their own check first, run on every request, and a request with no ids makes no per-row rights request; (2) stops the candidate check after the rights page (250) at which bound + 1 (51) offerable readable candidates are found; (3) sets the record's own-row Procedures aside BEFORE that scan, by id, from the record's own assignment rows (any state), so they never count toward the stop or the bound. A denied own-row Procedure is still not listed (200); a readable one keeps its `OwnRow` entry and its own row is still asked (a denied own row is 503). Any page that faults, is unanswered or short is still 503.
+- **Behaviour change.** An own-row Procedure no longer counts toward `tooMany`: 51 readable candidates, one of them an own-row Procedure, give a list of 50.
+- **Tests** (`RecordAssignableProceduresContractTests`): `T1_OwnRowProcedure_DoesNotCountTowardTheBound`, `T1_52ReadableCandidates_AreTooMany`, `T1_StopsAskingOnceBoundPlusOneAreFound`, `T1_NoCandidates_StillResolvesTheCaller`, `T1_DeniedOwnRowProcedure_IsNotListed_AndNeverCounts`.
+- **Known limit K6.** Response time varies with the number of matching rows the caller cannot Read (accepted by uac-r2, 2026-11-13).
