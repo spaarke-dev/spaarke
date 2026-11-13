@@ -139,6 +139,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                         values[column] = value;
                     }
 
+                    if (app is not null)
+                        AnswerDeriveReads(app);
                     var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
                 Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                         _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
@@ -164,6 +166,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             Mock.Get(app)
                 .Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string table, CancellationToken _) => EntitySetNameFixtures.SetOf(table));
+            AnswerDeriveReads(app);
             services.AddSingleton(app);
         }
 
@@ -375,7 +378,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull();
         WrittenOnce("sprk_invoice", Invoice);
-        app.Verify(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Once,
+        app.Verify(a => a.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_billingevent"), It.IsAny<CancellationToken>()), Times.Once,
             "the lines are counted once, as the app");
     }
 

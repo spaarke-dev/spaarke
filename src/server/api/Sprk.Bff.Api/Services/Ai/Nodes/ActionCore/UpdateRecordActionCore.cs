@@ -274,6 +274,22 @@ internal sealed class UpdateRecordActionCore
                 .ConfigureAwait(false);
         }
 
+        // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family row whose own core lookup this update
+        // sets or clears takes the resolver fields of the record it will name, in this same PATCH (read app-only, after the pair
+        // planner so they win). A derive that cannot be done is refused as the guard above refuses: its code only.
+        if (InvoiceFamilyCoreRecordGuard.ColumnsToRead(input.EntityLogicalName) is not null)
+        {
+            using var familyFieldsScope = _scopeFactory.CreateScope();
+            var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+                    familyFieldsScope.ServiceProvider.GetService<IGenericEntityService>(), input.EntityLogicalName, input.RecordId,
+                    updatePayload, "UpdateRecord", _logger, cancellationToken,
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null)
+                .ConfigureAwait(false);
+            if (familyFields.RefusalCode is { } derivedCode)
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, derivedCode);
+            updatePayload = familyFields.Payload;
+        }
+
         async Task Patch(CancellationToken ct)
         {
             // ebilling-r1 #2081: an invoice or line is written UPDATE-ONLY (If-Match: *, impersonation kept). The guard above

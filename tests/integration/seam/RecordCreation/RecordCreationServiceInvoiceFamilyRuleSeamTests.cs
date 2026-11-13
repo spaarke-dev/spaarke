@@ -233,6 +233,14 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
     private static string MatterId => OrdinaryMatter.ToString("D").ToLowerInvariant();
 
+    /// <summary>A created column's value as text; null for a value that is absent or written as null (a clear).</summary>
+    private static string? WrittenAs(object? value) => value switch
+    {
+        null => null,
+        JsonElement { ValueKind: JsonValueKind.Null } => null,
+        _ => Describe(value),
+    };
+
     [Fact]
     public async Task CreateAsync_AnInvoiceUnderOneMatter_IsCreatedWithTheMattersFiveResolverFields_OverTheCallersOwn()
     {
@@ -310,21 +318,31 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         AssertNothingWritten();
     }
 
-    [Fact]
-    public async Task CreateAsync_WhenTheMatterHasNoNumber_Is400ResolverFieldsIncomplete_AndWritesNothing()
+    [Theory]
+    [InlineData("no number")]
+    [InlineData("no name")]
+    public async Task CreateAsync_WhenTheMatterHasNoNameOrNoNumber_IsCreated_WithTheTypeIdAndUrl_AndWithoutTheBlankOne(string gap)
     {
+        // Owner, 2026-11-12, option (b): the row takes what the record has.
         _readBack
             .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Entity(table, id) { ["sprk_mattername"] = "Acme v Beta" });
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => gap == "no number"
+                ? new Entity(table, id) { ["sprk_mattername"] = "Acme v Beta" }
+                : new Entity(table, id) { ["sprk_matternumber"] = "MAT-000013" });
 
         var outcome = await Service().CreateAsync(InvoiceRequest(new
         {
-            sprk_name = "Matter without a number",
+            sprk_name = "Matter with a blank",
             sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
         }), AsCaller(), CancellationToken.None);
 
-        Problem(outcome, "sprk_invoice").Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
-        AssertNothingWritten();
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordtype@odata.bind"]).Should().Be($"/sprk_recordtype_refs({CatalogRowOf("sprk_matter"):D})");
+        Describe(fields["sprk_regardingrecordid"]).Should().Be(MatterId);
+        Describe(fields["sprk_regardingrecordurl"]).Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={MatterId}");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordnumber")).Should().Be(gap == "no number" ? null : "MAT-000013");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordname")).Should().Be(gap == "no name" ? null : "Acme v Beta");
     }
 
     [Fact]

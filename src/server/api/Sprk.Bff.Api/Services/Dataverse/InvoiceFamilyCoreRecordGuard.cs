@@ -409,6 +409,103 @@ public static class InvoiceFamilyCoreRecordGuard
             : decided;
     }
 
+    /// <summary>
+    /// Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): the app-only update half — the playbook update, the output
+    /// orchestrator and the field-mapping push. For an update of an invoice-family row whose patch sets or clears one of the
+    /// row's own core lookups (<see cref="ColumnsToRead"/>), the stored lookups are read with <paramref name="appOnly"/>,
+    /// overlaid with the patch, decided by <see cref="Check(string, Func{string, object?})"/>, and the resolver fields of the
+    /// record the row will name are derived app-only (<see cref="DeriveGenericResolverFieldsAsync"/>). The path writes them in
+    /// the same write (<see cref="InvoiceFamilyCoreRecord.ResolverFields"/>, <see cref="InvoiceFamilyResolverFields.ToGenericFields"/>),
+    /// or answers a refusal through the refusal form it uses for <see cref="CheckGenericUpdateAsync"/>.
+    /// Null when nothing is derived: a table outside the family, a patch that moves no core lookup, or a row
+    /// <see cref="Check(string, Func{string, object?})"/> refuses (left to the path's guard, which answers it as before).
+    /// </summary>
+    /// <param name="patch">As <see cref="CheckGenericUpdateAsync"/>'s: a column → <see cref="EntityReference"/> or null, or a
+    /// <c>{navigation}@odata.bind</c> → <c>/{set}({id})</c> or null.</param>
+    /// <param name="appOnly">The path's app-only reader; null fails closed (<see cref="ReadFailedCode"/>) when a derive is due.</param>
+    /// <param name="writeIsImpersonated">As <see cref="CheckGenericUpdateAsync"/>'s: a record not found is answered
+    /// <see cref="ReadFailedCode"/>, the path's answer for a missing record when the write runs as a user.</param>
+    public static async Task<InvoiceFamilyCoreRecord?> DeriveForGenericUpdateAsync(
+        string entityLogicalName,
+        Guid recordId,
+        IEnumerable<KeyValuePair<string, object?>> patch,
+        IGenericEntityService? appOnly,
+        CancellationToken ct = default,
+        bool writeIsImpersonated = false)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (ColumnsToRead(entity) is not { } coreColumns)
+            return null;
+
+        var targets = CoreRecordLookups[entity].Select(l => (l.Column, Table: l.CoreEntity)).ToList();
+        if (IsExternalIdentifier(entity))
+            targets.Add((ExternalIdentifierInvoiceColumn, InvoiceEntity));
+        var change = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in patch)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = ColumnOfKey(key);
+            var target = targets.FirstOrDefault(t => string.Equals(t.Column, column, StringComparison.OrdinalIgnoreCase));
+            if (target.Column is null)
+                continue;
+
+            change[target.Column] = value is string bind && IsBindKey(key) && TryParseBind(bind, out var id)
+                ? new EntityReference(target.Table, id)
+                : value;
+        }
+
+        if (change.Count == 0)
+            return null;
+
+        InvoiceFamilyCoreRecord derived;
+        if (appOnly is null)
+        {
+            derived = InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
+                $"What this {entity} is filed under cannot be read here; nothing was written.");
+        }
+        else
+        {
+            Entity? stored;
+            try
+            {
+                stored = await appOnly.RetrieveAsync(entity, recordId, coreColumns.ToArray(), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return NotFoundAs(IsRecordNotFound(ex)
+                    ? InvoiceFamilyCoreRecord.Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written.")
+                    : InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
+                        $"What this {entity} is filed under could not be read ({ex.GetType().Name}); nothing was written."), writeIsImpersonated);
+            }
+
+            if (stored is null)
+            {
+                return NotFoundAs(InvoiceFamilyCoreRecord.Refused(entity, RecordNotFoundCode,
+                    $"{entity}({recordId:D}) does not exist; nothing was written."), writeIsImpersonated);
+            }
+
+            var decided = Check(entity, column =>
+                change.TryGetValue(column, out var changed) ? changed
+                : stored.Attributes.TryGetValue(column, out var kept) ? kept
+                : null);
+            if (decided.IsRefused)
+                return null;
+
+            derived = await DeriveGenericResolverFieldsAsync(decided, AppOnlyRecords(appOnly), AppOnlyRecordTypes(appOnly), ct)
+                .ConfigureAwait(false);
+        }
+
+        return NotFoundAs(derived, writeIsImpersonated);
+    }
+
+    /// <summary>A record not found, answered <see cref="ReadFailedCode"/> when the write runs as a user (#2081 fix round 2).</summary>
+    private static InvoiceFamilyCoreRecord NotFoundAs(InvoiceFamilyCoreRecord derived, bool writeIsImpersonated) =>
+        writeIsImpersonated && derived is { RefusalCode: RecordNotFoundCode }
+            ? derived.Refuse(ReadFailedCode, $"What this {derived.EntityLogicalName} is filed under could not be read; nothing was written.")
+            : derived;
+
     private static async Task<InvoiceFamilyCoreRecord?> CheckGenericUpdateCoreAsync(
         string entityLogicalName,
         Guid recordId,
@@ -741,27 +838,70 @@ public static class InvoiceFamilyCoreRecordGuard
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(records);
-        return DeriveResolverFieldsAsync(
-            decided, async (table, id, columns, token) => await records.RetrieveAsync(table, id, columns, token).ConfigureAwait(false),
-            recordTypes, ct);
+        return DeriveAsync(decided, AppOnlyRecords(records), recordTypes, displayOptional: false, ct);
     }
 
     /// <summary>
     /// Reads the regarded record's <paramref name="columns"/> (task 045d: the generic writers pass their own reader — app-only on
-    /// the create, the caller's on a caller update). <c>null</c>, or a fault that is a record-not-found, is
-    /// <see cref="RecordNotFoundCode"/>; any other fault is <see cref="ReadFailedCode"/>.
+    /// the create and the app-only updates, the caller's on a caller update). <c>null</c>, or a fault that is a record-not-found,
+    /// is <see cref="RecordNotFoundCode"/>; any other fault is <see cref="ReadFailedCode"/>.
     /// </summary>
     public delegate Task<Entity?> RecordLookup(string entityLogicalName, Guid id, string[] columns, CancellationToken ct);
 
     /// <summary>
+    /// Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): the GENERIC writers' derive — the create's pre-write rule,
+    /// the caller update planner and the app-only update paths. The same reads and the same refusals as
     /// <see cref="DeriveResolverFieldsAsync(InvoiceFamilyCoreRecord, IGenericEntityService, RecordTypeLookup, CancellationToken)"/>
-    /// over any record reader (task 045d). The same rule and the same answers.
+    /// (no active catalog row, or one naming no number column, is <see cref="ResolverFieldsIncompleteCode"/>; a missing record is
+    /// <see cref="RecordNotFoundCode"/>; a read fault is <see cref="ReadFailedCode"/>), except that the row takes what the
+    /// record has: the type, the id and the URL always, the name and the number when the record has them
+    /// (<see cref="InvoiceFamilyResolverFields.ToGenericFields"/>). A blank name or number is never a refusal here. The
+    /// submission writers keep the strict overload (all five or a refusal).
     /// </summary>
-    public static async Task<InvoiceFamilyCoreRecord> DeriveResolverFieldsAsync(
+    public static Task<InvoiceFamilyCoreRecord> DeriveGenericResolverFieldsAsync(
         InvoiceFamilyCoreRecord decided,
         RecordLookup records,
         RecordTypeLookup recordTypes,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        DeriveAsync(decided, records, recordTypes, displayOptional: true, ct);
+
+    /// <summary>An app-only <see cref="RecordLookup"/> over <paramref name="records"/>.</summary>
+    public static RecordLookup AppOnlyRecords(IGenericEntityService records)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        return async (table, id, columns, token) => await records.RetrieveAsync(table, id, columns, token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 045d: an app-only <see cref="RecordTypeLookup"/> over <paramref name="records"/> — the table's active
+    /// <c>sprk_recordtype_ref</c> row, the same query as <c>ICommunicationDataverseService.QueryRecordTypeRefAsync</c>, for the
+    /// app-only update paths whose only reader is the <see cref="IGenericEntityService"/>.
+    /// </summary>
+    public static RecordTypeLookup AppOnlyRecordTypes(IGenericEntityService records)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        return async (table, token) =>
+        {
+            var query = new QueryExpression(RecordTypeEntity)
+            {
+                ColumnSet = new ColumnSet(RecordTypeEntity + "id", "sprk_recorddisplayname", RegardingRecordType.RecordNumberFieldColumn),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition("sprk_recordlogicalname", ConditionOperator.Equal, table);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            var rows = await records.RetrieveMultipleAsync(query, token).ConfigureAwait(false);
+            return rows.Entities.Count > 0 ? rows.Entities[0] : null;
+        };
+    }
+
+    private const string RecordTypeEntity = "sprk_recordtype_ref";
+
+    private static async Task<InvoiceFamilyCoreRecord> DeriveAsync(
+        InvoiceFamilyCoreRecord decided,
+        RecordLookup records,
+        RecordTypeLookup recordTypes,
+        bool displayOptional,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(decided);
         ArgumentNullException.ThrowIfNull(records);
@@ -812,8 +952,10 @@ public static class InvoiceFamilyCoreRecordGuard
             return decided.Refuse(RecordNotFoundCode, $"{regarding.LogicalName}({regarding.Id:D}) does not exist; nothing was written.");
         }
 
-        var fields = BuildResolverFields(regarding, recordType.Id, row.GetAttributeValue<string>(nameField),
-            row.GetAttributeValue<string>(numberField));
+        var fields = displayOptional
+            ? BuildGenericResolverFields(regarding, recordType.Id, row.GetAttributeValue<string>(nameField), row.GetAttributeValue<string>(numberField))
+            : BuildResolverFields(regarding, recordType.Id, row.GetAttributeValue<string>(nameField),
+                row.GetAttributeValue<string>(numberField));
         return fields is null
             ? decided.Refuse(ResolverFieldsIncompleteCode,
                 $"{regarding.LogicalName}({regarding.Id:D}) has no {(string.IsNullOrWhiteSpace(row.GetAttributeValue<string>(nameField)) ? nameField : numberField)}, "
@@ -840,6 +982,28 @@ public static class InvoiceFamilyCoreRecordGuard
             trimmedName.Length > RegardingRecordNameMaxLength ? trimmedName[..RegardingRecordNameMaxLength] : trimmedName,
             RegardingRecordType.BuildRecordUrl(regarding.LogicalName.ToLowerInvariant(), id),
             number.Trim());
+    }
+
+    /// <summary>
+    /// Task 045d (owner, 2026-11-12, option (b)): the generic writers' fields — what the record has. The type, the id and the URL
+    /// always; the name (cut to 100) and the number when the record has them, otherwise <see cref="string.Empty"/>, which
+    /// <see cref="InvoiceFamilyResolverFields.ToGenericFields"/> writes as a clear. Null only for an empty type or record id. Pure.
+    /// </summary>
+    internal static InvoiceFamilyResolverFields? BuildGenericResolverFields(
+        EntityReference regarding, Guid recordTypeId, string? name, string? number)
+    {
+        ArgumentNullException.ThrowIfNull(regarding);
+        if (recordTypeId == Guid.Empty || regarding.Id == Guid.Empty)
+            return null;
+
+        var id = regarding.Id.ToString("D").ToLowerInvariant();
+        var trimmedName = name?.Trim() ?? string.Empty;
+        return new InvoiceFamilyResolverFields(
+            recordTypeId,
+            id,
+            trimmedName.Length > RegardingRecordNameMaxLength ? trimmedName[..RegardingRecordNameMaxLength] : trimmedName,
+            RegardingRecordType.BuildRecordUrl(regarding.LogicalName.ToLowerInvariant(), id),
+            number?.Trim() ?? string.Empty);
     }
 
     private static bool IsExternalIdentifier(string entity) =>
@@ -941,5 +1105,19 @@ public sealed record InvoiceFamilyResolverFields(
         ["sprk_regardingrecordname"] = RecordName,
         ["sprk_regardingrecordurl"] = RecordUrl,
         ["sprk_regardingrecordnumber"] = RecordNumber,
+    };
+
+    /// <summary>
+    /// Task 045d (owner, 2026-11-12, option (b)): the five columns as the GENERIC writers write them — a blank name or number is
+    /// written as null (a clear), so a row moved to a record without one never keeps the previous record's. The submission
+    /// writers use <see cref="ToFields"/>, whose fields are never blank.
+    /// </summary>
+    public Dictionary<string, object?> ToGenericFields() => new(StringComparer.OrdinalIgnoreCase)
+    {
+        [CoreAncestorResolver.RegardingRecordTypeColumn] = new EntityReference("sprk_recordtype_ref", RecordTypeId),
+        [CoreAncestorResolver.RegardingRecordIdColumn] = RecordId,
+        ["sprk_regardingrecordname"] = string.IsNullOrWhiteSpace(RecordName) ? null : RecordName,
+        ["sprk_regardingrecordurl"] = RecordUrl,
+        ["sprk_regardingrecordnumber"] = string.IsNullOrWhiteSpace(RecordNumber) ? null : RecordNumber,
     };
 }

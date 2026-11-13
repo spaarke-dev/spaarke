@@ -107,11 +107,11 @@ internal static partial class RecordTableRules
             if (family.Admitted is not { } admitted)
                 return PreWriteResult.Of(InvoiceFamilyPreWrite(family.Refusal));
 
-            var derived = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
+            var derived = await InvoiceFamilyCoreRecordGuard.DeriveGenericResolverFieldsAsync(
                 admitted, row.Records ?? NoRecordReader, row.RecordTypes ?? NoRecordTypeReader, ct).ConfigureAwait(false);
             // A derive with no fields and no refusal is a step that refuses nothing it can name: undecided (the mapping's last arm).
             return derived is { IsRefused: false, ResolverFields: { } fields }
-                ? PreWriteResult.Add(fields.ToFields())
+                ? PreWriteResult.Add(fields.ToGenericFields())
                 : PreWriteResult.Of(InvoiceFamilyPreWrite(
                     new OwnedChildWrite.InvoiceFamilyStep(derived.IsRefused ? derived : null, null, false)));
         });
@@ -1090,10 +1090,10 @@ internal sealed record PreWriteRow(
 /// </summary>
 internal sealed record PreWriteResult
 {
-    private static readonly IReadOnlyDictionary<string, object> NoColumns =
-        new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+    private static readonly IReadOnlyDictionary<string, object?> NoColumns =
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
-    private PreWriteResult(PreWriteRefusal? refusal, IReadOnlyDictionary<string, object> columns)
+    private PreWriteResult(PreWriteRefusal? refusal, IReadOnlyDictionary<string, object?> columns)
     {
         Refusal = refusal;
         AdditionalColumns = columns;
@@ -1103,7 +1103,7 @@ internal sealed record PreWriteResult
     public PreWriteRefusal? Refusal { get; }
 
     /// <summary>The columns the rule sets on the row (empty for a refusal, and for a rule that adds nothing).</summary>
-    public IReadOnlyDictionary<string, object> AdditionalColumns { get; }
+    public IReadOnlyDictionary<string, object?> AdditionalColumns { get; }
 
     /// <summary>The row may be written as it is.</summary>
     public static PreWriteResult Admit { get; } = new(null, NoColumns);
@@ -1116,10 +1116,10 @@ internal sealed record PreWriteResult
     }
 
     /// <summary>The row may be written with <paramref name="columns"/> set over its own.</summary>
-    public static PreWriteResult Add(IReadOnlyDictionary<string, object> columns)
+    public static PreWriteResult Add(IReadOnlyDictionary<string, object?> columns)
     {
         ArgumentNullException.ThrowIfNull(columns);
-        return new(null, new Dictionary<string, object>(columns, StringComparer.OrdinalIgnoreCase));
+        return new(null, new Dictionary<string, object?>(columns, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary><see cref="Refuse"/> for a refusal, otherwise <see cref="Admit"/>.</summary>

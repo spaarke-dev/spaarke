@@ -73,6 +73,49 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
 
+    /// <summary>
+    /// Task 045d: the reads the app-only resolver-field derive makes, answered for every world (registered when a path runs,
+    /// after the world's own setups; each matches only the derive's own query): the core table's active
+    /// <c>sprk_recordtype_ref</c> row (<see cref="CatalogRowOf"/>, naming <c>{table}number</c>), and a core record read for its
+    /// name and number (<c>Record {id}</c>, <c>N-{id}</c>). A test scripts another answer with <see cref="_catalogAnswer"/> or
+    /// <see cref="_recordAnswer"/>; <see cref="_deriveReads"/> journals each derive read.
+    /// </summary>
+    private void AnswerDeriveReads(IGenericEntityService app)
+    {
+        if (app is not IMocked<IGenericEntityService> mocked)
+            return;
+        var mock = mocked.Mock;
+        mock.Setup(a => a.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) =>
+            {
+                var table = (string)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_recordlogicalname").Values[0];
+                _deriveReads.Add("catalog:" + table);
+                return Task.FromResult(new EntityCollection(_catalogAnswer(table) is { } row ? [row] : []));
+            });
+        mock.Setup(a => a.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.Is<string[]>(c => c.Length == 2 && c[1].EndsWith("number", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            {
+                _deriveReads.Add($"record:{table}");
+                return Task.FromResult(_recordAnswer(table, id, columns)!);
+            });
+    }
+
+    private readonly List<string> _deriveReads = [];
+
+    private Func<string, Entity?> _catalogAnswer = table =>
+        new Entity("sprk_recordtype_ref", CatalogRowOf(table)) { [RegardingRecordType.RecordNumberFieldColumn] = table + "number" };
+
+    private Func<string, Guid, string[], Entity?> _recordAnswer = (table, id, columns) => new Entity(table, id)
+    {
+        [columns[0]] = $"Record {id.ToString("N")[..6]}",
+        [columns[1]] = $"N-{id.ToString("N")[..6]}",
+    };
+
+    /// <summary>Task 045d: the harness catalog's fixed row id for a core table.</summary>
+    private static Guid CatalogRowOf(string table) =>
+        new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("catalog:" + table)));
+
     /// <summary>The app-only reader: a stored invoice filed under a matter (with no lines).</summary>
     private static Mock<IGenericEntityService> InvoiceUnderAMatter()
     {
@@ -107,10 +150,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
 
-    private DataverseUpdateHandler Handler(IGenericEntityService app) =>
-        new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
+    private DataverseUpdateHandler Handler(IGenericEntityService app)
+    {
+        AnswerDeriveReads(app);
+        return new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
             SecureChildReconcilerFixtures.OverEmptyWorld());
+    }
 
     [Fact]
     public async Task DataverseUpdateHandler_AnInvoiceGivenASecondCoreRecord_IsRefusedWithTheGuardsCode_AndNothingIsWritten()
@@ -159,6 +205,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         Mock.Get(app)
             .Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, CancellationToken _) => EntitySetNameFixtures.SetOf(table));
+        AnswerDeriveReads(app);
         return new(_writes.Object,
             new ServiceCollection()
                 .AddSingleton(app)

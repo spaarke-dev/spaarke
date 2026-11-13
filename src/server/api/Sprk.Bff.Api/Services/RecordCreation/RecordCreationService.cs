@@ -2170,11 +2170,11 @@ internal sealed partial class RecordCreationService
     /// value wins); each rule decides on the row as the caller sent it. The row's app-only readers (the regarded record, the
     /// record-type catalog) are the ones the dedicated writers use; they are asked here, after step 5's AppendTo.
     /// </summary>
-    private async Task<(RecordCreationRefusal? Refusal, IReadOnlyDictionary<string, object> Columns)> RunPreWriteRulesAsync(
+    private async Task<(RecordCreationRefusal? Refusal, IReadOnlyDictionary<string, object?> Columns)> RunPreWriteRulesAsync(
         string table, RecordTableRule rule, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, string noun,
         CancellationToken ct)
     {
-        var columns = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var columns = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         if (user is null)
         {
             return (new RecordCreationRefusal(RecordCreationRefusalKind.Forbidden, RecordCreationRefusal.SystemPrincipalUnsupportedCode,

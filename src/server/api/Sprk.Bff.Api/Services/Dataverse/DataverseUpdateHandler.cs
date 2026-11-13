@@ -153,6 +153,17 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
             .ConfigureAwait(false);
 
+        // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family row whose own core lookup this write
+        // sets or clears takes the resolver fields of the record it will name, in this same write (read app-only, after the pair
+        // planner so they win). A derive that cannot be done is refused as the guard above refuses: its code only.
+        var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
+                writeIsImpersonated: impersonateSystemUserId is not null)
+            .ConfigureAwait(false);
+        if (familyFields.RefusalCode is { } derivedCode)
+            throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, derivedCode);
+        fields = familyFields.Payload;
+
         // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
         // the record this write files it under is secure must be readable, or nothing is written (fail closed).
         if (await _rootFiling.CheckAsync(entityLogicalName, recordId, fields, ct).ConfigureAwait(false) is { } rootRefusal)

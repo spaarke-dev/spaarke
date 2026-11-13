@@ -1084,7 +1084,7 @@ internal static class OwnedChildWrite
         if (decided.IsRefused)
             return (item, null);
 
-        var derived = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
+        var derived = await InvoiceFamilyCoreRecordGuard.DeriveGenericResolverFieldsAsync(
             decided, CallerRecordReader(user, table, entitySetName, recordId), CallerRecordTypeReader(user), ct).ConfigureAwait(false);
         if (derived is not { IsRefused: false, ResolverFields: { } fields })
         {
@@ -1101,7 +1101,7 @@ internal static class OwnedChildWrite
 
         logger?.LogInformation(
             "[UPDATE] the resolver fields of {Table} {RecordId} were derived from the core record it will name", table, recordId);
-        return (WithColumnsSet(table, item, fields.ToFields()), null);
+        return (WithColumnsSet(table, item, fields.ToGenericFields()), null);
     }
 
     /// <summary>The derive's record read AS THE CALLER (the planner's own, <see cref="CallerReaders"/>): a record they may not
@@ -1324,7 +1324,7 @@ internal static class OwnedChildWrite
     /// </summary>
     /// <exception cref="ArgumentException">A lookup other than the pair type, or a value that is neither text nor a reference.</exception>
     internal static DataverseWriteItemMapper.MappedItem WithColumnsSet(
-        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, object> columns)
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, object?> columns)
     {
         if (columns.Count == 0)
             return item;
@@ -1352,6 +1352,9 @@ internal static class OwnedChildWrite
                 case string text:
                     body[column] = JsonSerializer.SerializeToElement(text);
                     break;
+                case null:
+                    body[column] = JsonSerializer.SerializeToElement<string?>(null); // a clear (option (b): a blank name or number)
+                    break;
                 default:
                     throw new ArgumentException($"'{column}' cannot be set here: only text and the pair type are.", nameof(columns));
             }
@@ -1364,6 +1367,68 @@ internal static class OwnedChildWrite
             Lookups = lookups,
             ClearedColumns = kept.ClearedColumns,
         };
+    }
+
+    /// <summary>
+    /// Task 045d: the app-only paths' shape of the same helper — a copy of <paramref name="payload"/> (the playbook update's, the
+    /// output orchestrator's or the push's dictionary) with <paramref name="columns"/> set over its own, in the form the app-only
+    /// pair planner writes (<see cref="KeepRegardingPairWholeAppOnlyAsync"/>): every key the payload holds for one of the columns
+    /// (a column, or its <c>{nav}@odata.bind</c>) is replaced; the pair type is bound on the table's own navigation property;
+    /// text and null (a clear) are written as they are. The caller's dictionary is not changed. Pure: no read.
+    /// </summary>
+    /// <exception cref="ArgumentException">A lookup other than the pair type, or a value that is neither text nor a reference.</exception>
+    internal static Dictionary<string, object?> WithColumnsSet(
+        string table, Dictionary<string, object?> payload, IReadOnlyDictionary<string, object?> columns)
+    {
+        var written = new Dictionary<string, object?>(payload, payload.Comparer);
+        if (columns.Count == 0)
+            return written;
+
+        var drop = columns.Keys.Select(k => k.Trim().ToLowerInvariant()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in written.Keys.Where(k => drop.Contains(SecureRootInheritance.NormalizeColumn(k))).ToList())
+            written.Remove(key);
+        foreach (var (key, value) in columns)
+        {
+            var column = key.Trim().ToLowerInvariant();
+            switch (value)
+            {
+                case Microsoft.Xrm.Sdk.EntityReference type when IsPairType(column)
+                                                                && string.Equals(type.LogicalName, RecordTypeTable, StringComparison.OrdinalIgnoreCase):
+                    written[$"{RegardingRecordTypeNavigationPropertyOf(table)}@odata.bind"] = $"/{RecordTypeEntitySet}({type.Id:D})";
+                    break;
+                case string or null:
+                    written[column] = value;
+                    break;
+                default:
+                    throw new ArgumentException($"'{column}' cannot be set here: only text and the pair type are.", nameof(columns));
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    /// Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): the app-only update half on one path — the five resolver
+    /// fields of the core record an invoice-family row will name, derived app-only
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync"/>) and set over <paramref name="payload"/> for the
+    /// same write (<see cref="WithColumnsSet(string, Dictionary{string, object?}, IReadOnlyDictionary{string, object?})"/>).
+    /// The payload unchanged when nothing is derived; the guard's refusal (its code) when the derive cannot be done, which the
+    /// path answers through the refusal form it uses for <see cref="InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync"/>.
+    /// </summary>
+    internal static async Task<(Dictionary<string, object?> Payload, string? RefusalCode)> KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+        IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
+        ILogger? logger, CancellationToken ct, bool writeIsImpersonated = false)
+    {
+        var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync(table, recordId, payload, entities, ct, writeIsImpersonated)
+            .ConfigureAwait(false);
+        if (derived is null)
+            return (payload, null);
+        if (derived is not { IsRefused: false, ResolverFields: { } fields })
+            return (payload, derived.RefusalCode ?? InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+
+        logger?.LogInformation(
+            "[{Path}] the resolver fields of {Table} {RecordId} were derived from the core record it will name", path, table, recordId);
+        return (WithColumnsSet(table, payload, fields.ToGenericFields()), null);
     }
 
     /// <summary>One mapped item carrying <paramref name="item"/>'s writes and <paramref name="added"/>'s (which win).</summary>

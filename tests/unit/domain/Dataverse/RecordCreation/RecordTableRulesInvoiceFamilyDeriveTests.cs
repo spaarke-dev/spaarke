@@ -102,7 +102,7 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
     {
         var result = await Run("sprk_invoice", Binding(("sprk_matter", "sprk_matter")), NamedRecord(name: new string('n', 150)), CatalogNamingNumber());
 
-        ((string)result.AdditionalColumns["sprk_regardingrecordname"]).Should().HaveLength(100);
+        result.AdditionalColumns["sprk_regardingrecordname"].Should().BeOfType<string>().Which.Should().HaveLength(100);
     }
 
     // ── Fail closed: a derive that cannot complete all five refuses, through the existing mapping ──────────────────
@@ -155,17 +155,44 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
         result.AdditionalColumns.Should().BeEmpty();
     }
 
-    [Theory]
-    [InlineData(null, "N-1")]
-    [InlineData("  ", "N-1")]
-    [InlineData("Acme", null)]
-    [InlineData("Acme", "")]
-    public async Task ARecordWithABlankNameOrNumber_IsRefusedIncomplete_NeverAPartialSet(string? name, string? number)
-    {
-        var result = await Run("sprk_invoice", Binding(("sprk_matter", "sprk_matter")), NamedRecord(name, number), CatalogNamingNumber());
+    // ── Owner, 2026-11-12, option (b): the row takes what the record has ──────────────────────────────────────────
 
-        result.Refusal!.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
-        result.AdditionalColumns.Should().BeEmpty();
+    [Theory]
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_matter", null, "MAT-000001")] // a matter with no name
+    [InlineData("sprk_invoice", "sprk_matter", "sprk_matter", "  ", "MAT-000001")]
+    [InlineData("sprk_invoiceapproval", "sprk_regardingproject", "sprk_project", null, "PRJ-000001")] // a project with no name
+    [InlineData("sprk_externalidentifier", "sprk_regardinginvoice", "sprk_invoice", "Invoice 7", null)] // an invoice with no number
+    [InlineData("sprk_externalidentifier", "sprk_regardinginvoice", "sprk_invoice", "Invoice 7", "")]
+    public async Task ARecordWithABlankNameOrNumber_IsAdmitted_WithTheTypeIdAndUrl_AndTheBlankOneCleared(
+        string table, string column, string core, string? name, string? number)
+    {
+        var result = await Run(table, Binding((column, core)), NamedRecord(name, number), CatalogNamingNumber());
+
+        result.Refusal.Should().BeNull("a blank name or number is never resolver_fields_incomplete on the generic path");
+        result.AdditionalColumns.Should().HaveCount(5);
+        result.AdditionalColumns[CoreAncestorResolver.RegardingRecordTypeColumn].Should()
+            .BeEquivalentTo(new EntityReference("sprk_recordtype_ref", CatalogRow));
+        result.AdditionalColumns[CoreAncestorResolver.RegardingRecordIdColumn].Should().Be(Core.ToString("D").ToLowerInvariant());
+        result.AdditionalColumns["sprk_regardingrecordurl"].Should()
+            .Be($"/main.aspx?pagetype=entityrecord&etn={core}&id={Core.ToString("D").ToLowerInvariant()}");
+        result.AdditionalColumns["sprk_regardingrecordname"].Should().Be(string.IsNullOrWhiteSpace(name) ? null : name);
+        result.AdditionalColumns["sprk_regardingrecordnumber"].Should().Be(string.IsNullOrWhiteSpace(number) ? null : number);
+    }
+
+    [Fact]
+    public async Task TheSubmissionWritersDerive_StillRefusesABlankName_AllFiveOrNone()
+    {
+        // The strict overload the submission writers call is unchanged: a blank name is resolver_fields_incomplete there.
+        var decided = InvoiceFamilyCoreRecordGuard.Check("sprk_invoice",
+            c => c == "sprk_matter" ? new EntityReference("sprk_matter", Core) : null);
+        var records = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        records.Setup(r => r.RetrieveAsync("sprk_matter", Core, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", Core) { ["sprk_mattername"] = null, ["sprk_matternumber"] = "MAT-000001" });
+
+        var strict = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(decided, records.Object, CatalogNamingNumber());
+
+        strict.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
+        strict.ResolverFields.Should().BeNull();
     }
 
     [Fact]
@@ -216,7 +243,7 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
         {
             Lookups = [new DataverseWriteItemMapper.MappedLookup("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_recordtype_refs", forgedType)],
         };
-        var fields = new InvoiceFamilyResolverFields(CatalogRow, Core.ToString("D"), "Acme v Beta", "/main.aspx?x", "N-1").ToFields();
+        var fields = new InvoiceFamilyResolverFields(CatalogRow, Core.ToString("D"), "Acme v Beta", "/main.aspx?x", "N-1").ToGenericFields();
 
         var set = OwnedChildWrite.WithColumnsSet(table, item, fields);
 
@@ -240,6 +267,6 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
     {
         var item = Binding(("sprk_matter", "sprk_matter"));
 
-        OwnedChildWrite.WithColumnsSet("sprk_invoice", item, new Dictionary<string, object>()).Should().BeSameAs(item);
+        OwnedChildWrite.WithColumnsSet("sprk_invoice", item, new Dictionary<string, object?>()).Should().BeSameAs(item);
     }
 }
