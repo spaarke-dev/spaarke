@@ -7,6 +7,7 @@ import '@testing-library/jest-dom';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import {
   NOT_ALLOWED_BOTH,
+  NOT_ALLOWED_CHANGE,
   NOT_ALLOWED_CREATE,
   NOT_ALLOWED_REMOVE,
   allowedBlocker,
@@ -141,7 +142,9 @@ describe('B1 must-fire: no plan step can ever require a kind of call its choice 
   ];
 
   const ownExcl = (overrideRowId?: string) => mark('Excluded', { distance: 0, chainRecord: MATTER, reason: 'r', firm: FENWICK, overrideRowId });
-  const baseRules: RuleItem[] = [...matterRules.rules, ...projectRules.rules, ...waRules.rules];
+  const fixtureRules: RuleItem[] = [...matterRules.rules, ...projectRules.rules, ...waRules.rules];
+  // 084c: the fixtures' rule types are display words with no form; the same rows with a type that has a form make the Change plans real.
+  const baseRules: RuleItem[] = [...fixtureRules, ...fixtureRules.map(r => ({ ...r, ruleType: 'DailyHoursCap' }))];
   const ruleRows: RuleItem[] = baseRules.flatMap(r => [
     r,
     { ...r, marks: [...r.marks, ownExcl('own-x')] },
@@ -150,8 +153,17 @@ describe('B1 must-fire: no plan step can ever require a kind of call its choice 
     { ...r, marks: [...r.marks, mark('Excluded', { distance: 1, chainRecord: { ...PROJECT, distance: 1 } })] },
     { ...r, recordRule: false, marks: [mark('BaseRetired', {}), ownExcl('own-x')] },
   ]);
-  const ruleChoices: RuleChoice[] = ['parent', 'keep', 'exclude', 'changed'];
-  const ruleInputs: RuleInput[] = [{}, { reason: 'r' }, { reason: 'r', firmId: FENWICK.id }, { reason: 'other', firmId: '' }];
+  const ruleChoices: RuleChoice[] = ['parent', 'keep', 'exclude', 'change', 'changed'];
+  const BODY = '{"type":"DailyHoursCap","maxHoursPerDay":12}';
+  const ruleInputs: RuleInput[] = [
+    {},
+    { reason: 'r' },
+    { reason: 'r', firmId: FENWICK.id },
+    { reason: 'other', firmId: '' },
+    { reason: 'r', ruleBody: BODY },
+    { reason: 'r', firmId: FENWICK.id, ruleBody: BODY },
+    { ruleBody: BODY },
+  ];
 
   /** Every (row, choice, input) whose plan steps fall outside `needsOf`. */
   function violations(needsP: (p: ProcedureItem, c: ProcedureChoice) => ChoiceNeeds, needsR: (r: RuleItem, c: RuleChoice) => ChoiceNeeds): string[] {
@@ -166,27 +178,41 @@ describe('B1 must-fire: no plan step can ever require a kind of call its choice 
 
   it('over every fixture row and variant, every choice and every input, each plan is within what its choice needs', () => {
     expect(procedureRows.length).toBeGreaterThan(100);
-    expect(ruleRows.length).toBeGreaterThan(30);
+    expect(ruleRows.length).toBeGreaterThan(60);
     expect(violations(procedureChoiceNeeds, ruleChoiceNeeds)).toEqual([]);
   });
 
+  it('the Change choice really plans on these rows (the scan above is not vacuous): with its own Exclude it removes it first, and needs both rights', () => {
+    const plain = ruleRows.find(r => r.ruleType === 'DailyHoursCap' && r.marks.length === 0)!;
+    expect(planRule(plain, 'change', { reason: 'r', ruleBody: BODY }).steps.map(st => st.kind)).toEqual(['changeRule']);
+    expect(ruleChoiceNeeds(plain, 'change')).toEqual({ remove: false, create: false, change: true });
+    const excluded = { ...plain, marks: [ownExcl('own-x')] };
+    expect(planRule(excluded, 'change', { reason: 'r', ruleBody: BODY }).steps.map(st => st.kind)).toEqual(['remove', 'changeRule']);
+    expect(ruleChoiceNeeds(excluded, 'change')).toEqual({ remove: true, create: false, change: true });
+    // The count of rows whose Change plans something, so the scan is known to cover them.
+    expect(ruleRows.filter(r => planRule(r, 'change', { reason: 'r', ruleBody: BODY }).steps.length > 0).length).toBeGreaterThan(10);
+  });
+
   it('so, under any answers, a choice the answers allow never plans a call they do not allow', () => {
-    const combos: AllowedSteps[] = [
-      { remove: false, create: false },
-      { remove: true, create: false },
-      { remove: false, create: true },
-      { remove: true, create: true },
-    ];
+    const combos: AllowedSteps[] = [false, true].flatMap(change =>
+      [
+        { remove: false, create: false },
+        { remove: true, create: false },
+        { remove: false, create: true },
+        { remove: true, create: true },
+      ].map(c => ({ ...c, change }))
+    );
+    const allows = (kind: string, a: AllowedSteps) => (kind === 'remove' ? a.remove : kind === 'changeRule' ? a.change : a.create);
     for (const allowed of combos) {
       for (const p of procedureRows)
         for (const c of procedureChoices) {
           if (allowedBlocker(procedureChoiceNeeds(p, c), allowed) !== null) continue;
-          for (const i of procedureInputs) for (const s of planProcedure(p, c, i).steps) expect([c, s.kind, s.kind === 'remove' ? allowed.remove : allowed.create]).toEqual([c, s.kind, true]);
+          for (const i of procedureInputs) for (const s of planProcedure(p, c, i).steps) expect([c, s.kind, allows(s.kind, allowed)]).toEqual([c, s.kind, true]);
         }
       for (const r of ruleRows)
         for (const c of ruleChoices) {
           if (allowedBlocker(ruleChoiceNeeds(r, c), allowed) !== null) continue;
-          for (const i of ruleInputs) for (const s of planRule(r, c, i).steps) expect([c, s.kind, s.kind === 'remove' ? allowed.remove : allowed.create]).toEqual([c, s.kind, true]);
+          for (const i of ruleInputs) for (const s of planRule(r, c, i).steps) expect([c, s.kind, allows(s.kind, allowed)]).toEqual([c, s.kind, true]);
         }
     }
   });
@@ -196,13 +222,20 @@ describe('B1 must-fire: no plan step can ever require a kind of call its choice 
     expect(violations(procedureChoiceNeeds, (r, c) => ({ ...ruleChoiceNeeds(r, c), remove: false })).length).toBeGreaterThan(0);
     expect(violations((p, c) => ({ ...procedureChoiceNeeds(p, c), create: false }), ruleChoiceNeeds).length).toBeGreaterThan(0);
     expect(violations(procedureChoiceNeeds, (r, c) => ({ ...ruleChoiceNeeds(r, c), create: false })).length).toBeGreaterThan(0);
+    // 084c: and one that forgets the change right.
+    expect(violations(procedureChoiceNeeds, (r, c) => ({ ...ruleChoiceNeeds(r, c), change: false })).length).toBeGreaterThan(0);
   });
 
-  it('the reasons: both missing, removal missing, create missing, nothing missing', () => {
-    expect(allowedBlocker({ remove: true, create: true }, { remove: false, create: false })).toBe(NOT_ALLOWED_BOTH);
-    expect(allowedBlocker({ remove: true, create: true }, { remove: false, create: true })).toBe(NOT_ALLOWED_REMOVE);
-    expect(allowedBlocker({ remove: true, create: true }, { remove: true, create: false })).toBe(NOT_ALLOWED_CREATE);
-    expect(allowedBlocker({ remove: false, create: false }, { remove: false, create: false })).toBeNull();
+  it('the reasons: several missing, removal missing, create missing, change missing, nothing missing', () => {
+    const all = { remove: true, create: true, change: false };
+    expect(allowedBlocker(all, { remove: false, create: false, change: false })).toBe(NOT_ALLOWED_BOTH);
+    expect(allowedBlocker(all, { remove: false, create: true, change: false })).toBe(NOT_ALLOWED_REMOVE);
+    expect(allowedBlocker(all, { remove: true, create: false, change: false })).toBe(NOT_ALLOWED_CREATE);
+    expect(allowedBlocker({ remove: false, create: false, change: true }, { remove: true, create: true, change: false })).toBe(NOT_ALLOWED_CHANGE);
+    // A change over an own Exclude needs the removal as well: missing both is the "view only" words, missing one names it.
+    expect(allowedBlocker({ remove: true, create: false, change: true }, { remove: false, create: true, change: false })).toBe(NOT_ALLOWED_BOTH);
+    expect(allowedBlocker({ remove: true, create: false, change: true }, { remove: false, create: false, change: true })).toBe(NOT_ALLOWED_REMOVE);
+    expect(allowedBlocker({ remove: false, create: false, change: false }, { remove: false, create: false, change: false })).toBeNull();
   });
 });
 
@@ -250,7 +283,7 @@ describe('R1: read-only means the answers deny a call, not that the row has none
   });
 
   it('noAllowedCall: read-only only when some choice makes a call and none of those is allowed', () => {
-    const needs = (c: string): ChoiceNeeds => (c === 'none' ? { remove: false, create: false } : { remove: false, create: true });
+    const needs = (c: string): ChoiceNeeds => (c === 'none' ? { remove: false, create: false, change: false } : { remove: false, create: true, change: false });
     expect(noAllowedCall(['none'], needs, () => null)).toBe(false);
     expect(noAllowedCall(['none'], needs, () => 'blocked')).toBe(false);
     expect(noAllowedCall(['none', 'call'], needs, c => (c === 'call' ? 'blocked' : null))).toBe(true);

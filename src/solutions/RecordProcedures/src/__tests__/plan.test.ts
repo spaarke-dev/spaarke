@@ -163,7 +163,7 @@ describe('the calls a rule choice makes', () => {
 });
 
 describe('running a plan', () => {
-  const fail: WriteFailure = { status: 409, errorCode: 'assignment.duplicate', title: 'Conflict', detail: null, problems: [], signInFailed: false };
+  const fail: WriteFailure = { status: 409, errorCode: 'assignment.duplicate', title: 'Conflict', detail: null, problems: [], fieldErrors: [], signInFailed: false };
   const api = (over: Partial<OverridesApi>): OverridesApi =>
     ({
       assignProcedure: jest.fn(async () => ({ ok: true, value: {} })),

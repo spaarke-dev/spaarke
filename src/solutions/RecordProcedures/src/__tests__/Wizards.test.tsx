@@ -224,7 +224,7 @@ describe('the rule wizard', () => {
     const firmField = within(d).getByRole('combobox', { hidden: true });
     expect(firmField).toBeDisabled();
     expect(firmField).toHaveTextContent(FENWICK.name!);
-    expect(within(d).getByText(/can only be excluded for that firm \(O-20\)/)).toBeInTheDocument();
+    expect(within(d).getByText(/can only be excluded or changed for that firm \(O-20\)/)).toBeInTheDocument();
     typeReason(d, 'Rule is not relevant');
     await toConfirm(d);
     await finish(d, 'Exclude rule');
@@ -504,15 +504,16 @@ describe('a refusal keeps the wizard open and re-reads nothing', () => {
   });
 });
 
-describe('nothing in this task changes a rule or dry-runs a change', () => {
-  it('the rule wizard offers Run the published rule and Exclude here, and no Change choice, no New values step', async () => {
+describe('the Change choice belongs to the rule wizard, and nothing here dry-runs a change', () => {
+  it('a rule whose type this page has no form for lists Change for this record disabled with the reason, and no New values step', async () => {
     const { writeCalls } = renderHarness();
     const d = await openRule('r-block', 'BLOCK · Block billing');
     const steps = within(d).getAllByRole('listitem', { hidden: true }).map(li => li.textContent);
     expect(steps.join(' ')).not.toMatch(/New values/);
     await toChoices(d);
-    expect(within(d).getAllByRole('radio', { hidden: true }).map(r => r.closest('[data-testid]')?.getAttribute('data-testid'))).toEqual(['choice-keep', 'choice-exclude']);
-    expect(within(d).queryByText(/Change for this record/)).not.toBeInTheDocument();
+    expect(within(d).getAllByRole('radio', { hidden: true }).map(r => r.closest('[data-testid]')?.getAttribute('data-testid'))).toEqual(['choice-keep', 'choice-exclude', 'choice-change']);
+    expect(radio(d, /^Change for this record/)).toBeDisabled();
+    expect(within(d).getByTestId('choice-change')).toHaveTextContent(/no form for the rule type/);
     expect(within(d).queryByText(/dry.?run/i)).not.toBeInTheDocument();
     expect(writeCalls).toHaveLength(0);
   });
@@ -532,10 +533,10 @@ describe('nothing in this task changes a rule or dry-runs a change', () => {
     }
   });
 
-  it('the page sources have no route of the change flow and no dry-run read (control: the scan sees one)', () => {
+  it('the page sources have no dry-run read (control: the scan sees one), and the Procedure wizard has no change call at all', () => {
     const root = path.join(__dirname, '..');
     const files = ['services/overridesApi.ts', 'components/wizards/plan.ts', 'components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx'];
-    const forbidden = /rule-overrides\/change|\bdry[-_ ]?run\b|changeRule|ChangeRule/i;
+    const forbidden = /\bdry[-_ ]?run\b/i;
     // Comments may say what the page does not do; the scan reads code only.
     const code = (f: string) =>
       fs
@@ -543,8 +544,10 @@ describe('nothing in this task changes a rule or dry-runs a change', () => {
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/^\s*\/\/.*$/gm, '');
     for (const f of files) expect([f, forbidden.test(code(f))]).toEqual([f, false]);
-    expect(forbidden.test('/rule-overrides/change')).toBe(true);
     expect(forbidden.test('const dryRun = true')).toBe(true);
+    // The change route is called from the one api module, and only the rule wizard's plan reaches it.
+    expect(/changeRule|rule-overrides\/change/.test(code('components/wizards/ProcedureWizard.tsx'))).toBe(false);
+    expect(/rule-overrides\/change/.test(code('services/overridesApi.ts')) || /changeRuleUrl/.test(code('services/overridesApi.ts'))).toBe(true);
   });
 
   it('the only writes in the page are in overridesApi.ts, and they are the routes of the task (control: the scan sees one)', () => {
@@ -644,7 +647,9 @@ describe('theme', () => {
   it('the wizard files carry no colour literal (control: the scan sees one)', () => {
     const colour = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/;
     const root = path.join(__dirname, '..');
-    for (const f of ['components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx', 'components/rowOpen.ts']) {
+    const forms = fs.readdirSync(path.join(root, 'components/wizards/ruleForms')).map(f => `components/wizards/ruleForms/${f}`);
+    expect(forms.length).toBeGreaterThan(14);
+    for (const f of ['components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx', 'components/rowOpen.ts', ...forms]) {
       expect([f, colour.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false]);
     }
     expect(colour.test('color: #fff;')).toBe(true);
