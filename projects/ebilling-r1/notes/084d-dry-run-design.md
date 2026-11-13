@@ -213,3 +213,219 @@ No Signals diff. Keep the chunk rule (§1). Drop the `ReadRowsAsync`-parameter f
   - K2: Now and After are not read atomically (R10).
   - K3: clock skew does not matter.
 - Send ontology-r1 the diff before merge.
+
+## 084d-5 design (draft for uac-r2 and ontology-r1)
+
+Status: DESIGN, nothing built. This came from a read-only look at `work/ebilling-r1` at `cd869e3050` on 2026-11-13. It covers what 084d-4 stopped on (its K-1): no route lists the Procedures a billing admin could assign to a record. Neither POML escalation fires: there is no Signals diff, and the route asks at least what the assign write asks.
+
+### 1. The set
+
+**Principle.** The query narrows only by what 089's write itself refuses. Everything else is decided by the real `ProcedureResolver`, through the 084d overlay. No applicability, firm, version or ranking predicate is copied into the list (§4).
+
+**How it is computed** (one request, per record, firm and date):
+1. **Now.** `ReadAsync` and `BuildProcedures`, exactly as `ListProceduresAsync` does it, for the lists' firm and date. Every Procedure in that view, of any status (InForce, Excluded, Gap, NotYetInForce), is **on the record**.
+2. **Candidates.** Procedures with `sprk_status` = Active and `statecode` 0, optionally narrowed by name (`q`), and minus the ones on the record. Q1 asks about narrowing further by firm and area.
+3. **Own rows.** These are the candidates that this record already has an assignment row for, of any state. It is `HasRowAsync`'s own predicate (the record lookup and the subject, no `statecode` filter), so a row the resolver ignores (inactive) still counts. They go to `notOffered` with reason `OwnRow`, because the write would answer 409 `assignment.duplicate`.
+4. **Images.** Each remaining candidate gets the write's own Follow-latest row image: id `AssignmentIdFor(core, record, procedure, P)`, built by the existing row builder in image mode. All the images go into ONE `ProcedureOverridePlan`.
+5. **After.** `ReadAsync` over `ProcedureRowOverlay(plan)` and `BuildProcedures`, as `DryRunAsync` does it, with `proposedRowIds` set to the images (ontology-r1 F3).
+6. **Offered.** The After items whose id is not in Now. Each one carries what the resolver says it would be if assigned: `InForce`, `Gap` or `NotYetInForce`. That is the prototype's "CATALOG minus before.procedures", but decided by the resolver.
+
+**What this gives, point by point:**
+- **Status.** A Retired Procedure is never queried (the write refuses it: 409 `assignment.procedure_retired`). The resolver also drops non-Active ones.
+- **Published version only.** A Draft-only Procedure, or one whose Drafts were only ever retired, never enters the After output, through the resolver's `NotApplicableOn` and `OpenedAWindow` (D-203, DEF-061). So it is not offered. The write would accept it (Q5).
+- **AppliesTo.**
+  - AssignedRecordsOnly: offered unless already on the record. This is the main case Assign exists for.
+  - AllRecords, and Firm for the list's firm: already a source, so already on the record. Not offered; the Procedure wizard already offers Follow and Pin on its row.
+  - An unknown AppliesTo makes the resolver fault (`ProcedureResolver.cs:1068`), which gives 503 for the list (K5).
+- **Firm scope.** `firmId` works as on the lists: the query firm, else the record's `sprk_billingfirm`, else none (`NoFirm`). The resolver's O-20 firm condition (`FirmConditionHolds`) then keeps only Procedures with no firm or the list's firm. This matches the prototype's `!p.firm || p.firm === firm`. Another firm's Procedure is assigned after switching the panel's firm, so that Impact and the lists after the save show it (Q6).
+- **Already on the record.** Not offered and not returned. The client already holds that list for the same firm and date, and it shows "already applies here", "applies from a parent" or "excluded here" with each row's own wizard. The only flagged entries are those whose refusal the client cannot see:
+  - `notOffered: [{ id, name, reason: "OwnRow" }]`.
+- **What the write refuses, and whether the list knows** (`PlanAssignmentRowAsync`, `ProcedureAssignmentService.cs:369-437`):
+
+| Write refusal | Known at list time? | List |
+|---|---|---|
+| 404 `procedure_not_found` | yes | only rows that exist are listed |
+| 409 `procedure_retired` | yes | Active only |
+| 409 `duplicate` (any row on this record) | yes | `notOffered` `OwnRow` |
+| 400 pin version not Active/Superseded of P | yes, per version | Pin versions come from 081 (§5); the client already filters them (084b fix 1 item 4) |
+| 400 reason over 2000 characters | input | the client caps it |
+| 403 no Read on P (route filter) | yes | the batched check gives 503, never a partial list (§3, Q2) |
+| 409 owner refusal (`CreateRowAsync`) | no | the dry-run disclosure note (R5) applies to Impact |
+| 503 `read_failed`, 500 `write_failed` | no | the write decides |
+
+**Gap if assigned.** A candidate with a hole on the date is offered as `Gap`, with the After view's gap text. Assigning it holds invoices checked from then on (O-22), so the wizard warns at Choose and Impact shows it (Q7).
+
+### 2. Route
+
+`GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures/assignable?firmId=&date=&q=`
+- Three literal routes in `RecordProcedureEndpoints.cs`, beside each core's `procedures`, `rules-in-force` and `dry-run`. The table is fixed by the route.
+- `firmId` and `date` parse as the lists parse them (`TryParseQuery`).
+- `q` is trimmed, 1-100 characters, a case-insensitive name contains, with Like wildcards (`%`, `_`, `[`) escaped. It is narrowing only. Anything else is 400 `procedures.invalid_query`.
+
+**Response, `RecordAssignableProceduresView`:**
+```
+{ record, date, firm, firmSource,                   // as RecordProceduresView
+  q, bound: 50, tooMany: bool,
+  procedures: AssignableProcedureItem[] | null,      // null exactly when tooMany
+  notOffered: [{ id, name, reason: "OwnRow" }],
+  label: "If assigned now" }
+AssignableProcedureItem = { id, name, type, appliesTo, firm,
+  statusIfAssigned: InForce | Gap | NotYetInForce,
+  versionInForce: { id, number, status, from, to } | null,   // the After item's, for the date
+  gap: { kind, text } | null }
+```
+
+- **The item is a projection** of the After `ProcedureListItem`: fields are copied, never recomputed. `sources`, `level`, `overrides` and `pinned` are left out, because they describe the synthetic row.
+- **Pin versions are not in this answer.** The Pin step reads them from 081's `GET /api/finance/procedures/{id}`, as the Procedure wizard does (084b decision 3). That keeps one source for the version list and its own Read check, and this answer exposes fewer rows.
+- **The bound.** The candidate query is `TopCount = bound + 1`. If more than `bound` rows come back:
+  - `tooMany: true` and `procedures: null`, and NO After read is made;
+  - `notOffered` is empty;
+  - the client asks the user to type a name (`q`).
+  - It is never a partial list.
+  - 50 is proposed because each candidate brings its rules into the After read and its versions into the rights check (K1, Q4).
+
+**Statuses.**
+- 200.
+- 400 `procedures.invalid_query`.
+- 401: a caller id that is not a GUID.
+- 403 `sdap.access.deny.*`: no billing-admin privilege.
+- 404: step 0, or the uniform record 404.
+- 503 `ebilling.disabled`.
+- 503 `procedures.unavailable`.
+- Nothing is written.
+
+### 3. Access (EB-D-218, EB-D-220, EB-D-221, uac-r2 C5)
+
+**Filters, in order** (the dry run's order, minus its body steps):
+1. Step 0 on the group: `RequireInternalFinanceCaller` on the stored external flag, as on 084's routes.
+2. `DryRunRecordTargets`, reused as is: `finance.read` then `RecordWriteCheck`, in ONE filter with `FinanceDenial.UniformNotFound`. An unknown record, an unreadable one and one the caller may not write all get one byte-identical 404 (NFR-01), before any 403.
+3. `AssignableTargets` (403): `AssignOrExcludePrivileges()`, the assign write's privileges. The per-subject Read is the EB-D-218 check below.
+4. `RequireEbillingEnabled`.
+5. 401 for a non-GUID `oid`, then the query (400), then the service.
+
+**Recommendation: yes, the caller also needs the assign write's authorization.** It is `RecordWriteCheck` plus `Admin()`, the same checks as the `assignOrExclude` flag (`WritePermissionChecks(AssignOrExclude)`) with `finance.read` in front.
+- *Reason:* the list exists only to feed that write. Under uac-r2 C5, a list of what to write never reveals what the caller could not write (the dry run's rule).
+- The entry point is already hidden when the flag is false (§5), so a legitimate caller never meets the 403.
+- *Rejected:* `finance.read` alone. It would show a non-admin the tenant's Procedure catalog, a wider read than any existing route gives them.
+
+**The one batched check.**
+- Rows are read app-only.
+- `SyntheticRowsAsync` runs first, app-only on the real service (uac-r2 condition 1). A fault is 503 with nothing exempted. A colliding real id is asked (condition 2).
+- Then ONE `CallerCanReadAllAsync` over Now.Exposed ∪ After.Exposed ∪, for each `OwnRow` entry, the Procedure and the own row. The own row decides the refusal, so it is asked.
+- Through `BuildProcedure`'s `ExposeVersionsOf`, every version of each offered Procedure is asked (084 F-B), because `versionInForce` and `Gap` derive from the whole set.
+- Firms are lookup-origin (084 F-D). A `firmId` in the query is asked.
+- Any refusal, unanswered row or fault is 503 `procedures.unavailable`, never a partial list.
+- So the assignable read gives 503 whenever the record's Procedures list would. That is deliberate: "not offered because on the record" is derived from Now's rows.
+
+**Ledger.** `RecordProcedureEndpoints.cs` is already a `GovernedFile` (RouteLevelGate). Its reason text gains the three GETs, and the count stays at 153.
+
+### 4. Reuse (§11)
+
+| New member | Existing | Extension / why not | Cost of doing nothing |
+|---|---|---|---|
+| 3 GET routes in `RecordProcedureEndpoints.cs` | `/procedures` lists only what applies; 081 reads one Procedure by id; `ProcedureEndpoints.cs` has no list | Added to the existing file and ledger entry. A catalog inside `/procedures` would change that list's meaning, add cost to every panel load, and widen its all-or-nothing check | A billing admin cannot assign an AssignedRecordsOnly Procedure from any UI (EB-D-217 B4) |
+| `RecordProcedureReadService.ListAssignableAsync` | `ListProceduresAsync`, `DryRunAsync` | A composition of `ReadAsync`, `BuildProcedures`, `ProcedureRowOverlay`, `SyntheticRowsAsync` and `CallerCanReadAllAsync`, in the existing class. No new type | The route would need its own selection, which drifts from the resolver |
+| `ProcedureAssignmentService.PlanAssignCatalogAsync(reads, core, record, excludeIds, q, bound)` | `PlanAssignProcedureAsync`, one Procedure, two reads | Per-candidate planning would be 2 × 50 sequential reads. The batch shares the write's checks through two extractions (next rows), on the `WriteRefusingEntityService` | Per-candidate latency, or a list that re-derives refusals |
+| `OwnRowQuery(core, record, subjectColumn, ids)`, extracted from `HasRowAsync` | `HasRowAsync` | `HasRowAsync` calls it with one id. One builder, one predicate | The list's `OwnRow` drifts from the 409 |
+| `AssignRefusalOf(procedureRow, hasOwnRow)`, pure, extracted from `PlanAssignmentRowAsync:400-431` | the inline checks | Both the write and the batch call it | Same |
+| DTOs `RecordAssignableProceduresView`, `AssignableProcedureItem`, `NotOfferedProcedureView` | `RecordProceduresView`, `ProcedureListItem` | A projection: the full item would publish the synthetic row's id and sources | The wizard has no shape to read |
+
+**Exact selection reused** (ontology-r1 condition style):
+- applicability, the firm condition, Active and Billing: `ProcedureResolver.Applicability` (`:509-566`), through `ReadRowsAsync`;
+- published window: `NotApplicableOn` and `ProcedureVersionRow.OpenedAWindow`, through the future probe in `BuildProcedures` (`RecordProcedureReadService.cs:984`);
+- version in force and gaps: `RulesOn`;
+- duplicate: `OwnRowQuery`, shared with `HasRowAsync`;
+- retired and missing: `AssignRefusalOf`, shared with `PlanAssignmentRowAsync`.
+
+The overlay is 084d-1's, unchanged, so it keeps ontology-r1's F1-F4. Many assignment images in one plan is its K1 case (the assignment table with no primary-key condition): the resolver's own re-checks decide. The only pre-filter is Active plus `q`, and the resolver decides the rest. No ranking code is touched.
+
+**Publish size.** No package. Measure the delta against a fresh master build (BFF hygiene item 4).
+
+### 5. Client
+
+- **Entry point.** A button "Assign Procedure" in the Procedures list header. It is rendered only when `allowedSteps(procedures.permissions, rules.permissions).create` is true, so both answers must say `assignOrExclude`. Otherwise it is absent, not disabled. The panel decides; nothing under `components/wizards/**` reads permissions, so 084g's source scan still holds.
+- **`AssignProcedureWizard.tsx`** on `WizardFrame` (084b), with `resetKey "assign"` and no nav:
+  1. **Procedure (Choose).** Calls `readAssignable` in `recordProceduresApi.ts` (a read, so the "writes only in `overridesApi.ts`" scan holds) with the lists' own query (`queryOf`: the firm only when its source is `Query`, and the date).
+     - Each offered item shows its name, type, appliesTo, firm and if-assigned status and version, with the gap text for `Gap`.
+     - `notOffered` items are shown disabled: "This record already has an override for it."
+     - When `tooMany`, the step shows a search box and no list. `q` is re-asked with a debounce, through the same `raceTimeout` and `AbortController` as 084d-4.
+     - A 503 shows the panel's "unavailable" words and no list.
+  2. **On this record.** Follow latest, or Pin a version.
+     - The Pin versions come from 081's `getProcedure` in `overridesApi.ts`, which already exists, filtered to Active and Superseded by the existing pinnable rule.
+     - A pin needs a version and a reason (at most 2000 characters).
+  3. **Impact.** The 084d-4 `ImpactStep` as it is. `plan.ts` already maps `{ kind: 'assign' }` to the dry run's `Assign` request (084d-4 mapping table), and a plan with no removal never asks the removal-preview fallback.
+  4. **Confirm.** The existing `executePlan` makes one call, POST `.../procedure-assignments` (089). It is exactly `{ procedureId, mode, pinnedVersionId?, reason? }`.
+- **After a save.** A refusal (409 duplicate, 403, owner) shows its title and the wizard stays open (084b). Success triggers the panel's silent re-read of both lists.
+- No new package. Semantic tokens only.
+
+### 6. Tests (KEEP path `tests/integration/contract/Api/Finance/`, R3)
+
+- **Contract, `RecordAssignableProceduresContractTests`.** The rig seeds Procedures across:
+  - AppliesTo (AllRecords, Firm F, Firm G, AssignedRecordsOnly);
+  - firm (none, F, G);
+  - Area (Billing, other);
+  - status (Active, Retired);
+  - versions (none, Draft-only, Active, Superseded plus Active, future-dated, a hole);
+  - own row (none, active, inactive);
+  - parent row (none, Follow d1, Exclude d1).
+
+  Assertions:
+  - the exact offered set, statuses and `notOffered`, on 3 cores × 2 firms;
+  - each 400 (`firmId`, `date`, `q` empty or over 100);
+  - 401;
+  - 403 without `Admin()`, with no read made;
+  - 404 byte-identical for an unknown record, an unreadable one, an unwritable one and every step-0 kind;
+  - 503 disabled;
+  - the bound: exactly 50 gives a list; 51 gives null and `tooMany`, with no After read; `q` brings it back under the bound;
+  - an unknown AppliesTo gives 503;
+  - no write: a strict world, `WriteRefusingEntityService` on planning, and the overlay. Extend `DryRunNoWriteGuardTests` if a new type appears.
+- **Access.**
+  - `EveryAskedRow_DeniedAlone_Is503_WithNoList`, with the nothing-denied 200 as the must-not-fire control;
+  - `Every200Guid_WasAskedOfTheCaller`, where `AlsoAsked` holds the Now rows that decide absence;
+  - by-id synthetic load faults gives 503 and `Exempt` is never called;
+  - a colliding id is asked;
+  - declaration guard: `AssignableChecks` equals `DryRunRecordChecks` followed by `AssignOrExcludePrivileges()`, with must-fire controls (a check added or dropped on either side);
+  - behaviour guard through the real filter chain on 3 cores.
+- **Ledger.** `RouteAuthorizationGuardTests` stays green at 153, with the governed-file text updated.
+- **Parity, in `RecordProcedureWriteRig`, on 3 cores.** For EVERY seeded Procedure P, assign P Follow-latest through the REAL writer service, then read `/procedures`:
+  - offered ⇔ (the write gives `Done` AND the post-write list newly holds P);
+  - `statusIfAssigned` and `versionInForce` equal the post-write item's;
+  - a write refusal ⇒ P is not offered (and is `OwnRow` when the refusal is 409 `duplicate`);
+  - not offered with the write `Done` ⇒ the post-write list is unchanged for P (Draft-only, other area, other firm, or already on the record).
+
+  For each offered P and each version 081 offers, Pin is `Done`. Mutation seeds:
+  - drop the `OwnRow` step;
+  - the query includes Retired;
+  - offered taken from the candidates instead of After − Now;
+  - no `ExposeVersionsOf`.
+- **Jest.**
+  - The entry is absent or present by `create` from both answers.
+  - Choose lists offered items, disables `OwnRow` with its reason, and shows the search with no list on `tooMany`.
+  - A 503 shows no list.
+  - Follow, and Pin (version and reason required), each plan one `assign` step.
+  - The Impact body is `Assign`.
+  - Finish posts once, with the exact body. A 409 is shown and the wizard stays open.
+  - Timeout and abort.
+  - Source scans keep their must-fire controls.
+  - Dark mode: no colour literals.
+
+### 7. Risks and known limits
+
+- **K1 cost.** The After read pulls every candidate's rule sets, policies and policy versions (`ReadRowsAsync`), and the rights check asks one question per row (Procedure plus versions, 4 at a time). Hence the bound of 50. Measure at 112; above about 2 s is F3.
+- **K2.** Now and After are separate reads (dry-run R10). The list can be stale by Confirm, and the write decides (409).
+- **K3.** No owner prediction (R5): a 409 owner refusal can still come at Confirm.
+- **K4. Absent without a reason.** Draft-only, other-area and other-firm Procedures are absent with no reason given. The fixes are: publish a version (081), or switch the panel's firm.
+- **K5.** One corrupt candidate (an unknown AppliesTo) gives 503 for the whole assignable list, failing closed as the resolver does. `q` can narrow around it. The Procedure's admin route fixes it.
+- **K6.** One candidate Procedure or version the caller cannot Read gives 503 (EB-D-218). Billing admins read Procedures at Deep from the top unit (084f, 089e), so this needs a Procedure owned outside that subtree (Q2).
+- **R1.** 089's write accepts Procedures that can never apply here: other area, or Draft-only, which may be legitimate ahead of publication. The list hides them. Filed as Q5, not changed here.
+- **R2.** A pre-filter that drops more than the resolver would can only under-offer. The parity test's other-firm, other-area and AppliesTo seeds catch it.
+
+### 8. Open questions
+
+- **Q1 (ontology-r1).** May the candidate query also narrow by the O-20 firm condition (Firm empty or the list's firm) and Area = Billing, so other firms' rate cards do not fill the bound? The resolver still re-checks both, and R2's parity seeds fail if the narrowing ever drops a Procedure the resolver would apply. *Recommend yes,* citing `FirmConditionHolds` and the resolver's area re-check in a comment.
+- **Q2 (uac-r2).** A candidate the caller cannot Read: 503 (the design default, EB-D-218), or drop it, since the write's 403 makes it knowable at list time and a dropped choice reveals nothing? *Recommend 503 for R1,* and revisit with task 191.
+- **Q3 (uac-r2).** Confirm §3: the list requires the assign write's own record and privilege checks, not `finance.read` alone. *Recommend yes.*
+- **Q4 (owner).** A bound of 50 with name search, versus a larger bound or paging. *Recommend 50 + `q`.* Paging would make a partial list the norm.
+- **Q5 (owner).** Should 089's assign refuse a Procedure of another area (O-24: document-only in R1)? *Recommend yes,* as a separate small 089 fix with its own test. Keep accepting Draft-only, since assigning ahead of publication is harmless.
+- **Q6 (owner).** Offer only the list firm's Procedures (prototype, and this design), or every firm's, for records billed by two firms? *Recommend the list firm.* After and the lists then show the result, and the panel's firm picker reaches the others.
+- **Q7 (owner).** Offer a Procedure that would be a Gap on the date, with a warning, or hide it? *Recommend offering it with the warning.* The hold is O-22's intended effect, and hiding it would be silent.
