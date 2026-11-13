@@ -34,8 +34,9 @@ public static class DecisionCommitEndpoints
             .WithDescription("200 with the record id, the steps and the Signals closed (a repeated review id returns its first "
                 + "outcome). 403 when the caller is unresolved or lacks a right an action needs; 404 when a Signal or its core "
                 + "record is not readable; 409 when a Signal is no longer open or the review is in progress; 422 when the review "
-                + "is invalid; 500 when a step failed (no record; the writes that landed are listed); 503 when the route cannot "
-                + "check the review id.")
+                + "is invalid; 500 when a step failed (no record; the writes that landed are listed); 409 with the same body when "
+                + "that stored failure is returned again (a repeat, a retry that cannot resume, or one that needs the send choice: "
+                + "sendChoiceRequired, answered by sendChoice on the same POST); 503 when the route cannot check the review id.")
             .Accepts<DecisionReview>("application/json")
             .Produces<DecisionCommitResult>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -74,11 +75,13 @@ public static class DecisionCommitEndpoints
         {
             DecisionCommitStatus.Forbidden => StatusCodes.Status403Forbidden,
             DecisionCommitStatus.Conflict or DecisionCommitStatus.InProgress => StatusCodes.Status409Conflict,
+            // Task 191: a stored failure returned again is a known state, not a server fault. Its body is the first failure's.
+            DecisionCommitStatus.Failed when result.Replayed => StatusCodes.Status409Conflict,
             DecisionCommitStatus.Refused => StatusCodes.Status422UnprocessableEntity,
             DecisionCommitStatus.Unavailable => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError,
         };
-        var title = status switch
+        var title = result.Status == DecisionCommitStatus.Failed ? "The decision was not recorded" : status switch
         {
             StatusCodes.Status403Forbidden => "Forbidden",
             StatusCodes.Status409Conflict => "Conflict",
@@ -110,6 +113,7 @@ public static class DecisionCommitEndpoints
                 extensions["recordMayExist"] = result.RecordMayExist;
                 extensions["sentButNotRecorded"] = result.SentButNotRecorded;
                 extensions["resumable"] = result.Resumable;
+                extensions["sendChoiceRequired"] = result.SendChoiceRequired;
                 extensions["replayed"] = result.Replayed;
             }
         }

@@ -1527,6 +1527,28 @@ public class DecisionActionExecutorsTests
         var sendFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendFailed, sr));
         sendFailed.Status.Should().Be(DecisionActionStatus.Failed);
         sendFailed.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) }, "the row exists; the email did not go");
+        sendFailed.SendFailure.Should().Be(DecisionSendFailure.NotSent, "task 191: SendFailed means definitely not sent");
+
+        var unknown = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendOutcomeUnknown, sr));
+        unknown.Status.Should().Be(DecisionActionStatus.Failed);
+        unknown.SendFailure.Should().Be(DecisionSendFailure.Unknown, "task 191: the email may have gone out");
+        unknown.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) });
+        unknown.Detail.Should().Contain("may have been sent");
+
+        sent.SendFailure.Should().BeNull();
+        createFailed.SendFailure.Should().BeNull("nothing landed, so there is no send to classify");
+    }
+
+    [Fact]
+    public void InquiryAdapter_ALandedServiceRequest_IsReadOnlyFromTheRoutesLandedRefs_Task191()
+    {
+        var sr = Guid.NewGuid();
+        var plain = Request(new() { ["to"] = "a@x.example", ["subject"] = "s", ["body"] = "b" });
+
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain).Should().BeNull("a first attempt creates the service request");
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain with { Landed = [new("sprk_servicerequest", sr)] }).Should().Be(sr);
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain with { Landed = [new("sprk_communication", sr)] }).Should().BeNull();
+        BudgetInquiryActionExecutor.LandedServiceRequest(plain with { Landed = [new("sprk_servicerequest", Guid.Empty)] }).Should().BeNull();
     }
 
     [Fact]
@@ -1563,6 +1585,7 @@ public class DecisionActionExecutorsTests
     [InlineData(BudgetInquiryOutcome.Invalid, DecisionActionReasons.InvalidParameter)]
     [InlineData(BudgetInquiryOutcome.CreateFailed, DecisionActionReasons.WriteFailed)]
     [InlineData(BudgetInquiryOutcome.SendFailed, DecisionActionReasons.WriteFailed)]
+    [InlineData(BudgetInquiryOutcome.SendOutcomeUnknown, DecisionActionReasons.WriteFailed)]
     public void InquiryAdapter_NeverPassesTheRawErrorText_ToTheCaller_OnlyAFixedMessageAndTheCode_UacK4(BudgetInquiryOutcome outcome, string reason)
     {
         const string raw = "0x80040220 SecLib::AccessCheckEx failed. Returned hr = -2147187962, ObjectID: 1a2b..., OwnerId: 3c4d...";

@@ -61,6 +61,19 @@ public sealed record DecisionReview
 
     /// <summary>Resume a review whose first attempt FAILED before its record: the steps that landed are not run again.</summary>
     public bool Retry { get; init; }
+
+    /// <summary>
+    /// Ontology task 191 (D-223): the person's choice for a resumed review whose budget inquiry email MAY have been sent
+    /// (<see cref="DecisionCommitResult.SendChoiceRequired"/>): <see cref="SendAgain"/> or <see cref="RecordWithoutSending"/>. Sent
+    /// only with <see cref="Retry"/>; refused anywhere else. Like <see cref="Retry"/>, it is not part of the review's content hash.
+    /// </summary>
+    public string? SendChoice { get; init; }
+
+    /// <summary>D-223: send the inquiry email once more (it may then arrive twice), reusing the landed service request.</summary>
+    public const string SendAgain = "send-again";
+
+    /// <summary>D-223: send nothing; the Decision Record lists the inquiry step as not sent, by the person's choice.</summary>
+    public const string RecordWithoutSending = "record-without-sending";
 }
 
 /// <summary>One offered action: taken or skipped, with the wizard's values (keyed by the catalog's parameter codes).</summary>
@@ -127,7 +140,8 @@ public sealed record DecisionCommitRef(string Entity, Guid Id);
 /// <param name="Key">Stable within the review (<c>action:revise-budget</c>, <c>next-step:add-todo#0</c>), used to resume.</param>
 /// <param name="Code">The catalog code.</param>
 /// <param name="Phase">D-17 step: 2 Dataverse writes of taken actions, 3 Next-step creators, 4 messages (the inquiry last).</param>
-/// <param name="Status">Done, Refused or Failed (<see cref="DecisionActionStatus"/>).</param>
+/// <param name="Status">Done, Refused or Failed (<see cref="DecisionActionStatus"/>), or NotSentByChoice for a budget inquiry the
+/// person chose to record without sending (D-223, <see cref="DecisionCommitService.NotSentByChoiceStatus"/>).</param>
 public sealed record DecisionCommitStep(
     string Key,
     string Code,
@@ -187,6 +201,10 @@ public sealed record DecisionCommitResult
     /// <summary>A failed first attempt that <see cref="DecisionReview.Retry"/> may resume.</summary>
     public bool Resumable { get; init; }
 
+    /// <summary>Ontology task 191 (D-223): a resumable failure whose budget inquiry email MAY have been sent. It resumes only with
+    /// the person's <see cref="DecisionReview.SendChoice"/>; a retry without one is refused (409) and sends and writes nothing.</summary>
+    public bool SendChoiceRequired { get; init; }
+
     public IReadOnlyList<string> Warnings { get; init; } = [];
 
     /// <summary>True when this is the stored first outcome of a repeated review id.</summary>
@@ -225,6 +243,10 @@ public static class DecisionCommitReasons
     public const string IdempotencyUnavailable = "ontology.decision.idempotency_unavailable";
     public const string ReviewChanged = "ontology.decision.review_changed";
     public const string NotResumable = "ontology.decision.not_resumable";
+
+    /// <summary>Ontology task 191 (D-223): the review's inquiry email may have been sent, and the retry named no
+    /// <see cref="DecisionReview.SendChoice"/> (409; nothing sent or written).</summary>
+    public const string SendChoiceRequired = "ontology.decision.send_choice_required";
     public const string NotAuthorized = "ontology.decision.not_authorized";
     public const string CoreChanged = "ontology.decision.core_changed";
 
@@ -635,6 +657,10 @@ public sealed class DecisionCommitService
             && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMine)
             return notMine;
 
+        // D-223 (task 191): a send choice is one of the two the item offers; anything else is a malformed review (no I/O, nothing done).
+        if (review.SendChoice is { } choice && choice is not (DecisionReview.SendAgain or DecisionReview.RecordWithoutSending))
+            return Refused(review.ReviewId, DecisionCommitReasons.ReviewInvalid, "The send choice is not one this item offers; nothing was done.");
+
         DecisionCommitResult? resume = null;
         if (prior is { InProgress: true })
             return InProgress(review.ReviewId);
@@ -655,10 +681,28 @@ public sealed class DecisionCommitService
                 return first with { Replayed = true };
             if (!first.Resumable)
                 return first with { Replayed = true, ReasonCode = DecisionCommitReasons.NotResumable };
+            // D-223 (task 191): the inquiry email may have been sent, so only the person's choice resumes this review. Without one
+            // the stored failure is returned as it is (409, see the endpoint), naming the choice: nothing is sent or written.
+            if (first.SendChoiceRequired && review.SendChoice is null)
+            {
+                return first with
+                {
+                    Replayed = true,
+                    ReasonCode = DecisionCommitReasons.SendChoiceRequired,
+                    Detail = "The inquiry email may have been sent. Check Sent Items, then choose Send again or Record without sending. Nothing was done.",
+                };
+            }
+
+            if (!first.SendChoiceRequired && review.SendChoice is not null)
+                return Refused(review.ReviewId, DecisionCommitReasons.ReviewInvalid, "This decision does not need a send choice; nothing was done.");
             if (mineNeeded && await ConfirmDoLaneMineAsync(review.ReviewId, ids, lanes, ct).ConfigureAwait(false) is { } notMineOnResume)
                 return notMineOnResume;
             resume = first;
         }
+
+        // D-223: a send choice only finishes an earlier attempt that asked for one.
+        if (resume is null && review.SendChoice is not null)
+            return Refused(review.ReviewId, DecisionCommitReasons.ReviewInvalid, "A send choice only finishes an earlier attempt; nothing was done.");
 
         // The review started when the SERVER last served this caller the plan (K4: never a client-sent time); a resume keeps
         // the first attempt's start, but never earlier than the plan-read window (K3); no stamp means it started now (any earlier
@@ -1021,16 +1065,27 @@ public sealed class DecisionCommitService
             return Unavailable(reviewId, DecisionCommitReasons.RecordRefused, "The deciding user could not be identified right now; nothing was done. Try again shortly.");
 
         // ---- (1d) Every executor's preflight, as the caller. A resumed review skips the steps that already landed. ------
-        var done = (resume?.Steps ?? []).Where(s => s.Status == nameof(DecisionActionStatus.Done)).ToDictionary(s => s.Key, StringComparer.Ordinal);
+        var done = (resume?.Steps ?? [])
+            .Where(s => s.Status is nameof(DecisionActionStatus.Done) or NotSentByChoiceStatus)
+            .ToDictionary(s => s.Key, StringComparer.Ordinal);
+
+        // D-223 (task 191): the inquiry step of a resumed review whose service request landed and whose email did not go out (or
+        // may have). Its retry never creates a second service request: it sends once, with the landed id, or (the person's
+        // choice for a maybe-sent email) is recorded as not sent and runs nothing.
+        var landedInquiry = ResumedInquiry(resume);
+        var recordWithoutSending = landedInquiry is not null && review.SendChoice == DecisionReview.RecordWithoutSending;
         foreach (var step in p.Steps.Where(s => !done.ContainsKey(s.Key)))
         {
+            if (recordWithoutSending && step.Key == landedInquiry!.Key)
+                continue;
+
             if (!_executors.TryGet(step.Def.Code, out var executor))
                 return Refused(reviewId, DecisionCommitReasons.UnresolvedAction, $"'{step.Def.Code}' cannot be carried out here.", step.Def.Code);
 
             DecisionActionOutcome? refused;
             try
             {
-                refused = await executor.PreflightAsync(Request(http, p, step), ct).ConfigureAwait(false);
+                refused = await executor.PreflightAsync(Request(http, p, step, LandedFor(step, landedInquiry)), ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -1113,11 +1168,19 @@ public sealed class DecisionCommitService
                 continue;
             }
 
+            if (recordWithoutSending && step.Key == landedInquiry!.Key)
+            {
+                // The person chose to record the decision without sending: the landed service request stands, nothing is sent.
+                executed.Add(new DecisionCommitStep(step.Key, step.Def.Code, step.Phase, NotSentByChoiceStatus, landedInquiry.Written, [], null,
+                    "Recorded without sending, by the user's choice."));
+                continue;
+            }
+
             _executors.TryGet(step.Def.Code, out var executor);
             DecisionActionOutcome outcome;
             try
             {
-                outcome = await executor.ExecuteAsync(Request(http, p, step), writeCt).ConfigureAwait(false);
+                outcome = await executor.ExecuteAsync(Request(http, p, step, LandedFor(step, landedInquiry)), writeCt).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -1933,13 +1996,36 @@ public sealed class DecisionCommitService
 
     // ── Steps and the record ─────────────────────────────────────────────────────────────────────────────────────────
 
-    private static DecisionActionRequest Request(HttpContext http, Prepared p, ExecStep step) =>
+    private static DecisionActionRequest Request(HttpContext http, Prepared p, ExecStep step, IReadOnlyList<DecisionRecordRef>? landed = null) =>
         new(http,
             p.Primary.Id,
             p.Primary.SubjectEntity is { Length: > 0 } entity && p.Primary.SubjectId is { } id ? new DecisionRecordRef(entity, id) : null,
             p.Core,
             p.MatterId,
-            step.Values);
+            step.Values,
+            landed);
+
+    /// <summary>Step status for an inquiry the person chose to record without sending (D-223). Carried forward like Done.</summary>
+    internal const string NotSentByChoiceStatus = "NotSentByChoice";
+
+    /// <summary>
+    /// D-223: the failed inquiry step of a resumable stored failure whose service request landed (and nothing else did for it).
+    /// Null for every other resume: those carry only Done steps forward and run the failed step again from the start.
+    /// </summary>
+    private static DecisionCommitStep? ResumedInquiry(DecisionCommitResult? resume) =>
+        resume is { Resumable: true }
+            ? resume.Steps.LastOrDefault(s =>
+                s.Code == BudgetInquiryExecutor.ActionCode
+                && s.Status == nameof(DecisionActionStatus.Failed)
+                && s.PossiblyWritten.Count == 0
+                && s.Written.Count == 1
+                && string.Equals(s.Written[0].Entity, BudgetInquiryExecutor.Table, StringComparison.OrdinalIgnoreCase))
+            : null;
+
+    private static IReadOnlyList<DecisionRecordRef>? LandedFor(ExecStep step, DecisionCommitStep? landedInquiry) =>
+        landedInquiry is not null && step.Key == landedInquiry.Key
+            ? landedInquiry.Written.Select(w => new DecisionRecordRef(w.Entity, w.Id)).ToList()
+            : null;
 
     private static DecisionCommitStep ToStep(ExecStep step, DecisionActionOutcome outcome) =>
         new(step.Key,
@@ -2054,9 +2140,19 @@ public sealed class DecisionCommitService
         // Only a step that was REFUSED (by contract: nothing written) can resume. A Failed step may have landed (a create that
         // timed out after committing, a message that went out, a revision whose amount was then refused), so running it again
         // could write it twice; a thrown step is Failed. The steps that landed in full before it are never repeated.
-        var resumable = outcome.Status == DecisionActionStatus.Refused
-                        && possibly.Count == 0
-                        && outcome.Written.Count == 0;
+        // D-223 (task 191) adds ONE Failed case: the budget inquiry whose service request landed and whose email failed with a
+        // known send outcome. Its retry reuses the landed id (no second create) and sends once; when the email MAY have gone out
+        // (Unknown) the retry also needs the person's choice (Send again / Record without sending).
+        var refusedCleanly = outcome.Status == DecisionActionStatus.Refused
+                             && possibly.Count == 0
+                             && outcome.Written.Count == 0;
+        var inquiryResume = step.Def.Code == BudgetInquiryExecutor.ActionCode
+                            && outcome.Status == DecisionActionStatus.Failed
+                            && outcome.SendFailure is not null
+                            && possibly.Count == 0
+                            && outcome.Written.Count == 1
+                            && string.Equals(outcome.Written[0].Entity, BudgetInquiryExecutor.Table, StringComparison.OrdinalIgnoreCase);
+        var resumable = refusedCleanly || inquiryResume;
         return new DecisionCommitResult
         {
             Status = DecisionCommitStatus.Failed,
@@ -2070,6 +2166,7 @@ public sealed class DecisionCommitService
             PossiblyLanded = possibly,
             GateTier = p.GateTier,
             Resumable = resumable,
+            SendChoiceRequired = inquiryResume && outcome.SendFailure == DecisionSendFailure.Unknown,
         };
     }
 
