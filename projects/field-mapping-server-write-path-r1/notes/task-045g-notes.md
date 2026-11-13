@@ -302,6 +302,58 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
 - **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11888 passed, 4 skipped; ebilling
   filters 8440 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the six changed .cs files.
 
+## Fix round 4
+
+- **Rule 3b at create (owner decision, 2026-11-13).** An approval or a correction is never created without an invoice: a
+  create of `sprk_invoiceapproval` or `sprk_invoicecorrection` whose `sprk_invoice` is absent, null or an empty id is
+  refused with `invoice_family_invoice_required` (400, fixed text "An approval or a correction names its invoice when it
+  is created. Nothing was written.") and nothing is written. A submission and an external identifier may be created
+  without one, as before. Decided once, in `InvoiceFamilyCoreRecordGuard.CheckWriteAgainstOtherInvoiceAsync`, beside rule
+  3b (`RefuseCreateWithoutInvoice`), on every create that reaches the guard: `RecordCreationService` step 5½
+  (`RecordTableRules.InvoiceFamilyRule`). The chat create tool refuses these two tables before the guard (017c). The Finance
+  writers set `sprk_invoice` on these creates (ebilling-r1) and decide through `Check(row)`, not this path.
+- **Code (§11).**
+  - Existing: `invoice_family_line_invoice_cleared` (rule 3b) answers an update; its text says the invoice "cannot be
+    cleared after the row is created", which is false of a create. `invoice_family_no_core_record` is about core records.
+  - Extension: giving rule 3b's code create text too would make one code mean two things to a caller that keys on it, so a
+    second code is added with its own fixed text.
+  - Cost of doing nothing: an approval or a correction could be created with a blank invoice link, which rule 3b then
+    forbids reaching on update, so the row could never be made right through the BFF.
+- **A fault on the re-decision's read.** On a person's run, the read of the other invoice while a refusal is decided again
+  as that person is wrapped as the pre-read is: a fault is `invoice_family_read_failed`, its text kept out; cancellation is
+  rethrown.
+- **Tests.**
+  - Seam (`RecordCreationServiceInvoiceChildRuleSeamTests`): an approval or a correction created with no invoice (absent,
+    null) → 400 invoice_required, nothing written (must fire); a binding to an empty id → 400 at the payload step, before
+    any rule, nothing written; a submission and an external identifier with no invoice pass the rule (must not fire); one
+    with an invoice of its own matter passes (existing `CreateAsync_ARowFiledWithAnInvoiceOfItsOwnMatter_PassesTheRule`).
+  - Unit (`InvoiceFamilyCoreRecordGuardTests`): absent, null and empty id → invoice_required with the fixed text; with its
+    invoice → admitted; an update of a stored row with no invoice → not refused.
+  - Derive (`RecordTableRulesInvoiceFamilyDeriveTests`): an approval or a correction naming a core record only →
+    invoice_required, nothing derived, nothing read (6 cells).
+  - Generic paths: the re-decision's read of the other invoice faults → read_failed, no fault text, nothing written (3 cells).
+- **Changed expectations.**
+  - `InvoiceFamilyCoreRecordGuardTests.CheckWrite_ARowFiledWithAnInvoiceThatCannotBeRead_FailsClosed_AndWithNoInvoiceIsNotRead`
+    and `CheckWrite_ClearingTheInvoice_IsRefusedForAnApprovalOrCorrection_AndNotForASubmissionOrExternalIdentifier`: their
+    approval and correction creates with no invoice are now invoice_required (still not read); submission and external
+    identifier unchanged.
+  - `RecordTableRulesInvoiceFamilyDeriveTests.FamilyRows` and `InvoiceFamilyRegardingPairAgreementTests.EveryFamilyTable`
+    no longer list the approval and the correction: their creates name a core record only, which is now refused before the
+    derive and the pair are asked. The derive and the pair are the same for the submission (the same lookups), still listed.
+  - `ARecordWithABlankNameOrNumber_IsAdmitted…`: the project-with-no-name cell uses the submission instead of the approval,
+    for the same reason.
+  - No Finance or e-billing fixture changed: they do not create these rows through this path.
+- **Each new must-fire, run once with its change off** (temporary local edits, restored byte-identical):
+  - create rule off: **16 of 16 fail** (seam 4, derive 6, unit 6 incl. the two changed expectations); every must-not-fire
+    passes.
+  - re-decision wrap off: the fault cell **still passes** (3 of 3). Before the wrap, the comparison's own catch
+    (`CheckWriteAgainstOtherInvoiceAsync`) already answered that fault `invoice_family_read_failed` and wrote nothing (its
+    reason then named the exception type). The wrap makes the answer local with fixed text; the cell pins the outcome.
+- **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11893 passed, 4 skipped; ebilling
+  filters 8437 passed, 4 skipped (3 fewer than round 3: 8 approval and correction create cells leave the pair-agreement
+  theory, 2 unit and 3 fault cells are added; the 6 derive cells are replaced one for one); `dotnet format
+  --verify-no-changes` clean on the six changed .cs files.
+
 ## Known limits
 
 - **K1.** D-96's app-only line count still runs for an invoice update that writes its core lookup with the record it

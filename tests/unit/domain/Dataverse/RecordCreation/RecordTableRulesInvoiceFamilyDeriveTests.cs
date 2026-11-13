@@ -64,17 +64,48 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
 
     // ── Must fire: every family table, every core lookup, gets all five ─────────────────────────────────────────────
 
+    /// <summary>Task 045g rule 3b at create: an approval and a correction are created with their invoice, so a create naming a
+    /// core record only is refused before any derive (<see cref="ApprovalAndCorrectionRows"/>).</summary>
+    private static bool IsCreatedWithItsInvoice(string table) => table is "sprk_invoiceapproval" or "sprk_invoicecorrection";
+
     public static TheoryData<string, string, string> FamilyRows()
     {
         var rows = new TheoryData<string, string, string>();
         foreach (var (table, lookups) in InvoiceFamilyCoreRecordGuard.CoreRecordLookups)
         {
+            if (IsCreatedWithItsInvoice(table))
+                continue;
             foreach (var (column, core) in lookups)
                 rows.Add(table, column, core);
         }
 
         rows.Add(InvoiceFamilyCoreRecordGuard.ExternalIdentifierEntity, InvoiceFamilyCoreRecordGuard.ExternalIdentifierInvoiceColumn, "sprk_invoice");
         return rows;
+    }
+
+    public static TheoryData<string, string, string> ApprovalAndCorrectionRows()
+    {
+        var rows = new TheoryData<string, string, string>();
+        foreach (var (table, lookups) in InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Where(t => IsCreatedWithItsInvoice(t.Key)))
+        {
+            foreach (var (column, core) in lookups)
+                rows.Add(table, column, core);
+        }
+
+        return rows;
+    }
+
+    [Theory]
+    [MemberData(nameof(ApprovalAndCorrectionRows))]
+    public async Task AnApprovalOrCorrectionNamingACoreRecordAndNoInvoice_IsRefusedInvoiceRequired_AndNothingIsDerived(
+        string table, string column, string core)
+    {
+        var result = await Run(table, Binding((column, core)), NamedRecord(), CatalogNamingNumber());
+
+        result.Refusal!.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceRequiredCode);
+        result.Refusal.IsUndecided.Should().BeFalse();
+        result.AdditionalColumns.Should().BeEmpty();
+        _reads.Should().BeEmpty("refused before the derive reads anything");
     }
 
     [Theory]
@@ -160,7 +191,7 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
     [Theory]
     [InlineData("sprk_invoice", "sprk_matter", "sprk_matter", null, "MAT-000001")] // a matter with no name
     [InlineData("sprk_invoice", "sprk_matter", "sprk_matter", "  ", "MAT-000001")]
-    [InlineData("sprk_invoiceapproval", "sprk_regardingproject", "sprk_project", null, "PRJ-000001")] // a project with no name
+    [InlineData("sprk_invoicesubmission", "sprk_regardingproject", "sprk_project", null, "PRJ-000001")] // a project with no name
     [InlineData("sprk_externalidentifier", "sprk_regardinginvoice", "sprk_invoice", "Invoice 7", null)] // an invoice with no number
     [InlineData("sprk_externalidentifier", "sprk_regardinginvoice", "sprk_invoice", "Invoice 7", "")]
     public async Task ARecordWithABlankNameOrNumber_IsAdmitted_WithTheTypeIdAndUrl_AndTheBlankOneCleared(

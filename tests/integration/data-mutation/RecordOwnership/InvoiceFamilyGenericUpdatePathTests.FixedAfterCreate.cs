@@ -535,6 +535,36 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
     [InlineData(GenericPath.FieldMappingPush)]
+    public async Task OnAPersonsRun_WhenThePersonsReadOfTheOtherInvoiceFaultsWhileTheRefusalIsDecidedAgain_IsRefusedReadFailed_AndNothingIsWritten(
+        GenericPath path)
+    {
+        // The person reads the row, and the invoice it is given once (before any rule compares it); the second read of that
+        // invoice, when the refusal is decided again as the person, faults.
+        var otherInvoiceReads = 0;
+        _personRows = (table, id) => (table, id) switch
+        {
+            ("sprk_invoiceapproval", var row) when row == FamilyRow =>
+                new Entity(Approval, FamilyRow) { ["sprk_regardingmatter"] = MatterRef(Matter), ["sprk_invoice"] = new EntityReference("sprk_invoice", Invoice) },
+            ("sprk_invoice", var invoice) when invoice == OtherInvoice && ++otherInvoiceReads == 1 =>
+                new Entity("sprk_invoice", OtherInvoice) { ["sprk_matter"] = MatterRef(OtherMatter) },
+            ("sprk_invoice", var invoice) when invoice == OtherInvoice => throw new HttpRequestException("socket 10.0.0.13 returned 503"),
+            _ => null,
+        };
+
+        var outcome = await RunAsync(path, Approval, FamilyRow, Lookups(("sprk_invoice", new EntityReference("sprk_invoice", OtherInvoice))), NoPlain,
+            ChildWorld(Approval, "sprk_invoice", storedInvoice: Invoice).Object, playbookActsAs: Caller);
+
+        otherInvoiceReads.Should().Be(2, "the fault is on the re-decision's read");
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, outcome.Message);
+        outcome.Message.Should().NotContain("10.0.0.13").And.NotContain("503");
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_ACancellationDuringThePersonsReadOfTheInvoice_IsRethrown_AndNothingIsWritten(GenericPath path)
     {
         using var cancel = new CancellationTokenSource();

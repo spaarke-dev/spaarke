@@ -665,12 +665,22 @@ public class InvoiceFamilyRegardingPairAgreementTests
         RecordTableRules.InvoiceFamilyRule.Check(new PreWriteRow(NoCallerRead(), table, item, NamedRecord(), NumberedCatalog()),
             CancellationToken.None);
 
-    /// <summary>Every family table with its first core lookup (the rule is registered on all six).</summary>
+    /// <summary>
+    /// Every family table with its first core lookup (the rule is registered on all six), but the approval and the correction:
+    /// task 045g rule 3b at create refuses those without their invoice before the pair is asked
+    /// (<c>RecordTableRulesInvoiceFamilyDeriveTests.AnApprovalOrCorrectionNamingACoreRecordAndNoInvoice_…</c>), and this
+    /// create names a core record only, with no caller read for an invoice. The submission has the same lookups.
+    /// </summary>
     public static TheoryData<string, string, string> EveryFamilyTable()
     {
         var rows = new TheoryData<string, string, string>();
         foreach (var (table, lookups) in InvoiceFamilyCoreRecordGuard.CoreRecordLookups)
+        {
+            if (table is "sprk_invoiceapproval" or "sprk_invoicecorrection")
+                continue;
             rows.Add(table, lookups[0].Column, lookups[0].CoreEntity);
+        }
+
         return rows;
     }
 

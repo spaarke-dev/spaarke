@@ -760,7 +760,11 @@ public class InvoiceFamilyCoreRecordGuardTests
 
         unreadable.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
         unreadable.Reason.Should().NotContain("boom");
-        noInvoice.IsRefused.Should().BeFalse(noInvoice.Reason);
+        // Rule 3b at create (owner, 2026-11-13): an approval or a correction is created with its invoice.
+        if (table is "sprk_invoiceapproval" or "sprk_invoicecorrection")
+            noInvoice.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceRequiredCode);
+        else
+            noInvoice.IsRefused.Should().BeFalse(noInvoice.Reason);
     }
 
     [Fact]
@@ -885,7 +889,39 @@ public class InvoiceFamilyCoreRecordGuardTests
             cleared.IsRefused.Should().BeFalse(cleared.Reason);
         }
 
-        created.IsRefused.Should().BeFalse("a create is not an update: these rules ask nothing of it");
+        // Rule 3b at create (owner, 2026-11-13): an approval or a correction is created with its invoice; a submission and an
+        // external identifier may be created without one.
+        if (refused)
+            created.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceRequiredCode);
+        else
+            created.IsRefused.Should().BeFalse(created.Reason);
+    }
+
+    [Theory]
+    [InlineData("sprk_invoiceapproval")]
+    [InlineData("sprk_invoicecorrection")]
+    public async Task CheckWrite_AnApprovalOrCorrectionCreatedWithNoInvoice_IsRefusedInvoiceRequired_AndAnUpdateIsNot(string table)
+    {
+        var underMatter = ("sprk_regardingmatter", new EntityReference("sprk_matter", MatterId));
+
+        var absent = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table, Reads(underMatter), NeverRead);
+        var nulled = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table, Reads(underMatter, ("sprk_invoice", null)), NeverRead);
+        var emptyId = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table,
+            Reads(underMatter, ("sprk_invoice", new EntityReference("sprk_invoice", Guid.Empty))), NeverRead);
+        var withItsInvoice = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table,
+            Reads(underMatter, ("sprk_invoice", new EntityReference("sprk_invoice", InvoiceId))), SupersededRegarding("sprk_matter", MatterId));
+        // An update of a stored row that names no invoice, leaving it so, is not a create.
+        var update = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table, Reads(underMatter), NeverRead, default, null, null,
+            Reads(underMatter));
+
+        foreach (var refused in new[] { absent, nulled, emptyId })
+        {
+            refused.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceRequiredCode);
+            refused.Reason.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceRequiredReason);
+        }
+
+        withItsInvoice.IsRefused.Should().BeFalse(withItsInvoice.Reason);
+        update.IsRefused.Should().BeFalse(update.Reason);
     }
 
     [Fact]

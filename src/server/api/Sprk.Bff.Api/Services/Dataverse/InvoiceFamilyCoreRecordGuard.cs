@@ -129,6 +129,17 @@ public static class InvoiceFamilyCoreRecordGuard
         + "with an invoice of its own matter, project or work assignment. Nothing was written.";
 
     /// <summary>
+    /// Task 045g rule 3b at create (owner, 2026-11-13): a create of an approval or a correction that names no invoice
+    /// (<c>sprk_invoice</c> absent, null, or an empty id). These rows are created with their invoice, as rule 3b keeps it after
+    /// create. A submission (it exists before its invoice) and an external identifier may be created without one.
+    /// </summary>
+    public const string InvoiceRequiredCode = "invoice_family_invoice_required";
+
+    /// <summary>The reason of <see cref="InvoiceRequiredCode"/>: fixed text, naming no record.</summary>
+    internal const string InvoiceRequiredReason =
+        "An approval or a correction names its invoice when it is created. Nothing was written.";
+
+    /// <summary>
     /// An invoice would be filed under a work assignment (<c>sprk_regardingworkassignment</c>) that is itself filed under that
     /// same invoice (<c>sprk_workassignment.sprk_regardinginvoice</c>, owner Option A). Neither record would then say which
     /// matter or project the pair belongs to (unified-access-control-r2 ruling on RecordFamilyEdges, 2026-10-28). The work
@@ -290,7 +301,8 @@ public static class InvoiceFamilyCoreRecordGuard
     /// differ from its stored one is <see cref="InvoiceCoreRecordFixedCode"/>. Rule 3: a line whose stored invoice would be
     /// cleared is <see cref="LineInvoiceClearedCode"/>. Both are asked right after <see cref="Check(string, Func{string, object?})"/>
     /// admits the row, before any other read; an invoice stored under one core record that the write would leave under none,
-    /// or under two, is <see cref="InvoiceCoreRecordFixedCode"/> too. Null on a create.</param>
+    /// or under two, is <see cref="InvoiceCoreRecordFixedCode"/> too. Null on a create, where an approval or a correction that
+    /// names no invoice is <see cref="InvoiceRequiredCode"/> (rule 3b at create).</param>
     public static async Task<InvoiceFamilyCoreRecord> CheckWriteAsync(
         string entityLogicalName,
         Func<string, object?> read,
@@ -837,8 +849,18 @@ public static class InvoiceFamilyCoreRecordGuard
 
             decided = await DecideAsync(personRow, async (invoice, token) =>
                 {
-                    var other = await asPerson(invoice.LogicalName, invoice.Id,
-                        CoreRecordLookups[invoice.LogicalName].Select(l => (l.Column, l.CoreEntity)).ToArray(), token).ConfigureAwait(false);
+                    // As the pre-read: a fault is "could not be read" (its text stays out); cancellation is rethrown.
+                    Entity? other;
+                    try
+                    {
+                        other = await asPerson(invoice.LogicalName, invoice.Id,
+                            CoreRecordLookups[invoice.LogicalName].Select(l => (l.Column, l.CoreEntity)).ToArray(), token).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
+                    {
+                        other = null;
+                    }
+
                     return other is null
                         ? InvoiceFamilyCoreRecord.Refused(invoice.LogicalName, ReadFailedCode, "The other invoice could not be read; nothing was written.")
                         : Check(invoice.LogicalName, column => other.Attributes.TryGetValue(column, out var value) ? value : null);
@@ -1140,6 +1162,10 @@ public static class InvoiceFamilyCoreRecordGuard
         // Task 045g rules 1 and 3: what an existing row cannot change, decided on the stored row before any other read.
         if (stored is not null && RefuseChangeAfterCreate(decided, read, stored) is { } fixedAfterCreate)
             return fixedAfterCreate;
+
+        // Task 045g rule 3b at create: an approval or a correction is created with its invoice.
+        if (stored is null && RefuseCreateWithoutInvoice(decided, read) is { } noInvoice)
+            return noInvoice;
 
         // The one other invoice a write is compared with: the invoice an invoice supersedes, or the invoice a line belongs
         // to (task 026), or — task 045g rule 2 — the invoice an approval, a submission, a correction or an external identifier
@@ -1551,6 +1577,21 @@ public static class InvoiceFamilyCoreRecordGuard
 
         return null;
     }
+
+    /// <summary>
+    /// Task 045g rule 3b at create (owner, 2026-11-13): a create of an approval or a correction whose <see cref="LineInvoiceColumn"/>
+    /// names no invoice (absent, null, or an empty id) is <see cref="InvoiceRequiredCode"/>. Null otherwise (every other table,
+    /// a submission and an external identifier included). Pure.
+    /// </summary>
+    internal static InvoiceFamilyCoreRecord? RefuseCreateWithoutInvoice(InvoiceFamilyCoreRecord decided, Func<string, object?> read) =>
+        IsCreatedWithItsInvoice(decided.EntityLogicalName)
+        && TryReadReference(read(LineInvoiceColumn), InvoiceEntity, out var invoice) && invoice is null
+            ? decided.Refuse(InvoiceRequiredCode, InvoiceRequiredReason)
+            : null;
+
+    /// <summary>Rule 3b at create: the approval and the correction, which are created with their invoice.</summary>
+    private static bool IsCreatedWithItsInvoice(string entity) =>
+        entity.Trim().ToLowerInvariant() is "sprk_invoiceapproval" or "sprk_invoicecorrection";
 
     /// <summary>
     /// A value is unset (null, or a reference with an empty id), a reference to <paramref name="core"/> (a reference

@@ -86,4 +86,74 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         Problem(outcome, table).Status.Should().Be(StatusCodes.Status404NotFound, "a row the caller cannot read is the uniform not-found");
         AssertNothingWritten();
     }
+
+    // ── Rule 3b at create (owner, 2026-11-13): an approval or a correction is created with its invoice ─────────────────
+
+    /// <summary>A create of <paramref name="table"/> under the ordinary matter, its invoice <paramref name="invoice"/>: absent
+    /// (the binding is not sent), null, or a binding to an empty id.</summary>
+    private RecordCreationRequest NoInvoiceRequest(string table, string invoiceBind, string invoice)
+    {
+        _scripted.Held.Add($"prvCreate{table}");
+        _scripted.Held.Add($"prvAppend{table}");
+        _scripted.Held.Add("prvAppendTosprk_invoice");
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Filed under a matter",
+            ["sprk_RegardingMatter_bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+        };
+        if (invoice == "null")
+            body[invoiceBind] = null;
+        else if (invoice == "empty id")
+            body[invoiceBind] = $"/sprk_invoices({Guid.Empty:D})";
+        return WebApiRequest(table, body);
+    }
+
+    public static TheoryData<string, string> ApprovalOrCorrectionWithNoInvoice()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var table in new[] { "sprk_invoiceapproval", "sprk_invoicecorrection" })
+            foreach (var invoice in new[] { "absent", "null" })
+                data.Add(table, invoice);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ApprovalOrCorrectionWithNoInvoice))]
+    public async Task CreateAsync_AnApprovalOrCorrectionNamingNoInvoice_Is400InvoiceRequired_AndWritesNothing(string table, string invoice)
+    {
+        var outcome = await Service().CreateAsync(NoInvoiceRequest(table, "sprk_Invoice_bind", invoice), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceRequiredCode, outcome.Refusal.Detail);
+        Problem(outcome, table).Status.Should().Be(StatusCodes.Status400BadRequest);
+        AssertNothingWritten();
+    }
+
+    [Theory]
+    [InlineData("sprk_invoiceapproval")]
+    [InlineData("sprk_invoicecorrection")]
+    public async Task CreateAsync_AnApprovalOrCorrectionBindingAnEmptyInvoiceId_Is400_AndWritesNothing(string table)
+    {
+        // The payload step refuses a binding to an empty id before any rule runs; the guard's own answer to an empty id (the
+        // invoice-required code) is pinned in InvoiceFamilyCoreRecordGuardTests.
+        var outcome = await Service().CreateAsync(NoInvoiceRequest(table, "sprk_Invoice_bind", "empty id"), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Code.Should().Be(RecordCreationRefusal.InvalidPayloadCode, outcome.Refusal.Detail);
+        Problem(outcome, table).Status.Should().Be(StatusCodes.Status400BadRequest);
+        AssertNothingWritten();
+    }
+
+    [Theory]
+    [InlineData("sprk_invoicesubmission", "sprk_Invoice_bind")]
+    [InlineData("sprk_externalidentifier", "sprk_RegardingInvoice_bind")]
+    public async Task CreateAsync_ASubmissionOrExternalIdentifierNamingNoInvoice_PassesTheRule(string table, string invoiceBind)
+    {
+        var outcome = await Service().CreateAsync(NoInvoiceRequest(table, invoiceBind, "absent"), AsCaller(), CancellationToken.None);
+
+        outcome.Steps.Should().ContainSingle(s => s.Step == RecordCreationStep.PreWriteRules)
+            .Which.State.Should().Be(RecordCreationStepState.Ran, "the invoice-family rule admitted the row");
+        outcome.Refusal?.PreWrite.Should().BeNull();
+        (outcome.Refusal?.Code ?? string.Empty).Should().NotStartWith("invoice_family_");
+    }
 }
