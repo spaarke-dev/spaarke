@@ -27,6 +27,14 @@ FR-23 (the regarding pair stays pushable) is amended for the six invoice-family 
    sent alone (no pair) is decided too.
    A sent clear (null or blank) of the URL is not refused: it names no other record. On a create, and on a write that moves
    the core lookup, the URL is not checked: it is dropped and the derive writes it (rule 5).
+   An admitted URL is written in the server's canonical form (fix round 4), as the id is (rule 2):
+   `InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl` = `RegardingRecordType.BuildRecordUrl(core table, canonical id)`, the form
+   045d's derive writes. Its scheme, host, `appid` and other parameters are not stored. Nothing more is refused. On the caller
+   paths (PATCH, chat tool) a sent URL that names a record is put in that form before the check
+   (`OwnedChildWrite.WithCanonicalFamilyPairId`), which leaves the table and id it names, so the check's answer is the same; on
+   the app-only paths the gate writes it after the check admits it (`WithCanonicalPairId`). The URL is read strictly: a
+   parameter must be written once (a repeated `etn` or `id` names no record, even when the repeats agree), and the query must
+   be the URL's own text (an HTML-escaped `&amp;` separator leaves no `etn` or `id` to read); either is refused.
 3. A write that disagrees is refused through the path's existing refusal form, with ONE code
    (`invoice_family_regarding_pair_core_record_mismatch`), and nothing is written:
    - create (`RecordCreationService` step 5½, `RecordTableRules.InvoiceFamilyRule`): `PreWriteRefusal.Refused`, 400;
@@ -88,6 +96,7 @@ reason, which is this code's intended status. No per-path code.
 | Fix round 1: `CanonicalPairId`, `WithCanonicalPairId` (guard), `OwnedChildWrite.WithCanonicalFamilyPairId` | 045d's derive already writes the canonical id on a move; `WithColumnsSet`. | One formatter, applied by the app-only gate and by the caller-path planner entry over the existing `WithColumnsSet`. | Another spelling of the same id is stored in the D-68 alternate key (F2). |
 | Fix round 1: `aCoreMoveIsChecked` parameter (optional) on `CheckRegardingPairAgreesAsync` | The move exemption. | Optional flag; the caller paths pass it because their derive runs before the check. | On the caller paths a sent pair on a move would be exempt even when the derive did not write over it. |
 | Fix round 3: `RegardingPairWrite.UrlNamesRecord` (pure), `SetsUrl` / `UrlText` / `DecidesAnything`, `RecordUrlColumn` | 045d's derive and the planner write the URL (`RegardingRecordType.BuildRecordUrl`); nothing parsed one. | Extends the existing carrier and check; the parse lives beside them, with no read. | A write could keep a pair naming the core record and a URL naming another, and a reader that opens the URL lands on the wrong record. |
+| Fix round 4: `InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl`, `RegardingPairWrite.TryReadRecordUrl` | `RegardingRecordType.BuildRecordUrl` (the format, reused), `UrlNamesRecord` (now reads through `TryReadRecordUrl`). | One formatter over the existing builder, applied by the existing canonicalisers (`WithCanonicalPairId`, `WithCanonicalFamilyPairId`). | An admitted URL is stored with whatever scheme and host it was sent with. |
 | Test-only: `EntitySetNameFixtures` pins `sprk_recordtype_ref` → `sprk_recordtype_refs` | The fixture's pinned set names. | One entry. | The playbook path's tests cannot bind the pair type. |
 
 ## What changed
@@ -193,6 +202,21 @@ The 7 that pass both ways pin behaviour the round keeps: a core move with a disa
   asserts the catalog read; it failed when the URL was decided first, because the planner's display URL then refused it).
 - Filtered suites (as in round 1): 10156 passed, 0 failed, 3 skipped.
 - ebilling-r1 filters: 8170 passed, 0 failed, 4 skipped.
+- ArchTests (alone, unfiltered): 2539 passed.
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `dotnet format whitespace --verify-no-changes` on the touched files: clean.
+
+### Fix round 4 evidence
+
+| Set | Tests | Failed before |
+|---|---|---|
+| Domain gate: an agreeing URL on another host, with another scheme, or as a JSON string with a fragment, written canonical (every family table and core lookup) | 19 | 19 |
+| Generic (playbook update, output orchestrator): another host, another scheme → canonical | 4 | 4 |
+| Chat: absolute on another host (six tables), another scheme (approval) → canonical; PATCH: absolute on another host → canonical | 8 | 8 |
+| Must not fire: a canonical URL is written unchanged (domain, generic ×2, chat); a cleared URL is written as a clear; a create's sent URL of another record is replaced by the derived URL; a chat core move's sent URL of another record is replaced by the derived URL | 7 | 0 (they pass both ways, as they must) |
+
+- "Failed before" = with the round's URL canonicalisation switched off (a temporary switch, removed).
+- Filtered suites (as in round 1): 10186 passed, 0 failed, 3 skipped.
+- ebilling-r1 filters: 8195 passed, 0 failed, 4 skipped.
 - ArchTests (alone, unfiltered): 2539 passed.
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `dotnet format whitespace --verify-no-changes` on the touched files: clean.
 
