@@ -8,6 +8,9 @@ name: nightly-health
 #   - bundle-size:   builds key client artifacts; flags >10% size regressions
 #                    vs the recorded baseline in .github/baseline-bundle-sizes.json
 #   - vuln-scan:     dotnet list package --vulnerable + npm audit per client pkg
+#   - duplication-sweep (WEEKLY cron + every dispatch): jscpd over src/ with
+#                    .jscpd.json; observation only, raises weekly/duplication-sweep
+#                    for new cross-area clusters. Never fails the workflow.
 #
 # The legacy per-night comment on the rolling issue "Nightly Health — YYYY-MM-DD" is
 # OFF by default (dispatch input post_tracking_comment); the quality alerts below and
@@ -29,8 +32,17 @@ name: nightly-health
 on:
   schedule:
     - cron: '0 6 * * *'  # daily 06:00 UTC (~02:00 ET, ~23:00 PT prev day)
+    # Weekly: ONLY the duplication-sweep job runs on this cron. Every daily job (and the
+    # alerts / report jobs) carries `if: github.event.schedule != '0 7 * * 1' && ...`;
+    # keep that string in sync if this cron changes.
+    - cron: '0 7 * * 1'  # Mondays 07:00 UTC
   workflow_dispatch:
     inputs:
+      duplication_sweep_only:
+        description: 'Run only the weekly jscpd duplication sweep (skips every daily job)'
+        required: false
+        type: boolean
+        default: false
       update_baseline:
         description: 'Update .github/baseline-bundle-sizes.json with current sizes (commit to master)'
         required: false
@@ -87,6 +99,7 @@ jobs:
   # -------------------------------------------------------------------------
   flake-hunt-run:
     name: Flake hunt run ${{ matrix.run }} / ${{ matrix.shard }}
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     # Measured 2026-10-13 (run 38432551839): 6.7-12.9 min per leg including a ~3 min
     # build. Cap = ~2x the slowest leg.
@@ -157,7 +170,7 @@ jobs:
     needs: flake-hunt-run
     # Analyse whatever TRX exist even when a leg timed out: a partial answer plus a
     # loud "incomplete" beats the silence the old single job produced.
-    if: always()
+    if: always() && github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -258,6 +271,7 @@ jobs:
   # -------------------------------------------------------------------------
   bundle-size:
     name: Bundle size drift
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
@@ -401,6 +415,7 @@ jobs:
   # -------------------------------------------------------------------------
   vuln-scan:
     name: Vulnerability scan
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -482,6 +497,7 @@ jobs:
   # -------------------------------------------------------------------------
   full-integration:
     name: Full integration tests (Tier 3)
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -575,6 +591,7 @@ jobs:
   # -------------------------------------------------------------------------
   coverage-shard:
     name: Coverage shard ${{ matrix.shard }}
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     # Measured 2026-10-13 (run 38432551839): 4.5-20.4 min per shard (api-seam is the
     # slowest). Cap = ~2x the slowest shard.
@@ -660,7 +677,7 @@ jobs:
     name: Coverage observation (Tier 3, never a gate)
     needs: coverage-shard
     # Aggregate whatever shards finished; a missing shard is reported as incomplete.
-    if: always()
+    if: always() && github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -738,6 +755,7 @@ jobs:
   # -------------------------------------------------------------------------
   trivy-fs:
     name: Trivy filesystem scan (Tier 3)
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -793,6 +811,7 @@ jobs:
   # -------------------------------------------------------------------------
   dep-audit:
     name: Dependency audit (Tier 3, full transitive)
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -883,6 +902,7 @@ jobs:
   # -----------------------------------------------------------------------
   graph-app-role-parity:
     name: Graph App-Role Parity (UAMI SP vs GraphAppRoles.cs)
+    if: github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     # Advisory during rollout window (per r3 deferral doc — do NOT flip
     # blocking until zero-findings baseline holds ≥ 7 nightly runs). The advisory
@@ -995,7 +1015,7 @@ jobs:
   report:
     name: Update tracking issue
     needs: [flake-hunt, bundle-size, vuln-scan, full-integration, coverage-observation, trivy-fs, dep-audit, graph-app-role-parity]
-    if: always()
+    if: always() && github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -1149,7 +1169,7 @@ jobs:
   alerts:
     name: Alert ${{ matrix.check }}
     needs: [flake-hunt-run, flake-hunt, bundle-size, vuln-scan, full-integration, coverage-shard, coverage-observation, trivy-fs, dep-audit, graph-app-role-parity]
-    if: always()
+    if: always() && github.event.schedule != '0 7 * * 1' && !inputs.duplication_sweep_only
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -1298,6 +1318,173 @@ jobs:
         uses: ./.github/actions/quality-alert
         with:
           check: ${{ matrix.check }}
+          status: ${{ steps.decide.outputs.status }}
+          summary: ${{ steps.decide.outputs.summary }}
+          dry-run: ${{ inputs.dry_run_alerts == true || github.ref_name != github.event.repository.default_branch }}
+
+  # ---------------------------------------------------------------------------
+  # Weekly duplication sweep (reuse-governance-tightening-r1, spec FR-06, OQ-8).
+  # Observation only: jscpd runs with exitCode 0 and continue-on-error, and the
+  # decide step always succeeds, so duplication never fails this workflow.
+  # No baseline file: a cluster is NEW when either of its files appears in
+  # `git log --since=7.days`. It alerts only when a new cluster is at or above the
+  # floor (>= MIN_TOKENS tokens AND >= MIN_LINES lines) and its two files sit in
+  # different top-level areas. Area = first 4 path segments under src/client/ and
+  # src/server/ (src/client/pcf/MatterHeader, src/server/api/Sprk.Bff.Api), else the
+  # first 3 (src/solutions/SpaarkeAi). The full report (jscpd defaults 50 tokens /
+  # 5 lines) is the jscpd-report artifact. Tune the floor only after four weekly
+  # reports (OQ-8).
+  # ---------------------------------------------------------------------------
+  duplication-sweep:
+    name: Duplication sweep (weekly, jscpd, never a gate)
+    if: github.event.schedule == '0 7 * * 1' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # Full history, trees only: `git log --since=7.days --name-only` needs commits
+      # and trees, not old blobs.
+      - name: Checkout (history for the 7-day window)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Run jscpd (pinned, exit 0)
+        continue-on-error: true
+        run: npx --yes jscpd@5.4.2 --config .jscpd.json
+
+      - name: Decide status
+        id: decide
+        shell: bash
+        env:
+          REPORT: jscpd-report/jscpd-report.json
+          INDEX: .claude/patterns/CAPABILITY-INDEX.md
+          MIN_TOKENS: "100"
+          MIN_LINES: "10"
+          MAX_LISTED: "15"
+        run: |
+          # Never `set -e` here: this step must always succeed and emit a status.
+          set -uo pipefail
+          status=ok
+          summary=""
+          ws="${GITHUB_WORKSPACE}/"
+          tmp="$(mktemp -d)"
+
+          area() {
+            awk -F'/' '{ if ($1=="src" && ($2=="client" || $2=="server") && NF>=5) print $1"/"$2"/"$3"/"$4; else if (NF>=4) print $1"/"$2"/"$3; else print $0 }' <<<"$1"
+          }
+
+          # Most likely CAPABILITY-INDEX row: one whose canonical-component cell names
+          # the file itself; else a path in the SAME folder; else a folder path (no
+          # extension) that contains the file. Empty when none. Plain prefix matching
+          # of file paths is wrong (Api/X.cs is not Api/FieldMappings/Y.cs).
+          row_for() {
+            awk -F'|' -v f="$1" '
+              /^\| *[0-9]+ *\|/ {
+                n=$2; gsub(/ /,"",n); cap=$3; gsub(/^ +| +$/,"",cap); s=$5
+                d=f; sub(/\/[^\/]*$/,"",d)
+                while (match(s, /`[^`]+`/)) {
+                  p=substr(s, RSTART+1, RLENGTH-2); s=substr(s, RSTART+RLENGTH)
+                  if (p==f) { print "row " n " (" cap ")"; found=1; exit }
+                  pd=p; sub(/\/[^\/]*$/,"",pd); last=p; sub(/^.*\//,"",last)
+                  if (dirhit=="" && pd==d) dirhit="row " n " (" cap ")"
+                  if (foldhit=="" && last !~ /\.(ts|tsx|js|jsx|cs|md|json|ps1)$/ && index(f, p "/")==1) foldhit="row " n " (" cap ")"
+                }
+              }
+              END { if (!found) { if (dirhit!="") print dirhit; else if (foldhit!="") print foldhit } }' "$INDEX" 2>/dev/null | head -n 1
+          }
+
+          git log --since=7.days --name-only --pretty=format: | sed '/^$/d' | sort -u > "$tmp/changed.txt"
+          echo "Files changed in the last 7 days: $(wc -l < "$tmp/changed.txt")"
+
+          if [ ! -s "$REPORT" ] || ! jq -e '.duplicates' "$REPORT" >/dev/null 2>&1; then
+            status=failing
+            summary="- jscpd produced no readable report (\`${REPORT}\`), so this week's duplication is unknown. A sweep that did not run is a failing check, not a pass. See the \"Run jscpd\" step log on the run linked above."$'\n'
+          else
+            total="$(jq '.duplicates | length' "$REPORT")"
+            # One TSV line per duplicate pair at or above the floor, paths repo-relative.
+            jq -r --arg ws "$ws" --argjson mt "$MIN_TOKENS" --argjson ml "$MIN_LINES" '
+              .duplicates[] | select(.tokens >= $mt and .lines >= $ml)
+              | [ (.firstFile.name | ltrimstr($ws)), (.firstFile.start|tostring), (.firstFile.end|tostring),
+                  (.secondFile.name | ltrimstr($ws)), (.secondFile.start|tostring), (.secondFile.end|tostring),
+                  (.tokens|tostring), (.lines|tostring) ] | @tsv' "$REPORT" > "$tmp/floor.tsv"
+
+            # Guard: if the workspace prefix did not strip, no path would ever match the
+            # 7-day list and every cluster would read as old (a silent pass).
+            if grep -q '^/' "$tmp/floor.tsv"; then
+              status=failing
+              summary+="- jscpd report paths did not start with \`${ws}\` (e.g. \`$(cut -f1 "$tmp/floor.tsv" | grep '^/' | head -n 1)\`), so new clusters cannot be told from old ones. Fix the path handling in this step."$'\n'
+            fi
+
+            : > "$tmp/cross.tsv"
+            while IFS=$'\t' read -r a as ae b bs be tok lin; do
+              if [ "$(area "$a")" != "$(area "$b")" ]; then
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$a" "$as" "$ae" "$b" "$bs" "$be" "$tok" "$lin" >> "$tmp/cross.tsv"
+              fi
+            done < "$tmp/floor.tsv"
+
+            awk -F'\t' 'NR==FNR { c[$0]=1; next } ($1 in c) || ($4 in c)'    "$tmp/changed.txt" "$tmp/cross.tsv" > "$tmp/new.tsv"
+            awk -F'\t' 'NR==FNR { c[$0]=1; next } !(($1 in c) || ($4 in c))' "$tmp/changed.txt" "$tmp/cross.tsv" > "$tmp/old.tsv"
+
+            n_floor="$(wc -l < "$tmp/floor.tsv")"; n_cross="$(wc -l < "$tmp/cross.tsv")"
+            n_new="$(wc -l < "$tmp/new.tsv")"; n_old="$(wc -l < "$tmp/old.tsv")"
+            echo "Duplicates in report (jscpd defaults): ${total}"
+            echo "At or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines): ${n_floor}"
+            echo "  ... of those, across different top-level areas: ${n_cross}"
+            echo "  ... NEW (a file changed in the last 7 days; these alert): ${n_new}"
+            echo "  ... OLD (both files unchanged for > 7 days; these do NOT alert): ${n_old}"
+            if [ "$n_old" -gt 0 ]; then
+              echo "First old cross-area clusters (logged only, not alerted):"
+              head -n 10 "$tmp/old.tsv" | awk -F'\t' '{ print "  " $1 ":" $2 "-" $3 "  <->  " $4 ":" $5 "-" $6 "  (" $7 " tokens, " $8 " lines)" }'
+            fi
+
+            if [ "$n_new" -gt 0 ]; then
+              status=failing
+              summary="${n_new} new cross-area duplicate cluster(s) at or above the floor (>= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines) touched a file changed in the last 7 days:"$'\n\n'
+              i=0
+              while IFS=$'\t' read -r a as ae b bs be tok lin; do
+                i=$((i+1))
+                if [ "$i" -gt "$MAX_LISTED" ]; then break; fi
+                row="$(row_for "$a")"; [ -z "$row" ] && row="$(row_for "$b")"
+                [ -z "$row" ] && row="no row"
+                summary+="- \`${a}:${as}-${ae}\` and \`${b}:${bs}-${be}\` (${tok} tokens, ${lin} lines). CAPABILITY-INDEX: ${row}."$'\n'
+              done < "$tmp/new.tsv"
+              if [ "$n_new" -gt "$MAX_LISTED" ]; then
+                summary+="- ... and $((n_new - MAX_LISTED)) more in the \`jscpd-report\` artifact."$'\n'
+              fi
+              summary+=$'\n'"Extend the indexed component (\`.claude/patterns/CAPABILITY-INDEX.md\`) instead of keeping two copies, or record why both stay. This alert closes itself on the first weekly run with no new cluster. Full report: the \`jscpd-report\` artifact on the run linked above."$'\n'
+            elif [ "$status" = "ok" ]; then
+              summary="No new cross-area duplication this week (floor >= ${MIN_TOKENS} tokens and >= ${MIN_LINES} lines). ${n_old} older cross-area cluster(s) above the floor, all in files unchanged for more than 7 days; ${total} duplicates at jscpd defaults in the \`jscpd-report\` artifact."
+            fi
+          fi
+
+          echo "Decided status: ${status}"
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          delimiter="ALERT_SUMMARY_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "summary<<${delimiter}"
+            printf '%s\n' "$summary"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload jscpd report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: jscpd-report
+          path: jscpd-report/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Raise or clear the alert
+        uses: ./.github/actions/quality-alert
+        with:
+          check: weekly/duplication-sweep
           status: ${{ steps.decide.outputs.status }}
           summary: ${{ steps.decide.outputs.summary }}
           dry-run: ${{ inputs.dry_run_alerts == true || github.ref_name != github.event.repository.default_branch }}

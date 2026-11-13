@@ -4,7 +4,7 @@
     <title>Inbound communication and document ingestion stay outside RecordCreationService as named exceptions; guards pin them (FR-21 part b, W3 direction)</title>
     <phase>3 W3 Product creators onto the service</phase>
     <gate>019 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds source-scan guards and may touch .cs in Sprk.Bff.Api if a guard reveals a missing owner call (data-mutation, security-adjacent: owner and isolation of inbound rows); adds tests at KEEP paths (TEST-MODIFYING override).</rigor-reason>
     <model-tier>opus</model-tier>

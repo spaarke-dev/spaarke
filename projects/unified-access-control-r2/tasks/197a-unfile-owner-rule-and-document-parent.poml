@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="197a" project="unified-access-control-r2">
+  <metadata>
+    <title>Unfiled non-Direct communication moves to its creator's team (#2722); a document follows its unfiled Direct message (#2728)</title>
+    <phase>Session 28: UAC (owner answers 2026-11-12)</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes who owns a record after an unfile (ownership/authorization path) and the ArchTests guard; auth/security tags.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The decided owner must be reached identically by the first decision and the post-write settle; fail-closed reads on every parent.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches RecordOwnershipResolver and its tests only. Stays off 197b's files (DirectMessageParticipantShares*, DirectThreadAccessService*, GateDecisionRecordSharing*, ExternalTeamShareSynchronizer*).</parallel-reason>
+    <deps>fm #2733 on master (UnfiledOwnershipFor, the one unfile rule for every re-file writer)</deps>
+    <tags>bff-api, auth, access-control, dataverse, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>
+      GitHub #2722 and #2728; owner answers 2026-11-12 (both #2722 choices YES; #2728 option (a), option (b) rejected for now).
+    </origin>
+  </metadata>
+
+  <goal>
+Split in two PRs.
+197a-1 (#2722): when a non-Direct communication becomes filed under nothing, it moves to its creator's business-unit team, through the resolver's one creator-team path. It keeps its former owner when it leaves a Secure or Restricted parent, when it is itself held Secure or Restricted, when its creator is not recorded or cannot be resolved, or when any read of what it leaves fails.
+197a-2 (#2728): a document whose primary parent is an unfiled communication follows that communication when the communication's owner is positively recognized as the Direct message owner team.
+  </goal>
+
+  <component-justification>
+    1. Existing: RecordOwnershipResolver already decides the unfile outcome (UnfiledOwnership.UnfiledCommunication, chosen by DirectMessageOwnerStep.UnfiledOwnershipFor for all four re-file writers) and already has the creator-team path (ResolveFromUserAsync, 191c rule included). Until now the non-Direct branch answered Unchanged.
+    2. Extension: extend the resolver's unfile branch. UnfiledCommunicationFacts carries what was read before the change, through RecordOwnershipContext.UnfiledFrom and RowBeforeChange.Unfiled, so the first decision and SettleOwnerAsync give the same answer. No new service, endpoint, column or DI registration.
+    3. Cost of doing nothing: an email or message unfiled from a matter stays owned by that matter's team. The matter team keeps access to a record it no longer has anything to do with, and the creator's own team has none (#2722).
+  </component-justification>
+
+  <steps mode="directional">
+    1. (197a-1) Read the facts before the change (ReadUnfiledFactsAsync). Do one committed read per direct parent being left: owning unit; sprk_issecure on matter, project and work assignment (an empty flag fails closed); sprk_accesspermission where the table carries it. Apply the same check to the message itself. Take the creator from sprk_createdbyperson only, never createdby. Any read failure → Keep.
+    2. (197a-1) Decide in one place (NonDirectUnfileAnswerAsync): Keep, or no creator → Unchanged, logged with ids only (EventId 5420). Otherwise ResolveFromUserAsync on the creator. Refused, or an exception → Unchanged, logged with ids only.
+    3. (197a-1) Carry the facts to SettleOwnerAsync and ConfirmUnconditionalSecureWriteAsync. The regarding-only clear (path a) now settles too.
+    4. (197a-1) Tests: must-fire and must-not-fire per the owner's list; extend RefileWriterUnfileRuleGuardTests with one decision point, one facts maker, and settle carries the facts, plus controls. Perturbation-check.
+    5. (197a-2, after 197a-1 merges, branch task/uac-197a2) In the #2468 branch of ResolveOwnerOnlyAsync, skip the demotion only when the communication's owner is positively recognized as the Direct message owner team, by the recognition the Direct-parent rule uses. Tests: a document linked only through sprk_relatedcommunication follows its unfiled Direct message. Must-not-fire: a communication owned by a non-Direct team stays demoted. Add a guard pinning the recognition.
+  </steps>
+
+  <acceptance-criteria>
+    - A normal non-secure unfile (both paths) is written to the creator's business-unit team by the settle's conditional write; an External Collaborators creator follows the 191c rule.
+    - A communication still linked to a record after the change (an ownership parent or a typed regarding lookup) is not unfiled and keeps its owner. A settle that fails after a regarding-only clear keeps the former owner and does not refuse the written change.
+    - Keep the former owner, with no owner write and no refusal, when: the message leaves a Secure, Restricted or Secure-unit-owned parent; the message is itself Secure-unit owned, flagged secure, Restricted, or has no readable owning unit; a parent read faults or returns nothing; sprk_createdbyperson is empty; or the creator is disabled, unknown, or external with no customer unit.
+    - The unfile codes 409 record_owner_direct_team_unusable and 503 record_owner_direct_team_unavailable are unchanged; the Direct unfile tests pass unchanged except for one renamed test.
+    - The guard fails when the settle drops the facts (perturbation recorded in the notes).
+    - Negative: no new endpoint, column, DI registration or package; createdby is never read for the creator.
+  </acceptance-criteria>
+
+  <constraints>
+    - CLAUDE.md §9-§11, §10 (publish delta), ADR-028, ADR-002 (no plugins; the BFF owns the invariant).
+    - Fail closed: any doubt keeps the former owner.
+    - Don't edit 197b's files. Don't merge, deploy or touch Dataverse.
+  </constraints>
+</task>

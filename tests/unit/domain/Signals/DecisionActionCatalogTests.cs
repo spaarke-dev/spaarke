@@ -67,8 +67,28 @@ public class DecisionActionCatalogTests
         DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
 
         // Task 043 added the optional outside firm (sprk_regardingorganization); still no reply-due parameter (D-56/D-20).
-        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body", "outsideFirm");
+        // Task 190 (D-222) added the optional cc and bcc.
+        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body", "cc", "bcc", "outsideFirm");
         inquiry.Parameters.Single(p => p.Code == "outsideFirm").Required.Should().BeFalse();
+    }
+
+    [Fact]
+    public void SendBudgetInquiry_DeclaresCcAndBccAsOptionalText_AndSendReminderKeepsItsParameters_Task190()
+    {
+        DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
+        DecisionActionCatalog.TryGet("send-reminder", out var reminder).Should().BeTrue();
+
+        foreach (var code in new[] { "cc", "bcc" })
+        {
+            var parameter = inquiry.Parameters.Single(p => p.Code == code);
+            parameter.Required.Should().BeFalse(code);
+            parameter.Kind.Should().Be(DecisionParameterKind.Text, code);
+        }
+
+        // Scope: the shared message parameters did not gain cc/bcc, so send-reminder (and any other user of them) is as before.
+        reminder.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body");
+        DecisionActionCatalog.All.Where(a => a.Code != "send-budget-inquiry")
+            .SelectMany(a => a.Parameters).Select(p => p.Code).Should().NotContain(["cc", "bcc"]);
     }
 
     [Fact]

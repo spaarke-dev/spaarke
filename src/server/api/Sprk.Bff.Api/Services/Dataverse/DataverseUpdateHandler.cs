@@ -18,6 +18,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly Sprk.Bff.Api.Services.Access.SecureChildReconciler _children;
     private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _shares;
     private readonly Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? _readAsPerson;
+    private readonly Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? _directOwner;
 
     /// <param name="children">#2091: the ONE step after a re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>).
     /// REQUIRED: without it a re-file into a Secure record would silently leave the row business-unit readable. Scoped, like
@@ -30,6 +31,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     /// unconditionally by CommunicationModule), through which an Optimistic update made AS a person reads the row's
     /// <c>versionnumber</c> AS that person, so a row they cannot read looks the same as a missing one. Optional: without it
     /// such an update writes nothing (fail closed); it never reads app-only for a person.</param>
+    /// <param name="directOwner">fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.AfterReparentAsync"/>). Registered by
+    /// CommunicationModule; absent, an unfiled communication keeps its owner.</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
@@ -39,8 +43,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         ILogger<DataverseUpdateHandler> logger,
         Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
         Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null,
-        Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? readAsPerson = null)
+        Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? readAsPerson = null,
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
     {
+        _directOwner = directOwner;
         _children = children ?? throw new ArgumentNullException(nameof(children));
         _shares = shares;
         _readAsPerson = readAsPerson;
@@ -201,6 +207,13 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     // #2257: as the Update Record core — a move out of a secure root (F3) is asked of the person this write
                     // runs AS; an app-only write passes no caller and is refused such a move.
                     CallerSystemUserId = impersonateSystemUserId,
+                    // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
+                    // to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722). An app-only write keeps the
+                    // acting-user rule, so with no person named it is refused as before.
+                    WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
+                        entityLogicalName, actsForAPerson: impersonateSystemUserId is not null, _directOwner),
+                    RegardingLinksSet = RecordReparent.RegardingLinksSetIn(entityLogicalName, fields),
+                    UnfileRuleColumnsWritten = RecordReparent.UnfileRuleColumnsWrittenIn(entityLogicalName, fields),
                     SecureExitCaller = secureExitCaller = impersonateSystemUserId is { } person
                         ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(person, _shares)
                         : null,
@@ -211,6 +224,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             {
                 throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
             }
+
+            // Piece 3b: an unfiled Direct message returns to the Direct team now, before the step after the re-file below.
+            if (_directOwner is not null)
+                await _directOwner.AfterReparentAsync(recordId, reparent, CancellationToken.None).ConfigureAwait(false);
 
             refiled = !reparent.ParentsUnchanged;
             refiledBy = reparent;

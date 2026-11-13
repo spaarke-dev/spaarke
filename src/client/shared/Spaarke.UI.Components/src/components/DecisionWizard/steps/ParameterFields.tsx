@@ -41,9 +41,10 @@ import {
   withValue,
 } from '../decisionDraft';
 import type { StepScope } from '../decisionDraft';
+import { lockedNoteText } from '../decisionDisplay';
 import { useDecisionItem } from '../decisionItemContext';
 import type { DecisionAction, DecisionParameter } from '../decisionWizardTypes';
-import { EMAIL_MESSAGE_CODES, EmailMessageFields } from './EmailMessageFields';
+import { EMAIL_COPY_CODES, EMAIL_MESSAGE_CODES, EmailMessageFields, declaresCopies } from './EmailMessageFields';
 
 const useStyles = makeStyles({
   form: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
@@ -58,14 +59,15 @@ const INVALID: Partial<Record<DecisionParameter['kind'], string>> = {
 };
 
 /** Shown on a step while a failed attempt pins the review: the route has seen this exact decision, so it cannot change. */
-export const LockedNote: React.FC = () => (
-  <MessageBar intent="info" data-testid="locked-note">
-    <MessageBarBody>
-      An earlier attempt to record this decision did not finish, so it cannot be changed now. Record the same decision
-      again, or close without recording.
-    </MessageBarBody>
-  </MessageBar>
-);
+export const LockedNote: React.FC = () => {
+  // Task 191 fix round 1 (F2): the way on the item offers for the attempt that pinned the review (choice, resume or repeat).
+  const { lockedBy } = useDecisionItem();
+  return (
+    <MessageBar intent="info" data-testid="locked-note">
+      <MessageBarBody>{lockedNoteText(lockedBy)}</MessageBarBody>
+    </MessageBar>
+  );
+};
 
 interface FieldProps {
   parameter: DecisionParameter;
@@ -289,7 +291,9 @@ const BooleanParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
         label={parameter.label}
         checked={checked}
         disabled={locked}
-        onChange={(_e, data) => update(d => withValue(d, scope, parameter.code, data.checked === true ? 'true' : 'false'))}
+        onChange={(_e, data) =>
+          update(d => withValue(d, scope, parameter.code, data.checked === true ? 'true' : 'false'))
+        }
       />
       {parameter.hint ? <Caption1 className={styles.prefilled}>{parameter.hint}</Caption1> : null}
     </div>
@@ -307,10 +311,12 @@ export const ParameterFields: React.FC<{ action: DecisionAction; scope: StepScop
     action.composer === 'email' &&
     !locked &&
     EMAIL_MESSAGE_CODES.every(code => action.parameters.some(p => p.code === code));
-  const fields = composed ? action.parameters.filter(p => !EMAIL_MESSAGE_CODES.includes(p.code)) : action.parameters;
+  // Task 190 (D-222): the composer's Cc and Bcc are the editor of an action's `cc` / `bcc`, so they are not separate fields too.
+  const composerCodes = declaresCopies(action) ? [...EMAIL_MESSAGE_CODES, ...EMAIL_COPY_CODES] : EMAIL_MESSAGE_CODES;
+  const fields = composed ? action.parameters.filter(p => !composerCodes.includes(p.code)) : action.parameters;
   return (
     <div className={styles.form} data-testid="parameter-fields">
-      {composed ? <EmailMessageFields scope={scope} /> : null}
+      {composed ? <EmailMessageFields scope={scope} action={action} /> : null}
       {fields.map(p =>
         p.kind === 'Person' || p.kind === 'Lookup' ? (
           <LookupParameter key={p.code} parameter={p} scope={scope} action={action} />

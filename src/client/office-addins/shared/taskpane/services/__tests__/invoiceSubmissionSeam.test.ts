@@ -8,12 +8,47 @@ import {
   applyMarkingBudget,
   buildInvoiceSubmissionInput,
   describeOverBudget,
+  describeSubmittedLine,
   isPdfAttachment,
+  NO_FIRM_REFUSAL,
   normalizeFirmInvoiceNumber,
   toInvoiceMarkingAttachments,
   toSubmissionMarks,
 } from '../invoiceSubmissionSeam';
 import { MAX_ATTACHMENT_BYTES, captureEmailContent } from '../emailContentCapture';
+
+describe('describeSubmittedLine — the firm on the banner (task 134, slice B1)', () => {
+  const SUBMISSION = {
+    submissionId: 's1',
+    statusUrl: '/x',
+    trackingNumber: 'INV-0012.1',
+    status: 'Accepted' as const,
+    message: null,
+    invoiceId: null,
+    submittedOn: '2026-11-03T14:04:38Z',
+    submittedBy: 'Ana Diaz',
+    isCorrection: false,
+  };
+
+  it('must-fire: names the firm between the tracking number and the person', () => {
+    expect(describeSubmittedLine({ ...SUBMISSION, firmName: 'Ravenscroft and Vance LLP' }, 'en-US')).toMatch(
+      /^Submitted on .+ as INV-0012\.1 for Ravenscroft and Vance LLP by Ana Diaz.$/
+    );
+  });
+
+  it('must-not-fire: with no firm name (absent, null, empty) the line is exactly as before', () => {
+    const before = describeSubmittedLine(SUBMISSION, 'en-US');
+    expect(before).toMatch(/^Submitted on .+ as INV-0012\.1 by Ana Diaz.$/);
+    expect(describeSubmittedLine({ ...SUBMISSION, firmName: null }, 'en-US')).toBe(before);
+    expect(describeSubmittedLine({ ...SUBMISSION, firmName: '' }, 'en-US')).toBe(before);
+  });
+
+  it('the firm reads on a correction line too, and without a person', () => {
+    expect(
+      describeSubmittedLine({ ...SUBMISSION, isCorrection: true, submittedBy: null, firmName: 'Firm F' }, 'en-US')
+    ).toMatch(/^A correction was submitted on .+ as INV-0012\.1 for Firm F.$/);
+  });
+});
 
 const att = (over: Partial<AttachmentInfo> & Pick<AttachmentInfo, 'id' | 'name'>): AttachmentInfo => ({
   contentType: 'application/pdf',
@@ -265,6 +300,51 @@ describe('buildInvoiceSubmissionInput', () => {
       mode: 'New',
       invoiceId: null,
     });
+  });
+
+  it.each([[''], ['   '], [null as unknown as string], [undefined as unknown as string]])(
+    'must-fire: a blank firm (%j) is refused — the input never carries a null or empty firmId',
+    blank => {
+      expect(() =>
+        buildInvoiceSubmissionInput({
+          target: { entityType: 'Matter', entityId: '6f1c0e8a-2b1d-4c7e-9a52-0d3f1b7e9c41' },
+          attachments: listed,
+          marking: { '1': 'invoice' },
+          firmId: blank,
+          firmInvoiceNumber: 'N',
+          poNumber: '',
+          mode: 'New',
+        })
+      ).toThrow(NO_FIRM_REFUSAL);
+    }
+  );
+
+  it('must-fire: a blank firm is refused for a Correction too', () => {
+    expect(() =>
+      buildInvoiceSubmissionInput({
+        target: { entityType: 'Matter', entityId: '6f1c0e8a-2b1d-4c7e-9a52-0d3f1b7e9c41' },
+        attachments: listed,
+        marking: { '1': 'invoice' },
+        firmId: '',
+        firmInvoiceNumber: 'N',
+        poNumber: '',
+        mode: 'Correction',
+        invoiceId: '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65',
+      })
+    ).toThrow(NO_FIRM_REFUSAL);
+  });
+
+  it('must-not-fire: a GUID firm is still canonicalized (braces, case)', () => {
+    const input = buildInvoiceSubmissionInput({
+      target: { entityType: 'Matter', entityId: '6f1c0e8a-2b1d-4c7e-9a52-0d3f1b7e9c41' },
+      attachments: listed,
+      marking: { '1': 'invoice' },
+      firmId: ' {8B0C6F1E-4C2A-4F7E-9A51-2F3D1C0E9B77} ',
+      firmInvoiceNumber: 'N',
+      poNumber: '',
+      mode: 'New',
+    });
+    expect(input.firmId).toBe('8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77');
   });
 
   it('Correction carries the invoice id; a PO number is kept', () => {

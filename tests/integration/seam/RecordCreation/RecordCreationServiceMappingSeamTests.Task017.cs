@@ -247,6 +247,47 @@ public sealed partial class RecordCreationServiceMappingSeamTests
             "the caller's column policy is still not asked of a system principal (FR-07)");
     }
 
+    /// <summary>
+    /// fm task 054b (K1): a system principal's create of a communication naming a BFF-owned column (its thread lookup) is
+    /// refused at step 2, before anything is asked — the typed writers own that column for every identity.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_ASystemCommunicationNamingItsThreadLookup_IsRefused_BeforeAnythingIsAsked_054b()
+    {
+        var outcome = await Service().CreateAsync(
+            SystemCommunication("sprk_communicationthread"),
+            RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.BlockedColumn);
+        outcome.Refusal.Detail.Should().Contain("sprk_communicationthread").And.Contain("set by Spaarke");
+        _journal.Should().NotContain(["owner", "create"]);
+        _creates.Should().BeEmpty();
+    }
+
+    /// <summary>Must not fire: the "for" person the server set itself (<c>sprk_sentby</c>, a server-set lookup) passes step 2.</summary>
+    [Fact]
+    public async Task CreateAsync_ASystemCommunicationWhoseSenderTheServerSet_PassesStep2_054b()
+    {
+        var request = SystemCommunication("sprk_sentby") with
+        {
+            ServerSetLookupColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_sentby" },
+        };
+
+        var outcome = await Service().CreateAsync(
+            request, RecordCreationPrincipal.ForSystem(RecordRequester.Of(Caller, CallerOid)), CancellationToken.None);
+
+        (outcome.Refusal?.Detail ?? string.Empty).Should().NotContain("set by Spaarke (it decides who may read a message)");
+    }
+
+    private static RecordCreationRequest SystemCommunication(string column) =>
+        new("sprk_communication", new RecordCreationPayload.Mapped(new DataverseWriteItemMapper.MappedItem(
+            JsonSerializer.Serialize(new Dictionary<string, object?> { ["sprk_subject"] = "Re: invoice", [column] = null }),
+            new[] { "sprk_subject", column })))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+
     private async Task<RecordCreationRequest> SystemDocument(params (string Column, object Value)[] extra)
     {
         var body = new Dictionary<string, object?>

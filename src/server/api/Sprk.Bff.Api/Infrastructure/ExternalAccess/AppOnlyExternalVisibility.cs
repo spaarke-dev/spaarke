@@ -45,6 +45,27 @@ public sealed class ExternalRowVisibility
     /// a row that does not come back, a closure that reaches no root), rather than because a rule hides it.</summary>
     public bool IsUndecided(string table, Guid id) => _result.For(table, id).Verdict == ExternalVisibilityVerdict.Undecided;
 
+    /// <summary>uac-r2 task 191g: whether a not-visible row is not visible only for now — the decision faulted, or the row is
+    /// Undecided for a reason a later read may answer (task 191c's transient set: a failed read, a row not found this time, an
+    /// undecided parent, ...) — rather than because a rule hides it or its filing is structurally unresolvable. A caller that
+    /// REVOKES on "not visible" keeps on this answer and retries (round 70: remove only on a positive answer).</summary>
+    public bool MayAnswerLater(string table, Guid id) =>
+        Faulted || (_result.For(table, id) is { Verdict: ExternalVisibilityVerdict.Undecided } decision
+                    && Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer.IsTransient(decision.Reason));
+
+    /// <summary>
+    /// uac-r2 task 197b: whether the row is not visible ONLY because its closure reaches no root
+    /// (<see cref="ExternalVisibilityReason.NoRoot"/>): no rule hides it, nothing it reached is undecidable, and the decision did not
+    /// fault. The predicate reports <c>NoRoot</c> only when every finding of the row's closure is Visible
+    /// (<c>ExternalVisibility.Run.Combine</c>), so this is never <c>true</c> for a Hidden row or for any other Undecided reason.
+    /// <para>It is NOT "visible". Every caller keeps it hidden except one bounded by the owner (uac-r2 197b, design §5): the
+    /// participants of a message positively owned by the Direct-message owner team, which is by definition filed under no record
+    /// (<c>DirectMessageParticipantShares.DecideForDirectParticipantsAsync</c>).</para>
+    /// </summary>
+    public bool UndecidedOnlyForNoRoot(string table, Guid id) =>
+        !Faulted
+        && _result.For(table, id) is { Verdict: ExternalVisibilityVerdict.Undecided, Reason: ExternalVisibilityReason.NoRoot };
+
     /// <summary>The not-visible count per reason code for <paramref name="rows"/> (one log line; codes and counts only, ADR-015).</summary>
     public string Summary(IEnumerable<(string Table, Guid Id)> rows) =>
         ExternalVisibilityResult.Summary(rows.Select(r => _result.For(r.Table, r.Id)));

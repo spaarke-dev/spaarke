@@ -423,6 +423,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
               outsideCounselValue={ocVal}
               onOutsideCounselChange={handleOutsideCounselChange}
               onSearchOutsideCounsel={handleSearchOrganizations}
+              navigationService={navigationService}
             />
           );
         },
@@ -440,6 +441,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
       handleAttorneyChange,
       handleParalegalChange,
       handleOutsideCounselChange,
+      navigationService,
     ]
   );
 

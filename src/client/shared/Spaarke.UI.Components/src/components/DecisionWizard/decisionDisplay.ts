@@ -5,6 +5,7 @@
  * Task: spaarke-ontology-platform-r1, task 058.
  */
 
+import { canRecordWithoutSending } from './decisionRecording';
 import type {
   DecisionAction,
   DecisionCommitFailure,
@@ -114,6 +115,10 @@ export function joinLabels(labels: readonly string[]): string {
 
 /** The heading of a failed attempt: what happened to the decision, not the status line of the request. */
 export function failureHeading(failure: DecisionCommitFailure): string {
+  // Task 191: a stored failure returned again (409 + replayed) is the same failure, not a review in progress.
+  if (failure.httpStatus === 409 && failure.replayed) return 'The decision was not recorded';
+  if (failure.reasonCode === SIGNAL_NOT_OPEN) return 'This item is no longer open';
+  if (failure.reasonCode === REVIEW_UNFINISHED) return 'An earlier decision on this item is unfinished';
   switch (failure.httpStatus) {
     case 0:
       return 'The decision may not have been recorded';
@@ -132,8 +137,36 @@ export function failureHeading(failure: DecisionCommitFailure): string {
   }
 }
 
+const SIGNAL_NOT_OPEN = 'ontology.decision.signal_not_open';
+const REVIEW_UNFINISHED = 'ontology.decision.review_unfinished';
+
+/**
+ * Task 191 fix round 1 (F2): what a step says while the review is pinned by `pinning`, the failure that pinned it. It names the way
+ * on that the item actually offers: the send choice, Retry recording (which runs only what did not land), or recording it again.
+ */
+export function lockedNoteText(pinning: DecisionCommitFailure | null): string {
+  const start = 'An earlier attempt to record this decision did not finish, so it cannot be changed now.';
+  // Only an attempt whose writes landed is offered again when the item is reopened (the plan read returns it).
+  const later =
+    pinning && pinning.resumable && pinning.landed.length > 0
+      ? ' You can also close and finish it later from this item.'
+      : '';
+  if (pinning?.sendChoiceRequired && pinning.resumable)
+    return `${start} The inquiry email may have been sent: check Sent Items, then choose Send again or Record without sending on the last step.${later}`;
+  if (pinning?.resumable && canRecordWithoutSending(pinning))
+    return `${start} The inquiry email was not sent. Retry recording sends it without repeating what was already carried out, or Record without sending records the decision without it.${later}`;
+  if (pinning?.resumable)
+    return `${start} Retry recording finishes it without repeating what was already carried out.${later}`;
+  return `${start} Try recording it again, or close without recording.`;
+}
+
+/** Task 191 (D-223): what the person reads when the inquiry email may have been sent, before choosing. */
+export const SEND_CHOICE_MESSAGE =
+  'The inquiry email may have been sent: the earlier attempt could not tell. Check Sent Items in Outlook, then choose Send again or Record without sending.';
+
 /** What to tell the person; the route's own sentence is used only when it has no code to translate. */
 export function failureMessage(failure: DecisionCommitFailure): string {
+  if (failure.sendChoiceRequired && failure.resumable) return SEND_CHOICE_MESSAGE;
   switch (failure.reasonCode) {
     case 'ontology.decision.review_changed':
       return 'This decision was changed after an earlier attempt that may have been partly carried out, so it was not recorded again. Put your choices back as they were and try again, or close without recording.';
@@ -141,8 +174,15 @@ export function failureMessage(failure: DecisionCommitFailure): string {
       return 'The earlier attempt cannot be continued. Nothing more was recorded.';
     case 'ontology.decision.review_in_progress':
       return 'This decision is already being recorded. Wait a moment, then try again.';
+    case SIGNAL_NOT_OPEN:
+      return 'This item was closed in the meantime, so the decision was not recorded on it. Anything listed as already carried out stands.';
+    case REVIEW_UNFINISHED:
+      return failure.detail && failure.detail !== failure.title
+        ? failure.detail
+        : 'An earlier decision on this item is unfinished. Close this and open the item again to finish it. Nothing was done.';
   }
-  if (failure.httpStatus === 409) return 'This decision is already being recorded. Wait a moment, then try again.';
+  if (failure.httpStatus === 409 && !failure.replayed)
+    return 'This decision is already being recorded. Wait a moment, then try again.';
   if (failure.httpStatus === 503) return 'Recording could not start. Nothing was written. Try again in a moment.';
   if (failure.httpStatus === 0)
     return 'The request could not be completed, so it is not known whether anything was written.';
@@ -190,6 +230,9 @@ const WARNING_TEXT: Record<string, string> = {
   signal_changed: 'An item kept changing while it was being closed, so it was left as it is.',
   signal_close_failed: 'An item could not be closed and was left open.',
   signal_subject_missing: 'An item refers to a record that no longer exists, so it was left open.',
+  // Task 191: the item had been closed automatically after the earlier attempt; this decision closed it again (Signal and record agree).
+  reclosed_after_system_resolution:
+    'This item had been closed automatically after the earlier attempt; it is now closed with this decision.',
   // Task 176 (D-216): the inquiry email went out; its copy was not filed in the matter's documents.
   inquiry_email_not_archived: 'The inquiry email was sent, but a copy of it could not be saved to the matter.',
   // Task 168 (D-194): the task was created and the decision recorded; only the email did not go.

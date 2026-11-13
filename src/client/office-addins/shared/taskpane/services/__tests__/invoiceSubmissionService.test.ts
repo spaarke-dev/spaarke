@@ -9,6 +9,7 @@ import {
   FROM_EMAIL_ROUTE,
   loadCorrectionPrefill,
   loadInvoiceFirms,
+  loadPreviousSubmission,
   pollSubmission,
   submitInvoiceFromEmail,
   type InvoiceEmailSource,
@@ -244,6 +245,72 @@ describe('submitInvoiceFromEmail — the §2 request', () => {
       contentType: 'text/csv',
       mark: 'DontSave',
     });
+  });
+});
+
+describe('submitInvoiceFromEmail — the firm on the wire (task 134: no invoice without a firm)', () => {
+  const FIRM = '8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77';
+
+  it('contract: a firm-chosen NEW invoice sends exactly the §2 body keys with the firm as a string id', async () => {
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED));
+    await submitInvoiceFromEmail(INPUT, { config, email: emailSource(), idempotencyKey: 'action-1' });
+    const body = sentBody();
+    expect(Object.keys(body).sort()).toEqual(
+      ['email', 'firmId', 'firmInvoiceNumber', 'invoiceId', 'marks', 'mode', 'poNumber', 'targetEntity'].sort()
+    );
+    expect(body).toMatchObject({ firmId: FIRM, mode: 'New', invoiceId: null });
+    expect(typeof body.firmId).toBe('string');
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).body).not.toContain('"firmId":null');
+  });
+
+  it('contract: a CORRECTION sends the same keys, the invoice id and the invoice firm as a string id', async () => {
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED));
+    await submitInvoiceFromEmail(
+      { ...INPUT, mode: 'Correction', invoiceId: '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65' },
+      { config, email: emailSource(), idempotencyKey: 'action-2' }
+    );
+    const body = sentBody();
+    expect(Object.keys(body).sort()).toEqual(
+      ['email', 'firmId', 'firmInvoiceNumber', 'invoiceId', 'marks', 'mode', 'poNumber', 'targetEntity'].sort()
+    );
+    expect(body).toMatchObject({ firmId: FIRM, mode: 'Correction', invoiceId: '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65' });
+  });
+});
+
+describe('loadPreviousSubmission — the firm on the banner (task 134, slice B1)', () => {
+  const MESSAGE_ID = '<CA+abc123@mail.firm.example>';
+  const BODY = {
+    submissionId: '5a1a526f-0000-4000-8000-000000000001',
+    trackingNumber: 'INV-0012.1',
+    status: 'Accepted',
+    invoiceId: '3d3009f7-0000-4000-8000-000000000002',
+    submittedOn: '2026-11-03T14:04:38Z',
+    submittedBy: { name: 'Ana Diaz' },
+    isCorrection: false,
+  };
+  const load = async (over: Record<string, unknown>) => {
+    mockFetch.mockResolvedValueOnce(res(200, { ...BODY, ...over }));
+    return loadPreviousSubmission(MESSAGE_ID, config);
+  };
+
+  it('must-fire: a firm { id, name } on the body is read as the firm name', async () => {
+    const previous = await load({
+      firm: { id: '8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77', name: ' Ravenscroft and Vance LLP ' },
+    });
+    expect(previous).toMatchObject({ trackingNumber: 'INV-0012.1', firmName: 'Ravenscroft and Vance LLP' });
+  });
+
+  it.each([
+    ['absent', {}],
+    ['null', { firm: null }],
+    ['a blank name', { firm: { id: 'x', name: '   ' } }],
+    ['no name', { firm: { id: 'x' } }],
+    ['not an object', { firm: 'Ravenscroft' }],
+  ])('must-not-fire: a firm that is %s adds no firm name and the body is still read', async (_label, over) => {
+    const previous = await load(over);
+    expect(previous).not.toBeNull();
+    expect(previous).toMatchObject({ trackingNumber: 'INV-0012.1', status: 'Accepted' });
+    expect(previous).not.toHaveProperty('firmName');
   });
 });
 
@@ -544,7 +611,11 @@ describe('loadCorrectionPrefill (§10, ebilling 097e)', () => {
 
   it('must-not-fire: a body missing what a correction keeps is not used', async () => {
     for (const bad of [
-      { ...PREFILL, firm: null },
+      { ...PREFILL, firm: { id: 5, name: 'Morrison Foerster' } },
+      { ...PREFILL, firm: { id: 'f1' } },
+      { ...PREFILL, firm: { name: 'Morrison Foerster' } },
+      { ...PREFILL, firm: { id: '', name: 'Morrison Foerster' } },
+      { ...PREFILL, firm: 'f1' },
       { ...PREFILL, coreRecord: { ...PREFILL.coreRecord, entityType: 'Account' } },
       { ...PREFILL, firmInvoiceNumber: undefined },
       { ...PREFILL, canCorrect: 'yes' },
@@ -553,6 +624,15 @@ describe('loadCorrectionPrefill (§10, ebilling 097e)', () => {
       mockFetch.mockResolvedValueOnce(res(200, bad));
       await expect(loadCorrectionPrefill(INVOICE_ID, config)).rejects.toThrow(/couldn't be read/);
     }
+  });
+
+  it('EB-D-185 must-fire: an invoice with no firm ("firm": null, or no firm at all) reads as firm: null', async () => {
+    mockFetch.mockResolvedValueOnce(res(200, { ...PREFILL, firm: null }));
+    expect(await loadCorrectionPrefill(INVOICE_ID, config)).toEqual({ ...PREFILL, firm: null });
+
+    const { firm: _omitted, ...withoutFirm } = PREFILL;
+    mockFetch.mockResolvedValueOnce(res(200, withoutFirm));
+    expect(await loadCorrectionPrefill(INVOICE_ID, config)).toEqual({ ...PREFILL, firm: null });
   });
 
   it('the uniform 404, ebilling.disabled, another 503 and no answer each have their sentence', async () => {
@@ -910,6 +990,16 @@ describe('review fixes (task 133) — what the handler says after the 202', () =
       replacedBy: { trackingNumber: 'INV-4711.2' },
     });
     expect(outcome).toMatchObject({ kind: 'success', message: HELD_FOR_REVIEW_MESSAGE });
+  });
+
+  it('EB-D-185 must-fire: Accepted with firm_missing is the "submitted without a firm" sentence, not "held"', async () => {
+    const outcome = await run({ status: 'Accepted', outcomeReasonCode: 'ebilling.submission.firm_missing' });
+    expect(outcome).toEqual({
+      kind: 'success',
+      trackingNumber: 'INV-4711.1',
+      message: 'Submitted without a firm. A reviewer will add the firm before approval.',
+    });
+    expect(JSON.stringify(outcome)).not.toContain(HELD_FOR_REVIEW_MESSAGE);
   });
 
   it('must-not-fire: Accepted with no code has no message', async () => {

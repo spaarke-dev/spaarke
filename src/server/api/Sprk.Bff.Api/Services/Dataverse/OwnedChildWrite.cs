@@ -1453,7 +1453,8 @@ internal static class OwnedChildWrite
         DataverseWriteItemMapper.MappedItem item,
         Guid? callerObjectId,
         CancellationToken ct,
-        IGenericEntityService? appOnlyEntities = null)
+        IGenericEntityService? appOnlyEntities = null,
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
     {
         // The core record pair is fixed after create on BFF update paths (RecordTableRule.FixedAfterCreateColumns): asked on the
         // item's shape alone, before any read or write, so the re-file core holds it for any table a caller passes. Nothing written.
@@ -1581,10 +1582,19 @@ internal static class OwnedChildWrite
                     ParentChanges = changes,
                     CallerObjectId = callerObjectId,
                     CallerSystemUserId = me.SystemUserId,
-                    // E1: a communication filed under nothing keeps its creator.
-                    WhenUnfiled = string.Equals(table, "sprk_communication", StringComparison.OrdinalIgnoreCase)
-                        ? UnfiledOwnership.KeepCreator
-                        : UnfiledOwnership.ActingUserTeam,
+                    // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
+                    // to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722).
+                    WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
+                        table, actsForAPerson: true, directOwner),
+                    // Piece 3b: the typed regarding lookups the update sets that file nothing (a contact, an account): a message
+                    // still linked to one after the update is not unfiled.
+                    RegardingLinksSet = RecordReparent.RegardingLinksSetIn(
+                        table,
+                        item.Lookups.Select(l => KeyValuePair.Create(
+                            l.Column, (object?)new Microsoft.Xrm.Sdk.EntityReference(l.RelatedTable, l.RecordId)))),
+                    // Piece 3b: and every other column the unfile rule reads that the update writes (its type, its stamped pair),
+                    // so the rule judges the row as the update leaves it.
+                    UnfileRuleColumnsWritten = RecordReparent.UnfileRuleColumnsWrittenIn(table, WrittenFieldsOf(item)),
                     SecureExitCaller = secureExitCaller,
                 },
                 async token =>
@@ -1596,6 +1606,10 @@ internal static class OwnedChildWrite
                         throw new CallerWriteFailedException(response);
                 },
                 ct).ConfigureAwait(false);
+
+            // Piece 3b: an unfiled Direct message returns to the Direct team now, before the host's step after the re-file.
+            if (directOwner is not null && !resolution.IsRefused)
+                await directOwner.AfterReparentAsync(recordId, resolution, CancellationToken.None).ConfigureAwait(false);
 
             return resolution switch
             {
@@ -1615,6 +1629,40 @@ internal static class OwnedChildWrite
             // Privilege-denied update surfaces the USER's own access error — never escalates; no owner was assigned.
             return new RefileOutcome { ClientFailure = failed.Response };
         }
+    }
+
+    /// <summary>
+    /// fm task 054 piece 3b: every column a mapped update writes, as a generic payload: each lookup it binds as an
+    /// <see cref="Microsoft.Xrm.Sdk.EntityReference"/>, each column it clears as <c>null</c>, and each other column of its body as
+    /// the body holds it. The input of <see cref="RecordReparent.UnfileRuleColumnsWrittenIn{TValue}"/>. A body that is not a JSON
+    /// object adds no plain column.
+    /// </summary>
+    internal static IEnumerable<KeyValuePair<string, object?>> WrittenFieldsOf(DataverseWriteItemMapper.MappedItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var fields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var body = System.Text.Json.JsonDocument.Parse(item.JsonBody);
+            if (body.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                foreach (var property in body.RootElement.EnumerateObject())
+                {
+                    if (!property.Name.EndsWith("@odata.bind", StringComparison.OrdinalIgnoreCase))
+                        fields[property.Name] = property.Value.Clone();
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Not a JSON object: only the lookups and clears the mapper read are written columns here.
+        }
+
+        foreach (var column in item.ClearedColumns)
+            fields[column] = null;
+        foreach (var lookup in item.Lookups)
+            fields[lookup.Column] = new Microsoft.Xrm.Sdk.EntityReference(lookup.RelatedTable, lookup.RecordId);
+        return fields;
     }
 
     // ── ebilling-r1 FR-05: the invoice-family guard, invoked by the write core (ISS-010 / #1973, unified-access-control-r2) ──

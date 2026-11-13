@@ -208,6 +208,45 @@ public enum UnfiledOwnership
     /// application-owned row. A team owner would break all three. A FILED communication never takes this branch.
     /// </summary>
     KeepCreator = 1,
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 054 piece 3b: the unfile of a <c>sprk_communication</c> by a re-file writer, chosen by
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor"/>. A Direct message with a
+    /// valid stamped pair in a thread typed Direct (not the per-user master thread) returns to the Direct message owner team: the
+    /// re-file decides it before the write (<see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.DecideUnfileAsync"/>)
+    /// and refuses the unfile when that team cannot be confirmed (<see cref="RecordOwnerRefusal.DirectTeamUnusable"/>,
+    /// <see cref="RecordOwnerRefusal.DirectTeamUnavailable"/>); the writer moves it after the write
+    /// (<see cref="RecordOwnerResolution.DirectUnfile"/>). Any other communication (uac-r2 task 197a, #2722, owner decision
+    /// 2026-11-12) moves to its creator's business-unit team (D-11), unless it leaves a Secure or Restricted record, is itself held
+    /// in the Secure Record unit, Secure or Restricted, its creator is not recorded or cannot be resolved, or a fact cannot be
+    /// read: then it keeps its former owner (round 87, a re-file never loosens). Outside a re-file it answers as
+    /// <see cref="KeepCreator"/>.
+    /// </summary>
+    UnfiledCommunication = 2,
+}
+
+/// <summary>
+/// uac-r2 task 197a (#2722): what a re-file read, BEFORE the change, about a communication it leaves filed under nothing that is
+/// not an eligible Direct message (<see cref="RecordOwnershipContext.UnfiledFrom"/>). <see cref="KeepReason"/> set: the message
+/// keeps its former owner. Otherwise <see cref="CreatorSystemUserId"/> is its recorded creator, whose business-unit team owns it.
+/// </summary>
+/// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="RecordOwnershipContext"/> carries every other input
+/// of the owner question, and <c>RowBeforeChange</c> what a re-file read before its change. (2) Extension — one internal record
+/// carried on both, so the decision before the write and the re-derivation after it (<c>SettleOwnerAsync</c>) take the same facts;
+/// no new type of answer, no new reader of the creator. (3) Cost of doing nothing — the settle re-derives the owner from the row's
+/// parents alone; with none it would answer Unchanged and the creator's team would never be written (#2722 stays open).</remarks>
+internal sealed record UnfiledCommunicationFacts(Guid CommunicationId, Guid? CreatorSystemUserId, string? KeepReason)
+{
+    /// <summary>The message keeps its former owner, for <paramref name="reason"/> (ids and fact names only).</summary>
+    public static UnfiledCommunicationFacts Keep(Guid communicationId, string reason) => new(communicationId, null, reason);
+
+    /// <summary>The message moves to <paramref name="creatorSystemUserId"/>'s business-unit team.</summary>
+    public static UnfiledCommunicationFacts ToCreator(Guid communicationId, Guid creatorSystemUserId) =>
+        new(communicationId, creatorSystemUserId, null);
+
+    /// <summary>The facts say the message moves to its creator's team (no keep reason, a creator recorded). Members after the decision
+    /// ask this, never the creator id: only <c>NonDirectUnfileAnswerAsync</c> reads the creator (the 197a guard).</summary>
+    public bool MovesToCreator => KeepReason is null && CreatorSystemUserId is { } creator && creator != Guid.Empty;
 }
 
 /// <summary>
@@ -319,6 +358,15 @@ public sealed record RecordOwnershipContext
 
     /// <summary>What happens when no parent at all is named. Default: the acting user's team (I-6).</summary>
     public UnfiledOwnership WhenUnfiled { get; init; } = UnfiledOwnership.ActingUserTeam;
+
+    /// <summary>
+    /// uac-r2 task 197a (#2722): what a re-file read, BEFORE the change, about the communication it unfiles — whether it leaves
+    /// a Secure or Restricted record (or is itself held there) and who created it. Set only by
+    /// <see cref="RecordOwnershipResolver.ReparentAsync"/> for <see cref="UnfiledOwnership.UnfiledCommunication"/>, on the first
+    /// decision and on every re-derivation after the write, so both reach the same answer. <c>null</c> everywhere else: an
+    /// unfiled communication then keeps its owner.
+    /// </summary>
+    internal UnfiledCommunicationFacts? UnfiledFrom { get; init; }
 
     /// <summary>
     /// The PERSON who asked for the row, when the BFF creates it as the application (task 146 c1-r1, owner round 13 item 9:
@@ -1091,6 +1139,205 @@ public sealed record RecordReparent
     public Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller { get; init; }
 
     /// <summary>
+    /// fm task 054 piece 3b: the typed regarding lookups (<see cref="Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap"/>)
+    /// the change SETS onto a table that is no ownership parent (an account, a contact, an organization), read from the payload by
+    /// <see cref="RegardingLinksSetIn{TValue}"/>. They decide no owner. The unfile rule
+    /// (<see cref="UnfiledOwnership.UnfiledCommunication"/>) judges the row as it will be after the change
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange"/>): a communication still
+    /// linked to a record after the change is not unfiled.
+    /// </summary>
+    public IReadOnlyDictionary<string, EntityReference> RegardingLinksSet { get; init; } =
+        new Dictionary<string, EntityReference>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// fm task 054 piece 3b: every typed regarding lookup of a communication that <paramref name="fields"/> sets onto a table that is
+    /// no ownership parent, keyed by its column (<c>@odata.bind</c> and <c>_x_value</c> spellings normalized), as an
+    /// <see cref="EntityReference"/> value or an <c>@odata.bind</c> naming one row of its target. Empty for any other table. A bind
+    /// that names no row of the lookup's target is left out (Dataverse refuses it). The ONE reader every re-file writer passes to
+    /// <see cref="RegardingLinksSet"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, EntityReference> RegardingLinksSetIn<TValue>(
+        string entityLogicalName, IEnumerable<KeyValuePair<string, TValue>> fields)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        ArgumentNullException.ThrowIfNull(fields);
+        var links = new Dictionary<string, EntityReference>(StringComparer.OrdinalIgnoreCase);
+        if (!RecordThreadFiling.AppliesTo(entityLogicalName.Trim().ToLowerInvariant()))
+            return links;
+
+        foreach (var (key, raw) in fields)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
+            var target = Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.All
+                .FirstOrDefault(entry => string.Equals(entry.RegardingField, column, StringComparison.OrdinalIgnoreCase))
+                .EntityLogicalName;
+            if (target is null || RecordOwnershipResolver.IsOwnershipParent(target))
+                continue;
+
+            var id = raw switch
+            {
+                EntityReference set when set.Id != Guid.Empty => set.Id,
+                _ when key.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase) => LineageBoundIdOf(target, raw),
+                _ => null,
+            };
+            if (id is { } linked)
+                links[column] = new EntityReference(target, linked);
+        }
+
+        return links;
+    }
+
+    /// <summary>
+    /// fm task 054 piece 3b: the other columns of a communication the unfile rule reads that the change WRITES: its type
+    /// (<c>sprk_communicationtype</c>) and its stamped pair (<c>sprk_sentby</c>, <c>sprk_directrecipient</c>), read from the
+    /// payload by <see cref="UnfileRuleColumnsWrittenIn{TValue}"/>. The unfile rule judges the row as the change leaves it
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange"/>), so the judgement made
+    /// before the write is the one made of the row read back after it.
+    /// </summary>
+    public IReadOnlyDictionary<string, object?> UnfileRuleColumnsWritten { get; init; } =
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// fm task 054 piece 3b: every column of a communication the unfile rule reads, other than its record links and its thread,
+    /// that <paramref name="fields"/> writes, keyed by its column (<c>@odata.bind</c> and <c>_x_value</c> spellings normalized):
+    /// the type as an <see cref="OptionSetValue"/>, a pair column as an <see cref="EntityReference"/> to a systemuser, and
+    /// <c>null</c> for a column the change clears or writes in a shape that names no value of that kind (the rule then reads the
+    /// row as not holding it). Empty for any other table. The ONE reader every re-file writer passes to
+    /// <see cref="UnfileRuleColumnsWritten"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, object?> UnfileRuleColumnsWrittenIn<TValue>(
+        string entityLogicalName, IEnumerable<KeyValuePair<string, TValue>> fields)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        ArgumentNullException.ThrowIfNull(fields);
+        var written = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!RecordThreadFiling.AppliesTo(entityLogicalName.Trim().ToLowerInvariant()))
+            return written;
+
+        foreach (var (key, raw) in fields)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
+            object? value = raw is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined }
+                ? null
+                : raw;
+            if (string.Equals(column, CommunicationTypeColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                written[column] = OptionValueOf(value) is { } option ? new OptionSetValue(option) : null;
+            }
+            else if (string.Equals(column, Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares.SentByColumn, StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(column, Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares.DirectRecipientColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                written[column] = SystemUserOf(value) is { } user ? new EntityReference(SystemUserTable, user) : null;
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    /// fm task 054 piece 3b: whether the change clears a typed regarding lookup of a communication
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap"/>) that <paramref name="current"/> (the row as read
+    /// before the change) holds: a <c>null</c> or empty reference in <see cref="ParentChanges"/> for a column that names a row
+    /// before the change. Clearing the last link a message holds unfiles it even when the link files it under no ownership parent.
+    /// Setting a link never unfiles, and a clear of a column the row does not hold changes nothing.
+    /// </summary>
+    internal bool ChangesARegardingLink(Entity current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        return RecordThreadFiling.AppliesTo(EntityLogicalName?.Trim().ToLowerInvariant())
+            && ParentChanges.Any(change =>
+                (change.Value is null || change.Value.Id == Guid.Empty)
+                && IsRegardingColumn(change.Key)
+                && current.GetAttributeValue<EntityReference>(
+                        Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(change.Key)) is { } held
+                && held.Id != Guid.Empty);
+    }
+
+    /// <summary>fm task 054 piece 3b: whether <paramref name="column"/> (any spelling) is a typed regarding lookup of a
+    /// communication.</summary>
+    internal static bool IsRegardingColumn(string? column) =>
+        !string.IsNullOrWhiteSpace(column)
+        && Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.AllRegardingFields.Contains(
+            Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(column), StringComparer.OrdinalIgnoreCase);
+
+    private const string CommunicationTypeColumn = "sprk_communicationtype";
+    private const string SystemUserTable = "systemuser";
+
+    /// <summary>An option value as a payload carries one — an <see cref="OptionSetValue"/>, any CLR number, a JSON number, or a
+    /// numeric string (plain or in a JSON string) — as its integer value; <c>null</c> for anything that is not a whole number in
+    /// range.</summary>
+    private static int? OptionValueOf(object? value) => value switch
+    {
+        OptionSetValue option => option.Value,
+        int number => number,
+        long number => IntegerOf((decimal)number),
+        short number => number,
+        byte number => number,
+        double number => IntegerOf(number),
+        // A float cannot hold an option value such as 100000004 exactly, so it reads as not set.
+        decimal number => IntegerOf(number),
+        string text => OptionValueOfText(text),
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Number } element =>
+            element.TryGetInt32(out var parsed) ? parsed
+            : element.TryGetDecimal(out var exact) ? IntegerOf(exact)
+            : element.TryGetDouble(out var approximate) ? IntegerOf(approximate)
+            : null,
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => OptionValueOfText(element.GetString()),
+        _ => null,
+    };
+
+    private static int? OptionValueOfText(string? text)
+    {
+        var trimmed = text?.Trim();
+        if (int.TryParse(trimmed, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+        return decimal.TryParse(trimmed, System.Globalization.NumberStyles.Integer | System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var number)
+            ? IntegerOf(number)
+            : null;
+    }
+
+    private static int? IntegerOf(decimal number) =>
+        decimal.Truncate(number) == number && number is >= int.MinValue and <= int.MaxValue ? (int)number : null;
+
+    private static int? IntegerOf(double number) =>
+        double.IsFinite(number) && Math.Truncate(number) == number && number is >= int.MinValue and <= int.MaxValue ? (int)number : null;
+
+    /// <summary>A systemuser a payload names: an <see cref="EntityReference"/> to one, or a bind
+    /// (<c>/systemusers(&lt;id&gt;)</c>, relative or absolute); otherwise <c>null</c>.</summary>
+    private static Guid? SystemUserOf(object? value)
+    {
+        if (value is EntityReference reference)
+        {
+            return string.Equals(reference.LogicalName, SystemUserTable, StringComparison.OrdinalIgnoreCase) && reference.Id != Guid.Empty
+                ? reference.Id
+                : null;
+        }
+
+        var path = (value switch
+        {
+            string text => text,
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => element.GetString(),
+            _ => null,
+        })?.Trim();
+        if (path is null)
+            return null;
+
+        var segment = path[(path.LastIndexOf('/') + 1)..];
+        var open = segment.IndexOf('(');
+        return open > 0 && segment.EndsWith(')')
+               && string.Equals(segment[..open], "systemusers", StringComparison.OrdinalIgnoreCase)
+               && Guid.TryParse(segment[(open + 1)..^1], out var id) && id != Guid.Empty
+            ? id
+            : null;
+    }
+
+    /// <summary>
     /// The parent changes as <see cref="EntityReference"/> values from an update payload: every
     /// <see cref="EntityReference"/> value whose type is an ownership parent. A payload that names no parent yields
     /// an empty map — the caller then has no reparent to do.
@@ -1189,10 +1436,13 @@ public sealed record RecordReparent
         var table = entityLogicalName.Trim().ToLowerInvariant();
         // #2143 round 7c: a message's thread set or cleared re-files it (IsThreadFilingColumn).
         var threadFiles = RecordThreadFiling.AppliesTo(table);
+        // fm task 054 piece 3b: a message's typed regarding lookup cleared may unfile it (its last link), even when the link files
+        // it under no ownership parent, so the writer reads isolation before the write and the step after a re-file can run.
         return lookupTargets.Any(RecordOwnershipResolver.IsOwnershipParent)
             || (threadFiles && lookupTargets.Any(t => string.Equals(t, RecordThreadFiling.ThreadTable, StringComparison.OrdinalIgnoreCase)))
             || clearedColumns.Any(c => FilingParentOf(table, Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(c)) is not null
-                                       || IsThreadFilingColumn(table, c));
+                                       || IsThreadFilingColumn(table, c)
+                                       || (threadFiles && IsRegardingColumn(c)));
     }
 
     /// <summary>
@@ -1466,6 +1716,25 @@ public static class RecordOwnerRefusal
     /// of doing nothing — a caller cannot tell the two apart, so an unfiled Office save refused here was told to check its
     /// business unit or the record it is filed to, neither of which is the cause.</remarks>
     public const string CommunicationFilingUnresolved = "record_owner_communication_filing_unresolved";
+
+    /// <summary>
+    /// fm task 054 piece 3b: an unfile of a Direct message (<see cref="UnfiledOwnership.UnfiledCommunication"/>) whose Direct
+    /// message owner team is configured in a way that cannot be used (one setting missing, or the configured team fails a check),
+    /// or whose Secure Record business unit cannot be decided (more than one carries its name).
+    /// Nothing was written; an administrator fixes the configuration. HTTP 409.
+    /// </summary>
+    /// <remarks>Component Justification (CLAUDE.md §11), for this code and <see cref="DirectTeamUnavailable"/>: (1) Existing — the
+    /// lookup's own codes (<c>DirectMessageOwnerTeamRefusal</c>) and the 1:1 send's (<c>DirectOwnerSendCheck</c>), which no re-file
+    /// writer renders. (2) Extension — two codes in the set every re-file writer already renders. (3) Cost of doing nothing — the
+    /// refusal would reach the writers as a code they do not know, and a retryable read fault could not be told from a
+    /// configuration an administrator must fix.</remarks>
+    public const string DirectTeamUnusable = "record_owner_direct_team_unusable";
+
+    /// <summary>
+    /// fm task 054 piece 3b: an unfile of a Direct message whose Direct message owner team, or its thread, could not be read.
+    /// Nothing was written; the caller tries again. HTTP 503.
+    /// </summary>
+    public const string DirectTeamUnavailable = "record_owner_direct_team_unavailable";
 }
 
 /// <summary>
@@ -1537,6 +1806,23 @@ public sealed record RecordOwnerResolution(
     /// knows nothing of what (#2159 slice 2: the document's file follows it from S1's container into S2's).
     /// </summary>
     public SecureExitPermit? SecureExitPermitted { get; init; }
+
+    /// <summary>
+    /// fm task 054 piece 3b: set on a WRITTEN unfile (<see cref="UnfiledOwnership.UnfiledCommunication"/>) of a Direct message whose
+    /// Direct message owner team resolved before the write: the message returns to that team, moved by the writer through
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.AfterReparentAsync"/>. <c>null</c> on every
+    /// other answer.
+    /// </summary>
+    public Sprk.Bff.Api.Services.Communication.Access.DirectUnfileDue? DirectUnfile { get; init; }
+
+    /// <summary>
+    /// uac-r2 task 197a (#2722, round 90 decision): set on a WRITTEN unfile of a communication that is not a Direct message when the
+    /// settle moved it from the team that owned it before the change to its creator's team: its content rows that had that team
+    /// follow it, moved by the writer through
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.AfterReparentAsync"/> (the Direct move's own
+    /// content step). <c>null</c> on every other answer.
+    /// </summary>
+    public Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove? UnfiledContentFollows { get; init; }
 
     /// <summary>True for a refusal the F3 check made (<see cref="SecureRemovalRefusal"/>): an AUTHORIZATION answer, not an
     /// owner refusal — HTTP writers answer it with the unsecure endpoint's ProblemDetails, not the owner refusal's 409.</summary>
@@ -1919,14 +2205,20 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private readonly IConfiguration _configuration;
     private readonly ILogger<RecordOwnershipResolver> _logger;
 
+    /// <summary>fm task 054 (F1): the Direct message owner team lookup <see cref="DirectMessageParentAnswerAsync"/> reads. Production
+    /// DI composes it (<c>CommunicationModule</c>); a construction without it leaves that rule off.</summary>
+    private readonly DirectMessageOwnerTeam? _directMessageOwnerTeam;
+
     public RecordOwnershipResolver(
         IGenericEntityService dataverse,
         IConfiguration configuration,
-        ILogger<RecordOwnershipResolver> logger)
+        ILogger<RecordOwnershipResolver> logger,
+        DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _directMessageOwnerTeam = directMessageOwnerTeam;
     }
 
     /// <inheritdoc />
@@ -1998,8 +2290,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // creating identity (E1: the application user, or a root team) — a technical owner, never the family the document
         // belongs to — so it does not name the document's owner: it counts for secure-if-any only, and the document takes
         // the question's unfiled answer (an Office save: the saver's team, task 080; the reconciler: the owner it has). A
-        // FILED communication still names it (the family rule). Decided from the communication's filing alone, never from
-        // its owner kind; ContentOf questions (no ChildEntityLogicalName) are unchanged.
+        // FILED communication still names it (the family rule). Decided from the communication's filing, never from its owner
+        // kind — with ONE narrow exception (uac-r2 197a-2, #2728, owner option a): an unfiled communication POSITIVELY owned by
+        // the Direct message owner team (IsOwnedByTheDirectTeamAsync) is not demoted. It stays a full parent, so secure-if-any
+        // over the document's other parents still applies, and the Direct rule (DirectMessageParentAnswerAsync: a document is a
+        // message content row) gives the Direct team, so a document linked only through sprk_relatedcommunication follows a
+        // Direct message unfiled from a Secure record. Every other owner, an unconfigured or unresolvable Direct team, or a
+        // lookup fault demotes as before. ContentOf questions (no ChildEntityLogicalName) are unchanged.
         if (parents.Count > 0
             && string.Equals(context.ChildEntityLogicalName, DocumentEntity, StringComparison.OrdinalIgnoreCase)
             && string.Equals(parents[0].EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
@@ -2013,7 +2310,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     + "read, so whether it is filed cannot be decided");
             }
 
-            if (filed == false)
+            if (filed == false
+                && !await IsOwnedByTheDirectTeamAsync(parents[0], context, committedParentReads, ct).ConfigureAwait(false))
             {
                 var rest = parents.Skip(1).ToArray();
                 var demoted = context with
@@ -2049,6 +2347,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         {
             return RecordOwnerResolution.Unchanged(
                 "no parent is named; this writer's unfiled rows keep their creating identity (task 146 E1)");
+        }
+
+        // fm task 054 piece 3b: a re-file asks the Direct rule first (ReparentAsync, DirectUnfileAnswerAsync). uac-r2 task 197a
+        // (#2722): a communication that is not an eligible Direct message is decided in NonDirectUnfileAnswerAsync, from the facts
+        // the re-file read before its change — on the first decision and on every re-derivation after the write alike. A question
+        // that carries no such facts keeps the owner.
+        if (context.WhenUnfiled == UnfiledOwnership.UnfiledCommunication)
+        {
+            return context.UnfiledFrom is { } unfiledFrom
+                ? await NonDirectUnfileAnswerAsync(unfiledFrom, context, ct).ConfigureAwait(false)
+                : RecordOwnerResolution.Unchanged(
+                    "no parent is named, and nothing was read about what the communication leaves; it keeps its owner (#2722)");
         }
 
         // FALLBACK: the acting user's business unit.
@@ -2140,6 +2450,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var threadBefore = await RecordThreadFiling.ParentsAsync(
             _dataverse, request.EntityLogicalName, RecordThreadFiling.ThreadOf(current), ct).ConfigureAwait(false);
         var threadAfter = threadBefore;
+        var threadIdAfter = RecordThreadFiling.ThreadOf(current);
         var namesAnotherThread = false;
         if (RecordThreadFiling.AppliesTo(request.EntityLogicalName)
             && request.ParentChanges.FirstOrDefault(change =>
@@ -2148,6 +2459,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             && (threadChange.Value?.Id ?? Guid.Empty) != (RecordThreadFiling.ThreadOf(current) ?? Guid.Empty))
         {
             namesAnotherThread = true;
+            threadIdAfter = threadChange.Value?.Id;
             threadAfter = await RecordThreadFiling.ParentsAsync(
                 _dataverse, request.EntityLogicalName, threadChange.Value?.Id, ct).ConfigureAwait(false);
         }
@@ -2230,9 +2542,91 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         {
             // Nothing the row is filed under changes, so its owner does not either: write the change and decide nothing
             // (task 146 verifier item 8 — the writer passed every null it writes; none of them was a parent).
-            await applyChange(ct).ConfigureAwait(false);
             var unchanged = RecordOwnerResolution.Unchanged(
                 $"the change to {request.EntityLogicalName} {request.RecordId:D} sets no parent and clears none it holds");
+
+            // fm task 054 piece 3b: but clearing a typed regarding lookup the communication holds that files it under no ownership
+            // parent (a contact, an account, an organization) can still leave it linked to nothing: an unfile, decided by the same
+            // rule BEFORE the write, refused the same way when the Direct team cannot be confirmed. Its filing does not change, so
+            // no named secure root is left; a message the unfile takes off the Secure owner is asked F3 all the same.
+            if (request.WhenUnfiled == UnfiledOwnership.UnfiledCommunication
+                && request.ChangesARegardingLink(current)
+                && byColumn.Count == 0 && threadAfter.Count == 0)
+            {
+                var rowAfter = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange(
+                    current, request.ParentChanges, request.RegardingLinksSet, threadIdAfter, request.UnfileRuleColumnsWritten);
+                var (answer, regardingOnlyUnfiledFrom) = await DirectUnfileAnswerAsync(
+                    rowAfter, threadIdAfter, unchanged, request, current, filedUnderBefore, ct).ConfigureAwait(false);
+                if (answer.IsRefused)
+                {
+                    _logger.LogWarning(
+                        "Refusing to re-file {Entity} {RecordId}: {Reason} ({Code}). The change was NOT written.",
+                        request.EntityLogicalName, request.RecordId, answer.Reason, answer.RefusalCode);
+                    return answer;
+                }
+
+                // A move out of the Secure owner leaves secure isolation, so F3 is asked before anything is written, as for any
+                // row held in the Secure Record business unit that leaves it.
+                if (answer.DirectUnfile is { LeavesSecureOwner: true })
+                {
+                    var (directExitRefusal, _, _) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
+                        request, current, filedUnderBefore, filedUnderBefore, ownBefore, ownBefore,
+                        Array.Empty<RecordOwnershipParent>(), answer, leavesSecureOwner: true, ct).ConfigureAwait(false);
+                    if (directExitRefusal is not null)
+                    {
+                        _logger.LogWarning(
+                            "Refusing to re-file {Entity} {RecordId} out of a secure record: {Reason} ({Code}). The change was NOT "
+                            + "written.", request.EntityLogicalName, request.RecordId, directExitRefusal.Reason,
+                            directExitRefusal.RefusalCode);
+                        return directExitRefusal;
+                    }
+                }
+
+                if (answer.DirectUnfile is not null)
+                {
+                    // The message returns to the Direct team: the writer moves it and runs the step after a re-file.
+                    await applyChange(ct).ConfigureAwait(false);
+                    return answer with { ParentsUnchanged = false };
+                }
+
+                if (answer.IsOwned)
+                {
+                    // uac-r2 task 197a (#2722): the message moves to its creator's business-unit team. Settled as every re-file's
+                    // owner is — conditionally, at the version read after the change, re-derived from the same facts — so this path
+                    // writes the owner too. It filed under nothing before and after, so there is no filing to put back: a settle
+                    // that fails leaves the change written and the former owner kept (never looser), logged with ids only. The
+                    // change is not refused for it — it has landed, and a retry would no longer clear a link, so it could not
+                    // move the owner either.
+                    var regardingOnly = new RowBeforeChange(
+                        current.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id,
+                        current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
+                        PermittedToLeaveSecure: false,
+                        LineageAfterThisChange(request, current))
+                    {
+                        Unfiled = regardingOnlyUnfiledFrom,
+                    };
+                    await applyChange(ct).ConfigureAwait(false);
+                    try
+                    {
+                        var (settledOwner, _) = await SettleOwnerAsync(
+                            request, Array.Empty<RecordOwnershipParent>(), regardingOnly, observed: null, ct).ConfigureAwait(false);
+                        return settledOwner with { ParentsUnchanged = false };
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(UnfileKeepsOwnerEvent, ex,
+                            "Unfiled communication {CommunicationId}: the link change was written, but its move to its creator's team "
+                            + "could not be confirmed; it is answered as keeping its former owner and its content rows are not moved "
+                            + "(#2722).", request.RecordId);
+                        return RecordOwnerResolution.Unchanged(
+                            "the link change was written; the owner could not be confirmed as settled, so the communication is "
+                            + "answered as keeping its former owner (#2722)") with
+                        { ParentsUnchanged = false };
+                    }
+                }
+            }
+
+            await applyChange(ct).ConfigureAwait(false);
             return unchanged with { ParentsUnchanged = !movesALineageLookup };
         }
 
@@ -2281,7 +2675,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             // V-fix 3: filed under, after the change, includes the Secure-only parents it still holds (as filedUnderBefore does),
             // so keeping a copy's canonical is never read as leaving the canonical's secure root.
             request, current, filedUnderBefore, parents.Concat(secureOnlyAfter).Distinct().ToArray(), ownBefore, ownAfter,
-            threadTheReconcileMayLeave, resolution, ct)
+            threadTheReconcileMayLeave, resolution, leavesSecureOwner: false, ct)
             .ConfigureAwait(false);
         if (exitRefusal is not null)
         {
@@ -2289,6 +2683,57 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Refusing to re-file {Entity} {RecordId} out of a secure record: {Reason} ({Code}). The change was NOT "
                 + "written.", request.EntityLogicalName, request.RecordId, exitRefusal.Reason, exitRefusal.RefusalCode);
             return exitRefusal;
+        }
+
+        // fm task 054 piece 3b: a communication the change leaves filed under nothing, for a writer that chose the unfiled-communication
+        // rule. Decided AFTER the F3 check above and BEFORE the write, on the row as the change leaves it, so a Direct message
+        // whose Direct team cannot be confirmed is refused with nothing written. The check above refuses a caller without F3
+        // first only when it can name a secure root the change leaves. Whether a Direct message leaves the Secure owner is known
+        // only after this lookup (LeavesSecureOwner comes from it), so when no secure root can be named the lookup runs first and
+        // its 409 or 503 is returned before the 403 a caller without F3 would get. Nothing is written either way, and that 409
+        // or 503 does not depend on whether the message is Secure-owned.
+        // uac-r2 task 197a (#2722): any other communication takes its creator's business-unit team only when it leaves no Secure
+        // or Restricted record and is not held in the Secure Record unit itself, so that answer never takes it out of isolation
+        // and asks no F3; the settle re-derives it from the same facts (RowBeforeChange.Unfiled).
+        UnfiledCommunicationFacts? unfiledFrom = null;
+        if (request.WhenUnfiled == UnfiledOwnership.UnfiledCommunication
+            && parents.Length == 0 && secureOnlyAfter.Length == 0
+            && resolution.Outcome == RecordOwnerOutcome.Unchanged
+            && string.Equals(request.EntityLogicalName.Trim(), RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
+        {
+            var rowAfter = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange(
+                current, request.ParentChanges, request.RegardingLinksSet, threadIdAfter, request.UnfileRuleColumnsWritten);
+            (resolution, unfiledFrom) = await DirectUnfileAnswerAsync(
+                rowAfter, threadIdAfter, resolution, request, current, filedUnderBefore, ct).ConfigureAwait(false);
+            if (resolution.IsRefused)
+            {
+                _logger.LogWarning(
+                    "Refusing to re-file {Entity} {RecordId}: {Reason} ({Code}). The change was NOT written.",
+                    request.EntityLogicalName, request.RecordId, resolution.Reason, resolution.RefusalCode);
+                return resolution;
+            }
+
+            // A move out of the Secure owner leaves secure isolation. The check above asked F3 only for the secure roots the
+            // change leaves, while the answer still kept the owner; unless it was asked and permitted that, F3 is asked now,
+            // before anything is written, as for any row held in the Secure Record business unit that leaves it.
+            if (resolution.DirectUnfile is { LeavesSecureOwner: true } && !permittedToLeaveSecure)
+            {
+                var (directExitRefusal, directPermitted, directPermit) = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
+                    request, current, filedUnderBefore, parents.Concat(secureOnlyAfter).Distinct().ToArray(), ownBefore, ownAfter,
+                    threadTheReconcileMayLeave, resolution, leavesSecureOwner: true, ct)
+                    .ConfigureAwait(false);
+                if (directExitRefusal is not null)
+                {
+                    _logger.LogWarning(
+                        "Refusing to re-file {Entity} {RecordId} out of a secure record: {Reason} ({Code}). The change was NOT "
+                        + "written.", request.EntityLogicalName, request.RecordId, directExitRefusal.Reason,
+                        directExitRefusal.RefusalCode);
+                    return directExitRefusal;
+                }
+
+                permittedToLeaveSecure = directPermitted;
+                exitPermit ??= directPermit;
+            }
         }
 
         // #2159 slice 2: an answer of this written re-file carries the F3 permission it was given (the roots it left) — the
@@ -2304,22 +2749,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // of one reads as a change. Round 5 (F1): only ParentChanges carries a value, so a writer that sets a lineage-only
         // lookup names it there too (a thread join: ThreadResolver), never only in AttachColumns (refused at the top of this
         // method). Enforced by: Reparent_WhenAnAttachColumnIsALineageOnlyLookupNotNamedInParentChanges_ThrowsArgumentException_BeforeAnyReadOrWrite.
-        var lineageAfterThisChange = LineageOnlyLookupsOf(request.EntityLogicalName, current);
-        foreach (var (column, value) in request.ParentChanges)
-        {
-            if (RecordReparent.LineageOnlyTargetOf(request.EntityLogicalName, column) is null)
-                continue;
-            if (value is { } set && set.Id != Guid.Empty)
-                lineageAfterThisChange[column] = set.Id;
-            else
-                lineageAfterThisChange.Remove(column);
-        }
-
         var before = new RowBeforeChange(
             current.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id,
             current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id,
             permittedToLeaveSecure,
-            lineageAfterThisChange);
+            LineageAfterThisChange(request, current))
+        {
+            Unfiled = unfiledFrom,
+        };
 
         await applyChange(ct).ConfigureAwait(false);
 
@@ -2442,7 +2879,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </summary>
     private sealed record RowBeforeChange(
         Guid? OwningTeam, Guid? OwningBusinessUnit, bool PermittedToLeaveSecure,
-        IReadOnlyDictionary<string, Guid> LineageLookups);
+        IReadOnlyDictionary<string, Guid> LineageLookups)
+    {
+        /// <summary>uac-r2 task 197a (#2722): what the re-file read before its change about the communication it unfiles
+        /// (<see cref="RecordOwnershipContext.UnfiledFrom"/>), so every re-derivation after the write asks the same question as
+        /// the decision before it. <c>null</c> for every other re-file.</summary>
+        public UnfiledCommunicationFacts? Unfiled { get; init; }
+    }
 
     /// <summary>
     /// A row's version, owner and ownership parents, from one read (#2143) — and (round 3) its lineage-only lookups
@@ -2479,6 +2922,27 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         return lookups;
+    }
+
+    /// <summary>
+    /// #2143 round 3: the row's lineage-only lookups as read before the change (<paramref name="current"/>) with this call's own
+    /// changes to them applied (<see cref="RowBeforeChange.LineageLookups"/>). Only <see cref="RecordReparent.ParentChanges"/>
+    /// carries a value (round 5).
+    /// </summary>
+    private static Dictionary<string, Guid> LineageAfterThisChange(RecordReparent request, Entity current)
+    {
+        var lineage = LineageOnlyLookupsOf(request.EntityLogicalName, current);
+        foreach (var (column, value) in request.ParentChanges)
+        {
+            if (RecordReparent.LineageOnlyTargetOf(request.EntityLogicalName, column) is null)
+                continue;
+            if (value is { } set && set.Id != Guid.Empty)
+                lineage[column] = set.Id;
+            else
+                lineage.Remove(column);
+        }
+
+        return lineage;
     }
 
     /// <summary>Whether two reads hold the same lineage-only lookups (#2143 round 3).</summary>
@@ -2553,9 +3017,11 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
     /// <summary>The owner a re-filed row takes from <paramref name="parents"/>, for the request's caller — from parent facts
     /// read committed (#2143 round 3, K1: the settle and put-back decisions are taken from them).</summary>
+    /// <param name="unfiledFrom">uac-r2 task 197a (#2722): what the re-file read before its change about a communication it
+    /// unfiles; it decides the answer only when <paramref name="parents"/> names nothing.</param>
     private Task<RecordOwnerResolution> ResolveReparentOwnerAsync(
         RecordReparent request, IReadOnlyList<RecordOwnershipParent> parents, IReadOnlyList<RecordOwnershipParent> secureOnly,
-        CancellationToken ct) =>
+        CancellationToken ct, UnfiledCommunicationFacts? unfiledFrom = null) =>
         ResolveOwnerOnlyAsync(
             new RecordOwnershipContext
             {
@@ -2565,6 +3031,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 CallerSystemUserId = request.CallerSystemUserId,
                 CallerObjectId = request.CallerObjectId,
                 WhenUnfiled = request.WhenUnfiled,
+                UnfiledFrom = unfiledFrom,
             },
             committedParentReads: true,
             ct);
@@ -2665,7 +3132,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
             // F1-a: re-derived on EVERY attempt, from the parents read now — never the answer from before the change, which a
             // parent made Secure since (SecureChildReconciler re-owning the row first) would turn into a stale ordinary owner.
-            var target = await ResolveReparentOwnerAsync(request, state.Parents.ToArray(), state.SecureOnlyParents, ct)
+            var target = await ResolveReparentOwnerAsync(request, state.Parents.ToArray(), state.SecureOnlyParents, ct, before.Unfiled)
                 .ConfigureAwait(false);
             if (!parentsAsResolved)
             {
@@ -2700,7 +3167,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             var teamId = target.OwningTeamId!.Value;
             if (state.OwningTeam == teamId)
             {
-                return (target, filingIsOwn); // already owned by the team its current parents resolve to
+                // already owned by the team its current parents resolve to
+                return (WithUnfiledContentFollowing(target, before, filingIsOwn), filingIsOwn);
             }
 
             // R4b-2b (rule 1): the restricted-content team replaces a default-team answer only, never a kept creator. An
@@ -2752,7 +3220,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
 
             // Written conditionally at the version read, so the filing it answers is the one read at that version.
-            return (await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false), filingIsOwn);
+            return (WithUnfiledContentFollowing(await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false), before, filingIsOwn),
+                filingIsOwn);
         }
 
         if (lastTarget is { IsSecureOwner: true } secure)
@@ -2782,6 +3251,21 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             + "attempts: the row kept changing under concurrent writers. No owner that disagrees with its current parents was "
             + "written (#2143).");
     }
+
+    /// <summary>
+    /// uac-r2 task 197a (#2722, round 90 decision): a settled answer for an unfiled communication moved to its creator's team
+    /// (<see cref="RowBeforeChange.Unfiled"/> named the creator) from the team that owned it before the change carries
+    /// <see cref="RecordOwnerResolution.UnfiledContentFollows"/>, so its content rows follow it — only when the answer came from the
+    /// filing THIS call made (<paramref name="filingIsOwn"/>): an answer from another writer's filing is that writer's, and no
+    /// step after this re-file acts on it. Every other answer is returned as is.
+    /// </summary>
+    private static RecordOwnerResolution WithUnfiledContentFollowing(
+        RecordOwnerResolution settled, RowBeforeChange before, bool filingIsOwn) =>
+        filingIsOwn && before.Unfiled is { MovesToCreator: true }
+        && settled.IsOwned && settled.OwningTeamId is { } team && team != Guid.Empty
+        && before.OwningTeam is { } previous && previous != Guid.Empty && previous != team
+            ? settled with { UnfiledContentFollows = new Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove(previous, team) }
+            : settled;
 
     /// <summary>
     /// Reads a written owner back (task 146): <paramref name="target"/> when it is the team, else throws
@@ -2836,7 +3320,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 $"The {request.EntityLogicalName} {request.RecordId:D} being re-filed no longer exists, so its owner could "
                 + "not be settled (#2143).");
 
-        var freshTarget = await ResolveReparentOwnerAsync(request, fresh.Parents.ToArray(), fresh.SecureOnlyParents, ct)
+        var freshTarget = await ResolveReparentOwnerAsync(request, fresh.Parents.ToArray(), fresh.SecureOnlyParents, ct, before.Unfiled)
             .ConfigureAwait(false);
         var filingIsOwn = FiledAsResolved(fresh, resolvedFrom) && SameLineage(before.LineageLookups, fresh.LineageLookups);
         if (freshTarget.IsSecureOwner)
@@ -3064,13 +3548,17 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// secure root above it can be named (its secure parent is not one of its own columns — a message secured by the
     /// record thread it joined) admits only its creator. A filing deeper than <see cref="MaxLineageDepth"/> refuses, as
     /// the owner decision does.</para>
+    /// <para><b>A move the writer makes after the re-file</b> (fm task 054 piece 3b). <paramref name="leavesSecureOwner"/>: the
+    /// answer carries a move of the row off the Secure owner that the writer makes after the change (a Direct unfile,
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectUnfileDue.LeavesSecureOwner"/>), so the row leaves isolation
+    /// although the answer keeps its owner, and it is held in the Secure Record business unit as that answer read it.</para>
     /// </remarks>
     private async Task<(RecordOwnerResolution? Refusal, bool PermittedToLeave, SecureExitPermit? Permit)>
         RefuseUnlessPermittedToLeaveSecureRootsAsync(
         RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
         IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, IReadOnlyCollection<RecordOwnershipParent> ownBefore,
         IReadOnlyCollection<RecordOwnershipParent> ownAfter, IReadOnlyCollection<RecordOwnershipParent> threadTheReconcileMayLeave,
-        RecordOwnerResolution resolution, CancellationToken ct)
+        RecordOwnerResolution resolution, bool leavesSecureOwner, CancellationToken ct)
     {
         // Two cheap facts first, so the many re-files that leave nothing (a thread JOIN, an invoice link, additive inbound
         // filing) cost no read: a change that removes none of the row's parents leaves no root (both walks would read the
@@ -3079,7 +3567,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // #2143 round 7 (F1): a parent taken out of the row's OWN columns, though another source (its thread) still files the
         // row under it — the move a re-file makes; the thread follows it after the write.
         var removesAnOwnParent = ownBefore.Any(parent => !ownAfter.Contains(parent));
-        var mayLeaveIsolation = !resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged;
+        var mayLeaveIsolation = leavesSecureOwner
+                                || (!resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged);
         if (!removesAParent && !removesAnOwnParent && threadTheReconcileMayLeave.Count == 0 && !mayLeaveIsolation)
         {
             return (null, false, null);
@@ -3147,11 +3636,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             left.AddRange(threadRoots.Roots.Where(root => !keptByOwn.Roots.Contains(root) && !left.Contains(root)));
         }
 
-        // Held in the Secure Record business unit, about to leave its isolation, yet no secure root above it can be named.
+        // Held in the Secure Record business unit, about to leave its isolation, yet no secure root above it can be named. A
+        // writer that moves the row off the Secure owner (leavesSecureOwner) already named the unit when it decided so: the
+        // unit being unreadable now does not clear the row, it leaves the question open and F3 asks (fail closed).
         var unidentified = left.Count == 0
             && mayLeaveIsolation
-            && secureBu.Id is { } secureBuId
-            && current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId;
+            && (leavesSecureOwner
+                || (secureBu.Id is { } secureBuId
+                    && current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId));
 
         if (left.Count == 0 && !unidentified)
         {
@@ -3355,7 +3847,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Re-file of {Entity} {RecordId}: the owner assignment to team {TeamId} reported a failure, but the owner reads "
                 + "back as that team — the assignment landed (lost response); the re-file stands (task 146).",
                 request.EntityLogicalName, request.RecordId, teamId);
-            return (target, filedAsResolved == true);
+            // uac-r2 197a (scoped re-check F2): a landed creator-team move still takes its content rows with it.
+            return (WithUnfiledContentFollowing(target, before, filedAsResolved == true), filedAsResolved == true);
         }
 
         if (landed is null && !target.IsSecureOwner)
@@ -3699,6 +4192,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         /// <summary>Fix round (B-K2): a project whose ADR-024 pair is EMPTY — filed under nothing, so it is never looked
         /// through (its own business unit decides, and no look-through depth is spent on it).</summary>
         public bool UnpairedProject { get; init; }
+
+        /// <summary>The team that owns the parent (its planned team, when one is planned); <c>null</c> when no team owns it.
+        /// Read by <see cref="DirectMessageParentAnswerAsync"/> only.</summary>
+        public Guid? OwningTeamId { get; init; }
     }
 
     /// <summary>
@@ -3846,9 +4343,345 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, primaryUndecided);
         }
 
+        // fm task 054 (F1): a team-owned communication primary parent that is, or may be, the Direct message owner team's.
+        if (await DirectMessageParentAnswerAsync(facts[0], context, ct).ConfigureAwait(false) is { } direct)
+            return direct;
+
         return await OrdinaryExitAsync(
             await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct, context.LookupCache).ConfigureAwait(false),
             facts[0].BusinessUnitId, context, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Information: an unfiled communication that is not an eligible Direct message keeps its former owner (#2722).</summary>
+    internal const string UnfileKeepsOwnerEventCode = "communication.unfile_keeps_owner";
+
+    internal static readonly EventId UnfileKeepsOwnerEvent = new(5420, UnfileKeepsOwnerEventCode);
+
+    /// <summary>The tables that carry <c>sprk_accesspermission</c>: the three secure roots and the four child tables that show
+    /// it (<see cref="InheritedAccessPermission.Tables"/>). Another parent table has no such column, and is never Restricted.</summary>
+    private static bool CarriesAccessPermission(string table) =>
+        SecureFlaggedRoots.Contains(table) || InheritedAccessPermission.AppliesTo(table);
+
+    /// <summary>
+    /// uac-r2 task 197a (#2722, owner decision 2026-11-12): the ONE decision point for what an unfile does with a communication that
+    /// is not an eligible Direct message (including every communication while the Direct owner rule is off). Reached only from
+    /// <see cref="ResolveOwnerOnlyAsync"/> for a question naming no parent whose <see cref="RecordOwnershipContext.UnfiledFrom"/>
+    /// the re-file filled — its first decision (<see cref="DirectUnfileAnswerAsync"/>) and every re-derivation after the write
+    /// (<see cref="SettleOwnerAsync"/>). <paramref name="unfiledFrom"/> says keep: the former owner (Unchanged). Otherwise the
+    /// creator's business-unit team, through the resolver's one creator-team path (<see cref="ResolveFromUserAsync"/>, which also
+    /// applies 191c's External Collaborators rule). A creator who cannot be resolved (refused, or a fault reading them) keeps the
+    /// former owner too, logged with ids only: the unfile is never refused for it, and the owner never loosens.
+    /// </summary>
+    private async Task<RecordOwnerResolution> NonDirectUnfileAnswerAsync(
+        UnfiledCommunicationFacts unfiledFrom, RecordOwnershipContext context, CancellationToken ct)
+    {
+        if (unfiledFrom.KeepReason is { } keep || unfiledFrom.CreatorSystemUserId is not { } creator || creator == Guid.Empty)
+        {
+            var reason = unfiledFrom.KeepReason ?? "its creator is not recorded";
+            _logger.LogInformation(UnfileKeepsOwnerEvent,
+                "Unfiled communication {CommunicationId} keeps its former owner: {Reason} (#2722).", unfiledFrom.CommunicationId, reason);
+            return RecordOwnerResolution.Unchanged($"no parent is named; the communication keeps its former owner: {reason} (#2722)");
+        }
+
+        RecordOwnerResolution creatorTeam;
+        try
+        {
+            creatorTeam = await ResolveFromUserAsync("systemuserid", creator, context with { UnfiledFrom = null }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(UnfileKeepsOwnerEvent, ex,
+                "Unfiled communication {CommunicationId} keeps its former owner: its creator {CreatorId} could not be read (#2722).",
+                unfiledFrom.CommunicationId, creator);
+            return RecordOwnerResolution.Unchanged(
+                "no parent is named; the communication keeps its former owner: its creator could not be read (#2722)");
+        }
+
+        if (creatorTeam.IsOwned)
+            return creatorTeam;
+
+        _logger.LogWarning(UnfileKeepsOwnerEvent,
+            "Unfiled communication {CommunicationId} keeps its former owner: its creator {CreatorId} has no business-unit team ({Code}) (#2722).",
+            unfiledFrom.CommunicationId, creator, creatorTeam.RefusalCode);
+        return RecordOwnerResolution.Unchanged(
+            $"no parent is named; the communication keeps its former owner: its creator's team could not be resolved ({creatorTeam.RefusalCode}) (#2722)");
+    }
+
+    /// <summary>
+    /// uac-r2 task 197a (#2722): what a re-file reads, BEFORE its change, about the communication <paramref name="current"/> it
+    /// unfiles. It keeps its former owner when any of these holds; otherwise it goes to its recorded creator's team:
+    /// <list type="bullet">
+    /// <item>It is still linked to a record after the change (<paramref name="rowAfter"/>, the row as the change leaves it: an
+    /// ownership parent or a typed regarding lookup, the Direct rule's own test): it is not unfiled. Reads nothing.</item>
+    /// <item>The message itself: owned in the Secure Record business unit (or its owning unit did not come back), flagged
+    /// <c>sprk_issecure</c>, or Restricted (<c>sprk_accesspermission</c> = 100000002).</item>
+    /// <item>Any parent it was filed under before the change (<paramref name="filedUnderBefore"/>, its own lookups and its record
+    /// thread's filing), each read on its own, committed: owned in the Secure Record unit, a secure root flagged (or with an empty
+    /// flag, task 150), Restricted, missing, or with no owning unit.</item>
+    /// <item>Its creator is not recorded: <c>sprk_createdbyperson</c> on a table the BFF stamps, never <c>createdby</c> (which can
+    /// be the application user).</item>
+    /// <item>The Secure Record unit cannot be decided, or any read faults (fail closed).</item>
+    /// </list>
+    /// </summary>
+    private async Task<UnfiledCommunicationFacts> ReadUnfiledFactsAsync(
+        RecordReparent request, Entity rowAfter, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
+        CancellationToken ct)
+    {
+        var id = request.RecordId;
+        if (Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.WhyFiledUnderARecord(rowAfter) is not null)
+            return UnfiledCommunicationFacts.Keep(id, "it is still linked to a record after the change, so it is not unfiled");
+
+        // Round 90 decision (pass-2 F1-3): a row owned by a person keeps that owner; a re-file never loosens it to a business
+        // unit's whole team. Reads nothing.
+        if (current.GetAttributeValue<EntityReference>(OwnerColumn) is { LogicalName: var ownerTable }
+                && !string.Equals(ownerTable, TeamEntity, StringComparison.OrdinalIgnoreCase)
+            || current.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } owningUser && owningUser != Guid.Empty)
+            return UnfiledCommunicationFacts.Keep(id, "it is owned by a person, and a re-file never loosens that to a team");
+
+        try
+        {
+            var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger)
+                .ConfigureAwait(false);
+            if (secureBu.Ambiguous)
+                return UnfiledCommunicationFacts.Keep(id, "the Secure Record business unit cannot be decided");
+
+            if (WhyHeldSecureOrRestricted(current, secureBu.Id, isRoot: false) is { } selfReason)
+                return UnfiledCommunicationFacts.Keep(id, $"the communication itself {selfReason}");
+
+            foreach (var parent in filedUnderBefore)
+            {
+                var table = parent.EntityLogicalName.Trim().ToLowerInvariant();
+                var isRoot = SecureFlaggedRoots.Contains(table);
+                var columns = new ColumnSet(OwningBusinessUnitColumn, OwningTeamColumn);
+                if (isRoot)
+                    columns.AddColumn(IsSecureColumn);
+                if (CarriesAccessPermission(table))
+                    columns.AddColumn(InheritedAccessPermission.Column);
+
+                var query = new QueryExpression(table) { ColumnSet = columns, TopCount = 1, NoLock = false };
+                query.Criteria.AddCondition($"{table}id", ConditionOperator.Equal, parent.RecordId);
+                var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+                if (row is null)
+                    return UnfiledCommunicationFacts.Keep(id, $"the {table} {parent.RecordId:D} it was filed under could not be read");
+                if (WhyHeldSecureOrRestricted(row, secureBu.Id, isRoot) is { } parentReason)
+                    return UnfiledCommunicationFacts.Keep(id, $"the {table} {parent.RecordId:D} it leaves {parentReason}");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(UnfileKeepsOwnerEvent, ex,
+                "Unfiled communication {CommunicationId}: what it leaves could not be read, so it keeps its former owner (#2722).", id);
+            return UnfiledCommunicationFacts.Keep(id, "what it leaves could not be read");
+        }
+
+        var creator = RecordCreatorPerson.IsStamped(request.EntityLogicalName)
+            ? current.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id
+            : null;
+        return creator is { } person && person != Guid.Empty
+            ? UnfiledCommunicationFacts.ToCreator(id, person)
+            : UnfiledCommunicationFacts.Keep(id, "its creator is not recorded");
+
+        // Why a row keeps an unfiled communication under its former owner; null when it does not.
+        static string? WhyHeldSecureOrRestricted(Entity row, Guid? secureBuId, bool isRoot)
+        {
+            var owningUnit = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+            if (owningUnit is null || owningUnit == Guid.Empty)
+                return "has no owning business unit that could be read";
+            if (secureBuId is { } secure && owningUnit == secure)
+                return "is owned in the Secure Record business unit";
+            // A secure root's EMPTY flag fails closed (task 150); on another row only a stored true counts.
+            var flag = row.GetAttributeValue<bool?>(IsSecureColumn);
+            if (isRoot ? flag != false : flag == true)
+                return "is Secure";
+            if (row.GetAttributeValue<OptionSetValue>(InheritedAccessPermission.Column)?.Value == InheritedAccessPermission.Restricted)
+                return "is Restricted";
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// fm task 054 piece 3b: the unfile of <paramref name="message"/> (the row as the change leaves it,
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.RowAfterChange"/>) into <paramref name="threadId"/>,
+    /// for <see cref="UnfiledOwnership.UnfiledCommunication"/>. The Direct rule is
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.DecideUnfileAsync"/>; this maps its verdict onto
+    /// the re-file's answer: for a communication that is not an eligible Direct message, the #2722 answer
+    /// (<see cref="NonDirectUnfileAnswerAsync"/>, from <see cref="ReadUnfiledFactsAsync"/>, returned with those facts for the
+    /// settle), a refusal
+    /// (<see cref="RecordOwnerRefusal.DirectTeamUnusable"/> or <see cref="RecordOwnerRefusal.DirectTeamUnavailable"/>), or
+    /// <paramref name="unchanged"/> carrying <see cref="RecordOwnerResolution.DirectUnfile"/> for the writer's move. Whether the
+    /// message is owned in the Secure Record business unit is read here too: its content rows are then the secure-child reconcile's
+    /// to move. An owning unit that did not come back counts as Secure. A Secure Record unit that cannot be decided (more than one
+    /// carries its name) is <see cref="RecordOwnerRefusal.DirectTeamUnusable"/>, a configuration an administrator fixes; a fault
+    /// reading it is <see cref="RecordOwnerRefusal.DirectTeamUnavailable"/>. No owner is written here.
+    /// </summary>
+    private async Task<(RecordOwnerResolution Answer, UnfiledCommunicationFacts? UnfiledFrom)> DirectUnfileAnswerAsync(
+        Entity message, Guid? threadId, RecordOwnerResolution unchanged, RecordReparent request, Entity current,
+        IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore, CancellationToken ct)
+    {
+        var decision = await Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.DecideUnfileAsync(
+            _dataverse, _directMessageOwnerTeam, message, threadId, _logger, ct).ConfigureAwait(false);
+
+        switch (decision.Verdict)
+        {
+            case Sprk.Bff.Api.Services.Communication.Access.DirectUnfileVerdict.Refused:
+                return (RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.DirectTeamUnusable,
+                    $"the Direct message owner team is not usable ({decision.Refusal}), so a Direct message cannot be unfiled; nothing was written"), null);
+            case Sprk.Bff.Api.Services.Communication.Access.DirectUnfileVerdict.Unavailable:
+                return (UnfileUnavailable(), null);
+            case Sprk.Bff.Api.Services.Communication.Access.DirectUnfileVerdict.ToDirectTeam:
+                break;
+            default:
+                // #2722: the same question the settle asks after the write (no parent, these facts), so both give one answer.
+                var unfiledFrom = await ReadUnfiledFactsAsync(request, message, current, filedUnderBefore, ct).ConfigureAwait(false);
+                var answer = await ResolveReparentOwnerAsync(
+                    request, Array.Empty<RecordOwnershipParent>(), Array.Empty<RecordOwnershipParent>(), ct, unfiledFrom)
+                    .ConfigureAwait(false);
+                return (answer, unfiledFrom);
+        }
+
+        bool leavesSecureOwner;
+        try
+        {
+            var secureBu = await SecureRecordOwnerTeam.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct, _logger)
+                .ConfigureAwait(false);
+            if (secureBu.Ambiguous)
+            {
+                _logger.LogWarning(Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfileRefusedEvent,
+                    "Unfiling Direct message {CommunicationId} was refused: the Secure Record business unit cannot be decided. " +
+                    "Nothing was written.", message.Id);
+                return (RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.DirectTeamUnusable,
+                    "more than one business unit carries the Secure Record name, so where a Direct message's content rows go cannot " +
+                    "be decided; nothing was written"), null);
+            }
+
+            var owningUnit = message.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+            leavesSecureOwner = secureBu.Id is { } secureBuId && (owningUnit is null || owningUnit == secureBuId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfileRefusedEvent, ex,
+                "Unfiling Direct message {CommunicationId} was refused: the Secure Record business unit could not be read. Nothing " +
+                "was written.", message.Id);
+            return (UnfileUnavailable(), null);
+        }
+
+        return (unchanged with
+        {
+            DirectUnfile = new Sprk.Bff.Api.Services.Communication.Access.DirectUnfileDue(threadId!.Value, leavesSecureOwner),
+        }, null);
+
+        static RecordOwnerResolution UnfileUnavailable() => RecordOwnerResolution.Refused(
+            RecordOwnerRefusal.DirectTeamUnavailable,
+            "the Direct message owner team could not be read, so a Direct message cannot be unfiled now; nothing was written, try again");
+    }
+
+    /// <summary>
+    /// uac-r2 task 197a-2 (#2728, owner option a): whether the UNFILED <paramref name="communication"/>, a document's primary
+    /// parent, is POSITIVELY owned by the Direct message owner team — the one Direct lookup
+    /// (<see cref="DirectMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync"/>, as <see cref="DirectMessageParentAnswerAsync"/>
+    /// asks it) resolves with no fault, and the communication's owning team, read through the one parent-facts read
+    /// (<see cref="ReadParentAsync"/>: a planned team when one is planned; committed on the re-file path, #2143 round 3 K1), is
+    /// that team. <c>false</c> in every other case, so the #2468 demotion runs as before: no lookup composed, neither Direct
+    /// setting configured (nothing is read), a refusal or a fault of the lookup, a communication that does not come back, is
+    /// owned by no team or by another team. A Dataverse fault on the parent-facts read propagates, as the demoted path's
+    /// secure-if-any read of the same row does.
+    /// </summary>
+    private async Task<bool> IsOwnedByTheDirectTeamAsync(
+        RecordOwnershipParent communication, RecordOwnershipContext context, bool committedReads, CancellationToken ct)
+    {
+        if (_directMessageOwnerTeam is null)
+            return false;
+
+        var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
+        if (!direct.IsResolved || direct.Fault is not null || direct.TeamId is not { } directTeam || directTeam == Guid.Empty)
+            return false;
+
+        var facts = await ReadParentAsync(communication, context.PlannedOwningTeams, committedReads, ct).ConfigureAwait(false);
+        return facts is { HasOwningTeam: true, OwningTeamId: { } owner } && owner == directTeam;
+    }
+
+    /// <summary>Error: whether a row's communication parent is owned by the Direct message owner team cannot be decided, so the
+    /// row is given no owner.</summary>
+    internal const string DirectParentUndecidedEventCode = "direct_message.content_owner_undecided";
+
+    internal static readonly EventId DirectParentUndecidedEvent = new(5418, DirectParentUndecidedEventCode);
+
+    /// <summary>
+    /// field-mapping-server-write-path-r1 task 054 (F1). A CONTENT row of a message — a question asked as content
+    /// (<see cref="RecordOwnershipContext.ContentOf"/>) or a row of a message content table
+    /// (<see cref="Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar.ContentRows"/>) — whose PRIMARY parent is a team-owned
+    /// <c>sprk_communication</c>, decided by the one Direct message owner team lookup (<see cref="DirectMessageOwnerTeam"/>), after
+    /// the secure decision and before the ordinary exit. <c>null</c>: today's answer (the parent business unit's default team) stands.
+    /// A gate Decision Record of a message asks with <see cref="RecordOwnershipContext.KeepCreatorUnlessTargetIsTeamOwned"/> and
+    /// the communication as its first parent, so it takes this rule too: a gate record of a Direct-team message is owned by the
+    /// Direct team, and an answer that cannot be told is no write. Any other row (an event or an analysis filed under a message)
+    /// keeps today's answer.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>The lookup resolves and the parent's owning team IS that team (ids, non-null): the row is owned by the Direct team.
+    /// Any other team: <c>null</c>.</item>
+    /// <item>Neither Direct setting is configured: <c>null</c>, from configuration alone (nothing is read).</item>
+    /// <item>Any other answer (a refusal, including <see cref="DirectMessageOwnerTeamRefusal.PartiallyConfigured"/>, or a fault):
+    /// the shared check (<see cref="Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares.IsDirectOwnerTeamAsync"/>) decides
+    /// whether the parent's team could be the Direct team. A team proven not to be it (a default team, an access team, a team
+    /// other than the one the configuration names) gives <c>null</c>. Otherwise the answer is a refusal
+    /// (<see cref="RecordOwnerRefusal.ParentUnresolved"/>) logged with <see cref="DirectParentUndecidedEvent"/>: the row is not
+    /// written, and the parent business unit's default team is never the answer. When the answer is unknown BECAUSE a read faulted
+    /// (the lookup's, or the check's), it is not a refusal: the fault propagates, as every other read fault in this resolver does,
+    /// so the caller retries instead of reporting a permanent refusal.</item>
+    /// </list>
+    /// Only a communication parent takes this rule. A Secure-owned parent was answered before it (secure-if-any). Without the lookup
+    /// (a construction that does not compose it) the rule is off.
+    /// </remarks>
+    private async Task<RecordOwnerResolution?> DirectMessageParentAnswerAsync(
+        ParentFacts primary, RecordOwnershipContext context, CancellationToken ct)
+    {
+        var contentRow = context.KeepCreatorUnlessTargetIsTeamOwned
+                         || Sprk.Bff.Api.Services.Access.RestrictedFilingShareBar.ContentRows.Any(c =>
+                             string.Equals(c.Table, context.ChildEntityLogicalName, StringComparison.OrdinalIgnoreCase));
+        if (_directMessageOwnerTeam is null
+            || !contentRow
+            || !string.Equals(primary.Parent.EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase)
+            || !primary.HasOwningTeam
+            || primary.OwningTeamId is not { } parentTeam
+            || parentTeam == Guid.Empty)
+        {
+            return null;
+        }
+
+        var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
+        if (direct.IsNotConfigured && direct.Fault is null)
+            return null;
+        if (direct.IsResolved && direct.Fault is null)
+            return direct.TeamId == parentTeam ? RecordOwnerResolution.Owned(parentTeam) : null;
+
+        var isDirect = await Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares
+            .IsDirectOwnerTeamAsync(_dataverse, _directMessageOwnerTeam, parentTeam, _logger, ct).ConfigureAwait(false);
+        if (isDirect == false)
+            return null;
+        if (isDirect == true)
+            return RecordOwnerResolution.Owned(parentTeam);
+
+        // An unknown answer behind a FAULTED read is not an answer to refuse on (it would surface as a permanent 409): the fault
+        // propagates, as ReadFilingRowAsync's does. The shared check swallows its own faults into "unknown", so when the lookup
+        // itself did not fault, the identity read it relies on is asked once more for the fault it hid.
+        var fault = direct.Fault
+                    ?? (await _directMessageOwnerTeam.IdentifyDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false)).Fault;
+        if (fault is not null)
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
+
+        _logger.LogError(DirectParentUndecidedEvent,
+            "Refusing to resolve an owning team: the parent {ParentEntity} {ParentId} is owned by team {TeamId}, and whether that is "
+            + "the Direct message owner team cannot be decided ({Refusal}). The row is given no owner.",
+            primary.Parent.EntityLogicalName, primary.Parent.RecordId, parentTeam, direct.Refusal);
+        return RecordOwnerResolution.Refused(
+            RecordOwnerRefusal.ParentUnresolved,
+            $"the parent {primary.Parent.EntityLogicalName} {primary.Parent.RecordId:D} is owned by a team that may be the Direct "
+            + "message owner team, and that cannot be decided now");
     }
 
     /// <summary>
@@ -4282,10 +5115,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 return null;
             }
 
-            return new ParentFacts(parent, plannedBu.Value, HasOwningTeam: true, flaggedSecure) { UnpairedProject = unpairedProject };
+            return new ParentFacts(parent, plannedBu.Value, HasOwningTeam: true, flaggedSecure)
+            {
+                UnpairedProject = unpairedProject,
+                OwningTeamId = plannedTeam,
+            };
         }
 
-        return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure) { UnpairedProject = unpairedProject };
+        return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure)
+        {
+            UnpairedProject = unpairedProject,
+            OwningTeamId = hasOwningTeam ? row.GetAttributeValue<EntityReference>(OwningTeamColumn)!.Id : null,
+        };
     }
 
     /// <summary>

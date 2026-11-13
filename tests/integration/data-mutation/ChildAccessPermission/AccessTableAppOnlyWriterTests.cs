@@ -1208,9 +1208,13 @@ public class AccessTableAppOnlyWriterTests
 
         foreach (var (table, columns) in TableAccessColumns)
         {
-            foreach (var column in columns)
+            // fm task 054b: a thread's type is also BFF-owned, which is refused whatever the identity.
+            foreach (var column in columns.Where(c => InheritedAccessPermission.BffOwnedCommunicationColumnIn(table, [c]) is null))
                 CallerCode(table, column).Should().BeNull($"{column} on {table}: the caller's own privileges decide");
         }
+
+        CallerCode("sprk_communicationthread", "sprk_threadtype")
+            .Should().Be(InheritedAccessPermission.BffOwnedCommunicationColumnReasonCode, "a thread's type is the BFF's own");
     }
 
     [Fact]
@@ -1411,14 +1415,12 @@ public class AccessTableAppOnlyWriterTests
     // ── Field-mapping push (a rule naming one is skipped; the rest of the push applies) ──────────────────────────
 
     /// <summary>
-    /// #2253 fix round 1 (K2): the push runs as its caller, so a rule onto a matter's Access Permission (editable by a Write
-    /// holder; <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>), a root's container or business unit, or an access table is
-    /// not refused here: it is sent as the caller, whose own Dataverse privileges and field security decide it.
+    /// #2253 fix round 1 (K2): the push runs as its caller, so a rule onto an access table's column is not refused here: it
+    /// is sent as the caller, whose own Dataverse privileges and field security decide it. Task 022c (unified-access-control-r2,
+    /// 2026-11-12): the access columns (a root's Access Permission, container, business unit, secure flag and access
+    /// inheritance) are never a mapping target, so a push skips them on every table (<c>AccessColumnPushTargetTests</c>).
     /// </summary>
     [Theory]
-    [InlineData("sprk_matter", "sprk_accesspermission")]
-    [InlineData("sprk_matter", "sprk_securitybu")]
-    [InlineData("sprk_project", "sprk_containerid")]
     [InlineData("sprk_externalrecordaccess", "sprk_accesslevel")]
     [InlineData("contact", "sprk_standinggrant")]
     public async Task APushRule_OntoAColumnTheCallersPrivilegesDecide_IsSentAsTheCaller(string table, string target)

@@ -116,6 +116,46 @@ public sealed class ChatPreSuspendServiceRefusalTests : TypedToolHandlerTestFixt
         Handler().ValidateChat(Context(args), Tool()).IsValid.Should().BeTrue();
     }
 
+    // ── fm task 054b: a BFF-owned communication column is refused before the confirmation, on every create path ──────────
+
+    public static TheoryData<string, string> TheBffOwnedCommunicationColumns => new()
+    {
+        { "sprk_communication", "sprk_communicationthread" },
+        { "sprk_communication", "sprk_communicationthread@odata.bind" },
+        { "sprk_communication", "sprk_sentby" },
+        { "sprk_communication", "sprk_directrecipient" },
+        { "sprk_communicationthread", "sprk_threadtype" },
+        { "sprk_communicationthread", "sprk_isdefaultthread" },
+    };
+
+    [Theory]
+    [MemberData(nameof(TheBffOwnedCommunicationColumns))]
+    public void ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_054b(string table, string column)
+    {
+        // An unfiled communication or a thread keeps its creator (the run-as-user path), which the service-rule pre-check
+        // exits on; the BFF-owned refusal is asked before that exit, so the gate never suspends (no confirm dialog).
+        var args = Args(table, (column, JsonSerializer.SerializeToElement("x")));
+
+        var validation = Handler().ValidateChat(Context(args), Tool());
+
+        validation.IsValid.Should().BeFalse("every create path refuses the column, so the create is refused before the dialog");
+        string.Join(" ", validation.Errors).Should().Contain(column.Replace("@odata.bind", string.Empty, StringComparison.Ordinal))
+            .And.Contain("is set by the server");
+        _reads.Should().BeEmpty("the pre-check is pure: no Dataverse call");
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_communication", "sprk_subject")]
+    [InlineData("sprk_communicationthread", "sprk_name")]
+    [InlineData("sprk_matter", "sprk_communicationthread")] // the same name on another table is not a BFF-owned column
+    public void ValidateChat_AProposalWithoutTheFiveColumns_StillPassesToItsConfirmation_054b_MustNotFire(string table, string column)
+    {
+        var args = Args(table, (column, JsonSerializer.SerializeToElement("x")));
+
+        Handler().ValidateChat(Context(args), Tool()).IsValid.Should().BeTrue();
+    }
+
     private DataverseCreateRecordHandler Handler() =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             _world.Resolver(), IdentityNormalizationFixtures.NoLinkedContact(),

@@ -420,6 +420,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
             containerId={containerId}
             onFormValues={setAssignWorkState}
             initialValues={assignWorkStateRef.current}
+            navigationService={navigationService}
           />
         ),
       },
@@ -461,11 +462,20 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
             onValidChange={handleFollowOnEventValid}
             onFormValues={setFollowOnEventState}
             initialValues={followOnEventStateRef.current}
+            navigationService={navigationService}
           />
         ),
       },
     ],
-    [dataService, authenticatedFetch, bffBaseUrl, containerId, handleFollowOnEventValid, handleSearchUsers]
+    [
+      dataService,
+      authenticatedFetch,
+      bffBaseUrl,
+      containerId,
+      handleFollowOnEventValid,
+      handleSearchUsers,
+      navigationService,
+    ]
   );
 
   // -- Pre-fill email when entering Send Email step --------------------------
@@ -545,6 +555,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
               }
               authenticatedFetch={authenticatedFetch}
               bffBaseUrl={bffBaseUrl}
+              navigationService={navigationService}
             />
           );
         },
@@ -580,6 +591,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       handleUploadedFilesChange,
       handleEnterInfoValid,
       handleEnterInfoValues,
+      navigationService,
     ]
   );
 

@@ -39,6 +39,26 @@ const composerInquiry = (prefillTo: DecisionAction['prefillTo'] = null): Decisio
   prefillTo,
 });
 
+/** Task 190 (D-222): the inquiry as the plan route returns it now: the catalog declares optional `cc` and `bcc`. */
+const composerInquiryWithCopies: DecisionAction = {
+  ...composerInquiry([LEAD]),
+  parameters: [
+    ...sendInquiry.parameters,
+    { code: 'cc', label: 'Cc', kind: 'Text', required: false },
+    { code: 'bcc', label: 'Bcc', kind: 'Text', required: false },
+  ],
+};
+
+const addRecipient = (step: HTMLElement, field: 'To' | 'Cc' | 'Bcc', address: string) => {
+  // The composer hides the Bcc row until its small "Bcc" toggle is used.
+  if (field === 'Bcc' && !within(step).queryByRole('textbox', { name: 'Bcc' })) {
+    click(within(step).getByRole('button', { name: 'Bcc' }));
+  }
+  const input = within(step).getByRole('textbox', { name: field });
+  fireEvent.change(input, { target: { value: address } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+};
+
 function setup(
   plan: DecisionPlan,
   overrides: Partial<React.ComponentProps<typeof DecisionWizard>> = {},
@@ -332,6 +352,96 @@ describe('message step in the EmailComposer (task 160)', () => {
     fireEvent.keyDown(cc, { key: 'Enter' });
 
     expect(await within(step).findByTestId('cc-not-sent')).toHaveTextContent('Cc and Bcc are not sent');
+  });
+
+  describe('Cc and Bcc on an action that declares them (task 190, D-222)', () => {
+    it('commits the Cc to the cc step value and shows no cc-not-sent warning', async () => {
+      const { service } = setup(planWith(composerInquiryWithCopies));
+      const step = await toInquiry();
+
+      addRecipient(step, 'Cc', 'copy@firm.example');
+      await waitFor(() => expect(within(step).getByText('copy@firm.example')).toBeInTheDocument());
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(within(step).queryByTestId('cc-not-sent')).toBeNull();
+      expect(button(/^next$/i)).toBeEnabled();
+
+      const review = await recordAfterInquiry(service);
+      expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values).toMatchObject({
+        to: 'lead@firm.example',
+        cc: 'copy@firm.example',
+      });
+    }, 30000);
+
+    it('commits Cc and Bcc joined with "; "', async () => {
+      const { service } = setup(planWith(composerInquiryWithCopies));
+      const step = await toInquiry();
+
+      addRecipient(step, 'Cc', 'c1@firm.example');
+      addRecipient(step, 'Cc', 'c2@firm.example');
+      addRecipient(step, 'Bcc', 'hidden@firm.example');
+
+      const review = await recordAfterInquiry(service);
+      const values = review.actions.find(a => a.code === 'send-budget-inquiry')?.values;
+      expect(values).toMatchObject({ cc: 'c1@firm.example; c2@firm.example', bcc: 'hidden@firm.example' });
+      expect(values?.to).toBe('lead@firm.example');
+    }, 30000);
+
+    it('sends no cc or bcc value when none was added', async () => {
+      const { service } = setup(planWith(composerInquiryWithCopies));
+      await toInquiry();
+
+      const review = await recordAfterInquiry(service);
+      const values = review.actions.find(a => a.code === 'send-budget-inquiry')?.values ?? {};
+      expect(Object.keys(values)).not.toContain('cc');
+      expect(Object.keys(values)).not.toContain('bcc');
+    }, 30000);
+
+    it('does not render cc and bcc as separate fields beside the composer', async () => {
+      setup(planWith(composerInquiryWithCopies));
+      const step = await toInquiry();
+
+      expect(within(step).queryByTestId('field-cc')).toBeNull();
+      expect(within(step).queryByTestId('field-bcc')).toBeNull();
+      expect(within(step).getByTestId('field-outsideFirm')).toBeInTheDocument();
+    });
+
+    it('starts Cc and Bcc from the step values: they are still there after Back', async () => {
+      setup(planWith(composerInquiryWithCopies));
+      const step = await toInquiry();
+      addRecipient(step, 'Cc', 'copy@firm.example');
+      addRecipient(step, 'Bcc', 'hidden@firm.example');
+      await waitFor(() => expect(within(step).getByText('hidden@firm.example')).toBeInTheDocument());
+
+      click(button(/^next$/i));
+      await screen.findByTestId('step-action-revise-budget');
+      click(button(/^back$/i));
+      const again = await screen.findByTestId('step-action-send-budget-inquiry');
+
+      expect(within(again).getByText('copy@firm.example')).toBeInTheDocument();
+      expect(within(again).getByText('hidden@firm.example')).toBeInTheDocument();
+      expect(within(again).queryByTestId('cc-not-sent')).toBeNull();
+    }, 30000);
+
+    it.each(['Cc', 'Bcc'] as const)('Next stays disabled while a %s address is not one, as for To', async field => {
+      setup(planWith(composerInquiryWithCopies));
+      const step = await toInquiry();
+      expect(button(/^next$/i)).toBeEnabled();
+
+      addRecipient(step, field, 'copy@firm');
+
+      await waitFor(() => expect(button(/^next$/i)).toBeDisabled());
+    });
+
+    it('must-not-fire: an action that declares no cc/bcc (send-reminder) still shows the warning', async () => {
+      // send-reminder's message step is the same composer over to/subject/body only (the catalog's MessageParameters).
+      setup(planWith(composerInquiry([LEAD])));
+      const step = await toInquiry();
+      expect(sendInquiry.parameters.some(p => p.code === 'cc' || p.code === 'bcc')).toBe(false);
+
+      addRecipient(step, 'Cc', 'copy@firm.example');
+
+      expect(await within(step).findByTestId('cc-not-sent')).toBeInTheDocument();
+    });
   });
 
   it('mounting the composer is not a choice: opening and leaving the step asks nothing (F3b)', async () => {

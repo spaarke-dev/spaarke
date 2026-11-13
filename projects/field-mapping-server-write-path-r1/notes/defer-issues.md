@@ -256,3 +256,21 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | Follow-up; blocked on unified-access-control-r2 task 198 reaching master |
 | **Failure** | `DirectMessageRecipient.ReadParticipantsAsync` deliberately duplicates the participant rule of `IDirectThreadAccessService.GetParticipantSystemUserIdsAsync`: the thread typed Direct; the user owner plus systemuser shares carrying the Read bit; a strict read. Two readers can drift, and then the stamp and the grant path would disagree on who a message's participants are. Fix: once 198 is on master, call the shared reader and delete the duplicate, keeping the stamp's tests passing |
 | **Status** | Open |
+## DI-026 — Check that no strict Direct pair thread is Record-Anchored before the Direct settings go live
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-11, task 054b (A1, known limit K3); UAC-r2 review follow-up |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2701 |
+| **Class** | K, follow-up |
+| **Failure** | Rule: a strict Direct pair thread, or a thread holding a message with `sprk_directrecipient` set, stays typed Direct and is never anchored to a record. Since 054b, filing enforces this going forward (`ThreadResolver` rule 2, EventId 5413); it does not look back. Follow-up: a one-time per-environment check, before the `DirectMessage:*` settings are set, that no such thread is Record-Anchored, with an owner-approved dry-run / `-Apply` / `-Verify` correction if any is found (a script, or a phase of `Migrate-DirectMessagesToOwnerTeam.ps1`). Nothing with outbound Direct pair routing is deployed yet, so the expected count is zero |
+| **Status** | Open |
+## DI-027 — Apply the Restricted source rule to Repair and the field-mapping push (task 022c)
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-12, task 022b (scope: create only) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2738 |
+| **Class** | F1, follow-up task 022c (unified-access-control-r2, round 90: fixed promptly, right after 022b merges) |
+| **Failure** | Rule: values mapped from a source whose `sprk_accesspermission` is Restricted, or cannot be read, are written only into a row that is Restricted. 022b applies it to the create. Repair mode (`RecordCreationService.Repair.cs`) and the field-mapping push (`FieldMappingPushSourceGate`) apply the secure copy gate; 022c applies the same Restricted predicate there. |
+| **Status** | Fixed on the work branch by task 022c (merge 74556c46df, 2026-11-12; UAC-r2 PASS). #2738 closes when it reaches master. |

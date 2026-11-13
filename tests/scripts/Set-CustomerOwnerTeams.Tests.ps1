@@ -229,6 +229,106 @@ Describe 'Set-CustomerOwnerTeams.ps1 (mocked Dataverse, no writes)' {
         $r.Output | Should -Match "names business unit 'direct'"
     }
 
+    Context 'No mode accepts the ontology writer''s unit as a customer unit (task 269)' {
+        BeforeEach {
+            $global:SetCustomerOwnerTeamsTest_WriterUnitId = '00000000-0000-4000-8000-00000000000e'
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_WriterUnitId; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId })
+        }
+
+        It 'must fire: the writer unit by name is refused as a customer unit' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Spaarke Ontology Writer' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "is the ontology writer's business unit \('Spaarke Ontology Writer', task 267\), never a customer unit"
+            $r.Output | Should -Not -Match 'Re-run with -Apply'
+        }
+
+        It 'must fire: the writer unit by id is refused by -Apply, nothing written' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitId = [guid]$global:SetCustomerOwnerTeamsTest_WriterUnitId; Apply = $true }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "is the ontology writer's business unit"
+            $r.Output | Should -Not -Match 'the script wrote'
+        }
+
+        It 'must fire: the writer unit named as the Direct-message unit is refused' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; DirectMessageBusinessUnitName = 'Spaarke Ontology Writer' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "is the ontology writer's business unit"
+        }
+
+        It 'must fire: an owner team of the name in the writer unit is TEAM PLACE drift' {
+            $global:SetCustomerOwnerTeamsTest_WithTeam = $true
+            $global:SetCustomerOwnerTeamsTest_TeamUnitId = $global:SetCustomerOwnerTeamsTest_WriterUnitId
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "TEAM PLACE: .* sits in the ontology writer's business unit 'Spaarke Ontology Writer'"
+        }
+
+        It 'must fire: the writer unit placed under the customer unit is not the expected tree shape' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @([pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_WriterUnitId; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_CustomerId })
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "business-unit tree is not the expected shape: the ontology writer's business unit 'Spaarke Ontology Writer' sits inside the subtree of Customer One"
+            $r.Output | Should -Match "as must the ontology writer's unit \(task 267\)"
+        }
+
+        It 'must fire: an owner team of the name in a unit BELOW the writer unit is TEAM PLACE drift naming the writer unit' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @(
+                [pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_WriterUnitId; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId }
+                [pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-000000000010'; name = 'Writer Child'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_WriterUnitId }
+            )
+            $global:SetCustomerOwnerTeamsTest_WithTeam = $true
+            $global:SetCustomerOwnerTeamsTest_TeamUnitId = '00000000-0000-4000-8000-000000000010'
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "TEAM PLACE: .* sits in 'Writer Child', below the ontology writer's business unit 'Spaarke Ontology Writer'"
+        }
+
+        It 'must fire (label unchanged): an owner team of the name in a unit BELOW Secure Record is TEAM PLACE drift naming Secure Record' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @(
+                [pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_WriterUnitId; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId }
+                [pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-000000000011'; name = 'Secure Child'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_SecureId }
+            )
+            $global:SetCustomerOwnerTeamsTest_WithTeam = $true
+            $global:SetCustomerOwnerTeamsTest_TeamUnitId = '00000000-0000-4000-8000-000000000011'
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "TEAM PLACE: .* sits in 'Secure Child', below the Secure Record business unit"
+        }
+
+        It 'must fire (review K1): a -SecureBusinessUnitName that names the writer unit refuses, so the real Secure Record never passes as a customer unit' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One'; SecureBusinessUnitName = 'Spaarke Ontology Writer' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "-SecureBusinessUnitName 'Spaarke Ontology Writer' names the ontology writer's business unit"
+            $r.Output | Should -Not -Match 'Re-run with -Apply'
+        }
+
+        It 'must fire: two units named as the writer unit refuse (which one is the writer''s is not guessable)' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @(
+                [pscustomobject]@{ businessunitid = $global:SetCustomerOwnerTeamsTest_WriterUnitId; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId }
+                [pscustomobject]@{ businessunitid = '00000000-0000-4000-8000-00000000000f'; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $global:SetCustomerOwnerTeamsTest_RootId }
+            )
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match "Found 2 business units named 'Spaarke Ontology Writer'"
+        }
+
+        It 'must not fire: a customer unit plans as before, and the writer unit is not listed as a customer top unit' {
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 0 -Because $r.Output
+            $r.Output | Should -Match 'Re-run with -Apply'
+            $r.Output | Should -Match "Writer BU   : Spaarke Ontology Writer \($([regex]::Escape($global:SetCustomerOwnerTeamsTest_WriterUnitId))\)"
+            $r.Output | Should -Not -Match "customer top unit 'Spaarke Ontology Writer'"
+        }
+
+        It 'must not fire: with no writer unit (H7b not run yet), nothing is refused or listed' {
+            $global:SetCustomerOwnerTeamsTest_ExtraUnits = @()
+            $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = 'Customer One' }
+            $r.ExitCode | Should -Be 0 -Because $r.Output
+            $r.Output | Should -Not -Match 'Writer BU'
+            $r.Output | Should -Not -Match "is the ontology writer's business unit|Refused"
+        }
+    }
+
     Context 'Customer mode never accepts the Direct-message unit (task 198 Q4)' {
         It 'must fire: the Direct-message unit by name is refused as a customer unit' {
             $r = Invoke-Script @{ EnvironmentUrl = $script:Url; CustomerBusinessUnitName = $global:SetCustomerOwnerTeamsTest_DirectUnitName }
@@ -507,6 +607,8 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $global:SetCustomerOwnerTeamsTest_OtherCustomerId = '00000000-0000-4000-8000-000000000022'  # another customer's top unit
         $global:SetCustomerOwnerTeamsTest_OtherChildId = '00000000-0000-4000-8000-000000000023'     # a child unit of Customer Two
         $global:SetCustomerOwnerTeamsTest_DirectUnitId = '00000000-0000-4000-8000-000000000024'     # the Direct-message unit (uac-r2 198), a root child, never a customer
+        $global:SetCustomerOwnerTeamsTest_WriterUnitId = '00000000-0000-4000-8000-000000000025'     # the ontology writer's unit (task 267), a root child, never a customer (task 269)
+        $global:SetCustomerOwnerTeamsTest_WriterChildId = '00000000-0000-4000-8000-000000000026'    # a unit below the ontology writer's unit (task 269 review)
         # One copy of the role per unit (the root copy is the role itself), keyed by a short name the tests use. 'otherchild'
         # is a unit only (a holder's home); it has no entry in CopyId, so the role has no copy in it here.
         $global:SetCustomerOwnerTeamsTest_Unit = @{
@@ -517,6 +619,8 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
             other      = $global:SetCustomerOwnerTeamsTest_OtherCustomerId
             otherchild = $global:SetCustomerOwnerTeamsTest_OtherChildId
             direct     = $global:SetCustomerOwnerTeamsTest_DirectUnitId
+            writer     = $global:SetCustomerOwnerTeamsTest_WriterUnitId
+            writerchild = $global:SetCustomerOwnerTeamsTest_WriterChildId
         }
         $global:SetCustomerOwnerTeamsTest_CopyId = @{
             root     = '00000000-0000-4000-8000-000000000101'
@@ -525,6 +629,8 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
             child    = '00000000-0000-4000-8000-000000000104'
             other    = '00000000-0000-4000-8000-000000000105'
             direct   = '00000000-0000-4000-8000-000000000106'
+            writer   = '00000000-0000-4000-8000-000000000107'
+            writerchild = '00000000-0000-4000-8000-000000000108'
         }
         $global:SetCustomerOwnerTeamsTest_CandidateId = '00000000-0000-4000-9000-000000000099'
         function Invoke-Billing([switch]$Verify, [switch]$Apply, [string]$ConfigPath = $script:BillingConfig, [guid[]]$Assign) {
@@ -635,6 +741,9 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
                     [pscustomobject]@{ businessunitid = $unit.other; name = 'Customer Two'; _parentbusinessunitid_value = $unit.root }
                     [pscustomobject]@{ businessunitid = $unit.otherchild; name = 'Customer Two Litigation'; _parentbusinessunitid_value = $unit.other }
                     [pscustomobject]@{ businessunitid = $unit.direct; name = 'Spaarke Direct Messages'; _parentbusinessunitid_value = $unit.root }
+                    # Task 269: the ontology writer's unit exists on every stamp H7b has run on (task 267).
+                    [pscustomobject]@{ businessunitid = $unit.writer; name = 'Spaarke Ontology Writer'; _parentbusinessunitid_value = $unit.root }
+                    [pscustomobject]@{ businessunitid = $unit.writerchild; name = 'Writer Child'; _parentbusinessunitid_value = $unit.writer }
                 )
                 # uac-r2 198 (R6): the script reads named units by Dataverse's own `name eq` filter; answer only that name.
                 if ($u -match "filter=name eq '((?:[^']|'')*)'") {
@@ -654,7 +763,7 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
                 return @{ value = @([pscustomobject]@{ roleid = $copy.root; name = $roleName; isinherited = $global:SetCustomerOwnerTeamsTest_IsInherited; _parentrootroleid_value = $copy.root }) }
             }
             if ($u -match '/roles\?.*_parentrootroleid_value eq') {
-                return @{ value = @(foreach ($k in 'root', 'secure', 'customer', 'child', 'other', 'direct') {
+                return @{ value = @(foreach ($k in 'root', 'secure', 'customer', 'child', 'other', 'direct', 'writer', 'writerchild') {
                             $inh = if ($global:SetCustomerOwnerTeamsTest_CopyIsInherited.ContainsKey($k)) { $global:SetCustomerOwnerTeamsTest_CopyIsInherited[$k] } else { $global:SetCustomerOwnerTeamsTest_IsInherited }
                             [pscustomobject]@{ roleid = $copy[$k]; isinherited = $inh; _businessunitid_value = $unit[$k] }
                         })
@@ -911,6 +1020,22 @@ Describe 'Set-CustomerOwnerTeams.ps1: the directly assigned Billing Rule Reader 
         $r.ExitCode | Should -Be 1 -Because $r.Output
         $r.Output | Should -Match "ROLE ASSIGNED ELSEWHERE: user 'holder 2' .* holds the 'Spaarke Direct Messages' copy"
         $r.Output | Should -Not -Match "INFO .* hold the 'Spaarke Direct Messages' copy"
+    }
+
+    It 'task 269 must fire: the ontology writer''s unit is never another customer''s top unit, so a holder of its copy homed there is drift, not information' {
+        $global:SetCustomerOwnerTeamsTest_UserHolders = @(@{ Copy = 'customer'; Home = 'child'; Admin = $true }, @{ Copy = 'writer'; Home = 'writer'; Admin = $true })
+        $r = Invoke-Billing -Verify
+        $r.ExitCode | Should -Be 1 -Because $r.Output
+        $r.Output | Should -Match "ROLE ASSIGNED ELSEWHERE: user 'holder 2' .* holds the 'Spaarke Ontology Writer' copy .* in or below the ontology writer's business unit"
+        $r.Output | Should -Not -Match "INFO .* hold the 'Spaarke Ontology Writer' copy"
+    }
+
+    It 'task 269 must fire: a copy BELOW the ontology writer''s unit is the writer''s drift, not Secure Record''s' {
+        $global:SetCustomerOwnerTeamsTest_UserHolders = @(@{ Copy = 'customer'; Home = 'child'; Admin = $true }, @{ Copy = 'writerchild'; Home = 'writerchild'; Admin = $true })
+        $r = Invoke-Billing -Verify
+        $r.ExitCode | Should -Be 1 -Because $r.Output
+        $r.Output | Should -Match "ROLE ASSIGNED ELSEWHERE: user 'holder 2' .* holds the 'Writer Child' copy .* in or below the ontology writer's business unit"
+        $r.Output | Should -Not -Match "holds the 'Writer Child' copy .* in or below Secure Record"
     }
 
     It 'F3 -Apply -AssignBillingRuleReader: the one write assigns the CUSTOMER TOP UNIT''s copy (never the root''s), and the read-back shows the holder' {

@@ -13,7 +13,9 @@
  *   a pick with no usable address adds nothing and the step says so (a warning: type one in To); a side pane that fails to open says so the same way. Both warnings clear when the next lookup starts or To changes. Typed addresses are accepted as the
  *   composer accepts them; Next stays disabled while any address in To is not one (`stepValid`).
  * - The body is committed as plain text: a body the user switched to rich text is converted back.
- * - Cc and Bcc are not part of the action: when the user adds any, the step says they will not be sent.
+ * - Cc and Bcc: an action that declares `cc` and `bcc` parameters (send-budget-inquiry, task 190, D-222) commits them like To
+ *   (addresses joined with "; ") and the commit route sends them; the composer is their only editor. An action that does not declare
+ *   them (send-reminder) keeps the warning: when the user adds any, the step says they will not be sent.
  *
  * Fluent v9 tokens only (ADR-021). No Xrm, no auth import (ADR-012, ADR-028).
  */
@@ -27,11 +29,31 @@ import type { AuthenticatedFetchFn } from '../../../services/EntityCreationServi
 import { fieldValue, withValue } from '../decisionDraft';
 import type { StepScope } from '../decisionDraft';
 import { useDecisionItem } from '../decisionItemContext';
+import type { DecisionAction } from '../decisionWizardTypes';
 
 /** The parameter codes the composer edits. */
 export const EMAIL_MESSAGE_CODES: readonly string[] = ['to', 'subject', 'body'];
 
+/** Task 190 (D-222): the copy-line codes an action may declare; the composer edits them when it declares both. */
+export const EMAIL_COPY_CODES: readonly string[] = ['cc', 'bcc'];
+
+/** True when the action declares `cc` and `bcc`, so the composer's Cc and Bcc are committed (and sent) rather than warned about. */
+export const declaresCopies = (action: Pick<DecisionAction, 'parameters'>): boolean =>
+  EMAIL_COPY_CODES.every(code => action.parameters.some(p => p.code === code));
+
 const SEPARATORS = /[;,\s]+/;
+
+const splitAddresses = (value: string): string[] =>
+  value
+    .split(SEPARATORS)
+    .map(a => a.trim())
+    .filter(Boolean);
+
+const joinAddresses = (recipients: IRecipient[]): string =>
+  recipients
+    .map(r => r.email.trim())
+    .filter(Boolean)
+    .join('; ');
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
@@ -51,11 +73,12 @@ function toPlainText(body: string, format: EmailComposerState['bodyFormat']): st
   return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) => {
+export const EmailMessageFields: React.FC<{ scope: StepScope; action: DecisionAction }> = ({ scope, action }) => {
   const { draft, update, openLookup } = useDecisionItem();
   const styles = useStyles();
   const latest = React.useRef(draft);
   latest.current = draft;
+  const sendsCopies = declaresCopies(action);
   const [otherRecipients, setOtherRecipients] = React.useState(false);
   // The contact picked in the side pane that gave no usable address: said out loud, never a silent no-op.
   const [noAddressFor, setNoAddressFor] = React.useState<string | null>(null);
@@ -64,25 +87,25 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
 
   // The composer is uncontrolled: it starts from the step's values as they are when the step opens.
   const [initial] = React.useState(() => ({
-    to: fieldValue(draft, scope, 'to')
-      .split(SEPARATORS)
-      .map(a => a.trim())
-      .filter(Boolean),
+    to: splitAddresses(fieldValue(draft, scope, 'to')),
+    cc: sendsCopies ? splitAddresses(fieldValue(draft, scope, 'cc')) : [],
+    bcc: sendsCopies ? splitAddresses(fieldValue(draft, scope, 'bcc')) : [],
     subject: fieldValue(draft, scope, 'subject'),
     body: fieldValue(draft, scope, 'body'),
   }));
 
   const onStateChange = React.useCallback(
     (state: EmailComposerState) => {
-      setOtherRecipients(state.cc.length > 0 || state.bcc.length > 0);
+      setOtherRecipients(!sendsCopies && (state.cc.length > 0 || state.bcc.length > 0));
       const next: Record<string, string> = {
-        to: state.to
-          .map(r => r.email.trim())
-          .filter(Boolean)
-          .join('; '),
+        to: joinAddresses(state.to),
         subject: state.subject,
         body: toPlainText(state.body, state.bodyFormat),
       };
+      if (sendsCopies) {
+        next.cc = joinAddresses(state.cc);
+        next.bcc = joinAddresses(state.bcc);
+      }
       // Only a real change is written, so mounting the composer over the starting values is not a choice (discard check).
       const changed = Object.keys(next).filter(code => fieldValue(latest.current, scope, code) !== next[code]);
       if (changed.length === 0) return;
@@ -93,7 +116,7 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
       }
       update(d => changed.reduce((acc, code) => withValue(acc, scope, code, next[code]), d));
     },
-    [scope, update]
+    [scope, sendsCopies, update]
   );
 
   const paneForContacts =
@@ -131,6 +154,8 @@ export const EmailMessageFields: React.FC<{ scope: StepScope }> = ({ scope }) =>
         sendMode="user"
         authenticatedFetch={refuseFetch}
         initialTo={initial.to}
+        initialCc={initial.cc}
+        initialBcc={initial.bcc}
         initialSubject={initial.subject}
         initialBody={initial.body}
         initialBodyFormat="PlainText"

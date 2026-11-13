@@ -506,6 +506,47 @@ internal static class InheritedAccessPermission
     internal static bool AppliesTo(string? table) => table is not null && Tables.Contains(table);
 
     /// <summary>
+    /// field-mapping-server-write-path-r1 task 022b: the tables that carry <see cref="Column"/> as a TARGET of a create, from
+    /// the metadata this code already holds — the four inheriting tables (<see cref="Tables"/>) and every secure root whose
+    /// server-owned columns name it (<see cref="SecureRootColumns"/>, from the table registry). No list of its own: a table
+    /// added to either is here.
+    /// </summary>
+    internal static IEnumerable<string> TablesCarryingColumn() =>
+        Tables.Concat(SecureRootColumns.Where(root => root.Value.Contains(Column)).Select(root => root.Key))
+            .Select(table => table.ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal);
+
+    /// <summary>Task 022b: true when rows of <paramref name="table"/> carry <see cref="Column"/> as a create's target
+    /// (<see cref="TablesCarryingColumn"/>). Any other table's new row is never Restricted.</summary>
+    internal static bool CarriesColumn(string? table) =>
+        table is not null
+        && (Tables.Contains(table) || (SecureRootColumns.TryGetValue(table, out var columns) && columns.Contains(Column)));
+
+    /// <summary>
+    /// Task 022b (UAC-r2, 2026-11-12): the tables whose <see cref="Column"/> is read ONLY as a mapping SOURCE — the
+    /// Restricted-source check reads it there and fails closed on it. This adds no inheritance and no enforcement on these
+    /// tables: they are not in <see cref="Tables"/> or <see cref="SecureRootColumns"/>, and a new row of one is never
+    /// Restricted (<see cref="CarriesColumn"/>).
+    /// </summary>
+    internal static readonly IReadOnlySet<string> SourceOnlyTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_agreement",
+    };
+
+    /// <summary>
+    /// Task 022b: every table whose rows carry <see cref="Column"/> as a mapping source: <see cref="TablesCarryingColumn"/> and
+    /// <see cref="SourceOnlyTables"/>. Held exactly equal to the solution's tables that define the column by
+    /// <c>AccessPermissionTablesGuardTests</c>.
+    /// </summary>
+    internal static IEnumerable<string> SourceTablesCarryingColumn() =>
+        TablesCarryingColumn().Concat(SourceOnlyTables.Select(table => table.ToLowerInvariant())).Distinct(StringComparer.Ordinal);
+
+    /// <summary>Task 022b: true when a mapping source of <paramref name="table"/> carries <see cref="Column"/>
+    /// (<see cref="SourceTablesCarryingColumn"/>). A source table without it is never read for it.</summary>
+    internal static bool SourceCarriesColumn(string? table) =>
+        table is not null && (CarriesColumn(table) || SourceOnlyTables.Contains(table));
+
+    /// <summary>
     /// The most restrictive of <paramref name="values"/> (null counts as Standard), or <see langword="null"/> when one of
     /// them is not a known level — an unknown option is never ranked by guess.
     /// </summary>
@@ -530,7 +571,25 @@ internal static class InheritedAccessPermission
     }
 
     /// <summary>What a row's parents give it.</summary>
-    internal sealed record Answer(ParentTopsStatus Status, int? Value, IReadOnlyList<ParentTop> Tops, string? Reason);
+    internal sealed record Answer(ParentTopsStatus Status, int? Value, IReadOnlyList<ParentTop> Tops, string? Reason)
+    {
+        /// <summary>Task 022b: the row has no parent, or every parent was read and what they give is a KNOWN level other than
+        /// Restricted (Standard or Limited).</summary>
+        internal bool NoRestrictedAncestor =>
+            Status == ParentTopsStatus.NoParent || (Status == ParentTopsStatus.Found && Value is Standard or Limited);
+
+        /// <summary>Task 022b: what the parents give cannot be told (a value that cannot be read, a record that did not come back,
+        /// a fault, or a found value that is no known level). Never read as "no Restricted ancestor".</summary>
+        internal bool Unknown =>
+            Status == ParentTopsStatus.Undetermined
+            || (Status == ParentTopsStatus.Found && Value is not (Standard or Limited or Restricted));
+
+        /// <summary>Task 022b: <paramref name="reason"/> as an answer that cannot be told.</summary>
+        internal static Answer Undetermined(string reason) => new(ParentTopsStatus.Undetermined, null, [], reason);
+
+        /// <summary>Task 022b: the answer for a row that names no parent.</summary>
+        internal static Answer NoParent { get; } = new(ParentTopsStatus.NoParent, null, [], null);
+    }
 
     /// <summary>
     /// The inherited value for a row whose filing parents are <paramref name="parents"/>, through <paramref name="walk"/>
@@ -653,6 +712,72 @@ internal static class InheritedAccessPermission
         Sprk.Bff.Api.Services.Communication.CrossPathLink.EmailMessageIdAttribute,
         Sprk.Bff.Api.Services.Communication.CrossPathLink.IsEmailArchiveAttribute,
     };
+
+    /// <summary>
+    /// fm task 054b: the reason code when a caller-, model- or configuration-supplied payload names one of the BFF-owned columns
+    /// of a communication or its thread (<see cref="BffOwnedCommunicationColumns"/>; <see cref="RefuseBffOwnedCommunicationColumn"/>).
+    /// </summary>
+    internal const string BffOwnedCommunicationColumnReasonCode = "sdap.access.communication_bff_column_server_only";
+
+    /// <summary>
+    /// fm task 054b: the columns of a communication and of its thread that only the BFF's own typed writers write, per table.
+    /// <list type="bullet">
+    /// <item><c>sprk_communicationthread</c>: <c>sprk_threadtype</c> (Direct or Record-Anchored) and <c>sprk_isdefaultthread</c>
+    /// (the per-record default and the per-user master). Written at create by the thread creators, and on update only by the
+    /// filing reconcile's whole-thread anchor (<c>ThreadResolver.AnchorThreadForFilingAsync</c>, owner decision 2026-11-11).</item>
+    /// <item><c>sprk_communication</c>: <c>sprk_sentby</c> and <c>sprk_directrecipient</c> (a Direct message's two participants,
+    /// the audience its participant grants read) and the thread lookup <c>sprk_communicationthread</c> (the unfile step derives
+    /// the thread participants from it). Written by the create paths' typed stamps and the one thread filing write
+    /// (<c>DirectMessageRecipient.WriteThreadFilingAsync</c>).</item>
+    /// </list>
+    /// <c>scripts/Set-ThreadFlagFieldSecurity.ps1</c> field-secures exactly these columns for the BFF's writer profile, so a
+    /// person's own write of one fails at Dataverse; the BFF's generic writers run as the BFF or carry a payload a person,
+    /// model or configuration chose, so this refusal is what stops them. The script's list and this set are equal
+    /// (<c>CommunicationBffOwnedColumnRefusalTests</c> reads the script). Built from the owners' constants, so it cannot drift
+    /// from them.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> BffOwnedCommunicationColumns =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [DirectMessageParticipantShares.ThreadTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                DirectMessageParticipantShares.ThreadTypeColumn,
+                DirectMessageParticipantShares.DefaultThreadColumn,
+            },
+            [DirectMessageParticipantShares.CommunicationTable] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                DirectMessageParticipantShares.SentByColumn,
+                DirectMessageParticipantShares.DirectRecipientColumn,
+                DirectMessageParticipantShares.ThreadLookup,
+            },
+        };
+
+    /// <summary>
+    /// fm task 054b: the first BFF-owned column of <paramref name="table"/> (<see cref="BffOwnedCommunicationColumns"/>) that
+    /// <paramref name="keys"/> names, in any form a writer sends (any case, surrounding space, <c>{nav}@odata.bind</c>,
+    /// <c>_{column}_value</c>), or <see langword="null"/>. The table is matched trimmed and in any case. Shape only: reads nothing.
+    /// </summary>
+    internal static string? BffOwnedCommunicationColumnIn(string? table, IEnumerable<string> keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (table is null || !BffOwnedCommunicationColumns.TryGetValue(table.Trim(), out var owned))
+            return null;
+
+        return keys.Select(k => SecureRootInheritance.NormalizeColumn(k).Trim()).FirstOrDefault(owned.Contains);
+    }
+
+    /// <summary>
+    /// fm task 054b: the refusal when a payload names a BFF-owned column of a communication or its thread
+    /// (<see cref="BffOwnedCommunicationColumnIn"/>), or <see langword="null"/>. Asked whatever identity the write runs as: by
+    /// <see cref="RefuseAppOnlyWrite"/> (every app-only generic writer and the field-mapping push) and by the shared update-side
+    /// column check <c>RecordTableRules.RefuseFixedAfterCreateColumns</c> (every generic update path, a confirmed proposal
+    /// written as its user included). Nothing is written.
+    /// </summary>
+    internal static RecordOwnerResolution? RefuseBffOwnedCommunicationColumn(string? table, IEnumerable<string> keys) =>
+        BffOwnedCommunicationColumnIn(table, keys) is { } named
+            ? RecordOwnerResolution.Refused(BffOwnedCommunicationColumnReasonCode,
+                $"{named} of a {table!.Trim().ToLowerInvariant()} is set by Spaarke (it decides who may read a message), so it was not written")
+            : null;
 
     /// <summary>
     /// #2247: the reason code when an app-only generic writer names a row's owner (<see cref="OwnerColumns"/>;
@@ -1298,16 +1423,18 @@ internal static class InheritedAccessPermission
     /// <see cref="AppOnlyAccessColumnWriteReasonCode"/>. Whatever the identity, a table that is not a bare identifier after
     /// trimming is refused first (<see cref="AppOnlyTableNameInvalidReasonCode"/>): the write would paste it into a URL.</para>
     /// <para><b>Identity</b> (<paramref name="identity"/>, K2): <see cref="WriteIdentity.Caller"/> (the field-mapping push,
-    /// which runs as its caller) asks the table-name check and only the refusals it asked before #2251 (the document codes,
-    /// the owner, the creator); the three #2251-and-later sets are left to that person's own Dataverse privileges and field
-    /// security. <see cref="WriteIdentity.Playbook"/> (#2250: the Update Record node and a playbook's output mapping) asks every
+    /// which runs as its caller) asks the table-name check, the refusals it asked before #2251 (the document codes, the
+    /// owner, the creator), the writer-only columns (task 165d) and the BFF-owned columns of a communication and its thread
+    /// (fm task 054b); the three #2251-and-later sets are left to that person's own Dataverse privileges and field security.
+    /// <see cref="WriteIdentity.Playbook"/> (#2250: the Update Record node and a playbook's output mapping) asks every
     /// <see cref="WriteIdentity.AppOnly"/> refusal and, last, a grant root's Assigned-To columns
     /// (<see cref="IsAssignedToGrantColumn"/>, refused with <see cref="PlaybookAssignedToWriteReasonCode"/>).</para>
     /// <para><b>Precedence</b> (the first match decides the code): a table that is not an identifier; then an access table;
     /// then, on a document, its Access Permission or own-narrowing record, then its D7 links, then its BFF-owned columns;
     /// then a secure root's columns; then a non-root table's access columns; then, on every table and for every identity, a
-    /// writer-only column (<c>RecordTableRule.WriterOnlyColumns</c>, task 165d); then, on every table, the owner, then the
-    /// creator; then, for a playbook write, a root's Assigned-To columns.</para>
+    /// writer-only column (<c>RecordTableRule.WriterOnlyColumns</c>, task 165d); then, on a communication or its thread, its
+    /// BFF-owned columns (fm task 054b, every identity); then, on every table, the owner, then the creator; then, for a
+    /// playbook write, a root's Assigned-To columns.</para>
     /// </summary>
     /// <returns>The refusal (nothing is written), or <see langword="null"/> when the write may proceed.</returns>
     /// <param name="table">The table the write names (trimmed here).</param>
@@ -1410,6 +1537,12 @@ internal static class InheritedAccessPermission
         {
             return writerOnlyColumn;
         }
+
+        // fm task 054b: a communication's participants and thread lookup, and its thread's type and default flag, are the BFF's
+        // own (BffOwnedCommunicationColumns). Every identity; asked after the app-only access columns so a column in both
+        // sets keeps its access-column code app-only, and is still refused as the caller.
+        if (RefuseBffOwnedCommunicationColumn(trimmed, columns) is { } communicationColumn)
+            return communicationColumn;
 
         // #2247: on every table, the row's owner and its creator are the BFF's typed writers' (OwnerColumns, CreatorColumns).
         if (columns.FirstOrDefault(OwnerColumns.Contains) is { } owner)

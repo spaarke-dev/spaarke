@@ -56,8 +56,12 @@ public class OfficeEditAccessServiceTests
             .ReturnsAsync(new EntityCollection());
     }
 
+    private readonly ExternalVisibilitySeamStub _visibility = new();
+    private readonly Dictionary<string, string?> _settings = [];
+
     private Sut Build(OwningSecureRecord? secureOwner, AccessRights rights)
-        => new(secureOwner, new StubProbe(rights, SystemUserId), _membership.Object, _entities.Object);
+        => new(secureOwner, new StubProbe(rights, SystemUserId), _membership.Object, _entities.Object, _visibility.Seam,
+            new ConfigurationBuilder().AddInMemoryCollection(_settings).Build());
 
     private static DefaultHttpContext Http()
     {
@@ -152,8 +156,12 @@ public class OfficeEditAccessServiceTests
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [Fact(DisplayName = "Task 171: an EXTERNAL Write holder on a secure record that is NOT Restricted is granted as usual")]
-    public async Task SecureContainer_ExternalCallerOnUnrestrictedRecord_IsGranted()
+    // ── Task 191g (owner Q2 = b): a flagged-external caller gets an item permission on the one file, never a container role ──
+
+    private const string ItemId = "item-191g";
+
+    /// <summary>A flagged caller (stored sprk_isexternal = true) and a project that is not Restricted.</summary>
+    private void FlaggedCallerOnUnrestrictedProject(bool settingOn = true)
     {
         _entities.Setup(e => e.RetrieveAsync("systemuser", SystemUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("systemuser", SystemUserId)
@@ -164,14 +172,193 @@ public class OfficeEditAccessServiceTests
             });
         _entities.Setup(e => e.RetrieveAsync("sprk_project", ProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_project", ProjectId) { ["sprk_accesspermission"] = new OptionSetValue(100000000) });
+        _membership.Setup(m => m.GrantMarkedItemWriterAsync(
+                SecureDrive, ItemId, DocumentId, SystemUserId, ObjectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Membership.ItemGrantOutcome.Granted);
+        if (settingOn)
+            _settings[OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
+    }
+
+    private void NoContainerGrantOrRead()
+    {
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a flagged caller never reaches the container grant");
+        _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private void NoItemGrant()
+        => _membership.Verify(m => m.GrantMarkedItemWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+    private Task<OfficeEditAccess> OpenAsFlagged(AccessRights rights = AccessRights.Read | AccessRights.Write, string? itemId = ItemId)
+        => Build(new OwningSecureRecord("sprk_project", ProjectId), rights).PrepareAsync(DocumentId, SecureDrive, Http(), itemId: itemId);
+
+    [Fact(DisplayName = "Task 191g: a flagged Write holder on a secure, non-Restricted record opening a VISIBLE document gets an item permission on that file only — never a container role")]
+    public async Task Flagged_WriteVisible_GetsItemGrantOnly()
+    {
+        FlaggedCallerOnUnrestrictedProject();
+
+        var result = await OpenAsFlagged();
+
+        result.Should().Be(new OfficeEditAccess(true, "item-writer-jit"));
+        _membership.Verify(m => m.GrantMarkedItemWriterAsync(
+            SecureDrive, ItemId, DocumentId, SystemUserId, ObjectId, It.IsAny<CancellationToken>()), Times.Once);
+        NoContainerGrantOrRead();
+        _visibility.Calls.Should().ContainSingle().Which.Should().Equal(("sprk_document", DocumentId));
+    }
+
+    [Theory(DisplayName = "Task 191g (must not fire): the item-grant setting absent, false or unparseable grants a flagged caller NOTHING (view only)")]
+    [InlineData(null)]
+    [InlineData("false")]
+    [InlineData("on")]
+    public async Task Flagged_SettingOff_GrantsNothing(string? setting)
+    {
+        FlaggedCallerOnUnrestrictedProject(settingOn: false);
+        if (setting is not null)
+            _settings[OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = setting;
+
+        var result = await OpenAsFlagged();
+
+        result.Should().Be(new OfficeEditAccess(false, "none"));
+        NoItemGrant();
+        NoContainerGrantOrRead();
+    }
+
+    [Fact(DisplayName = "Task 191g: a flagged caller WITHOUT Write gets no grant of any kind")]
+    public async Task Flagged_NoWrite_NoGrant()
+    {
+        FlaggedCallerOnUnrestrictedProject();
+
+        var result = await OpenAsFlagged(AccessRights.Read);
+
+        result.Should().Be(new OfficeEditAccess(false, "none"));
+        NoItemGrant();
+        NoContainerGrantOrRead();
+    }
+
+    [Theory(DisplayName = "Task 191g: a flagged Write holder on a RESTRICTED (or unreadable) record gets no item grant")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Flagged_RestrictedRecord_NoItemGrant(bool recordReadable)
+    {
+        FlaggedCallerOnUnrestrictedProject();
+        var project = _entities.Setup(e => e.RetrieveAsync("sprk_project", ProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (recordReadable)
+            project.ReturnsAsync(new Entity("sprk_project", ProjectId) { ["sprk_accesspermission"] = new OptionSetValue(100000002) });
+        else
+            project.ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+
+        var result = await OpenAsFlagged();
+
+        result.Should().Be(new OfficeEditAccess(false, "none"));
+        NoItemGrant();
+        NoContainerGrantOrRead();
+    }
+
+    [Theory(DisplayName = "Task 191g: a flagged Write holder on a document that is NOT externally visible (hidden, undecided, faulted) gets no item grant")]
+    [InlineData("Hidden", "DocumentHidden", false)]
+    [InlineData("Hidden", "CommunicationHidden", false)]
+    [InlineData("Undecided", "NoRoot", false)]
+    [InlineData("Undecided", "ReadFailed", true)]
+    [InlineData("Visible", "Visible", true)]
+    public async Task Flagged_DocumentNotVisible_NoItemGrant(string verdict, string reason, bool faulted)
+    {
+        FlaggedCallerOnUnrestrictedProject();
+        _visibility.Set("sprk_document", DocumentId, Enum.Parse<ExternalVisibilityVerdict>(verdict), Enum.Parse<ExternalVisibilityReason>(reason));
+        _visibility.Faulted = faulted;
+
+        var result = await OpenAsFlagged();
+
+        result.Should().Be(new OfficeEditAccess(false, "none"));
+        NoItemGrant();
+        NoContainerGrantOrRead();
+    }
+
+    [Fact(DisplayName = "Task 191g: a visibility decision that throws gives a flagged caller no item grant (fail closed)")]
+    public async Task Flagged_VisibilityThrows_NoItemGrant()
+    {
+        FlaggedCallerOnUnrestrictedProject();
+        _visibility.Throws = new HttpRequestException("throttled");
+
+        var result = await OpenAsFlagged();
+
+        result.Should().Be(new OfficeEditAccess(false, "none"));
+        NoItemGrant();
+    }
+
+    [Fact(DisplayName = "Task 191g: a caller whose flag cannot be read (the user read fails) gets no grant of any kind — 503, never links that look usable")]
+    public async Task UnreadableFlag_NoGrantOfAnyKind()
+    {
+        _settings[OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
+        _entities.Setup(e => e.RetrieveAsync("systemuser", SystemUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+
+        var act = () => OpenAsFlagged();
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(503);
+        NoItemGrant();
+        NoContainerGrantOrRead();
+    }
+
+    [Fact(DisplayName = "Task 191g (must not fire): an INTERNAL Write holder still gets the container JIT writer with the item-grant setting on")]
+    public async Task Internal_SettingOn_StillGetsContainerJitWriter()
+    {
+        _settings[OfficeEditAccessService.FlaggedOfficeEditEnabledConfigKey] = "true";
         _membership.Setup(m => m.GrantMarkedWriterAsync(
                 SecureDrive, Membership.JitWriterMarkerPrefix, SystemUserId, Upn, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Membership.MarkedGrantOutcome.Granted);
 
-        var result = await Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Write)
-            .PrepareAsync(DocumentId, SecureDrive, Http());
+        var result = await OpenAsFlagged();
 
         result.Should().Be(new OfficeEditAccess(true, "writer-jit"));
+        NoItemGrant();
+        _visibility.Calls.Should().BeEmpty("an internal caller's edit is not an external-visibility question");
+    }
+
+    [Theory(DisplayName = "Task 191g: an item grant that already stands, or a direct permission the caller already holds, is reported truthfully")]
+    [InlineData(Membership.ItemGrantOutcome.Reused, true, "member")]
+    [InlineData(Membership.ItemGrantOutcome.HeldByOther, true, "member")]
+    [InlineData(Membership.ItemGrantOutcome.HeldReadOnly, false, "member-read-only")]
+    public async Task Flagged_ExistingPermission_IsReported(Membership.ItemGrantOutcome outcome, bool canEdit, string role)
+    {
+        FlaggedCallerOnUnrestrictedProject();
+        _membership.Setup(m => m.GrantMarkedItemWriterAsync(
+                SecureDrive, ItemId, DocumentId, SystemUserId, ObjectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(outcome);
+
+        var result = await OpenAsFlagged();
+
+        result.Should().Be(new OfficeEditAccess(canEdit, role));
+        NoContainerGrantOrRead();
+    }
+
+    [Fact(DisplayName = "Task 191g: an item grant that cannot be made, read back or recorded answers 503 edit_access_unavailable")]
+    public async Task Flagged_ItemGrantFails_Is503()
+    {
+        FlaggedCallerOnUnrestrictedProject();
+        _membership.Setup(m => m.GrantMarkedItemWriterAsync(
+                SecureDrive, ItemId, DocumentId, SystemUserId, ObjectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Membership.ItemGrantOutcome.Failed);
+
+        var act = () => OpenAsFlagged();
+
+        var problem = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        problem.StatusCode.Should().Be(503);
+        problem.Code.Should().Be("edit_access_unavailable");
+        NoContainerGrantOrRead();
+    }
+
+    [Fact(DisplayName = "Task 191g: a visible document whose file id is unknown answers 503 — never a URL that cannot work, never a container role")]
+    public async Task Flagged_NoItemId_Is503()
+    {
+        FlaggedCallerOnUnrestrictedProject();
+
+        var act = () => OpenAsFlagged(itemId: null);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(503);
+        NoItemGrant();
+        NoContainerGrantOrRead();
     }
 
     private const string BuDrive = "b!business-unit-container";
@@ -269,7 +456,7 @@ public class OfficeEditAccessServiceTests
     public async Task UnclassifiableContainer_GrantsNothing()
     {
         var sut = new Sut(new InvalidOperationException("Dataverse down"), new StubProbe(AccessRights.Write, SystemUserId),
-            _membership.Object, _entities.Object);
+            _membership.Object, _entities.Object, _visibility.Seam, new ConfigurationBuilder().Build());
 
         var result = await sut.PrepareAsync(DocumentId, SecureDrive, Http());
 
@@ -282,13 +469,15 @@ public class OfficeEditAccessServiceTests
         private readonly OwningSecureRecord? _owner;
         private readonly Exception? _fault;
 
-        public Sut(OwningSecureRecord? owner, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities)
-            : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities,
+        public Sut(OwningSecureRecord? owner, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities,
+            AppOnlyExternalVisibility visibility, IConfiguration configuration)
+            : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities, visibility, configuration,
                 NullLogger<OfficeEditAccessService>.Instance)
             => _owner = owner;
 
-        public Sut(Exception fault, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities)
-            : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities,
+        public Sut(Exception fault, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities,
+            AppOnlyExternalVisibility visibility, IConfiguration configuration)
+            : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities, visibility, configuration,
                 NullLogger<OfficeEditAccessService>.Instance)
             => _fault = fault;
 

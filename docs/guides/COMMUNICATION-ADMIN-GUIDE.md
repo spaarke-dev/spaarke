@@ -210,7 +210,7 @@ The `GraphSubscriptionManager` background service:
 
 ### 2. Backup Polling Service (Safety Net)
 
-The `InboundPollingBackupService` runs every 5 minutes as a fallback:
+The `InboundPollingBackupService` scheduled job (`inbound-polling-backup`) runs every 5 minutes as a fallback, once per tick across all BFF instances:
 - Queries Graph for messages since the last poll
 - Skips messages already processed (checks `sprk_graphmessageid` on existing records)
 - Enqueues any missed messages for processing
@@ -768,10 +768,11 @@ The **Communication Account** form includes the following sections:
 
 | Cause | Fix |
 |-------|-----|
-| `InboundPollingBackupService` not started | Check BFF API health via `/healthz`; review startup logs for "InboundPollingBackupService starting" |
-| Startup failure killed the service | Check logs for errors within first 15 seconds of startup. The service has startup resilience (try-catch) but check for persistent errors. |
+| The `inbound-polling-backup` scheduled job is not running | `GET /api/admin/jobs/inbound-polling-backup/status` (SystemAdmin) shows its last runs and next fire; logs carry one `[INBOUND-POLL] heartbeat` line per run. Non-production slots run no scheduled jobs (`Scheduling__RunScheduledJobs=false`). |
+| A run keeps failing | The job status shows `Success=false` with a message; a failed mailbox is logged per account with its Graph error code, keeps its watermark and is retried on the next run (every 5 minutes). |
 | Account not receive-enabled | Set `sprk_receiveenabled` to Yes |
-| Redis cache stale | Clear Redis cache; service will re-query on next cycle |
+| Communication account cache stale | Do not clear Redis. To refresh the account list, delete only the `comm:accounts:*` keys; the service re-queries Dataverse on the next run. The `comm:inbound-poll-watermark:*` keys must survive: they hold each mailbox's poll position, and losing one makes the backup poll start from the default 15-minute lookback, which can skip older unread mail. |
+| Redis is down | The backup poll stops while Redis is unavailable, because the scheduler cannot take its lease. Polling resumes from the saved position when Redis returns; the webhook and delta-reconciliation paths keep running meanwhile. |
 
 ### BackgroundService Not Running (Silent Death)
 
@@ -782,7 +783,7 @@ The **Communication Account** form includes the following sections:
 | Cause | Fix |
 |-------|-----|
 | Unhandled exception in `ExecuteAsync` | .NET 8 default `BackgroundServiceExceptionBehavior.StopHost` stops the host on unhandled exceptions. All communication services now wrap initial execution in try-catch, but check for exceptions in startup logs. |
-| Dependency not available at startup | Services have startup delays (10s for GraphSubscriptionManager, 15s for InboundPollingBackupService) to allow dependencies to initialize. If Dataverse or Graph is slow, the first cycle may fail but the service will retry on next tick. |
+| Dependency not available at startup | Services have startup delays (10s for GraphSubscriptionManager) to allow dependencies to initialize; the inbound polling job has no startup run (its first run is the next 5-minute boundary). If Dataverse or Graph is slow, the first cycle may fail but the service will retry on next tick. |
 | App Service recycled | Check App Service logs for recycling events. Services auto-restart with the host. |
 
 ### OBO Token Errors (Individual User Send)
