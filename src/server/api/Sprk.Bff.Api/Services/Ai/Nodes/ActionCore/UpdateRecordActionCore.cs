@@ -275,15 +275,21 @@ internal sealed class UpdateRecordActionCore
         }
 
         // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family row whose own core lookup this update
-        // sets or clears takes the resolver fields of the record it will name, in this same PATCH (read app-only, after the pair
-        // planner so they win). A derive that cannot be done is refused as the guard above refuses: its code only.
+        // sets or clears takes the resolver fields of the record it will name, in this same PATCH (after the pair planner so they
+        // win). The stored row and the catalog are read app-only; the name and number as the planner reads a moved pair's
+        // display (MovedDisplayReader): as the person the run acts as, cleared when they may not read it, and cleared with no
+        // person (never derived app-only). A derive that cannot be done is refused as the guard above refuses: its code only.
         if (InvoiceFamilyCoreRecordGuard.ColumnsToRead(input.EntityLogicalName) is not null)
         {
             using var familyFieldsScope = _scopeFactory.CreateScope();
+            var familyEntities = familyFieldsScope.ServiceProvider.GetService<IGenericEntityService>();
             var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
-                    familyFieldsScope.ServiceProvider.GetService<IGenericEntityService>(), input.EntityLogicalName, input.RecordId,
+                    familyEntities, input.EntityLogicalName, input.RecordId,
                     updatePayload, "UpdateRecord", _logger, cancellationToken,
-                    writeIsImpersonated: input.ImpersonateSystemUserId is not null)
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null,
+                    displayRecord: OwnedChildWrite.MovedDisplayReader(
+                        familyFieldsScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
+                        familyEntities, input.ImpersonateSystemUserId))
                 .ConfigureAwait(false);
             if (familyFields.RefusalCode is { } derivedCode)
                 throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, derivedCode);

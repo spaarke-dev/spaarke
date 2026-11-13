@@ -154,11 +154,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
             .ConfigureAwait(false);
 
         // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family row whose own core lookup this write
-        // sets or clears takes the resolver fields of the record it will name, in this same write (read app-only, after the pair
-        // planner so they win). A derive that cannot be done is refused as the guard above refuses: its code only.
+        // sets or clears takes the resolver fields of the record it will name, in this same write (after the pair planner so
+        // they win). The stored row and the catalog are read app-only; the name and number as the planner reads a moved pair's
+        // display (MovedDisplayReader): as the person the write runs for, cleared when they may not read it, and cleared with
+        // no person (never derived app-only). A derive that cannot be done is refused as the guard above refuses: its code only.
         var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
                 _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
-                writeIsImpersonated: impersonateSystemUserId is not null)
+                writeIsImpersonated: impersonateSystemUserId is not null,
+                displayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
             .ConfigureAwait(false);
         if (familyFields.RefusalCode is { } derivedCode)
             throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, derivedCode);

@@ -181,6 +181,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             services.AddSingleton(app);
         }
 
+        // Task 045d fix round 4: the person the run acts as reads the derived name and number (MovedDisplayReader).
+        if (CallerQuery() is { } personQuery)
+            services.AddSingleton(personQuery);
+
         return new UpdateRecordActionCore(_writes.Object, services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             NullLogger.Instance);
     }

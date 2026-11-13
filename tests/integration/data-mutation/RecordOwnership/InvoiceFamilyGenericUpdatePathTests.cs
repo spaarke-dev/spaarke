@@ -113,24 +113,29 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     };
 
     /// <summary>
-    /// Task 045d fix round 3: the push's caller query (its display read of the record the row will name). It answers the
-    /// selected columns of <see cref="_recordAnswer"/> (journalled as that record's read), no row when that answers null, or
-    /// 403 when <see cref="_callerMayNotRead"/>.
+    /// Task 045d fix rounds 3-4: the person's query — the push's caller, or the person a playbook run acts as on the two
+    /// handlers (their display read of the record the row will name). It answers the selected columns of
+    /// <see cref="_recordAnswer"/> (journalled as that record's read), no row when that answers null, 403 when
+    /// <see cref="_callerMayNotRead"/>, or <see cref="_callerFault"/>. Null when <see cref="_noCallerQuery"/>.
     /// </summary>
-    private Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery CallerQuery()
+    private Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? CallerQuery()
     {
+        if (_noCallerQuery)
+            return null;
         var query = new Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(MockBehavior.Strict);
-        query.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), Caller, It.IsAny<CancellationToken>()))
+        query.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns((string _, string? odata, Guid _, CancellationToken _) =>
             {
                 var select = Regex.Match(odata!, @"\$select=([^&]+)").Groups[1].Value.Split(',');
                 var filter = Regex.Match(odata!, @"\$filter=(\w+)id eq ([0-9a-fA-F-]{36})");
                 var table = filter.Groups[1].Value;
                 _deriveReads.Add($"record:{table}");
+                if (_callerFault is { } fault)
+                    throw fault;
                 if (_callerMayNotRead)
                     throw new HttpRequestException("denied", null, System.Net.HttpStatusCode.Forbidden);
                 IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> rows =
-                    _recordAnswer(table, Guid.Parse(filter.Groups[2].Value), select) is { } row
+                    (_personAnswer ?? _recordAnswer)(table, Guid.Parse(filter.Groups[2].Value), select) is { } row
                         ? [select.ToDictionary(c => c, c => System.Text.Json.JsonSerializer.SerializeToElement(row.GetAttributeValue<string>(c)))]
                         : [];
                 return Task.FromResult(rows);
@@ -139,6 +144,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     private bool _callerMayNotRead;
+
+    private Exception? _callerFault;
+
+    private bool _noCallerQuery;
+
+    /// <summary>What the person's query answers, when it differs from the app's read (<see cref="_recordAnswer"/>).</summary>
+    private Func<string, Guid, string[], Entity?>? _personAnswer;
 
     /// <summary>Task 045d: the harness catalog's fixed row id for a core table.</summary>
     private static Guid CatalogRowOf(string table) =>
@@ -167,7 +179,11 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <summary>Neither the upsert nor the update-only write was sent: nothing was created or changed.</summary>
     private void NothingWritten() => Sent().Should().BeEmpty();
 
-    /// <summary>One write of the row, UPDATE-ONLY (If-Match: *): an invoice or line (#2081) and every other table alike.</summary>
+    /// <summary>
+    /// One write of the row, UPDATE-ONLY (If-Match: *), never the upsert. The guard's update-only branch (a family table,
+    /// <c>InvoiceFamilyCoreRecordGuard.UpdateExistingAsync</c>) and the generic one send the same call; they differ in how a row
+    /// gone by then is answered, which <c>AFamilyRowDeletedAfterTheGuard_IsRefusedByTheUpdateOnlyWrite_WithTheGuardsCode</c> pins.
+    /// </summary>
     private void WrittenOnce(string table, Guid id)
     {
         var sent = Sent().Where(w => w.Table == table && w.Id == id).ToList();
@@ -183,7 +199,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         AnswerDeriveReads(app);
         return new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            SecureChildReconcilerFixtures.OverEmptyWorld());
+            SecureChildReconcilerFixtures.OverEmptyWorld(), readAsPerson: CallerQuery());
     }
 
     [Fact]

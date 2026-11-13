@@ -1415,8 +1415,9 @@ internal static class OwnedChildWrite
     /// The payload unchanged when nothing is derived; the guard's refusal (its code) when the derive cannot be done, which the
     /// path answers through the refusal form it uses for <see cref="InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync"/>.
     /// </summary>
-    /// <param name="displayRecord">The field-mapping push's display read (<see cref="CallerDisplayReader"/>): the record's name
-    /// and number are read as the caller, as the pair planner reads them on the push (<see cref="CallerDisplayRecords"/>). Null:
+    /// <param name="displayRecord">The path's display read, the one its pair planner uses for a moved pair: the push's caller
+    /// (<see cref="CallerDisplayReader"/>), or on the two handlers the person the run acts as (<see cref="MovedDisplayReader"/>,
+    /// which answers 403 with no person, so the name and number are cleared). Through <see cref="CallerDisplayRecords"/>. Null:
     /// read app-only.</param>
     internal static async Task<(Dictionary<string, object?> Payload, string? RefusalCode)> KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
         IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
@@ -1437,8 +1438,9 @@ internal static class OwnedChildWrite
     }
 
     /// <summary>
-    /// Task 045d (fix round 3): the push's record reader for the derive — the name and number as the caller sees them
-    /// (<paramref name="displayRecord"/>), as the 045b planner reads display values on the push. A record the caller may not
+    /// Task 045d (fix rounds 3-4): an app-only path's record reader for the derive — the name and number as the push's caller,
+    /// or the person a handler's run acts as, sees them (<paramref name="displayRecord"/>), as the 045b planner reads a moved
+    /// pair's display values on that path. A record the caller may not
     /// read, or cannot find (403 or 404), is checked to exist app-only: it exists, so its name and number are cleared (owner,
     /// 2026-11-12, option (b)); it does not, so the derive refuses as for any missing record. Any other failed read throws,
     /// which the derive refuses as a read failure.

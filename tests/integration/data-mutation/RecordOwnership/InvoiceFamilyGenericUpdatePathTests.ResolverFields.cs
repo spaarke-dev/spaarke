@@ -45,6 +45,12 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private static string RecordNumber(Guid id) => $"N-{id.ToString("N")[..6]}";
 
+    /// <summary>
+    /// A name or number as a path writes it for a run with no person: the push reads it as its caller (here, one who may read
+    /// it); the two handlers clear it, as the 045b planner clears a moved pair's display with no person (never derived app-only).
+    /// </summary>
+    private static string? ShownOn(GenericPath path, string? value) => path == GenericPath.FieldMappingPush ? value : null;
+
     // ── Must fire: the core lookup moves, the resolver fields follow it in the same write ───────────────────────────
 
     [Theory]
@@ -58,7 +64,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull(outcome.Message);
         ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
-            RecordName(OtherMatter), RecordNumber(OtherMatter));
+            ShownOn(path, RecordName(OtherMatter)), ShownOn(path, RecordNumber(OtherMatter)));
         _deriveReads.Should().Equal("catalog:sprk_matter", "record:sprk_matter");
     }
 
@@ -74,7 +80,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull(outcome.Message);
         ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_project", Project,
-            RecordName(Project), RecordNumber(Project));
+            ShownOn(path, RecordName(Project)), ShownOn(path, RecordNumber(Project)));
     }
 
     [Theory]
@@ -95,7 +101,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull(outcome.Message);
         ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
-            gap == "no name" ? null : "Acme v Beta", gap == "no number" ? null : "MAT-000077");
+            ShownOn(path, gap == "no name" ? null : "Acme v Beta"), ShownOn(path, gap == "no number" ? null : "MAT-000077"));
     }
 
     // ── Fail closed: a derive that cannot be done is the path's existing invoice-family refusal ─────────────────────
@@ -175,6 +181,73 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             name: null, number: null);
     }
 
+    // ── Fix round 4: on the two handlers the name and number are read as the person the run acts as ──────────────────
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task ARunAsAPersonWhoMayNotReadTheNewMatter_WritesItsTypeIdAndUrl_AndClearsItsNameAndNumber(GenericPath path)
+    {
+        _callerMayNotRead = true;
+
+        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow,
+            Lookups(("sprk_regardingmatter", MatterRef(OtherMatter))), NoPlain, FamilyRowUnderAMatter("sprk_invoiceapproval").Object,
+            playbookActsAs: Caller);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoiceapproval", FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
+            OtherMatter, name: null, number: null);
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task ARunAsAPersonWhoMayReadTheNewMatter_WritesTheNameAndNumberThePersonReads(GenericPath path)
+    {
+        _personAnswer = (table, id, columns) => new Entity(table, id) { [columns[0]] = "As the person sees it", [columns[1]] = "P-1" };
+
+        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow,
+            Lookups(("sprk_regardingmatter", MatterRef(OtherMatter))), NoPlain, FamilyRowUnderAMatter("sprk_invoiceapproval").Object,
+            playbookActsAs: Caller);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoiceapproval", FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
+            OtherMatter, "As the person sees it", "P-1");
+    }
+
+    // ── Fix round 4: the push's caller read, when it fails ─────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("caller read times out")]
+    [InlineData("no caller query")]
+    public async Task OnThePush_ACallerReadThatCannotBeDone_IsRefusedReadFailed_AndNothingIsWritten(string failure)
+    {
+        if (failure == "no caller query")
+            _noCallerQuery = true;
+        else
+            _callerFault = new TimeoutException("socket 10.0.0.8 timed out");
+
+        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
+            NoPlain, WorldWithLines(OtherMatter).Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        outcome.Message.Should().NotContain("10.0.0.8");
+        NothingWritten();
+    }
+
+    [Fact]
+    public async Task OnThePush_A403OnAMatterThatDoesNotExist_IsRefusedRecordNotFound_AndNothingIsWritten()
+    {
+        _callerMayNotRead = true;
+        _recordAnswer = (_, _, _) => null; // the app's exists-check finds no matter
+
+        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
+            NoPlain, WorldWithLines(OtherMatter).Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
+        NothingWritten();
+    }
+
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
@@ -186,7 +259,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull(outcome.Message);
         ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoiceapproval", FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
-            OtherMatter, RecordName(OtherMatter), RecordNumber(OtherMatter));
+            OtherMatter, ShownOn(path, RecordName(OtherMatter)), ShownOn(path, RecordNumber(OtherMatter)));
     }
 
     [Fact]
@@ -201,7 +274,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull(outcome.Message);
         ShouldCarryTheResolverFieldsOf(SentPayload("sprk_externalidentifier", FamilyRow), "sprk_RegardingRecordType", "sprk_invoice",
-            Invoice, RecordName(Invoice), RecordNumber(Invoice));
+            Invoice, name: null, number: null);
     }
 
     [Fact]
