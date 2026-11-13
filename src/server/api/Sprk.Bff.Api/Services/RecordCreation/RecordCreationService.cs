@@ -567,8 +567,9 @@ internal sealed partial class RecordCreationService
             item = mapped.Item ?? callerItem;
             mappedValues = mapped.Values;
             stepThreeMappedColumns = mapped.Values.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            // A mapped value with no gate read is checked as "not told" (fail closed), never skipped.
-            mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(table, null) : null;
+            // A mapped value with no gate read is checked as "not told" (fail closed), never skipped. Task 022b (review K2): its
+            // source is unknown, never taken to be the target table.
+            mappingGate = mapped.Values.Count > 0 ? mapped.Gate ?? new MappedSourceGate(null, null) : null;
             trace.Record(RecordCreationStep.FieldMapping, RecordCreationStepState.Ran,
                 $"{mappedValues.Count} column(s) mapped (fill-only), {mappingWarnings.Count} warning(s)");
         }
@@ -771,6 +772,8 @@ internal sealed partial class RecordCreationService
         trace.Begin(RecordCreationStep.SecureRootPlan);
         var creatorPerson = callerSystemUserId ?? Guid.Empty;
         Guid? isolatedTeam = null;
+        // Task 022b (UAC-r2 Q2): the Access Permission floor the plan's parents set, for the Restricted-source check (read only).
+        AccessPermissionFloor? rootFloor = null;
         (RecordCreationRefusal? Refusal, Dictionary<string, object>? Plan)? earlyStampPlan = null;
         if (SecureRootInheritance.Inherits(table))
         {
@@ -832,6 +835,7 @@ internal sealed partial class RecordCreationService
             if (plan.Refusal is { } planRefusal)
                 return Decision.Refuse(PlanRefused(planRefusal, noun));
 
+            rootFloor = plan.AccessPermissionFloor;
             if (plan is { Isolated: true, SecureOwnerTeamId: { } secureTeam })
                 isolatedTeam = secureTeam;
 
@@ -906,6 +910,24 @@ internal sealed partial class RecordCreationService
             mappedValues = enforced.Values;
         }
 
+        // Task 022b (the Restricted-source rule): values mapped from a source whose Access Permission is Restricted, or from a
+        // source table with the column whose value could not be read, are written only into a row that ends Restricted in this
+        // create (step 10's own value, decided here once and handed to step 10). Otherwise every mapped value is removed, as
+        // above. Never changes the owner, the filing or the caller's values.
+        InCreateAccessPermission? decidedAccess = null;
+        if (mappingGate is { } restrictedGate && mappedValues.Count > 0 && user is not null)
+        {
+            var restricted = await EnforceMappingSourceRestrictedAsync(
+                    table, rule, user, restrictedGate, callerItem, item, mappedValues, defaultColumns, copiedDefaults,
+                    stepThreeMappedColumns, planned.Plan, rootFloor, mappingWarnings, noun, ct)
+                .ConfigureAwait(false);
+            if (restricted.Refusal is { } restrictedRefusal)
+                return Decision.Refuse(restrictedRefusal);
+            item = restricted.Item;
+            mappedValues = restricted.Values;
+            decidedAccess = restricted.Access;
+        }
+
         // ── Step 9: the creator person ("for" person and table defaults: the adapters', owner-review item 3) ─────────────
         var fields = owner is not null
             ? OwnedCreateFields(owner, table, item)
@@ -917,7 +939,9 @@ internal sealed partial class RecordCreationService
 
         // ── Step 10: the I-1 stamp step 6½ derived, bound into the payload, and I-16 (owner decision 2a; FR-41; see remarks) ──
         trace.Begin(RecordCreationStep.StampAndInheritance);
-        var stamped = await StampBeforeCreateAsync(table, user, item, fields, missingStamp, planned.Plan, noun, ct).ConfigureAwait(false);
+        var stamped = await StampBeforeCreateAsync(
+                table, user, item, fields, missingStamp, planned.Plan, decidedAccess, rootFloor, noun, ct)
+            .ConfigureAwait(false);
         if (stamped.Refusal is { } stampRefusal)
             return Decision.Refuse(stampRefusal);
 
@@ -1022,7 +1046,10 @@ internal sealed partial class RecordCreationService
     /// <paramref name="stampPlan"/> applied: 042b fix round 2). No second derivation. A derived stamp the
     /// table's metadata cannot bind is the non-retryable <see cref="RecordCreationRefusalKind.Undecided"/> (500, F-5); a bind
     /// Dataverse did not answer is <see cref="RecordCreationRefusal.StampUnavailableCode"/> (503). I-16 never refuses: it is
-    /// display only, and a null is simply not set. A document gets neither (#2169).
+    /// display only, and a null is simply not set. A document gets no I-1 stamp before the create (#2169); task 022b: its
+    /// Access Permission is set IN the create from its filing parents, by the document decision, with its record
+    /// (<see cref="InCreateAccessPermissionAsync"/>). <paramref name="decidedAccess"/> is that answer when the Restricted-source
+    /// check already decided it on this same item.
     /// </summary>
     /// <remarks>Only <paramref name="fields"/> changes: the item (what the owner, the plan and step 12 read) is the row as the
     /// earlier steps decided it. The stamp is bound under the table's navigation property, read as the caller through
@@ -1030,19 +1057,20 @@ internal sealed partial class RecordCreationService
     /// stamp is left to the post-create re-derivation (step 12), which runs for every principal.</remarks>
     private async Task<(RecordCreationRefusal? Refusal, RecordCreationStepState State, string? Note)> StampBeforeCreateAsync(
         string table, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, Dictionary<string, object?> fields,
-        IReadOnlyDictionary<string, object>? missing, IReadOnlyDictionary<string, object>? stampPlan, string noun,
-        CancellationToken ct)
+        IReadOnlyDictionary<string, object>? missing, IReadOnlyDictionary<string, object>? stampPlan,
+        InCreateAccessPermission? decidedAccess, AccessPermissionFloor? rootFloor, string noun, CancellationToken ct)
     {
-        if (InheritedAccessPermission.RecordsOwnNarrowing(table))
-            return (null, RecordCreationStepState.Skipped, "a document is stamped after the create only (#2169)");
-
-        var stampsI1 = CoreAncestorResolver.IsStampedChildEntity(table);
+        // A document is stamped after the create only (#2169); its Access Permission is decided IN the create (task 022b).
+        var document = InheritedAccessPermission.RecordsOwnNarrowing(table);
+        var stampsI1 = !document && CoreAncestorResolver.IsStampedChildEntity(table);
         var takesI16 = InheritedAccessPermission.AppliesTo(table);
         if (!stampsI1 && !takesI16)
             return (null, RecordCreationStepState.Skipped, "the table carries no I-1 stamp and no inherited Access Permission");
 
-        var row = MergedRowOf(table, item);
         var notes = new List<string>();
+        if (document)
+            notes.Add("a document is stamped after the create only (#2169)");
+
         if (stampsI1)
         {
             if (missing is null)
@@ -1051,9 +1079,6 @@ internal sealed partial class RecordCreationService
             }
             else
             {
-                foreach (var (column, value) in missing)
-                    row[column] = value; // I-16 below reads the row as it will be written
-
                 if (user is null)
                 {
                     notes.Add($"I-1 stamp derived ({missing.Count} column(s)); a system principal's is bound after the create");
@@ -1086,40 +1111,183 @@ internal sealed partial class RecordCreationService
 
         if (takesI16)
         {
-            // 042b fix round 2: I-16 reads the row as it ENDS — the plan's replacements and clears too, which the step-12
-            // restamp writes — so a caller-sent stamp that disagrees with the intermediate's root does not set I-16 from the
-            // wrong root (as step 7 asks over AsTheRowEnds). The same parents' read, no extra read or probe.
-            if (stampsI1 && stampPlan is not null)
-            {
-                foreach (var (column, value) in stampPlan)
-                {
-                    if (value is EntityReference root)
-                        row[column] = root;
-                    else
-                        row.Attributes.Remove(column);
-                }
-            }
-
-            var filed = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-            foreach (var attribute in row.Attributes)
-            {
-                if (attribute.Value is EntityReference reference)
-                    filed[attribute.Key] = reference;
-            }
-
-            // Never throws (the resolver's contract): a null is simply not set, and step 12 refreshes it after the create.
-            if (await _restamper.ResolveInheritedAccessPermissionAsync(table, filed, ct).ConfigureAwait(false) is { } level)
-            {
-                PutServerValue(fields, InheritedAccessPermission.Column, level);
-                notes.Add("I-16 set");
-            }
-            else
-            {
-                notes.Add("no I-16 before the create");
-            }
+            // Task 022b: decided once — by the Restricted-source check before the create when it asked (on this same item), or
+            // here. Never throws (the resolver's contract): a value that cannot be decided is simply not set, and step 12
+            // refreshes it after the create.
+            var access = decidedAccess
+                ?? await InCreateAccessPermissionAsync(table, item, stampPlan, rootFloor, ct).ConfigureAwait(false);
+            BindInCreateAccessPermission(fields, access);
+            notes.Add(access.Note);
         }
 
         return (null, RecordCreationStepState.Ran, string.Join("; ", notes));
+    }
+
+    /// <summary>
+    /// Task 022b: the Access Permission a create writes (step 10), and whether the row ends Restricted in this create.
+    /// </summary>
+    /// <param name="Write">The value step 10 writes, or <see langword="null"/>: the row keeps what its payload carries.</param>
+    /// <param name="Record">A document's own-narrowing record (<see cref="AccessInheritance.Column"/>), written with the value.</param>
+    /// <param name="EndsRestricted">The row is Restricted once created. Never true when it could not be told.</param>
+    /// <param name="Undetermined">What the parents give, or the row's own value, could not be told.</param>
+    /// <param name="Note">Step 10's trace note.</param>
+    internal sealed record InCreateAccessPermission(int? Write, string? Record, bool EndsRestricted, bool Undetermined, string Note);
+
+    /// <summary>
+    /// Task 022b (the target answer): the Access Permission a NEW row of <paramref name="table"/> holds once created, from the
+    /// row as it ENDS (<paramref name="stampPlan"/> applied, 042b fix round 2: a caller-sent stamp that disagrees with the
+    /// intermediate's root does not decide it):
+    /// <list type="bullet">
+    /// <item>To Do, Event, Communication: what the parents give (I-16) when every parent was read; a parentless row keeps its
+    /// own value (round 81); parents that cannot be told decide nothing.</item>
+    /// <item>Document: max(own, inherited), by the document decision (<see cref="InheritedAccessPermission.DecideDocument"/>
+    /// through <see cref="CoreAncestorRestamper.DecideNewDocumentAccessPermissionAsync"/>), its record written with it; the
+    /// value its payload carries is its own.</item>
+    /// <item>Project, Work Assignment (UAC-r2 Q2): Restricted when the value its payload carries is, or when the floor the
+    /// secure-root plan's parents set is (<paramref name="rootFloor"/>: only parents filed in this create; the cascade sets the
+    /// stored value after the create, nothing is written here). A floor that is not decided is never Restricted.</item>
+    /// <item>Any other table with the column (a matter): the value its payload carries.</item>
+    /// <item>A table without the column: never Restricted.</item>
+    /// </list>
+    /// Fail closed: an answer that cannot be told is never Restricted. Never throws (cancellation aside).
+    /// </summary>
+    private async Task<InCreateAccessPermission> InCreateAccessPermissionAsync(
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, object>? stampPlan,
+        AccessPermissionFloor? rootFloor, CancellationToken ct)
+    {
+        if (!InheritedAccessPermission.CarriesColumn(table))
+            return new InCreateAccessPermission(null, null, false, false, "the table carries no Access Permission");
+
+        var (ownReadable, own) = OwnAccessPermissionOf(item);
+        var ownRestricted = ownReadable && own == InheritedAccessPermission.Restricted;
+        if (SecureRootInheritance.Inherits(table))
+            return RootAccessPermission(ownReadable, ownRestricted, rootFloor);
+        if (!InheritedAccessPermission.AppliesTo(table))
+            return new InCreateAccessPermission(null, null, ownRestricted, !ownReadable, "the row's own Access Permission");
+
+        var filed = FiledAsTheRowEnds(table, item, stampPlan);
+        if (InheritedAccessPermission.RecordsOwnNarrowing(table))
+        {
+            if (!ownReadable)
+                return new InCreateAccessPermission(null, null, false, true, "the document's own Access Permission cannot be read");
+
+            var decided = await _restamper.DecideNewDocumentAccessPermissionAsync(table, filed, own, ct).ConfigureAwait(false);
+            return decided.Target is { } target
+                ? new InCreateAccessPermission(decided.Write, decided.Record, target == InheritedAccessPermission.Restricted, false,
+                    "the document's Access Permission decided in the create")
+                : new InCreateAccessPermission(null, null, false, true, "the document's Access Permission not decided before the create");
+        }
+
+        var answer = await _restamper.ResolveInheritedAccessPermissionAsync(table, filed, ct).ConfigureAwait(false);
+        return ChildAccessPermission(answer, ownReadable, ownRestricted);
+    }
+
+    /// <summary>
+    /// Task 022b: a To Do's, Event's or Communication's answer from what its parents give (the three states). Cannot be told
+    /// (<see cref="InheritedAccessPermission.Answer.Unknown"/>, a found value that is no known level included): nothing written,
+    /// never Restricted. No parent: the row keeps its own value (round 81). Otherwise the known level is written, and the row
+    /// is Restricted exactly when it is not <see cref="InheritedAccessPermission.Answer.NoRestrictedAncestor"/>. Pure.
+    /// </summary>
+    internal static InCreateAccessPermission ChildAccessPermission(
+        InheritedAccessPermission.Answer answer, bool ownReadable, bool ownRestricted)
+    {
+        if (answer.Unknown)
+            return new InCreateAccessPermission(null, null, false, true, "no I-16 before the create");
+        if (answer.Status == ParentTopsStatus.NoParent)
+            return new InCreateAccessPermission(null, null, ownRestricted, !ownReadable, "no I-16 before the create");
+
+        return new InCreateAccessPermission(answer.Value, null, !answer.NoRestrictedAncestor, false, "I-16 set");
+    }
+
+    /// <summary>
+    /// Task 022b (UAC-r2 Q2): a project's or work assignment's answer — Restricted when its own value is, or when the plan's
+    /// floor is (a decided Restricted parent filed in this create); otherwise undetermined when either could not be told. Writes
+    /// nothing (<c>Write</c> and <c>Record</c> stay <see langword="null"/>): the cascade owns the stored value. Pure.
+    /// </summary>
+    internal static InCreateAccessPermission RootAccessPermission(
+        bool ownReadable, bool ownRestricted, AccessPermissionFloor? rootFloor)
+    {
+        if (rootFloor is { IsRestricted: true })
+            return new InCreateAccessPermission(null, null, true, false, "a parent filed in the create is Restricted");
+        if (ownRestricted)
+            return new InCreateAccessPermission(null, null, true, false, "the row's own Access Permission");
+
+        var floorDecided = rootFloor is { Decided: true };
+        return new InCreateAccessPermission(null, null, false, !ownReadable || !floorDecided,
+            floorDecided ? "the row's own Access Permission" : "the parents' Access Permission could not be read");
+    }
+
+    /// <summary>Task 022b: every lookup of the row as it ENDS (042b fix round 2): the item's, with the stamp plan's
+    /// replacements and clears applied.</summary>
+    private static Dictionary<string, object> FiledAsTheRowEnds(
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, object>? stampPlan)
+    {
+        var row = MergedRowOf(table, item);
+        if (stampPlan is not null)
+        {
+            foreach (var (column, value) in stampPlan)
+            {
+                if (value is EntityReference root)
+                    row[column] = root;
+                else
+                    row.Attributes.Remove(column);
+            }
+        }
+
+        var filed = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in row.Attributes)
+        {
+            if (attribute.Value is EntityReference reference)
+                filed[attribute.Key] = reference;
+        }
+
+        return filed;
+    }
+
+    /// <summary>
+    /// Task 022b: the row's own <see cref="InheritedAccessPermission.Column"/> as its payload carries it (the caller's value, or
+    /// a mapped one): <c>(true, null)</c> when it names none, <c>(false, null)</c> when it names one that is not a whole number.
+    /// Pure.
+    /// </summary>
+    internal static (bool Readable, int? Value) OwnAccessPermissionOf(DataverseWriteItemMapper.MappedItem item)
+    {
+        using var body = JsonDocument.Parse(item.JsonBody);
+        if (body.RootElement.ValueKind != JsonValueKind.Object)
+            return (true, null);
+
+        foreach (var property in body.RootElement.EnumerateObject())
+        {
+            if (!string.Equals(property.Name.Trim(), InheritedAccessPermission.Column, StringComparison.OrdinalIgnoreCase))
+                continue;
+            return property.Value.ValueKind switch
+            {
+                JsonValueKind.Null => (true, null),
+                JsonValueKind.Number when property.Value.TryGetInt32(out var level) => (true, level),
+                _ => (false, null),
+            };
+        }
+
+        return (true, null);
+    }
+
+    /// <summary>
+    /// Task 022b: step 10's Access Permission into the create body — the ONE place the create writes the column. A
+    /// document's value comes only from the document decision (<see cref="InheritedAccessPermission.DecideDocument"/>), with
+    /// its record in the same create (task 189's rule); the other three tables take what their parents give.
+    /// </summary>
+    private static void BindInCreateAccessPermission(Dictionary<string, object?> fields, InCreateAccessPermission access)
+    {
+        if (access.Write is { } level)
+        {
+            RemoveOtherSpellings(fields, InheritedAccessPermission.Column);
+            fields[InheritedAccessPermission.Column] = level;
+        }
+
+        if (access.Record is { } record)
+        {
+            RemoveOtherSpellings(fields, AccessInheritance.Column);
+            fields[AccessInheritance.Column] = record;
+        }
     }
 
     /// <summary>
@@ -2673,6 +2841,11 @@ internal sealed record RecordCreationWarning(string Code, string? Column, string
     /// <summary>Task 022 fix round 2 (the mapping-source rule): the source is secure, or whether it is secure could not be told,
     /// and the row is not created in that source's isolation, so nothing mapped from it is written. The row is still created.</summary>
     internal const string MappingSourceSecureCode = "record_creation.mapping_source_secure";
+
+    /// <summary>Task 022b (the Restricted-source rule): the source's Access Permission is Restricted, or could not be read, and
+    /// the row is not Restricted once created (or that could not be told), so nothing mapped from it is written. The row is
+    /// still created.</summary>
+    internal const string MappingSourceRestrictedCode = "record_creation.mapping_source_restricted";
 }
 
 /// <summary>The payload of a create: a caller's Dataverse Web API body, or an item already mapped (a chat tool, a server writer).</summary>

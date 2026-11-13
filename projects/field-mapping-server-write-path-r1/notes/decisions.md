@@ -1078,9 +1078,29 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
 ### 2026-11-12 — task 022b: Restricted mapping source (UAC-r2, round 75; from rounds 2, 67, 81, 84, 87)
 
 - **Agreement:** `sprk_agreement.sprk_accesspermission` is declared in the SOURCE set only, so the Restricted-source check reads it and fails closed. No inheritance or enforcement on agreements. `AccessPermissionTablesGuardTests` holds the code set equal to the solution with no ratchet.
-- **Project and work assignment:** the root's value is set in the create from `SecureRootInheritance`'s own decision, unchanged: the value max(own, floor) AND the access record marking the floor part inherited and the caller's value own. The max is never written as the record's own value (round 87: only inherited strictness follows a parent down). The post-create step stays and agrees with the create. No second writer.
+- **Project and work assignment (SUPERSEDED by the Q2 option (c) bullet below; nothing is written in the create for a root):** the root's value is set in the create from `SecureRootInheritance`'s own decision, unchanged: the value max(own, floor) AND the access record marking the floor part inherited and the caller's value own. The max is never written as the record's own value (round 87: only inherited strictness follows a parent down). The post-create step stays and agrees with the create. No second writer.
 - **Readings confirmed:** a Standard or Limited source maps unchanged (secure sources stay with the secure copy gate); an empty value is Standard; an unreadable value fails closed; the filing refusal reuses `record_creation.mapping_source_secure_filing` with Restricted wording (no client contract change).
 - **A document filed only through the regarding pair:** a known limit. The strip fails closed; a document's access permission is a display copy with no enforcement of its own (round 81), and the reconcile brings it in step.
 - **Repair and the field-mapping push:** task 022c (#2738, DI-027), started right after 022b merges, reviewed by UAC-r2.
 - **Project and work assignment (Q2, UAC-r2 revised to option c):** round 84 already treats a filed child by the parent-derived value from its first moment, so 022b only needs to KNOW the floor and never writes it. Named edit to `SecureRootInheritance`, approved by UAC-r2: `PlanCreateAsync`'s result also returns the Access Permission floor it already computes for the new row (read-only, with an explicit "undecided" when a parent could not be read). No write behaviour changes; task 175 F1-1 stands (a create never carries the access record; the cascade writes it after the create). A Restricted source maps into a project or work assignment only when the caller's own value is Restricted or the floor is Restricted; an undecided floor strips. Two adversarial passes cover the edit; it is listed separately in the diff to UAC-r2. If the floor cannot be separated without changing what `DecideParentsAsync` decides: option (b), the strip as a stated known limit, and UAC-r2 exposes it.
 - **Agreement (Q1, follow-up):** the source check is in place; no caller path reaches it yet (`EntityAccessFilter` has no agreement entity set). Recorded as a K; no entity set added in 022b.
+
+## 2026-11-12 — 022c rules (unified-access-control-r2 confirmed)
+
+- **Push filing:** a Restricted or Unreadable mapping source never changes a child's filing. Such a child is not written (`RefileNotAllowedReasonCode`), the same as rule (a) for a secure source.
+- **Row answer (Repair and push):** the row's stored `sprk_accesspermission`, Restricted only when it reads as the Restricted option. Anything else strips or skips.
+  - Repair: the row is skipped with `record_repair.mapping_source_restricted`.
+  - Push: the child gets `field_mapping.push.restricted_source_not_restricted`. An Unreadable source gives `UndeterminedReasonCode`.
+- **Reads:** the source column joins the existing source read. A child's value is read only when the source is Restricted or Unreadable.
+- **Known limit, in both the 022b and 022c notes:** Restricted-ness is decided at the write. A target loosened later keeps the mapped values, and nothing strips them again.
+
+## 2026-11-12 — Owner go-aheads (this session), and the 045d derive-failure rule
+
+- **Owner go-aheads, given in this session on 2026-11-12:**
+  - the PR to master for 022b and 022c;
+  - the class-aware sync-mode migration on dev. The dry run read 48 rules: 36 to demote to One-time (32 Assigned-To, 4 display copies), 12 plain data already at Manual Refresh, 0 unknown. `-Apply` waits for the owner's review of that list;
+  - task 054's live steps on dev, in the binding deploy order. UAC-r2 coordinates the dev BFF deploy from master `e9208abc5e`;
+  - tasks 045d and 052b.
+- **045d, a derive failure (main session):** when the invoice-family re-derive fails (`ReadFailedCode`, `ResolverFieldsIncompleteCode` or `RecordNotFoundCode`), the write is refused through the existing `InvoiceFamilyPreWrite` refusal mapping. The refusal contract is unchanged (NFR-07).
+  - Reason: the regarding pair decides filing, so a row whose core lookup changed is never written without its five fields (fail closed).
+  - UAC-r2 and ebilling-r1 review the diff.

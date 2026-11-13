@@ -4,7 +4,7 @@
     <title>The regarding pair is always complete and reaches every related row that should carry it (inventory and design first; owner 2026-11-04)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>042c and 044 merged; part B gated on the owner's approval of the part A design note</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Part B modifies .cs on every server create and update path that writes the ADR-024 pair or its derived values (bff-api, security); 6+ steps; depends on 042c and 044.</rigor-reason>
     <model-tier>opus</model-tier>
