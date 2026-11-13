@@ -556,7 +556,11 @@ internal sealed class RecordProcedureRig
         public override Task<IReadOnlyList<AccessRights?>> GetCallerRightsForRecordsOrUnknownAsync(
             string? callerBearerToken, IReadOnlyList<(string EntitySet, Guid RecordId)> targets, CancellationToken ct = default)
         {
-            Batches.Add(targets);
+            lock (Batches)
+            {
+                Batches.Add(targets); // 084d-3: concurrent dry runs share one probe
+            }
+
             if (Fault is not null)
             {
                 throw Fault;

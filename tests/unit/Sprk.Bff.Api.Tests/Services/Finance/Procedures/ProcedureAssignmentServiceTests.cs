@@ -2219,7 +2219,14 @@ public sealed class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var policy = w.Rule();
-        var finding = w.Signal(policy, w.Invoice(matter: MatterId));
+        var invoice = w.Invoice(matter: MatterId);
+        var finding = w.Signal(policy, invoice, line: w.Line(invoice));
+        // ebilling-r1 084d-3 review round 1 (F3-1): a record directly under the matter with an In Review invoice, so the close selects the
+        // children (ChildrensInReviewInvoicesAsync returns early with no child): the children's invoice read and the override read of the
+        // child's chain (the change's own Exclude row on the matter is the override row that decides the child's invoice) both run.
+        var child = WorkAssignmentUnder(w, Matter, MatterId);
+        var childInvoice = InvoiceOn(w, WorkAssignmentTable, child);
+        var childFinding = w.Signal(policy, childInvoice);
         using var cts = new CancellationTokenSource();
         var readsBefore = -1;
         w.H.TransactionCommitsButAnswersUnknown = requests =>
@@ -2244,6 +2251,39 @@ public sealed class ProcedureAssignmentServiceTests
         // The read-back (the version row) and the close's Signal reads; the caller-scoped count after them keeps the request's token.
         after.Where(r => r.First.EntityName is "sprk_policyversion" or "sprk_signal")
             .Should().OnlyContain(r => !r.Second.CanBeCanceled, "the read-back and the close run on CancellationToken.None");
+
+        // ebilling-r1 084d-3 (ontology-r1 O-K3): the close's selection is shared with the dry run, which passes ITS request token into it
+        // (SelectBaseFindingsAsync and its readers take an optional token since 084d-2b fix round 1). The write never does: every read of the
+        // close's selection (the In Review invoices, their lines, and the records directly under this one) runs on CancellationToken.None. The
+        // close ends with its last Signal read; the caller-scoped count after it keeps the request's token (must-not-fire: the guard tells them apart).
+        var closeEnds = after.FindLastIndex(r => r.First.EntityName == "sprk_signal");
+        closeEnds.Should().BeGreaterThan(0, "the close selected the base rule's findings");
+        var close = after.Take(closeEnds + 1).ToList();
+        var selectionTables = new[]
+        {
+            "sprk_invoice", "sprk_billingevent", "sprk_matter", "sprk_project", "sprk_workassignment",
+            "sprk_procedureassignment", "sprk_ruleset", "sprk_policy", "sprk_policyversion",
+        };
+        foreach (var table in new[] { "sprk_invoice", "sprk_billingevent" })
+        {
+            close.Should().Contain(r => r.First.EntityName == table, $"the close's selection reads {table}");
+        }
+
+        close.Should().Contain(r => r.First.EntityName == "sprk_project" || r.First.EntityName == "sprk_workassignment",
+            "the close's selection reads the records directly under the matter");
+        // Premises (084d-3 review round 1, F3-1): the children's In Review invoice read and the override read of the child's chain ran inside
+        // the close's window. Without them the token assertion below is vacuous for those two reads.
+        static bool Names(QueryExpression q, string attribute, Guid id) => q.Criteria.Conditions.Concat(q.Criteria.Filters.SelectMany(f => f.Conditions))
+            .Any(c => c.AttributeName == attribute && c.Values.Contains(id));
+        var childInvoiceColumn = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].Single(l => l.CoreEntity == WorkAssignmentTable).Column;
+        close.Any(r => r.First.EntityName == "sprk_invoice" && Names(r.First, childInvoiceColumn, child))
+            .Should().BeTrue("the close read the children's In Review invoices");
+        close.Any(r => r.First.EntityName == "sprk_procedureassignment" && Names(r.First, WorkAssignmentTable, child))
+            .Should().BeTrue("the close read the override rows on the child's chain (ProcedureResolver.ReadOverridesAsync)");
+        w.StatusOf(childFinding).Should().Be(SignalWriter.SignalStatusResolved, "the child's invoice was kept by the override read, so its finding closed");
+        close.Where(r => selectionTables.Contains(r.First.EntityName))
+            .Should().OnlyContain(r => !r.Second.CanBeCanceled, "the request's token never reaches the write's selection reads");
+        after.Skip(closeEnds + 1).Should().Contain(r => r.Second == cts.Token, "the caller-scoped count after the close keeps the request's token");
     }
 
     [Fact(DisplayName = "089c: an unknown override, or another record's, is 404 assignment.override_not_found and nothing is written")]
