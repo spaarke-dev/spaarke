@@ -2290,8 +2290,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // creating identity (E1: the application user, or a root team) — a technical owner, never the family the document
         // belongs to — so it does not name the document's owner: it counts for secure-if-any only, and the document takes
         // the question's unfiled answer (an Office save: the saver's team, task 080; the reconciler: the owner it has). A
-        // FILED communication still names it (the family rule). Decided from the communication's filing alone, never from
-        // its owner kind; ContentOf questions (no ChildEntityLogicalName) are unchanged.
+        // FILED communication still names it (the family rule). Decided from the communication's filing, never from its owner
+        // kind — with ONE narrow exception (uac-r2 197a-2, #2728, owner option a): an unfiled communication POSITIVELY owned by
+        // the Direct message owner team (IsOwnedByTheDirectTeamAsync) is not demoted. It stays a full parent, so secure-if-any
+        // over the document's other parents still applies, and the Direct rule (DirectMessageParentAnswerAsync: a document is a
+        // message content row) gives the Direct team, so a document linked only through sprk_relatedcommunication follows a
+        // Direct message unfiled from a Secure record. Every other owner, an unconfigured or unresolvable Direct team, or a
+        // lookup fault demotes as before. ContentOf questions (no ChildEntityLogicalName) are unchanged.
         if (parents.Count > 0
             && string.Equals(context.ChildEntityLogicalName, DocumentEntity, StringComparison.OrdinalIgnoreCase)
             && string.Equals(parents[0].EntityLogicalName, RecordThreadFiling.CommunicationTable, StringComparison.OrdinalIgnoreCase))
@@ -2305,7 +2310,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     + "read, so whether it is filed cannot be decided");
             }
 
-            if (filed == false)
+            if (filed == false
+                && !await IsOwnedByTheDirectTeamAsync(parents[0], context, committedParentReads, ct).ConfigureAwait(false))
             {
                 var rest = parents.Skip(1).ToArray();
                 var demoted = context with
@@ -4570,6 +4576,31 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         static RecordOwnerResolution UnfileUnavailable() => RecordOwnerResolution.Refused(
             RecordOwnerRefusal.DirectTeamUnavailable,
             "the Direct message owner team could not be read, so a Direct message cannot be unfiled now; nothing was written, try again");
+    }
+
+    /// <summary>
+    /// uac-r2 task 197a-2 (#2728, owner option a): whether the UNFILED <paramref name="communication"/>, a document's primary
+    /// parent, is POSITIVELY owned by the Direct message owner team — the one Direct lookup
+    /// (<see cref="DirectMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync"/>, as <see cref="DirectMessageParentAnswerAsync"/>
+    /// asks it) resolves with no fault, and the communication's owning team, read through the one parent-facts read
+    /// (<see cref="ReadParentAsync"/>: a planned team when one is planned; committed on the re-file path, #2143 round 3 K1), is
+    /// that team. <c>false</c> in every other case, so the #2468 demotion runs as before: no lookup composed, neither Direct
+    /// setting configured (nothing is read), a refusal or a fault of the lookup, a communication that does not come back, is
+    /// owned by no team or by another team. A Dataverse fault on the parent-facts read propagates, as the demoted path's
+    /// secure-if-any read of the same row does.
+    /// </summary>
+    private async Task<bool> IsOwnedByTheDirectTeamAsync(
+        RecordOwnershipParent communication, RecordOwnershipContext context, bool committedReads, CancellationToken ct)
+    {
+        if (_directMessageOwnerTeam is null)
+            return false;
+
+        var direct = await _directMessageOwnerTeam.ResolveDirectMessageOwnerTeamAsync(ct).ConfigureAwait(false);
+        if (!direct.IsResolved || direct.Fault is not null || direct.TeamId is not { } directTeam || directTeam == Guid.Empty)
+            return false;
+
+        var facts = await ReadParentAsync(communication, context.PlannedOwningTeams, committedReads, ct).ConfigureAwait(false);
+        return facts is { HasOwningTeam: true, OwningTeamId: { } owner } && owner == directTeam;
     }
 
     /// <summary>Error: whether a row's communication parent is owned by the Direct message owner team cannot be decided, so the
