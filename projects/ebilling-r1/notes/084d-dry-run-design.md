@@ -164,3 +164,17 @@ Both sides run through the real resolver. Mutation proofs: dropping `createdon`,
 - `RouteAuthorizationGuardTests.Ledger.cs`.
 - Tests: the rig, the contract file, the IL guard.
 - Client (later in the task): `ImpactStep.tsx`, `AssignProcedureWizard.tsx`.
+
+## Review: uac-r2 (2026-11-13): OK with conditions (binding for the build)
+
+- **C5 confirmed.** Each kind's checks come from one source (`AssignChecks`, `ExcludeChecks`, `ChangeChecks`), guarded by the declaration-equality test. For the steps it shares with the write routes, keep the same filter order: the record filter's uniform 404 runs before the 403s, so an unknown record and a denied one get the same answer.
+- **R6 accepted.** A body firm the caller cannot Read gives 503. The client words it as "this preview isn't available for this firm", not as an outage.
+- **R5 and R10 accepted, with disclosure.** The response, as a fixed flag or note, and the Impact text say:
+  - the preview does not predict an ownership refusal;
+  - Now and After are separate reads.
+
+  Nothing presents After as "will succeed".
+- **Synthetic-row exemption accepted, with two conditions:**
+  1. The planning by-id load that decides "synthetic" runs app-only. A load that faults, is throttled or is refused never counts as "found nothing"; it refuses with 503. Test: when the by-id load faults, the answer is 503 and `Exempt` is never called.
+  2. A synthetic id that collides with an existing real row takes the "real, asked" path. Test: a deny-alone on that row gives 503.
+- **Before merge:** send uac-r2 the diff with the access files listed at the top.
