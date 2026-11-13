@@ -11,7 +11,11 @@
 - Items 1 (capability index), 2 (reuse scan: design-to-spec, pipeline fallback, task-create citation) and 3 (jscpd sweep + adversarial-reviewer checks) are complete on the branch.
 - Task 020: weekly `duplication-sweep` job in `nightly-health.yml` (Mon 07:00 UTC cron, dispatch input `duplication_sweep_only`), `.jscpd.json`. Verified by dispatch runs 43289750101 and 43293619731: 38 s, artifact uploaded, 17 new / 192 old cross-area clusters, status failing in dry-run. The first master run after merge will open the `weekly/duplication-sweep` alert for those 17 (intended).
 
-**Active task**: none. **Next**: 030 (package decision records, owner gate; merge master first, check PR #935), 040 (Learn MCP; owner does the per-machine approval), 043, 080, 090.
+**Active task**: **030** package decision records (started 2026-11-13; rigor STANDARD; master merged `265d426d3c`; PR #935 still open — matters for 031–033, not 030).
+- Done: 3 code-mapper inventories (sonnet/low); candidate defects checked in the main session (none user-visible; the CommunicationPage prototype is not deployed). `notes/package-reviews.md` written: 9 sections + findings P-1..P-14 (8 Medium, 6 Low, 0 High).
+- Recommendations: sdap-client consolidate→ui-components; smart-todo / communication / daily-briefing **sanction via one Path B amendment for "Pattern D feature packages"** (overturns the §6.2 consolidate hypothesis — owner call); compose sanction; document-operations consolidate→ui-components (033); ai-outputs consolidate→ai-widgets; ai-context types→ai-widgets + retire (031); legal-workspace retire facade, SpaarkeAi depends on the solution directly (032).
+- **Next action**: owner reviews `notes/package-reviews.md` and decides each of the 9 → fill each "Owner decision", mark the POML complete + TASK-INDEX ✅, commit. Tasks 031–034 do not start before that.
+**Then**: 031–034, 035 (DEV deploy — owner OK), 040 (Learn MCP; owner per-machine approval), 043, 080, 090.
 **Open, reported to owner**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
 - ISS-003 #2713 — done (PR #2751), closed.
