@@ -1324,8 +1324,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (!string.IsNullOrWhiteSpace(thread.RegardingName))
             communication["sprk_regardingrecordname"] = TruncateTo(thread.RegardingName, 100);
         communication["sprk_regardingrecordid"] = TruncateTo(regarding.Id.ToString(), 100);
+        // Task 045f: the url is the one of the record the row is now filed under (the thread's typed regarding), never the
+        // thread's stored text, which can describe another record.
         if (!string.IsNullOrWhiteSpace(thread.RegardingUrl))
-            communication["sprk_regardingrecordurl"] = TruncateTo(thread.RegardingUrl, 200);
+            communication["sprk_regardingrecordurl"] = Dataverse.InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(regarding.LogicalName, regarding.Id);
 
         _logger.LogInformation(
             "Inherited regarding {EntityType}:{RegardingId} from target thread {ThreadId} | CorrelationId: {CorrelationId}",
@@ -3514,8 +3516,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         communication["sprk_regardingrecordid"] = TruncateTo(primary.EntityId.ToString(), 100);
 
-        if (primary.EntityUrl is not null)
-            communication["sprk_regardingrecordurl"] = TruncateTo(primary.EntityUrl, 200);
+        // Task 045f: the url is the one of the association's own record, never the text the request carried; an association
+        // of a table the map does not know names no record this row can be filed under, so it carries no url.
+        if (primary.EntityUrl is not null && primary.EntityType is { } urlTable && RegardingLookupMap.ContainsKey(urlTable))
+            communication["sprk_regardingrecordurl"] = Dataverse.InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(urlTable, primary.EntityId);
     }
 
     /// <summary>
@@ -3620,7 +3624,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     source.GetAttributeValue<string>("sprk_regardingrecordid")))
             {
                 CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
-                CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+                CopyRecordUrlOfTheCopiedRecord(source, communication);
                 CopyStringIfPresent(source, communication, "sprk_regardingrecordnumber");
 
                 if (source.GetAttributeValue<EntityReference>("sprk_regardingrecordtype") is { Id: var typeId } && typeId != Guid.Empty
@@ -3684,6 +3688,27 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         communication.Attributes.Remove("sprk_regardingrecordnumber");
         communication.Attributes.Remove("sprk_regardingrecordname");
         communication.Attributes.Remove("sprk_regardingrecordurl");
+    }
+
+    /// <summary>
+    /// Task 045f: a reply's copy of its source's record url, as the url of the record the copied id names — never the source's
+    /// stored text, which can describe another record. The table is the copied typed regarding lookup that names that id;
+    /// with none, the url's own table when its id is that id. A url naming another record, or none, is not copied. Additive:
+    /// a url the row already carries is kept.
+    /// </summary>
+    private static void CopyRecordUrlOfTheCopiedRecord(DataverseEntity source, DataverseEntity target)
+    {
+        if (target.Attributes.ContainsKey("sprk_regardingrecordurl")
+            || !Guid.TryParse(target.GetAttributeValue<string>("sprk_regardingrecordid"), out var pairId))
+        {
+            return;
+        }
+
+        var table = Engine.RegardingFieldMap.All
+            .Select(r => target.GetAttributeValue<EntityReference>(r.RegardingField))
+            .FirstOrDefault(r => r is not null && r.Id == pairId && !string.IsNullOrWhiteSpace(r.LogicalName))?.LogicalName;
+        if (Dataverse.RegardingPairWrite.TryAdmitRecordUrl(source.GetAttributeValue<string>("sprk_regardingrecordurl"), table, pairId, out var canonical))
+            target["sprk_regardingrecordurl"] = canonical;
     }
 
     /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>

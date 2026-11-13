@@ -218,4 +218,143 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         WrittenOnce("sprk_todo", Todo);
         SentPayload("sprk_todo", Todo)[UrlColumn].Should().Be(CanonicalUrl("sprk_project", Project));
     }
+
+    // ── Fix round 1 (F1c): a write run as a person decides a sent URL on the stored pair as that person reads it ────────────
+
+    /// <summary>The person reads the todo's stored pair as <paramref name="pairTable"/> <paramref name="pairId"/>.</summary>
+    private void PersonReadsThePair(string pairTable, Guid pairId) =>
+        _personAnswer = (table, id, _) => table == "sprk_todo" && id == Todo
+            ? new Entity("sprk_todo", Todo)
+            {
+                ["sprk_regardingrecordid"] = pairId.ToString("D"),
+                ["_sprk_regardingrecordtype_value"] = CatalogRowOf(pairTable).ToString("D"),
+            }
+            : null;
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AsAPerson_ARowThePersonCannotRead_IsTheReadFailedRefusal_NeverTheUrlMismatch(GenericPath path)
+    {
+        _callerMayNotRead = true;
+
+        var outcome = await RunAsync(path, "sprk_todo", Todo, NoLookups, SendsUrl(CanonicalUrl("sprk_matter", OtherMatter)),
+            StoredPair("sprk_todo", "sprk_matter", Matter).Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined, outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AsAPerson_ARowNotThereForThePerson_IsTheReadFailedRefusal_NeverTheUrlMismatch(GenericPath path)
+    {
+        _personAnswer = (_, _, _) => null; // the person's query answers no row
+
+        var outcome = await RunAsync(path, "sprk_todo", Todo, NoLookups, SendsUrl(CanonicalUrl("sprk_matter", Matter)),
+            StoredPair("sprk_todo", "sprk_matter", Matter).Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined, outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AsAPerson_AReadableRow_AUrlOfAnotherRecord_IsRefused(GenericPath path)
+    {
+        PersonReadsThePair("sprk_matter", Matter);
+
+        var outcome = await RunAsync(path, "sprk_todo", Todo, NoLookups, SendsUrl(CanonicalUrl("sprk_matter", OtherMatter)),
+            StoredPair("sprk_todo", "sprk_matter", Matter).Object, playbookActsAs: Caller);
+
+        RefusedAsUrlMismatch(outcome);
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AsAPerson_AReadableRow_AUrlOfItsRecord_IsWritten_InCanonicalForm(GenericPath path)
+    {
+        PersonReadsThePair("sprk_matter", Matter);
+
+        var outcome = await RunAsync(path, "sprk_todo", Todo, NoLookups, SendsUrl($"/main.aspx?etn=sprk_matter&id={Matter:B}"),
+            StoredPair("sprk_todo", "sprk_matter", Matter).Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        WrittenOnce("sprk_todo", Todo);
+        SentPayload("sprk_todo", Todo)[UrlColumn].Should().Be(CanonicalUrl("sprk_matter", Matter));
+    }
+
+    // ── Fix round 1 (F1b): the communication thread, anchored by typed regarding lookups, is under the same rule ────────────
+
+    private static readonly Guid Thread = Guid.Parse("02200000-0000-4000-8000-0000000000c2");
+
+    private const string ThreadTable = "sprk_communicationthread";
+
+    /// <summary>The app-only world of one thread whose stored anchor is <c>sprk_regardingmatter</c> = <paramref name="matter"/>.</summary>
+    private static Mock<IGenericEntityService> ThreadUnder(Guid? matter)
+    {
+        var app = new Mock<IGenericEntityService>();
+        app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        var stored = new Entity(ThreadTable, Thread);
+        if (matter is { } id)
+            stored["sprk_regardingmatter"] = new EntityReference("sprk_matter", id);
+        app.Setup(a => a.RetrieveAsync(ThreadTable, Thread, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stored);
+        return app;
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task OnAThread_AUrlOfAnotherRecordThanItsAnchor_IsRefused(GenericPath path)
+    {
+        var outcome = await RunAsync(path, ThreadTable, Thread, NoLookups, SendsUrl(CanonicalUrl("sprk_matter", OtherMatter)),
+            ThreadUnder(Matter).Object);
+
+        RefusedAsUrlMismatch(outcome);
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task OnAThreadAnchoredNowhere_AUrl_IsRefused(GenericPath path)
+    {
+        var outcome = await RunAsync(path, ThreadTable, Thread, NoLookups, SendsUrl(CanonicalUrl("sprk_matter", Matter)),
+            ThreadUnder(null).Object);
+
+        RefusedAsUrlMismatch(outcome);
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task OnAThread_AUrlOfItsAnchor_IsWritten_InCanonicalForm(GenericPath path)
+    {
+        var outcome = await RunAsync(path, ThreadTable, Thread, NoLookups,
+            SendsUrl($"https://other.example/main.aspx?etn=sprk_matter&id={Matter:B}"), ThreadUnder(Matter).Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        WrittenOnce(ThreadTable, Thread);
+        SentPayload(ThreadTable, Thread)[UrlColumn].Should().Be(CanonicalUrl("sprk_matter", Matter));
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task OnAThread_AUrlOfTheRecordTheSameWriteAnchorsItTo_IsWritten(GenericPath path)
+    {
+        var outcome = await RunAsync(path, ThreadTable, Thread,
+            Lookups(("sprk_regardingmatter", new EntityReference("sprk_matter", OtherMatter))),
+            SendsUrl(CanonicalUrl("sprk_matter", OtherMatter)), ThreadUnder(Matter).Object);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        WrittenOnce(ThreadTable, Thread);
+        SentPayload(ThreadTable, Thread)[UrlColumn].Should().Be(CanonicalUrl("sprk_matter", OtherMatter));
+    }
 }

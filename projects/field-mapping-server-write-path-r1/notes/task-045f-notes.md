@@ -149,3 +149,94 @@ Before the two fixture corrections, the first filtered run failed 2 of 4869, bot
   the BFF and are not covered.
 - **Id-only update.** An update that sends only the id keeps the stored type, so a URL whose `etn` disagrees with the stored
   type is refused.
+
+### Fix round 1 (coordinator review)
+
+#### Rules added or sharpened
+
+1. **The communication thread is under the rule** (F1b). `sprk_communicationthread` carries the URL column but no pair; it is
+   filed by typed regarding lookups (`ThreadResolver.ThreadRegardingColumns`). On the thread, a sent URL must name the record
+   its first typed regarding lookup names after the write, in ADR-024 priority order (`RegardingFieldMap.All`): a lookup the
+   same write sets decides; a lookup it clears is skipped; otherwise the stored lookup decides. A thread anchored nowhere
+   refuses a URL. Same code, same forms, same canonical write, same fail-closed reads (the caller's row on caller paths,
+   the app-only row on app-only paths, a missing app-only row read as anchored nowhere).
+2. **A write run as a person reads the stored pair as that person** (F1c). On the playbook node and the output orchestrator,
+   when the run acts as a person, the stored pair (or the thread's lookups) is read with that person's query
+   (`OwnedChildWrite.PersonStoredRowReader`). A row the person cannot read (403) or that is not there for them (no row, 404)
+   is the read-failed answer (`record_owner_parent_undetermined`), never the URL-mismatch code. A readable row is decided as
+   before.
+3. **Only a URL the write sends is decided** (K1). The URL step runs only when the original request sends the URL; a URL the
+   planner itself derived on a pair move is not re-decided.
+4. **Server code never copies one row's stored URL onto another** (F1a and the grep). Every BFF write of the URL builds it
+   from the record it names (`InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl`), or admits a copied one only when it names
+   the record being copied (`RegardingPairWrite.TryAdmitRecordUrl`):
+   - a communication sent into a thread takes the canonical URL of the thread's own anchor, not the thread's stored text;
+   - a reply copies the source's URL only when it names the copied record, in canonical form;
+   - an explicit association writes the canonical URL of the associated record, never the request's text; an association
+     of a table the regarding map does not know writes no URL;
+   - the thread anchors `ThreadResolver` builds from an email or another thread carry the canonical URL of the anchor record.
+
+#### Table enumeration (every `Entity.xml` with `sprk_regardingrecordurl`)
+
+| Table | Writable via the five paths? | Pair? | Action |
+|---|---|---|---|
+| the 12 non-family pair tables | yes | id + type | under the rule (part A) |
+| the 6 invoice-family tables | yes | id + type | 045e (unchanged) |
+| `sprk_communicationthread` | chat update, playbook node, output orchestrator (not the PATCH re-file routes, not the create: no table rule) | typed regarding lookups | brought under the rule (rule 1 above) |
+
+No other table carries the column, so no "writable with no pair" refusal was needed.
+
+#### URL-copy grep (`sprk_regardingrecordurl` / `RegardingUrl` / `RecordUrl` writes in `src/server`)
+
+| Site | Before | After |
+|---|---|---|
+| `CommunicationService.ApplyTargetThreadAsync` | the thread's stored URL | canonical URL of the thread's anchor |
+| `CommunicationService` reply copy | the source's stored URL | admitted only when it names the copied record, canonical |
+| `CommunicationService.MapAssociationFieldsAsync` | the request's `EntityUrl` text | canonical URL of the associated record; none for an unknown table |
+| `ThreadResolver` email anchor and thread-to-thread anchor (feed thread create, re-anchor, default thread) | the source row's stored URL | canonical URL of the anchor record |
+| `InvoiceSubmissionEndpoints` re-file body | built by `DeriveResolverFieldsAsync` | unchanged (built, not copied; family) |
+| `ExternalDataService`, `IncomingAssociationResolver`, `TodoRegardingBuilder`, `EventEndpoints` | built from their own pair | unchanged |
+
+Nothing outside the BFF copies the column.
+
+#### Comments (F2b)
+
+The "It adds no check" comments on the orchestrator, the playbook node and the push now say the same call decides a sent URL.
+The PATCH comment states that, with a URL sent, a missing row is refused.
+
+#### Known limits added
+
+- **K2.** On an id-only pair (rule 5), any `etn` is kept when the id matches.
+- **K4.** A re-file that sends only the id over a stale stored type now gets 400 when the URL names the new table. This
+  depends on the live catalog.
+
+#### Evidence
+
+New or changed tests:
+
+| File | New | Fail before the fix |
+|---|---|---|
+| `tests/unit/domain/Dataverse/RegardingRecordUrlDecisionTests.cs` (the thread) | 10 | 9 with the rule off (the clear passes) |
+| `InvoiceFamilyGenericUpdatePathTests.RegardingRecordUrl.cs` (as a person, ×2 paths) | 8 | 8 with the rule off; the 4 read-failed cases also fail when the stored row is read app-only |
+| `InvoiceFamilyGenericUpdatePathTests.RegardingRecordUrl.cs` (the thread, ×2 paths) | 8 | 6 with the rule off (the canonical same-write anchor passes) |
+| `SecureChildOwnershipAiToolTests.RegardingRecordUrl.cs` `ChildRefile_AStoredPairReadFault_WritesNothing` (F2a: faults only the full-row read, asserts 503) | changed | fails with the rule off |
+| `tests/integration/data-mutation/Communication/ReplyRegardingCopyTests.cs` | 4 | 4 on the old communication code |
+| `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ThreadResolverTests.cs` (not a KEEP path) | 1 | fails on the old code |
+| `AssociationMappingTests` (2 expectations changed to the canonical URL / no URL) | changed | both fail on the old code |
+
+The domain test `ATableWithNoRegardingPair_IsNotDecided` no longer lists the thread.
+
+Rule off (`RegardingRecordUrlRuleApplies` false, a temporary local switch, restored from a copy): 24 of the 27 new or changed
+045f tests fail; the 3 that pass are must-not-fire cases (a clear, and a URL already canonical for the anchor the same write
+sets). The communication fixes were proved by putting the previous `CommunicationService.cs` and `ThreadResolver.cs` back
+temporarily: 7 of 196 tests in `ReplyRegardingCopyTests`, `ThreadResolverTests` and `AssociationMappingTests` fail, all the
+new or changed ones.
+
+Gates (fix round 1):
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
+- ArchTests, alone and in full: 2544/2544.
+- Filtered `Sprk.Bff.Api.Tests` (the part-A classes plus `Communication` and `ThreadResolver`, minus `Api.Office.`):
+  7830 passed, 2 skipped, 0 failed. The first run, in the gates script beside the ArchTests build, had 1 failure whose name
+  the quiet run did not print; the rerun after a formatting-only change had none.
+- ebilling (Finance | ProcedureAssignment | InvoiceFamily, minus `Api.Office.`): 8255 passed, 4 skipped, 0 failed.
+- `dotnet format whitespace --folder --verify-no-changes` on the touched files: clean.

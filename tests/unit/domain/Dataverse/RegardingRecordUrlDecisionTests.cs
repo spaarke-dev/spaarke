@@ -286,11 +286,106 @@ public class RegardingRecordUrlDecisionTests
     [Theory]
     [InlineData("sprk_matter")]
     [InlineData("sprk_document")]
-    [InlineData("sprk_communicationthread")]
     public async Task ATableWithNoRegardingPair_IsNotDecided(string table)
     {
         (await Decide(table, Url("not a URL"), Stored(Record, TypeRow))).Should().Be(OwnedChildWrite.RegardingRecordUrlDecision.Unchanged);
         OwnedChildWrite.RegardingRecordUrlRuleApplies(table).Should().BeFalse();
+    }
+
+    // ── The communication thread: anchored by typed regarding lookups, not a pair (fix round 1, F1b) ─────────────────────
+
+    private const string Thread = "sprk_communicationthread";
+
+    /// <summary>The thread's stored typed lookups (column → record), read with the path's reader.</summary>
+    private Func<CancellationToken, Task<OwnedChildWrite.RegardingPairRead<OwnedChildWrite.RegardingPairRow>>> StoredThread(
+        params (string Column, Guid Id)[] lookups) =>
+        _ =>
+        {
+            _reads.Add("row");
+            return Task.FromResult(OwnedChildWrite.RegardingPairRead<OwnedChildWrite.RegardingPairRow>.Ok(
+                new OwnedChildWrite.RegardingPairRow(null, null, lookups.ToDictionary(l => l.Column, l => l.Id))));
+        };
+
+    private Task<OwnedChildWrite.RegardingRecordUrlDecision> DecideThread(
+        string? url, Func<CancellationToken, Task<OwnedChildWrite.RegardingPairRead<OwnedChildWrite.RegardingPairRow>>>? stored,
+        params (string Column, Guid? Id)[] sent) =>
+        OwnedChildWrite.DecideRegardingRecordUrlAsync(Thread, Url(url), stored, Catalog(), default,
+            sent.ToDictionary(s => s.Column, s => s.Id));
+
+    [Fact]
+    public void TheThread_IsUnderTheRule() => OwnedChildWrite.RegardingRecordUrlRuleApplies(Thread).Should().BeTrue();
+
+    [Fact]
+    public async Task TheThread_AUrlOfItsStoredAnchor_IsAdmitted_InCanonicalForm()
+    {
+        var decided = await DecideThread($"/main.aspx?etn=sprk_matter&id={Record:B}", StoredThread(("sprk_regardingmatter", Record)));
+
+        decided.CanonicalUrl.Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", Record.ToString("D")));
+        decided.Refused.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("sprk_matter", true)]   // another record of the anchor's table
+    [InlineData("sprk_project", false)] // the anchor's id under another table
+    public async Task TheThread_AUrlOfAnotherRecordThanItsAnchor_IsRefused(string urlTable, bool otherId)
+    {
+        var decided = await DecideThread(RegardingRecordType.BuildRecordUrl(urlTable, (otherId ? OtherRecord : Record).ToString("D")),
+            StoredThread(("sprk_regardingmatter", Record)));
+
+        decided.Should().Be(OwnedChildWrite.RegardingRecordUrlDecision.Refuse);
+    }
+
+    [Fact]
+    public async Task TheThread_TheHighestPriorityAnchorDecides()
+    {
+        // The matter outranks the project (ThreadResolver's anchor order): a URL of the project is not the thread's anchor.
+        var decided = await DecideThread(RegardingRecordType.BuildRecordUrl("sprk_project", OtherRecord.ToString("D")),
+            StoredThread(("sprk_regardingproject", OtherRecord), ("sprk_regardingmatter", Record)));
+
+        decided.Should().Be(OwnedChildWrite.RegardingRecordUrlDecision.Refuse);
+    }
+
+    [Fact]
+    public async Task TheThread_AnAnchorTheSameWriteSets_DecidesWithoutReadingTheRow()
+    {
+        var decided = await DecideThread(RegardingRecordType.BuildRecordUrl("sprk_matter", OtherRecord.ToString("D")),
+            StoredThread(("sprk_regardingmatter", Record)), ("sprk_regardingmatter", OtherRecord));
+
+        decided.CanonicalUrl.Should().Be(RegardingRecordType.BuildRecordUrl("sprk_matter", OtherRecord.ToString("D")));
+        _reads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheThread_AnAnchorTheSameWriteClears_FallsToTheNextStoredAnchor()
+    {
+        var decided = await DecideThread(RegardingRecordType.BuildRecordUrl("sprk_project", OtherRecord.ToString("D")),
+            StoredThread(("sprk_regardingmatter", Record), ("sprk_regardingproject", OtherRecord)), ("sprk_regardingmatter", null));
+
+        decided.CanonicalUrl.Should().Be(RegardingRecordType.BuildRecordUrl("sprk_project", OtherRecord.ToString("D")));
+    }
+
+    [Fact]
+    public async Task TheThread_AnchoredNowhere_IsRefused()
+    {
+        (await DecideThread(RegardingRecordType.BuildRecordUrl("sprk_matter", Record.ToString("D")), StoredThread()))
+            .Should().Be(OwnedChildWrite.RegardingRecordUrlDecision.Refuse);
+    }
+
+    [Fact]
+    public async Task TheThread_AStoredRowReadFault_FailsClosed()
+    {
+        var decided = await DecideThread(RegardingRecordType.BuildRecordUrl("sprk_matter", Record.ToString("D")),
+            _ => Task.FromResult(new OwnedChildWrite.RegardingPairRead<OwnedChildWrite.RegardingPairRow>(null, 503, null)));
+
+        decided.Failed.Should().BeTrue();
+        decided.CanonicalUrl.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TheThread_AClear_IsNotDecided()
+    {
+        (await DecideThread(null, StoredThread(("sprk_regardingmatter", Record)))).Should().Be(OwnedChildWrite.RegardingRecordUrlDecision.Unchanged);
+        _reads.Should().BeEmpty();
     }
 
     // ── Fail closed ────────────────────────────────────────────────────────────────────────────────────────────────

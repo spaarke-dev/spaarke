@@ -260,17 +260,20 @@ internal sealed class UpdateRecordActionCore
 
         // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
         // planner, with the app-only reader this core already uses for the invoice-family guard) BEFORE the filing gate below and
-        // the write, so they see the pair as it will be written. It adds no check (UAC-r2, 2026-11-07). A failed read refuses.
+        // the write, so they see the pair as it will be written. The planner adds no check (UAC-r2, 2026-11-07); the same call then
+        // decides a sent regarding record URL (task 045f; on a person's run, on the row as that person reads it). A failed read
+        // refuses.
         if (OwnedChildWrite.RegardingPairWriteApplies(input.EntityLogicalName, updatePayload)) // task 045f: a record URL too
         {
             using var pairScope = _scopeFactory.CreateScope();
             var pairEntities = pairScope.ServiceProvider.GetService<IGenericEntityService>();
+            var personQuery = pairScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>();
             updatePayload = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
                     pairEntities, input.EntityLogicalName, input.RecordId,
                     updatePayload, "UpdateRecord", _logger, cancellationToken,
-                    movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(
-                        pairScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
-                        pairEntities, input.ImpersonateSystemUserId))
+                    movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(personQuery, pairEntities, input.ImpersonateSystemUserId),
+                    storedRowAsPerson: OwnedChildWrite.PersonStoredRowReader(
+                        personQuery, pairEntities, input.ImpersonateSystemUserId, input.EntityLogicalName, input.RecordId))
                 .ConfigureAwait(false);
         }
 

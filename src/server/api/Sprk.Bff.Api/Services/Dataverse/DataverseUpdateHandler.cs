@@ -147,10 +147,14 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 
         // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
         // planner, with this handler's own app-only reader) BEFORE the filing gate below and the write, so they see the pair as it
-        // will be written. It adds no check (UAC-r2, 2026-11-07). The caller's dictionary is not changed; a failed read refuses.
+        // will be written. The planner adds no check (UAC-r2, 2026-11-07); the same call then decides a sent regarding record URL
+        // (task 045f; on a person's write, on the row as that person reads it). The caller's dictionary is not changed; a failed
+        // read refuses.
         fields = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
                 _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
-                movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
+                movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId),
+                storedRowAsPerson: OwnedChildWrite.PersonStoredRowReader(
+                    _readAsPerson, _genericEntityService, impersonateSystemUserId, entityLogicalName, recordId))
             .ConfigureAwait(false);
 
         // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family row whose own core lookup this write

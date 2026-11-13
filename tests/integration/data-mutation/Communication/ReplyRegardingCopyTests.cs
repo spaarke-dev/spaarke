@@ -275,6 +275,81 @@ public class ReplyRegardingCopyTests
         row.GetAttributeValue<string>("sprk_regardingrecordurl").Should().Contain(MatterId.ToString("D"));
     }
 
+    // ── Task 045f (fix round 1): the url a send writes is the one of the record the row is filed under ──────────────────
+
+    private static string CanonicalUrlOf(Guid matter) =>
+        RegardingRecordType.BuildRecordUrl("sprk_matter", matter.ToString("D").ToLowerInvariant());
+
+    [Fact]
+    public async Task SendIntoAThread_WhoseStoredUrlNamesAnotherRecord_WritesTheUrlOfTheThreadsOwnRecord()
+    {
+        var source = WholeSource();
+        source.Attributes.Remove("sprk_regardingmatter");
+        var thread = new DataverseEntity("sprk_communicationthread", ThreadId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherMatterId),
+            ["sprk_regardingrecordurl"] = "https://other.example/main.aspx?etn=sprk_matter&id=" + MatterId.ToString("D"),
+        };
+        var harness = new Harness(source, thread);
+
+        await harness.Service.SendAsync(Reply() with { ThreadId = ThreadId }, harness.SignedInUser());
+
+        var row = harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(OtherMatterId);
+        row.GetAttributeValue<string>("sprk_regardingrecordurl").Should().Be(CanonicalUrlOf(OtherMatterId),
+            "the url of the record the thread is filed under, never the thread's stored text");
+    }
+
+    [Fact]
+    public async Task Reply_ToASourceWhoseStoredUrlNamesAnotherRecord_CopiesNoUrl()
+    {
+        var source = WholeSource();
+        source["sprk_regardingrecordurl"] = "/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=" + OtherMatterId.ToString("D");
+        var harness = new Harness(source);
+
+        await harness.Service.SendAsync(Reply(), harness.SignedInUser());
+
+        var row = harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(MatterId.ToString("D"));
+        row.Contains("sprk_regardingrecordurl").Should().BeFalse("the source's url named another record than the copied pair");
+    }
+
+    [Fact]
+    public async Task Reply_ToASourceWhoseUrlNamesItsRecordInAnotherForm_CopiesItInCanonicalForm()
+    {
+        var source = WholeSource();
+        source["sprk_regardingrecordurl"] = "https://other.example/main.aspx?etn=SPRK_MATTER&id=" + MatterId.ToString("B");
+        var harness = new Harness(source);
+
+        await harness.Service.SendAsync(Reply(), harness.SignedInUser());
+
+        harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject
+            .GetAttributeValue<string>("sprk_regardingrecordurl").Should().Be(CanonicalUrlOf(MatterId));
+    }
+
+    [Fact]
+    public async Task Send_WithAnAssociationWhoseUrlNamesAnotherRecord_WritesTheUrlOfTheAssociatedRecord()
+    {
+        var harness = new Harness(WholeSource());
+        var request = Reply() with
+        {
+            Associations = new[]
+            {
+                new CommunicationAssociation
+                {
+                    EntityType = "sprk_matter",
+                    EntityId = OtherMatterId,
+                    EntityUrl = "/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=" + MatterId.ToString("D"),
+                },
+            },
+        };
+
+        await harness.Service.SendAsync(request, harness.SignedInUser());
+
+        harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject
+            .GetAttributeValue<string>("sprk_regardingrecordurl").Should().Be(CanonicalUrlOf(OtherMatterId));
+    }
+
     private static SendCommunicationRequest Reply() => new()
     {
         To = new[] { "counsel@other.example" },

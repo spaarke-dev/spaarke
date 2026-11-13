@@ -110,14 +110,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public async Task ChildRefile_AStoredPairReadFault_WritesNothing()
     {
+        // Only the full-row read the URL decision makes (the route's own reads select columns, so they still answer).
         ToDoWhosePairNamesTheOrdinaryMatter();
-        _user.GetOverride = path => path.StartsWith($"sprk_todos({Todo:D})", StringComparison.Ordinal)
-            ? DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.")
+        _user.GetOverride = path => path == $"sprk_todos({Todo:D})"
+            ? DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.BadRequest, "Scripted fault.")
             : null;
 
         var result = await RefileChild("sprk_todo", Todo, new() { ["sprk_regardingrecordurl"] = RecordUrlOf("sprk_matter", OrdinaryMatter) });
 
-        Status(result).Should().BeGreaterThanOrEqualTo(400, Detail(result));
+        Status(result).Should().Be(StatusCodes.Status503ServiceUnavailable, Detail(result));
         _user.Patches.Should().BeEmpty();
     }
 
