@@ -1200,3 +1200,32 @@ Parity, no-write and concurrency tests for the dry run. Test-only: no product co
 - **K5.** The concurrency tests run on the in-memory world with one lock between queries. They show that the overlay is per request; they say nothing of Dataverse's isolation. The write-between test uses a one-row write. A multi-row write landing between two queries of one resolution can tear that resolution (R10), as it can for the plain read.
 
 **Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede) 8545 passed, 4 skipped, 0 failed (8341 before: +204, the new class). `dotnet format whitespace --verify-no-changes` clean on the four touched test files.
+
+### 084d-3 review round 1 (2026-11-13)
+
+Test code and this file only; no product code changed. Branch `task/084d-3`, from `06139f6aca`.
+
+**F3-1, fixed.** `Change_WhenTheTransactionCommitsButGivesNoAnswer_AndTheRequestIsCancelled_StillReadsBack` seeded no record under the matter, so `ChildrensInReviewInvoicesAsync` returned early and its two reads never ran.
+- The test now seeds a work assignment under the matter with an In Review invoice and an open finding on it. The change's own Exclude row on the matter is the override row that decides the child's invoice (the child's chain read finds it).
+- `selectionTables` now also holds `sprk_procedureassignment`, `sprk_ruleset`, `sprk_policy` and `sprk_policyversion`: every read of them in the close's window runs on a token that cannot be cancelled.
+- Premises, asserted inside the close's window: (1) a `sprk_invoice` read that names the child's lookup column and the child's id (the children's In Review invoice read); (2) a `sprk_procedureassignment` read that names the child in its chain filter (`ProcedureResolver.ReadOverridesAsync`); (3) the child's finding ends Resolved, so the override read kept the invoice.
+- Mutation proofs (product code, restored afterwards). The write has no request token, so each mutation records the request's token in a static field in `ChangeRuleAsync` and passes it to one read:
+  - M5, the children's `sprk_invoice` read in `ChildrensInReviewInvoicesAsync` takes the request token: the test fails (1 of 1) at the token assertion over `selectionTables`.
+  - M6, the `ProcedureResolver.ReadOverridesAsync(entities, chain, ct)` call in `ChildrensInReviewInvoicesAsync` takes the request token: the test fails (1 of 1), at the premise that the override read ran (the cancelled read throws before the rig logs it, the child is dropped, and the close's children side fails). Either way it fails.
+  - With no mutation the test passes (1 of 1).
+
+**F3-2, fixed.** The comment said every read of the four tables spans pages, but the large seed had at most one assignment row on a chain.
+- A work assignment's chain is itself and its project; the matter is not on it. So the large seed now puts `AssignmentFillers` (2) filler rows on each of the matter, the project and the work assignment: rule excludes of filler policies (enabled, no version, so they run nowhere and show nowhere), ids `ffffffff-...` that sort after every derived row id, `createdon` before the clock (condition (c) of the createdon check still holds).
+- The rig pages assignments one row per page in id order, so a replaced row (switch, re-change, remove, remove of a changed rule) with two rows after it is never on the last page. Asserted per large case: the replaced row's id sorts before every filler id; an assignments page with Page > 1 was read; an assignments page 1 with More was read; and for a kind that replaces or removes a row, an assignments page numbered above the filler count was read (the replaced row plus two fillers).
+- The comment at the top of the large seed now names what each table's paging comes from.
+- No new normalisation. 162/162 parity cases and the 9 exactly-once cases stay green (`RecordProcedure*` 549 passed).
+- Mutation proof: with `AssignmentFillers = 0` the large seed's 63 cases fail (54 parity, 9 exactly-once), the other 141 pass. Restored.
+
+**Known limits, accepted:**
+- **K-1.** The chunk-order check does not prove read order, and the page log is not After-specific.
+- **K-2.** The rig stamps one `createdon` per write, so a per-statement ordering change of the Exclude row and the version would go uncaught. The `statecode` and `createdon` fill is by construction, matching Dataverse defaults.
+- **K-3.** The proposed normalisation also blanks the existing row's creator for switch and re-change. Covered by `RecordProcedureReadModelContractTests`.
+- **K-4.** Closes and Affected are not compared. Owned by 084d-2b.
+- **K-5.** The strict-rig control exercises `ExecuteTransactionAsync` only. `WriteRefusingEntityService` refuses first.
+- **K-6.** The O-K3 must-not-fire is weak, by-id reads are not captured, and the window ends at the last `sprk_signal` read.
+- **K-7.** Interleaving happens only at `RetrieveMultipleAsync`, and some shared doubles are unsynchronised on refusal paths only.

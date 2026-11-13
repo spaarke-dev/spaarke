@@ -103,8 +103,8 @@ public sealed class RecordProcedureDryRunParityContractTests
                 rig.AddLegacyRule("LEGACY-CHAIN", RuleSetScope.ClientDefault);
                 break;
             case "large":
-                // (a) the rig's page: one row per page on assignments and versions, 50 on sets and policies, so every read of the four tables
-                // spans pages and the overlay's last-page append runs after earlier pages.
+                // (a) the rig's page: one row per page on assignments and versions, 50 on sets and policies. Policies, rule sets and versions
+                // always span pages; assignments do once condition (c) below has put rows on the chain beside the kind's own.
                 w.PageSizes[ProcedureAssignmentEntity.Entity] = 1;
                 w.PageSizes[PolicyVersion] = 1;
                 w.PageSizes[RuleSet] = 50;
@@ -139,11 +139,35 @@ public sealed class RecordProcedureDryRunParityContractTests
                         (RuleDomains.PolicyDomainColumn, Option(RuleDomains.PolicyDomainBilling)));
                 }
 
+                // (c) 084d-3 review round 1 (F3-2): assignments also span pages, and the row a switch, a re-change or a remove replaces is NOT on
+                // the last page. The rig pages the assignments one row per page in id order, so the fillers are plain rule excludes of filler rules
+                // (enabled, no version: they run nowhere and show nowhere), AssignmentFillers on each record (a work assignment's chain is itself
+                // and its project; the matter is not on it), with ids that sort after every derived row id (ffffffff-...): the replaced row sits
+                // before them on whichever record the kind writes.
+                var fillerNumber = 0;
+                foreach (var (table, record, _) in Records)
+                {
+                    for (var n = 1; n <= AssignmentFillers; n++)
+                    {
+                        fillerNumber++;
+                        rig.World.Add(ProcedureAssignmentEntity.Entity, AssignmentFiller(fillerNumber),
+                            (ProcedureAssignmentEntity.ExcludedPolicyColumn, Ref(Policy, Filler(0xf4, fillerNumber))),
+                            (ProcedureAssignmentEntity.ModeColumn, Option(ProcedureAssignmentEntity.ModeExcluded)),
+                            ("sprk_createdbyperson", Ref("systemuser", Reviewer)), ("statecode", Option(0)), (table, Ref(table, record)), ("createdon", rig.Tick()));
+                    }
+                }
+
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(seed));
         }
     }
+
+    /// <summary>Filler assignment rows of the large seed on each record (parity condition (c)): the replaced row has at least this many rows after it in its chain's read, so it is never on the last page.</summary>
+    private const int AssignmentFillers = 2;
+
+    /// <summary>An assignment filler's id: the highest prefix, so it sorts after every derived row id (<see cref="ReplacedRowSortsBeforeTheAssignmentFillers"/> checks it).</summary>
+    private static Guid AssignmentFiller(int n) => Filler(0xff, n);
 
     private static Guid Filler(int table, int n) => new($"fffffff{table & 0xf:x}-0000-4000-8000-{n:x12}");
 
@@ -379,6 +403,20 @@ public sealed class RecordProcedureDryRunParityContractTests
         if (seed == "large")
         {
             LargeSeedConditionsHeld(dryPages, kind, proposal);
+            ReplacedRowSortsBeforeTheAssignmentFillers(proposal);
+        }
+    }
+
+    /// <summary>Parity condition (c): the row a switch, a re-change or a remove replaces sorts before the assignment fillers, so the rig (id order) reads it on a page that is not the last.</summary>
+    private static void ReplacedRowSortsBeforeTheAssignmentFillers(Proposal proposal)
+    {
+        var replaced = proposal.Request.ReplacesOverrideId ?? proposal.Request.OverrideId;
+        if (replaced is { } row)
+        {
+            for (var n = 1; n <= AssignmentFillers * Records.Length; n++)
+            {
+                row.CompareTo(AssignmentFiller(n)).Should().BeLessThan(0, $"(c) the replaced row {row} sorts before filler assignment {n}, so it is read on a page that is not the last");
+            }
         }
     }
 
@@ -392,6 +430,15 @@ public sealed class RecordProcedureDryRunParityContractTests
         pages.Should().Contain(p => p.Table == Policy && p.Page > 1, "(a) the policies are read over several pages");
         pages.Should().Contain(p => p.Table == RuleSet && p.Page > 1, "(a) the rule sets are read over several pages");
         pages.Should().Contain(p => p.Table == PolicyVersion && p.Page > 1, "(a) the versions are read over several pages");
+        pages.Should().Contain(p => p.Table == ProcedureAssignmentEntity.Entity && p.Page > 1, "(c) the assignments are read over several pages");
+        pages.Should().Contain(p => p.Table == ProcedureAssignmentEntity.Entity && p.Page == 1 && p.More, "(c) an assignments read has a page after its first, so the overlay's last-page append runs after earlier pages");
+        if ((proposal.Request.ReplacesOverrideId ?? proposal.Request.OverrideId) is not null)
+        {
+            // The replaced row and the fillers after it: at least three rows on the record's own chain, so the replaced row is on page 1 or 2 of 3.
+            pages.Should().Contain(p => p.Table == ProcedureAssignmentEntity.Entity && p.Page > AssignmentFillers,
+                "(c) a replaced override row is read on a page that is not the last: the assignments read spans more pages than the fillers after it");
+        }
+
         if (proposal.RecordSet is { } set)
         {
             var chunks = pages.Where(p => p.Table == Policy && p.Lists.ContainsKey("sprk_ruleset")).Select(p => p.Lists["sprk_ruleset"]).ToList();
