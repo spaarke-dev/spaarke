@@ -498,6 +498,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
           return (
             <CreateEventFollowOnStep
               dataService={config.eventDataService}
+              navigationService={config.navigationService}
               formValues={currentFormValues}
               onFormValues={vals => {
                 setCreateEventName(vals.eventName);

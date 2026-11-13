@@ -35,7 +35,7 @@ import { CreateTodoStep } from '../../CreateTodoWizard/CreateTodoStep';
 import type { ICreateTodoFormState, AssociationResult } from '../../CreateTodoWizard/formTypes';
 import { TodoService } from '../../CreateTodoWizard/todoService';
 import type { ICreateTodoResult } from '../../CreateTodoWizard/todoService';
-import type { IDataService } from '../../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
@@ -46,6 +46,11 @@ import type { ILookupItem } from '../../../types/LookupTypes';
 export interface IAddTodoFollowOnStepProps {
   /** Data service (forwarded to CreateTodoStep — assignee search etc.). */
   dataService: IDataService;
+  /**
+   * Host navigation service. When supplied, Assigned To opens the Dataverse side pane over active contacts
+   * (owner D-219), like the To Do wizard's own step. Omitted: the inline search field.
+   */
+  navigationService?: INavigationService;
   /** Current To Do form values (controlled by the parent wizard). */
   formValues: ICreateTodoFormState;
   /** Called whenever any field in the To Do form changes. */
@@ -69,6 +74,7 @@ export interface IAddTodoFollowOnStepProps {
 
 export const AddTodoFollowOnStep: React.FC<IAddTodoFollowOnStepProps> = ({
   dataService,
+  navigationService,
   formValues,
   onFormValuesChange,
   onSearchAssignees,
@@ -84,6 +90,7 @@ export const AddTodoFollowOnStep: React.FC<IAddTodoFollowOnStepProps> = ({
   return (
     <CreateTodoStep
       dataService={dataService}
+      navigationService={navigationService}
       onSearchUsers={onSearchAssignees}
       onValidChange={handleValidChange}
       onFormValues={onFormValuesChange}

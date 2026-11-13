@@ -369,6 +369,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         renderStep: () => (
           <AddTodoFollowOnStep
             dataService={dataService}
+            navigationService={navigationService}
             formValues={todoFormRef.current}
             onFormValuesChange={setTodoForm}
             onSearchAssignees={handleSearchContacts}
@@ -464,6 +465,7 @@ const CreateReportCardWizard: React.FC<ICreateReportCardWizardProps> = ({
         renderContent: () => (
           <CreateReportCardStep
             dataService={dataService}
+            navigationService={navigationService}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             initialFormValues={formValues}

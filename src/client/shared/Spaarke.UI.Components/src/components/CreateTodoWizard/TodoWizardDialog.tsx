@@ -210,6 +210,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         renderContent: _wizardFiles => (
           <CreateTodoStep
             dataService={dataService}
+            navigationService={navigationService}
             // UAT 2026-06-21 — sprk_todo.sprk_assignedto migrated to a Contact
             // lookup. The wizard's Assignee picker now searches the OOB
             // `contact` entity (not systemuser) so the selected GUID matches

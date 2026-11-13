@@ -4,14 +4,16 @@
  *
  * Fields:
  *   - Event Name (required, Input)
- *   - Event Type (LookupField -> sprk_eventtype_ref)
+ *   - Event Type (DataverseLookupField -> sprk_eventtype_ref)
  *   - Due Date (Input type="date")
  *   - Priority (Dropdown: Low/Normal/High/Urgent)
- *   - Assigned To (LookupField -> contact, optional, + "Assign to me")
+ *   - Assigned To (DataverseLookupField -> active contacts, optional, + "Assign to me")
  *   - Description (Textarea)
  *
  * Dependencies are injected via props (no solution-specific imports):
  *   - dataService: IDataService for Dataverse operations
+ *   - navigationService (optional): host INavigationService. With it, Event Type and Assigned To open the
+ *     Dataverse side pane (owner D-219, 2026-11-12); without it they keep the inline search fields.
  *
  * "Assign to me" (spaarkeai-assistant-enhancements-r1 task 014 / FR-A4):
  * resolves the current Dataverse user onto their own `contact` record via
@@ -36,12 +38,13 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { PersonRegular } from '@fluentui/react-icons';
-import { LookupField } from '../LookupField/LookupField';
+import { DataverseLookupField } from '../LookupField/DataverseLookupField';
+import { ACTIVE_CONTACT_LOOKUP_FILTERS } from '../LookupField/lookupFilters';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { EventService } from './eventService';
 import type { ICreateEventFormState } from './formTypes';
 import { EMPTY_EVENT_FORM } from './formTypes';
-import type { IDataService } from '../../types/serviceInterfaces';
+import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { searchContactsAsLookup, resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 
 // ---------------------------------------------------------------------------
@@ -50,6 +53,8 @@ import { searchContactsAsLookup, resolveCurrentUserAsContactAssignee } from '../
 
 export interface ICreateEventStepProps {
   dataService: IDataService;
+  /** Host navigation service: when present the lookups open the Dataverse side pane (owner D-219). */
+  navigationService?: INavigationService;
   onValidChange: (isValid: boolean) => void;
   onFormValues: (values: ICreateEventFormState) => void;
   initialFormValues?: ICreateEventFormState;
@@ -105,6 +110,7 @@ const useStyles = makeStyles({
 
 export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
   dataService,
+  navigationService,
   onValidChange,
   onFormValues,
   initialFormValues,
@@ -218,10 +224,12 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
         />
       </Field>
 
-      <LookupField
+      <DataverseLookupField
         label="Event Type"
+        entityType="sprk_eventtype_ref"
         value={eventTypeValue}
         onChange={handleEventTypeChange}
+        navigationService={navigationService}
         onSearch={handleSearchEventTypes}
         placeholder="Search event types..."
       />
@@ -247,10 +255,13 @@ export const CreateEventStep: React.FC<ICreateEventStepProps> = ({
 
       <div className={styles.assigneeRow}>
         <div className={styles.assigneeLookup}>
-          <LookupField
+          <DataverseLookupField
             label="Assigned To"
+            entityType="contact"
             value={assignedToValue}
             onChange={handleAssignedToChange}
+            navigationService={navigationService}
+            filters={ACTIVE_CONTACT_LOOKUP_FILTERS}
             onSearch={handleSearchAssignees}
             placeholder="Search contacts..."
             minSearchLength={2}
