@@ -500,10 +500,12 @@ public sealed partial class TrackingNumberAllocatorTests
         const int callers = 10;
         var ids = Enumerable.Range(0, callers).Select(_ => Guid.NewGuid()).ToList();
 
-        // Hold every caller's FIRST sequence read until all ten have read, so all ten pick .1 and contend for it (the worst case).
+        // Hold every caller AFTER its first sequence read is answered, until all ten have their answer, so all ten pick .1 and contend for
+        // it (the worst case). Holding BEFORE the read (GitHub #2067) let a released caller create .1 before another's read was answered;
+        // that caller then read .1 and took .2 uncontended, and on an unlucky schedule no caller retried at all.
         var firstReads = 0;
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _store.BeforeSequenceRead = async () =>
+        _store.AfterSequenceRead = async () =>
         {
             var arrival = Interlocked.Increment(ref firstReads);
             if (arrival <= callers)
@@ -730,9 +732,10 @@ public sealed partial class TrackingNumberAllocatorTests
         InPhase(TrackingScopePhase.P2ScopeKeyActive);
         const int callers = 10;
         var ids = Enumerable.Range(0, callers).Select(_ => Guid.NewGuid()).ToList();
+        // Held after the read is answered, not before it (GitHub #2067): see TenParallelCreates_AllGetADistinctNumber_AndNoRowIsLeftOverOrDoubled.
         var firstReads = 0;
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _store.BeforeSequenceRead = async () =>
+        _store.AfterSequenceRead = async () =>
         {
             var arrival = Interlocked.Increment(ref firstReads);
             if (arrival <= callers)
