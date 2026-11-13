@@ -283,6 +283,10 @@ import {
 import type { ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
 import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
+import {
+  readRelativeRecordTarget,
+  resolveRegardingPairTable,
+} from '@spaarke/ui-components/dist/utils/safeRegardingRecordUrl';
 
 /**
  * The shared library's `.d.ts` bundle exposes `PolymorphicPicker` as
@@ -681,25 +685,19 @@ async function resolveClickTarget(
   try {
     const result = await webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl');
     const urlValue = result?.sprk_regardingrecordurl;
-    if (typeof urlValue === 'string' && urlValue.length > 0) {
-      try {
-        // URL constructor handles absolute URLs; the stored value is
-        // `https://<orgurl>/main.aspx?etn=<entity>&id=<guid>` per the shared
-        // buildRecordUrl helper (used by applyResolverFields on write).
-        const parsed = new URL(urlValue);
-        const etn = parsed.searchParams.get('etn');
-        const id = parsed.searchParams.get('id');
-        if (etn && id) {
-          const cleanId = cleanGuid(id);
-          if (cleanId.length > 0) {
-            return { entityName: etn, entityId: cleanId };
-          }
-        }
-      } catch {
-        // Malformed URL — return null. Warn is intentionally silent here to
-        // avoid noisy logs for admin-edited records; the caller warns on null.
-      }
-    }
+    // Only a same-origin relative record URL is read; any other stored value is never opened.
+    const fromUrl = readRelativeRecordTarget(typeof urlValue === 'string' ? urlValue : null);
+    if (fromUrl) return fromUrl;
+
+    // Otherwise build the target from the row's pair: the record id and the table of its record type.
+    const pair = await webApi.retrieveRecord(
+      hostEntity,
+      hostRecordId,
+      '?$select=sprk_regardingrecordid,_sprk_regardingrecordtype_value'
+    );
+    const pairId = cleanGuid(String(pair?.sprk_regardingrecordid ?? ''));
+    const pairTable = pairId ? await resolveRegardingPairTable(webApi, pair?._sprk_regardingrecordtype_value) : null;
+    if (pairTable && pairId.length > 0) return { entityName: pairTable, entityId: pairId };
   } catch (err) {
     // Record deleted, no privilege, or network error. Warn (developer-visible)
     // but do not throw — the host form must never crash from a click.

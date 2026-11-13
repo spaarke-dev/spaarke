@@ -324,3 +324,59 @@ describe('TodoDetail — dismiss', () => {
     expect(screen.getByRole('button', { name: /Dismissed/i })).toBeDisabled();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Open regarding record — the host is handed only a same-origin relative record URL
+// ─────────────────────────────────────────────────────────────────────
+
+describe('TodoDetail — open regarding record', () => {
+  const MATTER_ID = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
+  const CANONICAL = `/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=${MATTER_ID}`;
+  const withRegarding = (url: string | null): ITodoRecord => ({
+    ...baseRecord,
+    sprk_regardingrecordname: 'Matter 1',
+    sprk_regardingrecordid: MATTER_ID,
+    sprk_regardingrecordurl: url,
+    '_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue': 'Matter',
+  });
+  const openRegarding = async (record: ITodoRecord, onOpenRegardingUrl: jest.Mock) => {
+    renderWithProviders(
+      <TodoDetail
+        record={record}
+        isLoading={false}
+        error={null}
+        onSaveTodo={noop}
+        onSearchContacts={noopSearch}
+        onOpenRegardingUrl={onOpenRegardingUrl}
+      />
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Matter 1/ }));
+    });
+  };
+
+  it('passes a same-origin relative stored URL to the host', async () => {
+    const onOpenRegardingUrl = jest.fn();
+    await openRegarding(withRegarding(CANONICAL), onOpenRegardingUrl);
+    expect(onOpenRegardingUrl).toHaveBeenCalledWith(CANONICAL);
+  });
+
+  it.each([
+    ['another host', `https://evil.example/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=${MATTER_ID}`],
+    ['a javascript scheme', 'javascript:alert(1)'],
+    ['a protocol-relative URL', `//evil.example/main.aspx?etn=sprk_matter&id=${MATTER_ID}`],
+  ])('never passes %s to the host; the URL is built from the pair', async (_label, stored) => {
+    const onOpenRegardingUrl = jest.fn();
+    await openRegarding(withRegarding(stored), onOpenRegardingUrl);
+    expect(onOpenRegardingUrl).toHaveBeenCalledTimes(1);
+    expect(onOpenRegardingUrl).toHaveBeenCalledWith(CANONICAL);
+  });
+
+  it('does not call the host when the stored URL is refused and the pair cannot name a table', async () => {
+    const onOpenRegardingUrl = jest.fn();
+    const record = withRegarding('javascript:alert(1)');
+    record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] = 'Unknown type';
+    await openRegarding(record, onOpenRegardingUrl);
+    expect(onOpenRegardingUrl).not.toHaveBeenCalled();
+  });
+});

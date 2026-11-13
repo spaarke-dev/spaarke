@@ -39,6 +39,10 @@ jest.mock('@spaarke/ui-components', () => {
     __esModule: true,
     TODO_REGARDING_CATALOG,
     cleanGuid: (id: string) => String(id).replace(/[{}]/g, '').toLowerCase(),
+    // The ONE regarding-record-URL reader (task 045f): real implementation, from TS source.
+    readRelativeRecordTarget: jest.requireActual(
+      '../../../shared/Spaarke.UI.Components/src/utils/safeRegardingRecordUrl'
+    ).readRelativeRecordTarget,
     resolveRecordDisplayNameFieldName: jest.fn().mockResolvedValue(null),
     // task 081 (C-8): the App resolves Xrm through the shared cross-frame
     // walker. Pass the REAL implementation through (from TS source) — the
@@ -90,7 +94,7 @@ function buildContext(overrides?: {
   const denorm = overrides?.denorm ?? {
     number: 'MTR-2025-0001',
     name: 'Acme v. Beta',
-    url: 'https://test.crm.dynamics.com/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    url: '/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
   };
 
   // The denorm effect retrieves the host communication WITHOUT $select (opts === undefined);
@@ -232,6 +236,33 @@ describe('CommunicationConnectionsApp — RegardingResolver card parity (task 13
       entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     });
     expect(navOptions).toMatchObject({ target: 2 });
+  });
+
+  it.each([
+    [
+      'an absolute URL on another host',
+      'https://evil.example/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    ],
+    [
+      'an absolute URL on the org host',
+      'https://test.crm.dynamics.com/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    ],
+    ['a javascript scheme', 'javascript:alert(1)'],
+    ['a protocol-relative URL', '//evil.example/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'],
+  ])('number Link never opens a denorm URL that is %s (nothing filed: no navigation)', async (_label, url) => {
+    const navigateTo = jest.fn().mockResolvedValue(undefined);
+    (global as { Xrm?: unknown }).Xrm = {
+      WebApi: { retrieveRecord: jest.fn(), retrieveMultipleRecords: jest.fn() },
+      Navigation: { navigateTo },
+      Page: { data: { entity: { getId: () => HOST_ID } } },
+    };
+
+    const { context } = buildContext({ denorm: { number: 'MTR-2025-0001', name: 'Acme v. Beta', url } });
+    renderApp(context);
+
+    fireEvent.click(await screen.findByTestId('cc-record-number'));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(navigateTo).not.toHaveBeenCalled();
   });
 
   it('hides refresh + lookup icons in read-only mode (title + Row 2 still render)', async () => {

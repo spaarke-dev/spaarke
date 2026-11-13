@@ -61,6 +61,7 @@ import {
 } from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
 import { computeTodoScoreBreakdown } from '../../utils/dateLocal';
+import { safeRegardingRecordUrl } from '../../utils/safeRegardingRecordUrl';
 
 // ---------------------------------------------------------------------------
 // statuscode + statecode constants (mirror task 009 customization)
@@ -715,15 +716,24 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     //      Xrm-based path, supports only Matter + Project today.
     const handleOpenRegardingRecord = React.useCallback(() => {
       if (!record) return;
-      // Path 1: use sprk_regardingrecordurl (FR-13, ADR-024 resolver-field path)
-      if (record.sprk_regardingrecordurl && onOpenRegardingUrl) {
-        onOpenRegardingUrl(record.sprk_regardingrecordurl);
-        return;
+      const typeName = record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] ?? '';
+      const pairEntityName = RECORD_TYPE_ENTITY_MAP[typeName];
+      // Path 1: the host is handed only a same-origin relative record URL: the stored value when it is one, else the
+      // URL built from the row's pair (FR-13, ADR-024 resolver-field path). Any other stored value is never passed on.
+      if (onOpenRegardingUrl) {
+        const safeUrl = safeRegardingRecordUrl(
+          record.sprk_regardingrecordurl,
+          pairEntityName,
+          record.sprk_regardingrecordid
+        );
+        if (safeUrl) {
+          onOpenRegardingUrl(safeUrl);
+          return;
+        }
       }
       // Path 2: legacy Xrm navigate fallback
       if (record.sprk_regardingrecordid && onOpenRegardingRecord) {
-        const typeName = record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] ?? '';
-        const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
+        const entityName = pairEntityName;
         if (!entityName) return;
         onOpenRegardingRecord(entityName, record.sprk_regardingrecordid);
       }
