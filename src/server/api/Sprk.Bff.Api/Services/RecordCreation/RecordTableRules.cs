@@ -103,7 +103,10 @@ internal static partial class RecordTableRules
             "Owner ruling Q8 (a): the row carries the five resolver fields of that record, derived by the server."),
         async (row, ct) =>
         {
-            var family = await OwnedChildWrite.DecideInvoiceFamilyAsync(row.Caller, row.Table, row.Item, stored: null, ct)
+            // Task 045e: and a regarding pair the caller sends must name that record (the catalog read app-only, row.RecordTypes),
+            // asked before the derive below replaces it.
+            var family = await OwnedChildWrite.DecideInvoiceFamilyAsync(row.Caller, row.Table, row.Item, stored: null, ct,
+                    recordTypes: row.RecordTypes)
                 .ConfigureAwait(false);
             if (family.Admitted is not { } admitted)
                 return PreWriteResult.Of(InvoiceFamilyPreWrite(family.Refusal));
