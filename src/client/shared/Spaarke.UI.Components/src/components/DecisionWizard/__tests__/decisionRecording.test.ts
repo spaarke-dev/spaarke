@@ -84,7 +84,7 @@ describe('task 191 (D-223): the inquiry email that may have been sent', () => {
   it('a replayed failure (409) reads as the failure, not as a review in progress', () => {
     const replay = failure({ httpStatus: 409, replayed: true, reasonCode: 'ontology.decision.not_resumable' });
     expect(failureHeading(replay)).toBe('The decision was not recorded');
-    expect(failureMessage(replay)).not.toMatch(/already being recorded/);
+    expect(failureMessage(replay)).toBe('The earlier attempt cannot be continued. Nothing more was recorded.');
     expect(failureHeading(failure({ httpStatus: 409 }))).toBe('This decision is already being recorded');
   });
 

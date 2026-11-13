@@ -52,6 +52,8 @@ public sealed partial class DecisionCommitServiceTests
         rig.Records.Should().ContainSingle();
         var steps = Steps(rig.Record).GetProperty("steps");
         steps[0].GetProperty("outcome").GetString().Should().Be("Done");
+        steps[0].GetProperty("written").EnumerateArray().Select(w => w.GetProperty("id").GetGuid())
+            .Should().Equal(new[] { ServiceRequestId, CommunicationId }, "the landed service request and the communication the retry sent");
         steps[1].GetProperty("outcome").GetString().Should().Be("Done");
         rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
 
@@ -274,6 +276,8 @@ public sealed partial class DecisionCommitServiceTests
         var retried = await rig.CommitAsync(review with { Retry = true });
 
         retried.Status.Should().Be(DecisionCommitStatus.Conflict);
+        retried.ReasonCode.Should().Be(DecisionCommitReasons.SignalNotOpen, "a defined refusal the item explains");
+        ((Microsoft.AspNetCore.Http.IStatusCodeHttpResult)DecisionCommitEndpoints.ToHttp(retried, Http())).StatusCode.Should().Be(409);
         rig.Log.Should().HaveCount(log, "nothing runs");
         rig.Records.Should().BeEmpty();
         rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionConditionCleared);
