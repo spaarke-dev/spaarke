@@ -172,3 +172,6 @@ src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
 runs/*-intake.json
 
 __pycache__/
+
+# jscpd duplication report (local runs of the weekly sweep; .jscpd.json)
+jscpd-report/

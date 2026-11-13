@@ -6,13 +6,13 @@ techStack: [all]
 appliesTo: ["projects/*/design.md", "projects/*/design.docx", "transform spec", "design to spec"]
 alwaysApply: false
 exemplar: projects/spaarkeai-word-add-in-r1/spec.md
-last-reviewed: 2026-11-03
+last-reviewed: 2026-11-12
 ---
 
 # design-to-spec
 
 > **Category**: Project-orchestration
-> **Last Reviewed**: 2026-11-03
+> **Last Reviewed**: 2026-11-12 (reuse scan added to Step 3, reuse-governance-tightening-r1 task 011)
 > **Exemplar**: `projects/spaarkeai-word-add-in-r1/spec.md` follows the current template section for section, including Placement & New Components, Hot-Path Declaration and ADR Tensions. Other skills and project files cite this skill's step numbers (Step 2.5, Step 3), so never renumber them.
 
 ## When to Use
@@ -37,7 +37,7 @@ Human design documents are narrative. Implementing agents need explicit constrai
 - **MUST** emit every required spec.md section with its heading verbatim (Step 4), including ADR Tensions when there are none. project-pipeline Step 1 stops on a spec without it.
 - **MUST** record owner answers under Owner Clarifications, unanswered IMPORTANT questions under Assumptions, and anything still blocking under Unresolved Questions.
 - **MUST** leave the design document unchanged as a project artifact. spec.md is a new file beside it.
-- **MUST NOT** do comprehensive resource discovery here. Step 3 loads ADR constraints only; project-pipeline Step 2 does the full pass.
+- **MUST NOT** do comprehensive resource discovery here. Step 3 loads ADR constraints and runs one reuse scan (a single `code-mapper` agent); every other search is project-pipeline Step 2's full pass.
 - **MUST NOT** run `/project-setup` or `/task-create` after this skill. project-pipeline calls them after its resource discovery; called directly, project-setup misses discovery and task-create has no plan.md.
 - **MUST NOT** write spec.md before the analysis has been presented (Step 0).
 
@@ -159,7 +159,28 @@ Enrich the spec with **architectural constraints only**, not implementation patt
 OUTPUT: the applicable ADRs and their key constraints, for spec.md
 ```
 
-**Scope limitation**: this is preliminary discovery for spec enrichment only. Identify which ADRs apply and extract their MUST / MUST NOT rules. Do not search the codebase for implementation patterns, load guides or knowledge docs, or find code examples: comprehensive resource discovery happens in project-pipeline Step 2. One exception: for each new component the design introduces, run a quick Grep/Glob for an existing component it overlaps with, because the §11 table in Step 4 asks for it and root CLAUDE.md §11 forbids "none" without a check.
+**Reuse scan (one agent).** Catch a design that duplicates an existing component before the spec is written around it. List the capabilities the design introduces (each new service, endpoint, package, Dataverse column and UI surface) as a concept, its synonyms and the interface it would expose, not by the name the design gives it.
+
+```
+1. LAUNCH one code-mapper agent (subagent_type code-mapper, model sonnet; effort low comes from its definition)
+   with: the capability list; .claude/patterns/CAPABILITY-INDEX.md, read first; "search by concept, synonym and
+   interface shape; exclude projects/ and .claude/worktrees/"; and "return ONLY this JSON":
+   { "capabilities": [ { "concept": "…", "searched": ["terms and patterns run"],
+       "candidates": [ { "path": "…:line", "symbol": "…", "match": "name|synonym|interface|index-row",
+                         "evidence": "…" } ] } ],
+     "notCovered": "what was not searched" }
+2. JUDGE (the agent only finds facts; it does not judge and writes nothing):
+   per capability: 0 viable candidates → "none found", with the searches run
+                   1 → the extend target; it fills the §11 table's overlap and "Can extend instead?" cells
+                   2+ → an owner question at Step 5
+   plan level: does any capability duplicate an existing one, or add a package or service where the index row
+   says to extend one?
+3. HOLD the result for Step 4 (Plan Mode is read-only).
+```
+
+Keep effort `low`: the 2026-11-12 dry-run caught both known duplicates at about 36k tokens per scan. Raising it needs the owner's approval with the measured token cost first.
+
+**Scope limitation**: this is preliminary discovery for spec enrichment only. Identify which ADRs apply and extract their MUST / MUST NOT rules. Do not search the codebase for implementation patterns, load guides or knowledge docs, or find code examples: comprehensive resource discovery happens in project-pipeline Step 2. The reuse scan above is the single discovery pass this skill runs. It answers the §11 table's "Existing overlap" column, which root CLAUDE.md §11 forbids leaving "none" without a check.
 
 ### Step 4: Generate Structured spec.md
 
@@ -179,11 +200,20 @@ Read `references/spec-template.md` and fill it to create `projects/{project-name
 | Assumptions | Each unanswered IMPORTANT question, with the component it affects |
 | Unresolved Questions | Each with what it blocks |
 
+**Reuse scan file.** When writing starts, also write `projects/{project-name}/notes/reuse-scan.md` from the Step 3 result:
+- per capability: the concept, the searches run, the candidates (`path:line`, symbol, match) and the verdict: extend `{target}`, owner question (Step 5), or none found;
+- a plan-level duplication check;
+- the scan's model, effort and token count.
+
+The §11 table cites it. project-pipeline Step 2 reuses the file and runs the scan itself only when the file is missing; task-create Step 3.5.6 cites the capability's row.
+
 **Portfolio sync** (after spec.md is written): if `projects/{project-name}/README.md` contains the `> **Portfolio**:` pointer block, invoke `/devops-project-sync`, and if the Project Issue's `Project Status` is not `In Progress`, set it to `In Progress` (a spec exists, so the project is moving). Print one line on success: `✅ Portfolio synced: #N — Status=In Progress`. A failure warns (⚠️) and does not block this skill. No pointer block → the project is not registered; skip silently.
 
 ### Step 5: Present for Review
 
-Output the spec.md content, then:
+**Reuse questions first.** For each capability where the Step 3 scan found 2+ viable candidates, ask: "Which existing component should {capability} extend: {A} or {B}, or neither, and why?" Record each answer under Owner Clarifications (topic `Reuse: {capability}`), in that capability's verdict in `notes/reuse-scan.md`, and in its §11 row.
+
+Then output the spec.md content, then:
 
 ```
 ✅ spec.md generated:
@@ -222,6 +252,7 @@ The next step is always `/project-pipeline`, never `/project-setup` or `/task-cr
 - [ ] **Gap-targeted interview conducted**: specific questions asked for the gaps found (Step 2.5)
 - [ ] **Owner clarifications captured** in spec.md; **assumptions documented** for unanswered questions
 - [ ] Applicable ADRs and their constraints identified; tensions declared (Step 3)
+- [ ] Reuse scan run with one `code-mapper` agent; `notes/reuse-scan.md` written; 2+ candidates put to the owner (Steps 3–5)
 - [ ] spec.md generated with every required section, headings verbatim (Step 4)
 - [ ] Unresolved questions flagged with what each blocks
 - [ ] Portfolio synced, if the project is registered (Step 4)
@@ -235,7 +266,7 @@ The next step is always `/project-pipeline`, never `/project-setup` or `/task-cr
 - **Lost design document.** Opening design.md to "tidy it" while writing the spec loses the source. Preserve it verbatim; if it is lost, recover it from git history.
 - **A requirement contradicts an ADR.** The design's author may not know the ADR. Do not proceed silently: record it in ADR Tensions with a path (A exception / B amendment / C comply, root CLAUDE.md §6.5) and let the owner choose. A Path B amendment merges before or with the dependent code.
 - **Hot-path declaration only in spec.md.** project-pipeline Step 3 and root CLAUDE.md §10 look for it in design.md. A copy in spec.md does not stop the warning; report the gap (Step 5) rather than editing the owner's design.
-- **"none found" without a search.** The §11 "Existing overlap" column needs a Grep/Glob behind it (Step 3 exception). An unchecked "none" is exactly what task-create Step 3.5.6 and code-review Step 6.6 reject later.
+- **"none found" without a search.** The §11 "Existing overlap" column needs the Step 3 reuse scan behind it, with the searches run recorded in `notes/reuse-scan.md`. An unchecked "none" is exactly what task-create Step 3.5.6 and code-review Step 6.6 reject later.
 
 ## References
 

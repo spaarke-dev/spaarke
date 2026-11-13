@@ -83,11 +83,12 @@ background, scheduled or event-driven work, name the host chosen under ADR-052 a
 
 ### New Components (§11 three-question gate)
 {For each NEW service/abstraction/endpoint/DI-registration/package/Dataverse-column this design introduces,
-answer in one sentence each — task-create Step 3.5.6 and code-review Step 6.6 will re-check these:}
+answer in one sentence each — task-create Step 3.5.6 and code-review Step 6.6 will re-check these.
+The overlap cell comes from the Step 3 reuse scan; its searches and candidates are in `notes/reuse-scan.md`:}
 
-| New component | Existing overlap (grep) | Can extend instead? | Cost-of-doing-nothing (concrete failure) |
+| New component | Existing overlap (`notes/reuse-scan.md`) | Can extend instead? | Cost-of-doing-nothing (concrete failure) |
 |---|---|---|---|
-| {name} | {file:line or "none found"} | {Yes→extend / No + why} | {behavior/contract that fails — NOT "flexibility"} |
+| {name} | {file:line, or "none found" + the searches run} | {Yes→extend / No + why} | {behavior/contract that fails — NOT "flexibility"} |
 
 {If this project adds NO new surface (modify-only), state: "No new components — modify-only."}
 
@@ -128,7 +129,8 @@ code review. The bar is "a MUST/MUST NOT rule the design seems to push against" 
 
 ## Owner Clarifications
 
-{Answers captured from the Step 2.5 interview - CRITICAL for implementation}
+{Answers captured from the Step 2.5 interview - CRITICAL for implementation. Step 5 reuse questions (a capability
+with 2+ existing candidates in `notes/reuse-scan.md`) go here too, topic `Reuse: {capability}`.}
 
 | Topic | Question | Answer | Impact |
 |-------|----------|--------|--------|

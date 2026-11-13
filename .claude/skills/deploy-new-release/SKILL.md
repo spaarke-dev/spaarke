@@ -441,7 +441,7 @@ The full parameter table for `Deploy-Release.ps1` and the `config/environments.j
 | `azure-deploy` | Azure infrastructure changes (Bicep), App Settings, Key Vault |
 | `code-page-deploy` | Deploying a single code page web resource |
 | `master-deploy` | Bringing everything on master to dev in one pass |
-| `power-page-deploy` | Deploying the external SPA web resource |
+| `.github/workflows/deploy-external-spa.yml` | Deploying the external SPA (Azure Static Web Apps, manual `workflow_dispatch`) |
 
 ---
 
