@@ -10,6 +10,32 @@
 
 ## Open (in priority order)
 
+### ISS-017 — Invoice-family rows: a regarding pair that disagrees with the core lookup
+
+| Field | Value |
+|---|---|
+| **Status** | Open: owner decision pending (refuse or re-derive) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 (by field-mapping-r1 as DI-029, during the 045d review) |
+| **Source** | field-mapping-server-write-path-r1 task 045d adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2772 |
+
+**Description**
+
+On invoice-family tables, a write that changes only the regarding pair can leave the core lookup unchanged. The row then names one core record while its derived fields describe another. On an external identifier, the D-68 key moves with it. Filing follows the typed core lookup, so this is a consistency defect, not an access one. Rule options:
+- (a) refuse a pair that disagrees with the stored or written core lookup (ebilling-r1's preferred option);
+- (b) re-derive the derived fields from the core lookup on any write.
+
+It touches field-mapping's FR-23, so the owner decides, and field-mapping-r1 confirms in its own session before acting.
+
+**Entry-points**: the invoice-family core-record guard (`InvoiceFamilyCoreRecordGuard.cs`) and field-mapping's pair-derivation rule (045b rule 3).
+
+**Estimated effort**: small, once decided.
+**Blockers**: owner decision.
+**Related**: D-68, D-96; field-mapping 045d (the neighbouring gap was closed there by widening the guard to all six family tables).
+
+---
+
 ### DEF-067 — Invoice submission: other file types, supporting files, several invoices (owner E2E feedback)
 
 | Field | Value |
