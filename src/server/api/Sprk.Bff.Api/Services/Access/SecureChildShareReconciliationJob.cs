@@ -167,11 +167,11 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
         _logger.Log(
             external.Clean ? LogLevel.Information : LogLevel.Warning,
             "[EXTERNAL-TEAM-SHARE] heartbeat status={Status} writes={Writes} reownWrites={ReownWrites} carriedIn={CarriedIn} " +
-            "listed={Listed} swept={Swept} examined={Examined} undecided={Undecided} teamGrants={TeamGrants} teamChanges={TeamChanges} " +
+            "walkedAgain={WalkedAgain} listed={Listed} swept={Swept} examined={Examined} undecided={Undecided} teamGrants={TeamGrants} teamChanges={TeamChanges} " +
             "teamRevokes={TeamRevokes} flaggedUserRevokes={FlaggedUserRevokes} reowns={Reowns} written={Written} reowned={Reowned} " +
             "externalTeamOwned={ExternalTeamOwned} directOwnedFlaggedShares={DirectOwnedFlagged} carried={Carried} " +
             "sweepPassComplete={SweepPassComplete} failure={Failure} runId={RunId}",
-            external.Status, external.WritesEnabled, external.ReownWritesEnabled, external.CarriedIn, external.Listed, external.Swept,
+            external.Status, external.WritesEnabled, external.ReownWritesEnabled, external.CarriedIn, external.WalkedAgain, external.Listed, external.Swept,
             external.Examined, external.Undecided, external.TeamGrants, external.TeamChanges, external.TeamRevokes,
             external.FlaggedUserRevokes, external.Reowns, external.Written, external.Reowned, external.ExternalTeamOwned,
             external.DirectOwnedFlaggedShares, external.Carried, external.SweepPassComplete, external.Failure, context.RunId);
@@ -265,6 +265,8 @@ public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
                     writesEnabled = external.WritesEnabled,
                     reownWritesEnabled = external.ReownWritesEnabled,
                     carriedIn = external.CarriedIn,
+                    // #2795: the family walks that stopped short in an earlier run and were walked again in this one.
+                    walkedAgain = external.WalkedAgain,
                     listed = external.Listed,
                     swept = external.Swept,
                     examined = external.Examined,
