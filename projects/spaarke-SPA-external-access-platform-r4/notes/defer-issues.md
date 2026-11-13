@@ -213,3 +213,21 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Why deferred.** Owner decision 2026-11-12: finish the E2E first, then one rework pass.
 
 **Fix shape.** In the post-E2E rework task: column widths / truncation at the modal width, with a layout test.
+
+## D-13 — Retire the external to-do BFF routes (#2800)
+
+**Where.** The external to-do routes (list / create / PATCH on projects, matters and work assignments) in `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/**`.
+
+**What.** R4 task 009 removes To Do from the SPA (owner directive 2026-11-12). The SPA was the only client caller, so after that the routes have no caller.
+
+**Effect.** None for users: the routes stay mapped and authorized but unused.
+
+**Why deferred.**
+- uac-r2 (round 10 item 1) asked that the routes be deleted in the same change.
+- **Owner decision 2026-11-13: keep them for now** as a rollback option while Task-typed events (tasks 008/011) go live.
+
+**Fix shape.**
+- After the R4 deploy and the owner retest, re-check that the routes have no callers.
+- Delete the routes.
+- Update the route ledger and the external route counts.
+- Remove the routes' contract tests, with the ADR-038 A3 evidence.
