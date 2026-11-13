@@ -83,8 +83,8 @@ SPA stops using them; retirement is a filed follow-up.**
 | 1 | Inactivating the contact's organization removes the contact's access | PASS |
 | 2 | View Only contact: no create actions in the record view, no Submit invoice | PASS |
 | 3 | Dark mode (matter record) | PASS |
-| 4 | Remove View Only grant → re-add at Collaborate → contact still cannot reach documents | **FAIL → #2786 (uac-r2)**, details pending from owner |
-| 5 | Inline level change in Manage Access instead of remove/re-add | enhancement → #2786 (uac-r2) |
+| 4 | Remove View Only grant → re-add at Collaborate → documents listed but **no download icons** (owner) | **Not a grant or R4 defect — legacy data (#2786, uac-r2):** grant fine (200, both documents). Both rows have the file (`sprk_filepath` SPE web URL, name, size) but drive/item ids were never written (early create flow, 2026-02-20); the internal app opens via the URL, the external broker needs the ids, so no download is correctly offered. 6 such active rows on dev: 5 from the 2026-02-20 legacy flow + 1 uac-r2 gate-171 test row with pointers deliberately cleared (no live create path skips the ids). Fix = backfill of the 5 legacy rows (uac-r2 asks the owner) |
+| 5 | Inline level change in Manage Access instead of remove/re-add | enhancement → #2786 (retitled; uac-r2, owner scope question) |
 | 6 | Label mismatch: SPA "Can contribute" (matter/WA, where `/me` has no level) vs Manage Access "Collaborate" | R4 rework: use the Manage Access labels everywhere; matter/WA need a level answer from the BFF (UAC review) |
 
 Also for the rework: the empty states still say "Use Add event in the toolbar" and 'Use "Add to-do" in the toolbar'
