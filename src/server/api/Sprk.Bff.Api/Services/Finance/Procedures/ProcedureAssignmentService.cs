@@ -1778,7 +1778,16 @@ public class ProcedureAssignmentService
         IGenericEntityService reads, string coreTable, Guid recordId, CancellationToken ct)
     {
         var own = new Dictionary<Guid, List<Guid>>();
-        foreach (var row in (await ReadAsync(reads, OwnRowQuery(coreTable, recordId, ProcedureAssignmentEntity.ProcedureColumn, null), ct)).Entities)
+        var query = OwnRowQuery(coreTable, recordId, ProcedureAssignmentEntity.ProcedureColumn, null);
+        query.PageInfo = new PagingInfo { Count = 5000, PageNumber = 1 };
+        var rows = await ReadAsync(reads, query, ct);
+        if (rows.MoreRecords)
+        {
+            // Fails closed: own rows past one page would be dropped, and their Procedures offered as if the record had no row for them.
+            throw new InvalidOperationException("More override rows on the record than one page.");
+        }
+
+        foreach (var row in rows.Entities)
         {
             if (row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn)?.Id is { } subject)
             {

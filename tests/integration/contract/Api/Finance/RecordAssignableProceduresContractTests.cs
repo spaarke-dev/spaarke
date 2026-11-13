@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Auth.Rules;
@@ -574,6 +575,93 @@ public sealed class RecordAssignableProceduresContractTests
         (await Ok(await under.Client.SendAsync(Get("projects", P))))["notOffered"]!.AsArray().Select(n => n!["id"]!.GetValue<Guid>()).Should().Equal(hidden);
         under.Rig.Probe.Denied.Add((AssignmentSet, hiddenRow));
         await AssertUnavailable(await under.Client.SendAsync(Get("projects", P)), under);
+    }
+
+    [Fact(DisplayName = "084d-5a re-check F1: the record's own override rows are read as one page; a read that reports more rows than the page is 503 procedures.unavailable with no list (never a list that misses own rows); a one-page read is 200")]
+    public async Task T1_OwnRowsPastOnePage_Is503_NeverAListMissingThem()
+    {
+        await using var host = await Host.StartAsync();
+        var own = Candidate(host.Rig, "Own");
+        OwnRow(host.Rig, Project, P, own, state: 1);
+        var offered = Candidate(host.Rig, "Offered");
+        var pastOnePage = false;
+        var ownRowReads = 0;
+        host.Rig.Entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken _) =>
+            {
+                var answer = host.Rig.World.Answer(query);
+                // The planner's own-row read: the assignment table, the procedure column alone.
+                if (query.EntityName == ProcedureAssignmentEntity.Entity && query.ColumnSet.Columns.SequenceEqual(new[] { ProcedureAssignmentEntity.ProcedureColumn }))
+                {
+                    ownRowReads++;
+                    if (pastOnePage)
+                    {
+                        answer.MoreRecords = true;
+                        answer.PagingCookie = "cookie";
+                    }
+                }
+
+                return Task.FromResult(answer);
+            });
+
+        var onePage = await Ok(await host.Client.SendAsync(Get("projects", P)));
+        OfferedIds(onePage).Should().Equal(offered);
+        ownRowReads.Should().Be(1, "must-not-fire control: the own-row read was reached and one page is answered");
+
+        pastOnePage = true;
+        await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
+        ownRowReads.Should().Be(2);
+    }
+
+    [Fact(DisplayName = "084d-5a re-check F3 (a): a second rights page counts toward the bound: 301 candidates, the first 250 holding 200 unreadable and 50 readable, then 1 readable on page 2, are tooMany with a null list")]
+    public async Task T1_SecondRightsPage_ReadableRowsThere_CountTowardTheBound()
+    {
+        await using var host = await Host.StartAsync();
+        var all = Enumerable.Range(1, 301).Select(n => Candidate(host.Rig, $"Candidate {n:D3}")).ToList();
+        foreach (var id in all.Take(200).Concat(all.Skip(251)))
+        {
+            host.Rig.Probe.Denied.Add((ProcedureSet, id));
+        }
+
+        var body = await Ok(await host.Client.SendAsync(Get("projects", P)));
+
+        body["tooMany"]!.GetValue<bool>().Should().BeTrue("50 readable on page 1 and the 51st on page 2");
+        body["procedures"].Should().BeNull("never a partial list");
+        body["notOffered"]!.AsArray().Should().BeEmpty();
+        ProcedureRowsAsked(host).Should().Contain(all[250], "page 2 was asked");
+        host.Rig.NoWrites();
+    }
+
+    [Theory(DisplayName = "084d-5a re-check F3 (b): a fault, an unknown row or a short answer on the second rights page (page 1 fine, fewer than 51 readable on it) is 503 procedures.unavailable, never a 200")]
+    [InlineData("fault")]
+    [InlineData("unknown")]
+    [InlineData("short")]
+    public async Task T1_SecondRightsPage_FaultUnknownOrShortAnswer_Is503(string failure)
+    {
+        await using var host = await Host.StartAsync();
+        var all = Enumerable.Range(1, 260).Select(n => Candidate(host.Rig, $"Candidate {n:D3}")).ToList();
+        foreach (var id in all.Take(200))
+        {
+            host.Rig.Probe.Denied.Add((ProcedureSet, id));
+        }
+
+        var pageTwoRow = (ProcedureSet, all[250]);
+        switch (failure)
+        {
+            case "fault":
+                host.Rig.Probe.Answer = targets => targets.Contains(pageTwoRow) ? throw new InvalidOperationException("Test: page 2 faulted") : null;
+                break;
+            case "unknown":
+                host.Rig.Probe.Unknown.Add(pageTwoRow);
+                break;
+            default:
+                host.Rig.Probe.Answer = targets => targets.Contains(pageTwoRow) ? targets.Skip(1).Select(_ => (AccessRights?)AccessRights.Read).ToList() : null;
+                break;
+        }
+
+        await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
+        ProcedureRowsAsked(host).Should().Contain(all[250], "page 2 was asked, and failed");
     }
 
     [Fact(DisplayName = "084d-5a EB-D-227 (review round 1; design §6 mutation seed 'the query includes Retired'): what the query rules out (Retired, another area, another firm, inactive) never counts toward the bound: 50 candidates plus those are 50 offered, not tooMany")]
