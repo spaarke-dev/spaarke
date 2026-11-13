@@ -4,7 +4,7 @@
     <title>Set-CustomerOwnerTeams: the "Spaarke Ontology Writer" unit is never a customer top unit</title>
     <phase>Model 1 dedicated-stamp remediation — ebilling coordination (owner go 2026-11-13: "Writer-unit fix")</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes an operator script that decides which business units are customer units for role/team isolation checks, and modifies tests/scripts/** (Step 9.5 binding).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -60,6 +60,9 @@
 
   <notes>
     <note date="2026-11-13">Created on the owner's go ("Writer-unit fix"). Follow-up unblocked by ebilling PR #2689; master merged into the branch first (04e5cf5997).</note>
+    <note date="2026-11-13">Implemented (77b6cbe417): the writer unit is found by scripts/common/OntologyWriterUnit.ps1 Get-DvOntologyWriterBusinessUnitId (Dataverse name filter, ids only; two of that name throw before any write). Refused as the customer unit in every parameter set (name, id, Direct mode); excluded from $customerTops/$customerTopIds; a forbidden unit (with every unit below it) for TEAM PLACE; Get-CopyPlace 'writer' → ROLE ASSIGNED ELSEWHERE; inside the named customer's subtree → tree-shape refusal. Guide §7.11/§12.2 + change log. 8 new Pester rows failed on the old script and pass now.</note>
+    <note date="2026-11-13">Step 9.5: adversarial ×2 (opus logic: no F1/F2; sonnet tests via 15 deletion mutants). Fixed: F4 script help (.DESCRIPTION drift/REFUSED lists, "every OTHER direct child" → "every OTHER customer top unit"), PASS and plan text; F4 guide claimed "a direct child of the root" was checked — reworded to "inside the named customer's subtree" (each customer's run checks its own); F3 descendants of the writer unit untested (mutants M11 exact-id copy place, M15 no descent survived) → rows: team below the writer unit, team below Secure Record (label pinned), holder of a copy below the writer unit; K1 a -SecureBusinessUnitName naming the writer unit made the real Secure Record a customer top unit → now refused, with a row; K3 copy place decided by origin ID ($forbiddenOrigin), not label equality; tree-shape message tail pinned. M11, M15 and K1 mutants now fail the suite. Pester 81/81; ArchTests (writer-unit, restricted-content, direct-message guards) 121/121. rework: fix-round-1 task 269.</note>
+    <note date="2026-11-13">Known limits: K2 a renamed writer unit is invisible (the helper and H7b are pinned by name; the script has no run's ontologyWriterBusinessUnitId) — it would count as a customer top unit again; K the writer Context runs dry runs, not -Verify, for the team configs (the billing Describe's -Verify rows run with the writer unit in the tree); K no row names the writer unit in another case/accent (decided by id; the first Describe's mock folds both). No live change.</note>
   </notes>
 
   <execution>
