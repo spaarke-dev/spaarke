@@ -24,7 +24,7 @@ namespace Spaarke.ArchTests;
 ///   <c>ResourceAccessRequirement</c> policy, <see cref="ResourcePolicies"/>, also counts and is pinned in
 ///   <see cref="PolicyOnlyRoutes"/>.)</item>
 ///   <item><b>HandlerDecision</b> — a per-route declaration (<see cref="HandlerDecisions"/>) whose handler BODY
-///   (never its signature), followed through at most two named hops, reaches a decision seam. Verified in source,
+///   (never its signature), followed through at most two named hops (three for the routes in ThreeHopHandlerDecisionRoutes), reaches a decision seam. Verified in source,
 ///   not trusted.</item>
 ///   <item><b>Admin</b> — one of exactly four admin mechanisms (<see cref="AdminMechanisms"/>), on a route in
 ///   the pinned <see cref="AdminOnlyRoutes"/> set.</item>
@@ -87,7 +87,7 @@ public partial class RouteAuthorizationGuardTests
     // THE SCOPE BOUNDARY
     // ---------------------------------------------------------------------------------------------
     // EVERY file the census finds (EndpointFiles(): every non-obj/bin .cs file under Sprk.Bff.Api that
-    // registers a route with Map{Verb}, MapMethods or MapHealthChecks) is in GovernedFiles, and the two sets
+    // registers a route with Map{Verb}, MapMethods, MapHealthChecks or MapMcp) is in GovernedFiles, and the two sets
     // are equal — TheEndpointFileCensusIsPinned asserts it. Rule A applies to every live route of every one
     // of them. There is no "NotGoverned" and no file-level exemption any more: task 074's HandlerAuthorized
     // scope is RETIRED, because it is how eight Compose files and the external data plane sat outside Rule A
@@ -102,6 +102,17 @@ public partial class RouteAuthorizationGuardTests
     // =============================================================================================
 
     private const int MaxHandlerDecisionHops = 2;
+
+    // spaarkeai-mcp-bff-api-r1 task 014: the decision capability (B-1, spec FR-10) sits between the commit route and
+    // DecisionCommitService, the single owner of completion, so that route alone needs a third hop:
+    // handler -> DecisionCapability.CommitAsync -> DecisionCommitService.CommitAsync -> SignalCoreRecordAccess.AuthorizeAsync.
+    // Every other route keeps the two-hop limit (must-fire: a three-hop chain on any other route fails).
+    private const int MaxCapabilityHandlerDecisionHops = 3;
+
+    private static readonly IReadOnlySet<string> ThreeHopHandlerDecisionRoutes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "POST /api/v1/signals/{signalId:guid}/decision",
+    };
 
     private static readonly IReadOnlySet<string> PendingOwners = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -274,7 +285,7 @@ public partial class RouteAuthorizationGuardTests
             var waived = byRoute.GetValueOrDefault(a.Key) ?? new List<Waiver>();
             switch (a.Credit)
             {
-                case Credit.None when waived.Count == 0 && !ProvenRoutes.Value.Contains(a.Key):
+                case Credit.None when waived.Count == 0 && !ProvenRoutes.Value.Contains(a.Key) && !McpCreditedRoutes.Value.Contains(a.Key):
                     violations.Add($"{a.Key}\n      at {a.Route.File}:{a.Route.Line} — only signed-in (or nothing): "
                                    + $"[{string.Join(", ", a.Route.Forms)}]");
                     break;
@@ -1688,9 +1699,10 @@ public partial class RouteAuthorizationGuardTests
                            + "be an authorization decision or a caller-context mechanism, listed with its reason");
         }
 
-        if (decision.Hops.Count > MaxHandlerDecisionHops)
+        var maxHops = ThreeHopHandlerDecisionRoutes.Contains(decision.Route) ? MaxCapabilityHandlerDecisionHops : MaxHandlerDecisionHops;
+        if (decision.Hops.Count > maxHops)
         {
-            return (false, $"{decision.Hops.Count} hops declared; at most {MaxHandlerDecisionHops}");
+            return (false, $"{decision.Hops.Count} hops declared; at most {maxHops}");
         }
 
         if (route.Unit is null || route.HandlerEnd <= route.HandlerStart)
@@ -2516,7 +2528,7 @@ public partial class RouteAuthorizationGuardTests
         foreach (var file in GovernedFiles)
         {
             var code = Real.Set.Get(file.RelativePath)!.Code;
-            var expected = Regex.Matches(code, @"\.\s*Map(?:Get|Post|Put|Patch|Delete|Methods|HealthChecks)\s*\(").Count;
+            var expected = Regex.Matches(code, @"\.\s*Map(?:Get|Post|Put|Patch|Delete|Methods|HealthChecks|Mcp)\s*\(").Count;
             var actual = ScanFile(file.RelativePath).Select(r => (r.Line, r.RouteLiteral)).Distinct().Count();
             if (expected != actual)
             {
@@ -2569,7 +2581,7 @@ public partial class RouteAuthorizationGuardTests
     // =============================================================================================
     // THE THREE SHAPES THAT WOULD FAIL OPEN — refused outright (task 167 r1 findings 3 and 4; r2 finding 2)
     // ---------------------------------------------------------------------------------------------
-    // The scanner reads fluent chains of Map{Verb} / MapMethods / MapHealthChecks / MapGroup. Three things could
+    // The scanner reads fluent chains of Map{Verb} / MapMethods / MapHealthChecks / MapMcp / MapGroup. Three things could
     // put an anonymous or unread route surface beside it without it noticing, and all three fail OPEN, so all
     // three are refused rather than stated as residuals:
     //   - Anonymity carried by an ATTRIBUTE ([AllowAnonymous] on a lambda or a handler method,
@@ -2648,7 +2660,7 @@ public partial class RouteAuthorizationGuardTests
     /// <summary>The registration vocabulary the scanner reads (plus MapGroup, which it follows).</summary>
     private static readonly IReadOnlySet<string> ReadRegistrationVocabulary = new HashSet<string>(StringComparer.Ordinal)
     {
-        "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete", "MapMethods", "MapHealthChecks", "MapGroup",
+        "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete", "MapMethods", "MapHealthChecks", "MapMcp", "MapGroup",
     };
 
     /// <summary>ASP.NET Core registration APIs the scanner does not read — refused even if something in src/server
@@ -2761,7 +2773,7 @@ public partial class RouteAuthorizationGuardTests
         Assert.True(
             violations.Count == 0,
             "These calls register routes (or may) in a form outside the scanner's vocabulary (Map{Verb}, MapMethods, "
-            + "MapHealthChecks, MapGroup). Their routes would be invisible to the census and to Rule A. Teach the scanner "
+            + "MapHealthChecks, MapMcp, MapGroup). Their routes would be invisible to the census and to Rule A. Teach the scanner "
             + "the form (RouteAuthorizationGuardTests.Scanner.cs) and the census vocabulary first, with a control.\n\n  "
             + string.Join("\n  ", violations));
     }
@@ -5496,6 +5508,61 @@ public partial class RouteAuthorizationGuardTests
         }
     }
 
+    [Fact(DisplayName = "spaarkeai-mcp-bff-api-r1 controls: MapMcp is read like any route — without RequireAuthorization it fails; with it, it passes")]
+    public void MapMcp_Controls_ReadAsARouteAndJudgedByRuleA()
+    {
+        // The shape the SDK registration takes in the BFF: an extension on the application root, a same-file const path,
+        // the sign-in requirement and a non-authorization filter chained on the MapMcp call itself.
+        static List<RouteRegistration> Scan(string chain) => ScanFixtures(new[]
+        {
+            ("Api/Mcp/FakeMcpEndpoints.cs",
+                "public static class FakeMcpEndpoints\n{\n    public const string Route = \"/mcp/zz-fixture\";\n\n"
+                + "    public static void MapFakeMcp(this WebApplication app)\n    {\n"
+                + "        app.MapMcp(Route)" + chain + ";\n    }\n}"),
+            ("Program.cs", "var app = builder.Build();\napp.MapFakeMcp();"),
+        }, "Api/Mcp/FakeMcpEndpoints.cs");
+
+        var waiver = Permanent("POST /mcp/zz-fixture", PermanentBasis.CallerSuppliedContentOnly, "001",
+            "Seeded by MapMcp_Controls_ReadAsARouteAndJudgedByRuleA: an echo-only fixture route; FakeMcpEndpoints.cs:7.");
+
+        // MUST FIRE: MapMcp with no RequireAuthorization. It is a real, resolved route (not a parse failure), Rule A names
+        // it, and the omission rule names it even under a waiver that satisfies Rule A.
+        foreach (var chain in new[] { string.Empty, ".AddEndpointFilter(DisableResponseBufferingAsync)" })
+        {
+            var bare = Assert.Single(Scan(chain));
+            Assert.False(bare.Unparseable, bare.Problem);
+            Assert.Equal("POST /mcp/zz-fixture", bare.Key);
+            Assert.False(bare.Anonymous);
+            var assessed = Assess(bare, Array.Empty<HandlerDecision>());
+            Assert.Equal(Credit.None, assessed.Credit);
+            Assert.Contains(RuleAViolations(new[] { assessed }, Array.Empty<Waiver>()),
+                v => v.StartsWith("POST /mcp/zz-fixture\n      at Api/Mcp/FakeMcpEndpoints.cs:7 ", StringComparison.Ordinal));
+            Assert.Empty(RuleAViolations(new[] { assessed }, new[] { waiver }));
+            Assert.Contains(AnonymousByOmissionViolations(new[] { bare }),
+                v => v.StartsWith("POST /mcp/zz-fixture\n      at Api/Mcp/FakeMcpEndpoints.cs:7 ", StringComparison.Ordinal));
+        }
+
+        // MUST NOT FIRE: the real chain shape, MapMcp(...).RequireAuthorization().AddEndpointFilter(...). Sign-in is read
+        // from the chain, so the omission rule passes; Rule A still applies like any signed-in-only route — it passes with
+        // the route's waiver and names the route without one.
+        var gated = Assert.Single(Scan(".RequireAuthorization().AddEndpointFilter(DisableResponseBufferingAsync)"));
+        Assert.False(gated.Unparseable, gated.Problem);
+        Assert.Equal("POST /mcp/zz-fixture", gated.Key);
+        Assert.Contains("RequireAuthorization()", gated.Forms);
+        Assert.Empty(AnonymousByOmissionViolations(new[] { gated }));
+        var gatedAssessment = Assess(gated, Array.Empty<HandlerDecision>());
+        Assert.Empty(RuleAViolations(new[] { gatedAssessment }, new[] { waiver }));
+        Assert.Single(RuleAViolations(new[] { gatedAssessment }, Array.Empty<Waiver>()));
+
+        // MapMcp is in the read vocabulary and the census pattern; a MapMcp() with no path is a problem, never a guessed route.
+        Assert.Empty(UnreadRegistrationViolations(
+            new[] { new SourceUnit("Api/Mcp/FakeMcpEndpoints.cs", "app.MapMcp(\"/mcp/zz\").RequireAuthorization();") },
+            new HashSet<string>(StringComparer.Ordinal)));
+        Assert.Matches(RegistrationCall, CodeOf("app.MapMcp(\"/mcp/zz\").RequireAuthorization();"));
+        var noPath = Assert.Single(ScanText("Api/Mcp/NoPath.cs", new[] { "        app.MapMcp().RequireAuthorization();" }));
+        Assert.True(noPath.Unparseable);
+    }
+
     // =============================================================================================
     // CONTROLS — negative (the detector fires on a seeded violation) and positive (it does not fire on the
     // sanctioned shape), per tests/CLAUDE.md. Inline fixtures, so a control cannot go stale.
@@ -6510,6 +6577,9 @@ public partial class RouteAuthorizationGuardTests
         Assert.Contains("1 of 2", Problem(new HandlerDecision(route.Key, "Handle", "AuthorizationService", new[] { "FakeService.LoadAsync" }, "x")));
         // Too many hops.
         Assert.Contains("at most", Problem(new HandlerDecision(route.Key, "Handle", "AuthorizationService", new[] { "A.B", "C.D", "E.F" }, "x")));
+        // Task 014: the one three-hop route (ThreeHopHandlerDecisionRoutes) still has a limit: a fourth hop fails.
+        Assert.Contains("at most 3", Problem(new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "Handle", "AuthorizationService",
+            new[] { "A.B", "C.D", "E.F", "G.H" }, "x")));
 
         // Task 167 integration (2026-10-05): a hop method whose return type is a generic over a TUPLE is parsed (it was
         // invisible: "declares no method"), and the seam is still required in it — a tuple-returning hop WITHOUT the seam

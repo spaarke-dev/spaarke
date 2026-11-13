@@ -1,0 +1,318 @@
+{
+  "case": "plan.200.path-b",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"signalId\":\"c0430000-0000-4000-8000-000000000031\",\"lane\":\"Decide\",\"policyVersionId\":\"c0430000-0000-4000-8000-000000000021\",\"actions\":[{\"code\":\"send-budget-inquiry\",\"label\":\"Send budget inquiry\",\"workType\":\"ask\",\"recordClass\":\"Judgement\",\"isRecommended\":true,\"parameters\":[{\"code\":\"to\",\"label\":\"To\",\"kind\":\"Text\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"subject\",\"label\":\"Subject\",\"kind\":\"Text\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"body\",\"label\":\"Message\",\"kind\":\"TextArea\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"outsideFirm\",\"label\":\"Outside firm\",\"kind\":\"Lookup\",\"required\":false,\"hint\":\"The outside firm the inquiry is to; recorded on the inquiry so replies are tracked per firm\",\"lookupEntity\":\"sprk_organization\",\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Sends the message above to the recipient\",\"Records the inquiry against the matter\",\"The item stays open until the budget is revised or the variance approved\"],\"excludes\":[],\"composer\":\"email\",\"prefillTo\":null},{\"code\":\"revise-budget\",\"label\":\"Revise budget\",\"workType\":\"fund\",\"recordClass\":\"Judgement\",\"isRecommended\":false,\"parameters\":[{\"code\":\"budget\",\"label\":\"Budget to revise\",\"kind\":\"Lookup\",\"required\":true,\"hint\":\"Pre-selected when the matter has one budget; the user picks one when it has several (D-18)\",\"lookupEntity\":\"sprk_budget\",\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"amount\",\"label\":\"New budget\",\"kind\":\"Money\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"reason\",\"label\":\"Reason for revision\",\"kind\":\"TextArea\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Records a budget revision on the matter\",\"Updates the amount of the budget you picked\"],\"excludes\":[\"approve-variance\"],\"composer\":null,\"prefillTo\":null},{\"code\":\"approve-variance\",\"label\":\"Approve variance\",\"workType\":\"fund\",\"recordClass\":\"Judgement\",\"isRecommended\":false,\"parameters\":[{\"code\":\"amount\",\"label\":\"Approved overage\",\"kind\":\"Money\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"note\",\"label\":\"Approval note\",\"kind\":\"TextArea\",\"required\":false,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"The Decision Record is the approval; nothing else is written\"],\"excludes\":[\"revise-budget\",\"create-budget\"],\"composer\":null,\"prefillTo\":null}],\"nextSteps\":[{\"code\":\"add-todo\",\"label\":\"Add To Do\",\"workType\":null,\"recordClass\":\"Judgement\",\"isRecommended\":false,\"parameters\":[{\"code\":\"title\",\"label\":\"To Do\",\"kind\":\"Text\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"assignee\",\"label\":\"Assigned to\",\"kind\":\"Person\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"dueDate\",\"label\":\"Due\",\"kind\":\"Date\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Creates a To Do linked to the record, created when the decision is recorded\"],\"excludes\":[],\"composer\":null,\"prefillTo\":null},{\"code\":\"send-email\",\"label\":\"Send Notification Email\",\"workType\":null,\"recordClass\":\"Judgement\",\"isRecommended\":false,\"parameters\":[{\"code\":\"to\",\"label\":\"To\",\"kind\":\"Text\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"subject\",\"label\":\"Subject\",\"kind\":\"Text\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"body\",\"label\":\"Message\",\"kind\":\"TextArea\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Sends the message above when the decision is recorded\"],\"excludes\":[],\"composer\":\"email\",\"prefillTo\":null}],\"dismissalReasons\":[{\"code\":\"already-approved-offline\",\"label\":\"Already approved offline\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"not-material\",\"label\":\"Not material\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"wrong-matter-misresolved\",\"label\":\"Wrong matter - misresolved\",\"countsTowardSuppression\":false,\"requiresDetail\":false},{\"code\":\"duplicate\",\"label\":\"Duplicate\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"handled-outside-spaarke\",\"label\":\"Handled outside Spaarke\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"other\",\"label\":\"Other\",\"countsTowardSuppression\":true,\"requiresDetail\":true}],\"ruleDescription\":null}",
+  "bodyPretty": {
+    "signalId": "c0430000-0000-4000-8000-000000000031",
+    "lane": "Decide",
+    "policyVersionId": "c0430000-0000-4000-8000-000000000021",
+    "actions": [
+      {
+        "code": "send-budget-inquiry",
+        "label": "Send budget inquiry",
+        "workType": "ask",
+        "recordClass": "Judgement",
+        "isRecommended": true,
+        "parameters": [
+          {
+            "code": "to",
+            "label": "To",
+            "kind": "Text",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "subject",
+            "label": "Subject",
+            "kind": "Text",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "body",
+            "label": "Message",
+            "kind": "TextArea",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "outsideFirm",
+            "label": "Outside firm",
+            "kind": "Lookup",
+            "required": false,
+            "hint": "The outside firm the inquiry is to; recorded on the inquiry so replies are tracked per firm",
+            "lookupEntity": "sprk_organization",
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": [
+          "Sends the message above to the recipient",
+          "Records the inquiry against the matter",
+          "The item stays open until the budget is revised or the variance approved"
+        ],
+        "excludes": [],
+        "composer": "email",
+        "prefillTo": null
+      },
+      {
+        "code": "revise-budget",
+        "label": "Revise budget",
+        "workType": "fund",
+        "recordClass": "Judgement",
+        "isRecommended": false,
+        "parameters": [
+          {
+            "code": "budget",
+            "label": "Budget to revise",
+            "kind": "Lookup",
+            "required": true,
+            "hint": "Pre-selected when the matter has one budget; the user picks one when it has several (D-18)",
+            "lookupEntity": "sprk_budget",
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "amount",
+            "label": "New budget",
+            "kind": "Money",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "reason",
+            "label": "Reason for revision",
+            "kind": "TextArea",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["Records a budget revision on the matter", "Updates the amount of the budget you picked"],
+        "excludes": ["approve-variance"],
+        "composer": null,
+        "prefillTo": null
+      },
+      {
+        "code": "approve-variance",
+        "label": "Approve variance",
+        "workType": "fund",
+        "recordClass": "Judgement",
+        "isRecommended": false,
+        "parameters": [
+          {
+            "code": "amount",
+            "label": "Approved overage",
+            "kind": "Money",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "note",
+            "label": "Approval note",
+            "kind": "TextArea",
+            "required": false,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["The Decision Record is the approval; nothing else is written"],
+        "excludes": ["revise-budget", "create-budget"],
+        "composer": null,
+        "prefillTo": null
+      }
+    ],
+    "nextSteps": [
+      {
+        "code": "add-todo",
+        "label": "Add To Do",
+        "workType": null,
+        "recordClass": "Judgement",
+        "isRecommended": false,
+        "parameters": [
+          {
+            "code": "title",
+            "label": "To Do",
+            "kind": "Text",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "assignee",
+            "label": "Assigned to",
+            "kind": "Person",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "dueDate",
+            "label": "Due",
+            "kind": "Date",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["Creates a To Do linked to the record, created when the decision is recorded"],
+        "excludes": [],
+        "composer": null,
+        "prefillTo": null
+      },
+      {
+        "code": "send-email",
+        "label": "Send Notification Email",
+        "workType": null,
+        "recordClass": "Judgement",
+        "isRecommended": false,
+        "parameters": [
+          {
+            "code": "to",
+            "label": "To",
+            "kind": "Text",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "subject",
+            "label": "Subject",
+            "kind": "Text",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "body",
+            "label": "Message",
+            "kind": "TextArea",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["Sends the message above when the decision is recorded"],
+        "excludes": [],
+        "composer": "email",
+        "prefillTo": null
+      }
+    ],
+    "dismissalReasons": [
+      {
+        "code": "already-approved-offline",
+        "label": "Already approved offline",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "not-material",
+        "label": "Not material",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "wrong-matter-misresolved",
+        "label": "Wrong matter - misresolved",
+        "countsTowardSuppression": false,
+        "requiresDetail": false
+      },
+      {
+        "code": "duplicate",
+        "label": "Duplicate",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "handled-outside-spaarke",
+        "label": "Handled outside Spaarke",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "other",
+        "label": "Other",
+        "countsTowardSuppression": true,
+        "requiresDetail": true
+      }
+    ],
+    "ruleDescription": null
+  }
+}

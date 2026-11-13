@@ -114,6 +114,10 @@ public sealed record WorklistCoreRecord(string RecordType, Guid RecordId, string
 /// <param name="Decision">Closed today, Closed earlier and Decided sets only (task 045, #1959 item 2): the Decision Record that closed
 /// the item, read AS THE CALLER. Null when the item was closed by the system (no record), or when the caller cannot read the record
 /// (omitted, never withheld by name).</param>
+/// <param name="InvoiceReview">Task 174 (D-207): set only on a billing item, an item whose subject is an invoice or an invoice line, so
+/// the Console can open Invoice Review on the right invoice (billing decisions are made there, never through the commit route).
+/// Null on every other item, and on a billing item whose invoice cannot be named (the caller cannot read the line, the line has no
+/// invoice, or the read of the lines faulted): never an <c>invoiceId</c> that is not known.</param>
 public sealed record WorklistItemRow(
     Guid SignalId,
     string Lane,
@@ -133,7 +137,22 @@ public sealed record WorklistItemRow(
     string? Sentence = null,
     string? SubjectRecordType = null,
     Guid? SubjectRecordId = null,
-    WorklistDecisionRecord? Decision = null);
+    WorklistDecisionRecord? Decision = null,
+    WorklistInvoiceReview? InvoiceReview = null);
+
+/// <summary>Task 174 (D-207): the invoice a billing Work Item is decided on. <paramref name="LineId"/> is the subject when it is an
+/// invoice line (its <paramref name="InvoiceId"/> is the line's parent invoice), and null when the subject is the invoice itself.</summary>
+public sealed record WorklistInvoiceReview(Guid InvoiceId, Guid? LineId);
+
+/// <summary>D-42's item rank keys: severity rank (Critical 0, unknown 3), the subject's high-priority flag, and when the Signal was first
+/// detected. They order items within a group and, through the group's best item, the groups.</summary>
+public readonly record struct RankKey(int SeverityRank, bool HighPriority, DateTimeOffset? FirstDetected);
+
+/// <summary>What <see cref="SignalReadService"/> knows about a returned Signal that <see cref="WorklistItemRow"/> deliberately does not carry
+/// (the Console's REST response gains no member, task 015): the rank keys the Decide-lane page's cursor orders by, and what its privilege flag
+/// is derived from (FR-04 as amended 2026-11-08, task 018: <see cref="WorkItemPrivilege.SourcesOf"/> over the subject and the STORED evidence;
+/// the page reads the classification once, <see cref="WorkItemPrivilege.FlaggedAsync{TKey}"/>).</summary>
+public sealed record WorklistItemExtras(RankKey Rank, WorkItemPrivilegeSources Privilege);
 
 /// <summary>
 /// The Signal read route's service (task 038). Every row-visibility question is asked AS THE CALLER through
@@ -197,6 +216,7 @@ public sealed class SignalReadService
     internal const int WitnessIdChunk = 200;
 
     internal const string SignalEntitySet = "sprk_signals";
+
     internal const string HighPriorityColumn = "sprk_highpriority";
 
     /// <summary><c>sprk_todo.sprk_notes</c>: it carries the inquiry hint of an inquiry-outcome To Do (task 071, task 154).</summary>
@@ -307,8 +327,15 @@ public sealed class SignalReadService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    /// <summary>The caller's visible Signals in <paramref name="set"/>, grouped and ordered.</summary>
-    public async Task<SignalReadResult> ReadAsync(WorklistSet set, ClaimsPrincipal? user, CancellationToken ct)
+    /// <summary>
+    /// The caller's visible Signals in <paramref name="set"/>, grouped and ordered. When <paramref name="extras"/> is given it is also
+    /// filled with, for each returned Signal, what the row type does not carry (<see cref="WorklistItemExtras"/>: the D-42 rank keys and
+    /// the privilege sources, task 018), for the slim Decide-lane page (spaarkeai-mcp-bff-api-r1 task 015). The pipeline, the read rules and the
+    /// returned <see cref="WorklistResponse"/> are the same whether or not it is given. One method, not an overload pair: the task 167
+    /// authorization guard credits a route only when every overload reaches the caller's Dataverse client in its own body.
+    /// </summary>
+    public async Task<SignalReadResult> ReadAsync(
+        WorklistSet set, ClaimsPrincipal? user, CancellationToken ct, IDictionary<Guid, WorklistItemExtras>? extras = null)
     {
         // (1) + (2) Who the caller is and their linked contact: the inputs of the Do-lane "mine" rule.
         var caller = await ResolveMineCallerAsync(_user, _identity, _logger, ct).ConfigureAwait(false);
@@ -441,11 +468,15 @@ public sealed class SignalReadService
             var duplicates = DuplicateQuotesOf(visible);
             visible = await ApplyWitnessRuleAsync(visible, ct).ConfigureAwait(false);
 
+            // (9a) Task 174 (D-207): the parent invoice of every invoice-line subject, read ONCE as the caller. The Duplicate rule below
+            // (D-176, the same read of the same lines) and the invoiceReview member (12) both use it, so a response never reads it twice.
+            var lineInvoices = await ReadLineInvoicesAsync(visible, catalog, ct).ConfigureAwait(false);
+
             // (9b) D-176 (task 157): a Duplicate keeps its earlier-invoice detail only when the caller's own read returns that invoice;
             // otherwise it is shaped as ebilling withholds it at write time. Runs after (9); both rules must keep.
             if (duplicates.Count > 0)
             {
-                visible = await ApplyDuplicateRuleAsync(visible, duplicates, catalog, ct).ConfigureAwait(false);
+                visible = await ApplyDuplicateRuleAsync(visible, duplicates, catalog, lineInvoices, ct).ConfigureAwait(false);
             }
 
             // (10) Task 045 (#1959 item 2, D-47): the Decision Record of each closed item, read AS THE CALLER. A record the caller
@@ -477,8 +508,24 @@ public sealed class SignalReadService
             // BFF. A read fault is caught below as "fault" (503): severity ranks the list, so rows are never returned without it.
             visible = await ApplyPolicyColumnsAsync(visible, user, ct).ConfigureAwait(false);
 
+            // (12) Task 174 (D-207): the invoice each billing item is decided on, one batched read for the lines' parent invoices.
+            // Never fails the response: a fault leaves the lines without the member.
+            visible = ApplyInvoiceReview(visible, catalog, lineInvoices);
+
             _logger.LogInformation(
                 "Signal read: set {Set}, {Read} Signals read as the caller, {Visible} returned.", set, rows.Count, visible.Count);
+
+            if (extras is not null)
+            {
+                // Task 018 (FR-04): the privilege sources from the subject and the evidence AS STORED (steps 9 and 9b reshape the returned
+                // lines; a reference they drop must still count). No read here: the page reads the classification once, for its own items.
+                var stored = rows.ToDictionary(r => r.SignalId, r => r.EvidenceRefs);
+                foreach (var v in visible)
+                {
+                    extras[v.Row.SignalId] = new WorklistItemExtras(
+                        RankOf(v), WorkItemPrivilege.SourcesOf(SubjectTable(v.Row, catalog), v.Row.SubjectId, stored.GetValueOrDefault(v.Row.SignalId)));
+                }
+            }
 
             return Ok(set, Shape(set, visible, cores.Readable, catalog, decisions));
         }
@@ -582,6 +629,9 @@ public sealed class SignalReadService
                 {
                     WorklistSet.ClosedToday or WorklistSet.ClosedEarlier => WithDecisionRecordColumn(fetch),
                     WorklistSet.Decided => DecidedFetch(fetch),
+                    // Task 018 (FR-04): the privilege sources need the stored evidence; the live configuration already selects it, so this is a
+                    // no-op today and keeps a configuration edit from silently dropping the witness communications.
+                    WorklistSet.Lanes => WithColumn(fetch, "sprk_evidencerefs"),
                     _ => fetch,
                 });
             }
@@ -596,15 +646,22 @@ public sealed class SignalReadService
 
     /// <summary>The query with <c>sprk_decisionrecord</c> selected (a no-op when the configuration already selects it), so a closed
     /// item can be joined to its record whatever version of the configuration row is live (task 045).</summary>
-    private static string WithDecisionRecordColumn(string fetchXml)
+    private static string WithDecisionRecordColumn(string fetchXml) => WithColumn(fetchXml, "sprk_decisionrecord");
+
+    /// <summary>
+    /// The query with <paramref name="column"/> selected (a no-op when the configuration already selects it), whatever version of the
+    /// configuration row is live. Only a selected column is added: no filter, order or link changes, so membership and order are the
+    /// configuration's.
+    /// </summary>
+    private static string WithColumn(string fetchXml, string column)
     {
         var doc = XDocument.Parse(fetchXml);
         var entity = doc.Root!.Element("entity")!;
-        if (!entity.Elements("attribute").Any(a => a.Attribute("name")?.Value == "sprk_decisionrecord"))
+        if (!entity.Elements("attribute").Any(a => a.Attribute("name")?.Value == column))
         {
             var last = entity.Elements("attribute").LastOrDefault();
-            var column = new XElement("attribute", new XAttribute("name", "sprk_decisionrecord"));
-            if (last is null) entity.AddFirst(column); else last.AddAfterSelf(column);
+            var attribute = new XElement("attribute", new XAttribute("name", column));
+            if (last is null) entity.AddFirst(attribute); else last.AddAfterSelf(attribute);
         }
 
         return doc.ToString(SaveOptions.DisableFormatting);
@@ -1587,9 +1644,10 @@ public sealed class SignalReadService
         List<VisibleRow> rows,
         IReadOnlyDictionary<Guid, DuplicateQuote> duplicates,
         IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        Dictionary<Guid, Guid>? invoiceOfLine,
         CancellationToken ct)
     {
-        var shown = await DuplicatesShownAsync(rows, duplicates, catalog, ct).ConfigureAwait(false);
+        var shown = await DuplicatesShownAsync(rows, duplicates, catalog, invoiceOfLine, ct).ConfigureAwait(false);
         var withheld = 0;
         var result = new List<VisibleRow>(rows.Count);
         foreach (var row in rows)
@@ -1637,6 +1695,7 @@ public sealed class SignalReadService
         List<VisibleRow> rows,
         IReadOnlyDictionary<Guid, DuplicateQuote> duplicates,
         IReadOnlyDictionary<Guid, CatalogRow> catalog,
+        Dictionary<Guid, Guid>? invoiceOfLine,
         CancellationToken ct)
     {
         var shown = new HashSet<Guid>();
@@ -1660,9 +1719,8 @@ public sealed class SignalReadService
 
         if (eventOf.Count > 0)
         {
-            var invoiceOfEvent = await CallerLookupAsync(
-                BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, eventOf.Values, BillingEventTable, ct)
-                .ConfigureAwait(false);
+            // Task 174: read once for every line subject in the response (ReadLineInvoicesAsync), not here; null is a fault, as before.
+            var invoiceOfEvent = invoiceOfLine;
             if (invoiceOfEvent is null)
             {
                 return shown;
@@ -1757,13 +1815,14 @@ public sealed class SignalReadService
     /// <summary>One lookup column of the rows the CALLER's batched read returns (In lists of at most <see cref="WitnessIdChunk"/> ids):
     /// id → the lookup's value; a row without it is absent. Null on a fault (<see cref="EarlierInvoiceReadability.ReadAsCallerAsync"/>).</summary>
     private async Task<Dictionary<Guid, Guid>?> CallerLookupAsync(
-        string entitySet, string key, string lookup, IEnumerable<Guid> ids, string table, CancellationToken ct)
+        string entitySet, string key, string lookup, IEnumerable<Guid> ids, string table, CancellationToken ct,
+        string check = EarlierInvoiceReadability.DuplicateCheck, string consequence = EarlierInvoiceReadability.DuplicateConsequence)
     {
         var found = new Dictionary<Guid, Guid>();
         foreach (var chunk in ids.Distinct().Chunk(WitnessIdChunk))
         {
             var rows = await _earlierInvoices.ReadAsCallerAsync(
-                _user, $"{entitySet}?$select={key},{lookup}&$filter={InFilter(key, chunk)}", table, ct).ConfigureAwait(false);
+                _user, $"{entitySet}?$select={key},{lookup}&$filter={InFilter(key, chunk)}", table, ct, check, consequence).ConfigureAwait(false);
             if (rows is null)
             {
                 return null;
@@ -1844,11 +1903,92 @@ public sealed class SignalReadService
     }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // (9a) and (12) task 174 (D-207): the invoice a billing Work Item is decided on
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Task 174 (D-207): the parent invoice (<c>sprk_billingevent.sprk_invoice</c>) of every invoice-LINE subject among
+    /// <paramref name="rows"/>, in ONE batched read as the caller (<see cref="CallerLookupAsync"/>: In lists of at most
+    /// <see cref="WitnessIdChunk"/> ids, so a response of more lines than that reads one more per chunk). A line the caller cannot read, or
+    /// that has no invoice, is absent from the answer. No line subjects: an empty answer and no read. Null on a fault, logged ONCE by the
+    /// read helper (the table, the error code and what it costs: no invoiceReview on any line and no line-level Duplicate detail), which the
+    /// Duplicate rule treats as before (D-176) and <see cref="ApplyInvoiceReview"/> as "no invoiceReview on any line". Never fails the worklist.
+    /// </summary>
+    private async Task<Dictionary<Guid, Guid>?> ReadLineInvoicesAsync(
+        IEnumerable<VisibleRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, CancellationToken ct)
+    {
+        var lines = rows
+            .Where(r => r.Row.SubjectId is not null && SubjectTable(r.Row, catalog) == BillingEventTable)
+            .Select(r => r.Row.SubjectId!.Value)
+            .Distinct()
+            .ToList();
+        if (lines.Count == 0)
+        {
+            return [];
+        }
+
+        // ReadAsCallerAsync never throws (it logs a fault once, with this label) and answers null for any fault.
+        return await CallerLookupAsync(
+            BillingEventEntitySet, "sprk_billingeventid", EarlierInvoiceReadability.InvoiceColumn, lines, BillingEventTable, ct,
+            check: "Worklist invoice-line read",
+            consequence: "invoiceReview is omitted on invoice-line items and a line-level Duplicate's earlier-invoice detail is withheld (D-207, D-176, fail closed)")
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 174 (D-207): gives each billing item (a Signal whose subject, by its catalog type, is an invoice or an invoice line) the
+    /// invoice Invoice Review opens on. An invoice subject names itself. A line subject's parent invoice comes from
+    /// <paramref name="invoiceOfLine"/> (<see cref="ReadLineInvoicesAsync"/>). A line with no known parent (not returned, no invoice) is left
+    /// without the member and named once, by id, at Warning (the caller cannot read the line, or the line has no invoice); when the read faulted (<paramref name="invoiceOfLine"/> is null) every line is
+    /// left without it. The member is never emitted without an invoice id.
+    /// </summary>
+    private List<VisibleRow> ApplyInvoiceReview(
+        List<VisibleRow> rows, IReadOnlyDictionary<Guid, CatalogRow> catalog, Dictionary<Guid, Guid>? invoiceOfLine)
+    {
+        var result = new List<VisibleRow>(rows.Count);
+        var orphans = new HashSet<Guid>();
+        foreach (var row in rows)
+        {
+            WorklistInvoiceReview? review = null;
+            if (row.Row.SubjectId is { } subject)
+            {
+                var table = SubjectTable(row.Row, catalog);
+                if (table == InvoiceCoreRecordTable)
+                {
+                    review = new WorklistInvoiceReview(subject, LineId: null);
+                }
+                else if (table == BillingEventTable && invoiceOfLine is not null)
+                {
+                    if (invoiceOfLine.TryGetValue(subject, out var invoice))
+                    {
+                        review = new WorklistInvoiceReview(invoice, subject);
+                    }
+                    else
+                    {
+                        orphans.Add(subject);
+                    }
+                }
+            }
+
+            result.Add(review is null ? row : row with { InvoiceReview = review });
+        }
+
+        if (orphans.Count > 0)
+        {
+            _logger.LogWarning("Signal read: {Count} invoice line item(s) have no invoiceReview (D-207): the caller cannot read the line, or the line has no invoice: {LineIds}.",
+                orphans.Count, string.Join(',', orphans.Select(l => l.ToString("D"))));
+        }
+
+        return result;
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // shaping and D-42 order
     // ---------------------------------------------------------------------------------------------------------------
 
     /// <param name="SubjectTable">Do lane: the table whose caller-scoped "mine" read returned the subject; null on a Decide row.</param>
-    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact, string? SubjectTable);
+    /// <param name="InvoiceReview">Task 174: the invoice a billing item is decided on; null otherwise.</param>
+    private sealed record VisibleRow(SignalRow Row, bool HighPriority, Guid? AssigneeContact, string? SubjectTable, WorklistInvoiceReview? InvoiceReview = null);
 
     private static IReadOnlyList<WorklistLaneGroups> Shape(
         WorklistSet set,
@@ -1923,15 +2063,20 @@ public sealed class SignalReadService
         return byRank != 0 ? byRank : a.Row.SignalId.CompareTo(b.Row.SignalId);
     }
 
+    private static RankKey RankOf(VisibleRow v) => new(SeverityRank(v.Row.Severity), v.HighPriority, v.Row.FirstDetected);
+
+    private static int CompareRankKeys(VisibleRow a, VisibleRow b) => CompareRankKeys(RankOf(a), RankOf(b));
+
     /// <summary>D-42's item keys: severity (Critical first, unknown last), flagged first, oldest first (undated last).</summary>
-    private static int CompareRankKeys(VisibleRow a, VisibleRow b)
+    internal static int CompareRankKeys(RankKey a, RankKey b)
     {
-        var bySeverity = SeverityRank(a.Row.Severity).CompareTo(SeverityRank(b.Row.Severity));
+        var bySeverity = a.SeverityRank.CompareTo(b.SeverityRank);
         if (bySeverity != 0) return bySeverity;
         var byFlag = (a.HighPriority ? 0 : 1).CompareTo(b.HighPriority ? 0 : 1);
         if (byFlag != 0) return byFlag;
-        return (a.Row.FirstDetected ?? DateTimeOffset.MaxValue).CompareTo(b.Row.FirstDetected ?? DateTimeOffset.MaxValue);
+        return (a.FirstDetected ?? DateTimeOffset.MaxValue).CompareTo(b.FirstDetected ?? DateTimeOffset.MaxValue);
     }
+
 
     internal static int SeverityRank(int? severity) => severity switch
     {
@@ -1970,7 +2115,8 @@ public sealed class SignalReadService
             row.Sentence,
             subjectTable,
             subjectTable is null ? null : row.SubjectId,
-            decisions.GetValueOrDefault(row.SignalId));
+            decisions.GetValueOrDefault(row.SignalId),
+            visible.InvoiceReview);
     }
 
     // ---------------------------------------------------------------------------------------------------------------

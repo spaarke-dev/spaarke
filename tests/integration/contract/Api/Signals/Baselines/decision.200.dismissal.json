@@ -1,0 +1,33 @@
+{
+  "case": "decision.200.dismissal",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"status\":0,\"reviewId\":\"c0430011-0000-4000-8000-000000000002\",\"reasonCode\":null,\"detail\":null,\"actionCode\":null,\"decisionRecordId\":\"c0430000-0000-4000-8000-000000000060\",\"recordClass\":\"Dismissal\",\"gateTier\":null,\"steps\":[],\"followOns\":[],\"signals\":[{\"signalId\":\"c0430000-0000-4000-8000-000000000031\",\"state\":\"Dismissed\",\"warning\":null}],\"failedStep\":null,\"landed\":[],\"possiblyLanded\":[],\"recordMayExist\":false,\"sentButNotRecorded\":false,\"resumable\":false,\"warnings\":[],\"replayed\":false}",
+  "bodyPretty": {
+    "status": 0,
+    "reviewId": "c0430011-0000-4000-8000-000000000002",
+    "reasonCode": null,
+    "detail": null,
+    "actionCode": null,
+    "decisionRecordId": "c0430000-0000-4000-8000-000000000060",
+    "recordClass": "Dismissal",
+    "gateTier": null,
+    "steps": [],
+    "followOns": [],
+    "signals": [
+      {
+        "signalId": "c0430000-0000-4000-8000-000000000031",
+        "state": "Dismissed",
+        "warning": null
+      }
+    ],
+    "failedStep": null,
+    "landed": [],
+    "possiblyLanded": [],
+    "recordMayExist": false,
+    "sentButNotRecorded": false,
+    "resumable": false,
+    "warnings": [],
+    "replayed": false
+  }
+}

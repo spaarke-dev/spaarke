@@ -265,8 +265,13 @@ public sealed partial class DecisionCommitServiceTests
                     }
 
                     var createdBy = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "createdby" && c.Operator == ConditionOperator.Equal);
+                    // Task 174: like Dataverse, honour the review-id condition (sprk_steps LIKE %"reviewId":"{id}"%), so a record stored for
+                    // ANOTHER review is not found by this one.
+                    var reviewIdLike = query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_steps" && c.Operator == ConditionOperator.Like);
                     return new EntityCollection(ExistingRecords
                         .Where(r => createdBy is null || Equals(r.GetAttributeValue<EntityReference>("createdby")?.Id, createdBy.Values.Single()))
+                        .Where(r => reviewIdLike is null
+                            || (r.GetAttributeValue<string>("sprk_steps") ?? string.Empty).Contains(((string)reviewIdLike.Values.Single()).Trim('%'), StringComparison.Ordinal))
                         .ToList());
                 });
             Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -1454,7 +1459,7 @@ public sealed partial class DecisionCommitServiceTests
     private static async Task<DecisionCommitResult> ThroughTheRoute(Rig rig, DecisionReview review)
     {
         var http = Http();
-        var reply = await DecisionCommitEndpoints.CommitDecisionAsync(Primary, review, http, rig.Service(), CancellationToken.None);
+        var reply = await DecisionCommitEndpoints.CommitDecisionAsync(Primary, review, http, DecisionCapabilityFixtures.Capability(commits: rig.Service()), CancellationToken.None);
         reply.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Ok<DecisionCommitResult>>();
         return ((Microsoft.AspNetCore.Http.HttpResults.Ok<DecisionCommitResult>)reply).Value!;
     }
@@ -3977,7 +3982,7 @@ public sealed partial class DecisionCommitServiceTests
     [InlineData(DecisionCommitStatus.Failed, 500)]
     public void EachOutcome_IsOneHttpStatus(DecisionCommitStatus status, int http)
     {
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult { Status = status, ReviewId = Guid.NewGuid() }, Http());
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult { Status = status, ReviewId = Guid.NewGuid() }, Http());
 
         ((Microsoft.AspNetCore.Http.IStatusCodeHttpResult)reply).StatusCode.Should().Be(http);
     }
@@ -3986,7 +3991,7 @@ public sealed partial class DecisionCommitServiceTests
     public void AFailure_TellsTheUserWhichWritesLanded()
     {
         var landed = new DecisionCommitRef("sprk_budgetrevision", RevisionId);
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult
         {
             Status = DecisionCommitStatus.Failed,
             ReviewId = Guid.NewGuid(),
@@ -4006,7 +4011,7 @@ public sealed partial class DecisionCommitServiceTests
     [Fact]
     public void ANotFound_IsTheUniform404_WithNothingAboutTheReview()
     {
-        var reply = DecisionCommitEndpoints.ToHttp(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = Guid.NewGuid(), Detail = "secret" }, Http());
+        var reply = DecisionResultMapper.ToHttp(new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = Guid.NewGuid(), Detail = "secret" }, Http());
 
         var problem = reply.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject.ProblemDetails;
         problem.Detail.Should().NotContain("secret");

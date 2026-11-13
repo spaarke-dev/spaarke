@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>spaarke_show_decisions and app-only paging tool</title>
+    <phase>B MCP host and tools</phase>
+    <gate>after 015, 017, 018 and 021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; new tool classes and tests (.cs, .ts)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive output control: FR-04 keeps privileged legal detail out of model-visible text (ADR-015); a mistake is a confidentiality leak</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds only its own tool files, parity fixture and tests; shares no file with 023, 024 or 030</parallel-reason>
+    <deps>015, 017, 018, 021</deps>
+    <tags>bff-api, ai, endpoints, unit-test, integration-test</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement spaarke_show_decisions (model- and app-visible, readOnly, closed optional category enum) returning a short text summary with Console deep links, page 1 of slim rows and a widget pointer, with privileged Work Items reduced to one neutral count line in everything the model sees; and the app-only readOnly paging tool (working name spaarke_list_decision_page) that returns later pages with full detail.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in MCP tool design, ADR-015 data minimisation and cross-language parity testing.</role>
+  <goal>Both tools are listed with correct annotations and visibility; category counts match the Console's laneCountFilters.ts partition through a shared parity fixture; the privileged-marker negative test passes; every result is under 64 KiB at 200 items; the final paging tool name is recorded in notes/decisions.md.</goal>
+
+  <context>
+    <background>Spec FR-03, FR-04, FR-05, FR-14, NFR-02, NFR-05; design §7.1 and §9.5. laneCountFilters.ts after #2579: LaneFilterKey = 'all' | 'invoiceDecisions' | 'other' | WorkType; Invoice decisions card right after All, only when non-empty; work-type cards and Other are computed over the non-billing rest. Paging tool choice: notes/decisions.md 2026-11-06.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ShowDecisionsTool.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ListDecisionPageTool.cs (final name fixed here per the naming note)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/DecisionsTextSummary.cs (content text, Console deep links, privilege reduction)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/DecideLaneCategories.cs (closed enum + partition mirroring laneCountFilters.ts)</file>
+      <file role="new">tests/fixtures/decide-lane-category-parity/cases.json</file>
+      <file role="new">tests/unit/domain/Mcp/DecideLaneCategoriesParityTests.cs</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/Worklist/__tests__/laneCountFilters.parity.test.ts</file>
+      <file role="new">tests/integration/contract/Api/Mcp/ShowDecisionsToolTests.cs</file>
+      <file role="new">tests/integration/auth/Mcp/PrivilegeReductionTests.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Worklist/laneCountFilters.ts (bucketLaneItems; LaneFilterKey L32; invoiceDecisions L69-71)</file>
+      <file role="canonical-reference">tests/fixtures/compose-citation-parity/cases.json (shared C#/TS parity fixture style)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/WorklistItemSummary.cs and IDecisionCapability.ListDecidePageAsync (from 015)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="015" status="pending">WorklistItemSummary, PrivilegeFlagged and the paged list</dependency>
+      <dependency task="018" status="pending">FR-04 privilege derivation (hard dependency): PrivilegeFlagged derived from communications as the caller</dependency>
+      <dependency task="017" status="pending">DecisionResultMapper.ToToolError</dependency>
+      <dependency task="021" status="pending">A10 auth, per-tool policies and the annotation guard</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every MCP tool added by this task is named spaarke_{verb}_{object} (naming note §1), tagged with area legal-operations, carries an explicit readOnlyHint and a title, and has a description of at most 1,024 characters phrased 'use for / not for'; app-only tools set _meta.ui visibility to app only.</constraint>
+    <constraint source="ADR-015">In content and structuredContent of spaarke_show_decisions, every Work Item whose PrivilegeFlagged is true is reduced to the single line 'N privileged items — open to review' with no matter name, reason, evidence or party name; full detail for those items is returned only by the app-only paging tool.</constraint>
+    <constraint source="project">spaarke_show_decisions' input schema has exactly one optional property, category, a closed enum of the Decide lane's LaneFilterKey values (all, invoiceDecisions, other and the Decide-lane work types in laneCountFilters.ts), with additionalProperties false; the paging tool's input is the cursor only.</constraint>
+    <constraint source="project">Category counts are computed by DecideLaneCategories, which mirrors bucketLaneItems; a shared fixture tests/fixtures/decide-lane-category-parity/cases.json is asserted by both an xunit and a jest test.</constraint>
+    <constraint source="project">structuredContent of spaarke_show_decisions carries page 1 (at most 50 summaries), the next cursor, the per-category counts and consoleBaseUrl (the Console URL the widget uses for link-outs); _meta.ui points at ui://spaarke/decisions.html.</constraint>
+    <constraint source="ADR-028">Every tool this task adds reads the request HttpContext from IHttpContextAccessor and passes it (or its User) to the decision capability. A null HttpContext or an unauthenticated caller returns an isError result with UserContextRequired (DATAVERSE_USER_CONTEXT_REQUIRED) before any capability call, and nothing falls back to an app-only client (FR-10 as amended 2026-11-07, option C; ADR-002 WP-6 fail closed). No ICallerContext or other caller holder is introduced.</constraint>
+    <constraint source="ADR-019">Every domain failure from a tool added by this task is returned as an isError tool result produced by DecisionResultMapper.ToToolError → Api/Mcp/McpToolResults (reasonCode plus a fix-the-call message); no domain failure is returned as a transport error or exception.</constraint>
+    <constraint source="project">Every result of a tool added by this task is under 64 KiB at 200 seeded Work Items (NFR-02).</constraint>
+    <constraint source="ADR-013">Tools added by this task inject only the decision capability, IDecisionLookupSearch and Api/Mcp helpers: no AI-internal type (Services/Ai/**, IChatClient, playbook services).</constraint>
+    <constraint source="project">File ownership for parallel safety: this task adds only its own files under Api/Mcp/LegalOperations/Decisions/ and its own test files; tools are discovered per area by attribute (set up in 020), so no shared registration file is edited.</constraint>
+    <constraint source="ADR-015">Every log statement or telemetry property this task adds records identifiers, sizes, timings and outcome/reason codes only: no bearer token, claim value, record text or tool argument (NFR-05).</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="FR-10">One caller per call (013 known limit, 2026-11-07). `DecisionCapability` checks the caller and keys the plan stamp on the `HttpContext` passed in, while the Dataverse reads take the token from `IHttpContextAccessor`. Every MCP tool must pass exactly `IHttpContextAccessor.HttpContext` (the ambient request context), never a constructed or cached `HttpContext`, so the guard and the reads see the same principal.</constraint>
+    <constraint source="project">Before each push run `bash scripts/quality/check-changed-cs-format.sh origin/master` (blocking Tier 1 'Format (changed C# files)'; fix with `dotnet format whitespace . --folder --include &lt;file&gt;`). CS0618 (obsolete API) is a build error since master 9456083c78: migrate the call or escalate, never suppress it in Directory.Build.props, NoWarn or a file-wide pragma.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/coordination/2026-11-06-copilot-naming-and-ownership.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/pre-pipeline-context.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read laneCountFilters.ts and write the parity fixture (cases of mixed billing, matter and work-type items with expected cards and counts); make the jest parity test pass against bucketLaneItems.</step>
+    <step order="2">Implement DecideLaneCategories in C# and make the xunit parity test pass on the same fixture.</step>
+    <step order="3">Implement DecisionsTextSummary: counts per category, the top 5 non-privileged items each with a Console deep link built from the existing Console URL settings, and the privileged count line.</step>
+    <step order="4">Implement ShowDecisionsTool (capability ListDecidePageAsync(httpContext.User, null) with the HttpContext from IHttpContextAccessor → summary text, structuredContent page 1 with privileged rows reduced, _meta.ui) and the paging tool (app-only, cursor → full summaries); fix the paging tool's final name per the naming note and record it in notes/decisions.md.</step>
+    <step order="5">Write the contract, privilege and size tests (seed 200 items across at least 3 matters, including privileged items with a unique marker string in reason and matter name).</step>
+    <step order="6">Run the suites; measure the publish-size delta.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="8">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>HARD GATE (ontology review of 015, K1, binding, 2026-11-07; owner ruling FR-04 option A widened, 2026-11-08): do not start until 018 is done.
+      - 018 derives `PrivilegeFlagged` from communications as the caller (the `sprk_signal` column is never written, ontology DI-64).
+      - The derivation lives in `Services/Signals/` (`WorkItemPrivilege`) so ontology DI-143 (#2630) can reuse it.
+      - This task's done-when includes a test: a Privileged or Potentially Privileged communication subject has no SubjectName or Title in this tool's model-visible text (018 asserts only the flag).</trigger>
+    <trigger>If no existing setting or builder gives the Console URL for a Work Item deep link, STOP and escalate rather than hard-coding a URL.</trigger>
+    <trigger>If laneCountFilters.ts' partition cannot be mirrored exactly (e.g. depends on client-only state), STOP and escalate with the case.</trigger>
+    <trigger>If any privileged detail would have to appear in model-visible output to satisfy another criterion, STOP: FR-04 wins; escalate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>REST GET /api/v1/signals/worklist (SignalReadEndpoints.cs) and the client partition laneCountFilters.ts; no MCP tool exists in the BFF.</existing>
+    <extension>They are the extension: thin adapters over IDecisionCapability; the only new logic is the category partition (mirrored, parity-tested) and the privilege reduction FR-04 requires.</extension>
+    <cost-of-doing-nothing>Copilot cannot list a user's Work Items (FR-03), the widget cannot page past 50 items (FR-05), and without the reduction privileged detail would reach the model (FR-04).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+    <tool name="npm">Install (npm install --legacy-peer-deps --no-audit --no-fund), build and test TypeScript projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ShowDecisionsTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/ListDecisionPageTool.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/DecisionsTextSummary.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Mcp/LegalOperations/Decisions/DecideLaneCategories.cs</output>
+    <output type="test">tests/integration/auth/Mcp/PrivilegeReductionTests.cs</output>
+    <output type="test">tests/integration/contract/Api/Mcp/ShowDecisionsToolTests.cs</output>
+    <output type="test">tests/fixtures/decide-lane-category-parity/cases.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">tools/list includes spaarke_show_decisions (visible to model and app, readOnlyHint true, title, description of at most 1,024 characters with 'use for / not for') and the paging tool (app-only visibility, readOnlyHint true).</criterion>
+    <criterion testable="true">spaarke_show_decisions' input schema has only the optional closed category enum and additionalProperties false.</criterion>
+    <criterion testable="true">For the seeded user, the per-category counts equal the Console's Decide-lane partition: the parity fixture passes in both the xunit and the jest test.</criterion>
+    <criterion testable="true">Negative: an invalid category value returns an isError result whose message lists the valid values (not a transport error).</criterion>
+    <criterion testable="true">Negative (FR-04): with a privileged Work Item seeded with a unique marker string in its reason and matter name, the marker appears in neither content nor structuredContent of spaarke_show_decisions, and the 'N privileged items — open to review' count is correct; the paging tool's result for that page does carry the item's detail.</criterion>
+    <criterion testable="true">With 200 seeded items: every result of both tools is under 64 KiB; paging returns each item exactly once in Console order; a stale cursor returns the remaining items without duplicates; a malformed cursor returns isError ontology.worklist.cursor_invalid.</criterion>
+    <criterion testable="true">FR-14: content alone (widget ignored) lists counts per category and the top items with Console deep links; no write tool is model-visible.</criterion>
+    <criterion testable="true">Negative: the worklist's 503 too_many_signals becomes an isError result with that reasonCode, not a transport error.</criterion>
+    <criterion testable="true">Negative: when the lanes read returns Unavailable (for example `core_pair_read_failed`, from SignalReadService step 6b, ontology D-210, when the app-only read of the Do-lane no-core pair faults), the tool returns an isError result via `DecisionResultMapper.ToToolError`, never a partial list.</criterion>
+    <criterion testable="true">A log-capture test shows per-call telemetry has tool name, latency, row count, outcome and correlation id, and no argument or record text.</criterion>
+    <criterion testable="true">The final paging tool name is recorded in notes/decisions.md; the PR records the publish-size delta (at or under 60 MB, no new HIGH CVE).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+    <criterion testable="true">Negative: a grep or ArchTest shows no MCP tool constructs a `DefaultHttpContext` or stores an `HttpContext` in a field. The tool passes `accessor.HttpContext` straight through.</criterion>
+  </acceptance-criteria>
+
+  <notes>Request one seeding proof for the privileged-marker test (confidentiality guard): stop reducing one privileged row, confirm the test fails, restore. The jest parity test lives beside the existing laneCountFilters tests and must not change laneCountFilters.ts.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

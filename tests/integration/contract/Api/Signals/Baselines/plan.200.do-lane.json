@@ -1,0 +1,165 @@
+{
+  "case": "plan.200.do-lane",
+  "status": 200,
+  "contentType": "application/json; charset=utf-8",
+  "body": "{\"signalId\":\"c0430000-0000-4000-8000-000000000033\",\"lane\":\"Do\",\"policyVersionId\":\"c0430000-0000-4000-8000-000000000022\",\"actions\":[{\"code\":\"mark-complete\",\"label\":\"Mark complete\",\"workType\":null,\"recordClass\":\"Routine\",\"isRecommended\":true,\"parameters\":[{\"code\":\"note\",\"label\":\"Completion note\",\"kind\":\"TextArea\",\"required\":false,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Sets the item to Completed\"],\"excludes\":[\"reschedule\",\"reassign\"],\"composer\":null,\"prefillTo\":null},{\"code\":\"reschedule\",\"label\":\"Reschedule\",\"workType\":null,\"recordClass\":\"Routine\",\"isRecommended\":false,\"parameters\":[{\"code\":\"dueDate\",\"label\":\"New due date\",\"kind\":\"Date\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"reason\",\"label\":\"Reason\",\"kind\":\"Text\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Moves the due date of the item\"],\"excludes\":[\"mark-complete\"],\"composer\":null,\"prefillTo\":null}],\"nextSteps\":[{\"code\":\"add-todo\",\"label\":\"Add To Do\",\"workType\":null,\"recordClass\":\"Judgement\",\"isRecommended\":false,\"parameters\":[{\"code\":\"title\",\"label\":\"To Do\",\"kind\":\"Text\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"assignee\",\"label\":\"Assigned to\",\"kind\":\"Person\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null},{\"code\":\"dueDate\",\"label\":\"Due\",\"kind\":\"Date\",\"required\":true,\"hint\":null,\"lookupEntity\":null,\"options\":null,\"optionsSource\":null,\"defaultValue\":null,\"notBefore\":null,\"maxLength\":null}],\"effectLines\":[\"Creates a To Do linked to the record, created when the decision is recorded\"],\"excludes\":[],\"composer\":null,\"prefillTo\":null}],\"dismissalReasons\":[{\"code\":\"already-done-outside-spaarke\",\"label\":\"Already done outside Spaarke\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"not-mine\",\"label\":\"Not mine\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"no-longer-needed\",\"label\":\"No longer needed\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"duplicate\",\"label\":\"Duplicate\",\"countsTowardSuppression\":true,\"requiresDetail\":false},{\"code\":\"other\",\"label\":\"Other\",\"countsTowardSuppression\":true,\"requiresDetail\":true}],\"ruleDescription\":null}",
+  "bodyPretty": {
+    "signalId": "c0430000-0000-4000-8000-000000000033",
+    "lane": "Do",
+    "policyVersionId": "c0430000-0000-4000-8000-000000000022",
+    "actions": [
+      {
+        "code": "mark-complete",
+        "label": "Mark complete",
+        "workType": null,
+        "recordClass": "Routine",
+        "isRecommended": true,
+        "parameters": [
+          {
+            "code": "note",
+            "label": "Completion note",
+            "kind": "TextArea",
+            "required": false,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["Sets the item to Completed"],
+        "excludes": ["reschedule", "reassign"],
+        "composer": null,
+        "prefillTo": null
+      },
+      {
+        "code": "reschedule",
+        "label": "Reschedule",
+        "workType": null,
+        "recordClass": "Routine",
+        "isRecommended": false,
+        "parameters": [
+          {
+            "code": "dueDate",
+            "label": "New due date",
+            "kind": "Date",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "reason",
+            "label": "Reason",
+            "kind": "Text",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["Moves the due date of the item"],
+        "excludes": ["mark-complete"],
+        "composer": null,
+        "prefillTo": null
+      }
+    ],
+    "nextSteps": [
+      {
+        "code": "add-todo",
+        "label": "Add To Do",
+        "workType": null,
+        "recordClass": "Judgement",
+        "isRecommended": false,
+        "parameters": [
+          {
+            "code": "title",
+            "label": "To Do",
+            "kind": "Text",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "assignee",
+            "label": "Assigned to",
+            "kind": "Person",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          },
+          {
+            "code": "dueDate",
+            "label": "Due",
+            "kind": "Date",
+            "required": true,
+            "hint": null,
+            "lookupEntity": null,
+            "options": null,
+            "optionsSource": null,
+            "defaultValue": null,
+            "notBefore": null,
+            "maxLength": null
+          }
+        ],
+        "effectLines": ["Creates a To Do linked to the record, created when the decision is recorded"],
+        "excludes": [],
+        "composer": null,
+        "prefillTo": null
+      }
+    ],
+    "dismissalReasons": [
+      {
+        "code": "already-done-outside-spaarke",
+        "label": "Already done outside Spaarke",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "not-mine",
+        "label": "Not mine",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "no-longer-needed",
+        "label": "No longer needed",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "duplicate",
+        "label": "Duplicate",
+        "countsTowardSuppression": true,
+        "requiresDetail": false
+      },
+      {
+        "code": "other",
+        "label": "Other",
+        "countsTowardSuppression": true,
+        "requiresDetail": true
+      }
+    ],
+    "ruleDescription": null
+  }
+}

@@ -1,0 +1,465 @@
+// spaarkeai-mcp-bff-api-r1 task 015 (B-5; spec FR-05, FR-11, FR-04) - the Decide lane in pages of slim rows, through the REAL
+// DecisionCapability and SignalReadService over the same scripted caller Dataverse (World) as SignalReadRouteTests. This file is a part of
+// SignalReadRouteTests so it reuses that harness; it lives under tests/integration/regression/ (a KEEP path) and is compiled into the
+// IntegrationTests assembly by the link in its csproj, and removed from the unit-test assembly's regression glob.
+//
+// Seeded world: 200 Decide-lane Signals over 4 matters the caller reads, every text at its longest, mixed severities inside each matter
+// (so a matter's best item is not its only item), every 10th a billing line item (invoiceReview with both ids). Task 018 (FR-04 as amended
+// 2026-11-08): every 7th Signal is privileged through a communication (a Privileged or Potentially Privileged communication subject, or, on a
+// billing item, a Privileged witness communication; a communication subject is an untyped pair, as live, DI-63); others have a None or unclassified communication, or the never-written sprk_signal column
+// set to true, and are not flagged. Bob alone reads one more matter whose privileged Signal must never reach Alice.
+using System.Security.Claims;
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
+using Sprk.Bff.Api.Services.Signals;
+using Xunit;
+
+namespace Sprk.Bff.Api.IntegrationTests.Signals;
+
+public sealed partial class SignalReadRouteTests
+{
+    private static readonly ClaimsPrincipal AliceCaller = new(new ClaimsIdentity([new Claim("oid", Alice.ToString("D"))], "Test"));
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    private sealed record DecideSeed(World World, IReadOnlySet<Guid> Privileged, Guid HiddenPrivileged);
+
+    private static string LongText(string prefix, int length) => (prefix + new string('x', length))[..length];
+
+    private const int ClassNone = 100000000;
+    private const int ClassPotentiallyPrivileged = 100000001;
+    private const int ClassPrivileged = 100000002;
+
+    /// <summary>Task 018: the caller's classification read (one per page).</summary>
+    private const string ClassificationRead = "sprk_communications?$select=sprk_communicationid,sprk_privilegeclassification";
+
+    private static int ClassificationReads(World world) => world.Requests.Count(r => r.StartsWith(ClassificationRead, StringComparison.Ordinal));
+
+    /// <summary>Evidence quoting the communications by ref only (no text, so the D-142 witness read is not involved).</summary>
+    private static string WitnessRefs(params Guid[] communications) =>
+        JsonSerializer.Serialize(communications.Select(id => new { kind = "communication", @ref = $"sprk_communication:{id:D}", tier = "Fact" }));
+
+    private static DecideSeed SeedDecideLane(int count = 200)
+    {
+        var world = new World();
+        var matters = Enumerable.Range(0, 4)
+            .Select(n => world.Matter(readers: [Alice], name: LongText($"Matter {n} ", 400), number: $"MAT-{n + 1:0000}")).ToArray();
+        var severities = new[] { Critical, Warning, Info };
+        var shortNames = new[] { LongText("Budget gap ", 100), LongText("Comes due ", 100), LongText("Heads up ", 100) };
+        var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var privileged = new HashSet<Guid>();
+        for (var i = 0; i < count; i++)
+        {
+            (Guid? Type, Guid Id)? subject = null;
+            var evidence = "[]";
+            if (i % 10 == 0)
+            {
+                var invoice = world.Invoice([Alice], VendorOrg, matter: matters[i % 4]);
+                subject = (BillingEventType, world.BillingEvent([Alice], invoice));
+                if (i % 7 == 0) evidence = WitnessRefs(world.Communication([Alice], ClassPrivileged)); // (b) a privileged witness
+            }
+            else if (i % 7 == 0)
+            {
+                // (a) a Privileged or Potentially Privileged communication subject
+                subject = (null, world.Communication([Alice], i % 14 == 0 ? ClassPrivileged : ClassPotentiallyPrivileged));
+            }
+            else if (i % 7 == 3)
+            {
+                // (c) None, and an unclassified witness
+                subject = (null, world.Communication([Alice], ClassNone));
+                evidence = WitnessRefs(world.Communication([Alice], null));
+            }
+
+            var id = world.Signal(Decide, core: (MatterType, matters[i % 4]), subject: subject, severity: severities[i % 3], shortName: shortNames[i % 3],
+                title: LongText($"Title {i:000} ", 200), subjectName: LongText($"Subject {i:000} ", 400),
+                firstDetected: start.AddHours(i).ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture),
+                evidence: evidence, sentence: LongText("Sentence ", 2000),
+                privilegeFlagged: i % 7 == 5); // the never-written column (DI-64) is not a source: these are not flagged
+            if (i % 7 == 0) privileged.Add(id);
+        }
+
+        var hiddenMatter = world.Matter(readers: [Bob]);
+        var hidden = world.Signal(Decide, core: (MatterType, hiddenMatter), subject: (null, world.Communication([Bob], ClassPrivileged)));
+        return new DecideSeed(world, privileged, hidden);
+    }
+
+    private IServiceScope CapabilityScope(World world, out IDecisionCapability capability)
+    {
+        _factory.World = world;
+        world.ActingAs = Alice;
+        var scope = _factory.Services.CreateScope();
+        capability = scope.ServiceProvider.GetRequiredService<IDecisionCapability>();
+        return scope;
+    }
+
+    /// <summary>The Decide lane as the Console's list returns it: groups of Signal ids, in order.</summary>
+    private async Task<List<List<Guid>>> ConsoleGroupsAsync(World world)
+    {
+        using var scope = CapabilityScope(world, out var capability);
+        var result = await capability.ListDecideAsync(AliceCaller, CancellationToken.None);
+        result.Outcome.Should().Be(SignalReadOutcome.Ok);
+        return result.Response!.Lanes.Single(l => l.Lane == "Decide").Groups.Select(g => g.Items.Select(i => i.SignalId).ToList()).ToList();
+    }
+
+    private async Task<DecidePageResult> PageAsync(World world, string? cursor)
+    {
+        using var scope = CapabilityScope(world, out var capability);
+        return await capability.ListDecidePageAsync(AliceCaller, cursor, CancellationToken.None);
+    }
+
+    /// <summary>Pages from <paramref name="cursor"/> to the end.</summary>
+    private async Task<List<DecidePageResult>> AllPagesAsync(World world, string? cursor = null)
+    {
+        var pages = new List<DecidePageResult>();
+        do
+        {
+            var page = await PageAsync(world, cursor);
+            page.Outcome.Should().Be(DecidePageOutcome.Ok);
+            pages.Add(page);
+            cursor = page.NextCursor;
+            pages.Count.Should().BeLessThan(50, "paging ends");
+        }
+        while (cursor is not null);
+
+        return pages;
+    }
+
+    [Fact]
+    public async Task DecidePaging_ReturnsEveryItemOnce_InTheConsoleOrder_InPagesOfAtMost50_Under64KiB_EachRowAtMost600Bytes()
+    {
+        var seed = SeedDecideLane();
+        var console = (await ConsoleGroupsAsync(seed.World)).SelectMany(g => g).ToList();
+        console.Should().HaveCount(200);
+
+        var pages = await AllPagesAsync(seed.World);
+
+        pages.Select(p => p.Items.Count).Should().Equal(50, 50, 50, 50);
+        pages.Select(p => p.NextCursor is null).Should().Equal(false, false, false, true); // only the last page has no next cursor
+        pages.SelectMany(p => p.Items).Select(i => i.SignalId).Should().Equal(console, "every item once, in the Console's order");
+        foreach (var page in pages)
+        {
+            // NFR-02: the whole page (rows, the core map and the cursor) is under 64 KiB; the map has one entry per group on the page.
+            JsonSerializer.SerializeToUtf8Bytes(new { page.Items, page.Cores, page.NextCursor }, WebJson).Length.Should().BeLessThan(64 * 1024);
+            page.Cores.Keys.Should().BeEquivalentTo(page.Items.Select(i => i.CoreRecordId!.Value).Distinct());
+            foreach (var item in page.Items)
+            {
+                JsonSerializer.SerializeToUtf8Bytes(item, WebJson).Length.Should().BeLessThanOrEqualTo(WorklistItemSummary.MaxJsonBytes);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DecidePaging_PrivilegeFlagged_IsTrueOnTheFlaggedSignalsOnly_AndNeverOnTheConsolesRestRow()
+    {
+        var seed = SeedDecideLane();
+
+        var items = (await AllPagesAsync(seed.World)).SelectMany(p => p.Items).ToList();
+
+        // (a), (b), (c): derived from the communications, never from the sprk_signal column (every 7th + 5 sets it, and none is flagged).
+        seed.Privileged.Should().HaveCount(29);
+        items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should().BeEquivalentTo(seed.Privileged);
+        items.Count(i => !i.PrivilegeFlagged).Should().Be(200 - seed.Privileged.Count);
+        items.Select(i => i.SignalId).Should().NotContain(seed.HiddenPrivileged, "a flagged Signal on a matter the caller cannot read is not theirs to see");
+
+        // The Console's REST row gains no member (FR-09; the golden baselines pin the bytes, this pins the name).
+        var body = await OkAsync(seed.World, Alice);
+        AllItems(body).Should().HaveCount(200);
+        AllItems(body).Should().OnlyContain(i => !i.EnumerateObject().Any(p => p.Name.Equals("privilegeFlagged", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    // Task 018 (g): one batched classification read per page, as the caller; the Console's REST worklist makes none, and no worklist query
+    // selects the never-written sprk_signal column any more.
+    [Fact]
+    public async Task DecidePrivilege_IsOneBatchedCallerReadPerPage_AndTheRestWorklistMakesNone()
+    {
+        var seed = SeedDecideLane();
+
+        var restBefore = ClassificationReads(seed.World);
+        await OkAsync(seed.World, Alice);
+        ClassificationReads(seed.World).Should().Be(restBefore, "the Console's REST worklist is unchanged (FR-09)");
+
+        string? cursor = null;
+        do
+        {
+            var before = ClassificationReads(seed.World);
+            var page = await PageAsync(seed.World, cursor);
+            ClassificationReads(seed.World).Should().Be(before + 1, "one batched read per page, never one per item");
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+
+        seed.World.Requests.Where(r => r.StartsWith("sprk_signals?fetchXml=", StringComparison.Ordinal))
+            .Should().OnlyContain(r => !Uri.UnescapeDataString(r).Contains("sprk_privilegeflagged", StringComparison.Ordinal),
+                "sprk_signal.sprk_privilegeflagged is not a source (ontology DI-64)");
+    }
+
+    // Task 018 (f): a page about no communication is not flagged and reads nothing for privilege.
+    [Fact]
+    public async Task DecidePrivilege_APageWithNoCommunication_IsNotFlagged_AndMakesNoClassificationRead()
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        for (var i = 0; i < 5; i++) world.Signal(Decide, core: (MatterType, matter), evidence: "[]", privilegeFlagged: true);
+
+        var page = await PageAsync(world, null);
+
+        page.Items.Should().HaveCount(5).And.OnlyContain(i => !i.PrivilegeFlagged);
+        ClassificationReads(world).Should().Be(0);
+    }
+
+    // Task 018 (h), FR-04 done-when: a Privileged (or Potentially Privileged) communication subject is flagged on its summary, so task 022
+    // reduces its title and subject name in model-visible text. The marker's absence from that text is 022's test (022 does the reduction).
+    [Theory]
+    [InlineData(ClassPrivileged)]
+    [InlineData(ClassPotentiallyPrivileged)]
+    public async Task DecidePrivilege_APrivilegedCommunicationSubject_WithAMarkerInItsTitleAndSubjectName_IsFlagged(int classification)
+    {
+        const string Marker = "ZQX-PRIVILEGED-MARKER-7731";
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var privileged = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], classification)),
+            title: $"Reply to {Marker}", subjectName: $"{Marker} settlement");
+        var plain = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], ClassNone)));
+
+        var items = (await PageAsync(world, null)).Items;
+
+        var item = items.Single(i => i.SignalId == privileged);
+        item.Title.Should().Contain("ZQX", "the seed carries the marker into the summary (seeding proof)");
+        item.PrivilegeFlagged.Should().BeTrue();
+        items.Single(i => i.SignalId == plain).PrivilegeFlagged.Should().BeFalse();
+    }
+
+    // Task 018 (d): a fault in the caller's classification read flags every item that names a communication; the page is still returned.
+    [Theory]
+    [InlineData("500")]
+    [InlineData("401")]
+    [InlineData("429")]
+    [InlineData("unparseable")]
+    [InlineData("throw")]
+    public async Task DecidePrivilege_AClassificationReadFault_FlagsEveryItemThatNamesACommunication_AndThePageIsStillReturned(string fault)
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var onCommunication = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], ClassNone)));
+        var onWitness = world.Signal(Decide, core: (MatterType, matter), evidence: WitnessRefs(world.Communication([Alice], null)));
+        var plain = world.Signal(Decide, core: (MatterType, matter));
+        world.PathFaults[ClassificationRead] = fault;
+        _factory.Logs.Warnings.Clear();
+
+        var page = await PageAsync(world, null);
+
+        page.Outcome.Should().Be(DecidePageOutcome.Ok);
+        page.Items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should().BeEquivalentTo([onCommunication, onWitness], "fail closed");
+        page.Items.Single(i => i.SignalId == plain).PrivilegeFlagged.Should().BeFalse();
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("Work Item privilege: the caller's read of sprk_communication", StringComparison.Ordinal));
+    }
+
+    // Task 018 (adversarial review F2): the privilege sources come from the evidence AS STORED. Evidence that is not a JSON array is returned
+    // as null by the witness rule (step 9), so judging the returned row would read it as "no communication"; it must flag instead.
+    [Fact]
+    public async Task DecidePrivilege_StoredEvidenceThatIsNotAnArray_FlagsItsItem_EvenThoughTheReturnedRowCarriesNone()
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var malformed = world.Signal(Decide, core: (MatterType, matter),
+            evidence: JsonSerializer.Serialize(new { kind = "communication", @ref = $"sprk_communication:{world.Communication([Alice], ClassPrivileged):D}" }));
+        var plain = world.Signal(Decide, core: (MatterType, matter));
+
+        var items = (await PageAsync(world, null)).Items;
+
+        items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should().BeEquivalentTo([malformed]);
+        AllItems(await OkAsync(world, Alice)).Single(i => i.GetProperty("signalId").GetGuid() == malformed)
+            .GetProperty("evidenceRefs").ValueKind.Should().Be(JsonValueKind.Null, "the returned row carries no evidence, so only the stored value can flag it");
+    }
+
+    // Task 018 (e): a communication the caller cannot read (not returned to them, or no Read on the table) flags its item.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DecidePrivilege_ACommunicationTheCallerCannotRead_FlagsItsItem(bool noReadOnTheTable)
+    {
+        var world = new World();
+        var matter = world.Matter(readers: [Alice]);
+        var bobsOnly = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Bob], ClassNone)));
+        var readable = world.Signal(Decide, core: (MatterType, matter), subject: (null, world.Communication([Alice], ClassNone)));
+        var plain = world.Signal(Decide, core: (MatterType, matter));
+        if (noReadOnTheTable) world.TableDenied[Alice] = ["sprk_communication"];
+
+        var items = (await PageAsync(world, null)).Items;
+
+        items.Select(i => i.SignalId).Should().BeEquivalentTo([bobsOnly, readable, plain], "privilege never gates a read (owner 2026-07-16)");
+        items.Where(i => i.PrivilegeFlagged).Select(i => i.SignalId).Should()
+            .BeEquivalentTo(noReadOnTheTable ? [bobsOnly, readable] : new[] { bobsOnly });
+    }
+
+    [Fact]
+    public async Task DecidePaging_BillingItemsKeepInvoiceReview_AndAPageIsOneBatchedBillingEventRead()
+    {
+        var seed = SeedDecideLane();
+        var before = LineInvoiceReads(seed.World);
+
+        var page = await PageAsync(seed.World, null);
+
+        LineInvoiceReads(seed.World).Should().Be(before + 1, "#2580's one batched BillingEventRead per response, unchanged by paging");
+        var billing = page.Items.Where(i => i.InvoiceReview is not null).ToList();
+        billing.Should().NotBeEmpty();
+        billing.Should().OnlyContain(i => i.InvoiceReview!.InvoiceId != Guid.Empty && i.InvoiceReview.LineId != null);
+    }
+
+    // The Start-review walk resolves the item it just decided, so a stale cursor is the common case. For each way items disappear, the
+    // rest of the lane arrives exactly once: nothing from page 1 again, nothing missing, no error.
+    [Theory]
+    [InlineData("the-cursor-item")]
+    [InlineData("the-best-item-of-every-group-on-page-1")]
+    [InlineData("the-best-item-of-the-cursor-group-and-later-items")]
+    [InlineData("the-whole-cursor-group-and-later-items")]
+    public async Task DecidePaging_AStaleCursor_ReturnsTheRemainingItemsOnce_WithNoDuplicateAndNoError(string scenario)
+    {
+        var seed = SeedDecideLane();
+        var original = await ConsoleGroupsAsync(seed.World);
+        var page1 = await PageAsync(seed.World, null);
+        var page1Ids = page1.Items.Select(i => i.SignalId).ToList();
+        var cursorItem = page1Ids[^1];
+        var cursorGroup = original.Single(g => g.Contains(cursorItem));
+
+        var resolved = scenario switch
+        {
+            "the-cursor-item" => new HashSet<Guid> { cursorItem },
+            "the-best-item-of-every-group-on-page-1" => original.Where(g => page1Ids.Contains(g[0])).Select(g => g[0]).ToHashSet(),
+            "the-best-item-of-the-cursor-group-and-later-items" =>
+                new HashSet<Guid>([cursorGroup[0], .. original.SelectMany(g => g).Except(page1Ids).Where((_, n) => n % 9 == 0)]),
+            _ => new HashSet<Guid>([.. cursorGroup, .. original.SelectMany(g => g).Except(page1Ids).Where((_, n) => n % 9 == 0)]),
+        };
+        resolved.Should().NotBeEmpty();
+        seed.World.Signals.RemoveAll(s => resolved.Contains(s.Id));
+
+        var rest = (await AllPagesAsync(seed.World, page1.NextCursor)).SelectMany(p => p.Items).Select(i => i.SignalId).ToList();
+
+        var cursorAt = original.SelectMany(g => g).ToList().IndexOf(cursorItem);
+        var expected = original.SelectMany(g => g).Skip(cursorAt + 1).Where(id => !resolved.Contains(id)).ToList();
+        if (scenario == "the-cursor-item")
+        {
+            rest.Should().Equal(expected, "with only the cursor item gone the order is the Console's");
+        }
+        else
+        {
+            // The cursor's group is finished first, so after a resolved best item the order can differ from a fresh list's; the set cannot.
+            rest.Should().BeEquivalentTo(expected);
+        }
+
+        rest.Should().OnlyHaveUniqueItems();
+        rest.Should().NotIntersectWith(page1Ids.Where(id => !resolved.Contains(id)), "nothing already returned comes back");
+    }
+
+    // 015 review (F4, FR-12): every row names its group's core record by id, and the page names each of those records once (clipped name
+    // and number, from the same caller-trimmed group the REST worklist returns). A record with no row on the page has no entry.
+    [Fact]
+    public async Task DecidePaging_EachRowsCoreRecordId_ResolvesThroughThePagesCoreMap_AndAMatterNotOnThePageHasNoEntry()
+    {
+        var world = new World();
+        var acme = world.Matter(readers: [Alice], name: LongText("Acme v. Widget ", 400), number: "MAT-0042");
+        var globex = world.Matter(readers: [Alice], name: "Globex merger", number: "MAT-0043");
+        var initech = world.Matter(readers: [Alice], name: "Initech lease", number: "MAT-0044");
+        var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        string At(int hour) => start.AddHours(hour).ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+        for (var i = 0; i < 30; i++) world.Signal(Decide, core: (MatterType, acme), severity: Critical, firstDetected: At(i));
+        for (var i = 0; i < 20; i++) world.Signal(Decide, core: (MatterType, globex), severity: Warning, firstDetected: At(i));
+        for (var i = 0; i < 10; i++) world.Signal(Decide, core: (MatterType, initech), severity: Info, firstDetected: At(i));
+        world.Signal(Decide, core: (MatterType, world.Matter(readers: [Bob], name: "Bob only")), severity: Critical);
+
+        var page1 = await PageAsync(world, null);
+        var page2 = await PageAsync(world, page1.NextCursor);
+
+        page1.Items.Should().HaveCount(50, "Acme's 30 and Globex's 20");
+        page1.Items.Should().OnlyContain(i => i.CoreRecordId != null && page1.Cores.ContainsKey(i.CoreRecordId.Value));
+        page1.Items.Count(i => i.CoreRecordId == acme).Should().Be(30);
+        page1.Items.Count(i => i.CoreRecordId == globex).Should().Be(20);
+        page1.Cores.Keys.Should().BeEquivalentTo([acme, globex], "Initech has no row on page 1, and Bob's matter is not Alice's");
+        page1.Cores[acme].Should().Be(new WorklistCoreSummary(WorklistItemSummary.Clip(LongText("Acme v. Widget ", 400), WorklistCoreSummary.NameBytes), "MAT-0042"));
+        page1.Cores[globex].Should().Be(new WorklistCoreSummary("Globex merger", "MAT-0043"));
+
+        page2.Items.Should().HaveCount(10).And.OnlyContain(i => i.CoreRecordId == initech);
+        page2.Cores.Keys.Should().BeEquivalentTo([initech]);
+        page2.Cores[initech].Should().Be(new WorklistCoreSummary("Initech lease", "MAT-0044"));
+
+        // The REST body's group names the same records, unclipped (the page map takes its text from those groups).
+        var rest = Lane(await OkAsync(world, Alice), "Decide").GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("core")).ToList();
+        rest.Select(c => c.GetProperty("recordId").GetGuid()).Should().Equal(acme, globex, initech);
+        var pageCores = page1.Cores.Concat(page2.Cores).ToDictionary();
+        foreach (var core in rest)
+        {
+            pageCores[core.GetProperty("recordId").GetGuid()].Should().Be(new WorklistCoreSummary(
+                WorklistItemSummary.Clip(core.GetProperty("name").GetString(), WorklistCoreSummary.NameBytes),
+                WorklistItemSummary.Clip(core.GetProperty("number").GetString(), WorklistCoreSummary.NumberBytes)));
+        }
+    }
+
+    private static Guid CoreOf(World world, Guid signalId) =>
+        Guid.Parse((string)world.Signals.Single(s => s.Id == signalId).Row["sprk_corerecordid"]!);
+
+    // 015 review (F1): a group not yet returned can move AHEAD of the cursor's group between pages (here a new Critical Signal lands on
+    // its matter; a subject turned high priority or a policy severity change does the same). Its items have not been seen, so they must
+    // still arrive, each once.
+    [Fact]
+    public async Task DecidePaging_AStaleCursor_WhenAnUnreturnedGroupNowRanksAheadOfTheCursorGroup_StillReturnsItsItemsOnce()
+    {
+        var seed = SeedDecideLane(180); // 4 matters of 45: page 1 is all of the first group and part of the second
+        var original = await ConsoleGroupsAsync(seed.World);
+        var page1 = await PageAsync(seed.World, null);
+        var page1Ids = page1.Items.Select(i => i.SignalId).ToHashSet();
+        var unreturned = original[^1];
+        unreturned.Should().NotIntersectWith(page1Ids, "the last group has nothing on page 1");
+        original[1].Should().Contain(page1.Items[^1].SignalId, "the cursor sits inside the second group");
+
+        var arrived = seed.World.Signal(Decide, core: (MatterType, CoreOf(seed.World, unreturned[0])), severity: Critical,
+            firstDetected: "2026-08-01T00:00:00Z");
+        (await ConsoleGroupsAsync(seed.World))[0].Should().Contain(arrived, "that group now ranks ahead of every other, the cursor's included");
+
+        var rest = (await AllPagesAsync(seed.World, page1.NextCursor)).SelectMany(p => p.Items).Select(i => i.SignalId).ToList();
+
+        rest.Should().BeEquivalentTo(original.SelectMany(g => g).Where(id => !page1Ids.Contains(id)).Append(arrived),
+            "every item not on page 1 arrives, the new one included (FR-05)");
+        rest.Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task DecidePaging_AStaleButWellFormedCursor_ForAnItemThatIsGone_IsNotAnError()
+    {
+        var seed = SeedDecideLane(30);
+        var page1 = await PageAsync(seed.World, null);
+        var stale = new DecideCursor(
+            new RankKey(0, false, DateTimeOffset.Parse("2026-08-01T00:00:00Z")),
+            Guid.NewGuid(),
+            new RankKey(0, false, DateTimeOffset.Parse("2026-08-01T00:00:00Z")), Guid.NewGuid(), []).Encode();
+
+        var page = await PageAsync(seed.World, stale);
+
+        page.Outcome.Should().Be(DecidePageOutcome.Ok);
+        page.Items.Should().NotBeEmpty();
+        page1.Items.Should().HaveCount(30);
+    }
+
+    [Theory]
+    [InlineData("not-a-cursor")]
+    [InlineData("e30")]
+    public async Task DecidePaging_AMalformedCursor_IsCursorInvalid_AndNothingIsRead(string cursor)
+    {
+        var seed = SeedDecideLane(5);
+        var reads = seed.World.Requests.Count;
+
+        var page = await PageAsync(seed.World, cursor);
+
+        page.Outcome.Should().Be(DecidePageOutcome.CursorInvalid);
+        seed.World.Requests.Count.Should().Be(reads, "the cursor is refused before any Dataverse call");
+    }
+
+    [Fact]
+    public async Task DecidePaging_ATruncatedRealCursor_IsCursorInvalid()
+    {
+        var seed = SeedDecideLane();
+        var cursor = (await PageAsync(seed.World, null)).NextCursor!;
+
+        (await PageAsync(seed.World, cursor[..(cursor.Length / 2)])).Outcome.Should().Be(DecidePageOutcome.CursorInvalid);
+    }
+}

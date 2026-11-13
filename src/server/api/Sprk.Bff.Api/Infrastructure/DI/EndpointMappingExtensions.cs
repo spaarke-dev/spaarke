@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Api.Mcp;
 using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Platform;
 using Sprk.Bff.Api.Api.Records;
@@ -240,6 +241,9 @@ public static class EndpointMappingExtensions
         app.MapDecisionCommitEndpoints();
         // Ontology platform R1 task 038: the worklist's Signal read route (core-record check and Do-lane scope as the caller).
         app.MapSignalReadEndpoints();
+        // spaarkeai-mcp-bff-api-r1 task 020 (FR-01, ADR-010): POST /mcp/legal-operations, the stateless MCP endpoint (v1 maps this one area).
+        // UNCONDITIONAL (bff-extensions.md §F.1): AddMcpModule registers the SDK services in both states; Mcp:Enabled false answers 503.
+        app.MapMcpEndpoints();
         // Ontology platform R1 task 104 (D-22): the Ontology admin capability probe (shows the tab; never authorizes a write).
         app.MapOntologyAdminEndpoints();
         // MapWorkAssignmentEndpoints() REMOVED 2026-10-03 — unified-access-control-r2 task 166 (sweep finding S-76,

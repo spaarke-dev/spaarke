@@ -59,7 +59,7 @@
     </PackageReference>
 
     <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for chat agent tests -->
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
@@ -77,6 +77,9 @@
   -->
   <ItemGroup>
     <Compile Include="..\..\integration\contract\**\*.cs" LinkBase="ContractTests" />
+    <!-- spaarkeai-mcp-bff-api-r1 task 011: the worklist golden baselines are a part of SignalReadRouteTests and need its World fixture,
+         so they compile into Sprk.Bff.Api.IntegrationTests instead (see that csproj). GoldenContract.cs compiles into both. -->
+    <Compile Remove="..\..\integration\contract\Api\Signals\SignalWorklistRouteContractBaselineTests.cs" />
   </ItemGroup>
 
   <!--
@@ -137,6 +140,9 @@
   -->
   <ItemGroup>
     <Compile Include="..\..\integration\regression\**\*.cs" LinkBase="RegressionTests" />
+    <!-- spaarkeai-mcp-bff-api-r1 task 015: the Decide-lane paging tests are a part of SignalReadRouteTests and need its World fixture,
+         so they compile into Sprk.Bff.Api.IntegrationTests instead (see that csproj), like the worklist golden baselines above. -->
+    <Compile Remove="..\..\integration\regression\Signals\DecideLanePagingTests.cs" />
   </ItemGroup>
 
   <!--

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>B-4b thread ICallerContext through decision slice (CANCELLED)</title>
+    <phase>A BFF rework</phase>
+    <gate>cancelled 2026-11-07 (owner option C); do not execute</gate>
+    <status>cancelled</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Kept as planned (bff-api refactor across 9 files) for the record; the task will not run</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Kept as planned for the record; the task will not run</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Cancelled; occupies no wave</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, refactoring</tags>
+    <estimated-effort>0 (cancelled)</estimated-effort>
+  </metadata>
+
+  <prompt>CANCELLED 2026-11-07 by owner decision option C (defer ICallerContext, B-4). Do not execute this task. Nothing in the decision slice is to be rethreaded off HttpContext in v1.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>None: the task is cancelled. It satisfies no dependency and runs in no wave.</goal>
+
+  <context>
+    <background>Cancellation reason: the owner chose option C on 2026-11-07 (notes/decisions.md 2026-11-07; spec FR-10 as amended, which supersedes design §8 B-4). In ModelContextProtocol.AspNetCore 2.3.1 the stateless transport runs MCP tool handlers inside the ASP.NET request: StreamableHttpHandler passes context.RequestServices with ScopeRequests=false, and the default PerSessionExecutionContext=false keeps IHttpContextAccessor working. MCP tools therefore read the request HttpContext through IHttpContextAccessor and call the decision services unchanged, including DecisionPlanReadStamp, DecisionParameterSources, DecisionActionExecutors, DecisionRouteCores, AssignTaskNotifier, DecisionCommitFollowUps and BudgetInquiryExecutor. Threading ICallerContext through those files is no longer needed, and neither is the source-scan guard this task would have added. Task 010 now verifies the MCP caller path with tests instead. Former dependants: 017 now depends on 011 only.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/decisions.md (2026-11-07 option C entry)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/tasks/010-mcp-caller-path-verification.poml (the replacement verification)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Cancelled; no prerequisite applies.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do not implement any part of this task. Reopening it needs a new owner decision recorded in notes/decisions.md that reverses option C.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Do not execute. If this task is picked up, stop and read notes/decisions.md 2026-11-07 (option C).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The POML status is cancelled and the TASK-INDEX row shows 🚫 [cancelled]; pwsh scripts/check-task-status-drift.ps1 reports no drift.</criterion>
+  </acceptance-criteria>
+
+  <notes>Cancelled 2026-11-07 (owner option C). The original scope was to replace HttpContext/IHttpContextAccessor in the seven decision-slice files with ICallerContext and add an ArchTest guard with a ratchet baseline. It is dropped together with ICallerContext. The full original text is in git history (commit 8c9dab7df6 and earlier).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Cancelled task: task-execute must not run it.</protocol>
+  </execution>
+</task>

@@ -75,6 +75,7 @@ Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directo
     - never writes a guest it cannot place.
   - Workforce contacts never reach it. They are contacts, not systemusers, and their plane is `contact.sprk_identityplane`, written at sign-in.
 - ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in to model-driven apps or the Office add-ins — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 multitenant SPA client, used by the browser SPA and the Teams host for both populations. Licensed users there resolve through the stored link.
+- ✅ **MUST** register a Microsoft 365 Copilot / Cowork connector (MCP, `/mcp/*`) with **OAuth 2.0 at the Spaarke-tenant authority**, scope `api://{bffAppId}/user_impersonation`, through a dedicated connector client; tools run as the caller (OBO), for `systemuser` callers only. ❌ **MUST NOT** use the connector's Entra SSO option for Model 1, or accept CIAM or A9 home-directory tokens on `/mcp/*` (ADR-028 A10).
 - Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
 
 ### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)

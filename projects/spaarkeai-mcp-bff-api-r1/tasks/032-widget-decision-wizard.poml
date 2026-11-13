@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Widget Decision wizard over MCP shims</title>
+    <phase>C Widget</phase>
+    <gate>after 023, 024 and 031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include frontend; modifies .ts/.tsx in the shared lib and the widget</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses DecisionWizardHost/DecisionItemWizard over a ResponseFetchFn shim with a complete spec; no new architecture</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs after 031 because both edit the widget App shell; shares no file with 025</parallel-reason>
+    <deps>023, 024, 031</deps>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run DecisionWizardHost/DecisionItemWizard inside the widget through a ResponseFetchFn shim mapped onto spaarke_get_decision_plan, spaarke_search_decision_lookup and spaarke_complete_decision: every parameter kind, inline lookup type-ahead, the optional because rationale, in-frame dialog with fullscreen request and the master-detail and openLink fallbacks, and server refusals shown in the wizard.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React wizard flows, Fluent UI v9 dialogs and MCP Apps display modes.</role>
+  <goal>Opening a non-billing row runs the wizard end to end against mocked callServerTool for every lookup-bearing action type; after Confirm the row leaves the lane and the count drops by one; refusals show the server message and leave the item open; because reaches the commit; the bundle stays under budget.</goal>
+
+  <context>
+    <background>Spec FR-13, FR-15 (because), NFR-06 (Confirm is the only write trigger), NFR-03; design §9.2–§9.4 (in-frame Fluent Dialog; requestDisplayMode fullscreen; fallbacks master-detail in fullscreen, then openLink to the Console wizard). decisionDisplay.ts already maps decided_in_invoice_review to 'Decide this in Invoice Review' if the shim passes reasonCode through, and maps commit warnings (WARNING_TEXT, for example inquiry_email_not_archived) if the shim passes `warnings` through. The billing-only actions assign-firm and add-line (master, DecisionActionCatalog.cs) are not in the lookup-bearing list below. Rewrite fallback if over budget: keep decisionDraft.ts and re-render only the step UI.</background>
+    <relevant-files>
+      <file role="new">src/client/widgets/spaarke-decisions/src/wizard/WizardDialog.tsx (in-frame dialog, fullscreen request, fallbacks)</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/wizard/wizardFetch.ts (plan, suppression, decision and lookup paths → tools)</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/wizard/lookupTypeAhead.ts</file>
+      <file role="new">src/client/widgets/spaarke-decisions/src/__tests__/wizardFlow.test.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizardHost.tsx (ONLY if needed: optional lookup seam; props L25-40)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionItemWizard.tsx (ONLY if needed: send because on Confirm)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDraft.ts and decisionWizardTypes.ts (because, draft state)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts (failureHeading/failureMessage, INVOICE_REVIEW_REASON L116; WARNING_TEXT ~L193 incl. inquiry_email_not_archived)</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/worklist.registration.ts:94-114 (wizard wiring in the Console)</file>
+      <file role="canonical-reference">.claude/patterns/ui/modal-shell.md (ADR-050 shared modal shell)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">plan and lookup tools</dependency>
+      <dependency task="024" status="pending">complete tool</dependency>
+      <dependency task="031" status="pending">lane and openWizard event</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">This task reuses @spaarke/ui-components by deep import of source modules (not the barrel); it creates no per-project copy of a shared component; any shared-lib change is an optional prop or seam that leaves the Console's LegalWorkspace worklist mount (worklist.registration.ts) unchanged.</constraint>
+    <constraint source="ADR-050">The in-frame wizard dialog uses the shared modal shell (ModalShell / Fluent Dialog per .claude/patterns/ui/modal-shell.md); no bespoke modal chrome.</constraint>
+    <constraint source="project">spaarke_complete_decision is called only from the wizard's explicit Confirm action, with the user's because text when entered; nothing writes on open, on step change or on close (NFR-06, FR-15).</constraint>
+    <constraint source="project">Lookup and person parameters use an inline type-ahead backed by spaarke_search_decision_lookup; related records render as text plus an 'Open in Spaarke' link via openLink; no openLookup, openRecord or Xrm call.</constraint>
+    <constraint source="project">Display order: in-frame dialog with a fullscreen request; if fullscreen is refused, master-detail in fullscreen; if that is unavailable, openLink to the Console wizard for the item (O-5).</constraint>
+    <constraint source="project">Shared-lib changes are optional seams; existing DecisionWizard tests and the Console wizard behave unchanged.</constraint>
+    <constraint source="ADR-021">Every component this task adds or changes uses Fluent UI v9 semantic tokens only (no hex, rgb or inline colour), supports host light and dark themes, and is operable by keyboard (NFR-07).</constraint>
+    <constraint source="ADR-038">Every test this task adds lives on a KEEP path (tests/integration/{auth,contract,regression,data-mutation}/** or tests/unit/domain/**), mocks only at module boundaries, and uses no Mock&lt;HttpMessageHandler&gt; or Mock&lt;IServiceClient&gt;.</constraint>
+    <constraint source="project">The lookup type-ahead calls `spaarke_search_decision_lookup` only after a debounce of at least 300 ms and with at least 2 typed characters, because each call runs the Signal access check, plan resolution and several Dataverse reads as the caller (ontology review of 016, K1, 2026-11-07).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/embedded-widget-sizing.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/constraints/react-versioning.md</file>
+      <file>knowledge/mcp-apps/NOTES.md</file>
+      <file>knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/inline-lookup-field.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Inline lookup field" location=".claude/patterns/ui/inline-lookup-field.md">Type-ahead lookup UI to mirror for person and lookup parameters.</pattern>
+      <pattern name="Fluent dialog in jsdom" location=".claude/FAILURE-MODES.md">G-21: a Fluent v9 dialog can be aria-hidden in jsdom; query its contents accordingly in tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Map the wizard's ResponseFetchFn paths (plan, suppression, decision, lookup) to the three tools in wizardFetch.ts, preserving reasonCode in error Responses.</step>
+    <step order="2">Mount DecisionWizardHost inside WizardDialog on openWizard(signalId); request fullscreen; implement the two fallbacks.</step>
+    <step order="3">Implement lookupTypeAhead for person and lookup parameters; render related records as text plus 'Open in Spaarke'.</step>
+    <step order="4">Send because on Confirm (add the optional seam in DecisionItemWizard only if it does not already send it).</step>
+    <step order="5">On a successful commit, remove the row from the lane and decrement the count; on a refusal, show failureHeading/failureMessage and keep the item open.</step>
+    <step order="6">Write the flow tests with mocked callServerTool for each lookup-bearing action type; run DecisionWizard and Worklist tests unchanged; run the bundle-size check.</step>
+    <step order="7">Run the ui-tests against a local MCP Apps host.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the shimmed wizard (with Lexical EmailComposer) pushes dist/index.html over 3 MB, STOP and escalate with the composition and the decisionDraft.ts re-render fallback (NFR-03).</trigger>
+    <trigger>If a parameter kind cannot work without Xrm or a host-impossible interaction not covered by design §9.3, STOP and list it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DecisionWizardHost.tsx, DecisionItemWizard.tsx and decisionWizardService.ts run the wizard in the Console with Xrm lookups and navigateTo.</existing>
+    <extension>Yes for the wizard itself (reused unchanged or with optional seams); the new files only adapt it to the frame: a ResponseFetchFn mapping to tools, an inline type-ahead in place of the Xrm lookup pane, and the dialog, fullscreen and openLink fallbacks, none of which the Console needs.</extension>
+    <cost-of-doing-nothing>A Work Item cannot be resolved in Copilot or Cowork (FR-13), and the six lookup-bearing action types cannot be completed there.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Resolve one Work Item end to end">
+      <url>http://localhost:{basic-host-port}/?server={local-bff}/mcp/legal-operations</url>
+      <steps>
+        <step>Open a non-billing Work Item from the lane</step>
+        <step>Verify the dialog opens in-frame and requests fullscreen</step>
+        <step>Walk What was found → each planned action → Next steps → Confirm, entering a because rationale</step>
+        <step>Use the lookup type-ahead for a budget or person parameter</step>
+        <step>Confirm and check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>The row leaves the lane, the count drops by one, no console errors</expected>
+    </test>
+    <test name="Server refusal shown in the wizard">
+      <steps>
+        <step>Mock spaarke_complete_decision to return isError ontology.decision.not_authorized</step>
+        <step>Confirm</step>
+        <step>Verify the server's message is shown and the item stays open</step>
+      </steps>
+      <expected>The wizard shows the refusal and nothing is removed from the lane</expected>
+    </test>
+    <test name="Keyboard operation">
+      <steps>
+        <step>Open the wizard and complete every step with keyboard only (Tab, Enter, Escape)</step>
+      </steps>
+      <expected>Every control is reachable and operable; Escape closes without writing</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host (Cowork or the local MCP Apps host) to dark theme</step>
+        <step>Verify backgrounds adapt (no white surface in dark mode) and text adapts (no black text in dark mode)</step>
+        <step>Verify icons use currentColor</step>
+        <step>Switch back to light theme and verify the widget follows without reload</step>
+      </steps>
+      <expected>All colours come from Fluent v9 semantic tokens driven by host context (ADR-021); nothing is stored</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Install (npm install --legacy-peer-deps --no-audit --no-fund), build and test TypeScript projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/widgets/spaarke-decisions/src/wizard/WizardDialog.tsx</output>
+    <output type="code">src/client/widgets/spaarke-decisions/src/wizard/wizardFetch.ts</output>
+    <output type="code">src/client/widgets/spaarke-decisions/src/wizard/lookupTypeAhead.ts</output>
+    <output type="test">src/client/widgets/spaarke-decisions/src/__tests__/wizardFlow.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With mocked callServerTool, the wizard completes one Work Item of each lookup-bearing action type (revise-budget, reassign, add-todo, assign-work, assign-task, inquiry outside firm), each with its lookup resolved through the type-ahead.</criterion>
+    <criterion testable="true">Every parameter kind (text, choice, money, date, boolean, person, lookup) renders and submits.</criterion>
+    <criterion testable="true">After a successful Confirm, the row leaves the lane and the count drops by one.</criterion>
+    <criterion testable="true">Negative: a server refusal (not_authorized, stale plan) shows the server's message in the wizard and leaves the Work Item open; decided_in_invoice_review shows 'Decide this in Invoice Review'.</criterion>
+    <criterion testable="true">With mocked callServerTool returning a success with `warnings: ['inquiry_email_not_archived']`, the Done step shows 'The inquiry email was sent, but a copy of it could not be saved to the matter.' (decisionDisplay.ts `WARNING_TEXT` ~L193, covered on master by DecisionWizard.assignTaskNotify.test.tsx; the shim passes `warnings` and each step's `warning` through unchanged).</criterion>
+    <criterion testable="true">Negative: no tool other than plan/lookup is called before Confirm, and spaarke_complete_decision is never called on open, step change or close (spy).</criterion>
+    <criterion testable="true">A because rationale entered in the wizard is sent in the DecisionReview on Confirm.</criterion>
+    <criterion testable="true">When fullscreen is refused, master-detail in fullscreen is used; when unavailable, openLink to the Console wizard for the item is called (unit tests per branch).</criterion>
+    <criterion testable="true">Existing DecisionWizard and Worklist tests pass with no edits; dist/index.html stays under 3 MB; no hex or inline colour (grep).</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>FR-13 live acceptance (a licensed dev-tenant user resolves one Work Item of each lookup-bearing type) and FR-15's 'appears on the written Decision Record' are verified live in 042. Inline frames are about 640 px tall (design §9.4).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

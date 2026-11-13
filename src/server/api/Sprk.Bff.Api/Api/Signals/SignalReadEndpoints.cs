@@ -22,6 +22,9 @@ public static class SignalReadEndpoints
 {
     internal const string WorklistUnavailableReasonCode = "ontology.signal.worklist_unavailable";
 
+    /// <summary>The Decide-lane page's cursor is not one the server wrote the shape of (task 015). MCP only: no REST route pages.</summary>
+    internal const string CursorInvalidReasonCode = "ontology.worklist.cursor_invalid";
+
     public static void MapSignalReadEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/v1/signals")
@@ -43,9 +46,11 @@ public static class SignalReadEndpoints
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
+    /// <summary>The route over <see cref="IDecisionCapability.ListDecideAsync"/> (task 013, B-1): only the <c>set</c> validation and the
+    /// HTTP shaping (<see cref="DecisionResultMapper"/>) are here.</summary>
     internal static async Task<IResult> GetWorklistAsync(
         HttpContext httpContext,
-        SignalReadService signalRead,
+        IDecisionCapability decisions,
         CancellationToken ct,
         string? set = null)
     {
@@ -57,29 +62,8 @@ public static class SignalReadEndpoints
             });
         }
 
-        var result = await signalRead.ReadAsync(worklistSet, httpContext.User, ct);
-        return result.Outcome switch
-        {
-            SignalReadOutcome.Ok when result.Response is { } body => Results.Ok(body),
-            SignalReadOutcome.CallerUnresolved => Results.Problem(
-                title: "Forbidden",
-                detail: "The caller could not be resolved to a Dataverse user.",
-                statusCode: StatusCodes.Status403Forbidden,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = DecisionPlanEndpoints.CallerUnresolvedReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                }),
-            _ => Results.Problem(
-                title: "Service Unavailable",
-                detail: "The worklist could not be read. Try again.",
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = WorklistUnavailableReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                }),
-        };
+        var result = await decisions.ListDecideAsync(httpContext.User, ct, worklistSet);
+        return DecisionResultMapper.ToHttp(result, httpContext);
     }
 
     internal static bool TryParseSet(string? value, out WorklistSet set)

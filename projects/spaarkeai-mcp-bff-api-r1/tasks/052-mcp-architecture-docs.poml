@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>MCP architecture doc and add-a-tool guide</title>
+    <phase>E Docs and terminology</phase>
+    <gate>after 042</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New documentation files with explicit constraints (real paths, doc-drift-audit clean)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation from implemented code using the docs-architecture and docs-guide skills</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes docs/ only; safe beside the main-session 050/051</parallel-reason>
+    <deps>042</deps>
+    <tags>documentation</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md and docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md from the implemented code, link them and 042's connector runbook from docs/INDEX.md, replace the retired term 'Spaarke Copilot' in M365-COPILOT-DEPLOYMENT-GUIDE.md, and leave doc-drift-audit clean.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert technical writer for Spaarke architecture and operational guides.</role>
+  <goal>The architecture doc and how-to guide exist, name only real files, link the runbook, and doc-drift-audit reports no stale reference in them.</goal>
+
+  <context>
+    <background>Spec FR-18; naming note §1 ('Spaarke Copilot' retired; it appears at docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md L3 and L35; L102 is the `az ad app create --display-name "Spaarke Copilot Bot Dev"` command, an existing app registration's display name). The connector runbook is authored in 042; this task links and audits it.</background>
+    <relevant-files>
+      <file role="new">docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md</file>
+      <file role="new">docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</file>
+      <file role="modify">docs/INDEX.md (add both docs and the runbook)</file>
+      <file role="modify">docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md (retired term at L3 and L35 only; leave L102)</file>
+      <file role="canonical-reference">docs/guides/SPAARKE-COPILOT-CONNECTOR-RUNBOOK.md (from 042)</file>
+      <file role="canonical-reference">.claude/skills/docs-architecture/SKILL.md and .claude/skills/docs-guide/SKILL.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="pending">Live-verified system and the runbook</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The architecture doc covers: the /mcp/{area} route and area model; A10 auth flow and refusals; the decision capability, lookup search and result mapper; the five tools with visibility and hints; the widget and its embedding; kill switch, rate and size limits; telemetry; and links to ADR-028 A10, ADR-013, ADR-015, ADR-032 — each claim tied to a real file path.</constraint>
+    <constraint source="project">The how-to guide gives the steps to add a tool to an existing area and to add a new area (new /mcp/{area}, not a second MCP server), including the tests each needs.</constraint>
+    <constraint source="project">Every path named exists (doc-drift-audit clean); the only edit to M365-COPILOT-DEPLOYMENT-GUIDE.md is replacing the retired 'Spaarke Copilot' product term at L3 and L35. Leave L102 (the `az ad app create --display-name "Spaarke Copilot Bot Dev"` command) unchanged, because it names an existing app registration, and note why in the task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+      <file>docs/INDEX.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Draft the architecture doc with the docs-architecture skill from the implemented code.</step>
+    <step order="2">Draft the how-to guide with the docs-guide skill.</step>
+    <step order="3">Link both and the runbook from docs/INDEX.md; replace the retired term at M365-COPILOT-DEPLOYMENT-GUIDE.md:33.</step>
+    <step order="4">Run doc-drift-audit on the new and changed docs and fix every finding.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="6">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the implemented code contradicts design.md on a point the doc must state, document the code and record the divergence in notes/decisions.md; escalate only if it looks like a defect.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md (April agent); design.md (project-local, pre-implementation); no MCP architecture doc or tool guide exists in docs/ (grep -ril 'mcp' docs/architecture returns no server doc).</existing>
+    <extension>No: the April guide covers a different surface and design.md is a project artifact that is not maintained after close.</extension>
+    <cost-of-doing-nothing>The next area (billing review, Patents) has no maintained description of the host, auth or tool conventions, and a second MCP server could be built by mistake (risk R9).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">Run shell commands (grep, wc, git diff)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/SPAARKE-MCP-SERVER-ARCHITECTURE.md</output>
+    <output type="docs">docs/guides/HOW-TO-ADD-AN-MCP-TOOL.md</output>
+    <output type="docs">docs/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The architecture doc covers every item in its constraint, each tied to a real file path.</criterion>
+    <criterion testable="true">The guide covers adding a tool to legal-operations and adding a new area, with the tests each needs.</criterion>
+    <criterion testable="true">docs/INDEX.md links the two docs and the connector runbook.</criterion>
+    <criterion testable="true">doc-drift-audit reports no stale reference in the new or changed docs.</criterion>
+    <criterion testable="true">Negative: M365-COPILOT-DEPLOYMENT-GUIDE.md changes only at the retired product term on L3 and L35 (L102, the existing app registration's display name, is unchanged and the reason is noted).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec success criterion 12.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

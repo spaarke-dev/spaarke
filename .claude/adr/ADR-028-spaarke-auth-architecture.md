@@ -682,6 +682,53 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 
 > **Note (A9)**: Applied concise-only, like A1–A8. This concise ADR now carries Amendments A1–A9. A9 changes workforce-contact sign-in and registration only. It adds no token exchange, and does not weaken the no-OBO invariant.
 
+## Amendment A10 (2026-11-05): Microsoft 365 Copilot and Cowork connector client (MCP)
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Owner-approved** 2026-11-05 ("yes update ADR-028 to support this new approach as 'path B' recommended").
+> **Driver project**: `spaarkeai-mcp-bff-api-r1` (design §6, ADR tensions row ADR-028). **Adds one client plane; amends no earlier clause.**
+> **Numbering:** A10 is the next free number on master at writing. If another branch merges an A10 first, renumber this one, as A8 was.
+
+### Why
+
+The BFF gains an MCP server (`/mcp/{area}`) that Microsoft 365 Copilot and Cowork call through a **federated connector**, a plugin package (`agentConnectors`) or a declarative agent. In each case **Microsoft's token store is the OAuth client**: it signs the user in, holds the tokens and sends a bearer token with each MCP call. A1–A9 don't cover that client:
+- **The connector's Entra SSO option issues tokens from the user's home directory.** A Model 1 licensed core user's `systemuser` is keyed on their **guest `oid` in the Spaarke tenant** (A8), so a home-directory token matches no `systemuser`. It also cannot be exchanged on-behalf-of for Spaarke-tenant Dataverse.
+- **The decision tools run as the caller** (OBO through `DataverseUserClient`), exactly as the Console does. They need a Spaarke-tenant token for a licensed user, the token A8 already gives the Office add-ins.
+
+### New MUST rules (Copilot / Cowork connector plane)
+
+- **MUST** register the connector with **OAuth 2.0 and an authority pinned to the Spaarke tenant**: authorize and token endpoints at `https://login.microsoftonline.com/{Spaarke tenant id}/oauth2/v2.0/…`, PKCE on. The April 2026 Copilot plugin used this shape (`src/solutions/CopilotAgent/spaarke-bff-openapi.yaml:1301-1302`).
+- **MUST** request `api://{bffAppId}/user_impersonation` (A8's scope), so the token's `aud` is that stamp's BFF app. No new audience or scope is added; `AgentToken:CopilotAudience` is not used by this plane.
+- **MUST** treat the connector plane as an **internal workforce plane**, like Code Pages and PCF. Tools run as the caller: OBO to Dataverse and Graph through the existing workforce paths, and authorization by the existing server-side checks (for example `DecisionCallerRights`). It is not a collaboration plane, so A1–A3's broker-only rule does not apply to it.
+- **MUST** serve only callers that resolve to a **`systemuser`** (licensed core users). A token that resolves to no `systemuser` gets the existing `UserContextRequired` refusal.
+- **MUST** use a **dedicated connector client registration in the Spaarke tenant**, single-tenant, pre-authorized on the stamp's BFF app. It is not the BFF app, the A8 workforce client or the A9 SPA client. Prefer a **public client with PKCE** if the connector registration accepts one (no credential at all). If the registration requires a client secret:
+  - the secret lives **only in Microsoft's connector OAuth registration** (Teams Developer Portal), never in BFF configuration, app settings or Key Vault references the BFF reads;
+  - **one connector client per customer stamp**, so a credential is never shared across customers;
+  - it has a named owner, an expiry no longer than 180 days, and a rotation runbook (`docs/guides/`), and creating or rotating it is confirmed by a human (CLAUDE.md §9).
+- **MUST** map `/mcp/*` with an explicit `.RequireAuthorization()` on the **default workforce scheme**, with tool-level policies (BFF hygiene; route guard `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` extended to `MapMcp`).
+
+### New MUST NOT rules
+
+- **MUST NOT** use the connector's **Entra SSO** option for Model 1. Entra SSO stays available for **Model 2** (customer-tenant stamps, where home directory = stamp tenant) under a further decision.
+- **MUST NOT** accept **CIAM** (A1) or **A9 home-directory** tokens on `/mcp/*`.
+- **MUST NOT** pass the caller's token through to any downstream service; exchange it OBO, as every workforce path does.
+- **MUST NOT** rely on the Copilot host to confirm a write. Writes are enforced server-side: an explicit action, idempotency and an audit record.
+- **MUST NOT** log the bearer token or its claims on `/mcp/*` beyond the audit enrichment this ADR already requires (`oid`, `appid`, `obo`, `tenantId`, `correlationId`).
+
+### Scope and preserved invariants
+
+- **v1** (`spaarkeai-mcp-bff-api-r1`) runs in the BFF's own tenant, where users are members, not guests. It uses this Model 1 shape anyway, so the production route is tested from the start.
+- **Open, decided by the driver project's Phase 0 test T5:** whether a connector created in a customer's home directory accepts an OAuth registration whose authority is the Spaarke tenant, and whether the registration accepts a public client. If either fails, the driver project brings a follow-up amendment; it does not fall back silently.
+- **Unchanged:** A4 (secret-free credential for the BFF's own confidential clients, which this client is not), A5, A8's clients and scope, A9's home-directory rules, and the no-OBO rule on collaboration planes.
+
+### Alternatives considered and rejected
+
+- **Entra SSO for every model.** The token comes from the user's home directory, so a Model 1 guest matches no `systemuser`, and OBO into Spaarke-tenant Dataverse fails.
+- **A9's route: home-directory token plus the stored link.** The stored link identifies the `systemuser`, but a home-directory token cannot be exchanged OBO into the Spaarke tenant. Every tool would have to run app-only, impersonating the `systemuser` (as the A5 scope extension does for single confirmed writes). That would put a second authorization model on the decision services, which own their invariant as the caller.
+- **Reuse the A8 workforce client or the BFF app as the connector client.** The A8 client is a public SPA/NAA client with redirect URIs for Spaarke's own hosts; the BFF app is the resource. A dedicated client keeps the connector's consent, redirect URIs and any credential separate and revocable.
+- **Path A (project exception).** Every later Copilot capability (billing review, Patents, Trademarks) uses the same plane, so it is not a one-project deviation.
+
+> **Note (A10)**: Applied concise-only, like A1–A9. This concise ADR now carries Amendments A1–A10. A10 adds one workforce client plane. It adds no token exchange beyond the existing workforce OBO, and does not change any collaboration-plane rule.
+
 
 ## Documented MI exceptions
 

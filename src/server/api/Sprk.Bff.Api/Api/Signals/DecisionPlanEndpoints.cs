@@ -1,6 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Sprk.Bff.Api.Infrastructure.Dataverse;
-using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -61,190 +59,57 @@ public static class DecisionPlanEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // spaarkeai-mcp-bff-api-r1 task 016 (B-3, FR-07): the wizard's Person and Lookup search, scoped by the plan, read as the caller.
+        // Inherits this group's RequireAuthorization (the default workforce policy); never the ExternalCollaboration policy.
+        group.MapGet("/{signalId:guid}/lookup", SearchDecisionLookupAsync)
+            .WithName("SearchSignalDecisionLookup")
+            .WithSummary("Search the candidates for a person or lookup parameter of a Signal's decision plan")
+            .WithDescription("The table and its scope come from the Signal's decision plan for parameterCode, never from the caller: "
+                + "active contacts for a person, the active budgets of the Signal's matter for a budget (D-18), active organisations for a "
+                + "firm. Read as the caller, at most 25 by name. 404 when the Signal or its core record is not readable by the caller "
+                + "(as the decision-plan route); 403 when the caller cannot be resolved; 422 when parameterCode is not a person or lookup "
+                + "parameter of the plan or the plan does not resolve; 503 when the search could not be read.")
+            .Produces<DecisionLookupResponse>(200)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
+    /// <summary>The lookup route over <see cref="IDecisionLookupSearch.SearchAsync"/> (task 016, B-3): HTTP shaping only.</summary>
+    /// <remarks>
+    /// <para><b>Placement justification (CLAUDE.md section 10; .claude/constraints/bff-extensions.md).</b> The search needs the decision
+    /// plan and the caller's OBO Dataverse client, both BFF-only (spec "Placement Justification"). In this existing group so it inherits the
+    /// group's authorization and EndpointMappingExtensions is unchanged. The search service is <c>[FromServices]</c> so a host that maps
+    /// this group without registering it (the task 011 golden-baseline host) still starts; production registers it unconditionally
+    /// (SignalsModule).</para>
+    /// </remarks>
+    internal static async Task<IResult> SearchDecisionLookupAsync(
+        Guid signalId,
+        [FromQuery] string? parameterCode,
+        [FromQuery] string? query,
+        HttpContext httpContext,
+        [FromServices] IDecisionLookupSearch search,
+        CancellationToken ct) =>
+        DecisionResultMapper.ToHttp(await search.SearchAsync(httpContext, signalId, parameterCode, query, ct), httpContext);
+
+    /// <summary>The suppression route over <see cref="IDecisionCapability.GetSuppressionAsync"/> (task 013, B-1): HTTP shaping only.</summary>
     internal static async Task<IResult> GetSuppressionAsync(
         Guid signalId,
         HttpContext httpContext,
-        SignalCoreRecordAccess signalAccess,
-        SignalSuppressionService suppression,
-        IDataverseUserClient caller,
-        ILogger<SignalSuppressionService> logger,
-        CancellationToken ct)
-    {
-        var decision = await signalAccess.AuthorizeAsync(signalId, ct);
-        if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
-        {
-            return CallerUnresolved(httpContext);
-        }
+        IDecisionCapability decisions,
+        CancellationToken ct) =>
+        DecisionResultMapper.ToHttp(await decisions.GetSuppressionAsync(httpContext, signalId, ct), httpContext);
 
-        if (decision.Outcome == SignalAccessOutcome.Unavailable)
-        {
-            return AccessUnavailable(httpContext);
-        }
-
-        if (decision.Outcome != SignalAccessOutcome.Allowed)
-        {
-            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
-        }
-
-        // The caller may read this Signal and its core record, so the count is theirs to see. The count is trimmed to the Signals the
-        // caller's own read returns; the Decision-Record facts for those rows (not readable to Console users) are read with the BFF's own
-        // reader, and only the numbers and the date are returned.
-        SuppressionStatus? status;
-        try
-        {
-            // D-145a (task 152): a Do item's count is its person's own, and only that person is told it.
-            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct, decision.CallerContactId);
-        }
-        catch (SuppressionPartitionUndeterminedException)
-        {
-            // #1661 round 2 K5: a data condition, not a fault. A retry does not change it, so the caller is not told to retry; the
-            // Signal's secure family cannot be known, so its count is never answered (never one from across the wall).
-            logger.LogWarning("Suppression count withheld: the secure-family partition of Signal {SignalId} is undetermined; answering 503.", signalId);
-            return Results.Problem(
-                title: "Service Unavailable",
-                detail: "The suppression count is not available for this Signal because the secure records it belongs to cannot be determined.",
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = PartitionUndeterminedReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                });
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            // AFTER Allowed: the caller is authorized, so this is a fault of ours, not a denial. A timeout (a cancellation the caller did
-            // not ask for) is the same. 503 with the trace id, never a guessed count and never the uniform 404 (that answer is for "not yours").
-            logger.LogError(ex, "Suppression count failed for an authorized caller (Signal {SignalId}); answering 503.", signalId);
-            return Results.Problem(
-                title: "Service Unavailable",
-                detail: "The suppression count could not be read. Try again.",
-                statusCode: StatusCodes.Status503ServiceUnavailable,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = SuppressionUnavailableReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                });
-        }
-
-        return status is null
-            ? ProblemDetailsHelper.UniformRecordNotFound(httpContext)
-            : Results.Ok(SuppressionResponse.From(signalId, status));
-    }
-
-    /// <summary>A no-core Signal's subject, or a Do-lane Signal's "mine" read, could not be answered because of a fault: 503, never the
-    /// uniform 404 (that is for "not yours").</summary>
-    private static IResult AccessUnavailable(HttpContext httpContext) =>
-        Results.Problem(
-            title: "Service Unavailable",
-            detail: "This item could not be checked right now. Try again.",
-            statusCode: StatusCodes.Status503ServiceUnavailable,
-            extensions: new Dictionary<string, object?>
-            {
-                ["reasonCode"] = AccessUnavailableReasonCode,
-                ["correlationId"] = httpContext.TraceIdentifier,
-            });
-
-    private static IResult CallerUnresolved(HttpContext httpContext) =>
-        Results.Problem(
-            title: "Forbidden",
-            detail: "The caller could not be resolved to a Dataverse user.",
-            statusCode: StatusCodes.Status403Forbidden,
-            extensions: new Dictionary<string, object?>
-            {
-                ["reasonCode"] = CallerUnresolvedReasonCode,
-                ["correlationId"] = httpContext.TraceIdentifier,
-            });
-
+    /// <summary>The decision-plan route over <see cref="IDecisionCapability.GetPlanAsync"/> (task 013, B-1): HTTP shaping only. The
+    /// capability writes the plan-read stamp (task 043, K4) exactly as this route did.</summary>
     internal static async Task<IResult> GetDecisionPlanAsync(
         Guid signalId,
         HttpContext httpContext,
-        SignalCoreRecordAccess signalAccess,
-        DecisionPlanService planService,
-        RuleBodyDescriber describer,
-        CancellationToken ct,
-        [FromServices] DecisionPlanReadStamp? planReadStamp = null,
-        [FromServices] DecisionParameterSources? parameterSources = null)
-    {
-        var decision = await signalAccess.AuthorizeAsync(signalId, ct);
-        if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
-        {
-            return CallerUnresolved(httpContext);
-        }
-
-        if (decision.Outcome == SignalAccessOutcome.Unavailable)
-        {
-            return AccessUnavailable(httpContext);
-        }
-
-        if (decision.Outcome != SignalAccessOutcome.Allowed || decision.Lane is not { } lane || decision.PolicyVersionId is not { } versionId)
-        {
-            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
-        }
-
-        var resolution = await planService.GetAsync(versionId, lane, ct);
-        if (resolution.Plan is not { } plan)
-        {
-            return Results.Problem(
-                title: "Unprocessable Entity",
-                detail: "This Signal's decision plan does not resolve against the action catalog, so no actions can be offered.",
-                statusCode: StatusCodes.Status422UnprocessableEntity,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = PlanRefusedReasonCode,
-                    ["reason"] = resolution.RefusalReason,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                });
-        }
-
-        // Task 154 (D-111): an OPEN inquiry's "Record the outcome" To Do is completed by recording the disposition, never by Mark
-        // complete. Pass 2 F1: identified exactly as the commit route identifies it (the hint, else the To Do's matter's open
-        // inquiries), from the notes and matter the gate's own "mine" read returned, as the caller; only for a To Do whose plan offers
-        // Mark complete. Once the inquiry is closed the To Do is ordinary (adversarial pass 1). A fault offers nothing (503).
-        if (plan.Actions.Any(a => a.Code == ResolvedDecisionPlan.MarkCompleteCode))
-        {
-            var inquiry = await signalAccess.CheckSubjectTodoInquiryAsync(decision, ct);
-            if (inquiry == InquiryOutcomeTodoCheck.Unavailable)
-            {
-                return AccessUnavailable(httpContext);
-            }
-
-            if (inquiry == InquiryOutcomeTodoCheck.OpenInquiry)
-            {
-                plan = plan.WithoutMarkComplete();
-            }
-        }
-
-        // Task 161 (D-180): a matter with no active budget has nothing to revise, so Create budget takes Revise budget's place in the
-        // plan. Read as the caller; the commit route applies the same substitution (SignalCoreRecordAccess), so the two always agree.
-        // A count that cannot be read leaves Revise budget offered and never fails this read.
-        plan = await signalAccess.WithCreateBudgetWhenNoneAsync(plan, decision, ct);
-
-        // Task 160 (D-179): the budget inquiry's To pre-fill, read as the caller; none when it cannot be read. Never fails the read.
-        var inquiryRecipient = await signalAccess.ReadInquiryRecipientAsync(plan, decision, ct);
-
-        // Task 167 (D-193): the live option lists and starting values the plan's parameters name (Create budget's Category, Period and
-        // Currency), read once per source through the one resolver. Never fails the read: a list that cannot be read is empty.
-        var parameterFacts = parameterSources is null
-            ? DecisionParameterFacts.None
-            : await parameterSources.ForPlanAsync(
-                httpContext, plan,
-                string.Equals(decision.CoreTable, "sprk_matter", StringComparison.OrdinalIgnoreCase) ? decision.CoreId : null, ct);
-
-        // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
-        // as a guess; it does not stop the decision from being taken.
-        var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);
-
-        // Task 043 (K4): the server's own record of when this caller read this plan, so the commit route never trusts a client
-        // time to decide whether a system closure happened during the review. Best effort; it never fails the read.
-        if (planReadStamp is not null)
-        {
-            await planReadStamp.StampAsync(httpContext, signalId, ct);
-        }
-
-        return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description, inquiryRecipient, parameterFacts));
-    }
+        IDecisionCapability decisions,
+        CancellationToken ct) =>
+        DecisionResultMapper.ToHttp(await decisions.GetPlanAsync(httpContext, signalId, ct), httpContext);
 }
 
 /// <summary>The plan as the wizard consumes it.</summary>

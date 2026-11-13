@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Spike MCP server, echo tool and test widget</title>
+    <phase>0 Platform spike</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies code files (.cs, .ts) on the spike branch, and the spike is deployed to the dev BFF behind live auth</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single throwaway spike with explicit references (design.md §13, knowledge/mcp-apps samples); no production code merges</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs in its own worktree on spike/spaarkeai-mcp-phase0, so it shares no files with 011 or 017</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, minimal-api, typescript, frontend, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Cut spike/spaarkeai-mcp-phase0 from origin/master in its own worktree and build the smallest stateless MCP server in the BFF that Phase 0 needs: /mcp/legal-operations with an echo tool and an OBO WhoAmI tool, a second route with a different tool set (T13), and a single-file test widget at 1, 3 and 6 MB, so T0, T5, T13 and the size/init tests can run on the dev BFF.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal APIs, the ModelContextProtocol C# SDK and MCP Apps widgets.</role>
+  <goal>The spike branch exists (never merged) with a stateless, authenticated MCP endpoint, two tool sets on two routes, a spike_whoami OBO tool and a test widget resource in three sizes; local protocol checks pass; measurements are recorded in notes/spikes/phase0-spike-measurements.md on the project branch; the owner has a SHA to approve for the dev deploy.</goal>
+
+  <context>
+    <background>Spec FR-19 and design §13: Phase 0 gates the project (T5 gates everything, T0 gates the MCP build, T13 decides the route mechanism, Size decides NFR-03). Ontology condition 1 (project CLAUDE.md §3): no dev BFF deploy from work/spaarkeai-mcp-bff-api-r1 until ontology's #2580/#2579 pair deploys, so Phase 0 runs from a master-based spike branch, deployed only with the owner's per-SHA go in unified-access-control-r2's session.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/Mcp/Spike/SpikeMcpEndpoints.cs (spike branch only)</file>
+      <file role="new">src/client/widgets/spike-test/ (spike branch only: Vite single-file test widget)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (spike branch only: ModelContextProtocol.AspNetCore 2.3.1)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (spike branch only)</file>
+      <file role="new">projects/spaarkeai-mcp-bff-api-r1/notes/spikes/phase0-spike-measurements.md (project branch)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceMatterEndpoints.cs:196-200 (disable response buffering)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/DataverseUserClient.cs (OBO WhoAmI as the caller)</file>
+      <file role="canonical-reference">knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx</file>
+      <file role="canonical-reference">src/solutions/CreateMatterWizard/vite.config.ts (vite-plugin-singlefile)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/design.md §13 (Phase 0 tests) and §11 (hosting)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite task; startable in Wave 1.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">All spike code lives only on spike/spaarkeai-mcp-phase0 in a separate worktree cut from origin/master; nothing from the spike is merged into work/spaarkeai-mcp-bff-api-r1 or master; only the measurements note is written on the project branch (ontology condition 1).</constraint>
+    <constraint source="ADR-028">Every spike route calls .RequireAuthorization() on the default workforce scheme; the spike adds no anonymous route and changes no authentication scheme or AuthorizationModule.cs code (root CLAUDE.md §9).</constraint>
+    <constraint source="ADR-015">spike_whoami returns only the caller's systemuserid and the decoded aud, scp, tid and oid claim NAMES with a present/absent flag for each, never the token or claim values beyond those ids, and logs nothing but ids and timings.</constraint>
+    <constraint source="ADR-052">The spike adds no background work; it runs stateless (SDK default, no session store).</constraint>
+    <constraint source="ADR-029">Every change this task makes under src/server/api/Sprk.Bff.Api/ is listed in the PR with a Placement Justification that cites .claude/constraints/bff-extensions.md (source text: spec.md 'Placement Justification'), and the PR records the publish-size delta against a fresh master build per .claude/constraints/azure-deployment.md 'BFF Publish-Size Per-Task Verification Rule': a delta of +5 MB or more needs explicit justification, a total of 55 MB or more triggers architecture review, and the total must stay at or under 60 MB (hard stop). No new HIGH CVE (dotnet list package --vulnerable --include-transitive).</constraint>
+    <constraint source="project">Deploys of the spike happen only with the owner's explicit go for that SHA in unified-access-control-r2's session (project CLAUDE.md §5); this task never deploys on its own.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>knowledge/mcp-apps/NOTES.md</file>
+      <file>knowledge/mcp-apps/approvals-box</file>
+      <file>knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx</file>
+      <file>.claude/skills/widget-design/SKILL.md</file>
+      <file>.claude/skills/mcp-tool-handler/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/mcp-project-research-starter.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Worktree removal" location="scripts/worktree/Remove-WorktreeSafe.ps1">Remove the spike worktree only with this script (FAILURE-MODES G-20); never git worktree remove.</pattern>
+      <pattern name="Response buffering off" location="src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceMatterEndpoints.cs">Lines 196-200 disable buffering for streamed responses.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">From the repo, create the spike worktree: git worktree add ../spaarke-wt-spaarkeai-mcp-phase0-spike -b spike/spaarkeai-mcp-phase0 origin/master; work only there for code.</step>
+    <step order="2">Add ModelContextProtocol.AspNetCore 2.3.1; map a stateless MCP endpoint at /mcp/legal-operations (tools spike_echo, readOnly, and spike_whoami, readOnly, OBO WhoAmI through DataverseUserClient) and a second endpoint /mcp/spike-area-b with a different tool (spike_echo_b) to test T13; .RequireAuthorization() on both; response buffering disabled.</step>
+    <step order="3">Build a single-file test widget (Vite + vite-plugin-singlefile, @modelcontextprotocol/ext-apps 2.0.4) served by resources/read as ui://spaarke/spike.html with mimeType text/html;profile=mcp-app and an empty _meta.ui.csp; produce padded variants of about 1, 3 and 6 MB exposed as three resources (or one resource selected by a spike-only tool argument).</step>
+    <step order="4">Write in-process checks on the spike branch: tools/list per route returns that route's tools only; a request without Accept: application/json, text/event-stream gets 406; an anonymous request gets 401 with WWW-Authenticate; resources/read returns the MIME type above.</step>
+    <step order="5">Measure the publish-size delta against a fresh master build and the three widget file sizes.</step>
+    <step order="6">Record in notes/spikes/phase0-spike-measurements.md on the project branch: spike head SHA, SDK 2.3.1 API used (stateless options, route mapping, tool filtering), ext-apps 2.0.4 API differences from the 1.x samples (risk R13), local T13 result, publish-size delta, widget sizes.</step>
+    <step order="7">Hand the spike head SHA to the owner for a per-SHA deploy go in unified-access-control-r2's session; record the deployed URL when the owner confirms the deploy.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>Before any deploy of the spike, STOP and request the owner's explicit go for the exact SHA (project CLAUDE.md §5); do not deploy without it.</trigger>
+    <trigger>If SDK 2.3.1 cannot serve a stateless endpoint behind the existing default workforce scheme without changing AuthorizationModule.cs, STOP and escalate (root CLAUDE.md §6) rather than altering auth.</trigger>
+    <trigger>If two tool sets cannot be served on two routes in one host (T13 fails locally), record the fallback 'one route that filters tools by path' and escalate the decision to the owner before 020 starts.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None for MCP serving: grep -n ModelContextProtocol src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj returns nothing; the April surface (Api/Agent/AgentEndpoints.cs:37-107, OpenAPI plugin) cannot carry MCP Apps widgets.</existing>
+    <extension>No: the spike must prove the transport, auth through a connector and widget rendering before production code depends on them (FR-19); it lives on an unmerged branch and is discarded at wrap-up.</extension>
+    <cost-of-doing-nothing>T0, T5, T13 and the Size test cannot run, so FR-19 fails, FR-01's route mechanism and NFR-03's budget have no evidence, and Phase B would be built on untested platform assumptions.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Test widget renders in a local MCP Apps host">
+      <url>http://localhost:{basic-host-port}/</url>
+      <steps>
+        <step>Start the ext-apps basic host (or MCP Inspector) against the local spike BFF with a dev test token</step>
+        <step>Call a tool whose result points at ui://spaarke/spike.html</step>
+        <step>Verify the widget renders and calls spike_echo through callServerTool</step>
+        <step>Check the browser console for JavaScript errors</step>
+      </steps>
+      <expected>The widget renders, the echo round-trip succeeds, and the console shows no errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch the host theme to dark</step>
+        <step>Verify the widget background and text follow the host theme (no white surface in dark mode)</step>
+      </steps>
+      <expected>Colours come from Fluent v9 semantic tokens driven by host context</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (dotnet build src/server/api/Sprk.Bff.Api/, dotnet test)</tool>
+    <tool name="terminal">Run shell commands</tool>
+    <tool name="npm">Install (npm install --legacy-peer-deps --no-audit --no-fund), build and test TypeScript projects</tool>
+    <tool name="git">git worktree add for the spike branch only</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">spike/spaarkeai-mcp-phase0 branch (worktree ../spaarke-wt-spaarkeai-mcp-phase0-spike)</output>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/spikes/phase0-spike-measurements.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given origin/master, the branch spike/spaarkeai-mcp-phase0 exists in its own worktree, and git log work/spaarkeai-mcp-bff-api-r1 contains no spike commit.</criterion>
+    <criterion testable="true">tools/list on /mcp/legal-operations returns exactly spike_echo and spike_whoami, and tools/list on /mcp/spike-area-b returns exactly spike_echo_b; or, if T13 fails, the note records the failure and the path-filtering fallback.</criterion>
+    <criterion testable="true">Negative: an anonymous request to either route returns 401 with a WWW-Authenticate header; a request without the dual Accept header returns 406.</criterion>
+    <criterion testable="true">resources/read for each widget size returns mimeType text/html;profile=mcp-app and an empty _meta.ui.csp.</criterion>
+    <criterion testable="true">spike_whoami, called with a valid workforce token, returns the caller's systemuserid obtained OBO; its result and logs contain no token or claim value other than ids.</criterion>
+    <criterion testable="true">notes/spikes/phase0-spike-measurements.md records the spike head SHA, publish-size delta, the three widget sizes, the SDK and ext-apps API notes and the local T13 result.</criterion>
+    <criterion testable="true">No deploy occurred without a recorded owner go for the deployed SHA.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §13 lists T0–T14 and E1–E5; this task only builds what they need — 003 runs and records them. Remove the spike worktree at project wrap-up with scripts/worktree/Remove-WorktreeSafe.ps1 (FAILURE-MODES G-20). The plan's Discovered Resources path for useMcpApp.tsx is missing the src/ segment; the correct path is knowledge/mcp-apps/trey-research/src/mcpserver/widgets/src/hooks/useMcpApp.tsx. Use dotnet build/test without --no-build after edits (FAILURE-MODES G-12).
+Completed 2026-11-12 (closed out after the fact; the build work was done 2026-11-06 to 11-10). The spike branch spike/spaarkeai-mcp-phase0 is at tip 755987b385 (pushed, never merged; draft PR #2615) in worktree C:\code_files\spaarke-wt-spaarkeai-mcp-phase0-spike. Local checks passed (19 spike tests): T13 two tool sets on two routes, 401 + WWW-Authenticate, 406 without the dual Accept, resources/read MIME type text/html;profile=mcp-app with an empty csp. Publish delta +0.703 MB. Widget variants 1/3/6 MB. All recorded in notes/spikes/phase0-spike-measurements.md (updated 2026-11-12).
+Deployed to the dev BFF 2026-11-10 by mcp-r1 on the owner's per-SHA go for 755987b385 (given in the mcp-r1 session). Since 2026-11-11 uac-r2 includes it in every dev deploy (currently 6dbe69b9e2). Live: anonymous POST 401; T5 passed 2026-11-12; the widget rendered in Copilot Chat (web) and its callServerTool echo worked, which covers the ui-tests' render and round-trip. The dark-mode check is left to 003 (T1/T2).
+Deviation: the 3 and 6 MB variants are not bound to a tool, so 003's Size test needs a small spike change and a new owner-approved SHA.
+rework: none task 001</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

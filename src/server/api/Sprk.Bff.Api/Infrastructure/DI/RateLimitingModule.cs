@@ -10,6 +10,12 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// </summary>
 public static class RateLimitingModule
 {
+    /// <summary>The "mcp" policy name, used by <c>McpEndpoints</c>.</summary>
+    internal const string McpPolicyName = "mcp";
+
+    /// <summary>The "mcp" policy's permits per caller per minute.</summary>
+    internal const int McpPermitLimit = 60;
+
     /// <summary>
     /// Adds rate limiting services with the named policies below and a ProblemDetails rejection handler.
     /// </summary>
@@ -263,6 +269,23 @@ public static class RateLimitingModule
                     Window = TimeSpan.FromMinutes(1),
                     PermitLimit = 60,
                     QueueLimit = 5,
+                    SegmentsPerWindow = 6
+                });
+            });
+
+            // 14. MCP - every /mcp/{area} request (spaarkeai-mcp-bff-api-r1 task 020, FR-01, ADR-016): 60 requests/min per caller,
+            //     sliding window, no queue. One chat turn is 2-4 stateless calls (initialize, tools/list, tools/call) and a widget
+            //     adds its own callServerTool calls, so a person at normal pace stays well under 60; a runaway widget or a looping
+            //     model hits 429 (a refusal is answered at once, never held) while every other caller keeps their own budget. Keyed on the
+            //     caller (GetUserId), so Copilot and Cowork traffic from different users never shares a bucket.
+            options.AddPolicy(McpPolicyName, context =>
+            {
+                var userId = GetUserId(context);
+                return RateLimitPartition.GetSlidingWindowLimiter(userId, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = McpPermitLimit,
+                    QueueLimit = 0,
                     SegmentsPerWindow = 6
                 });
             });

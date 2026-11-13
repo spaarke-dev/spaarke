@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarkeai-mcp-bff-api-r1">
+  <metadata>
+    <title>Run and record Phase 0 tests T0–T14, E1–E5</title>
+    <phase>0 Platform spike</phase>
+    <gate>after 001 and 002</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Testing tags; creates a new results file; live test execution in the dev tenant</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Records live outcomes against the fixed test list in design.md §13; each judgment boundary has an escalation trigger</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes notes only (and 043's status if T1 passes); shares no file with 014 or 016</parallel-reason>
+    <deps>001, 002</deps>
+    <tags>testing, e2e-test, integration-test</tags>
+    <estimated-effort>4-8 hours (elapsed time depends on the owner)</estimated-effort>
+  </metadata>
+
+  <prompt>Run every Phase 0 test in design.md §13 (T0–T14, E1–E5, Size) against the spike in the dev tenant with the owner and a licensed non-admin user, and record each result, date and decision in notes/phase0-results.md, applying the gates: T5 fail stops the project; T0 gates 020+; T1 decides whether 043 is built; T13 fixes the route mechanism; Size sets 030's budget.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Microsoft 365 Copilot Chat, Cowork, federated connectors and MCP Apps behaviour testing.</role>
+  <goal>notes/phase0-results.md has one row per test (T0–T14, E1–E5, Size) with date, route, result, evidence and decision, and the gate decisions are applied to the task set.</goal>
+
+  <context>
+    <background>Spec FR-19: every test has a dated result and decision before dependent build; T5 gates everything, T0 gates the MCP build, T1 decides FR-17. Risk R1 (no widget through the connector in Chat) is decided here.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/tasks/043-spaarke-ai-agent-fallback.poml (status only, if T1 passes)</file>
+      <file role="modify">projects/spaarkeai-mcp-bff-api-r1/tasks/TASK-INDEX.md (043 row, if T1 passes)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/design.md §13 (test list and gates)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/spikes/phase0-spike-measurements.md (from 001)</file>
+      <file role="canonical-reference">projects/spaarkeai-mcp-bff-api-r1/notes/phase0-registration-facts.md (from 002)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite task; startable in Wave 1.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every result in this task comes from a live run in the dev tenant against the deployed spike; nothing is recorded from documentation alone (each row names its evidence: screenshot path, record id or transcript excerpt).</constraint>
+    <constraint source="ADR-028">Consent and approval behaviour (T3, T4, E1–E5) is tested with a licensed non-admin user, not the owner's admin account (design §13).</constraint>
+    <constraint source="project">If T1 shows the widget renders in Copilot Chat through the connector, set task 043's POML status to cancelled and its TASK-INDEX cell to 🚫 [cancelled] with the T1 evidence; otherwise leave 043 open.</constraint>
+    <constraint source="ADR-015">Evidence saved in notes contains no tokens, claim values or privileged record text.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/design.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/notes/copilot-as-spaarke-surface-2026-11-05.md</file>
+      <file>.claude/agent-memory/researcher/copilot-as-spaarke-surface-and-frontier-2026-11-05.md</file>
+      <file>knowledge/mcp-apps/NOTES.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/spec.md</file>
+      <file>projects/spaarkeai-mcp-bff-api-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Create notes/phase0-results.md with one row per test from design.md §13: T0–T14, E1–E5 and Size (columns: test, date, route/host, result, evidence, decision).</step>
+    <step order="2">Run T5 first (or import its dated result from 002); if it failed, apply the T5 gate immediately (escalation below).</step>
+    <step order="3">Run T0 (stateless calls, Accept/406 through the connector) and T13–T14 (two routes, display name in Sources and on the approval card, two connectors in one app package).</step>
+    <step order="4">Run T1 and T2 (widget rendering in Chat, Cowork, Word, Outlook; connector vs plugin package), T3–T4 (write confirmation behaviour), T6 (20 prompts without 'Spaarke'), T7–T12 (informational) and E1–E5 (entry points).</step>
+    <step order="5">Run Size: init time of the 1, 3 and 6 MB widgets in Chat and Cowork; record the budget recommendation for 030 (aim under 1 MB, ceiling 3 MB).</step>
+    <step order="6">Apply the gates: T1 → 043 cancelled or kept; T13 → route mechanism note for 020; Size → budget note for 030; T3/T4 → wizard copy note for 032.</step>
+    <step order="7">Ask the owner to review notes/phase0-results.md (spec success criterion 1) and record the review date.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status cell to `✅ [done]` (the bracketed ASCII token is mandatory, the emoji alone is not greppable: task-create Step 5, FAILURE-MODES G-16), set the POML &lt;status&gt; to completed, and run pwsh scripts/check-task-status-drift.ps1</step>
+    <step order="9">If any deviations from plan, document in projects/spaarkeai-mcp-bff-api-r1/notes/ (decisions go to notes/decisions.md)</step>
+  </steps>
+
+  <escalation>
+    <trigger>If T5 fails, STOP the project: record it, output 🔔 Human Input Required, and propose the follow-up ADR-028 amendment (A10 'no silent fallback'); do not start any task that depends on connector auth.</trigger>
+    <trigger>If T0 fails (no stateless MCP call through the connector), STOP and escalate before 020 starts.</trigger>
+    <trigger>If a test cannot be run (feature not rolled out, e.g. MC1493223 for / skills in Chat), record 'not runnable' with the date and reason and escalate only if it is T5, T0 or T1.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Widget renders through the connector (T1)">
+      <url>https://m365.cloud.microsoft/chat</url>
+      <steps>
+        <step>Sign in as the licensed non-admin test user</step>
+        <step>Ask a prompt that calls the spike tool through the 'Spaarke MCP' connector (Copilot shows its tools as `SpaarkeMCP_&lt;tool&gt;`; the user needs a Microsoft 365 Copilot licence)</step>
+        <step>Verify whether the ui://spaarke/spike.html widget renders in Chat; repeat in Cowork</step>
+        <step>Check the browser console for JavaScript errors from the widget frame</step>
+      </steps>
+      <expected>Render / no-render is recorded per host with a screenshot path</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Switch Microsoft 365 to dark theme</step>
+        <step>Verify the test widget follows the host theme</step>
+      </steps>
+      <expected>The widget adapts to dark theme with no white surface</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">Run shell commands (grep, wc, git diff)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-mcp-bff-api-r1/notes/phase0-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/phase0-results.md has a dated row for each of T0–T14, E1–E5 and Size, each with result, evidence and decision (FR-19).</criterion>
+    <criterion testable="true">T5, T0 and T1 each have an explicit gate decision; T13 has a route-mechanism decision; Size has a budget recommendation.</criterion>
+    <criterion testable="true">Negative: if T5 failed, the note records the stop and the ADR-028 follow-up proposal, and no dependent task was started.</criterion>
+    <criterion testable="true">If T1 passed, 043's POML status is cancelled and its TASK-INDEX cell shows 🚫 [cancelled]; scripts/check-task-status-drift.ps1 exits 0.</criterion>
+    <criterion testable="true">Consent and approval tests name the non-admin test user used (no admin results recorded as user behaviour).</criterion>
+    <criterion testable="true">The owner's review of the results is recorded with a date.</criterion>
+  </acceptance-criteria>
+
+  <notes>design.md §12 says 'T1–T12' for live tests; §13 is the authoritative list (T0–T14, E1–E5, Size). Ignite (17–20 Nov 2026) may change Chat widget support for connectors (R1): re-check T1 after Ignite if it failed, and record the re-check.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>
