@@ -135,10 +135,12 @@ internal sealed class OwnershipDirectory
     /// The REAL resolver over this directory, with the Secure Record names configured explicitly. A <paramref
     /// name="fault"/> makes every directory read throw it — a Dataverse fault, which must propagate. fm task 054 (F1):
     /// <paramref name="directMessageOwnerTeam"/> is the Direct message owner team lookup the resolver composes (none by default).
+    /// fm task 052b: <paramref name="customerContactOwner"/> is the contact owner lookup (none by default: every contact is refused).
     /// </summary>
     public RecordOwnershipResolver Resolver(
         Exception? fault = null, ILogger<RecordOwnershipResolver>? logger = null,
-        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ContactIdentityBinder? customerContactOwner = null)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
@@ -180,7 +182,8 @@ internal sealed class OwnershipDirectory
         }).Build();
 
         return new RecordOwnershipResolver(
-            entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance, directMessageOwnerTeam);
+            entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance, directMessageOwnerTeam,
+            customerContactOwner);
     }
 
     /// <summary>
