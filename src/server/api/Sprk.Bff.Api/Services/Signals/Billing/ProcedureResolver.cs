@@ -1025,11 +1025,13 @@ public static class ProcedureResolver
             {
                 ColumnSet = new ColumnSet(
                     ProcedureEntity.NameColumn, ProcedureEntity.AreaColumn, ProcedureEntity.AppliesToColumn, ProcedureEntity.FirmColumn,
-                    ProcedureEntity.StatusColumn),
+                    ProcedureEntity.StatusColumn, "statecode"),
                 NoLock = true,
             };
             query.Criteria.AddCondition(ProcedureEntity.AreaColumn, ConditionOperator.Equal, RuleDomains.PolicyDomainBilling);
             query.Criteria.AddCondition(ProcedureEntity.StatusColumn, ConditionOperator.Equal, ProcedureEntity.StatusActive);
+            // ISS-021: a Procedure deactivated in Dataverse (statecode Inactive) is not applicable, whatever its Status says.
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, StateActive);
             var sources = new FilterExpression(LogicalOperator.Or);
             if (i == 0)
             {
@@ -1048,9 +1050,11 @@ public static class ProcedureResolver
             query.Criteria.AddFilter(sources);
             foreach (var row in await AllAsync(entities, query, ct).ConfigureAwait(false))
             {
-                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1).
+                // Re-checked: Billing area, Active (an assignment to a Retired Procedure is ignored: 089b review 2 K1), and not deactivated
+                // (ISS-021: an assignment to a deactivated Procedure is ignored too).
                 if (row.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling
-                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive)
+                    || row.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value != ProcedureEntity.StatusActive
+                    || row.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or StateActive))
                 {
                     continue;
                 }
