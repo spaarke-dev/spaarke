@@ -51,7 +51,7 @@ Decide with the Copilot surface's owner. `spaarkeai-mcp-bff-api-r1` replaces thi
 
 | Field | Value |
 |---|---|
-| **Status** | Open (pre-existing on master; not caused by this project) |
+| **Status** | Done 2026-11-13 — PR #2759 merged to master (`0d676cc66a`); #2756 closed |
 | **Urgency** | soon (MCP routes now reach the handler) |
 | **Filed** | 2026-11-12 |
 | **Source** | Task 020 adversarial review |
@@ -71,7 +71,7 @@ Fix in review 2026-11-12: PR #2759 (branch `fix/2756-ratelimit-log-claim`) logs 
 
 | Field | Value |
 |---|---|
-| **Status** | Open (pre-existing on master; not caused by this project) |
+| **Status** | Done 2026-11-13 — PR #2763 merged to master (`2da422bb9c`, uac-r2 auth gate PASS); #2762 closed |
 | **Urgency** | soon (before `Mcp:Enabled` goes on in dev, task 041) |
 | **Filed** | 2026-11-12 |
 | **Source** | Task 021 adversarial review, pass 1 (reproduced with an expired connector-shaped token on `POST /mcp/legal-operations`) |
