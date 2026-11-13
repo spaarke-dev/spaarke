@@ -93,8 +93,11 @@ export interface WizardFrameProps {
   /** Both lists must be read again: the write succeeded (or part of it did). */
   onChanged: OnChanged;
   onClose: () => void;
-  /** Words added to a refusal's text (a hint for one code), or null. */
-  refusalHint?: (failure: WriteFailure) => string | null;
+  /**
+   * Words added to a refusal's text (a hint for one code), or null. `partial`: the plan's first call was accepted before this refusal, so the
+   * partial note follows; a hint must not contradict it (084c fix round 1, F3-4).
+   */
+  refusalHint?: (failure: WriteFailure, partial: boolean) => string | null;
   /** Task 084c: the "New values" step, for the choice that needs one. */
   valuesStep?: ValuesStep;
   /** Told of every refusal of the write (before the error bar shows it), so a form can put the server's field errors on its fields. */
@@ -167,7 +170,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     if (!run.ok) {
       const failure = run.failure as WriteFailure;
       p.onRefused?.(failure);
-      const text = [failureText(failure), p.refusalHint?.(failure)].filter((x): x is string => !!x).join(' ');
+      const text = [failureText(failure), p.refusalHint?.(failure, run.completed > 0)].filter((x): x is string => !!x).join(' ');
       if (run.completed > 0) {
         // The first call of the plan was accepted and the second was refused: the record's override changed, so the lists are read again,
         // and the wizard (still on the row it was opened with, whose override is now gone) waits for the re-read row.

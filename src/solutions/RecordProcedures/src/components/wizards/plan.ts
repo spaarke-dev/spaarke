@@ -8,6 +8,8 @@
  *
  * Task 084c adds "Change for this record" to the rule wizard: a `changeRule` step is the one call to `rule-overrides/change`. A rule that
  * already has this record's Exclude gets it removed first (089 keeps one row per record and rule: a change of it is 409 `assignment.duplicate`).
+ * Fix round 1 (F1-1): a rule already changed on this record is changed again the same way: its change is removed, then the BASE rule (the
+ * `Changed` mark's `basePolicyId`) is changed.
  */
 
 import type { OverrideView, ProcedureItem, RuleItem, RuleMark } from '../../services/recordProceduresApi';
@@ -202,23 +204,37 @@ export function excludeBlocker(r: RuleItem): string | null {
   return null;
 }
 
+/** Why a rule whose base rule is retired offers no Change (084c fix round 1, F1-7): checked before the type, which such a row does not carry. */
+export const BASE_RETIRED_NO_CHANGE = 'Not available: the published rule is no longer in force, so there is nothing to change. Remove the change instead.';
+
+/** Why a rule changed here cannot be changed again: the read did not name the published rule, or the change's own row (an older BFF). */
+export const RECHANGE_NOT_NAMED = 'This rule is already changed on this record, and the published rule it replaces is not named here. Run the published rule first, then change it again.';
+
 /**
  * Whether "Change for this record" can be chosen, and why not (task 084c):
+ *   - a record rule whose base rule is retired has nothing published to change (084c fix round 1, F1-7: said before the type, which it lacks);
  *   - a type this page has no form for, or whose form says it is not changed (a rate card rule: pin the Procedure version; a type with no
  *     values), offers no Change;
  *   - P-3: a rule a parent excluded or changed is changed on the parent;
- *   - a rule already changed on this record is the record rule: the change names the PUBLISHED rule (the read model does not carry its id on
- *     the record rule), so the change is removed first (Run the published rule) and made again.
+ *   - a rule already changed on this record (084c fix round 1, F1-1) is changed again by removing its change and changing the BASE rule, so
+ *     its `Changed` mark must name the base rule (`basePolicyId`) and its own row (`overrideRowId`).
  */
 export function changeBlocker(r: RuleItem): string | null {
+  if (isBaseRetired(r)) return BASE_RETIRED_NO_CHANGE;
   const form = formFor(r.ruleType);
   if (!form) return `Not available: this page has no form for the rule type ${r.ruleType ?? '(unknown)'}.`;
   if (form.noChange) return form.noChange;
   const inherited = inheritedOverride(r);
   if (inherited) return `Not available: the parent's rule ${inherited.kind === 'Excluded' ? 'exclusion' : 'change'} applies to this record. Change it on the parent.`;
-  if (ownChange(r) || r.recordRule) return 'This rule is already changed on this record. Run the published rule first, then change it again.';
+  if (ownChange(r) || r.recordRule) {
+    const own = ownChange(r);
+    if (!own?.basePolicyId || !own.overrideRowId) return RECHANGE_NOT_NAMED;
+  }
   return null;
 }
+
+/** The policy a change names: the base rule for a rule changed here (084c fix round 1, F1-1), else the rule itself. */
+export const changeTargetPolicyId = (r: RuleItem): string => ownChange(r)?.basePolicyId ?? r.policyId;
 
 /** O-20: a rule that names one firm can only be excluded (or changed) for that firm. */
 export const fixedFirmId = (r: RuleItem): string | null => r.firmScope?.id ?? null;
@@ -243,10 +259,12 @@ export function planRule(r: RuleItem, choice: RuleChoice, input: RuleInput): Pla
     case 'change': {
       if (changeBlocker(r) || !reasonValid(input.reason) || !input.ruleBody) return NO_CHANGE;
       const firmId = fixedFirmId(r) ?? (input.firmId || undefined);
-      // An own Exclude is removed first (the change would be refused as a duplicate); one whose row id the server did not name cannot be.
+      // This record's own override of the rule (its Exclude, or its earlier change) is removed first: 089 keeps one row per record and rule,
+      // so a change over it is refused as a duplicate. An own Exclude whose row id the server did not name cannot be removed.
       if (own && !own.overrideRowId) return NO_CHANGE;
-      const removeOwn: PlanStep[] = own?.overrideRowId ? [{ kind: 'remove', overrideId: own.overrideRowId }] : [];
-      return { steps: [...removeOwn, { kind: 'changeRule', policyId: r.policyId, reason: input.reason!.trim(), firmId, ruleBody: input.ruleBody }] };
+      const ownId = ownRuleOverrideId(r);
+      const removeOwn: PlanStep[] = ownId ? [{ kind: 'remove', overrideId: ownId }] : [];
+      return { steps: [...removeOwn, { kind: 'changeRule', policyId: changeTargetPolicyId(r), reason: input.reason!.trim(), firmId, ruleBody: input.ruleBody }] };
     }
 
     case 'exclude': {
@@ -315,11 +333,12 @@ export function ruleChoiceNeeds(r: RuleItem, choice: RuleChoice): ChoiceNeeds {
       return { remove: !!own?.overrideRowId, create: true, change: false };
     }
     case 'change': {
-      // A change saves no exclusion of its own: it is its own route and its own right. It removes this record's Exclude of the rule first.
+      // A change saves no exclusion of its own: it is its own route and its own right. It removes this record's own override of the rule
+      // first, its Exclude or its earlier change (084c fix round 1).
       if (changeBlocker(r)) return NEEDS_NOTHING;
       const own = ownExclude(r);
       if (own && !own.overrideRowId) return NEEDS_NOTHING;
-      return { remove: !!own?.overrideRowId, create: false, change: true };
+      return { remove: !!ownRuleOverrideId(r), create: false, change: true };
     }
   }
 }

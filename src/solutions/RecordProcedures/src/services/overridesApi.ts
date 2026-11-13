@@ -15,9 +15,9 @@
  * the rule's. The server validates it (RuleBodySchemaValidator, PolicyVersionValidator) and answers a refusal 400 with `errors`
  * (`{ policyId, rule, field, message, reason }`); {@link WriteFailure.fieldErrors} keeps them by field.
  *
- * Two existing reads are added: task 081's GET /api/finance/procedures/{procedureId} (the Pin picker's versions: task 084's view carries the
- * version in force and the newer one, not the list a pin picks from) and Rule Review's GET /api/finance/rulesets/{ruleSetId} (the rule's body
- * in force, which the Change form starts from: task 084's rows carry only a summary in words). Neither is a new route.
+ * One existing read is added: task 081's GET /api/finance/procedures/{procedureId} (the Pin picker's versions: task 084's view carries the
+ * version in force and the newer one, not the list a pin picks from). It is not a new route. (084c's read of Rule Review's rule set for the
+ * Change form's values was removed in its fix round 1: the rules-in-force rows now carry `ruleBody`.)
  *
  * The page decides nothing about authorization: every refusal (400, 403, 404, 409, 422, 503 ...) comes back as a {@link WriteFailure} carrying
  * the ProblemDetails `title` and `detail`, and the wizard shows them. There is no dry-run read of any kind (task 084d).
@@ -101,17 +101,6 @@ export interface RuleChanged {
   affectedText: string | null;
   visibleOpenInvoices: number | null;
   message: string | null;
-}
-
-/** The body of a rule in force, from Rule Review's read of its rule set: the working version, and whether it is the version in force. */
-export interface RuleValues {
-  policyId: string;
-  versionId: string | null;
-  versionNumber: number | null;
-  /** The working version is the rule's current version (not a newer draft). */
-  inForce: boolean;
-  ruleType: string | null;
-  body: Record<string, unknown> | null;
 }
 
 /** A version of a Procedure, for the Pin picker (from task 081's read). `status` is Draft | Active | Superseded | Retired. */
@@ -213,8 +202,6 @@ export interface OverridesApi {
   excludeRule(core: CoreRoute, recordId: string, body: ExcludeRuleRequest): Promise<WriteResult<OverrideCreated>>;
   /** Task 084c: change a rule for the record (and one firm's invoices when `firmId` is given). */
   changeRule(core: CoreRoute, recordId: string, body: ChangeRuleRequest): Promise<WriteResult<RuleChanged>>;
-  /** Task 084c: the body of the rule in force, for the Change form to start from (Rule Review's read of the rule's set). */
-  ruleValues(ruleSetId: string, policyId: string): Promise<WriteResult<RuleValues>>;
   removalPreview(core: CoreRoute, recordId: string, overrideId: string): Promise<WriteResult<RemovalPreview>>;
   removeOverride(core: CoreRoute, recordId: string, overrideId: string): Promise<WriteResult<Removed>>;
   /** The versions of a Procedure, for the Pin picker (task 081's read). */
@@ -231,7 +218,6 @@ function recordBase(bffBaseUrl: string, core: CoreRoute, recordId: string): stri
 export const assignmentsUrl = (bff: string, core: CoreRoute, recordId: string): string => `${recordBase(bff, core, recordId)}/procedure-assignments`;
 export const excludeRuleUrl = (bff: string, core: CoreRoute, recordId: string): string => `${recordBase(bff, core, recordId)}/rule-overrides/exclude`;
 export const changeRuleUrl = (bff: string, core: CoreRoute, recordId: string): string => `${recordBase(bff, core, recordId)}/rule-overrides/change`;
-export const ruleSetUrl = (bff: string, ruleSetId: string): string => `${trimBase(bff)}/api/finance/rulesets/${seg(ruleSetId)}`;
 export const overrideUrl =(bff: string, core: CoreRoute, recordId: string, overrideId: string): string => `${recordBase(bff, core, recordId)}/overrides/${seg(overrideId)}`;
 export const removalPreviewUrl = (bff: string, core: CoreRoute, recordId: string, overrideId: string): string => `${overrideUrl(bff, core, recordId, overrideId)}/removal-preview`;
 export const procedureUrl = (bff: string, procedureId: string): string => `${trimBase(bff)}/api/finance/procedures/${seg(procedureId)}`;
@@ -285,30 +271,6 @@ export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: st
         { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ policyId: body.policyId, reason: body.reason.trim(), firmId: body.firmId, ruleBody: body.ruleBody })) },
         b => (isObject(b) && isObject(b.override) && typeof b.override.id === 'string' && isObject(b.recordRule) ? (b as unknown as RuleChanged) : null)
       ),
-
-    ruleValues: (ruleSetId, policyId) =>
-      run(ruleSetUrl(bffBaseUrl, ruleSetId), { method: 'GET' }, b => {
-        if (!isObject(b) || !Array.isArray(b.proposals)) return null;
-        const p = (b.proposals as unknown[]).find(x => isObject(x) && typeof x.policyId === 'string' && x.policyId.toLowerCase() === policyId.toLowerCase());
-        if (!isObject(p)) return null;
-        // The body is an object; a string holding one is read too (the edit route accepts both).
-        let body: unknown = p.ruleBody;
-        if (typeof body === 'string') {
-          try {
-            body = JSON.parse(body) as unknown;
-          } catch {
-            body = null;
-          }
-        }
-        return {
-          policyId,
-          versionId: str(p.versionId),
-          versionNumber: typeof p.versionNumber === 'number' ? p.versionNumber : null,
-          inForce: p.inForce === true,
-          ruleType: str(p.ruleType),
-          body: isObject(body) ? body : null,
-        };
-      }),
 
     removalPreview: (core, recordId, overrideId) =>
       run(removalPreviewUrl(bffBaseUrl, core, recordId, overrideId), { method: 'GET' }, b =>

@@ -2,7 +2,18 @@
  * The Change plan of the rule wizard (ebilling-r1 task 084c): who may be changed, what a change calls, and in which order.
  */
 
-import { changeBlocker, executePlan, planRule, ruleChoiceNeeds, planWithin, allowedBlocker, NOT_ALLOWED_CHANGE, type Plan } from '../components/wizards/plan';
+import {
+  BASE_RETIRED_NO_CHANGE,
+  RECHANGE_NOT_NAMED,
+  changeBlocker,
+  executePlan,
+  planRule,
+  ruleChoiceNeeds,
+  planWithin,
+  allowedBlocker,
+  NOT_ALLOWED_CHANGE,
+  type Plan,
+} from '../components/wizards/plan';
 import type { OverridesApi } from '../services/overridesApi';
 import { FENWICK, MATTER, mark, rule } from './fixtures';
 
@@ -98,6 +109,48 @@ describe('what Change needs from the caller', () => {
   it('the words when the change right is missing', () => {
     expect(allowedBlocker({ remove: false, create: false, change: true }, { remove: true, create: true, change: false })).toBe(NOT_ALLOWED_CHANGE);
     expect(NOT_ALLOWED_CHANGE).toMatch(/cannot change a rule/);
+  });
+});
+
+describe('084c fix round 1: a rule changed here is changed again (F1-1); a base-retired row says why not (F1-7)', () => {
+  const changedHere = (over = {}, extra: ReturnType<typeof mark>[] = []) =>
+    hours({ policyId: 'POL-REC', recordRule: true, marks: [mark('Changed', { distance: 0, chainRecord: MATTER, overrideRowId: 'chg-row', reason: 'earlier', basePolicyId: 'POL-H', ...over }), ...extra] });
+  const stale = mark('Stale', { recordRuleId: 'POL-REC', basedOn: { id: 'v1', number: 1 }, currentBase: { id: 'v2', number: 2 } });
+
+  it('a Changed row, and a Changed and Stale one, offer Change', () => {
+    expect(changeBlocker(changedHere())).toBeNull();
+    expect(changeBlocker(changedHere({}, [stale]))).toBeNull();
+  });
+
+  it('the plan removes this record\'s change, then changes the BASE rule (the change route takes the base policy id)', () => {
+    for (const row of [changedHere(), changedHere({}, [stale])]) {
+      expect(planRule(row, 'change', { reason: ' r ', ruleBody: BODY }).steps).toEqual([
+        { kind: 'remove', overrideId: 'chg-row' },
+        { kind: 'changeRule', policyId: 'POL-H', reason: 'r', firmId: undefined, ruleBody: BODY },
+      ]);
+    }
+  });
+
+  it('it needs the removal and the change right, and the plan is within them', () => {
+    const needs = ruleChoiceNeeds(changedHere(), 'change');
+    expect(needs).toEqual({ remove: true, create: false, change: true });
+    expect(planWithin(planRule(changedHere(), 'change', { reason: 'r', ruleBody: BODY }), needs)).toBe(true);
+  });
+
+  it('negative: a Changed mark without the base rule or without its row id (an older BFF) offers no Change and plans nothing', () => {
+    for (const row of [changedHere({ basePolicyId: null }), changedHere({ overrideRowId: null })]) {
+      expect(changeBlocker(row)).toBe(RECHANGE_NOT_NAMED);
+      expect(planRule(row, 'change', { reason: 'r', ruleBody: BODY }).steps).toEqual([]);
+      expect(ruleChoiceNeeds(row, 'change')).toEqual({ remove: false, create: false, change: false });
+    }
+  });
+
+  it('F1-7: a base-retired row says the published rule is no longer in force, before the type (it carries none)', () => {
+    const retired = (ruleType: string | null) =>
+      hours({ ruleType, inForce: false, recordRule: true, marks: [mark('Changed', { distance: 0, chainRecord: MATTER, overrideRowId: 'chg-row', basePolicyId: 'POL-H' }), mark('BaseRetired', { recordRuleId: 'POL-REC' })] });
+    expect(changeBlocker(retired(null))).toBe(BASE_RETIRED_NO_CHANGE);
+    expect(changeBlocker(retired('DailyHoursCap'))).toBe(BASE_RETIRED_NO_CHANGE);
+    expect(changeBlocker(retired(null))).not.toMatch(/no form/);
   });
 });
 

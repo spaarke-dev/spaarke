@@ -3,7 +3,21 @@
  * fields. The forms are pinned against the server's schemas by tests/Spaarke.ArchTests/RecordProceduresRuleFormAgreementTests.cs.
  */
 
-import { RULE_FORMS, buildBody, formFor, sameBody, serverFieldErrors, toFormValues, describeBody, parseCodes } from '../components/wizards/ruleForms';
+import {
+  DUPLICATE_REJECT_NEEDS_INVOICE_NUMBER,
+  FEE_KIND_LOCKED,
+  RULE_FORMS,
+  buildBody,
+  consequenceProblems,
+  fieldDiffers,
+  formFor,
+  lockedFields,
+  sameBody,
+  serverFieldErrors,
+  toFormValues,
+  describeBody,
+  parseCodes,
+} from '../components/wizards/ruleForms';
 import type { FormValues } from '../components/wizards/ruleForms';
 
 /** One valid body per authorable type: what the server accepts. */
@@ -94,12 +108,27 @@ describe('the bounds are the schema\'s', () => {
 });
 
 describe('choices, sets and code lists', () => {
-  it('a choice must be one of the options; a set needs one pick and is written in the schema\'s order', () => {
+  it('a choice must be one of the options; a set needs one pick and keeps the order it was given in, without duplicates (fix round 1, F1-3)', () => {
     expect(buildBody(form('AiObservation'), { observation: 'other', minConfidence: '0.5' }).ok).toBe(false);
     expect(buildBody(form('AiObservation'), { observation: '', minConfidence: '0.5' }).ok).toBe(false);
     expect(buildBody(form('Duplicate'), { matchFields: [] }).ok).toBe(false);
-    const swapped = buildBody(form('Duplicate'), { matchFields: ['timekeeper', 'firmInvoiceNumber'] });
-    expect(swapped).toEqual({ ok: true, body: { type: 'Duplicate', matchFields: ['firmInvoiceNumber', 'timekeeper'] } });
+    const swapped = buildBody(form('Duplicate'), { matchFields: ['timekeeper', 'firmInvoiceNumber', 'timekeeper', 'unknown'] });
+    expect(swapped).toEqual({ ok: true, body: { type: 'Duplicate', matchFields: ['timekeeper', 'firmInvoiceNumber'] } });
+  });
+
+  it('F1-3: with the form, a multi-choice field compares as a set (sameBody, fieldDiffers); a code list and a body without the form still compare in order', () => {
+    const dup = form('Duplicate');
+    const published = { type: 'Duplicate', matchFields: ['amount', 'timekeeper'] };
+    const rebuilt = buildBody(dup, toFormValues(dup, published));
+    expect(rebuilt).toEqual({ ok: true, body: published });
+    expect(sameBody({ type: 'Duplicate', matchFields: ['timekeeper', 'amount'] }, published, dup)).toBe(true);
+    expect(sameBody({ type: 'Duplicate', matchFields: ['timekeeper'] }, published, dup)).toBe(false);
+    expect(sameBody({ type: 'Duplicate', matchFields: ['timekeeper', 'amount'] }, published)).toBe(false);
+    const field = dup.fields[0];
+    expect(fieldDiffers(field, { matchFields: ['timekeeper', 'amount'] }, published)).toBe(false);
+    expect(fieldDiffers(field, { matchFields: ['amount'] }, published)).toBe(true);
+    const nba = form('NonBillableActivity');
+    expect(sameBody({ type: 'NonBillableActivity', codes: ['B', 'A'] }, { type: 'NonBillableActivity', codes: ['A', 'B'] }, nba)).toBe(false);
   });
 
   it('codes: separators, duplicates, the pattern and the empty list', () => {
@@ -142,6 +171,24 @@ describe('AddedFee: only the allowance the server checks can be saved', () => {
   });
 });
 
+describe('084c fix round 1: what a change of one record may not do', () => {
+  it('item 9: AddedFee keeps its fee kind, and for "other" its fee codes too; no other type locks a field', () => {
+    expect(lockedFields(form('AddedFee'), VALID.AddedFee)).toEqual(['feeKind']);
+    expect(lockedFields(form('AddedFee'), { ...VALID.AddedFee, feeKind: 'other' })).toEqual(['feeKind', 'feeCodes']);
+    for (const f of RULE_FORMS.filter(x => x.ruleType !== 'AddedFee')) expect(lockedFields(f, VALID[f.ruleType])).toEqual([]);
+    expect(FEE_KIND_LOCKED).toMatch(/makes a different rule; exclude this one and ask an admin to publish the other/);
+  });
+
+  it('item 6: a Duplicate that Rejects must compare Firm invoice number; Flag, another type or a kept number is not refused', () => {
+    const dup = form('Duplicate');
+    expect(consequenceProblems(dup, { matchFields: ['amount'] }, 'Reject')).toEqual({ matchFields: DUPLICATE_REJECT_NEEDS_INVOICE_NUMBER });
+    expect(consequenceProblems(dup, { matchFields: ['amount', 'firmInvoiceNumber'] }, 'Reject')).toEqual({});
+    expect(consequenceProblems(dup, { matchFields: ['amount'] }, 'Flag')).toEqual({});
+    expect(consequenceProblems(dup, { matchFields: ['amount'] }, null)).toEqual({});
+    expect(consequenceProblems(form('RequiredData'), { fields: ['invoiceDate'] }, 'Reject')).toEqual({});
+  });
+});
+
 describe('describing and comparing bodies', () => {
   it('sameBody ignores key order and compares arrays in order; describeBody names the values', () => {
     expect(sameBody({ a: 1, b: [1, 2] }, { b: [1, 2], a: 1 })).toBe(true);
@@ -158,13 +205,15 @@ describe('the server\'s refusal goes back on the fields it names', () => {
   const err = (field: string, message: string) => ({ field, message, reason: null });
 
   it('a body error with a JSON pointer lands on that field, without the pointer', () => {
-    const r = serverFieldErrors(f, [err('ruleBody', '/maxHoursPerDay: value must be at most 24')]);
-    expect(r).toEqual({ byField: { maxHoursPerDay: ['value must be at most 24'] }, firm: [], general: [] });
+    const r = serverFieldErrors(f, [err('ruleBody', '/maxHoursPerDay: 30 should be at most 24')]);
+    expect(r).toEqual({ byField: { maxHoursPerDay: ['30 should be at most 24'] }, firm: [], general: [] });
   });
 
   it('"Required properties" names every field of the form it lists', () => {
-    const r = serverFieldErrors(form('AiObservation'), [err('ruleBody', 'Required properties ["observation", "minConfidence"] are not present')]);
+    const r = serverFieldErrors(form('AiObservation'), [err('ruleBody', ': Required properties ["observation","minConfidence"] are not present')]);
     expect(Object.keys(r.byField).sort()).toEqual(['minConfidence', 'observation']);
+    // The validator reports a missing member at the root (pointer ""): the field shows the words without the empty pointer.
+    expect(r.byField.observation).toEqual(['Required properties ["observation","minConfidence"] are not present']);
     expect(r.general).toEqual([]);
   });
 

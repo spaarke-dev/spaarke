@@ -89,10 +89,11 @@ export function buildBody(def: RuleFormDef, values: FormValues): BuildResult {
       }
       case 'multi': {
         const known = (f.options ?? []).map(o => o.value);
-        const picked = Array.isArray(v) ? v.filter(x => known.includes(x)) : [];
+        // The order the values were given in (a published body's order is kept, new picks follow), no duplicates (084c fix round 1, F1-3).
+        const picked = Array.isArray(v) ? Array.from(new Set(v.filter(x => known.includes(x)))) : [];
         if (picked.length === 0) {
           if (needed) errors[f.key] = `Pick at least one for ${f.label.toLowerCase()}.`;
-        } else body[f.key] = known.filter(o => picked.includes(o)); // vocabulary order, no duplicates
+        } else body[f.key] = picked;
         break;
       }
       case 'codes': {
@@ -128,8 +129,19 @@ export function buildBody(def: RuleFormDef, values: FormValues): BuildResult {
 
 const labelsOf = (def: RuleFormDef, keys: readonly string[]): string => keys.map(k => def.fields.find(f => f.key === k)?.label ?? k).join(' or ');
 
-/** Structural equality of two rule bodies (key order does not matter). */
-export function sameBody(a: unknown, b: unknown): boolean {
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * Structural equality of two rule bodies (key order does not matter). With the form `def`, a multi-choice field is a SET: its values compare
+ * whatever their order (084c fix round 1, F1-3: an unchanged Duplicate whose published order is not the vocabulary's is not a change).
+ */
+export function sameBody(a: unknown, b: unknown, def?: RuleFormDef): boolean {
+  if (def && isRecord(a) && isRecord(b)) {
+    const sets = new Set(def.fields.filter(f => f.kind === 'multi').map(f => f.key));
+    const asSets = (o: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(o).map(([k, v]) => [k, sets.has(k) && Array.isArray(v) ? Array.from(new Set(v.map(String))).sort() : v]));
+    return sameBody(asSets(a), asSets(b));
+  }
   if (a === b) return true;
   if (typeof a !== typeof b || a === null || b === null || typeof a !== 'object') return false;
   if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => sameBody(x, b[i]));
@@ -144,6 +156,60 @@ export function fieldText(f: FormField, body: Record<string, unknown>): string {
   if (raw === undefined || raw === null) return '';
   const label = (v: unknown) => f.options?.find(o => o.value === v)?.label ?? String(v);
   return Array.isArray(raw) ? raw.map(label).join(', ') : label(raw);
+}
+
+/** What a field currently holds, as the same kind of text `fieldText` gives for a body, so the two can be compared. */
+function valueText(f: FormField, values: FormValues): string {
+  const v = values[f.key];
+  if (f.kind === 'codes') return typeof v === 'string' ? v.split(/[\s,;]+/).filter(Boolean).join(', ') : '';
+  if (f.kind === 'choice') return f.options?.find(o => o.value === v)?.label ?? '';
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/**
+ * Whether a field's input differs from what a body gives for it (the form's "Published rule: X" hint). A multi-choice field compares as a
+ * set (084c fix round 1, F1-3): the same picks in another order are the same value.
+ */
+export function fieldDiffers(f: FormField, values: FormValues, body: Record<string, unknown>): boolean {
+  if (f.kind === 'multi') {
+    const known = new Set((f.options ?? []).map(o => o.value));
+    const mine = new Set((Array.isArray(values[f.key]) ? (values[f.key] as string[]) : []).filter(x => known.has(x)));
+    const theirs = new Set(strings(body[f.key]));
+    return mine.size !== theirs.size || [...mine].some(x => !theirs.has(x));
+  }
+  return fieldText(f, body) !== valueText(f, values);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What a change of one record may not do (084c fix round 1, items 6 and 9)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Item 9 (D-39): why AddedFee's fee kind (and, for `other`, its fee codes) cannot be changed for one record. */
+export const FEE_KIND_LOCKED =
+  'Changing the fee kind makes a different rule; exclude this one and ask an admin to publish the other.';
+
+/**
+ * Item 9: the fields a change for one record may not edit, given the body the form starts from. AddedFee's precedence key is the rule type
+ * plus `feeKind`, and for `other` the fee-code set too (D-39, `BillingRuleDefinition.PrecedenceKey`); a record rule takes its base rule's
+ * slot, so a change must not move it to another key. The change route does not check this itself, so the form keeps those fields read-only.
+ */
+export function lockedFields(def: RuleFormDef, start: Record<string, unknown> | null): string[] {
+  if (def.ruleType !== 'AddedFee') return [];
+  return start?.feeKind === 'other' ? ['feeKind', 'feeCodes'] : ['feeKind'];
+}
+
+/** Item 6: the server's reason (PolicyVersionValidator, at save) for a Rejecting Duplicate that compares lines only. */
+export const DUPLICATE_REJECT_NEEDS_INVOICE_NUMBER =
+  'This rule rejects invoices, and a Duplicate rule whose fields compared do not include Firm invoice number compares lines only: a duplicate line is flagged, never rejected. Keep Firm invoice number to reject a duplicate invoice.';
+
+/**
+ * Item 6: what the server will refuse in this change because of the rule's consequence, by field, before anything is sent. A record rule
+ * keeps its rule's consequence (the change route copies it), so a Duplicate that Rejects must keep `firmInvoiceNumber` in `matchFields`.
+ */
+export function consequenceProblems(def: RuleFormDef, values: FormValues, consequence: string | null | undefined): Record<string, string> {
+  if (def.ruleType !== 'Duplicate' || consequence !== 'Reject') return {};
+  const picked = Array.isArray(values.matchFields) ? values.matchFields : [];
+  return picked.includes('firmInvoiceNumber') ? {} : { matchFields: DUPLICATE_REJECT_NEEDS_INVOICE_NUMBER };
 }
 
 /** The values of a rule body in one line, for the Impact and Confirm steps: "Most hours per day 12". */

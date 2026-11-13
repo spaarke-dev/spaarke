@@ -90,19 +90,9 @@ describe('the requests are exactly the shapes of task 089\'s routes', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('rule values: GET the rule set and find the rule by policy id; a body sent as text is parsed; a missing rule is a failure', async () => {
-    const answer = {
-      proposals: [
-        { policyId: 'POL-0', versionId: 'V0', versionNumber: 1, inForce: true, ruleType: 'InvoiceAge', ruleBody: { type: 'InvoiceAge', maxAgeDays: 90 } },
-        { policyId: 'POL-1', versionId: 'V1', versionNumber: 3, inForce: true, ruleType: 'DailyHoursCap', ruleBody: '{"type":"DailyHoursCap","maxHoursPerDay":10}' },
-      ],
-    };
-    const { fetchFn, client } = api(answer);
-    const r = await client.ruleValues('RS-1', 'pol-1');
-    expect(fetchFn.mock.calls[0]).toEqual(['https://bff.example.com/api/finance/rulesets/rs-1', { method: 'GET' }]);
-    expect(r).toEqual({ ok: true, value: { policyId: 'pol-1', versionId: 'V1', versionNumber: 3, inForce: true, ruleType: 'DailyHoursCap', body: { type: 'DailyHoursCap', maxHoursPerDay: 10 } } });
-    expect((await api(answer).client.ruleValues('RS-1', 'POL-404')).ok).toBe(false);
-    expect((await api({ proposals: [{ policyId: 'POL-1', inForce: false, ruleBody: 'not json' }] }).client.ruleValues('RS-1', 'POL-1'))).toMatchObject({ ok: true, value: { inForce: false, body: null } });
+  it('084c fix round 1 (F1-2): the client has no read of a rule set; the Change form starts from the rules-in-force row', () => {
+    const { client } = api({});
+    expect(Object.keys(client).sort()).toEqual(['assignProcedure', 'changeRule', 'excludeRule', 'procedureVersions', 'removalPreview', 'removeOverride']);
   });
 });
 
@@ -128,14 +118,14 @@ describe('refusals keep the server\'s words', () => {
       problem(400, 'ruleoverride.invalid', {
         title: 'Rule change is not valid',
         errors: [
-          { policyId: 'POL-1', rule: 'DailyHoursCap', field: 'ruleBody', message: '/maxHoursPerDay: value must be at most 24', reason: 'schema' },
+          { policyId: 'POL-1', rule: 'DailyHoursCap', field: 'ruleBody', message: '/maxHoursPerDay: 30 should be at most 24', reason: 'schema' },
           { field: 'firmId', message: 'The firm was not found.' },
           { message: 'A reason is required.' },
         ],
       })
     );
     expect(a.fieldErrors).toEqual([
-      { field: 'ruleBody', message: '/maxHoursPerDay: value must be at most 24', reason: 'schema' },
+      { field: 'ruleBody', message: '/maxHoursPerDay: 30 should be at most 24', reason: 'schema' },
       { field: 'firmId', message: 'The firm was not found.', reason: null },
       { field: '', message: 'A reason is required.', reason: null },
     ]);

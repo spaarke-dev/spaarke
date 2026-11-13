@@ -8,6 +8,10 @@
  * while Change is chosen: a typed form for the rule's billing type (`ruleForms/`), prefilled from the published values. The server's
  * validation is the authority: a refusal is shown on the fields it names.
  *
+ * Fix round 1: the form is prefilled from the read model's `ruleBody` (no second read; with no body the step says why and Next stays off,
+ * F1-2). A rule already changed here can be changed again (F1-1): the form starts from this record's values, and "Start from the published
+ * values" loads the base rule's (`baseRuleBody`).
+ *
  *   - P-3: a rule a parent excluded (or changed) shows that as applied, and "Run the published rule" is disabled with the reason.
  *   - O-20: a rule that names one firm can only be excluded for that firm; the firm field is fixed.
  *
@@ -17,10 +21,10 @@
  */
 
 import * as React from 'react';
-import { Button, Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Spinner, Text, Textarea } from '@fluentui/react-components';
+import { Button, Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Text, Textarea } from '@fluentui/react-components';
 import { StatusBadge } from '@spaarke/ui-components';
 import type { CoreRoute, RuleItem, RuleMark } from '../../services/recordProceduresApi';
-import { failureText, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
+import type { OverridesApi, WriteFailure } from '../../services/overridesApi';
 import type { FirmOption } from '../../services/firmChoices';
 import { levelLabel, recordWords, ruleBadges, versionLabel, type AllowedSteps } from '../../services/model';
 import {
@@ -43,7 +47,19 @@ import {
   type RuleChoice,
 } from './plan';
 import { RuleValuesForm } from './ruleForms/RuleValuesForm';
-import { buildBody, describeBody, formFor, sameBody, serverFieldErrors, toFormValues, type FormValues, type ServerFieldErrors } from './ruleForms';
+import {
+  FEE_KIND_LOCKED,
+  buildBody,
+  consequenceProblems,
+  describeBody,
+  formFor,
+  lockedFields,
+  sameBody,
+  serverFieldErrors,
+  toFormValues,
+  type FormValues,
+  type ServerFieldErrors,
+} from './ruleForms';
 import { ChoiceGroup, KeyValues, useWizardStyles, type ChoiceOption } from './steps';
 import { WizardFrame, type OnChanged, type WizardNav } from './WizardFrame';
 import { stampWords } from './words';
@@ -74,20 +90,37 @@ interface Form {
   touched: boolean;
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * The body the Change form starts from (084c fix round 1, F1-2): the row's own version, from the read model. On a rule changed here it is
+ * this record's change (F1-1). Null when the server could not give it: the form then does not start (a change replaces the whole body, so a
+ * form built without the published optional values would drop them).
+ */
+export const startBodyOf = (r: RuleItem): Record<string, unknown> | null => (isRecord(r.ruleBody) ? r.ruleBody : null);
+
+/** The published rule's body and version number: the base rule's in force for a rule changed here, else the row's own. Null when not given. */
+export function publishedOf(r: RuleItem): { body: Record<string, unknown>; versionNumber: number | null } | null {
+  const changed = ownChange(r);
+  if (changed) return isRecord(changed.baseRuleBody) ? { body: changed.baseRuleBody, versionNumber: changed.currentBase?.number ?? null } : null;
+  const own = startBodyOf(r);
+  return own ? { body: own, versionNumber: r.versionNumber } : null;
+}
+
+/** Why the New values step cannot start: the read model gave no body for the rule (an older BFF, or a body that is not an object). */
+export const NO_VALUES_TEXT =
+  "The rule's values could not be read, so it cannot be changed here: a change replaces the whole rule, and values that are not shown would be lost. Close this window and open the rule again, or exclude the rule instead.";
+
 const initialForm = (r: RuleItem): Form => ({
   choice: currentRuleChoice(r),
   reason: ownExclude(r)?.reason ?? '',
   firmId: fixedFirmId(r) ?? ownExclude(r)?.firm?.id ?? '',
-  values: formFor(r.ruleType) ? toFormValues(formFor(r.ruleType)!, null) : {},
+  values: formFor(r.ruleType) ? toFormValues(formFor(r.ruleType)!, startBodyOf(r)) : {},
   touched: false,
 });
 
-/** The published rule's body, as the Change form starts from it. */
-type Published =
-  | { state: 'idle' }
-  | { state: 'loading' }
-  | { state: 'ready'; body: Record<string, unknown>; versionNumber: number | null }
-  | { state: 'failed'; text: string };
+/** Said with a refused change's field errors when nothing was saved: the fields are marked on New values. */
+export const GO_BACK_HINT = 'Go back to New values: the fields the server refused are marked.';
 
 /** 089 answers 409 `assignment.duplicate` for a second exclusion of the rule on the record, whichever firm the first one names. */
 export const DUPLICATE_HINT = 'An exclusion for another firm may exist on this record; switch the firm to see it.';
@@ -121,35 +154,17 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
   /** The server's field errors of the last refused change, for the rule it was made on; cleared by any edit. */
   const [refusalState, setRefusal] = React.useState<{ key: string; errors: ServerFieldErrors } | null>(null);
 
-  // ── Change: the form of the rule's type, and the published values it starts from (task 084c) ──
+  // ── Change: the form of the rule's type, prefilled from the read model (task 084c; fix round 1, F1-1 and F1-2: no second read) ──
   const def = formFor(row.ruleType);
   const key = ruleKey(row);
   const refusal = refusalState?.key === key ? refusalState.errors : null;
-  const keyRef = React.useRef(key);
-  keyRef.current = key;
-  const [pub, setPub] = React.useState<{ key: string; result: Published }>({ key: '', result: { state: 'idle' } });
-  const asked = React.useRef<string | null>(null);
-  const published: Published = pub.key === key ? pub.result : { state: 'idle' };
   const wantsValues = form.choice === 'change' && !!def;
-  React.useEffect(() => {
-    if (!wantsValues || !def || asked.current === key) return;
-    asked.current = key;
-    const done = (result: Published) => {
-      if (keyRef.current !== key) return;
-      setPub({ key, result });
-      if (result.state === 'ready') setForm(f => (f.touched ? f : { ...f, values: toFormValues(def, result.body) }));
-    };
-    if (!row.ruleSetId) {
-      done({ state: 'failed', text: 'the rule set is not known' });
-      return;
-    }
-    setPub({ key, result: { state: 'loading' } });
-    void api.ruleValues(row.ruleSetId, row.policyId).then(r => {
-      if (!r.ok) return done({ state: 'failed', text: failureText(r.failure) });
-      if (!r.value.inForce || !r.value.body) return done({ state: 'failed', text: 'a newer draft of the rule exists, so the version in force could not be read' });
-      done({ state: 'ready', body: r.value.body, versionNumber: r.value.versionNumber });
-    });
-  }, [wantsValues, def, key, row.ruleSetId, row.policyId, api]);
+  const start = startBodyOf(row);
+  const published = publishedOf(row);
+  const publishedBody = published?.body ?? null;
+  // Item 9: AddedFee's precedence key cannot move; item 6: what the rule's consequence makes the server refuse, before anything is sent.
+  const locked: Record<string, string> = def && start ? Object.fromEntries(lockedFields(def, start).map(k => [k, FEE_KIND_LOCKED])) : {};
+  const ruleProblems = def ? consequenceProblems(def, form.values, row.consequence) : {};
 
   const current = currentRuleChoice(row);
   const inherited = inheritedOverride(row);
@@ -160,19 +175,25 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
   // ── What each choice needs, and whether the lists' answers allow it (084g fix round 1, B1) ──
   const blockerOf = (c: RuleChoice) => allowedBlocker(ruleChoiceNeeds(row, c), allowed);
   const changeBlock = changeBlocker(row);
-  // The new body: complete, and different from the published one (nothing to send otherwise).
+  // The new body: complete, read from a body the server gave (F1-2), different from this record's current values and from the published
+  // ones (nothing to send otherwise; a multi-choice field compares as a set, F1-3), and nothing its consequence makes the server refuse.
   const draft = def && form.choice === 'change' ? buildBody(def, form.values) : null;
-  const samePublished = draft?.ok === true && published.state === 'ready' && sameBody(draft.body, published.body);
-  const ruleBody = draft?.ok === true && !samePublished ? JSON.stringify(draft.body) : undefined;
+  const sameCurrent = draft?.ok === true && start !== null && sameBody(draft.body, start, def);
+  const samePublished = draft?.ok === true && publishedBody !== null && sameBody(draft.body, publishedBody, def);
+  const ruleBody =
+    draft?.ok === true && start !== null && !sameCurrent && !samePublished && Object.keys(ruleProblems).length === 0 ? JSON.stringify(draft.body) : undefined;
   const plan = planRule(row, form.choice, { reason: form.reason, firmId: form.firmId, ruleBody });
   // A plan goes on only when its choice is allowed and every call it makes is one the choice was said to need. A change is chosen with its
-  // reason (and firm) on "On this record" and its values on "New values", so this step needs only the choice and the reason.
+  // reason (and firm) on "On this record" and its values on "New values", so this step needs only the choice and the reason. Its needs are
+  // empty when it cannot be planned at all (an own override the server named no row for; fix round 1 widens 084c's own-Exclude check).
   const choiceReady =
     form.choice === 'change'
-      ? changeBlock === null && blockerOf('change') === null && reasonValid(form.reason) && !(ownExclude(row) && !ownExclude(row)?.overrideRowId)
+      ? changeBlock === null && blockerOf('change') === null && reasonValid(form.reason) && ruleChoiceNeeds(row, 'change').change
       : plan.steps.length > 0 && blockerOf(form.choice) === null && planWithin(plan, ruleChoiceNeeds(row, form.choice));
   const canChoose = choiceReady;
-  const valuesReady = form.choice === 'change' && draft?.ok === true && !samePublished && blockerOf('change') === null && published.state !== 'loading' && plan.steps.length > 0 && planWithin(plan, ruleChoiceNeeds(row, 'change'));
+  const valuesReady = form.choice === 'change' && ruleBody !== undefined && blockerOf('change') === null && plan.steps.length > 0 && planWithin(plan, ruleChoiceNeeds(row, 'change'));
+  /** What the plan removes first: this record's exclusion, or its earlier change (F1-1). */
+  const removedWord = ownExclude(row) ? 'exclusion' : ownChange(row) ? 'change' : 'override';
   const recordLabel = recordWords(record.table, record.name);
   const sendsFirmId = fixedFirmId(row) ?? (form.firmId || null);
   const firmName = fixedFirm?.name ?? firms.find(f => f.id.toLowerCase() === form.firmId.toLowerCase())?.name ?? null;
@@ -312,7 +333,11 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
   options.push({
     value: 'change',
     label: 'Change for this record',
-    caption: changeBlock ?? 'A copy of the rule with your values runs in its place. You set the values next.',
+    caption:
+      changeBlock ??
+      (changedHere
+        ? "Replaces this record's change with new values: the change is removed, then the published rule is changed again. You set the values next."
+        : 'A copy of the rule with your values runs in its place. You set the values next.'),
     disabled: changeBlock !== null,
     body: (
       <>
@@ -340,37 +365,52 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
   // ── Step 3 (Change only): the new values ──────────────────────────────────
   const setValue = (k: string, v: string | string[]) => set({ values: { ...form.values, [k]: v }, touched: true });
   const serverByField = refusal ? Object.fromEntries(Object.entries(refusal.byField).map(([k, msgs]) => [k, msgs.join(' ')])) : {};
-  const fieldProblems: Record<string, string | undefined> = { ...(form.touched && draft && !draft.ok ? draft.errors : {}), ...serverByField };
-  const publishedBody = published.state === 'ready' ? published.body : null;
+  // The form's own problems once edited; what the rule's consequence makes the server refuse (item 6) always; the server's refusal last.
+  const fieldProblems: Record<string, string | undefined> = { ...(form.touched && draft && !draft.ok ? draft.errors : {}), ...ruleProblems, ...serverByField };
+  // "Start from the published values" keeps the fields this change may not edit (item 9) as they are.
+  const fromPublished = (body: Record<string, unknown>): FormValues => {
+    const values = def ? toFormValues(def, body) : {};
+    for (const k of Object.keys(locked)) if (k in form.values) values[k] = form.values[k];
+    return values;
+  };
   const valuesStep = def ? (
     <div className={s.step} data-testid="values-step">
       <Text>
         {row.code} for {recordLabel}
         {firmName ? `, ${firmName} invoices` : sendsFirmId ? ', one firm’s invoices' : ', every firm'}. It takes the published rule’s place and rank.
       </Text>
-      {published.state === 'loading' && <Spinner size="tiny" label="Reading the published values…" data-testid="values-loading" />}
-      {published.state === 'failed' && (
+      {start === null ? (
         <MessageBar intent="warning" layout="multiline" data-testid="values-unread">
-          <MessageBarBody>The published values could not be read ({published.text}). Enter the values below.</MessageBarBody>
+          <MessageBarBody>{NO_VALUES_TEXT}</MessageBarBody>
         </MessageBar>
+      ) : (
+        <>
+          {changedHere && <Caption1 className={s.muted} data-testid="values-current">The form shows this record’s current values.</Caption1>}
+          {publishedBody && !sameBody(draft?.ok ? draft.body : null, publishedBody, def) && (
+            <MessageBar intent="info" layout="multiline" data-testid="published-values">
+              <MessageBarBody>
+                The published rule{published?.versionNumber != null ? ` (v${published.versionNumber})` : ''} has {describeBody(def, publishedBody) || 'no values'}.
+              </MessageBarBody>
+              <Button size="small" onClick={() => set({ values: fromPublished(publishedBody), touched: true })} data-testid="start-from-published">
+                Start from the published values
+              </Button>
+            </MessageBar>
+          )}
+          {refusal?.general.map((m, i) => (
+            <MessageBar key={`${i}-${m}`} intent="error" layout="multiline" role="alert" data-testid="values-refused">
+              <MessageBarBody>{m}</MessageBarBody>
+            </MessageBar>
+          ))}
+          <RuleValuesForm def={def} values={form.values} onChange={setValue} errors={fieldProblems} published={publishedBody} locked={locked} />
+          {samePublished ? (
+            <Caption1 className={s.muted}>
+              {changedHere ? 'These are the published values: to run them, choose Run the published rule.' : 'These are the published values. Change at least one.'}
+            </Caption1>
+          ) : (
+            sameCurrent && <Caption1 className={s.muted}>These are this record’s current values. Change at least one.</Caption1>
+          )}
+        </>
       )}
-      {publishedBody && form.touched && !sameBody(draft?.ok ? draft.body : null, publishedBody) && (
-        <MessageBar intent="info" layout="multiline">
-          <MessageBarBody>
-            The published rule{published.state === 'ready' && published.versionNumber !== null ? ` (v${published.versionNumber})` : ''} has {describeBody(def, publishedBody) || 'no values'}.
-          </MessageBarBody>
-          <Button size="small" onClick={() => set({ values: toFormValues(def, publishedBody), touched: true })} data-testid="start-from-published">
-            Start from the published values
-          </Button>
-        </MessageBar>
-      )}
-      {refusal?.general.map((m, i) => (
-        <MessageBar key={`${i}-${m}`} intent="error" layout="multiline" role="alert" data-testid="values-refused">
-          <MessageBarBody>{m}</MessageBarBody>
-        </MessageBar>
-      ))}
-      <RuleValuesForm def={def} values={form.values} onChange={setValue} errors={fieldProblems} published={publishedBody} />
-      {samePublished && <Caption1 className={s.muted}>These are the published values. Change at least one.</Caption1>}
     </div>
   ) : null;
 
@@ -404,7 +444,7 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       ? ([
           [
             'Saved as',
-            `An exclusion of ${row.code} and a record rule with these values, saved together.${twoCalls ? " This record's current exclusion is removed first." : ''}`,
+            `An exclusion of ${row.code} and a record rule with these values, saved together.${twoCalls ? ` This record's current ${removedWord} is removed first.` : ''}`,
           ],
         ] as const)
       : twoCalls
@@ -432,11 +472,12 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       finishLabel={removeOnly ? 'Remove override' : form.choice === 'change' ? 'Save record rule' : 'Exclude rule'}
       successTitle={removeOnly ? 'Override removed' : form.choice === 'change' ? 'Rule changed for this record' : 'Rule excluded'}
       successBody={`${row.code} on ${recordLabel}: ${after}. The lists show the result.`}
-      refusalHint={f =>
+      refusalHint={(f, partial) =>
         f.errorCode === 'assignment.duplicate' && (form.choice === 'exclude' || form.choice === 'change')
           ? DUPLICATE_HINT
-          : form.choice === 'change' && f.fieldErrors.length > 0
-            ? 'Go back to New values: the fields the server refused are marked.'
+          : // F3-4: after a partial save the wizard is held on a row that is out of date, so "go back" would contradict the partial note.
+            form.choice === 'change' && f.fieldErrors.length > 0 && !partial
+            ? GO_BACK_HINT
             : null
       }
       valuesStep={valuesStep ? { active: wantsValues, content: valuesStep, canAdvance: valuesReady } : undefined}
@@ -445,7 +486,7 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       }}
       partialNote={
         form.choice === 'change'
-          ? "The record's earlier exclusion was removed but the change was not saved. Close this window and open the rule again."
+          ? `The record's earlier ${removedWord} was removed but the change was not saved. Close this window and open the rule again.`
           : "The record's earlier exclusion was removed but the new one was not saved. Close this window and open the rule again."
       }
       onChanged={onChanged}
