@@ -10,6 +10,43 @@
 
 ## Open (in priority order)
 
+### DEF-067 — Invoice submission: other file types, supporting files, several invoices (owner E2E feedback)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (scope and design not decided) |
+| **Urgency** | next-round |
+| **Filed** | 2026-11-13 (issue filed by spa-r4 on 2026-11-12, owner's split) |
+| **Source** | Owner's E2E on dev (spa-r4). The invoice flow passed: Submit invoice from a project created a linked invoice with amount and date extracted. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2770 |
+
+**Description**
+
+The owner's feedback assigns three items to ebilling-r1:
+1. Invoice files other than PDF, for example Excel or other data files.
+2. A "Submit other files" section, for supporting files that are not treated as the invoice.
+3. Several invoices in one submission.
+
+Today submission takes one PDF as the invoice, so a firm that bills in a spreadsheet, or needs to attach backup, cannot do it in one step. R4 separately builds, under our review:
+- (a) Submit invoice as a modal over the record modal;
+- (b) a locked record when launched from a record;
+- (c) Submit invoice in the Invoices grid toolbar.
+
+For (a) and (b), our submission wizard must be hostable in a SprkModal and accept a locked record. spa-r4 will send the proposed contract before writing code.
+
+**Entry-points**
+
+- The submission operation (FR-17, FR-20): the 044 path and the SPA submit wizard.
+- Extraction expects a PDF (Content Understanding analyzer `sprk_invoice_vN`).
+
+**Suggested fix**: none yet. Item 1 needs a design decision: extraction for non-PDF files, or a structured import such as LEDES, which is out of scope for R1. Items 2 and 3 fit the Stored Files model (EB-D-148).
+
+**Estimated effort**: unknown; needs a design pass.
+**Blockers**: none.
+**Related**: #2770; R4's post-E2E rework task.
+
+---
+
 ### DEF-066 — Readers field-security profile is not guaranteed on business units created after provisioning
 
 | Field | Value |
