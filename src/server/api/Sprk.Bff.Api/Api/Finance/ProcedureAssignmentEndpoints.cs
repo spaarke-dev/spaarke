@@ -52,7 +52,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 ///   <list type="bullet">
 ///   <item>400 <c>assignment.invalid</c> with <c>errors</c>.</item>
 ///   <item>404 <c>assignment.procedure_not_found</c>, <c>assignment.rule_not_found</c> or <c>assignment.override_not_found</c>.</item>
-///   <item>409 <c>assignment.duplicate</c>, <c>assignment.procedure_retired</c>, <c>assignment.procedure_not_billing</c> (EB-D-228),
+///   <item>409 <c>assignment.duplicate</c>, <c>assignment.procedure_retired</c>, <c>assignment.procedure_inactive</c> (EB-D-232: deactivated in Dataverse),
+///   <c>assignment.procedure_not_billing</c> (EB-D-228),
 ///   <c>assignment.system_rule</c>,
 ///   <c>assignment.rule_not_in_force</c>, <c>assignment.record_rule_conflict</c>, <c>assignment.concurrent_edit</c>, or the owner reason code.</item>
 ///   <item>500 <c>assignment.write_failed</c>.</item>

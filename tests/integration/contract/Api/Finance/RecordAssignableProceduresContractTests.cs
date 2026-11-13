@@ -1194,6 +1194,8 @@ public sealed class RecordAssignableProceduresContractTests
         var retired = rig.AddProcedure("P-retired", ProcedureAppliesTo.AssignedRecordsOnly, status: ProcedureEntity.StatusRetired);
         rig.AddVersion(retired, 1, Jan1, null);
         seeded["P-retired"] = retired;
+        seeded["P-inactive"] = Candidate(rig, "P-inactive");
+        rig.World.Set(ProcedureEntity.Entity, seeded["P-inactive"], "statecode", Option(1)); // EB-D-232: Status Active, deactivated in Dataverse
         seeded["P-otherArea"] = Candidate(rig, "P-otherArea");
         rig.World.Set(ProcedureEntity.Entity, seeded["P-otherArea"], ProcedureEntity.AreaColumn, Option(OtherArea));
         seeded["P-lapsedRow"] = Candidate(rig, "P-lapsedRow");
@@ -1323,6 +1325,7 @@ public sealed class RecordAssignableProceduresContractTests
         verdicts.Where(v => !v.Written).Select(v => v.Code).Should().Contain(new[]
         {
             ProcedureAssignmentService.CodeProcedureRetired, ProcedureAssignmentService.CodeProcedureNotBilling,
+            ProcedureAssignmentService.CodeProcedureInactive,
         });
         verdicts.Should().Contain(v => v.Name == "P-draft" && v.Written && !v.Offered, "EB-D-228: Draft-only is accepted, and never gained");
     }
