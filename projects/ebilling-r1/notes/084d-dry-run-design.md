@@ -429,3 +429,21 @@ The overlay is 084d-1's, unchanged, so it keeps ontology-r1's F1-F4. Many assign
 - **Q5 (owner).** Should 089's assign refuse a Procedure of another area (O-24: document-only in R1)? *Recommend yes,* as a separate small 089 fix with its own test. Keep accepting Draft-only, since assigning ahead of publication is harmless.
 - **Q6 (owner).** Offer only the list firm's Procedures (prototype, and this design), or every firm's, for records billed by two firms? *Recommend the list firm.* After and the lists then show the result, and the panel's firm picker reaches the others.
 - **Q7 (owner).** Offer a Procedure that would be a Gap on the date, with a warning, or hide it? *Recommend offering it with the warning.* The hold is O-22's intended effect, and hiding it would be silent.
+
+### 084d-5 design: answers and binding conditions (2026-11-13)
+
+**Owner:** Q4 50 plus `q` (EB-D-227); Q5 refuse non-Billing at assign, Draft-only still allowed (EB-D-228); Q6 the panel's firm (EB-D-229); Q7 offer a Gap with a warning (EB-D-230).
+
+**ontology-r1:** OK. Q1 yes: narrow the candidate query by Area = Billing and by Firm (empty, or the list's firm). Conditions:
+1. Reuse, don't re-encode: `ProcedureEntity.AreaColumn` / `FirmColumn`, `RuleDomains.PolicyDomainBilling`. The firm filter is an OR of (`sprk_firm` null, `sprk_firm` = firm), mirroring `FirmConditionHolds` (`ProcedureResolver.cs` ~569). If possible, a test pins the two together.
+2. The 50 bound never truncates silently: stable order (name, then id), a truncated flag, the wizard says so. Parity seeds include one case over the bound.
+3. Active-but-unpublished (D-203 / DEF-061) comes out as not offered from the resolver, never from a query condition.
+
+**uac-r2:** OK to build. Q2: 503 for a candidate the caller cannot Read (EB-D-218, all or nothing; revisit with 191). Q3: the list requires the assign write's checks (`RecordWriteCheck` + `Admin()`, after `finance.read`). Binding notes:
+1. The `tooMany` path also runs the ONE batched check over Now's exposed rows (and the firm) before answering; a refusal or fault gives 503. Tests: `TooMany_StillAsksNowRows`, and denied-Now gives 503.
+2. `notOffered` OwnRow asks the own row and its Procedure; an inactive own row counts and is asked too.
+3. A byte-identical 404 across unknown, unreadable, unwritable and step-0, before the 403 `Admin()` check. Keep the no-read-before-404 test.
+4. `q`: escape the Like wildcards AND reject control characters; 400 is the only bad-input answer.
+5. The ledger reason text names all three GETs; the count stays 153.
+
+Reviews: one Opus pass here, then uac-r2's; ontology-r1 sees the code.
