@@ -73,6 +73,7 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
   - Submit invoice opens as a modal over the record modal (same size and position) with the record fixed and no record step (R4 builds, ebilling reviews);
   - on the Invoices grid, Submit invoice sits in the grid toolbar;
   - invoice file types / supporting files / several invoices → ebilling-r1 (#2770).
+- 2026-11-13 — **access labels match Manage Access everywhere** ("View Only" / "Collaborate" / "Full Access"; no "Can contribute"). Matter/WA records need the level from the BFF (UAC review) rather than an inferred label.
 - 2026-11-11 — **Esc in a child dialog follows the modal standard (§6.5 Path C):** with a form or confirm child open, Esc closes neither the child nor the record and keeps the draft; Cancel/× close the child. Spec FR-03 amended. No local Esc handlers on presets.
 
 ## 4. Coordination

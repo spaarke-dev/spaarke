@@ -36,6 +36,10 @@ yet exercised). Tell uac-r2 when the E2E is done; it re-reads the external route
 `e9208abc5e` + mcp-r1 spike `d7369fecf1`; contains `c53452bb0c`, verified locally). Read-back 02:49:36Z all as expected;
 rollback snapshot `4e64670ea0`. No external-access files in the spike. SPA unchanged (same BFF host).
 
+**Second BFF redeploy between parts 1 and 2 (owner's go, owner not testing):** dev BFF `0c06f464e3` since
+2026-11-13 13:26Z (master `92d0ca09f7` + spike; contains `c53452bb0c`; only external-access change is uac-r2's 197b
+`AppOnlyExternalVisibility.cs`). Read-back as expected; rollback snapshot `9411f604bb`. Part 2 runs on this build.
+
 ## E2E results — part 1, write-capable partner (owner driving, 2026-11-12)
 
 | # | Check | Result |
@@ -72,6 +76,20 @@ SPA stops using them; retirement is a filed follow-up.**
 - ebilling: invoice files beyond PDF (Excel / data files); "Submit other files" (supporting files not treated as the
   invoice); several invoices in one submission.
 
+## E2E results — part 2 (owner, 2026-11-13, BFF `0c06f464e3`)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Inactivating the contact's organization removes the contact's access | PASS |
+| 2 | View Only contact: no create actions in the record view, no Submit invoice | PASS |
+| 3 | Dark mode (matter record) | PASS |
+| 4 | Remove View Only grant → re-add at Collaborate → contact still cannot reach documents | **FAIL → #2786 (uac-r2)**, details pending from owner |
+| 5 | Inline level change in Manage Access instead of remove/re-add | enhancement → #2786 (uac-r2) |
+| 6 | Label mismatch: SPA "Can contribute" (matter/WA, where `/me` has no level) vs Manage Access "Collaborate" | R4 rework: use the Manage Access labels everywhere; matter/WA need a level answer from the BFF (UAC review) |
+
+Also for the rework: the empty states still say "Use Add event in the toolbar" and 'Use "Add to-do" in the toolbar'
+(they change with the section-placed actions and the To Do removal).
+
 ## FR-33 evidence so far
 
 - (2) Held-invoice Review detail: **deferred to task 028** (R4 P1 does not render `sprk_reviewdetail`; FR-11 is P2 and
@@ -83,7 +101,9 @@ SPA stops using them; retirement is a filed follow-up.**
 
 ## E2E (steps 6–9) — accounts and records needed (owner to supply/confirm)
 
-- ⚠️ **Watch-item #2761 (uac-r2's code, not R4):** on dev the identity store's contact-binding readability proof faults
+- ✅ **#2761 watch-item dropped (uac-r2, 2026-11-13):** the WhoAmI 403 comes from the reconciliation job checking a
+  second provisioning-target org; spaarkedev1 reads `Readable` 24/24. First sign-in on dev is unaffected. Original note:
+- ~~Watch-item #2761 (uac-r2's code, not R4):~~ on dev the identity store's contact-binding readability proof faults
   on WhoAmI (403) every 5 min since 2026-11-02 and fails closed, so an **unbound** contact's first sign-in, invite
   redemption or registration may be refused or stall. Prefer already-bound test contacts; if a first-time contact
   fails, attribute it to #2761 and tell uac-r2 (they will prioritize it).
