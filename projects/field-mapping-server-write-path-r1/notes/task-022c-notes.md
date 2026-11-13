@@ -190,15 +190,16 @@ stamp / reconcile path; a mapping rule is configuration applied to every row it 
   so a Web API key or any case matches) is asked in two places: `PushMayWrite` (the preview's plan leaves the column out of
   `changes`, as for every refused target) and the apply's per-rule loop, which skips the rule VISIBLY: a `FieldResults` entry
   with `Status = Skipped` and `ErrorMessage = AccessColumnNotMappedMessage`, which carries the code
-  `field_mapping.push.access_column_not_mapped`. The rest of the push applies. A document's own access columns keep their
-  earlier refusal and text (`RefuseAppOnlyWrite` is asked first). The code is in the `PushFieldMappingsResponse.FieldResults`
+  `field_mapping.push.access_column_not_mapped`. The rest of the push applies. Since fix round 3 the check is asked first, so a
+  document's access columns carry the same one code. The code is in the `PushFieldMappingsResponse.FieldResults`
   and `FieldMappingResultDto.ErrorMessage` doc comments. The client reads neither `fieldResults` nor the rule text, so it needs
   no change.
 - **Saving a rule: not built.** The brief asked that saving a rule refuse such a target "at the rule-target refusals
   (FieldMappingEndpoints.cs ~1362)". No BFF path saves a field-mapping rule: the field-mapping endpoints are the profile reads,
   `POST validate` (type compatibility only, no callers) and the push; rules are authored in Dataverse (and seeded by the
-  provisioning seeder). Line ~1362 is the push's per-rule refusal, which is where the skip was added. A save-time refusal needs
-  a decision (a new save path, the seeder, or the push skip as the one enforcement); reported to the main session.
+  provisioning seeder). Line ~1362 is the push's per-rule refusal, which is where the skip was added. Fix round 3 answers it on
+  the enforcement ladder instead: the rules Spaarke ships are guarded by an ArchTest (below); rules an administrator authors in
+  Dataverse are not checked-in data, so for them the rule stays at the push and at Repair.
 - **End-value check: not built** (main session, superseded). The push can no longer carry `sprk_accesspermission` in its
   payload (the pin `AccessColumnPushTargetTests.EveryAccessColumn_IsRefusedByTheColumnsAPushMayWrite` and the apply test
   prove it on every table), so the child's stored value is the value it ends with, and the Restricted check reads that.
@@ -242,3 +243,58 @@ Evidence for fix round 2:
   2.5 to 3 minutes under machine load) pass when run alone (6 passed), and touch no field-mapping code.
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `dotnet test tests/Spaarke.ArchTests/`: **2530 passed**.
 - `dotnet format whitespace --folder --verify-no-changes` on the ten touched .cs files: clean. No client change, so no jest run.
+
+## Fix round 3 (2026-11-12): the shipped-rules guard and the one code
+
+unified-access-control-r2 PASSED `87d9074c3d`; its scoped re-check found no F-class finding. Three items followed.
+
+**Decisions**
+1. **Shipped rules never target an access column (ArchTest).** `tests/Spaarke.ArchTests/FieldMappingSeederAccessColumnTests.cs`.
+   The only checked-in field-mapping rule data is the provisioning seeder's literal
+   `DataverseWebApiFieldMappingSeeder.SeedProfiles` (C#). No seed JSON, CSV, solution data file or `scripts/` file carries
+   rules: the solution folders hold the rule table's schema, forms and views, and the `scripts/` hits are field-security and
+   sync-mode scripts over existing rows. The test reads the seeded rules through the loader the existing
+   `FieldMappingSeederSyncModeClassTests` uses (its `SeededRule` and `SeededRules` widened from private to internal, not
+   copied) and asks the BFF's own matcher, `FieldMappingEndpoints.IsAccessColumnNeverMapped`, which reads
+   `RecordCreationService.AccessColumnsNeverMapped` (the ArchTests project references the BFF and sees its internals), so the
+   five names are not retyped. Controls: must fire, every list column and a mixed-case Access Permission key are flagged by
+   name; must not fire, an ordinary, an Assigned-To and a regarding-pair target pass; plus a non-empty-seed check. The
+   maintenance procedure is in the file. Rules an administrator authors in Dataverse cannot be read by a test, so for them
+   the rule stays at the push and at Repair.
+2. **One code for every access column.** The apply loop asks `IsAccessColumnNeverMapped` BEFORE `RefuseAppOnlyWrite`, so a
+   document's `sprk_accesspermission` and `sprk_accessinheritance` now carry `field_mapping.push.access_column_not_mapped`
+   too. The submission marker and the document link and BFF-owned columns keep their own texts. Updated:
+   `DocumentAccessPermissionPushTargetTests.APushRule_TargetingADocumentsAccessColumn_IsSkipped_AndTheOtherColumnsArePushed`
+   (it asserted the earlier document text for those two columns).
+3. **Payload safety net.** After the rule loop, beside the search-index scrub, `FieldMappingEndpoints.DropAccessColumns`
+   removes every payload key whose column is an access column (bind key, `_x_value` key, any case) and logs each by table,
+   record, column and code, never the value. It catches a bind plan that names an access column under an aliased rule.
+
+**K: a key the safety net removes is logged, not listed per rule.** The aliased rule's `FieldResults` entry still reads
+Mapped, as the search-index safety net's does; the payload never carries the column. The per-rule check, not the net, is the
+visible skip.
+
+Evidence for fix round 3:
+- Item 2 off (the first check never fires): `AccessColumnPushTargetTests.ADocumentsAccessColumn*` +
+  `DocumentAccessPermissionPushTargetTests`: **7 failed, 2 passed**; restored, all pass.
+- Item 3 off (`DropAccessColumns` removes nothing): `AccessColumnPushTargetTests` **2 failed**
+  (`ABindKeyForAnAccessColumn_UnderAnAliasedRule_IsRemovedBeforeTheWrite`, `ThePayloadSafetyNet_RemovesEveryKeyForm_AndKeepsTheOtherColumns`),
+  **74 passed**; restored, 76 passed.
+- ArchTest on the real data: with a rule onto `sprk_accesspermission` added to the seeder's event profile,
+  `NoShippedFieldMappingRule_TargetsAnAccessColumn` **failed**, naming "Matter to Event (Attorney Matrix):
+  sprk_event.sprk_accesspermission is an access column" (the sync-mode guard failed on it too); seeder restored, it passes.
+- ArchTest controls: with the BFF matcher off, `ARuleTargetingAnAccessColumn_IsFlagged` **failed** (1 failed, 3 passed);
+  restored, 4 passed.
+- Filtered BFF suite `FieldMapping|RecordRepair|RecordCreation|MappingSource|RestrictedSource|Refile|RecordFamily|
+  ChildAccessPermission|PushRuleSelection|SecureRootInheritanceWriter` (`&FullyQualifiedName!~Api.Office.`): **4373 passed**.
+- `dotnet build Spaarke.sln` and `dotnet build tests/Spaarke.ArchTests/`: 0 warnings, 0 errors.
+  `dotnet test tests/Spaarke.ArchTests/`: **2534 passed** (2530 + the 4 new).
+- `dotnet format whitespace --folder --verify-no-changes` on the five touched .cs files: clean (one object initializer in
+  `AccessColumnPushTargetTests` reformatted to one property per line; that class rerun, 76 passed).
+
+Section 11 answers (fix round 3):
+
+| Member | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `FieldMappingEndpoints.DropAccessColumns` | `RecordTableRules.DropSearchIndexFromUpdate` (the same safety net for the index columns) | That helper is keyed to the search-index columns and their origin type; the access columns are a different list with their own code, so a sibling beside the push's other refusals | A bind plan naming an access column under an aliased rule would reach the write |
+| `FieldMappingSeederAccessColumnTests` (ArchTest) | `FieldMappingSeederSyncModeClassTests` (the seeder's sync modes) | Reuses its seed loader (widened to internal); a different invariant, so its own class with its own controls and procedure | A shipped seed rule could target an access column and be skipped on every push, unseen until run |
