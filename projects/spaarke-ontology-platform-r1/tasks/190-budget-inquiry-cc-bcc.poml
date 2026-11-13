@@ -4,7 +4,7 @@
     <title>Send budget inquiry sends Cc and Bcc end to end; the "Cc and Bcc are not sent" warning goes away on that step (D-222)</title>
     <phase>11 UAT (budget inquiry follow-up, D-222)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies .cs and .tsx code files.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -132,6 +132,7 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above; anything beyond needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
   <notes>Owner UAT 2026-11-13 on MAT-34929-0040 (D-222 (owner 2026-11-13, notes/decisions.md)). Failed-send recovery is task 191. The composer already shows Cc/Bcc in compose-only mode; only the commit path and the warning change.</notes>
+  <completion>Done 2026-11-13: PR #2784 merged to master (b77967a750). Notes: notes/task-190-notes.md. rework: fix-round-1 task 190</completion>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master (line numbers in this POML are origin/master d8b53ec0c3); PR to master.</protocol>
