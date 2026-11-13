@@ -771,7 +771,8 @@ The **Communication Account** form includes the following sections:
 | The `inbound-polling-backup` scheduled job is not running | `GET /api/admin/jobs/inbound-polling-backup/status` (SystemAdmin) shows its last runs and next fire; logs carry one `[INBOUND-POLL] heartbeat` line per run. Non-production slots run no scheduled jobs (`Scheduling__RunScheduledJobs=false`). |
 | A run keeps failing | The job status shows `Success=false` with a message; a failed mailbox is logged per account with its Graph error code, keeps its watermark and is retried on the next run (every 5 minutes). |
 | Account not receive-enabled | Set `sprk_receiveenabled` to Yes |
-| Redis cache stale | Clear Redis cache; service will re-query on next cycle |
+| Communication account cache stale | Do not clear Redis. To refresh the account list, delete only the `comm:accounts:*` keys; the service re-queries Dataverse on the next run. The `comm:inbound-poll-watermark:*` keys must survive: they hold each mailbox's poll position, and losing one makes the backup poll start from the default 15-minute lookback, which can skip older unread mail. |
+| Redis is down | The backup poll stops while Redis is unavailable, because the scheduler cannot take its lease. Polling resumes from the saved position when Redis returns; the webhook and delta-reconciliation paths keep running meanwhile. |
 
 ### BackgroundService Not Running (Silent Death)
 

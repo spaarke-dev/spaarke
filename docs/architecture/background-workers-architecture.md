@@ -38,7 +38,7 @@ Topic-based pub/sub is used for fan-out events (multiple consumers on the same s
 
 Topic policies: 1 GB max, 14-day default TTL, non-partitioned, batched ops, no duplicate detection (idempotency at consumer side). Subscription policies: 10 max delivery, 5-min lock duration, dead-letter on expiration. Per FR-2P2.3 (D3 decision 2026-06-20): topic transport with subscription-per-consumer — explicitly NOT reusing the `sdap-jobs` queue — so future consumers (cache warmers, downstream indexers, Teams notify, VIP cache invalidator) can subscribe without infra migration.
 
-### Periodic Timer Services (5)
+### Periodic Timer Services (3)
 
 These workers execute on a recurring schedule using `PeriodicTimer` or delay-until-time patterns. They are existing hand-rolled timer services: new scheduled work uses `IScheduledJob` on `ScheduledJobHost` ([ADR-036](../../.claude/adr/ADR-036-background-job-infrastructure.md)), and these migrate when next touched ([ADR-052](../../.claude/adr/ADR-052-workload-placement.md) §1).
 
@@ -47,8 +47,6 @@ These workers execute on a recurring schedule using `PeriodicTimer` or delay-unt
 | ScheduledRagIndexingService | `src/server/api/Sprk.Bff.Api/Services/Jobs/ScheduledRagIndexingService.cs` | Configurable (default: 60 min) | PeriodicTimer; opt-in via `ScheduledRagIndexing:Enabled` |
 | GraphSubscriptionManager | `src/server/api/Sprk.Bff.Api/Services/Communication/GraphSubscriptionManager.cs` | 30 minutes | PeriodicTimer; creates/renews Graph webhook subscriptions for all receive-enabled mailboxes |
 | DailySendCountResetService | `src/server/api/Sprk.Bff.Api/Services/Communication/DailySendCountResetService.cs` | Once daily at midnight UTC | Delay-until-midnight loop; resets `sprk_sendstoday` for all communication accounts |
-| PlaybookSchedulerService | `src/server/api/Sprk.Bff.Api/Services/PlaybookSchedulerService.cs` | 1 hour | PeriodicTimer; executes notification-mode playbooks for all active users; 5 parallel users per playbook |
-| TodoGenerationService | `src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs` | 24 hours | PeriodicTimer; scans for deadline-approaching and budget-alert conditions, creates to-do records |
 
 > **Migrated (#2749, PR #2757, 2026-11-13):** `InboundPollingBackupService` is no longer a timer service. It is an
 > `IScheduledJob` (`inbound-polling-backup`, cron `*/5 * * * *`) on `ScheduledJobHost`, registered in
@@ -107,7 +105,7 @@ These workers run once at startup (if enabled) and then exit.
 ### Scheduling Patterns
 
 **PeriodicTimer** (existing services only — new scheduled work uses `IScheduledJob`, ADR-036):
-- Used by: ScheduledRagIndexingService, GraphSubscriptionManager, PlaybookSchedulerService, TodoGenerationService
+- Used by: ScheduledRagIndexingService, GraphSubscriptionManager
 - Pattern: `using var timer = new PeriodicTimer(interval); while (await timer.WaitForNextTickAsync(ct)) { ... }`
 
 **Delay-until-time** (for wall-clock scheduling):
