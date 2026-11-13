@@ -93,7 +93,9 @@
 
 ## Remaining tasks
 
-- 084d-3, 084d-4.
+- 084d-3 (built `task/084d-3` 06139f6aca, gates green; review running, then ontology-r1, then merge), 084d-4.
+- 095e, 095f, 095g (owner rulings EB-D-223..226, 2026-11-13). 095g inputs: `notes/095g-assign-firm.md`; design note to uac-r2 before code.
+  word-add-in-r1 (their task 134) is owed: each master SHA and dev SHA for 095e (banner `firm {id,name}`), 095f contract (max length, missing-note rule), 095g contract after uac-r2 agrees.
 - 112 (deploy and ui-tests).
 - 079 (role expectations list the two Reads).
 - 131–135 (134: ping spa-r4 first).
