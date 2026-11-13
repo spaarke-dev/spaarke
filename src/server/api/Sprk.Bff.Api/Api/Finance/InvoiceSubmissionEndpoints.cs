@@ -616,6 +616,10 @@ public static class InvoiceSubmissionEndpoints
         try
         {
             // The invoice-family rule read as for an invoice that regards the core record (no row is built: nothing is created here).
+            // Read app-only on purpose (uac-r2, 2026-11-13). The submitter already reads this core record: the invoice follows its
+            // one core record (D-28), and the re-file runs as them. Only the type, id, name and URL are written, NO number.
+            // A change that writes the number, or that reaches this code without that read, must read as the caller and clear
+            // the name and number on 403/404, as task 045d's create does (OwnedChildWrite.CallerDisplayRecords).
             var regarding = new EntityReference(core.EntityLogicalName, core.RecordId);
             var decided = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
                 InvoiceFamilyCoreRecordGuard.Check(Services.Finance.FinanceBaseValues.InvoiceEntity,
