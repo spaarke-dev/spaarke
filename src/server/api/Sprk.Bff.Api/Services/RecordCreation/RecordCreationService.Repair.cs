@@ -1089,6 +1089,11 @@ internal sealed record RecordRepairOutcome
         RecordRepairReason.MappingSourceMetadataUnavailable,
         RecordRepairReason.MappingTargetMetadataUnavailable,
         RecordRepairReason.StampUnavailable,
+        // Review F2-a: an owner-resolution fault (the filing's owner, and so the mapping, undecided), and a mapping source that
+        // could not be read (Repair reads app-only, with no probe: a read fault, or a source that is gone — asked again up to the
+        // pass's attempt limit).
+        RecordRepairReason.MappingFilingUnavailable,
+        RecordRepairReason.MappingSourceUnreadable,
         // Review F1-a: the relationship metadata that says whether an owner write cascades could not be read.
         RecordRepairReason.OwnerAssignCascadeUnknown,
     };
@@ -1196,6 +1201,10 @@ internal static class RecordRepairReason
 
     /// <summary>Review F1-b: the owner of what the row is filed under could not be decided — nothing is mapped (fail closed).</summary>
     internal const string MappingFilingUndecided = "record_repair.mapping_filing_undecided";
+
+    /// <summary>Task 052b (review F2-a): deciding the owner of what the row is filed under faulted — nothing is mapped, and the
+    /// row is asked again (a fault, not an answer: <see cref="RecordRepairOutcome.TransientReasons"/>).</summary>
+    internal const string MappingFilingUnavailable = "record_repair.mapping_filing_unavailable";
 
     /// <summary>Task 016 escalation trigger 2: the owner would move the row to another business unit (fail closed).</summary>
     internal const string OwnerMovesBusinessUnit = "record_repair.owner_moves_business_unit";

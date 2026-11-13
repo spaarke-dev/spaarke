@@ -579,10 +579,58 @@ public sealed partial class RecordRepairModeTests
         outcome.OwnerRefusal!.Code.Should().Be(RecordCreationRefusal.OwnerUnavailableCode);
         outcome.OwnerRefusal.Detail.Should().NotContain("SECRET");
         outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
-            && f.ReasonCode == RecordRepairReason.MappingFilingUndecided);
+            && f.ReasonCode == RecordRepairReason.MappingFilingUnavailable, "task 052b review F2-a: a fault, not an answer");
         _world.Writes.Should().BeEmpty("an undecided filing could be a secure one");
         _world.Directory.Row("sprk_event", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        outcome.NeedsRetry.Should().BeTrue();
+    }
+
+    // ── Task 052b (review F2-a): a fault is asked again; an answer is not ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task AnOwnerResolverFault_OnARowWhoseOwnerIsKept_IsAskedAgain()
+    {
+        // A team-owned row keeps its owner, so no owner refusal is reported; the fault deciding its filing (which gates the
+        // mapping) must still make the row retryable, or the pass's watermark would pass it for good.
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null,
+            owner: new EntityReference("team", Directory.ChildTeam));
+        _world.ResolverFault = new InvalidOperationException("Test: resolver faulted.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.OwnerRefusal.Should().BeNull("the owner is kept, not refused");
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUnavailable);
+        outcome.NeedsRetry.Should().BeTrue("a fault, not an answer");
+        _world.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASourceReadThatFaults_IsAskedAgain()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        _world.SourceReadFault = new InvalidOperationException("Test: source read faulted.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingSourceUnreadable);
+        outcome.NeedsRetry.Should().BeTrue("the mapping was not applied because of a fault");
+    }
+
+    [Fact]
+    public async Task AFiledRowTheResolverRefuses_IsAnAnswer_NotAskedAgain()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null,
+            owner: new EntityReference("team", Directory.ChildTeam));
+        _world.ResolverAnswer = RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "Test: no owner.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUndecided);
+        outcome.NeedsRetry.Should().BeFalse("a deterministic refusal stays an answer");
     }
 
     [Theory]

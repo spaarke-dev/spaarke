@@ -1655,7 +1655,8 @@ internal sealed partial class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[RECORD-REPAIR] the owner of {Table} {Id} could not be decided (fault); it was not changed", table, row.Id);
-            var blockedOnFault = filed ? RecordRepairReason.MappingFilingUndecided : null;
+            // Task 052b (review F2-a): a fault, not an answer — the row is asked again.
+            var blockedOnFault = filed ? RecordRepairReason.MappingFilingUnavailable : null;
             return keep is { } keptOnFault
                 ? OwnerKept(keptOnFault, blockedOnFault, report)
                 : OwnerRefused(row, OwnerUnavailable(noun), report, blockedOnFault);
