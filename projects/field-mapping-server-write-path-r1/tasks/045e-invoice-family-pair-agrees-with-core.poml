@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045e" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Invoice family: a regarding pair that disagrees with the core lookup is refused (#2772, DI-029)</title>
+    <phase>3 W3 (follow-up to 045d)</phase>
+    <gate>045d merged into the work branch (it edits the same guard, planner and paths). ebilling-r1 and unified-access-control-r2 review the diff before merge.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what five write paths admit on six tables (.cs, bff-api); refusal behaviour; modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-closed reasoning across several write paths that already carry the invoice-family guard, the 045b planner and the 045d derive.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceFamilyCoreRecordGuard, OwnedChildWrite and FieldMappingEndpoints, which 045d changes.</parallel-reason>
+    <deps>045d</deps>
+    <tags>bff-api, field-mapping, invoice-family, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision 2026-11-13 (#2772 option (a), notes/decisions.md): on every invoice-family table, a write whose regarding pair (`sprk_regardingrecordid` plus its record type) disagrees with the row's effective core lookup is refused, and nothing is written. The effective core lookup is the value written in the same request, else the stored value. FR-23 (the regarding pair stays pushable) is amended for these six tables only. A write that moves the core lookup keeps 045d's behaviour: the server derives the pair and the five resolver fields.</prompt>
+  <role>SPAARKE platform developer, BFF write path. Security fails closed. Follow ADRs strictly.</role>
+  <goal>No write path leaves an invoice-family row whose regarding pair names a different record from its core lookup, and the D-68 external-identifier key moves only when the core lookup moves.</goal>
+
+  <context>
+    <background>
+The six tables and their core lookups are `InvoiceFamilyCoreRecordGuard.CoreRecordLookups` (045d widened the generic update guard to all six). 045b's planner propagates the pair; 045d derives the pair and the five resolver fields when a core lookup moves (`KeepInvoiceFamilyResolverFieldsAsync`, `DeriveForGenericUpdateAsync`, create step 5½). The pair's type is read through the record-type catalog (`sprk_recordtype_ref`). `SecureRootInheritance.BffManagedPairTables` holds no family table (pinned by `InvoiceFamilyPairTablesTests`), so on these tables the pair never decides filing; this rule is consistency, not access.
+
+Paths that can write a family row's pair: the create (`RecordCreationService`), the child-record PATCH and the chat tool (`OwnedChildWrite.DecideInvoiceFamilyAsync`), `UpdateRecordActionCore` (playbook update; also confirmed proposals), `DataverseUpdateHandler` (output orchestrator), and the field-mapping push (`FieldMappingEndpoints`). The submission writers set the pair from their own derive and are not in scope.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step 5½)</file>
+      <file role="read">projects/field-mapping-server-write-path-r1/notes/task-045d-notes.md</file>
+      <file role="read">projects/field-mapping-server-write-path-r1/notes/task-045c-notes.md</file>
+      <file role="test">tests/integration/data-mutation/RecordOwnership/InvoiceFamilyGenericUpdatePathTests*.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-045e origin/work/field-mapping-server-write-path-r1` (after 045d is merged there). Then confirm this POML exists on the branch.</constraint>
+    <constraint source="one rule, one place">Put the agreement check in ONE place in the guard that every path calls (beside `Check` / `CheckGenericUpdateCoreAsync`). Do not re-derive it per path. The pair agrees when its record id equals the effective core lookup's id and its type names that lookup's table (through the catalog). A pair that is absent from the write is not checked. A pair written together with a core-lookup move is replaced by 045d's derive, never refused.</constraint>
+    <constraint source="refusal">Refuse through each path's EXISTING refusal form (the guard's code-only refusal on the app-only handlers, the per-child error on the push, the uniform form on caller paths). Reuse an existing guard code if one says "the regarding record disagrees with the core record"; otherwise add ONE new reason code, with fixed text that names no record, and §11 answers for it. No new code per path.</constraint>
+    <constraint source="FR-23">On the push, a disagreeing pushed pair on a family-table child refuses that child (nothing written to it); other children and other tables are unchanged. Keep the push order: source gate → access-column scrub → guard → planner → derive.</constraint>
+    <constraint source="fail closed">A fault reading the stored row or the catalog means nothing is written, as today. Cancellation is rethrown.</constraint>
+    <constraint source="no other change">The submission writers, 045d's derive and option (b), the guard's existing decisions, and the create's step 5½ are unchanged except for the new check. Do not edit UAC-r2's files (`SecureRootInheritance.cs` read only; `DirectThreadAccessService.cs`, `DirectMessageParticipantShares.cs`, `SecureChildShareReconciliationJob.cs`, `SecureChildReconciler.cs`).</constraint>
+    <constraint source="public repo">Commit messages, comments, test names and notes state rules only, never a hole.</constraint>
+    <constraint source="ADR-038 / §10 / §11">New tests under KEEP paths (`tests/integration/**`, `tests/unit/domain/**`). Never run Sprk.Bff.Api.Tests unfiltered; add `&amp;FullyQualifiedName!~Api.Office.`. The publish delta is the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; read 045d's notes and the guard.</step>
+    <step order="1">The agreement check in the guard, and the refusal code decision.</step>
+    <step order="2">Wire it into the create, the caller paths (PATCH, chat tool), the two app-only handlers and the push.</step>
+    <step order="3">Tests (AC1–AC5), each must-fire run once with the rule off to show it fails. Then build (0 warnings), ArchTests, filtered suites, ebilling-r1's filters (Finance, ProcedureAssignment, InvoiceFamily), `dotnet format whitespace --verify-no-changes` on touched files, and `notes/task-045e-notes.md` (rule, §11, evidence, known limits). Commit on `task/fm-045e`.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (must fire): for each of the six tables, on each path that can write the pair (create, child-record PATCH, chat tool, UpdateRecordActionCore, DataverseUpdateHandler, push), a write whose pair names a record other than the effective core lookup (a different id, or the right id under the wrong type) is refused through that path's form, and nothing is written.</criterion>
+    <criterion testable="true">AC2 (must not fire): a pair equal to the core lookup; a write with no pair; a write that moves the core lookup with or without a pair (045d derives it); a write that touches neither — all behave as today.</criterion>
+    <criterion testable="true">AC3 (FR-23 elsewhere): pushing a pair to a non-family table is unchanged (existing push tests pass).</criterion>
+    <criterion testable="true">AC4 (external identifier): a pair-only write that would change the D-68 key's core is refused.</criterion>
+    <criterion testable="true">AC5 (fail closed): a fault reading the stored row or the catalog writes nothing; cancellation is rethrown; every existing invoice-family, Finance and push test passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-13 from the owner's decision on #2772 (DI-029), in the main session.</notes>
+</task>

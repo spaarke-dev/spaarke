@@ -291,4 +291,4 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2772 |
 | **Class** | Follow-up; owner decision (touches FR-23); ebilling-r1 and this project |
 | **Failure** | Rule: on every invoice-family table, a row's regarding pair and its five resolver fields agree with its core lookup, and a write's pair agrees with the stored or written core lookup. Options: (a) refuse a disagreeing pair (ebilling-r1's view), (b) always derive the pair from the core lookup. Scope once decided: six tables × child-record update, chat tool, `UpdateRecordActionCore`, `DataverseUpdateHandler`, push. |
-| **Status** | Open; owner decision pending |
+| **Status** | Owner decided 2026-11-13: (a) refuse (decisions.md). Work: task 045e, after 045d merges. |

@@ -1117,3 +1117,11 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
   - an unconfigured customer team skips the contact table without moving its watermark.
   
   unified-access-control-r2 confirmed the resolver change with four conditions, all in that round. The deployment dependency is DI-028 (#2771).
+
+## 2026-11-13 — Invoice family: a regarding pair that disagrees with the core lookup is refused (owner, #2772)
+
+- **Owner decision, given in this session on 2026-11-13: "Refuse it"** (option (a) of #2772 / DI-029).
+- **The rule.** On every invoice-family table (invoice, billing event, approval, external identifier, correction, submission), a write's regarding pair (`sprk_regardingrecordid` plus its record type) must agree with the row's core lookup. The core lookup is the effective one: the stored value, or the value written in the same request. A write whose pair disagrees is refused through each path's existing refusal form, and nothing is written. A write that moves the core lookup still gets its pair and the five resolver fields derived by the server (045d).
+- **FR-23 amended for these tables.** The regarding pair stays pushable, but on an invoice-family table a pushed pair that disagrees with the child's core lookup is refused per child. On every other table FR-23 is unchanged.
+- **Views.** ebilling-r1 recommended (a). unified-access-control-r2: either option; there is no access effect while `SecureRootInheritance.BffManagedPairTables` holds no family table (pinned by 045d).
+- **Work:** task 045e, after 045d merges (same files).
