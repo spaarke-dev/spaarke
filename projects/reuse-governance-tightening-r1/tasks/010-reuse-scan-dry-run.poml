@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="reuse-governance-tightening-r1">
+  <metadata>
+    <title>Reuse-scan dry-run and owner go/no-go</title>
+    <phase>2 Reuse scan</phase>
+    <gate>blocked until 001</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Creates a new project note and runs an agent under explicit cost constraints (FR-03, NFR-03)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The orchestrator must judge whether the agent's facts amount to catching a known duplicate; planning-tier judgment</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>launches a code-mapper agent and ends at an owner gate; run from the main session</parallel-reason>
+    <deps>001</deps>
+    <tags>config</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Prove, before any skill is edited, whether one code-mapper agent at effort low finds known duplication in two closed projects when searching by concept, synonym and interface shape. Record the result and get the owner's go/no-go.</prompt>
+  <role>SPAARKE planning-tier orchestrator. Judges facts returned by a read-only agent; never lets the agent judge.</role>
+  <goal>projects/reuse-governance-tightening-r1/notes/reuse-scan-dry-run.md records, for each case, the capabilities extracted, the searches run, what was caught, what was missed and the token use, plus the decision under the FR-03 rule and the owner's answer.</goal>
+
+  <context>
+    <background>design.md sections 4.0-4.2 and 9 (Validation); spec.md FR-03. Cases: (1) set-regarding / field-mapping: projects/set-regarding-and-field-mapping-resolver-r1 then r2 (and field-mapping-server-write-path-r1); (2) the RichTextEditor vs Compose pair (projects/spaarkeai-compose-r1). The agent gets the design or spec of the earlier project as if it were new, plus the capability index, and must find the existing component that the later history shows was duplicated.</background>
+    <relevant-files>
+      <file role="new">projects/reuse-governance-tightening-r1/notes/reuse-scan-dry-run.md</file>
+      <file role="canonical-reference">.claude/agents/code-mapper.md</file>
+      <file role="canonical-reference">.claude/patterns/CAPABILITY-INDEX.md</file>
+      <file role="canonical-reference">projects/set-regarding-and-field-mapping-resolver-r2</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">The capability index passed to the agent</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Each agent launch in this task uses subagent_type code-mapper with model sonnet; effort is the definition's low. Do not raise effort in this task (OQ-2).</constraint>
+    <constraint source="project">The agent prompt requires the design.md section 4.1 return schema (capabilities, searched, candidates with path:line, symbol, match, evidence; notCovered).</constraint>
+    <constraint source="project">Decision rule (owner, 2026-11-10): both caught at low means go; one missed means present the owner the measured token cost per scan and the projected monthly cost at medium, owner decides; both missed means no-go, and tasks 011 and 012 are set to cancelled.</constraint>
+    <constraint source="project">Do not edit any skill or agent file in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/reuse-governance-tightening-r1/design.md</file>
+      <file>.claude/agents/code-mapper.md</file>
+      <file>.claude/constraints/agent-cost.md</file>
+    </files>
+    <patterns>
+      <pattern name="Agent finds, orchestrator judges" location="projects/reuse-governance-tightening-r1/design.md">Section 4.2: code-mapper is read-only and fact-only; the orchestrator writes the file.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">For each case, identify from the earlier project's design/spec the capabilities it introduced and the known existing component the later history shows it duplicated (the answer key). Write the answer key into the note before running the agent.</step>
+    <step order="2">Launch one code-mapper agent per case with the capability list (concept, synonyms, interface shape), the index path and the return schema. Record total tokens from the agent result.</step>
+    <step order="3">Judge each result against the answer key: caught, partially caught (named the area but not the component), or missed.</step>
+    <step order="4">Apply the decision rule and write the note.</step>
+    <step order="5">Present the note to the owner and record the answer. If no-go, mark 011 and 012 `🚫 [cancelled]` in TASK-INDEX.md and their POML status cancelled, with the reason.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the answer key for a case cannot be established from the project history, STOP and ask the owner to confirm the duplicate rather than choosing one.</trigger>
+    <trigger>If one agent run costs more than 200k tokens, STOP and report the number to the owner before running the second.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No dry-run record exists for this project (Glob projects/reuse-governance-tightening-r1/notes/*).</existing>
+    <extension>No: a project-local record, not repo surface.</extension>
+    <cost-of-doing-nothing>Tasks 011 and 012 would wire a scan into two skills without evidence that it catches anything, and the owner would not see its cost first (OQ-2).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="Agent">code-mapper (sonnet, low)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/reuse-governance-tightening-r1/notes/reuse-scan-dry-run.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note has, per case: answer key, capabilities extracted, searches run, caught/missed, token use.</criterion>
+    <criterion testable="true">The note states the decision under the FR-03 rule and the owner's recorded answer.</criterion>
+    <criterion testable="true">Negative: no skill or agent file changed in this task.</criterion>
+    <criterion testable="true">If no-go: 011 and 012 are cancelled in both TASK-INDEX.md and their POMLs.</criterion>
+  </acceptance-criteria>
+
+  <notes>The project's own spec was generated with the old design-to-spec Step 3; that is expected.</notes>
+
+  <completion-notes>Completed 2026-11-12 (results commit 82648c08e4). Case 1 answer key escalated (trigger 1): the field-mapping history was not a cross-project duplication; the owner chose nav-prop discovery as scored case 1 and asked that field mapping also run, as unscored case 1b. code-mapper sonnet/low, projects/ excluded: case 1 caught (39,299 tokens), case 2 caught (34,346), case 1b caught (33,249). Verdicts rest on hits the search makes without index rows 5 and 30. Decision under FR-03: go; owner answered "Go" 2026-11-12. No skill or agent file changed. Found in passing: 7 private copies of nav-prop discovery remain (listed in notes/reuse-scan-dry-run.md as input for task 020). rework: none task 010</completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -27,7 +27,7 @@
 # break) costs one extra turn, not a loop.
 #
 # The build deliberately does NOT pass -warnaserror: Directory.Build.props owns
-# the warning policy (TreatWarningsAsErrors + WarningsNotAsErrors CS0618), the
+# the warning policy (TreatWarningsAsErrors; WarningsNotAsErrors is empty), the
 # same reason CI tier1 "compile" omits it (see the comment on that job and
 # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md).
 #

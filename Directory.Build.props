@@ -18,7 +18,7 @@
       CS0618 (use of an [Obsolete] member) is a build ERROR again — re-armed 2026-11-11
       (reuse-governance-tightening-r1 task 042). Marking a member [Obsolete] therefore
       fails the build at every existing caller: the change that adds the marker must
-      migrate those callers, or give the attribute a DiagnosticId (e.g. SPRK001) and
+      migrate those callers, or give the attribute its own new DiagnosticId (SPRK001 is taken) and
       suppress only that ID, at the call site or here, with a one-line reason. Never
       re-add CS0618 itself to WarningsNotAsErrors / NoWarn or as a file-wide pragma.
       REMOVED from the allowlist 2026-08-15 (quality-r3-followups):
