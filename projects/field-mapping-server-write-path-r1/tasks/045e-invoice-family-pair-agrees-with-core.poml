@@ -78,5 +78,6 @@ FieldMappingEndpoints.cs needed no change. One existing test was adapted (Action
 Fix round 1 (2026-11-13, review F2/F4/K1/K2, D-68 pins): an agreeing pair id is written in canonical form on every path; the
 app-only paths decide the pair on the payload as it will be written, after the planner (KeepRegardingPairAgreeingAsync, first
 step of KeepInvoiceFamilyResolverFieldsAppOnlyAsync), and drop a sent pair on a core move so only the derive writes it; the caller
-paths check the derived pair on a move too. Notes: rules 2, 5, 6, §11 rows, K2b/K3b/K4b/K6b.</notes>
+paths check the derived pair on a move too. Notes: rules 2, 5, 6, §11 rows, K2b/K3b/K4b/K6b.
+Merged into the work branch 2026-11-13 at 1c59df2ffc (task/fm-045e 14a98aadb9; fix rounds 2-4: refused after-state before the move exemption; D-96 order pinned; a sent record URL decided by its etn and id; admitted pair id and URL stored in canonical form). ebilling-r1 PASS, unified-access-control-r2 PASS. Gates on f0ef0c3d78: sln 0 warnings; ArchTests 2539; project suites 9003/0/7; publish +26,761 B vs fresh master 92d0ca09f7 (40.15 MB, 191 = 191 files); no vulnerable packages.</notes>
 </task>
