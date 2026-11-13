@@ -7,15 +7,12 @@
 
 **Checkpoint 2026-11-12** (after task 020). Branch `work/reuse-governance-tightening-r1`, all committed and pushed. **Items 1–3 merged to master: PR #2751 (`8c05f5b70f`, squash)**; master merged back, branch content = master.
 
-**Done (9/19; board synced 9)**: 001, 002, 041, 042 (2026-11-11); 010, 011, 012, 021, 020 (2026-11-12). 041/042 merged to master (#2705, #2706); master merged into the branch (`29bcda5fe3`).
+**Done (9/19 as of 2026-11-12)**: 001, 002, 041, 042 (2026-11-11); 010, 011, 012, 021, 020 (2026-11-12). 041/042 merged to master (#2705, #2706); master merged into the branch (`29bcda5fe3`).
 - Items 1 (capability index), 2 (reuse scan: design-to-spec, pipeline fallback, task-create citation) and 3 (jscpd sweep + adversarial-reviewer checks) are complete on the branch.
 - Task 020: weekly `duplication-sweep` job in `nightly-health.yml` (Mon 07:00 UTC cron, dispatch input `duplication_sweep_only`), `.jscpd.json`. Verified by dispatch runs 43289750101 and 43293619731: 38 s, artifact uploaded, 17 new / 192 old cross-area clusters, status failing in dry-run. The first master run after merge will open the `weekly/duplication-sweep` alert for those 17 (intended).
 
-**Active task**: **030** package decision records (started 2026-11-13; rigor STANDARD; master merged `265d426d3c`; PR #935 still open — matters for 031–033, not 030).
-- Done: 3 code-mapper inventories (sonnet/low); candidate defects checked in the main session (none user-visible; the CommunicationPage prototype is not deployed). `notes/package-reviews.md` written: 9 sections + findings P-1..P-14 (8 Medium, 6 Low, 0 High).
-- Recommendations: sdap-client consolidate→ui-components; smart-todo / communication / daily-briefing **sanction via one Path B amendment for "Pattern D feature packages"** (overturns the §6.2 consolidate hypothesis — owner call); compose sanction; document-operations consolidate→ui-components (033); ai-outputs consolidate→ai-widgets; ai-context types→ai-widgets + retire (031); legal-workspace retire facade, SpaarkeAi depends on the solution directly (032).
-- **Next action**: owner reviews `notes/package-reviews.md` and decides each of the 9 → fill each "Owner decision", mark the POML complete + TASK-INDEX ✅, commit. Tasks 031–034 do not start before that.
-**Then**: 031–034, 035 (DEV deploy — owner OK), 040 (Learn MCP; owner per-machine approval), 043, 080, 090.
+**Done (10/19)**: + 030 (2026-11-13). Owner approved all 9 package decisions ("Approve all"); `notes/package-reviews.md` (findings P-1..P-14: 8 Medium, 6 Low, 0 High), `notes/decisions.md` row.
+**Active task**: none. **Next**: **031** ai-context types → `@spaarke/ai-widgets`, retire the package (FULL, sonnet/high; touches `.claude/adr/ADR-012` census + `SharedPackageCensusTests` — check PR #935 first). Then 032 legal-workspace, 033 document-operations (serial), 034 (file the other six + P-findings; can run alongside), 035 DEV deploy (owner OK), 040, 043, 080, 090.
 **Open, reported to owner**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
 - ISS-003 #2713 — done (PR #2751), closed.

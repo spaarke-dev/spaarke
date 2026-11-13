@@ -3,7 +3,7 @@
 > Date: 2026-11-13. Branch `work/reuse-governance-tightening-r1` (master merged `265d426d3c`).
 > Bar: ADR-012's three tests, all of which must hold to sanction (`.claude/adr/ADR-012-shared-components.md`): **T1** distinct contract (a different feature area alone is not one), **T2** quarantine-worthy dependency, **T3** cross-surface reuse (2+ of PCF / code page / SPA / add-in).
 > Evidence: three `code-mapper` inventories (sonnet, low), re-verified from `package.json` files and import sites on 2026-11-13, plus main-session checks of each candidate defect. Recommendations are the main session's judgment. Design §6.2 hypotheses were starting points; two are overturned (feature-area packages; see §2–§4).
-> **Owner gate**: tasks 031–034 do not start until each section's *Owner decision* is filled in.
+> **Owner gate**: passed 2026-11-13. The owner approved all nine recommendations as written ("Approve all"), including the Pattern D feature-package amendment that overturns the §6.2 consolidate hypothesis for §2–§4.
 
 ## Decision summary
 
@@ -67,7 +67,7 @@ Routing: P-5, P-6 (the ai-context part) and P-11 (ai-context, legal-workspace, d
 
 This is out of r1 execution scope; task 034 files it.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 2. `@spaarke/smart-todo-components` (`src/client/shared/Spaarke.SmartTodo.Components`)
 
@@ -94,7 +94,7 @@ This is out of r1 execution scope; task 034 files it.
 
 It names these three packages and closes the list; a new one still needs an amendment. This changes ADR-012's bar, so it is the owner's call. The alternative is a strict reading (consolidate), with the costs above. Out of r1 execution scope; task 034 files it.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 3. `@spaarke/communication-components` (`src/client/shared/Spaarke.Communication.Components`)
 
@@ -113,7 +113,7 @@ It names these three packages and closes the list; a new one still needs an amen
 
 **Recommendation — Sanction** under the §2 amendment. It already meets condition (c): the PCFs deep-import, as its header documents. This is the strongest case of the three. Out of r1 execution scope; task 034 files it with P-3 and P-12 (delete the prototype code page).
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 4. `@spaarke/daily-briefing-components` (`src/client/shared/Spaarke.DailyBriefing.Components`)
 
@@ -128,7 +128,7 @@ It names these three packages and closes the list; a new one still needs an amen
 
 **Recommendation — Sanction** under the §2 amendment. Out of r1 execution scope; task 034 files it with P-4: replace the private nav-prop discovery with the shared resolver.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 5. `@spaarke/compose-components` (`src/client/shared/Spaarke.Compose.Components`)
 
@@ -143,7 +143,7 @@ It names these three packages and closes the list; a new one still needs an amen
 
 **Recommendation — Sanction** (ADR-012 amendment naming the editing-model contract and the TipTap quarantine). This also settles capability-index row 30 ("two answers" today). Out of r1 execution scope; task 034 files it.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 6. `@spaarke/document-operations` (`src/client/shared/Spaarke.DocumentOperations`)
 
@@ -165,7 +165,7 @@ It names these three packages and closes the list; a new one still needs an amen
 
 P-1 is **not** fixed by the move. It needs its own issue: the five other implementations migrate to the hook surface by surface, and each surface's behaviour change is checked by hand.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 7. `@spaarke/ai-outputs` (`src/client/shared/Spaarke.AI.Outputs`)
 
@@ -180,7 +180,7 @@ P-1 is **not** fixed by the move. It needs its own issue: the five other impleme
 
 **Recommendation — Consolidate into `@spaarke/ai-widgets`** (`src/outputs/`). In the same change, make the registry metadata import the enum (fixes P-7) and keep one pane-event definition (fixes the ai-outputs half of P-6). Out of r1 execution scope; task 034 files it.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 8. `@spaarke/ai-context` (`src/client/shared/Spaarke.AI.Context`)
 
@@ -202,7 +202,7 @@ P-1 is **not** fixed by the move. It needs its own issue: the five other impleme
 
 This fixes P-5 and the ai-context half of P-11. P-6's single-definition fix belongs with the ai-outputs consolidation (§7), so this task does not touch `SprkChat`.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
 
 ## 9. `@spaarke/legal-workspace` (`src/client/shared/Spaarke.LegalWorkspace`)
 
@@ -227,4 +227,4 @@ This fixes P-5 and the ai-context half of P-11. P-6's single-definition fix belo
 
 **Risk to check in 032**: Vite dedupe and transpile globs, which list both trees today.
 
-**Owner decision**: _pending_
+**Owner decision**: **Approved as recommended** (owner, 2026-11-13, "Approve all").
