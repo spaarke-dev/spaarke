@@ -28,7 +28,7 @@ public partial class BillingFactLoaderTests
         var procedure = Guid.NewGuid();
         _world.Add(ProcedureEntity.Entity, procedure,
             (ProcedureEntity.AreaColumn, new OptionSetValue(Billing)), (ProcedureEntity.StatusColumn, new OptionSetValue(ProcedureEntity.StatusActive)),
-            (ProcedureEntity.NameColumn, "Procedure " + code), (ProcedureEntity.AppliesToColumn, new OptionSetValue((int)appliesTo)));
+            ("statecode", new OptionSetValue(0)), (ProcedureEntity.NameColumn, "Procedure " + code), (ProcedureEntity.AppliesToColumn, new OptionSetValue((int)appliesTo)));
         var procedureVersion = Guid.NewGuid();
         _world.Add(ProcedureEntity.VersionEntity, procedureVersion,
             (ProcedureEntity.VersionProcedureColumn, Ref(ProcedureEntity.Entity, procedure)), (ProcedureEntity.VersionNumberColumn, 1),
