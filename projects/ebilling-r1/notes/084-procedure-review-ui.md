@@ -876,3 +876,21 @@ The dry run's access, read and routes. Branch `task/084d-2a`, from `3a9130b7be`.
 - **K3.** Both sides run the future-date probe, so a Procedure that opens after the date can make the dry run 503 when its overlap does, exactly as the record read does.
 - **K4.** In a switch, Now still shows the replaced row's creator (it is real and asked). F3 removes the creator from After only; the test asserts both.
 - **K5.** The sides' permission flags are all false. The client offers writes from the record read, not from the dry run.
+
+**Tests:**
+- `tests/integration/contract/Api/Finance/RecordProcedureDryRunContractTests.cs` (34): the HTTP cases above, plus the dry-run `Every200Guid_WasAskedOfTheCaller_DryRun` guard (four seeds, with a planted-GUID must-fire control) and the dry-run version-row guard (four seeds).
+- `RecordWritePermissionsContractTests.cs` (+36): `EachDryRun_DeclaresExactlyThePlannedWritesChecks` (21 cases, four must-fire controls each), `DryRunGuard_FiresWhenAReplacementDropsTheRemovalsChecks`, and `EachDryRunRoute_AsksTheCaller_ExactlyItsDeclaredChecks` (21 routes × kinds, eBilling off).
+- `RouteAuthorizationGuardTests.Ledger.cs`: the `RequireReadOnTheDryRunsOverridesSubject` credited form; the RecordProcedureEndpoints entry names the dry-run filters.
+
+**Mutation seeds.** Each was applied, built, run against the two test classes and restored:
+- S1 drop the R6 firm exposure: 2 fail (the R6 theory).
+- S2 exempt every created row without the found check: 2 fail (the switch test, the dry-run Every200Guid guard).
+- S3 revert F3: 1 fails (the switch test).
+- S4 swallow the by-id fault and exempt everything created: 1 fails (the condition 1 test). The first version of that test faulted every by-id read of the id, so the later stamp read still produced a 503 and S4 survived; the fault now hits only the synthetic load.
+- S5 drop `RemoveChecks` for a replacement: 6 fail (declaration equality, the replacing cases).
+- S6 swap the record and 403 filters (projects route): 4 fail (the uniform-404 theory, step 0).
+- S7 check After only: 3 fail (the removal test, the dry-run Every200Guid guard).
+
+**Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization) 8233 passed, 4 skipped, 0 failed. `dotnet format whitespace --verify-no-changes` clean on the touched files.
+
+**Publish size** (fresh `origin/master` `2a4b86272d` vs this branch, `dotnet publish -c Release -r linux-x64`, `Compress-Archive -CompressionLevel Optimal`, 191 files each): master 42,072,199 bytes, branch 42,065,181 bytes, delta −7,018 bytes (the branch base lags master; the change itself adds no package and no assembly).

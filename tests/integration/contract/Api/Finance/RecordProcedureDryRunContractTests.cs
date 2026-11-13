@@ -272,9 +272,13 @@ public sealed class RecordProcedureDryRunContractTests
         var s = host.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
         host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
         var proposed = DerivedAssignmentId(Project, P, s.Procedure);
+
+        // ONLY the load that decides "synthetic" (an In on the primary key asking for the key column alone) faults; every later read of the
+        // same id (the creators' stamp read) still answers. So a dry run that swallowed this fault and exempted the row would reach 200.
         host.Rig.Entities
             .Setup(e => e.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => q.EntityName == ProcedureAssignmentEntity.Entity
+                    && q.ColumnSet.Columns.Count == 1 && q.ColumnSet.Columns[0] == ProcedureAssignmentEntity.Entity + "id"
                     && q.Criteria.Conditions.Any(c => c.AttributeName == ProcedureAssignmentEntity.Entity + "id" && c.Values.Contains(proposed))),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("by-id load throttled"));
