@@ -52,7 +52,8 @@ public sealed class DirectMessageOwnerStep
     /// <summary>Error: the message's owner write was refused, faulted or did not read back; it keeps its owner.</summary>
     internal const string MessageNotMovedEventCode = "direct_message.owner_write_not_confirmed";
 
-    /// <summary>Error: a content row of a message moved to the Direct team did not move with it.</summary>
+    /// <summary>Error: a content row of a message moved to the Direct team (or, uac-r2 197a, to its creator's team) did not move
+    /// with it.</summary>
     internal const string ContentRowNotMovedEventCode = "direct_message.content_row_not_moved";
 
     /// <summary>Warning: a 1:1 message send was refused before anything was sent.</summary>
@@ -198,6 +199,26 @@ public sealed class DirectMessageOwnerStep
     /// </summary>
     public async Task AfterReparentAsync(Guid communicationId, RecordOwnerResolution? reparent, CancellationToken ct)
     {
+        // uac-r2 197a (#2722): a communication that is not a Direct message moved to its creator's team; its content rows follow
+        // it through the same content move as the Direct return, with the same partial-failure handling (each row that does not
+        // move is logged, the message's own move stands).
+        if (reparent?.UnfiledContentFollows is { } follows)
+        {
+            try
+            {
+                await MoveContentRowsAsync(
+                    communicationId, new EntityReference("team", follows.PreviousOwnerTeamId), follows.TeamId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogError(ContentRowNotMovedEvent, ex,
+                    "Communication {CommunicationId} moved to team {TeamId}, but its content rows could not be moved; they stay where they are.",
+                    communicationId, follows.TeamId);
+            }
+
+            return;
+        }
+
         if (reparent?.DirectUnfile is not { } due)
             return;
 
@@ -711,16 +732,16 @@ public sealed class DirectMessageOwnerStep
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogError(ContentRowNotMovedEvent, ex,
-                    "Message {CommunicationId} moved to the Direct team, but its {Table} rows could not be read; they stay where they are.",
-                    communicationId, table);
+                    "Message {CommunicationId} moved to team {TeamId}, but its {Table} rows could not be read; they stay where they are.",
+                    communicationId, teamId, table);
                 continue;
             }
 
             if (rows.Count >= RestrictedFilingShareBar.MaxRowsPerTable)
             {
                 _logger.LogError(ContentRowNotMovedEvent,
-                    "Message {CommunicationId} moved to the Direct team; its {Table} read reached its cap of {Cap}, so rows beyond it stay " +
-                    "where they are.", communicationId, table, RestrictedFilingShareBar.MaxRowsPerTable);
+                    "Message {CommunicationId} moved to team {TeamId}; its {Table} read reached its cap of {Cap}, so rows beyond it stay " +
+                    "where they are.", communicationId, teamId, table, RestrictedFilingShareBar.MaxRowsPerTable);
             }
 
             foreach (var row in rows)
@@ -737,8 +758,8 @@ public sealed class DirectMessageOwnerStep
                 if (IsFiledUnderARecord(row))
                 {
                     _logger.LogInformation(
-                        "Message {CommunicationId} moved to the Direct team; its {Table} row {RowId} is filed under a record and keeps its owner.",
-                        communicationId, table, row.Id);
+                        "Message {CommunicationId} moved to team {TeamId}; its {Table} row {RowId} is filed under a record and keeps its owner.",
+                        communicationId, teamId, table, row.Id);
                     continue;
                 }
 
@@ -748,8 +769,8 @@ public sealed class DirectMessageOwnerStep
                 if (fault is not null)
                 {
                     _logger.LogError(ContentRowNotMovedEvent,
-                        "Message {CommunicationId} moved to the Direct team, but its {Table} row {RowId} stays where it is ({Fault}).",
-                        communicationId, table, row.Id, fault);
+                        "Message {CommunicationId} moved to team {TeamId}, but its {Table} row {RowId} stays where it is ({Fault}).",
+                        communicationId, teamId, table, row.Id, fault);
                 }
             }
         }
@@ -901,6 +922,20 @@ public sealed record DirectUnfileDecision(DirectUnfileVerdict Verdict, string? R
 /// <param name="LeavesSecureOwner">The message was owned in the Secure Record business unit before the unfile: its content rows are
 /// moved by the secure-child reconcile, not by the step.</param>
 public sealed record DirectUnfileDue(Guid ThreadId, bool LeavesSecureOwner);
+
+/// <summary>
+/// uac-r2 task 197a (#2722, round 90 decision): carried on a written unfile's answer
+/// (<see cref="RecordOwnerResolution.UnfiledContentFollows"/>) when a communication that is not a Direct message moved from
+/// <paramref name="PreviousOwnerTeamId"/> to its creator's team <paramref name="TeamId"/>: its content rows that had the previous
+/// owner follow it, through the Direct move's own content step (<see cref="DirectMessageOwnerStep.AfterReparentAsync"/>).
+/// </summary>
+/// <remarks>Component Justification (CLAUDE.md §11): (1) Existing — <see cref="DirectUnfileDue"/> carries the Direct move, whose
+/// content step this reuses. (2) Extension — that record means "return to the Direct team, grant the pair"; this one names only the
+/// two teams the content rows move between, and the writers already hand every answer to the step. (3) Cost of doing nothing — the
+/// message's attachments, participants and review logs stay with the matter team after the message moves.</remarks>
+/// <param name="PreviousOwnerTeamId">The team that owned the communication before the unfile; only content rows it owns move.</param>
+/// <param name="TeamId">The team the communication was settled to.</param>
+public sealed record UnfiledContentMove(Guid PreviousOwnerTeamId, Guid TeamId);
 
 /// <summary>The pre-send check of a 1:1 message (<see cref="DirectMessageOwnerStep.CheckBeforeSendAsync"/>).</summary>
 public sealed record DirectOwnerSendCheck(bool CanSend, bool IsTransient, string? RefusalCode)

@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -80,6 +81,48 @@ public class DirectUnfileGenericPathTests
         writes.Should().ContainSingle("the unfile itself is written");
         OwningTeam(world).Should().Be(FakeDirectory.CustomerChildTeam).And.NotBe(FakeDirectory.GeneralTeam);
         _calls.Should().BeEmpty("not a Direct message: no participant grant");
+    }
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingACommunicationThatIsNotADirectMessage_ItsContentRowsFollowItToTheCreatorsTeam()
+    {
+        // uac-r2 197a, round 90 decision (pass-2 F1-2): the Direct move's own content step moves them.
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator()
+            .WithRecord(AttachmentTable, AttachmentId, FakeDirectory.ChildBu, owningTeam: FakeDirectory.ChildTeam, extra: AttachmentOf());
+        var (handler, _) = UpdateHandler(world, Resolved());
+
+        await handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+
+        OwningTeam(world).Should().Be(FakeDirectory.CustomerChildTeam);
+        world.Row(AttachmentTable, AttachmentId).GetAttributeValue<EntityReference>("owningteam")?.Id
+            .Should().Be(FakeDirectory.CustomerChildTeam, "a content row that had the matter team follows the message");
+        _calls.Should().Equal(new[] { "owner " + AttachmentTable }, "no participant grant: not a Direct message");
+    }
+
+    [Fact]
+    public async Task UpdateHandler_UnfilingACommunicationThatIsNotADirectMessage_AContentRowThatCannotMove_IsReported_AndTheMessageMoveStands()
+    {
+        var world = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator()
+            .WithRecord(AttachmentTable, AttachmentId, FakeDirectory.ChildBu, owningTeam: FakeDirectory.ChildTeam, extra: AttachmentOf());
+        // The message's own owner write (the settle) lands; every owner write after it faults — the content row's.
+        world.AfterWrite = (w, fields) =>
+        {
+            if (fields.ContainsKey("ownerid"))
+                w.AssignmentFault = new InvalidOperationException("Test: the content row's owner write faulted.");
+        };
+        var stepLog = new RecordingStepLogger();
+        var (handler, _) = UpdateHandler(world, Resolved(), stepLogger: stepLog);
+
+        await handler.UpdateAsync("sprk_communication", MessageId, Unfile(), ConcurrencyMode.None, maxRetries: 1, CancellationToken.None,
+            impersonateSystemUserId: Person);
+
+        OwningTeam(world).Should().Be(FakeDirectory.CustomerChildTeam, "the message's own move is reported as it happened");
+        world.Row(AttachmentTable, AttachmentId).GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(FakeDirectory.ChildTeam);
+        stepLog.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Event.Id == DirectMessageOwnerStep.ContentRowNotMovedEvent.Id
+                                              && e.Message.Contains(AttachmentId.ToString()));
     }
 
     [Fact]
@@ -640,7 +683,8 @@ public class DirectUnfileGenericPathTests
     private (DataverseUpdateHandler Handler, List<Dictionary<string, object?>> Writes) UpdateHandler(
         FakeDirectory world, DirectMessageOwnerTeam lookup, bool withStep = true, IThreadResolver? threads = null,
         Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null,
-        Sprk.Bff.Api.Services.Access.SecureChildReconciler? children = null, Action<string, Guid, Guid>? afterOwnerWrite = null)
+        Sprk.Bff.Api.Services.Access.SecureChildReconciler? children = null, Action<string, Guid, Guid>? afterOwnerWrite = null,
+        ILogger<DirectMessageOwnerStep>? stepLogger = null)
     {
         var writes = new List<Dictionary<string, object?>>();
         var handler = new DataverseUpdateHandler(
@@ -650,7 +694,7 @@ public class DirectUnfileGenericPathTests
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
             children ?? SecureChildReconcilerFixtures.OverEmptyWorld(threads),
             shares: shares,
-            directOwner: withStep ? Step(world, lookup, afterOwnerWrite) : null);
+            directOwner: withStep ? Step(world, lookup, afterOwnerWrite, stepLogger) : null);
         return (handler, writes);
     }
 
@@ -684,7 +728,9 @@ public class DirectUnfileGenericPathTests
 
     /// <summary>The real step over the directory: rows read by id, the message's attachment (when seeded) its one content row,
     /// owner writes conditional (each also handed to <paramref name="afterOwnerWrite"/> with the team it names).</summary>
-    private DirectMessageOwnerStep Step(FakeDirectory world, DirectMessageOwnerTeam lookup, Action<string, Guid, Guid>? afterOwnerWrite = null)
+    private DirectMessageOwnerStep Step(
+        FakeDirectory world, DirectMessageOwnerTeam lookup, Action<string, Guid, Guid>? afterOwnerWrite = null,
+        ILogger<DirectMessageOwnerStep>? logger = null)
     {
         var dataverse = new Mock<IGenericEntityService>();
         dataverse
@@ -713,7 +759,20 @@ public class DirectUnfileGenericPathTests
             .Callback<Guid, ThreadAssignment, CancellationToken>((_, assignment, _) => _calls.Add("grant " + assignment.Audience))
             .Returns(Task.CompletedTask);
         return new DirectMessageOwnerStep(
-            access.Object, dataverse.Object, lookup, NullLogger<DirectMessageOwnerStep>.Instance,
+            access.Object, dataverse.Object, lookup, logger ?? NullLogger<DirectMessageOwnerStep>.Instance,
             configuration: new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
     }
+
+    private sealed class RecordingStepLogger : ILogger<DirectMessageOwnerStep>
+    {
+        public List<(LogLevel Level, EventId Event, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, eventId, formatter(state, exception)));
+    }
 }
+

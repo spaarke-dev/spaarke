@@ -1811,6 +1811,15 @@ public sealed record RecordOwnerResolution(
     /// </summary>
     public Sprk.Bff.Api.Services.Communication.Access.DirectUnfileDue? DirectUnfile { get; init; }
 
+    /// <summary>
+    /// uac-r2 task 197a (#2722, round 90 decision): set on a WRITTEN unfile of a communication that is not a Direct message when the
+    /// settle moved it from the team that owned it before the change to its creator's team: its content rows that had that team
+    /// follow it, moved by the writer through
+    /// <see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.AfterReparentAsync"/> (the Direct move's own
+    /// content step). <c>null</c> on every other answer.
+    /// </summary>
+    public Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove? UnfiledContentFollows { get; init; }
+
     /// <summary>True for a refusal the F3 check made (<see cref="SecureRemovalRefusal"/>): an AUTHORIZATION answer, not an
     /// owner refusal — HTTP writers answer it with the unsecure endpoint's ProblemDetails, not the owner refusal's 409.</summary>
     public bool IsForbidden => IsRefused && SecureRemovalRefusal is not null;
@@ -3147,7 +3156,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             var teamId = target.OwningTeamId!.Value;
             if (state.OwningTeam == teamId)
             {
-                return (target, filingIsOwn); // already owned by the team its current parents resolve to
+                // already owned by the team its current parents resolve to
+                return (WithUnfiledContentFollowing(target, before), filingIsOwn);
             }
 
             // R4b-2b (rule 1): the restricted-content team replaces a default-team answer only, never a kept creator. An
@@ -3199,7 +3209,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
 
             // Written conditionally at the version read, so the filing it answers is the one read at that version.
-            return (await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false), filingIsOwn);
+            return (WithUnfiledContentFollowing(await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false), before),
+                filingIsOwn);
         }
 
         if (lastTarget is { IsSecureOwner: true } secure)
@@ -3229,6 +3240,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             + "attempts: the row kept changing under concurrent writers. No owner that disagrees with its current parents was "
             + "written (#2143).");
     }
+
+    /// <summary>
+    /// uac-r2 task 197a (#2722, round 90 decision): a settled answer for an unfiled communication moved to its creator's team
+    /// (<see cref="RowBeforeChange.Unfiled"/> named the creator) from the team that owned it before the change carries
+    /// <see cref="RecordOwnerResolution.UnfiledContentFollows"/>, so its content rows follow it. Every other answer is returned as is.
+    /// </summary>
+    private static RecordOwnerResolution WithUnfiledContentFollowing(RecordOwnerResolution settled, RowBeforeChange before) =>
+        before.Unfiled is { CreatorSystemUserId: not null }
+        && settled.IsOwned && settled.OwningTeamId is { } team && team != Guid.Empty
+        && before.OwningTeam is { } previous && previous != Guid.Empty && previous != team
+            ? settled with { UnfiledContentFollows = new Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove(previous, team) }
+            : settled;
 
     /// <summary>
     /// Reads a written owner back (task 146): <paramref name="target"/> when it is the team, else throws
@@ -4393,6 +4416,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var id = request.RecordId;
         if (Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.WhyFiledUnderARecord(rowAfter) is not null)
             return UnfiledCommunicationFacts.Keep(id, "it is still linked to a record after the change, so it is not unfiled");
+
+        // Round 90 decision (pass-2 F1-3): a row owned by a person keeps that owner; a re-file never loosens it to a business
+        // unit's whole team. Reads nothing.
+        if (current.GetAttributeValue<EntityReference>(OwnerColumn) is { LogicalName: var ownerTable }
+                && !string.Equals(ownerTable, TeamEntity, StringComparison.OrdinalIgnoreCase)
+            || current.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } owningUser && owningUser != Guid.Empty)
+            return UnfiledCommunicationFacts.Keep(id, "it is owned by a person, and a re-file never loosens that to a team");
 
         try
         {

@@ -54,6 +54,10 @@ public class RecordOwnershipResolverUnfileOwnerTests
         directory.ConditionalWrites.Should().ContainSingle(w => w.Applied && w.Fields.ContainsKey("ownerid"),
             "the owner is written conditionally, at the version read after the change");
         resolution.ParentsUnchanged.Should().BeFalse();
+        resolution.UnfiledContentFollows.Should().Be(
+            new Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove(FakeDirectory.ChildTeam, FakeDirectory.CustomerChildTeam),
+            "its content rows that had the matter team follow it (round 90 decision)");
+        resolution.DirectUnfile.Should().BeNull();
     }
 
     [Fact]
@@ -245,6 +249,33 @@ public class RecordOwnershipResolverUnfileOwnerTests
         directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("sprk_regardingperson").Should().BeNull();
         _log.Entries.Should().Contain(e => e.Event.Id == RecordOwnershipResolver.UnfileKeepsOwnerEvent.Id && e.Level == LogLevel.Warning
                                            && e.Message.Contains(MessageId.ToString()));
+    }
+
+    // ── Must not fire: owned by a person (round 90 decision, pass-2 F1-3) ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task Unfile_OfAMessageOwnedByAPerson_KeepsThatOwner_NeverItsCreatorsWholeTeam()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator();
+        var person = new EntityReference("systemuser", FakeDirectory.CallerUserId);
+        directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+        {
+            ["ownerid"] = person,
+            ["owninguser"] = person,
+            ["owningteam"] = null,
+        });
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        resolution.Reason.Should().Contain("owned by a person");
+        directory.Row("sprk_communication", MessageId).GetAttributeValue<EntityReference>("owninguser")?.Id
+            .Should().Be(FakeDirectory.CallerUserId);
+        Owner(directory).Should().BeNull("never the creator's business-unit team");
+        directory.ConditionalWrites.Should().BeEmpty();
+        directory.Assignments.Should().BeEmpty();
     }
 
     // ── Must not fire: who created it ────────────────────────────────────────────────────────────────────────────────────

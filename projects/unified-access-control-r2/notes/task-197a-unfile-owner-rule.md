@@ -57,23 +57,24 @@ Pass-1 known limits that were kept:
 - **The creator is read through field security.** If the app user cannot read `sprk_createdbyperson`, the unfile keeps its owner (safe).
 - **A fault while reading the facts logs twice:** a Warning and then an Information entry.
 
-## Adversarial pass 2 (Opus): open items for the coordinator
+## Adversarial pass 2 (Opus): round 90 wrap-up decisions (main session)
 
-Three F1 findings need an owner or design decision, so they were not guessed at.
+Three F1 findings needed an owner or design decision. The main session decided them in the round 90 wrap-up:
 
-1. **The common unlink path never reaches the rule.**
-   - An email in a record thread anchored to its matter still counts as filed under the matter through that thread after its matter link is cleared. So the re-file is not an unfile: `parents = [M]`, and the settle keeps M's team.
-   - The filing reconcile (`ThreadResolver`, "unlink" branch → `MoveUnfiledEmailOutAsync`) then moves it to the per-user master thread. That join has no anchor and does not call `ReparentAsync`, so nothing re-decides the owner.
-   - Result: #2722 fires only for a communication that is in no record thread.
-   - Fix options:
-     - (a) the move-out re-decides the owner through `ReparentAsync` with `UnfiledCommunication`, so `filedUnderBefore` holds the thread's parents;
-     - (b) the resolver treats "own filing empty, and the reconcile will leave the thread" as an unfile.
-   - Either way this touches `ThreadResolver`, whose join the guard lists as `NeverUnfiles`.
-2. **Content rows stay with the old owner.** When an email moves to its creator's team, its attachments, participant rows and review logs keep the matter team. (The Direct path moves them with `MoveContentRowsAsync`.) Do we move them, reusing the Direct step's move, or record this as a known limit beside the document one?
-3. **A user-owned message can be moved to a whole business unit.**
-   - This happens when the Direct owner rule is off: a message owned by a person (not a team) that is left linked to nothing goes to its creator's default team, which widens who can read it.
-   - Proposed: keep the owner when the row is owned by a user. This fails closed and follows "a re-file never loosens".
-
+1. **F1-1, record thread: not in this PR; filed as #2773.**
+   - An email in a record thread anchored to its matter still counts as filed under the matter through that thread when its matter link is cleared.
+   - The filing reconcile (`ThreadResolver` unlink branch → `MoveUnfiledEmailOutAsync`) then re-homes it to the master thread through an unanchored join that does not call `ReparentAsync`, so nothing re-decides the owner.
+   - The status quo is the old behaviour (the old owner kept), not a widening.
+   - PR #2765 stays "Refs #2722", and #2722 stays open.
+2. **F1-2, content rows: MOVED, reusing the Direct step's content move.**
+   - `SettleOwnerAsync` marks a settled creator-team move (`RecordOwnerResolution.UnfiledContentFollows`, an `UnfiledContentMove` carrying the team before and the team after).
+   - The writers already hand every answer to `DirectMessageOwnerStep.AfterReparentAsync`, which runs the same `MoveContentRowsAsync` as the Direct return. Only rows that had the previous team move; a row filed under a record keeps its owner.
+   - The partial-failure behaviour is the same as the Direct path: each row that cannot move is logged as an Error (5416), and the message's own move stands and is reported as it happened. The log text is now owner-neutral.
+   - Tests: the content row follows to the creator's team; a content-row write that faults is reported, and the message move stands. Perturbations: never set the mark → 4 tests fail; the step ignores the mark → 2 tests fail.
+3. **F1-3, user-owned: KEEP.**
+   - A row owned by a person (an `ownerid` that is not a team, or a non-empty `owninguser`) keeps that owner. A re-file never loosens it to a business unit's whole team.
+   - The check is made in `ReadUnfiledFactsAsync` and reads nothing.
+   - Test: `Unfile_OfAMessageOwnedByAPerson_KeepsThatOwner_NeverItsCreatorsWholeTeam`. Perturbation: remove the check → it fails.
 ### Fixed in pass 2
 
 | Finding | Fix |
@@ -99,6 +100,6 @@ The fix is option (a): skip the demotion only when the communication's owner is 
 
 ## Known limits
 
-- **Stale document owner after a #2722 move.** When an unfiled non-Direct communication moves to its creator's team, a document filed under it keeps its previous non-secure owner. That team keeps access it no longer needs (a stale owner, not a leak to anyone outside the earlier audience). Option (b), making the document follow, was rejected for now; the coordinator files the issue.
+- **Stale document owner after a #2722 move.** When an unfiled non-Direct communication moves to its creator's team, a document linked to it only through `sprk_relatedcommunication` now follows it (round 90, F1-2). A document that is also filed under a record keeps its previous owner. That team keeps access it no longer needs (a stale owner, not a leak to anyone outside the earlier audience). Option (b), making the document follow, was rejected for now; the coordinator files the issue.
 - **No recorded creator.** A message created where `sprk_createdbyperson` is not stamped (for example, directly in the model-driven app) keeps its former owner on unfile, by owner decision: never fall back to `createdby`.
 - **Path (a) settle failure.** If the settle on a regarding-only clear fails, the link change stays written and the former owner is kept, logged with ids only (5420, Warning). The change is not refused: it has landed, and a retry would clear no link, so it could not move the owner either. The owner is not retried later.
