@@ -21,6 +21,32 @@ Design: `task-045c-notes.md` "Q8 (a)" (copied, not redesigned). POML: `tasks/045
    when the guard admits the row. On every update path it runs after that path's invoice-family guard and the 045b planner,
    so their refusals come first and are unchanged.
 6. The dedicated submission writers are unchanged: their derive still refuses a blank name or number (all five or none).
+7. On the field-mapping push the name and number are read as the caller, as the 045b planner reads display values there.
+   A record the caller may not read (403 or 404) that exists has its name and number cleared; the type, id and URL are
+   still written. A record that does not exist refuses.
+8. A fault's own text never enters a generic writer's refusal reason (only its type name); the reason can reach a 500's
+   detail. The submission writers' text is unchanged.
+9. The derive reads the stored row only to derive from it. A stored row that does not exist gets no derive refusal; the
+   path answers it as it answers any missing row. A missing or unreadable NEW core record still refuses.
+
+## H1 widened, ebilling-r1 + unified-access-control-r2 agreed 2026-11-13
+
+The generic update paths' invoice-family guard (`CheckGenericUpdateAsync`) covers every family table: the approval, the
+external identifier, the correction and the submission as well as the invoice and the line.
+- The same rule applies (one core record per row; D-96 for an invoice). The stored row is read before deciding, as for the
+  invoice and the line.
+- `IsUpdateOnlyTarget` covers the same six tables. Their writes go out update-only (`If-Match: *`): a missing row is
+  refused with `invoice_family_record_not_found`, or `invoice_family_read_failed` on a write run as a person, and is never
+  created.
+- Refusals use each path's existing form and `CodeOnlyRefusalMessage`; no new code.
+- The guard has no rule comparing an external identifier's core record with its invoice's. With a core lookup set, that
+  lookup decides; D-68 applies only to a row with none.
+- A submission's core lookups are access columns on the playbook update and the output orchestrator. There they are refused
+  before the guard (`sdap.access.access_column_server_only`); the push reaches the guard.
+- Order on the push: source gate → access-column scrub → guard → planner → derive.
+- Rule 9 and H1 together: the guard now reads the stored row of all six tables first and refuses a missing one with its own
+  code. The derive's own "missing stored row" therefore falls through to that answer (or, in a race, to the update-only
+  write's) and never adds a code of its own.
 
 ## Decisions
 
@@ -54,7 +80,7 @@ A blank name or number is legitimate data, and refusing it would make such a rec
   - the row's stored core lookups (`RetrieveAsync`);
   - the catalog row by table name (`RetrieveMultipleAsync`, a `QueryExpression` on `sprk_recordtype_ref`:
     `sprk_recordlogicalname` = table, active, top 1);
-  - the record's name and number (`RetrieveAsync`).
+  - the record's name and number (`RetrieveAsync`; on the push, as the caller — rule 7).
 - It decides with the guard's pure `Check` on the stored values overlaid with the change. A row `Check` refuses is left to the
   path's existing guard, so there is no new refusal for any table.
 - Payload shapes: one helper, the dictionary overload of `OwnedChildWrite.WithColumnsSet`:
@@ -106,6 +132,8 @@ A blank name or number is legitimate data, and refusing it would make such a rec
 | `DeriveForGenericUpdateAsync` | `CheckGenericUpdateAsync` (invoice and billing event, decision only) | Kept separate: the derive covers all six tables and returns the fields; the guard's decision code is unchanged | Each app-only path would repeat the change, read and decision logic |
 | `InvoiceFamilyDecision` / `DecideInvoiceFamilyAsync` | `CheckInvoiceFamilyAsync` | Extended in place: the old method is now a projection | The create cannot learn which core record the guard decided without running the guard twice |
 | `WithColumnsSet` (mapped item and dictionary) | `WithoutColumns`, `Merge` | Both reused; a setter is needed for SDK values (an `EntityReference` pair type → bind on the table's navigation property) | The derived columns cannot be set over the caller's payload; the caller's values would win |
+| `CallerDisplayRecords` (push) and the `records` parameter of `DeriveForGenericUpdateAsync` | `CallerDisplayReader` (045b, the push's display read) | Reused: wrapped as the derive's record reader; only the exists-check on a 403 or 404 is new | The push writes app-only display values that the 045b planner, on the same path, reads as the caller |
+| H1: the widened table set of `CheckGenericUpdateAsync` / `IsUpdateOnlyTarget` | The same guard, invoice and line only | Extended in place: the condition reads `CoreRecordLookups`; no new member | A generic update can give an approval, external identifier, correction or submission a second core record, or re-create a deleted one by upsert |
 | `KeepInvoiceFamilyResolverFieldsAsync` / `…AppOnlyAsync` | 045b planner rule 4 (moves the pair with an agreement lookup) | Runs after the planner; rule 4 does not cover a core-table switch | A family row moved matter → project keeps a stale or cleared pair (045b notes, "What is not covered") |
 
 ## Evidence
@@ -132,9 +160,42 @@ A blank name or number is legitimate data, and refusing it would make such a rec
 - Fail-then-pass (second round): with option (b) off (the generic flag forced strict) and the app-only call returning early,
   26 of the 30 failed. The 4 that pass both ways are the 3 rename must-not-fire rows and the submission writers' pin.
   Restored: 30/30.
+- Third round (fix round 3 and H1), tests new or changed:
+  - `InvoiceFamilyGenericUpdatePathTests.AllFamilyTables.cs` (H1), on the playbook update, the output orchestrator and the
+    push, for each of the approval, the external identifier, the correction and the submission:
+    - must fire: a second core record is refused; a missing row is refused `record_not_found` and never created;
+    - must not fire: a write touching no core column is written once, update-only; a core the row already names is
+      written; an external identifier given an invoice is written;
+    - `IsUpdateOnlyTarget` covers all six tables.
+  - `InvoiceFamilyGenericUpdatePathTests.ResolverFields.cs`:
+    - the push with a caller who may not read the new matter: type, id and URL written, name and number cleared;
+    - an approval moved to another matter (three paths);
+    - an external identifier moved to invoice-only;
+    - a push that sends the pair and moves the core lookup gets the derived pair;
+    - a cancellation during the derive is rethrown, with nothing written;
+    - a stored row that does not exist derives nothing (three variants).
+  - `RecordCreationServiceInvoiceFamilyRuleSeamTests`: a catalog or matter read fault is 500 `read_failed`, and the fault's
+    text is not in the response.
+  - `RecordCreationServiceMappingSeamTests.RestrictedSource`: a stripped invoice is created with its matter's resolver fields,
+    set again on the rebuilt row.
+  - `tests/unit/domain/Dataverse/InvoiceFamilyPairTablesTests.cs`: no family table is a BFF-managed pair table.
+  - The D-96 must-not-fire also pins one catalog query and two queries in all.
+  - `InvoiceFamilyCoreRecordGuardLineSplitTests`: the `IsUpdateOnlyTarget` row for the submission is now true (H1).
+- Fail-then-pass (third round):
+  - Run A switched off H1, rule 7, rule 8, rule 9, the rebuilt row's re-set and the cancellation rethrow. 43 of 61 failed.
+    The 18 that pass both ways are:
+    - the two submission rows refused as an access column;
+    - the 12 "core already named" rows;
+    - the 3 "external identifier given an invoice" rows;
+    - the pair-table pin.
+  - Run B switched off the app-only derive. All 5 failed: the approval moves on 3 paths, the external identifier to
+    invoice-only, and the pushed pair replaced.
+  - Restored: all pass.
+- ebilling-r1's proof (minus `Api.Office.`): Finance 7280 passed, 0 failed, 4 skipped; ProcedureAssignment 392 passed;
+  InvoiceFamily 469 passed.
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
 - `dotnet test tests/Spaarke.ArchTests/`: 2536 passed.
-- `Sprk.Bff.Api.Tests` filtered run: 9361 passed, 0 failed, 3 skipped (live tests).
+- `Sprk.Bff.Api.Tests` filtered run: 9427 passed, 0 failed, 3 skipped (live tests), run alone (third round).
   - Filter: Invoice | RecordTableRules | PreWrite | RecordCreation | OwnedChildWrite | UpdatePlanner | ChildRecord |
     RegardingPair | SecureChildOwnership | DataverseUpdateRecordHandler | BillingExport | Refusal | ActionSeam | FieldMapping |
     UpdateRecordAction | DataverseUpdateHandler | AiTool | InvoiceSubmission, minus `Api.Office.`.
@@ -156,6 +217,16 @@ A blank name or number is legitimate data, and refusing it would make such a rec
 - K5: the derived pair type's catalog row is not asked for AppendTo, the same as the dedicated writers.
 - K6: on the create, the app-only catalog reader is resolved per call from a DI scope. `UpdateRecordActionCore` also takes
   its `IGenericEntityService` from a scope, and only for a family table.
-- K7: on the app-only paths, a core lookup that those paths refuse as an access column is refused before the derive is
-  reached. The derive therefore fires there only for the lookups the paths let through (for example the invoice's and the
-  billing event's core lookups).
+- K7: on the app-only paths the derive runs for every family table whose core lookup the path lets through:
+  - the invoice, the line, the approval, the external identifier and the correction on all three paths;
+  - the submission on the push and on a confirmed proposal.
+  A submission's core lookups are access columns on the playbook update and the output orchestrator, so they are refused
+  there before the guard or the derive is reached.
+- K8: a caller update path (child-record PATCH, chat update tool) reads the new core record as the caller for its name and
+  number, so it needs Read on that record, where a create needs only AppendTo. A caller without Read is refused (fail
+  closed).
+- K9: before deploy, each environment's catalog must hold an active `sprk_recordtype_ref` row with
+  `sprk_regardingrecordnumberfield` set, for matter, project, work assignment and invoice. Without one, a create or a
+  core-lookup move of a family row refuses with `invoice_family_resolver_fields_incomplete`.
+- K10: model-driven form edits of a family row's core lookup do not pass through these paths and are not covered.
+- K11: a pair-only write that disagrees with the row's core lookup is a separate owner decision (#2772, DI-029).
