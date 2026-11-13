@@ -140,6 +140,7 @@ internal sealed class RecordProcedureRig
             (ProcedureEntity.StatusColumn, Option(status)),
             (ProcedureEntity.NameColumn, name),
             (ProcedureEntity.AppliesToColumn, Option((int)appliesTo)),
+            ("statecode", Option(0)), // 084d-5a: the assignable list asks for active rows, as a stored row is
         };
         if (firm is { } f) columns.Add((ProcedureEntity.FirmColumn, Ref("sprk_organization", f)));
         if (type is { } t) columns.Add((ProcedureEntity.TypeColumn, Option((int)t)));

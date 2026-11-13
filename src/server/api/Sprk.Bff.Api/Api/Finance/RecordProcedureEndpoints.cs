@@ -37,6 +37,12 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// override, the caller's Read on the stored row's subject (the write routes' helper). Then 401 for a non-GUID caller, the query, the planning
 /// (the write's own refusals) and ONE batched Read check over both sides (503 <c>procedures.unavailable</c>). Both checks are stricter than
 /// the removal preview's: the dry run also needs <c>finance.read</c>, and a removal needs the remove route's privileges.</para>
+/// <para><b>Assignable Procedures (task 084d-5a, EB-D-227..230).</b> <c>GET .../procedures/assignable?firmId=&amp;date=&amp;q=</c>: the active
+/// Billing Procedures the record could be assigned (Follow latest), each as it would show if assigned now, for the lists' firm; at most
+/// <see cref="RecordProcedureReadService.AssignableBound"/>, else <c>procedures</c> is null and <c>tooMany</c> is set. Nothing is written.
+/// Filters: step 0; the dry run's record filter (<see cref="ProcedureAssignmentEndpoints.DryRunRecordTargets"/>, uniform 404); the assign
+/// write's privileges (<see cref="ProcedureAssignmentEndpoints.AssignableTargets"/>, 403); the kill switch. Then 401 for a non-GUID caller,
+/// the query (400 <c>procedures.invalid_query</c>, <c>q</c> included) and ONE batched Read check (503 <c>procedures.unavailable</c>).</para>
 /// <para><b>Known limit.</b> These routes are internal-only (step 0). Opening them to external callers needs the external-visibility
 /// predicate first (task 191).</para>
 /// </remarks>
@@ -82,6 +88,16 @@ public static class RecordProcedureEndpoints
             .RequireReadOnTheDryRunsOverridesSubject(ProcedureAssignmentEndpoints.MatterTable)
             .WithName("DryRunMatterProcedureOverride")
             .WithSummary("The Procedures and rules on this matter now, and if one proposed override were saved now (nothing is written)");
+
+        group.MapGet("/matters/{recordId:guid}/procedures/assignable",
+                (Guid recordId, string? firmId, string? date, string? q, [FromServices] RecordProcedureReadService service,
+                    [FromServices] ProcedureAssignmentService planner, HttpContext http, CancellationToken ct) =>
+                    Assignable(http, service, planner, ProcedureAssignmentEndpoints.MatterTable, recordId, firmId, date, q, ct))
+            .AddFinanceAuthorizationFilter(context => ProcedureAssignmentEndpoints.DryRunRecordTargets(context, FinanceAuthorizationFilter.MatterEntitySet), FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ProcedureAssignmentEndpoints.AssignableTargets, FinanceDenial.Forbidden)
+            .RequireEbillingEnabled()
+            .WithName("GetMatterAssignableProcedures")
+            .WithSummary("The Procedures this matter could be assigned, each as it would show if assigned now (nothing is written)");
         // ── Project ─────────────────────────────────────────────────────────────────────────────────────────────
         group.MapGet("/projects/{recordId:guid}/procedures",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
@@ -109,6 +125,16 @@ public static class RecordProcedureEndpoints
             .RequireReadOnTheDryRunsOverridesSubject(ProcedureAssignmentEndpoints.ProjectTable)
             .WithName("DryRunProjectProcedureOverride")
             .WithSummary("The Procedures and rules on this project now, and if one proposed override were saved now (nothing is written)");
+
+        group.MapGet("/projects/{recordId:guid}/procedures/assignable",
+                (Guid recordId, string? firmId, string? date, string? q, [FromServices] RecordProcedureReadService service,
+                    [FromServices] ProcedureAssignmentService planner, HttpContext http, CancellationToken ct) =>
+                    Assignable(http, service, planner, ProcedureAssignmentEndpoints.ProjectTable, recordId, firmId, date, q, ct))
+            .AddFinanceAuthorizationFilter(context => ProcedureAssignmentEndpoints.DryRunRecordTargets(context, FinanceAuthorizationFilter.ProjectEntitySet), FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ProcedureAssignmentEndpoints.AssignableTargets, FinanceDenial.Forbidden)
+            .RequireEbillingEnabled()
+            .WithName("GetProjectAssignableProcedures")
+            .WithSummary("The Procedures this project could be assigned, each as it would show if assigned now (nothing is written)");
         // ── Work assignment ─────────────────────────────────────────────────────────────────────────────────────
         group.MapGet("/workassignments/{recordId:guid}/procedures",
                 (Guid recordId, string? firmId, string? date, RecordProcedureReadService service, HttpContext http, CancellationToken ct) =>
@@ -136,6 +162,16 @@ public static class RecordProcedureEndpoints
             .RequireReadOnTheDryRunsOverridesSubject(ProcedureAssignmentEndpoints.WorkAssignmentTable)
             .WithName("DryRunWorkAssignmentProcedureOverride")
             .WithSummary("The Procedures and rules on this work assignment now, and if one proposed override were saved now (nothing is written)");
+
+        group.MapGet("/workassignments/{recordId:guid}/procedures/assignable",
+                (Guid recordId, string? firmId, string? date, string? q, [FromServices] RecordProcedureReadService service,
+                    [FromServices] ProcedureAssignmentService planner, HttpContext http, CancellationToken ct) =>
+                    Assignable(http, service, planner, ProcedureAssignmentEndpoints.WorkAssignmentTable, recordId, firmId, date, q, ct))
+            .AddFinanceAuthorizationFilter(context => ProcedureAssignmentEndpoints.DryRunRecordTargets(context, FinanceAuthorizationFilter.WorkAssignmentEntitySet), FinanceDenial.UniformNotFound)
+            .AddFinanceAuthorizationFilter(ProcedureAssignmentEndpoints.AssignableTargets, FinanceDenial.Forbidden)
+            .RequireEbillingEnabled()
+            .WithName("GetWorkAssignmentAssignableProcedures")
+            .WithSummary("The Procedures this work assignment could be assigned, each as it would show if assigned now (nothing is written)");
         return app;
     }
 
@@ -199,6 +235,60 @@ public static class RecordProcedureEndpoints
         return result.Status == RecordProcedureReadStatus.PlanRefused
             ? ProcedureAssignmentEndpoints.RefusalOf(result.Refusal!, http)
             : Answer(http, new RecordProcedureReadResult<ProcedureDryRunView>(result.Status, result.Value));
+    }
+
+    /// <summary>
+    /// Task 084d-5a: the assignable list, after the route's filters (step 0; the record's Read and Write+AppendTo, uniform 404; the assign
+    /// write's privileges, 403; the kill switch). Then 401 for a caller whose <c>oid</c> is not a GUID, the query (400
+    /// <c>procedures.invalid_query</c>, the only bad-input answer) and the service (503 <c>procedures.unavailable</c> on a refused or faulted row).
+    /// </summary>
+    private static async Task<IResult> Assignable(
+        HttpContext http, RecordProcedureReadService service, ProcedureAssignmentService planner, string table, Guid recordId, string? firmId,
+        string? date, string? q, CancellationToken ct)
+    {
+        if (ProcedureAssignmentEndpoints.CallerOid(http) is null)
+        {
+            return ProcedureAssignmentEndpoints.NoRequester();
+        }
+
+        if (!TryParseQuery(http, firmId, date, out var firm, out var day, out var invalid))
+        {
+            return invalid!;
+        }
+
+        if (!TryParseNameSearch(http, q, out var nameContains, out invalid))
+        {
+            return invalid!;
+        }
+
+        return Answer(http, await service.ListAssignableAsync(
+            planner, table, recordId, firm, day, nameContains, TokenHelper.ExtractBearerTokenOrNull(http), ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// uac-r2 note 4: <c>q</c>, when present, must hold 1 to <see cref="ProcedureAssignmentService.MaxNameSearchChars"/> characters after
+    /// trimming and no control character; otherwise 400. Absent, there is no name filter. The LIKE wildcards are escaped where the query is
+    /// built (<see cref="ProcedureAssignmentService.EscapeLike"/>), so any other text is a literal.
+    /// </summary>
+    private static bool TryParseNameSearch(HttpContext http, string? q, out string? nameContains, out IResult? invalid)
+    {
+        nameContains = null;
+        invalid = null;
+        if (!http.Request.Query.ContainsKey("q"))
+        {
+            return true;
+        }
+
+        var raw = q ?? string.Empty;
+        var trimmed = raw.Trim();
+        if (raw.Any(char.IsControl) || trimmed.Length == 0 || trimmed.Length > ProcedureAssignmentService.MaxNameSearchChars)
+        {
+            invalid = InvalidQuery(http, $"q must be 1 to {ProcedureAssignmentService.MaxNameSearchChars} characters, with no control characters.");
+            return false;
+        }
+
+        nameContains = trimmed;
+        return true;
     }
 
     private static IResult Answer<T>(HttpContext http, RecordProcedureReadResult<T> result) where T : class => result.Status switch

@@ -396,7 +396,12 @@ public partial class RouteAuthorizationGuardTests
             + "ONE AddFinanceAuthorizationFilter on the route record asking finance.read and ebilling.record.override (uniform 404), then a "
             + "second AddFinanceAuthorizationFilter (403) with the planned writes' own subject Read and privileges (DryRunTargets, built from the "
             + "write routes' AssignChecks / ExcludeChecks / ChangeChecks / RemoveChecks), the kill switch, then "
-            + "RequireReadOnTheDryRunsOverridesSubject for a removal or a replaced override; the service's one batched check covers Now and After."),
+            + "RequireReadOnTheDryRunsOverridesSubject for a removal or a replaced override; the service's one batched check covers Now and After. "
+            + "Task 084d-5a adds GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures/assignable (EB-D-227..230, nothing "
+            + "written): the dry run's record filter (finance.read and ebilling.record.override, uniform 404), then a second "
+            + "AddFinanceAuthorizationFilter (403) with the assign write's privileges (AssignableTargets = AssignOrExcludePrivileges, Admin()), the "
+            + "kill switch; the service's one batched check covers Now, the planned After and every refused own row (503 procedures.unavailable), "
+            + "on the tooMany path too."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "

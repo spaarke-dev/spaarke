@@ -102,6 +102,20 @@ internal sealed record ProcedureOverridePlan(
     internal const string WriteRemove = "Remove";
 }
 
+/// <summary>
+/// Task 084d-5a: the Procedures an assign could be planned for on one record (<c>PlanAssignCatalogAsync</c>). <see cref="TooMany"/>: more candidates
+/// than the bound, and nothing else is given. Otherwise <see cref="OwnRows"/> are the candidates the record already has an override row for (the
+/// write's 409 <c>assignment.duplicate</c>), and <see cref="Plan"/> holds one Follow-latest row image per other candidate.
+/// </summary>
+internal sealed record AssignableCatalog(bool TooMany, IReadOnlyList<AssignableOwnRow> OwnRows, ProcedureOverridePlan? Plan)
+{
+    /// <summary>Past the bound: no candidates, no own rows, no plan.</summary>
+    internal static AssignableCatalog Over { get; } = new(true, [], null);
+}
+
+/// <summary>Task 084d-5a: a candidate Procedure the record already has override rows for (<see cref="RowIds"/>, any state).</summary>
+internal sealed record AssignableOwnRow(Guid ProcedureId, string? Name, IReadOnlyList<Guid> RowIds);
+
 /// <summary>Task 084d-2b: the inputs of a planned change's close (<c>SupersedeBaseFindingsAsync</c>): the base rule, the change's firm, its Exclude row and the in-force day.</summary>
 internal sealed record PlannedSupersede(Guid BasePolicyId, Guid? FirmId, Guid ExcludeId, DateOnly InForceFrom);
 
@@ -402,24 +416,10 @@ public class ProcedureAssignmentService
             return (null, RuleSetOutcome<T>.Invalid(CodeInvalid, errors));
         }
 
-        var procedure = await LoadByIdAsync(entities, ProcedureEntity.Entity, procedureId,
-            new[] { ProcedureEntity.NameColumn, ProcedureEntity.StatusColumn, ProcedureEntity.AreaColumn }, ct);
-        if (procedure is null)
+        var procedure = await LoadByIdAsync(entities, ProcedureEntity.Entity, procedureId, AssignProcedureColumns, ct);
+        if (AssignRefusalOf<T>(procedure) is { } refused)
         {
-            return (null, Refused<T>(StatusCodes.Status404NotFound, CodeProcedureNotFound, "The Procedure was not found."));
-        }
-
-        if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired)
-        {
-            return (null, Refused<T>(StatusCodes.Status409Conflict, CodeProcedureRetired, "A retired Procedure cannot be assigned, pinned or excluded."));
-        }
-
-        // EB-D-228 (O-24): the resolver reads Billing-area Procedures only (ProcedureResolver.ReadProceduresAsync), so a row for any other area
-        // would never apply and would only look as if it did. A missing Area is not Billing (fail closed, as RuleSetService's draft check). The
-        // versions are not read: a Procedure with only Draft versions is still accepted, ahead of publication.
-        if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling)
-        {
-            return (null, Refused<T>(StatusCodes.Status409Conflict, CodeProcedureNotBilling, NotBillingDetail));
+            return (null, refused);
         }
 
         var pinned = mode == ProcedureAssignmentEntity.ModePinned ? request.PinnedVersionId : null;
@@ -443,11 +443,42 @@ public class ProcedureAssignmentService
             return (null, Duplicate<T>());
         }
 
-        return (new AssignmentRow(
-            AssignmentIdFor(coreTable, recordId, ProcedureAssignmentEntity.ProcedureColumn, procedureId),
-            coreTable, recordId, Name(procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn), ModeLabel(mode)), mode,
-            ProcedureId: procedureId, PinnedVersionId: pinned, ExcludedPolicyId: null, FirmId: null, Reason: Trimmed(request.Reason)), null);
+        return (ProcedureRowOf(coreTable, recordId, procedure!, mode, pinned, Trimmed(request.Reason)), null);
     }
+
+    /// <summary>The Procedure columns an assign's checks and its row read (<see cref="AssignRefusalOf{T}"/>, <see cref="ProcedureRowOf"/>).</summary>
+    private static readonly string[] AssignProcedureColumns = { ProcedureEntity.NameColumn, ProcedureEntity.StatusColumn, ProcedureEntity.AreaColumn };
+
+    /// <summary>
+    /// What an assign, pin or Procedure exclude refuses on the Procedure row alone, or null: no row (404 <c>procedure_not_found</c>), Retired
+    /// (409 <c>procedure_retired</c>), or an Area that is not Billing (409 <c>procedure_not_billing</c>, EB-D-228). Shared by the write and the
+    /// assignable list (task 084d-5a), so the list never offers what this refuses. Pure.
+    /// </summary>
+    private static RuleSetOutcome<T>? AssignRefusalOf<T>(Entity? procedure) where T : class
+    {
+        if (procedure is null)
+        {
+            return Refused<T>(StatusCodes.Status404NotFound, CodeProcedureNotFound, "The Procedure was not found.");
+        }
+
+        if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired)
+        {
+            return Refused<T>(StatusCodes.Status409Conflict, CodeProcedureRetired, "A retired Procedure cannot be assigned, pinned or excluded.");
+        }
+
+        // EB-D-228 (O-24): the resolver reads Billing-area Procedures only (ProcedureResolver.ReadProceduresAsync), so a row for any other area
+        // would never apply and would only look as if it did. A missing Area is not Billing (fail closed, as RuleSetService's draft check). The
+        // versions are not read: a Procedure with only Draft versions is still accepted, ahead of publication.
+        return procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling
+            ? Refused<T>(StatusCodes.Status409Conflict, CodeProcedureNotBilling, NotBillingDetail)
+            : null;
+    }
+
+    /// <summary>The Procedure-level row an assign, pin or Procedure exclude creates, at its derived id: one builder for the write and the assignable list.</summary>
+    private static AssignmentRow ProcedureRowOf(string coreTable, Guid recordId, Entity procedure, int mode, Guid? pinned, string? reason) => new(
+        AssignmentIdFor(coreTable, recordId, ProcedureAssignmentEntity.ProcedureColumn, procedure.Id),
+        coreTable, recordId, Name(procedure.GetAttributeValue<string>(ProcedureEntity.NameColumn), ModeLabel(mode)), mode,
+        ProcedureId: procedure.Id, PinnedVersionId: pinned, ExcludedPolicyId: null, FirmId: null, Reason: reason);
 
     // ───────────────────────────────────────────────────────────────────────────────────────────────
     // Rule-level: exclude (model 6.3)
@@ -1587,6 +1618,125 @@ public class ProcedureAssignmentService
         }
     }
 
+    /// <summary>Task 084d-5a: the longest name search the assignable list takes (after trimming).</summary>
+    internal const int MaxNameSearchChars = 100;
+
+    /// <summary>
+    /// Task 084d-5a (design 084d-5 §1, §4; EB-D-227, EB-D-229): the Procedures an assign of Follow latest could be planned for on one record,
+    /// without writing, as ONE plan. Reads through <paramref name="reads"/> only.
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item><b>Candidates</b> (ontology-r1 Q1 and condition 1): Active (<c>sprk_status</c>), <c>statecode</c> 0, Area Billing, and Firm empty or
+    /// <paramref name="firmId"/> (the list's firm; none: Firm empty only). The firm pre-filter mirrors the resolver's O-20 condition
+    /// (<c>ProcedureResolution.FirmConditionHolds</c>) and the Area pre-filter its area re-check (<c>ProcedureResolver.ReadProceduresAsync</c>);
+    /// the resolver still re-checks both. <paramref name="nameContains"/> narrows by name (Like wildcards escaped). Nothing else is filtered here:
+    /// applicability, the published window and the version are the resolver's (the After read). Ordered by name, then id.</item>
+    /// <item><b>The bound</b> (EB-D-227): the candidates not already on the record (<paramref name="onRecord"/>) number at most
+    /// <paramref name="bound"/>, or the answer is <see cref="AssignableCatalog.TooMany"/> with nothing else: never a partial list. The query
+    /// asks for <c>bound + 1 + |onRecord|</c> rows, so a candidate set past the bound is always seen as such.</item>
+    /// <item><b>Own rows</b>: a candidate the record already has an override row for, of any state (<see cref="OwnRowQuery"/>, the duplicate
+    /// refusal's own predicate), is not planned; it is returned with its rows.</item>
+    /// <item><b>The plan</b>: each other candidate that <see cref="AssignRefusalOf{T}"/> accepts gets the write's own Follow-latest row image
+    /// (<see cref="ProcedureRowOf"/> and the image-only builder), all in ONE <see cref="ProcedureOverridePlan"/>.</item>
+    /// </list>
+    /// A read fault is 503 <c>assignment.read_failed</c>, as the write's.
+    /// </remarks>
+    internal async Task<RuleSetOutcome<AssignableCatalog>> PlanAssignCatalogAsync(
+        WriteRefusingEntityService reads, string coreTable, Guid recordId, Guid? firmId, IReadOnlyCollection<Guid> onRecord, string? nameContains,
+        int bound, CancellationToken ct)
+    {
+        RequireCore(coreTable, recordId);
+        ArgumentNullException.ThrowIfNull(reads);
+        ArgumentNullException.ThrowIfNull(onRecord);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bound);
+        try
+        {
+            var query = new QueryExpression(ProcedureEntity.Entity)
+            {
+                ColumnSet = new ColumnSet(AssignProcedureColumns),
+                TopCount = bound + 1 + onRecord.Count,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(ProcedureEntity.StatusColumn, ConditionOperator.Equal, ProcedureEntity.StatusActive);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            query.Criteria.AddCondition(ProcedureEntity.AreaColumn, ConditionOperator.Equal, RuleDomains.PolicyDomainBilling);
+            // The resolver's O-20 firm condition (FirmConditionHolds): no Firm, or the list's firm.
+            var firm = new FilterExpression(LogicalOperator.Or);
+            firm.AddCondition(ProcedureEntity.FirmColumn, ConditionOperator.Null);
+            if (firmId is { } listFirm && listFirm != Guid.Empty)
+            {
+                firm.AddCondition(ProcedureEntity.FirmColumn, ConditionOperator.Equal, listFirm);
+            }
+
+            query.Criteria.AddFilter(firm);
+            if (nameContains is not null)
+            {
+                query.Criteria.AddCondition(ProcedureEntity.NameColumn, ConditionOperator.Like, "%" + EscapeLike(nameContains) + "%");
+            }
+
+            query.AddOrder(ProcedureEntity.NameColumn, OrderType.Ascending);
+            query.AddOrder(ProcedureEntity.Entity + "id", OrderType.Ascending);
+
+            var candidates = (await ReadAsync(reads, query, ct)).Entities.Where(p => !onRecord.Contains(p.Id)).ToList();
+            if (candidates.Count > bound)
+            {
+                return RuleSetOutcome<AssignableCatalog>.Done(AssignableCatalog.Over);
+            }
+
+            var own = new Dictionary<Guid, List<Guid>>();
+            if (candidates.Count > 0)
+            {
+                foreach (var row in (await ReadAsync(reads, OwnRowQuery(
+                             coreTable, recordId, ProcedureAssignmentEntity.ProcedureColumn, candidates.Select(c => c.Id).ToList()), ct)).Entities)
+                {
+                    if (row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn)?.Id is { } subject)
+                    {
+                        (own.TryGetValue(subject, out var ids) ? ids : own[subject] = new List<Guid>()).Add(row.Id);
+                    }
+                }
+            }
+
+            var images = new List<Entity>();
+            var ownRows = new List<AssignableOwnRow>();
+            foreach (var candidate in candidates)
+            {
+                if (own.TryGetValue(candidate.Id, out var rows))
+                {
+                    // The write's 409 assignment.duplicate.
+                    ownRows.Add(new AssignableOwnRow(candidate.Id, candidate.GetAttributeValue<string>(ProcedureEntity.NameColumn), rows.Order().ToList()));
+                }
+                else if (AssignRefusalOf<AssignableCatalog>(candidate) is null)
+                {
+                    var row = ProcedureRowOf(coreTable, recordId, candidate, ProcedureAssignmentEntity.ModeFollowLatest, null, null);
+                    images.Add((await AssignmentCreateAsync(row, null, imageOnly: true, ct)).Image!);
+                }
+            }
+
+            var plan = Planned(ProcedureOverridePlan.WriteAssign, KindProcedure, created: images).Value!;
+            return RuleSetOutcome<AssignableCatalog>.Done(new AssignableCatalog(false, ownRows, plan));
+        }
+        catch (ReadFailedException ex)
+        {
+            return ReadFailed<AssignableCatalog>(ex, "assignable list");
+        }
+    }
+
+    /// <summary>
+    /// Task 084d-5a: <paramref name="text"/> as a literal inside a Like pattern. The Like wildcards <c>%</c>, <c>_</c> and <c>[</c> each become a
+    /// one-character class (<c>[%]</c>, <c>[_]</c>, <c>[[]</c>), so a name search matches the text as typed.
+    /// </summary>
+    internal static string EscapeLike(string text)
+    {
+        var escaped = new System.Text.StringBuilder(text.Length + 8);
+        foreach (var c in text)
+        {
+            escaped.Append(c is '%' or '_' or '[' ? $"[{c}]" : c.ToString());
+        }
+
+        return escaped.ToString();
+    }
+
     /// <summary>The rows a rule Exclude would write (<see cref="ExcludeRuleAsync"/>), without writing: one created Exclude row.</summary>
     internal async Task<RuleSetOutcome<ProcedureOverridePlan>> PlanExcludeRuleAsync(
         WriteRefusingEntityService reads, string coreTable, Guid recordId, RuleExcludeRequest request, CancellationToken ct)
@@ -2055,10 +2205,30 @@ public class ProcedureAssignmentService
     /// <summary>True when the record already holds an override row naming <paramref name="subjectId"/> in <paramref name="subjectColumn"/> (I-A1).</summary>
     private async Task<bool> HasRowAsync(IGenericEntityService entities, string coreTable, Guid recordId, string subjectColumn, Guid subjectId, CancellationToken ct)
     {
-        var query = new QueryExpression(ProcedureAssignmentEntity.Entity) { ColumnSet = new ColumnSet(subjectColumn), TopCount = 1 };
-        query.Criteria.AddCondition(coreTable, ConditionOperator.Equal, recordId);
-        query.Criteria.AddCondition(subjectColumn, ConditionOperator.Equal, subjectId);
+        var query = OwnRowQuery(coreTable, recordId, subjectColumn, new[] { subjectId });
+        query.TopCount = 1;
         return (await ReadAsync(entities, query, ct)).Entities.Count > 0;
+    }
+
+    /// <summary>
+    /// The record's own override rows naming any of <paramref name="subjectIds"/> in <paramref name="subjectColumn"/>: the record lookup and the
+    /// subject, with NO state filter (an inactive row still holds the derived id, so the write would collide on it). One predicate for the
+    /// duplicate refusal (<see cref="HasRowAsync"/>, one id) and the assignable list's <c>OwnRow</c> (task 084d-5a, many ids).
+    /// </summary>
+    internal static QueryExpression OwnRowQuery(string coreTable, Guid recordId, string subjectColumn, IReadOnlyCollection<Guid> subjectIds)
+    {
+        var query = new QueryExpression(ProcedureAssignmentEntity.Entity) { ColumnSet = new ColumnSet(subjectColumn) };
+        query.Criteria.AddCondition(coreTable, ConditionOperator.Equal, recordId);
+        if (subjectIds.Count == 1)
+        {
+            query.Criteria.AddCondition(subjectColumn, ConditionOperator.Equal, subjectIds.First());
+        }
+        else
+        {
+            query.Criteria.AddCondition(subjectColumn, ConditionOperator.In, subjectIds.Cast<object>().ToArray());
+        }
+
+        return query;
     }
 
     /// <summary>A Dataverse read before the write failed (a fault or a timeout); thrown by <see cref="ReadAsync"/>, answered by the public methods as 503.</summary>
