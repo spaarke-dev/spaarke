@@ -261,7 +261,9 @@ Every writer of `sprk_regardingrecordurl` to the six tables writes a URL with `e
   this case. ebilling-r1 confirmed none of its flows sends a type-only pair (K5b accepted).
 - K5d (fix round 2; narrowed in fix round 3): the URL is now decided (rule 2a). A write that sends only the name or number
   (`sprk_regardingrecordname`, `sprk_regardingrecordnumber`) and no pair or URL is written as sent, as before this task:
-  deciding them would need a read of the core record's name and number. A URL clear is not refused (rule 2a). A URL-only
+  deciding them would need a read of the core record's name and number. A URL clear is not refused (rule 2a): an update may
+  clear the URL while the id stays, leaving the pair with a blank URL — the same class as the blank name and number that
+  045d's option (b) allows (ebilling-r1, 2026-11-13). A URL-only
   write to a row that names no single core record is refused with the guard's own code, as K4b says of a pair.
 - K6b (fix round 1): extra reads on the app-only paths: one stored-row read (app-only) when the planned payload carries a
   pair or display column; on the caller paths, one app-only catalog read when a core move also sends a type.
