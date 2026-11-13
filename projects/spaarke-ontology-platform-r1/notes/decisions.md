@@ -799,3 +799,9 @@ Task 168, owner questions Q1 and Q2 (asked 2026-10-28, explained in detail 2026-
 - **Failed send:** when the inquiry email fails after earlier actions succeeded, the user can retry from the item; the retry re-sends (reusing the service request already created) instead of replaying the stored error, and the Signal is not auto-closed while a decision on it is unfinished. Task 191 (Opus review; ontology-owned).
 - **Why:** on dev the budget revision and service request were written, the email was not sent, no Decision Record was written, the budget-revision trigger closed the Signal 33 s later, and "Record decision" then returned HTTP 500 by replaying the failure. The user had no way to finish.
 - **Dev data:** the revision, service request and closed Signal stay as evidence; re-test on a fresh zz- fee/scope communication after the next nightly run.
+
+## D-223 — A "maybe sent" inquiry email: the user chooses; sends are no longer silently re-sent (owner, 2026-11-13, asked directly after task 191 escalated)
+
+- **Finding:** every email send goes through the standard Graph policy, which re-sends `sendMail` up to 3 times on 5xx/408 (`GraphHttpMessageHandler.cs:116-119`), so after a 502/503/timeout nobody can tell whether the email went out (DI-153, #2779).
+- **Decision ("Ask the user"):** (1) fix #2779 in task 191: sends use `NoTransientRetryOption` (429 only) and the send error says NotSent or Unknown; (2) a NotSent failure retries automatically, reusing the service request; (3) for Unknown the item says the email may have been sent and to check Sent Items, and offers "Send again" or "Record without sending". No duplicate is ever sent without a person choosing it.
+- **Rejected:** checking Sent Items automatically (lag; lookup broken, #2774); treating 5xx as not sent (duplicate risk to the outside firm); shipping only the safe part.

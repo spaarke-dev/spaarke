@@ -87,9 +87,16 @@
     <step order="10">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
     <step order="11">Record deviations, the publish-size delta and the dev-check result in notes/task-191-notes.md.</step>
   </steps>
+  <owner-decision id="D-223" date="2026-11-13">
+    Fired escalation (first run): sends go through the standard Graph policy, which re-sends sendMail on 5xx/408 (GraphHttpMessageHandler.cs:116-119), so a Graph 5xx or timeout cannot be classified (DI-153, #2779). Owner chose "Ask the user":
+    (1) Fix #2779 in this task: the email send passes NoTransientRetryOption (copy ContainerOperations.cs:103-106,180), so only 429 is retried; GRAPH_SEND_FAILED carries an outcome flag: NotSent (failure provably before the request left, or a definite Graph 4xx other than 408/429 from the single attempt) vs Unknown (5xx, 408, timeout, transport fault after the request left, cancellation).
+    (2) NotSent (and every failure in InquiryEmailSender or the core's own refusals before the Graph call) is resumable: retry reuses the landed service request, sends once, writes the Decision Record.
+    (3) Unknown is stored as needing the user's choice. The item says the email may have been sent and to check Sent Items, and offers exactly two actions: "Send again" (sends once, reuses the service request, writes the DR) and "Record without sending" (writes the DR with the inquiry step recorded as not sent by the user's choice, sends nothing). A retry without a choice answers 409 naming the choice needed; it never sends.
+    No new endpoint: the choice travels on the existing decision POST.
+  </owner-decision>
   <escalation>
     <trigger>If "resume this one unfinished action with its landed service request" needs a schema change (new Dataverse column or table), STOP and escalate (root CLAUDE.md §6) with options; the ledger entry and DecisionCommitStep.Written are the expected carriers.</trigger>
-    <trigger>If CommunicationService does not expose enough to classify a send as definitely-not-sent, STOP and escalate; never treat every send failure as resumable (a re-send could deliver twice).</trigger>
+    <trigger>Resolved by owner decision D-223 (2026-11-13): see &lt;owner-decision&gt;. If D-223 cannot be implemented without a schema change or a new endpoint, STOP and escalate.</trigger>
     <trigger>If holding the system close needs evaluator changes beyond the one Signal (episodes, suppression), STOP and escalate first.</trigger>
   </escalation>
   <justification>
@@ -127,7 +134,10 @@
     <criterion testable="true">No duplicate service request: exactly one create across both attempts. Seeding proof: break the guard that routes a resumed inquiry send-only, show this test fails, restore, re-run (in task notes).</criterion>
     <criterion testable="true">No duplicate budget revision: revise-budget runs once across both attempts and its trigger is queued for that one revision.</criterion>
     <criterion testable="true">The Decision Record is written exactly once, listing both steps Done with the service request and communication; a further retry returns the Recorded outcome (Replayed) and writes nothing.</criterion>
-    <criterion testable="true">A possibly-sent failure (timeout, cancellation, no answer) is stored not resumable; its retry answers 409 not_resumable naming what landed, and sends or writes nothing.</criterion>
+    <criterion testable="true">(D-223) A send whose outcome is Unknown (5xx, 408, timeout, cancellation, transport fault after the request left) is stored as needing the user's choice; a retry with no choice answers 409 naming the choice and sends or writes nothing.</criterion>
+    <criterion testable="true">(D-223) "Send again" on an Unknown step sends exactly once, reuses the landed service request, and writes the Decision Record once; "Record without sending" sends nothing and writes the Decision Record with the inquiry step marked not sent by the user's choice.</criterion>
+    <criterion testable="true">(D-223, #2779) The email send is not re-sent by the Graph handler on 5xx or 408 (only 429): a handler-level test with a 503 response sees exactly one sendMail request, and the error carries outcome Unknown; a 400 from the single attempt carries NotSent. Seeding proof: remove NoTransientRetryOption from the send, show the test fails, restore.</criterion>
+    <criterion testable="true">(D-223) Client: an Unknown failure shows the "may have been sent, check Sent Items" message with exactly the two actions; each action posts the choice and shows the resulting outcome.</criterion>
     <criterion testable="true">Every replayed non-resumable Failed outcome answers 409 (not 500) with the stored steps in the extensions; first-attempt status codes are unchanged.</criterion>
     <criterion testable="true">Signal, order 1 (retry before any system close): resolved and linked as today.</criterion>
     <criterion testable="true">Signal, order 2 (budget-revision trigger runs between failure and retry): within the plan-read window the retry completes and the Signal ends in this decision's state (Acted, or InquirySent per D-119) with the record linked, never ConditionCleared with no record; outside the window the retry gets a defined refusal (not 500) the item explains.</criterion>
