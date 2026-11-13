@@ -670,3 +670,69 @@ Branch `task/ebilling-084c`, from `90da03b6ab`. Rigor FULL. Client and ArchTests
 
 - Add `basePolicyId` (the policy the Exclude/Changed row was made on) to the `Changed` mark of the rules-in-force read, so a rule already changed here can be changed again directly and the stale-rule refresh gets a surface (decision 3). Read-model change in 084/084e code.
 - The POML says 422; the route answers 400 (decision 1): reword the POML criterion.
+
+### 084c fix round 1 (branch `task/ebilling-084c-r2`, from `3a94a37fc9` merged with work `4e448148e2`)
+
+The merge was clean: only this notes file had changes on both sides, and git merged it automatically. Commits: `2fdcf95804` (server read model), `f8827c731d` (client), `7dc61446ca` (ArchTest), and this notes/POML commit. The server change is limited to `RecordProcedureReadService` and its DTOs, plus tests. Nothing in `Services/Signals/**`, 089's write routes or `ProcedureAssignmentService` was changed. No package was added.
+
+**Read-model fields added** (rules-in-force read). Each is asked of the caller through EB-D-218's single batched check (`Reading.Expose`):
+
+| Field | What it is | What it exposes |
+|---|---|---|
+| `RuleInForceView.ruleBody` | The row's rule body as a JSON object, or null if the body is not an object | The row's own policy version (`Expose(PolicyVersionSet, version)`), on every rules-in-force row, Excluded rows included |
+| `RuleInForceView.consequence` | `Reject` / `Flag` / `SuggestAdjustment` (the `BillingConsequence` name), or null | Nothing new: it comes from the same version `ruleBody` asks for |
+| `RuleMarkView.basePolicyId` (Changed mark) | The base rule's policy, which the change route takes | In force: `Expose(PolicySet, base)`; the returned id is the one sent, so it cannot be sent unasked. Base retired: already exposed, because the code is read from it |
+| `RuleMarkView.baseRuleBody` (Changed mark, in force) | The base rule's body in force | The base version in force (`Expose(PolicyVersionSet, baseVersion)`). That version was already exposed through `currentBase` and the summary, so the proof is a value test plus a deny-alone test, not a guard mutation |
+
+The base-retired Changed mark has no `baseRuleBody`, because nothing is published in force. All three EB-D-218 guards stay green: `EveryAskedRow_DeniedAlone_Is503_WithNoList`, `EveryVersionRow_IsAsked_OrExemptBecauseTheBodyDoesNotDependOnIt` and `Every200Guid_WasAskedOfTheCaller`. A new guard seed, "change prefill", covers them. Its exempt rows: four procedures-list version rows (the list shows no rule) and EXPENSE v1 on rules-in-force (superseded, so the body does not depend on it). Its integrity row is HOURS v1 on procedures (RequireBasedOn).
+
+**Items:**
+
+1. **F1-1. Re-change a changed rule.** The Changed mark now carries `basePolicyId`. Change plans `[remove (this record's change row), changeRule (policyId: basePolicyId)]`. The form starts from this record's current values, and "Start from the published values" loads `baseRuleBody`. A mark without the base rule or its row id (an older BFF) is blocked with `RECHANGE_NOT_NAMED`. The firm scope stays the record rule's own (`firmScope`).
+   - Server tests: `ChangedMark_NamesItsBaseRule_WhichIsAsked` (in force and base retired).
+   - Client tests: `planChange` "a rule changed here is changed again" (5), and `WizardsChange` "F1-1 ... Changed" and "Changed and Stale".
+   - Mutation, server: when the base id was not exposed, `Every200Guid` failed twice, the "changed: base rule" deny test failed, and `ChangedMark` (in force) failed.
+   - Mutation, client: when the change targeted the row's policy, 3 tests failed. When a changed row was blocked again, 5 failed. When the published body was the row's own, 2 failed.
+2. **F1-2. Prefill from the read model.** Rows carry `ruleBody`, and the client's `GET /api/finance/rulesets/{id}` is removed (`overridesApi` "the client has no read of a rule set"). With no body, the New values step says why (`NO_VALUES_TEXT`), shows no form, and keeps Next disabled.
+   - Server tests: `RulesInForce_CarriesEachRowsBody_AndTheBaseBodyInForce`, `ExcludedRule_CarriesItsBody`, `ABodyThatIsNotAnObject_IsNull`, and `TheVersionABodyIsReadFrom_DeniedAlone_Is503` (3 versions).
+   - Client tests: `WizardsChange` "ExpenseRule with two codes and a cap is prefilled from the row" and "F1-2 negative".
+   - Mutation: with no prefill, 17 tests failed. With `ruleBody` null on the server, 2 failed. With the base body taken from `basedOn`, 1 failed.
+3. **F1-3. Multi fields compare as sets.** `sameBody(a, b, def)` and `fieldDiffers` compare multi keys as sets. `buildBody` keeps the given order without duplicates, so the published order is kept.
+   - Tests: `ruleForms` "with the form, a multi-choice field compares as a set", and `WizardsChange` "an unchanged Duplicate whose published order is not the vocabulary's keeps Next off".
+   - Mutation: with ordered comparison, 2 tests failed. With vocabulary order in `buildBody`, 2 failed.
+4. **F3-4. Partial save.** The "Go back to New values" hint is dropped when the removal succeeded but the change was refused (`refusalHint(failure, partial)`).
+   - Test: `WizardsChange` "own Exclude: preview, DELETE accepted, change refused 400". It covers the partial message with no "go back", the lists re-read, and Finish held.
+   - Mutation: 1 test failed.
+5. **F1-7. Base retired first.** `changeBlocker` checks `isBaseRetired` before the form, so a base-retired row (whose type is null) gets `BASE_RETIRED_NO_CHANGE` rather than "no form".
+   - Test: `planChange` "F1-7".
+   - Mutation: 1 test failed.
+6. **Item 5. Conditional fields and refusal words.**
+   - The agreement ArchTest reads each `showWhen { key, equals }` and compares it with the schema's `allOf[].if.properties.<key>.const`. The fields a branch shows must be exactly its `then.required` plus its single-member `then.oneOf` entries, and a showWhen the parser cannot read fails.
+   - There are six must-fire seeds: three in the schema and three in the form. All six fail with the check disabled.
+   - "the page's tests use the validator's real refusal words" runs `RuleBodySchemaValidator`. The real shapes are `/maxHoursPerDay: 30 should be at most 24` and `: Required properties ["observation","minConfidence"] are not present`. The test asserts that the jest files use exactly these, and the hand-written jest messages were replaced with them.
+   - ArchTests for this class: 46 (was 39).
+7. **Item 6. Duplicate with Reject.** The form knows the rule's consequence from `consequence`. A Duplicate that Rejects without Firm invoice number is refused on the field before anything is sent (`DUPLICATE_REJECT_NEEDS_INVOICE_NUMBER`, the server's own rule).
+   - Tests: `ruleForms` "item 6", and `WizardsChange` "item 6" (Reject is refused; Flag is not).
+   - Mutation: 2 tests failed.
+8. **Item 8. Rate-card owner question.** Not changed; still open for the owner (see below).
+9. **Item 9. AddedFee precedence key.** `feeKind` is read-only, and so is `feeCodes` when the kind is `other`. The reason shown is `FEE_KIND_LOCKED`. The server does not refuse a key change (`ChangeRuleCoreAsync` has no precedence-key check), so the page holds this line.
+   - Tests: `ruleForms` "item 9", and `WizardsChange` "item 9" (lateFee and other).
+   - Mutation: 3 tests failed.
+10. **Item 10. Notes and POML.**
+    - (a) Decision 4's premise was wrong. The rule-set read's privileges are a subset of the change route's, so a caller who may change a rule could always read it. The "could not be read" fallback was reachable only through a draft or a fault, never through missing rights. The point is now moot: the prefill no longer reads rule sets (F1-2).
+    - (b) The POML criterion now says 400, not 422. The POML stays `completed`.
+    - (c) Fixture note: the shared fixtures (`__tests__/fixtures.ts`, from 084a) use display words for `ruleType` ("Daily hours limit", "Expense cap (meals)"), but the server sends the enum name (`DailyHoursCap`). Those rows have no form, so Change is disabled. That is correct for the fixture but not realistic. The 084c tests use enum names.
+11. **Found while testing.** All the checkboxes of a multi field took the Field's single control id, so none was named by its own label (duplicate ids). `CheckGroup` now gives the group the Field's label, hint and message, and each checkbox keeps its own id and label.
+    - Test: `WizardsChange` "each checkbox has its own id and is named by its own label".
+    - Mutation: 4 tests failed.
+
+**Verification:**
+- `npx jest` in RecordProcedures: 15 suites, 340 tests, all pass (was 322).
+- `npm run build`: succeeds. The surface-owned type errors are 0; the 98 pre-existing errors are in shared libs.
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `dotnet test` filtered to RecordProcedure, RecordWritePermissions and ProcedureAssignment: 802 pass. Against the old service file, 4 of the new server tests fail.
+- `dotnet test tests/Spaarke.ArchTests`: 2562 pass, 0 fail.
+
+**Still open for the owner:**
+- Item 8: confirm that "rate cards offer no Change" means the ApprovedRate type (decision 2).
+- Make the ruleType fixture words the enum names across 084a/084b (item 10c). This is test hygiene, with no user-visible effect.

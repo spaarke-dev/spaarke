@@ -114,7 +114,7 @@
   <acceptance-criteria>
     <criterion testable="true">Every billing RuleType has exactly one form, and the agreement test passes; a seeded extra server property fails it (must-fire), then is removed.</criterion>
     <criterion testable="true">A valid change sends 089's change request with values, firm scope and reason, and re-reads both lists.</criterion>
-    <criterion testable="true">A 422 refusal shows its field errors on the matching fields; nothing is re-read (negative).</criterion>
+    <criterion testable="true">A 400 refusal (task 089 change route, ProblemDetails errors[]) shows its field errors on the matching fields; nothing is re-read (negative).</criterion>
     <criterion testable="true">Rate cards offer no Change; AddedFee's two refused modes are disabled with the reason (negative).</criterion>
     <criterion testable="true">npm run build succeeds with no new package; ArchTests pass; the ui-tests pass after 112 deploys, including dark mode.</criterion>
     <criterion testable="true">Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
