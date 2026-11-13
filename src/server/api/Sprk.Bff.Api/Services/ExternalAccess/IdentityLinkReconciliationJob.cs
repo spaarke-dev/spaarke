@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 ///
 /// <para><b>Which environments.</b> First this BFF's own (<c>Dataverse:ServiceUrl</c>, through the DI-registered
 /// binder). Then its PROVISIONING TARGETS: the environment registration writes to when no target is given
-/// (<c>DATAVERSE_URL</c>) and every ACTIVE <c>sprk_dataverseenvironment</c> row — the only environments the approve
+/// (<c>DATAVERSE_URL</c>) and every ACTIVE, set-up <c>sprk_dataverseenvironment</c> row it serves (below) — the only environments the approve
 /// endpoint provisions into. A registration link that does not land there (a fault, a deny, a lost race, a
 /// collision) is therefore re-decided here on the next run, and a flag written there is re-evaluated and cleared
 /// here — the gap the second verifier round recorded (notes/task-141-identity-binding.md §12.1) is closed, not
@@ -38,7 +38,9 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// (<c>sprk_appservicename</c>, compared with this BFF's <c>WEBSITE_SITE_NAME</c>) is a customer stamp. That stamp's own BFF
 /// reconciles it as ITS own environment, and this BFF's identity has no seat there (D-12/D-13), so it is skipped and
 /// logged, never reconciled from here. Coverage is unchanged: every environment is still reconciled, by the BFF that
-/// serves it. A registration this BFF makes in a stamp environment could not succeed either, for the same reason.</para>
+/// serves it. A registration this BFF makes in a stamp environment could not succeed either, for the same reason.
+/// Limit: if a stamp's App Service is renamed or removed while its row still names the old one, no BFF reconciles that
+/// environment until the row is corrected; the skip line in every run's log names the App Service it expected.</para>
 ///
 /// <para><b>Two passes per environment, one reason to change</b> (identity binding — CLAUDE.md §11.5;
 /// deliberately NOT folded into <see cref="ExternalAccessReconciliationJob"/>, whose single reason to change is the
@@ -243,15 +245,18 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     }
 
     /// <summary>
-    /// The customer ids of active rows that carry a <c>sprk_customerid</c> but no <c>sprk_appservicename</c> (ordered,
-    /// case-insensitive, distinct). A stamp row looks like this when provisioning's best-effort registry write failed
-    /// (REGISTRY-STALE; recovered with <c>/provision-environment</c> Step 6a). <see cref="IsServedByThisBff"/> keeps such a
-    /// row, as before, so the run warns about it instead of the row faulting silently (#2761, provisioning-r1). Pure.
+    /// The customer ids of the rows this job WILL reconcile (setup Ready, or no status) that carry a <c>sprk_customerid</c> but
+    /// no <c>sprk_appservicename</c> (ordered, case-insensitive, distinct). A finished stamp row looks like this when
+    /// provisioning's registry write was lost (REGISTRY-STALE; recovered with <c>/provision-environment</c> Step 6a).
+    /// <see cref="IsServedByThisBff"/> keeps such a row, as before, so the run warns about it instead of the row faulting
+    /// silently (#2761, provisioning-r1). A row still being provisioned (its App Service is written only when provisioning
+    /// completes) or one that failed is not reconciled, so it is not named. Pure.
     /// </summary>
     public static IReadOnlyList<string> CustomerRowsWithoutAnAppService(IEnumerable<DataverseEnvironmentRecord> activeEnvironments)
     {
         ArgumentNullException.ThrowIfNull(activeEnvironments);
         return activeEnvironments
+            .Where(e => e.SetupStatus is null or EnvironmentSetupStatus.Ready)
             .Where(e => string.IsNullOrWhiteSpace(e.AppServiceName) && !string.IsNullOrWhiteSpace(e.CustomerId))
             .Select(e => e.CustomerId!.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -471,7 +476,8 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
 
     /// <summary>
     /// The environments this BFF provisions users into (third fix round, closing the registration-link gap): the
-    /// registration default (<c>DATAVERSE_URL</c>) and every ACTIVE registry row, each reconciled like the own
+    /// registration default (<c>DATAVERSE_URL</c>) and every ACTIVE, set-up registry row this BFF serves
+    /// (<see cref="ReconcilableRegistryUrls"/>; a row naming another BFF's App Service is left to that BFF, #2761), each reconciled like the own
     /// environment. Not configured when <c>DATAVERSE_URL</c> is absent — then this BFF registers nobody anywhere.
     /// </summary>
     private async Task ReconcileProvisioningTargetsAsync(

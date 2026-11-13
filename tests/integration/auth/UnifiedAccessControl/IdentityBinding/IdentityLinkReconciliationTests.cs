@@ -815,6 +815,24 @@ public class IdentityLinkReconciliationTests
     }
 
     [Fact]
+    public async Task WhenThisBffsAppServiceIsUnknown_ARowNamingAnyAppService_IsLeftToThatBff()
+    {
+        // Off App Service (no WEBSITE_SITE_NAME), this host cannot be the BFF a stamp row names: the row is skipped, not faulted.
+        var stamp = new DataverseEnvironmentRecord
+        {
+            DataverseUrl = OtherDemoEnvironment,
+            IsActive = true,
+            SetupStatus = EnvironmentSetupStatus.Ready,
+            AppServiceName = "sprk-acme-prod-api",
+        };
+
+        var result = await RunAsync(writes: false, targets: new(), registryRecords: new[] { stamp });
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        TargetEnvironments(result).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ARegistryRowNamingThisBffsAppService_IsStillATarget()
     {
         // Must-fire control for the test above: the same row, on the BFF it names, is reconciled (and faults here, having no store).

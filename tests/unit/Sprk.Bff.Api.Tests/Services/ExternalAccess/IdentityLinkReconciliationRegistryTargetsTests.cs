@@ -181,4 +181,17 @@ public class IdentityLinkReconciliationRegistryTargetsTests
         IdentityLinkReconciliationJob.ReconcilableRegistryUrls(registry, OwnAppService).Should().Contain(
             "https://stale.crm.dynamics.com", "a blank App Service keeps the row, as before; the warning makes it visible");
     }
+
+    [Theory]
+    [InlineData(EnvironmentSetupStatus.NotStarted)]
+    [InlineData(EnvironmentSetupStatus.InProgress)]
+    [InlineData(EnvironmentSetupStatus.Issue)]
+    public void ACustomerRowStillBeingProvisioned_IsNotWarnedAbout(EnvironmentSetupStatus status)
+        // Provisioning writes sprk_appservicename only when it completes, so an in-flight or failed customer row has none and is
+        // not reconciled either: warning about it every run would be wrong and noisy (the #2761 review's finding).
+        => IdentityLinkReconciliationJob.CustomerRowsWithoutAnAppService(new[]
+            {
+                Row("https://provisioning.crm.dynamics.com", status, appService: null, customerId: "gamma"),
+            })
+            .Should().BeEmpty();
 }
