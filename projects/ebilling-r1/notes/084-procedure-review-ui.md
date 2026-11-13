@@ -1560,6 +1560,13 @@ Each item: finding, then change, then test.
 
 - **Known limits (name in the PR).**
   - **K5.** The ceiling is `MaxCandidateRows` = 1000. A matching set past it is answered `tooMany`, which counts rows the caller cannot Read; narrowing by `q` brings it back. Replaces K2's padding limit (K2 is gone: there is no `+ |onRecord|` padding).
-  - **K6.** Read-batch timing, accepted: the candidate check asks one Read question per matching candidate (up to 1000, 250 per page, in addition to Now's and After's), so a large catalog with a broad `q` costs time. Measure at task 112; the bound on cost is the ceiling.
+  - K6: response time varies with the number of matching rows the caller cannot Read (accepted by uac-r2, 2026-11-13).
 
 **Round 1 gates (final state).** BFF build 0 warnings, 0 errors. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede, RecordContainer, ContainerDocument): 8988 passed, 4 skipped, 0 failed (`RecordContainer` alone: 363 passed, after item 2). `RecordAssignableProceduresContractTests`: 63 passed. ArchTests: 2570/2570. `dotnet format whitespace --verify-no-changes` on the changed files: no finding except ENDOFLINE, which the working tree's LF checkout raises on every line of every file (git converts at commit).
+
+### 084d-5a review round 2 (2026-11-13, uac-r2 T1)
+
+- **Change.** `PlanAssignCatalogAsync` (1) always resolves the caller: the own-row Procedures get their own check first, run on every request, and a request with no ids makes no per-row rights request; (2) stops the candidate check after the rights page (250) at which bound + 1 (51) offerable readable candidates are found; (3) sets the record's own-row Procedures aside BEFORE that scan, by id, from the record's own assignment rows (any state), so they never count toward the stop or the bound. A denied own-row Procedure is still not listed (200); a readable one keeps its `OwnRow` entry and its own row is still asked (a denied own row is 503). Any page that faults, is unanswered or short is still 503.
+- **Behaviour change.** An own-row Procedure no longer counts toward `tooMany`: 51 readable candidates, one of them an own-row Procedure, give a list of 50.
+- **Tests** (`RecordAssignableProceduresContractTests`): `T1_OwnRowProcedure_DoesNotCountTowardTheBound`, `T1_52ReadableCandidates_AreTooMany`, `T1_StopsAskingOnceBoundPlusOneAreFound`, `T1_NoCandidates_StillResolvesTheCaller`, `T1_DeniedOwnRowProcedure_IsNotListed_AndNeverCounts`.
+- **Known limit K6.** Response time varies with the number of matching rows the caller cannot Read (accepted by uac-r2, 2026-11-13).

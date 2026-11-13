@@ -1645,13 +1645,16 @@ public class ProcedureAssignmentService
     /// the caller cannot Read are dropped HERE, before the bound, the own-row step and the resolver. An unreadable Procedure is then
     /// indistinguishable from one that does not exist (no 503, no <c>tooMany</c>, no <c>notOffered</c> entry). The check returning null (a
     /// refusal as a whole, or an answer it could not get) is 503 <c>assignment.read_failed</c>: never "drop all", never an empty 200. A fault in
-    /// it propagates to the caller's 503.</item>
-    /// <item><b>The bound</b> (EB-D-227): the READABLE candidates number at most <paramref name="bound"/>, or the answer is
-    /// <see cref="AssignableCatalog.TooMany"/> with nothing else: never a partial list. The fetch is NOT capped before the Read filter (rows the
-    /// caller cannot Read would crowd out rows it can, and the boundary would then tell it about them): it asks for every matching row up to
-    /// <see cref="MaxCandidateRows"/>; a set past that ceiling is <c>tooMany</c> as well.</item>
-    /// <item><b>Own rows</b>: a candidate the record already has an override row for, of any state (<see cref="OwnRowQuery"/>, the duplicate
-    /// refusal's own predicate), is not planned; it is returned with its rows.</item>
+    /// it propagates to the caller's 503. <paramref name="readable"/> is called for the own-row Procedures first, on every request (even with
+    /// none: the caller is always resolved), then once per page of <see cref="RecordProcedureReadService.RightsPageSize"/> candidates.</item>
+    /// <item><b>Own rows</b> (uac-r2 T1): a candidate the record already has an override row for, of any state (<see cref="OwnRowQuery"/>, the
+    /// duplicate refusal's own predicate), is not planned; it is returned with its rows when the caller can Read its Procedure. Its id is taken
+    /// from the record's own rows and set aside BEFORE the scan, so it never counts toward the stop or the bound.</item>
+    /// <item><b>The bound and the stop</b> (EB-D-227): the other READABLE candidates number at most <paramref name="bound"/>, or the answer is
+    /// <see cref="AssignableCatalog.TooMany"/> with nothing else: never a partial list. The scan stops after the page at which
+    /// <paramref name="bound"/> + 1 of them are readable. The fetch is NOT capped before the Read filter (rows the caller cannot Read would crowd
+    /// out rows it can, and the boundary would then tell it about them): it asks for every matching row up to <see cref="MaxCandidateRows"/>; a
+    /// set past that ceiling is <c>tooMany</c> as well.</item>
     /// <item><b>The plan</b>: each other candidate that <see cref="AssignRefusalOf{T}"/> accepts gets the write's own Follow-latest row image
     /// (<see cref="ProcedureRowOf"/> and the image-only builder), all in ONE <see cref="ProcedureOverridePlan"/>.</item>
     /// </list>
@@ -1702,45 +1705,52 @@ public class ProcedureAssignmentService
             }
 
             var offeredToTheCaller = matching.Where(p => !onRecord.Contains(p.Id)).ToList();
-            IReadOnlySet<Guid>? visible = offeredToTheCaller.Count == 0
-                ? new HashSet<Guid>()
-                : await readable(offeredToTheCaller.Select(p => p.Id).ToList(), ct);
-            if (visible is null)
+
+            // uac-r2 T1 (2026-11-13): the record's own-row Procedures are set aside BEFORE the scan, by id (the record's own assignment rows, any
+            // state, are a small set that does not depend on the candidates), so they never count toward the stop or the bound.
+            var own = await OwnRowsOfRecordAsync(reads, coreTable, recordId, ct);
+            var ownCandidates = offeredToTheCaller.Where(p => own.ContainsKey(p.Id)).ToList();
+            var scanned = offeredToTheCaller.Where(p => !own.ContainsKey(p.Id)).ToList();
+
+            // The own-row Procedures get their own small check (one call), run first and ALWAYS, even with none: the caller is resolved on
+            // every request, with or without candidates; only the per-row rights request is skipped for no ids.
+            var visibleOwn = await readable(ownCandidates.Select(p => p.Id).ToList(), ct);
+            if (visibleOwn is null)
             {
-                _logger.LogWarning("Override: the caller's Read check on the candidate Procedures was refused as a whole; nothing was listed");
-                return Refused<AssignableCatalog>(StatusCodes.Status503ServiceUnavailable, CodeReadFailed,
-                    "The override could not be checked right now and nothing was written. Try again; if it keeps failing, contact support.");
+                return CandidateCheckRefused<AssignableCatalog>();
             }
 
-            var candidates = offeredToTheCaller.Where(p => visible.Contains(p.Id)).ToList();
+            // The scan walks the rest in the list's order, one rights page at a time, and stops after the page at which bound + 1 offerable
+            // readable candidates are in hand (more than the bound is tooMany whatever follows). Any page refused as a whole is 503, as before.
+            var candidates = new List<Entity>();
+            for (var asked = 0; asked < scanned.Count && candidates.Count <= bound; asked += RecordProcedureReadService.RightsPageSize)
+            {
+                var page = scanned.Skip(asked).Take(RecordProcedureReadService.RightsPageSize).ToList();
+                var visible = await readable(page.Select(p => p.Id).ToList(), ct);
+                if (visible is null)
+                {
+                    return CandidateCheckRefused<AssignableCatalog>();
+                }
+
+                candidates.AddRange(page.Where(p => visible.Contains(p.Id)));
+            }
+
             if (candidates.Count > bound)
             {
                 return RuleSetOutcome<AssignableCatalog>.Done(AssignableCatalog.Over);
             }
 
-            var own = new Dictionary<Guid, List<Guid>>();
-            if (candidates.Count > 0)
-            {
-                foreach (var row in (await ReadAsync(reads, OwnRowQuery(
-                             coreTable, recordId, ProcedureAssignmentEntity.ProcedureColumn, candidates.Select(c => c.Id).ToList()), ct)).Entities)
-                {
-                    if (row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn)?.Id is { } subject)
-                    {
-                        (own.TryGetValue(subject, out var ids) ? ids : own[subject] = new List<Guid>()).Add(row.Id);
-                    }
-                }
-            }
-
             var images = new List<Entity>();
             var ownRows = new List<AssignableOwnRow>();
+            foreach (var candidate in ownCandidates.Where(p => visibleOwn.Contains(p.Id)))
+            {
+                // The write's 409 assignment.duplicate.
+                ownRows.Add(new AssignableOwnRow(candidate.Id, candidate.GetAttributeValue<string>(ProcedureEntity.NameColumn), own[candidate.Id].Order().ToList()));
+            }
+
             foreach (var candidate in candidates)
             {
-                if (own.TryGetValue(candidate.Id, out var rows))
-                {
-                    // The write's 409 assignment.duplicate.
-                    ownRows.Add(new AssignableOwnRow(candidate.Id, candidate.GetAttributeValue<string>(ProcedureEntity.NameColumn), rows.Order().ToList()));
-                }
-                else if (AssignRefusalOf<AssignableCatalog>(candidate) is null)
+                if (AssignRefusalOf<AssignableCatalog>(candidate) is null)
                 {
                     var row = ProcedureRowOf(coreTable, recordId, candidate, ProcedureAssignmentEntity.ModeFollowLatest, null, null);
                     images.Add((await AssignmentCreateAsync(row, null, imageOnly: true, ct)).Image!);
@@ -1754,6 +1764,29 @@ public class ProcedureAssignmentService
         {
             return ReadFailed<AssignableCatalog>(ex, "assignable list");
         }
+    }
+
+    private RuleSetOutcome<T> CandidateCheckRefused<T>() where T : class
+    {
+        _logger.LogWarning("Override: the caller's Read check on the candidate Procedures was refused as a whole; nothing was listed");
+        return Refused<T>(StatusCodes.Status503ServiceUnavailable, CodeReadFailed,
+            "The override could not be checked right now and nothing was written. Try again; if it keeps failing, contact support.");
+    }
+
+    /// <summary>The record's own override rows by Procedure, any state (<see cref="OwnRowQuery"/> with no subject filter).</summary>
+    private static async Task<Dictionary<Guid, List<Guid>>> OwnRowsOfRecordAsync(
+        IGenericEntityService reads, string coreTable, Guid recordId, CancellationToken ct)
+    {
+        var own = new Dictionary<Guid, List<Guid>>();
+        foreach (var row in (await ReadAsync(reads, OwnRowQuery(coreTable, recordId, ProcedureAssignmentEntity.ProcedureColumn, null), ct)).Entities)
+        {
+            if (row.GetAttributeValue<EntityReference>(ProcedureAssignmentEntity.ProcedureColumn)?.Id is { } subject)
+            {
+                (own.TryGetValue(subject, out var ids) ? ids : own[subject] = new List<Guid>()).Add(row.Id);
+            }
+        }
+
+        return own;
     }
 
     /// <summary>The rows a rule Exclude would write (<see cref="ExcludeRuleAsync"/>), without writing: one created Exclude row.</summary>
@@ -2232,13 +2265,18 @@ public class ProcedureAssignmentService
     /// <summary>
     /// The record's own override rows naming any of <paramref name="subjectIds"/> in <paramref name="subjectColumn"/>: the record lookup and the
     /// subject, with NO state filter (an inactive row still holds the derived id, so the write would collide on it). One predicate for the
-    /// duplicate refusal (<see cref="HasRowAsync"/>, one id) and the assignable list's <c>OwnRow</c> (task 084d-5a, many ids).
+    /// duplicate refusal (<see cref="HasRowAsync"/>, one id) and the assignable list's <c>OwnRow</c> (task 084d-5a). A null
+    /// <paramref name="subjectIds"/> asks for every row of the record, whatever it names (the assignable list's own-row set, uac-r2 T1).
     /// </summary>
-    internal static QueryExpression OwnRowQuery(string coreTable, Guid recordId, string subjectColumn, IReadOnlyCollection<Guid> subjectIds)
+    internal static QueryExpression OwnRowQuery(string coreTable, Guid recordId, string subjectColumn, IReadOnlyCollection<Guid>? subjectIds)
     {
         var query = new QueryExpression(ProcedureAssignmentEntity.Entity) { ColumnSet = new ColumnSet(subjectColumn) };
         query.Criteria.AddCondition(coreTable, ConditionOperator.Equal, recordId);
-        if (subjectIds.Count == 1)
+        if (subjectIds is null)
+        {
+            // No subject condition: the record's own rows, whichever Procedure they name.
+        }
+        else if (subjectIds.Count == 1)
         {
             query.Criteria.AddCondition(subjectColumn, ConditionOperator.Equal, subjectIds.First());
         }

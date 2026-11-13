@@ -464,6 +464,118 @@ public sealed class RecordAssignableProceduresContractTests
         host.Rig.NoWrites();
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // uac-r2 T1 (2026-11-13): the stop counts only rows that can still be OFFERED; the caller is always resolved
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The Procedure rows asked of the caller (with no Now rows, these are the candidates walked and the own-row Procedures).</summary>
+    private static List<Guid> ProcedureRowsAsked(Host host) => host.Rig.Probe.Asked.Where(a => a.EntitySet == ProcedureSet).Select(a => a.RecordId).ToList();
+
+    [Fact(DisplayName = "084d-5a uac-r2 T1 (a): 51 readable candidates, one of them an own-row Procedure, give a list of 50 and NOT tooMany (the own-row Procedure is set aside before the scan and never counts)")]
+    public async Task T1_OwnRowProcedure_DoesNotCountTowardTheBound()
+    {
+        await using var host = await Host.StartAsync();
+        var candidates = Enumerable.Range(1, 51).Select(n => Candidate(host.Rig, $"Candidate {n:D3}")).ToList();
+        var own = candidates[10];
+        OwnRow(host.Rig, Project, P, own, state: 1);
+
+        var body = await Ok(await host.Client.SendAsync(Get("projects", P)));
+
+        body["tooMany"]!.GetValue<bool>().Should().BeFalse("50 rows can still be offered; the own-row Procedure never counts");
+        OfferedIds(body).Should().Equal(candidates.Where(c => c != own).ToList());
+        body["notOffered"]!.AsArray().Select(n => n!["id"]!.GetValue<Guid>()).Should().Equal(own);
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 T1 (b, must-fire): 52 readable candidates, none an own-row Procedure, are tooMany with a null list")]
+    public async Task T1_52ReadableCandidates_AreTooMany()
+    {
+        await using var host = await Host.StartAsync();
+        Enumerable.Range(1, 52).ToList().ForEach(n => Candidate(host.Rig, $"Candidate {n:D3}"));
+
+        var body = await Ok(await host.Client.SendAsync(Get("projects", P)));
+
+        body["tooMany"]!.GetValue<bool>().Should().BeTrue();
+        body["procedures"].Should().BeNull("never a partial list");
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 T1 (c): the candidate check stops early: with 600 readable candidates only the first rights page (250, in list order) is asked, not all 600; tooMany stays true")]
+    public async Task T1_StopsAskingOnceBoundPlusOneAreFound()
+    {
+        await using var host = await Host.StartAsync();
+        var all = Enumerable.Range(1, 600).Select(n => Candidate(host.Rig, $"Candidate {n:D3}")).ToList();
+
+        var body = await Ok(await host.Client.SendAsync(Get("projects", P)));
+
+        body["tooMany"]!.GetValue<bool>().Should().BeTrue();
+        body["procedures"].Should().BeNull();
+        var asked = ProcedureRowsAsked(host);
+        asked.Should().HaveCount(RecordProcedureReadService.RightsPageSize, "one page reaches 51 offerable readable rows; no later page is asked");
+        asked.Should().BeEquivalentTo(all.Take(RecordProcedureReadService.RightsPageSize), "the first page in the list's order (name, then id)");
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 T1 (d): with no candidate left after the own-row exclusion the caller is still resolved (no zero-candidate shortcut); the answer is a 200 with an empty list")]
+    public async Task T1_NoCandidates_StillResolvesTheCaller()
+    {
+        await using var none = await Host.StartAsync();
+        var emptyResponse = await Ok(await none.Client.SendAsync(Get("projects", P)));
+        OfferedIds(emptyResponse).Should().BeEmpty();
+        emptyResponse["tooMany"]!.GetValue<bool>().Should().BeFalse();
+        ProcedureRowsAsked(none).Should().BeEmpty("only the per-row request is skipped when there are no ids");
+
+        // The same route with ONE candidate that is not an own-row Procedure: the walk resolves the caller once more, for its page. So the empty
+        // world's count is that minus one: the own-row step (always) and Now's check (always) both resolved the caller.
+        await using var one = await Host.StartAsync();
+        Candidate(one.Rig, "Candidate");
+        await Ok(await one.Client.SendAsync(Get("projects", P)));
+        none.Rig.Probe.CallerLookups.Should().Be(one.Rig.Probe.CallerLookups - 1, "the walk resolves the caller once per page");
+
+        // Zero candidates left once the own-row Procedure is set aside: the same resolutions, the same 200, the own-row Procedure notOffered.
+        await using var onlyOwn = await Host.StartAsync();
+        var own = Candidate(onlyOwn.Rig, "Own");
+        OwnRow(onlyOwn.Rig, Project, P, own, state: 1);
+        var answer = await Ok(await onlyOwn.Client.SendAsync(Get("projects", P)));
+        OfferedIds(answer).Should().BeEmpty();
+        answer["notOffered"]!.AsArray().Select(n => n!["id"]!.GetValue<Guid>()).Should().Equal(own);
+        onlyOwn.Rig.Probe.CallerLookups.Should().Be(none.Rig.Probe.CallerLookups, "no walk page: the own-row step and Now's check only");
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 T1 (f): a denied own-row Procedure among more than 51 readable candidates is not listed (200), and tooMany is computed on the non-own candidates only")]
+    public async Task T1_DeniedOwnRowProcedure_IsNotListed_AndNeverCounts()
+    {
+        // 52 readable non-own candidates plus a denied own-row Procedure: tooMany (52 > 50), no trace of the denied one.
+        await using var over = await Host.StartAsync();
+        Enumerable.Range(1, 52).ToList().ForEach(n => Candidate(over.Rig, $"Candidate {n:D3}"));
+        var hiddenOver = Candidate(over.Rig, "Secret own row");
+        OwnRow(over.Rig, Project, P, hiddenOver, state: 1);
+        over.Rig.Probe.Denied.Add((ProcedureSet, hiddenOver));
+        var tooMany = await Ok(await over.Client.SendAsync(Get("projects", P)));
+        tooMany["tooMany"]!.GetValue<bool>().Should().BeTrue();
+        tooMany["procedures"].Should().BeNull();
+        tooMany.ToJsonString().Should().NotContain(hiddenOver.ToString()).And.NotContain("Secret");
+
+        // 50 readable non-own candidates plus the denied own-row Procedure: not tooMany, 50 offered, nothing about the denied row.
+        await using var under = await Host.StartAsync();
+        var fifty = Enumerable.Range(1, 50).Select(n => Candidate(under.Rig, $"Candidate {n:D3}")).ToList();
+        var hidden = Candidate(under.Rig, "Secret own row");
+        var hiddenRow = OwnRow(under.Rig, Project, P, hidden, state: 1);
+        under.Rig.Probe.Denied.Add((ProcedureSet, hidden));
+        var body = await Ok(await under.Client.SendAsync(Get("projects", P)));
+        body["tooMany"]!.GetValue<bool>().Should().BeFalse();
+        OfferedIds(body).Should().Equal(fifty);
+        body["notOffered"]!.AsArray().Should().BeEmpty("a denied own-row Procedure is not listed");
+        body.ToJsonString().Should().NotContain(hidden.ToString()).And.NotContain("Secret");
+        under.Rig.Probe.Asked.Should().NotContain((AssignmentSet, hiddenRow), "its Procedure is denied, so its own row is never asked");
+
+        // A READABLE own-row Procedure keeps its notOffered entry, and its own row is still asked: denying that row is 503.
+        under.Rig.Probe.Denied.Clear();
+        (await Ok(await under.Client.SendAsync(Get("projects", P))))["notOffered"]!.AsArray().Select(n => n!["id"]!.GetValue<Guid>()).Should().Equal(hidden);
+        under.Rig.Probe.Denied.Add((AssignmentSet, hiddenRow));
+        await AssertUnavailable(await under.Client.SendAsync(Get("projects", P)), under);
+    }
+
     [Fact(DisplayName = "084d-5a EB-D-227 (review round 1; design §6 mutation seed 'the query includes Retired'): what the query rules out (Retired, another area, another firm, inactive) never counts toward the bound: 50 candidates plus those are 50 offered, not tooMany")]
     public async Task Bound_CountsOnlyCandidates()
     {

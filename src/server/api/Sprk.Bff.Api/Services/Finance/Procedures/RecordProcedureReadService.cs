@@ -698,8 +698,10 @@ public class RecordProcedureReadService
     /// caller's Read on each candidate Procedure is asked first, in its own batch (<see cref="ReadableProceduresAsync"/>), and the unreadable
     /// ones are dropped before the resolver, the bound and <c>tooMany</c>: the answer is the same as if they did not exist, so neither the status
     /// nor the list nor <c>tooMany</c> can reveal one. That check refused as a whole or faulting is 503, never "drop all". Now's, own rows' and
-    /// the firm's rows stay all-or-nothing, as above. Accepted limit: the candidate batch adds one Read question per candidate (at most
-    /// <see cref="ProcedureAssignmentService.MaxCandidateRows"/>) to the request's time.</para>
+    /// the firm's rows stay all-or-nothing, as above. The candidate check stops at the page where bound + 1 offerable readable candidates are
+    /// found (the record's own-row Procedures are set aside first and never count); the caller is resolved on every request. Accepted limit:
+    /// response time varies with the number of matching rows the caller cannot Read (at most
+    /// <see cref="ProcedureAssignmentService.MaxCandidateRows"/>).</para>
     /// </remarks>
     internal virtual async Task<RecordProcedureReadResult<RecordAssignableProceduresView>> ListAssignableAsync(
         ProcedureAssignmentService planner, string coreTable, Guid recordId, Guid? firmId, DateOnly? date, string? nameContains,
@@ -1131,7 +1133,9 @@ public class RecordProcedureReadService
     /// Task 084d-5a (round 1, item 5; uac-r2 ruling 2026-11-13): of the candidate Procedures <paramref name="ids"/>, the ones the caller can Read,
     /// by the same batched check (<see cref="RightsOfAsync"/>). The assignable list drops the others BEFORE it judges anything, so an unreadable
     /// Procedure leaves no trace in the answer. Null when the check could not be answered as a whole (the caller not established, a row with no
-    /// answer): the list is then 503, never "drop all". A fault propagates to the list's 503.
+    /// answer): the list is then 503, never "drop all". A fault propagates to the list's 503. The planner calls it once for the own-row
+    /// Procedures (always, even with no ids: the caller is resolved, and no rights request is made for none) and then once per page of
+    /// <see cref="RightsPageSize"/> candidates, stopping early.
     /// </summary>
     private async Task<IReadOnlySet<Guid>?> ReadableProceduresAsync(IReadOnlyList<Guid> ids, string? callerBearerToken, CancellationToken ct)
     {
