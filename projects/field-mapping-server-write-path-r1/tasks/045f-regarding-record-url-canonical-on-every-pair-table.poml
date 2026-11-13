@@ -4,7 +4,7 @@
     <title>The regarding record URL names the row's own regarding record on every pair table, stored in canonical form; readers open only a same-origin record URL</title>
     <phase>3 W3 (follow-up to 045e)</phase>
     <gate>045e merged into the work branch (1c59df2ffc or later). Owner go 2026-11-13 ("Yes, do 045f here"). unified-access-control-r2 and ebilling-r1 review the server diff before merge.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what five BFF write paths admit for one column on every pair table (.cs, bff-api); refusal behaviour; client navigation (.ts/.tsx); modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -62,7 +62,9 @@
     <criterion testable="true">AC5 (readers): each reader that navigates to the stored regarding URL opens a same-origin relative record URL as today, builds the URL from the pair for any other value, and does not navigate when it can do neither; tests show an off-origin or non-http value is never opened.</criterion>
   </acceptance-criteria>
 
-  <notes>Added 2026-11-13 in the main session from the owner's go ("Yes, do 045f here"), after 045e (the same rule on the invoice-family tables) and unified-access-control-r2's reader inventory.</notes>
+  <notes>Added 2026-11-13 in the main session from the owner's go ("Yes, do 045f here"), after 045e (the same rule on the invoice-family tables) and unified-access-control-r2's reader inventory.
+Completed 2026-11-13. Part A (server) merged at 40c5e85d48 (task/fm-045f-server 091f46981b): on the 12 non-family pair tables and sprk_communicationthread a sent sprk_regardingrecordurl names the row's own regarding record after the write and is stored in canonical form, else refused with regarding_record_url_mismatch; server copies (communication into a thread, reply copy, explicit association, thread anchors) write the canonical URL; a person run that sends a URL reads the stored row as that person first. Opus adversarial pass (F1 thread copy, F1c person read), Sonnet re-check, unified-access-control-r2 PASS (F1 person-read-first fixed in round 3), ebilling-r1 PASS. Part B (client) merged at baf8a069dd (task/fm-045f-client 2f507ebf48): EventDetailSidePane Parent, TodoDetail, CommunicationConnections and RegardingResolver open only a same-origin record URL, else build it from the pair; Sonnet adversarial review, two fix rounds. Gates on 40c5e85d48: sln 0 warnings; ArchTests 2544; project suites 9142/0/7; publish +54,869 B vs fresh master b77967a750 (40.18 MB, 191 = 191 files); no vulnerable packages. Deploy order: the part B bundles (sprk_spaarkeai, sprk_eventdetailsidepane.html, RegardingResolver, CommunicationConnections) live before or with this BFF. Notes: notes/task-045f-notes.md, notes/task-045f-client-notes.md.
+rework: fix-round-3 task 045f</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
