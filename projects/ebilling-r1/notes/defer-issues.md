@@ -41,7 +41,7 @@ The order of checks on a firm named in the request body does not yet give NFR-01
 
 | Field | Value |
 |---|---|
-| **Status** | Open. Waiting on the owner's OK for the dev run. |
+| **Status** | In progress. Dev DONE 2026-11-13 (owner OK in session; uac-r2 before and after notices): WhatIf, then apply created 2 and published both tables; read-back Money, precision 2, not secured; a re-run skipped 2. Remaining: add both columns to the next SpaarkeMaster version, and put the script on task 112's apply list. |
 | **Urgency** | now |
 | **Filed** | 2026-11-13 (reported by ontology-r1 from the dev log) |
 | **Source** | Dev log, 2026-11-13 03:27:38Z: `POST /api/finance/matters/{id}/recalculate` → Dataverse 400 `0x80048d19` on the Pending Spend PATCH |
