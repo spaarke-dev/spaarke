@@ -2,78 +2,65 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas". History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-11-12 (#2552 merged and deployed; dev BFF 4e64670ea0 checked; D-220 split agreed with ontology). This project runs in the **Claude Desktop session `word-add-in-r1`** (the VS Code session retired 2026-11-08).
+> **Last Updated**: 2026-11-13 (checkpoint at 85% context): #2789 merged and deployed; follow-up PR #2793 open. This project runs in the **Claude Desktop session `word-add-in-r1`**.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **133 🔄 Outlook Submit Invoice view** (FULL, opus/high). Live on dev; unified package **1.1.4** uploaded by the owner 2026-11-03 (Invoice pane tab; Submit Invoice / Create To Do ribbon buttons removed). |
-| **Active task** | **134 🔄** (FULL, sonnet/high): Invoice tab firm required + "Open in Spaarke" (slice A) and banner firm (B1), built in worktree **C:\wt134** on branch `feat/invoice-firm-required` (off master b77967a750). **Merged in #2789 (c534bc0b82)**. Next: the owner checks it on dev:
-- a record with no firm shows the message and link;
-- "Open in Spaarke" works from the Invoice tab and the Save bar;
-- a blocked pop-up shows its reason. B2 (Correction Note) and C (inline firm assign) wait for ebilling's contracts (requested 2026-11-13; uac-r2 sent ebilling the review conditions for the assign route). |
-| **Status** | All owner checks done (Word on 9411f604bb, Outlook on 0c06f464e3). Task 134 slice A+B1 in progress; no PR yet. |
-| **Open PR** | None. **#2789** (task 134 A+B1) merged 2026-11-13 as **c534bc0b82**, on the owner's go. The first CI run failed on our blocked-pop-up test: it read the live region after `useAnnounce` had cleared it after 1 s, on a 92 s suite. Fixed in e243475993, which records the announcement with a MutationObserver. A one-off Spaarke.Auth `BrowserMsalStrategy.dataverseUser` failure passed on rerun. Auto-fix was on. C:\wt134 removed. SWA deploy run 43478586797 and gate run 43478586552 checked after the merge. **Follow-up PR #2793** (`fix/invoice-firm-recheck`, worktree C:\wt134b, 7a7025d0de) answers the Codex review comment on #2789: both no-firm states get "Check again", which re-reads the firm list or the correction prefill after the user adds the firm in Spaarke. The review thread has been replied to and resolved. The merge needs the owner's go; afterwards, remove C:\wt134b. |
-| **Live dev BFF** | **0c06f464e3** (uac-r2 after-notice, live since 2026-11-13T13:26Z): a local merge of master **92d0ca09f7** with the mcp-r1 spike **d7369fecf1**, so it is not one master commit. Every later dev deploy must include the spike. It carries everything in 9411f604bb (030b, 049c, 095c-2..4, 095a, 095b, 151e, fm 054) plus 197a-1/197a-2, 197b, 022b/022c and #2749. After-notice check: no add-in concern. `FlaggedOfficeEdit` is still unset; uac-r2 will say when it is on. Before it: 9411f604bb (Word checks passed there), then 4e64670ea0. Range checks: see "Recent deploy checks". |
-| **Owner checks (Outlook)** | On **0c06f464e3**, 2026-11-13: all pass except the no-firm submit, and all read back and sent to `uac-r2`. Results: (5) 030b attachment children (matter, parent, graph ids, related communication; child-BU team owner; indexed); (4) To Do; (3) submit INV-0012.1, with the correction INV-0012.2 superseding it (new invoice row, the old one Superseded); (6) the banner, plus the "already submitted" refusal for a second new invoice. (7) No-firm: the server refuses with 400 `firm_invalid` "A firm is required." (no-firm phase gate, P0/P1), and the pane wrongly shows "The chosen firm isn't an active firm". **Owner feedback 2026-11-13, waiting on decisions** (section "Invoice tab: owner feedback 2026-11-13"). |
-| **Owner checks (Word)** | On **9411f604bb**, 2026-11-12. **Word: pass.** (1) filed save: pass. The read-back row "Mutual Nondisclosure Agreement V3" is filed to a project (direct `sprk_project`), not a matter. (2) unfiled save: pass. Also the Word "already saved to record" view: pass. Both post-deploy rows are owned by the root BU default Owner team, have the SPE pointer set and are indexed in `spaarke-files-index`. The saves were by a root-BU user, so the child-BU case is not covered. Reported to `uac-r2`. **Deferred (Outlook outage), all from the Outlook pane:** (3) Submit Invoice from an email; (4) Outlook To Do save (049c); (5) Outlook email WITH an attachment filed to a matter (030b: the child row has `sprk_matter`, `sprk_parentdocument` and graph ids); (6) the 095a already-submitted banner on the Invoice tab; (7) #2552: no-firm Submit Invoice from an email, then a correction. An SPA submit works (owner) but does not exercise the pane path. The live build is now 0c06f464e3, so run (3)–(7) there. When Outlook is back, read back the rows (`sprk_document` index/owner/BU; invoice submission, invoice and line rows) and report to `uac-r2` naming the then-live SHA. |
-| **Last merge to master** | **#2552** (14b600192f, 2026-11-12T20:05:50Z, owner's go): optional firm (EB-D-185) + "Submit it again." for the 095c-4 transient Failed codes. All 45 PR checks passed. Auto-merge did not fire although the PR was clean and `Router` passed on the head, so it was merged directly with `--merge`. The SWA deploy (run 43296860255) and the post-merge `Office Add-ins Tests (Gate)` (run 43296860521) both passed. C:\wt185f removed. The work branch still has checkpoint-only commits ahead of master; they go in with the next merge. |
-| **Next Action** | Wait for, and act on: the owner's Outlook checks (3)–(7) once Outlook recovers (read back, report to `uac-r2` naming the live SHA); each `uac-r2` deploy notice (range check, reply); ontology's master SHA + handler contract for task 189's templates route, which starts this project's Word Email tab task (section "Word Email tab: templates + AI draft"). Nothing in progress, nothing uncommitted. |
+| **Active task** | **134 🔄** Invoice tab: firm required, "Open in Spaarke", firm on the banner, Correction Note, inline firm assign (FULL, sonnet/high; POML `tasks/134-…poml`; owner go 2026-11-13: "yes proceed with all recommendations"). **Slices A+B1 merged in #2789** (c534bc0b82). The SWA deploy (run 43478586797) succeeded. The post-merge gate (43478586552) shows "cancelled" only because its server-test jobs were cancelled; the jest, typecheck and ESLint jobs passed. **B2** (Correction Note) waits for ebilling 095f's contract. **C** (inline firm assign) waits for ebilling 095g's contract, after uac-r2 agrees the design. |
+| **Open PR** | **#2793** (`fix/invoice-firm-recheck`, worktree **C:\wt134b**, commit 7a7025d0de). Adds "Check again" to both no-firm states, which re-reads the firm list or the correction prefill after the user adds the firm in Spaarke. It answers Codex review comment 4565654143 on #2789, which has been replied to and resolved. The InvoiceView suites pass 100/100 and lint is clean. CI is running. **The merge needs the owner's go.** Then remove C:\wt134b with Remove-WorktreeSafe. Auto-fix is on for #2789 (merged); it was not set for #2793. |
+| **Next Action** | (1) Get the owner's go to merge #2793, check its CI (`gh pr checks 2793`: Router, Gated jest, Production typecheck), merge with `--merge`, confirm the SWA deploy, remove C:\wt134b. (2) Owner check on dev after the deploys: a record with no firm shows the message, the link and Check again; "Open in Spaarke" works from the Invoice tab and the Save bar; a blocked pop-up shows its reason. (3) Wait for ebilling's 095e/095f/095g SHAs and contracts (B1 is already tolerant of 095e), uac-r2 deploy notices (range check, reply), and ontology's task 189 SHA + contract (Word Email tab). |
+| **Uncommitted** | Nothing in this worktree after this checkpoint commit. C:\wt134b is clean (pushed). |
+| **Live dev BFF** | **0c06f464e3** (live since 2026-11-13T13:26Z): master **92d0ca09f7** + mcp-r1 spike **d7369fecf1**. Every later dev deploy must include the spike. After-notice check: no add-in concern. `FlaggedOfficeEdit` is still unset; uac-r2 will say when it is on. |
+| **Owner checks** | All done. Word passed on 9411f604bb. On 0c06f464e3 the Outlook checks passed: email with attachments (030b), To Do, Submit Invoice, the correction (INV-0012.2 supersedes .1), and the banner plus its second-submit refusal. Child-BU team ownership is covered. The no-firm submit led to task 134. All of it was reported to uac-r2, who recorded the passes. |
+| **Last merge to master** | **#2789** (c534bc0b82, 2026-11-13, owner's go). The first CI run failed on our blocked-pop-up test: `useAnnounce` clears the live region after 1 s, and the suite took 92 s, so the test read it empty. Fixed in e243475993 with a MutationObserver. There was also a one-off Spaarke.Auth `BrowserMsalStrategy.dataverseUser` failure, which passed on the rerun. |
 
-## Decisions in force (detail in CLAUDE.md "Standing directives")
-- **W3 create paths** (owner 2026-11-06): CLAUDE.md "Create paths follow fm's W3 direction". 030a is live. **030b is on master** (PR #2629, 57748ebf6d, 2026-11-08 04:43Z, with fm 034 + 052a) and **live on dev in 6dbe69b9e2**. Content read done on 2026-11-08 and sent to fm: OK, no pane change needed. Association, parent link and SPE pointer are now written in the create. The new request members are `[JsonIgnore]`. The id is server-minted, as it already was. The version save (`existingDocumentId` + `isNewVersion`) is outside the diff, and response and refusal bodies are unchanged. When a deploy notice's range includes 57748ebf6d, cite this read.
-- **Roles**: add-in user = Core User + Office Add In User; service and demo accounts never get the add-in role; every add-in role holder has Core User or System Administrator (read back 2026-11-06).
-- **ebilling contract** (#2552): `"firm": null` prefill accepted; "Firm: none" kept; §12 reviewer refusals are on no pane route; 082c-3 `warning` is SPA-only.
-
-## Recent deploy checks (newest first; older ones in git log)
-- 2026-11-13 0c06f464e3 (master 92d0ca09f7 + spike d7369fecf1; parents verified). Range e9208abc5e..92d0ca09f7 is 77 commits, with 0 add-in client files and 0 Api/Office, Services/Office or Finance files. 197a-1/197a-2 (`RecordOwnershipResolver`): the owner changes on unfile and re-file transitions, and for a document linked to a Direct-team-owned unfiled communication. The pane never unfiles, and the save's owner rule and its response and refusal bodies are unchanged. 022b (`RecordCreationService`): a value mapped from a Restricted source is removed with the warning `record_creation.mapping_source_restricted`. If that value would have filed the row, the create is refused with the existing 400 `record_creation.mapping_source_secure_filing`, which the pane already shows. Office responses carry no warnings field. #2749 (inbound poll), #2756/#2762 (log content), 197b (Direct shares) and field-mapping 022c (push/Repair): not pane routes. No add-in concern; sent to uac-r2.
-- 2026-11-12 peer OK for master e9208abc5e + spike (fm 054 deploy, owner's go pending in uac-r2). 2ef4a17915..e9208abc5e has 0 server and 0 add-in files, so the pre-check below covers it. Deployed as 9411f604bb (parents e9208abc5e and d7369fecf1, verified); after-notice received 2026-11-13.
-- 2026-11-12 pre-check of master 2ef4a17915 (+ spike) for uac-r2; the request was withdrawn (no deploy). Range 350ca3da66..2ef4a17915: 27 server commits, all fm 054/054b communication-ownership work. No Office server change. `CommunicationEndpoints` re-file/filing routes now declare 409/503; the pane calls neither. The only add-in commits are #2552's own. No add-in concern; reuse this if that SHA is deployed later.
-- 2026-11-12 4e64670ea0 (master 350ca3da66 + spikes 755987b385, d7369fecf1; uac-r2 via ebilling): range a654da59c4..350ca3da66 has no Office server or add-in commit. 191g (#2736, off by default): `GET /api/documents/{id}/open-links`, which the pane's Open Document uses, now passes the file's item id to the edit-access step; nothing changes while the setting is off. 191h (#2726) applies the external visibility predicate to SPA lists, AI tools and retrieval trim for external callers; the pane's licensed users are unaffected. #2732 is a share-job watermark fix. No add-in concern. The pane's own #2552 is not in this build: it is client-only and deploys through the SWA.
-- 2026-11-12 6dbe69b9e2 (master a654da59c4 + spike 755987b385; range from d53d67f604). Office server changes: 030b (read OK); 022 fix round 3, where quick-create returns 400 `record_creation.mapping_source_secure_filing` with the service's sentence (the pane shows the server detail, task 053); regarding-pair display columns; the uncalled attachment creator was deleted; whitespace only. Add-in client: one comment in EmailView (#2666). **Behaviour change (#2666, ontology D-217):** a Word Email-tab send filed to a record is now archived as an `.eml` even though the pane sends `archiveToSpe: false`. The server decides; no pane change. Finance: the 095a route `GET /api/finance/invoice-submissions?internetMessageId=` now exists; its fields and status values (Received, Processing, Accepted, Rejected, Failed) match the pane's reader. No add-in concern.
-- 2026-11-07 22487c6537 (spike tip): no add-in concern; flagged "not on master"; uac-r2 confirmed the owner's go.
-- 2026-11-07 cc11294300: 030a To Do through RecordCreationService; #2292 shared alternate-key classifier (exact 0x80060891). No add-in concern.
-- 2026-11-06 20669df6a9: POST /api/v1/documents caller check does not touch the pane (it uses GET/PUT there).
+## Task 134 facts (ebilling's answer: owner rulings EB-D-223..226 at 7a307104f1)
+- **D-223:** no invoice without a firm in ANY channel. It is refused at intake (400 `firm_invalid`). Invoices already held keep Set firm (095e).
+- **D-224:** assign-firm is ebilling 095g, built to uac-r2's conditions. Pane conditions from uac-r2 (already in the POML slice C):
+  - show the server's refusal text as given;
+  - confirm a replace or clear first, because that revokes the firm's external users;
+  - no client-side security filtering.
+  The firm link is `sprk_assignedlawfirm1/2`, which also grants external access.
+- **095e:** adds `firm {id, name}` to the 095a view (our B1 reader already takes it), plus D-226 naming: "{firm name} - {invoice number}".
+- **D-225:** `correctionNote` in 095f, on from-email Correction and in the review flow. It is written to `sprk_correctionnote` on the new invoice. The contract (max length, missing-note rule) comes later.
+- **ebilling's order:** 084d, then 095e, 095f, 095g.
+- **Known limits in #2789:**
+  - K4: a one-render double link after a record change.
+  - K2: a correction prefill with a malformed firm id leaves Submit disabled with no explanation.
+- The local add-in build's dev-certs step installed the Office Add-in Developer CA into the machine trust store. The owner has been told.
 
 ## Word Email tab: templates + AI draft (ontology D-220, owner ruling 2026-11-12)
-- The owner ruled that the Word Email tab (`EmailView.tsx` → `SendEmailPane`) gets the template picker and AI drafting, like the Console's Send Email (#2744), coordinated with this project and uac-r2. ontology's task 189 tracks it; nothing is built yet.
-- Answered ontology on 2026-11-12. This project owns `EmailView.tsx` and `shared/types/spaarke-send-email-pane.d.ts`; nothing in flight. Draft and render have no add-in limit (same NAA audience and CORS as `/send`). Recommended a BFF `GET /api/communications/templates` used by both hosts (Console drops its Xrm listing; ADR-012 host-agnostic decision 2026-10-05; compose-r8 can swap the source server-side), owned by the communications owner and checked by uac-r2. `NO_ADDITIONAL_ATTACHMENT_SOURCES` stays. **Agreed with ontology (2026-11-12):** ontology task 189 builds `GET /api/communications/templates` as an impersonated caller read (uac-r2's condition; its contract is not bound to OOB `template` columns) and switches the Console's `onListEmailTemplates` to it; uac-r2 reviews the route before merge. **This project then does the pane side:** EmailView passes `onDraftWithAi`, `onListEmailTemplates` and `onRenderEmailTemplate`; add those props (and `aiDraftActions` if used) to the `.d.ts` subset; EmailView tests; owner narrow-width check. Trigger: ontology sends the master SHA and the handler contract. Run it as a project task (task-execute) and add it to TASK-INDEX at that point.
-
-## Invoice tab: owner feedback 2026-11-13 (on 0c06f464e3)
-- **ebilling's answer (owner rulings in their session, EB-D-223..226 at 7a307104f1):**
-  - D-223: no firm in EVERY channel. Refused at intake with 400 `firm_invalid` and nothing written. Invoices already held keep Set firm (095e).
-  - D-224: ebilling builds assign-firm as 095g, to uac-r2's six conditions. Their design note goes to uac-r2 first. The contract comes after uac-r2 agrees, and includes the revoke wording; the pane must confirm a replace.
-  - 095e adds `firm {id, name}` to the 095a view, which matches our B1 reader.
-  - D-225: `correctionNote` in 095f, on from-email Correction and in the review flow. The contract (max length, missing-note rule) and the SHA come later.
-  - D-226: the invoice name becomes "{firm name} - {invoice number}" (095e).
-  - Their order: 084d, 095e, 095f, 095g.
-- **No firm (owner):** do not accept an invoice with no firm. The better fix is to let the user pick a firm in the pane and save it to the record. Facts:
-  - A record's firms are `sprk_assignedlawfirm1/2` on the matter, project or work assignment (`CheckFirmLinkAsync`).
-  - The same lookups feed the external access model (`ExternalParticipationService.GetReferencedOrganizationIdsAsync`), so setting one from the pane is an access grant to that firm, not just a field write. It needs a server route owned by ebilling/uac-r2.
-  - The server's no-firm path is gated to P2; dev refuses it today.
-  - Proposed: (1) the pane requires a firm (revert #2552's no-firm path, keep "Submit it again"), with an "Open record in Spaarke" link; (2) then inline "assign a firm" through a new server route. Waiting on the owner's go.
-- **Record link:** the record card after association has no link to open the record in Spaarke. The owner wants one (ours; `ORG_URL` exists).
-- **Banner firm name:** the 095a view carries `firmId` only. Ask ebilling to add the firm name, then show it in the banner.
-- **Correction Note:** the owner added `sprk_correctionnote` on `sprk_invoice`. A correction creates a new invoice row, so the note fits there. The request needs a `correctionNote` field (ebilling contract + persister). Reviewer adjustments are ebilling's decision flow. Waiting on the owner's go.
-- **For ebilling:** the invoice name comes from the PDF's AI-read issuer ("BRIANBACON patent…" vs "BRIAN BACON INC." for the same PDF), not the chosen firm.
+- Agreed with ontology: their task 189 builds `GET /api/communications/templates` as an impersonated caller read, reviewed by uac-r2, and switches the Console to it.
+- This project then does the pane side, as a new task via task-execute added to TASK-INDEX:
+  - EmailView passes `onDraftWithAi`, `onListEmailTemplates` and `onRenderEmailTemplate`;
+  - add them to the `.d.ts` subset;
+  - EmailView tests;
+  - owner narrow-width check.
+- Trigger: ontology sends the master SHA and the handler contract.
 
 ## Submit Invoice (task 133): state
-- Already-submitted banner (#2533): **active since 6dbe69b9e2** (095a on dev); owner check (6) above. Backfill for older submissions is ebilling's, with the owner's OK; an older submission still shows today's form until then.
-- Invoice form Files section and "Source email" link: ebilling 151e, on dev in 6dbe69b9e2 (the invoice form, not the pane). No approve UI until ebilling 110/111/112 (no interim path).
-- Owner retest still open: INV-012.2 / correction UAT.
+- Banner (#2533) active since 6dbe69b9e2. Backfill for older submissions is ebilling's.
 - **Slice C (needs the owner's explicit go):** remove Invoice from Save and "+ New" in both hosts; tell the owner Word loses Invoice save; then tell ebilling for 096.
 
-## Peers (SendMessage by session name; check `ListAgents` — several moved to Claude Desktop on 2026-11-08)
-- `uac-r2` (Desktop): dev BFF deploys, roles. A held message means the owner approves it in that session.
-- `field-mapping-r1` (Desktop; the VS Code session `-69` is retiring): field mapping. Nothing open with them (030b read OK, acknowledged).
-- `ebilling-r1` (Desktop since 2026-11-11; VS Code `-c7` retired): ebilling. Owner approved their next work→master merge on 2026-11-11, which carries 095c-2..4 and 095a/095b/151e. It is waiting on a master sync and a test fix. They will send the master SHA, then the dev SHA.
-- `ontology-r1` (Desktop, since 2026-11-08; the VS Code session `-38` is retiring): ontology, including its dev BFF before/after notices.
-- `provisioning-r1` (Desktop): customer provisioning.
+## Decisions in force (detail in CLAUDE.md "Standing directives")
+- **W3 create paths:** 030a/030b live; pane content read OK (CLAUDE.md "Create paths follow fm's W3 direction").
+- **Roles:** add-in user = Core User + Office Add In User; service and demo accounts never get the add-in role.
+
+## Recent deploy checks (newest first; older ones in git log)
+- 2026-11-13 0c06f464e3 (master 92d0ca09f7 + spike): 77 commits, with no add-in or Office/Finance server files. 197a (unfile/re-file ownership) and 022b (Restricted-source mapping, existing 400 code) need no pane change. No add-in concern.
+- 2026-11-12 9411f604bb (master e9208abc5e + spike): no add-in concern.
+- 2026-11-12 4e64670ea0, 6dbe69b9e2: no add-in concern. #2666 D-217: a Word Email-tab send filed to a record is archived as `.eml` server-side.
+
+## Peers (SendMessage by session name)
+- `uac-r2`: dev BFF deploys, roles, review of the assign-firm route.
+- `ebilling-r1`: 095e/f/g; sends master and dev SHAs.
+- `ontology-r1`: task 189 templates route (Word Email tab).
+- `field-mapping-r1`, `provisioning-r1`: nothing open.
 
 ## Owner items (open)
-- Prod Entra: register the add-in's `brk-…://addins.spaarke.com` redirect on prod `1958aec2` (dev has it; offered via az with a go).
-- Teams admin: reject the duplicate "Spaarke portal" submission `5d88b948…` (keep `60055573…`); then tell R3 and legal-ai-accelerator.
-- Request Too Long follow-ups on the owner's machine.
-- Excel/PowerPoint add-in (no go yet); UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; a named user's retest for R3; 090 wrap-up (`/test-diet`).
-- Post-deploy check (UAC #2468): a child-BU user's unfiled Outlook save; read back the `sprk_document` owner and BU.
+- Merge go for #2793; dev check of task 134 after the deploy.
+- Prod Entra: register the add-in's `brk-…://addins.spaarke.com` redirect on prod `1958aec2`.
+- Teams admin: reject the duplicate "Spaarke portal" submission `5d88b948…` (keep `60055573…`).
+- Excel/PowerPoint add-in (no go yet); UAT 042, 080, 121, 127, 078; PCF re-sync; A9 guest sign-in; 090 wrap-up (`/test-diet`).
