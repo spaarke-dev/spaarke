@@ -1962,12 +1962,15 @@ Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. 
 >   it. Do not assign it in the admin UI: the UI offers the copy in the user's own unit first, and that copy reaches nothing
 >   above that unit. Admins homed in the customer's unit itself need no assignment.
 > - **Then run `-Verify`.** It fails if the org setting is off; if `isinherited` is not 0; if the role grants anything but Read
->   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy or
->   a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
+>   at Deep on `sprk_policy`; if any team holds any copy of the role; if a user holds the root copy, the `Secure Record` copy,
+>   the `Spaarke Ontology Writer` copy or a copy below a customer top unit; if a holder of the customer unit's copy lacks the marker or is homed outside the
 >   customer's unit and the units below it (another customer's admin would read this customer's rules); or if a holder of
 >   **another** customer top unit's copy is homed outside that unit and the units below it. The script also refuses to run, in
->   every mode and before any write, when the business-unit tree is not the expected shape: `Secure Record` must be a direct
->   child of the root and outside every customer subtree (D-123).
+>   every mode and before any write, when `Secure Record` or the ontology writer's unit `Spaarke Ontology Writer` (task 267)
+>   sits inside the named customer's subtree (each must be outside every customer subtree, D-123; each customer's own run
+>   checks its subtree). The ontology writer's unit is never a customer unit (task 269): naming it (by name or id) is
+>   refused, it is never counted as another customer top unit, a declared team in or below it is drift, two units of that
+>   name refuse, and a `-SecureBusinessUnitName` that names it refuses.
 > - **Live-proof gate.** Before the first customer with a child unit relies on this, an admin homed in a child unit and holding
 >   the top unit's copy must be able to read (and exclude) a Billing rule owned in the customer's top unit, and must **not** be
 >   able to read a rule owned by `Secure Record Owners` (still 403). See Phase 7a. Until the admin holds the role, that
@@ -2640,11 +2643,13 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # the CUSTOMER TOP UNIT's copy. -Apply also sets the org setting EnableOwnershipAcrossBusinessUnits if it is off: an
 # ORG-WIDE write, logged as its own step (one orgdborgsettings element changes; the rest is written back as read).
 # -Verify fails while the org setting is off, isinherited is not 0, the role grants anything else or another depth, any team
-# holds any copy, a user holds the root copy, the Secure Record copy or a copy below a customer top unit, or a holder of this
+# holds any copy, a user holds the root copy, the Secure Record copy, the Spaarke Ontology Writer copy or a copy below a
+# customer top unit, or a holder of this
 # unit's copy lacks prvWritesprk_ruleset (the billing-admin marker) or is homed outside the customer's unit and the units
 # below it, or a holder of ANOTHER customer top unit's copy is homed outside that unit and the units below it. Every mode
-# refuses to run, before any write, when Secure Record sits inside the customer's subtree (it must be a direct child of the
-# root and outside every customer subtree, D-123).
+# refuses to run, before any write, when Secure Record or the ontology writer's unit sits inside the customer's subtree (each
+# must be a direct child of the root and outside every customer subtree, D-123 / task 267). The unit 'Spaarke Ontology
+# Writer' is never a customer unit (task 269): naming it is refused, and it is never another customer top unit.
 # Provisioning's H7c (#2429) replaces this step in a provisioning run: one handler for the two teams and the role, after H7b
 # and before H9, from the files $DeclaredRoleFiles lists (restricted-content-owner-role.json,
 # customer-configuration-owner-role.json, billing-rule-readers-role.json), with its own gate and an H13 re-check.
@@ -3107,6 +3112,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-11-10 | §5 displayName + `customerBusinessUnitId` row + §7.7 H10 + H7b S11/S16/S24/S25: the ontology writer sits alone in its own unit `Spaarke Ontology Writer` (H10 finds or creates it, moves a writer task 266 put in the customer's unit, records `ontologyWriterBusinessUnitId`; intake reserves the name); H7b (procedure v8) checks that unit by id, gives the writer that unit's role copy, keeps its default team out of every profile, and S25 gives the customer unit's default team `Spaarke Basic User` so it can own contacts — the operator step for #2618 is gone | `customer-provisioning-orchestration-r1` task 267 (#2618) |
 | 2026-11-10 | §5 H7b row + §6.5.2 + §7.7 H10/S24 + Secure Record setup: the nine operator scripts that add "every default team" to a reader profile skip the ontology writer unit's default team and FAIL when it is there (`scripts/common/OntologyWriterUnit.ps1`); a move keeps roles where `DoNotRemoveRolesOnChangeBusinessUnit` is set (S24 hint, remove by hand); the moved writer holds no role between H10 and H7b S24; H10 also refuses a writer whose client id is the BFF app registration's | `customer-provisioning-orchestration-r1` task 267 review fixes (#2618) |
 | 2026-11-11 | §5 H7b row + Secure Record setup S26: H7b procedure 9 verifies ebilling task 166's lock on the seven `sprk_invoice` amounts and firm (EB-D-200; secured, Readers read, Writers 4/4/4, no other writer); incomplete → `secure_setup.invoice_money_lock_incomplete` (Resumable: a SpaarkeMaster release above 1.3.0.0 carrying 166, or ebilling's script), other writer → `…_other_writer` (QuarantineRequired). The System Administrator profile is now excused by its fixed id in every H7b other-writer check, never by name (task 268). |
+| 2026-11-13 | §7.11 + §12.2 Phase 7a (Set-CustomerOwnerTeams): the ontology writer's unit `Spaarke Ontology Writer` (task 267) is never a customer unit — refused when named (by name or id, every mode), never counted as another customer top unit, a declared team or a role copy holder in it is drift, it must sit outside every customer subtree, and two units of that name refuse (task 269). |
 
 ---
 

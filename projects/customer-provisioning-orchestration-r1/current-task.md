@@ -2,27 +2,26 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2/§3/§6. Decisions → `notes/model1-dedicated-remediation-plan.md`. Narrative → commit messages. Full detail of every open item below as of 2026-11-06 (verbatim): `notes/handoff-history/current-task-archive-2026-11-06.md`.
 
-> **Last Updated**: 2026-11-12 (Desktop session `provisioning-r1`; task 268 completed).
+> **Last Updated**: 2026-11-13 (Desktop session `provisioning-r1`; task 269 completed, PR pending).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | None in progress. Last completed: **268** (H7b S26, invoice money + firm column lock, verify only; ProcedureVersion 9) — `1fa31177d0` + fix round `6929b3b10f` + `b921337a9e`, branch pushed. No PR open for the branch. |
-| **Next Action** | Owner decides question 1 (merge S26 now vs hold). Then, with owner go: Set-CustomerOwnerTeams writer-unit exclusion, or H7c (#2429). ebilling-r1 was told (2026-11-12) about S26, the SpaarkeMaster > 1.3.0.0 need, our 3 D-130 baseline entries and #2725 — await their published version. |
-| **Done 2026-11-11/12** | PR #2676 (task 267) MERGED → `df93d2029c`. ebilling #2689 on master `2fc434c912`. Task 268 done; #2725 / ISS-028 filed (19 operator scripts excuse System Administrator by name). Master has 1 commit since our merge (#2721 uac-r2, no overlap). |
+| **Task** | None in progress. Last completed: **269** (Set-CustomerOwnerTeams never treats "Spaarke Ontology Writer" as a customer unit; owner go 2026-11-13) — `77b6cbe417` + fix round `37e2e4fc35`; PR to master pending owner approval to merge. Before it: 268 → PR #2766 `4b45bdf3fe`. |
+| **Next Action** | Owner approves the task-269 PR merge (every check terminal + green). Then, with owner go: H7c (#2429) — `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it (it also edits Set-CustomerOwnerTeams.ps1 — resolve against task 269), review, resume. |
+| **Done 2026-11-11/13** | PR #2676 (task 267) → `df93d2029c`. ebilling #2689 → `2fc434c912`. Task 268 → PR #2766 `4b45bdf3fe`; #2725 / ISS-028 filed (19 operator scripts excuse System Administrator by name; ebilling fixing its 4 sites). SpaarkeMaster 1.3.1.0 published 2026-11-13. |
 | **Quality alert** | #1821 mutation-nightly, #1906 client-tests, #2060 tier2 full-unit-tests — mentioned to owner; not started. |
-| **Working tree** | `H7bSecureRecordSetupHandler.cs` shows `M` with an empty diff (line endings only) — leave it. |
+| **Working tree** | Clean after the close-out commit. |
 
 ## 🔔 Owner questions open
 
-1. **Task 268 S26**: merge S26 now (blocks every new run at H7b until SpaarkeMaster > 1.3.0.0 with ebilling 166 is published, or the ebilling script is run per stamp) vs hold the merge until that release exists. Recommendation: merge — a run that passes H7b today would deploy a master BFF where users can set invoice totals.
-2. ACME migration (writer unit + S25 + now S26) through a NEW run, owner OK; first read ACME's DoNotRemoveRolesOnChangeBusinessUnit (task 267 K3).
-3. Open from before: `version-compat-matrix.json` stale v1 cell; #2443/#2532 go-live gates (prod workforce client, CIAM BFF app T240d, routing T240c, GitHub env vars, A9 on ACME, DNS); L56 AI content for ACME; demo accounts; dev BFF secrets rotation; ISS-026.
+1. ACME migration (writer unit + S25 + now S26) through a NEW run, owner OK; first read ACME's DoNotRemoveRolesOnChangeBusinessUnit (task 267 K3).
+2. Open from before: `version-compat-matrix.json` stale v1 cell; #2443/#2532 go-live gates (prod workforce client, CIAM BFF app T240d, routing T240c, GitHub env vars, A9 on ACME, DNS); L56 AI content for ACME; demo accounts; dev BFF secrets rotation; ISS-026.
 
 ## Follow-ups unblocked by ebilling #2689 (not started)
 
-- `scripts/Set-CustomerOwnerTeams.ps1`: exclude the "Spaarke Ontology Writer" unit from `$customerTops` by id (`Get-DvOntologyWriterUnitId`), as master excludes the Direct unit. Master already merged into branch (`b94d351d2a`).
+- Done: task 269 Set-CustomerOwnerTeams writer-unit exclusion (PR pending).
 - **H7c (#2429)**: `wip/h7c-customer-owner-teams` (`8ca1c13911`, unreviewed): merge master into it, review, resume (owner go). Covers both owner teams, Billing Rule Reader role, `EnableOwnershipAcrossBusinessUnits`, H12b owner bind + `sprk_aisearchindex` seeding (owner chose B).
 - Possible: S26-style check for ebilling 095a (`sprk_invoicesubmission.sprk_sourceemaildocument` lock) — would make that ordering rule mechanical.
 
@@ -31,7 +30,7 @@
 - No stamp BFF with ebilling 092+ before SpaarkeMaster 1.3.0.0 is installed there AND 091 eBilling storage + `Finance:FileStore` settings are live (#2232).
 - No BFF with ebilling 095a on any stamp before `sprk_invoicesubmission.sprk_sourceemaildocument` is field-secured (ships in SpaarkeMaster 1.3.1.0 or via ebilling's script).
 - No stamp gets a master BFF containing ebilling 116 / #2724 (on master since 2026-11-12 05:25Z) before SpaarkeMaster 1.3.1.0 is installed there: 1.3.1.0 adds `sprk_procedureversion.sprk_notconvertedlist`, which #2724 reads; without it the rule-set and procedure-version routes fail (ebilling-r1, 2026-11-12).
-- SpaarkeMaster 1.3.1.0 (NOT 1.3.0.1; ebilling-r1 2026-11-12): carries 166 (what S26 checks), 095a/095c-1, DEF-061, DEF-059 Decision Record Reader role, uac-r2 193 `sprk_pairedsystemuser`, `sprk_notconvertedlist`. On master via PR #2727 `2b79f06b4b` (2026-11-12 14:41Z; CI pack passed) — NOT yet published; publish (`publish-dataverse-solutions-manifest.yml`, publish: true) is the owner's step. An environment that already has `sprk_invoicesubmission` rows runs `Deploy-EbillingSubmissionTrackingScopeSchema.ps1` steps 1–8 right after import; a new stamp needs nothing. ebilling will send the version + run when published.
+- SpaarkeMaster 1.3.1.0 (NOT 1.3.0.1; ebilling-r1 2026-11-12): carries 166 (what S26 checks), 095a/095c-1, DEF-061, DEF-059 Decision Record Reader role, uac-r2 193 `sprk_pairedsystemuser`, `sprk_notconvertedlist`. PUBLISHED 2026-11-13 03:22Z (owner go in ebilling-r1's session): run 43358397122 from master `d8b53ec0c3`; `dataverse-solutions-latest.json` = 1.3.1.0 (managed sha256 `4f7cda4c…32e6d4`), versioned manifest `dataverse-solutions-2026.11.13-318-1.json`; expectations `spaarkemaster-1.3.1.0.json`. Also carries field-mapping #2733 (secured message-access columns + BFF profile grants) and the #2725 profile-id fix. The #2724 gate is per stamp: 1.3.1.0 must be INSTALLED there (H6 on a new run), not just published. An environment that already has `sprk_invoicesubmission` rows runs `Deploy-EbillingSubmissionTrackingScopeSchema.ps1` steps 1–8 right after import; a new stamp needs nothing. ebilling will send the version + run when published.
 - ACME BFF upgrade gated on A9 home sign-in; any BFF from master needs `Set-ExternalAccessContactSecuritySchema.ps1 -Apply` + `-Verify` first.
 - Never remove System Administrator from the BFF identities.
 
