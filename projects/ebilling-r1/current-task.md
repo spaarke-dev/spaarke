@@ -49,7 +49,8 @@
      - It is additive: two Money columns. `-WhatIf` runs first.
      - It needs the owner's typed OK, plus a uac-r2 notice before and after.
    - Follow-ups either way: put the columns in the next SpaarkeMaster version, and add the script to 112's apply list.
-2. **How a wrongly filed invoice is corrected** (follows #2772 / ISS-017).
+2. **DONE 2026-11-13: owner chose "Return and resubmit" (EB-D-231, ISS-020 #2794).** Asked field-mapping-r1 who builds the two guard rules (they or we; one owner, one change). Earlier context:
+   **How a wrongly filed invoice is corrected** (follows #2772 / ISS-017).
    - Today D-96 refuses a core change on an invoice that has lines. The only path is to detach the lines, move the invoice, move each line, and reattach.
    - Approval, submission, corrections and identifiers never move, so the family splits.
    - **Option 1 (recommended):** never move an invoice that has any related record, and drop the detach hint. Correction is return-and-resubmit, which fits EB-D-148.
