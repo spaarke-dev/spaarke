@@ -251,6 +251,63 @@ public class RecordOwnershipResolverUnfileOwnerTests
                                            && e.Message.Contains(MessageId.ToString()));
     }
 
+    // ── The content-row mark (round 90, F1-2; scoped re-check F2/F3) ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Unfile_WhoseOwnerWriteLandedButReportedAFailure_StillTakesItsContentRows()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator();
+        directory.BeforeWrite = (w, fields) =>
+        {
+            if (fields.ContainsKey("ownerid"))
+            {
+                w.AssignmentFault = new InvalidOperationException("Test: the response to the owner write was lost.");
+                w.AssignmentLandsBeforeFault = true;
+            }
+        };
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), Applies(directory, Unfile()), CancellationToken.None);
+
+        Owner(directory).Should().Be(FakeDirectory.CustomerChildTeam, resolution.Reason);
+        resolution.OwningTeamId.Should().Be(FakeDirectory.CustomerChildTeam);
+        resolution.UnfiledContentFollows.Should().Be(
+            new Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove(FakeDirectory.ChildTeam, FakeDirectory.CustomerChildTeam),
+            "the move landed, so its content rows follow it");
+    }
+
+    [Fact]
+    public async Task Unfile_SettledFromAnotherWritersFiling_CarriesNoContentMark()
+    {
+        var directory = World().WithMessageFiledUnder(MatterId, FakeDirectory.ChildBu, FakeDirectory.ChildTeam, type: CommunicationType.Email)
+            .WithRecordedCreator();
+        var changed = false;
+        var refiledByAnother = false;
+        directory.BeforeAnswer = query =>
+        {
+            // After this call's change, before its settle reads the row: another writer files it under the secure matter.
+            if (changed && !refiledByAnother && query.EntityName == "sprk_communication" && query.ColumnSet.AllColumns)
+            {
+                refiledByAnother = true;
+                directory.Write("sprk_communication", MessageId, new Dictionary<string, object?>
+                {
+                    ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatterId),
+                });
+            }
+        };
+        Func<CancellationToken, Task> applies = async ct =>
+        {
+            await Applies(directory, Unfile())(ct);
+            changed = true;
+        };
+
+        var resolution = await Resolver(directory).ReparentAsync(Unfile(), applies, CancellationToken.None);
+
+        refiledByAnother.Should().BeTrue("the concurrent filing must land for this test to mean anything");
+        resolution.UnfiledContentFollows.Should().BeNull(
+            "the owner came from another writer's filing; no step after this re-file moves content rows for it");
+    }
+
     // ── Must not fire: owned by a person (round 90 decision, pass-2 F1-3) ───────────────────────────────────────────────
 
     [Fact]

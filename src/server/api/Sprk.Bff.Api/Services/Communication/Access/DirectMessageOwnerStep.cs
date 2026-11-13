@@ -192,7 +192,9 @@ public sealed class DirectMessageOwnerStep
     /// eligibility rule as before the write, <see cref="WhyNotAnEligibleUnfile"/>; its thread; the lookup), and only then grants it
     /// to its two participants, assigns it to the Direct team through the one owner write, moves its content rows (unless it was
     /// owned by the Secure team: the secure-child reconcile moves those and takes their mirror off), and grants it again. A message
-    /// that does not pass the checks is neither granted nor moved. Any other answer does nothing. Never throws for a Dataverse
+    /// that does not pass the checks is neither granted nor moved. uac-r2 197a: an answer carrying
+    /// <see cref="RecordOwnerResolution.UnfiledContentFollows"/> (a non-Direct communication moved to its creator's team) moves only
+    /// its content rows, through the same <c>MoveContentRowsAsync</c>. Any other answer does nothing. Never throws for a Dataverse
     /// fault: the unfile has landed, so a message that cannot be moved keeps its owner with an Error, and
     /// <c>Migrate-DirectMessagesToOwnerTeam.ps1</c> is the recovery. A writer calls it before the step after the re-file
     /// (<c>SecureChildReconciler.AfterRefileAsync</c>), so that step sees the message's new owner.

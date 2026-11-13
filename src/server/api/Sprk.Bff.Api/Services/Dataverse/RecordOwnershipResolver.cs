@@ -2605,11 +2605,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {
                         _logger.LogWarning(UnfileKeepsOwnerEvent, ex,
-                            "Unfiled communication {CommunicationId}: the link change was written, but its creator's team could not be "
-                            + "settled, so it keeps its former owner (#2722).", request.RecordId);
+                            "Unfiled communication {CommunicationId}: the link change was written, but its move to its creator's team "
+                            + "could not be confirmed; it is answered as keeping its former owner and its content rows are not moved "
+                            + "(#2722).", request.RecordId);
                         return RecordOwnerResolution.Unchanged(
-                            "the link change was written; the owner could not be settled, so the communication keeps its former "
-                            + "owner (#2722)") with
+                            "the link change was written; the owner could not be confirmed as settled, so the communication is "
+                            + "answered as keeping its former owner (#2722)") with
                         { ParentsUnchanged = false };
                     }
                 }
@@ -3157,7 +3158,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             if (state.OwningTeam == teamId)
             {
                 // already owned by the team its current parents resolve to
-                return (WithUnfiledContentFollowing(target, before), filingIsOwn);
+                return (WithUnfiledContentFollowing(target, before, filingIsOwn), filingIsOwn);
             }
 
             // R4b-2b (rule 1): the restricted-content team replaces a default-team answer only, never a kept creator. An
@@ -3209,7 +3210,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
 
             // Written conditionally at the version read, so the filing it answers is the one read at that version.
-            return (WithUnfiledContentFollowing(await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false), before),
+            return (WithUnfiledContentFollowing(await ConfirmOwnerAsync(request, target, ct).ConfigureAwait(false), before, filingIsOwn),
                 filingIsOwn);
         }
 
@@ -3244,10 +3245,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <summary>
     /// uac-r2 task 197a (#2722, round 90 decision): a settled answer for an unfiled communication moved to its creator's team
     /// (<see cref="RowBeforeChange.Unfiled"/> named the creator) from the team that owned it before the change carries
-    /// <see cref="RecordOwnerResolution.UnfiledContentFollows"/>, so its content rows follow it. Every other answer is returned as is.
+    /// <see cref="RecordOwnerResolution.UnfiledContentFollows"/>, so its content rows follow it — only when the answer came from the
+    /// filing THIS call made (<paramref name="filingIsOwn"/>): an answer from another writer's filing is that writer's, and no
+    /// step after this re-file acts on it. Every other answer is returned as is.
     /// </summary>
-    private static RecordOwnerResolution WithUnfiledContentFollowing(RecordOwnerResolution settled, RowBeforeChange before) =>
-        before.Unfiled is { CreatorSystemUserId: not null }
+    private static RecordOwnerResolution WithUnfiledContentFollowing(
+        RecordOwnerResolution settled, RowBeforeChange before, bool filingIsOwn) =>
+        filingIsOwn && before.Unfiled is { CreatorSystemUserId: not null }
         && settled.IsOwned && settled.OwningTeamId is { } team && team != Guid.Empty
         && before.OwningTeam is { } previous && previous != Guid.Empty && previous != team
             ? settled with { UnfiledContentFollows = new Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove(previous, team) }
@@ -3833,7 +3837,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Re-file of {Entity} {RecordId}: the owner assignment to team {TeamId} reported a failure, but the owner reads "
                 + "back as that team — the assignment landed (lost response); the re-file stands (task 146).",
                 request.EntityLogicalName, request.RecordId, teamId);
-            return (target, filedAsResolved == true);
+            // uac-r2 197a (scoped re-check F2): a landed creator-team move still takes its content rows with it.
+            return (WithUnfiledContentFollowing(target, before, filedAsResolved == true), filedAsResolved == true);
         }
 
         if (landed is null && !target.IsSecureOwner)

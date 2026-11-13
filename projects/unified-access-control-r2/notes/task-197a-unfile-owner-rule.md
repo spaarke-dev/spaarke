@@ -75,6 +75,15 @@ Three F1 findings needed an owner or design decision. The main session decided t
    - A row owned by a person (an `ownerid` that is not a team, or a non-empty `owninguser`) keeps that owner. A re-file never loosens it to a business unit's whole team.
    - The check is made in `ReadUnfiledFactsAsync` and reads nothing.
    - Test: `Unfile_OfAMessageOwnedByAPerson_KeepsThatOwner_NeverItsCreatorsWholeTeam`. Perturbation: remove the check → it fails.
+### Scoped re-check of the round 90 fix (Sonnet)
+
+| Finding | Fix | Proof |
+|---|---|---|
+| F2: an owner write that landed but reported a failure (lost response) came back through the recovery without the content mark, so the content rows stayed | The landed recovery branch passes its answer through `WithUnfiledContentFollowing` | `Unfile_WhoseOwnerWriteLandedButReportedAFailure_StillTakesItsContentRows`; dropping the mark fails it |
+| F3: the content mark could be set on a settle that answered from another writer's filing | The mark is set only when `filingIsOwn` | `Unfile_SettledFromAnotherWritersFiling_CarriesNoContentMark`; ignoring the flag fails it |
+| K3: the `AfterReparentAsync` summary was out of date | Updated | — |
+
+Known limit kept (K1): on the regarding-only path, a settle whose owner write landed but whose read-back faulted is answered as "keeping its former owner", and its content rows are not moved. Only path (b) has a landed-check (`RecoverFromFailedAssignmentAsync`). The log and the reason now say the move "could not be confirmed".
 ### Fixed in pass 2
 
 | Finding | Fix |
