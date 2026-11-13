@@ -4,10 +4,18 @@
  * under a new id would run the steps that already landed again.
  */
 
-import { closesSignal, failureKeepsReview, isFailedOutcome, needsSendChoice, reviewKey } from '../decisionRecording';
-import { failureHeading, failureMessage, describeWarning } from '../decisionDisplay';
+import {
+  closesSignal,
+  failureKeepsReview,
+  isFailedOutcome,
+  needsSendChoice,
+  resolutionFromRecord,
+  reviewKey,
+} from '../decisionRecording';
+import { failureHeading, failureMessage, describeWarning, lockedNoteText } from '../decisionDisplay';
+import { emptyDraft } from '../decisionDraft';
 import type { DecisionCommitFailure, DecisionReview } from '../decisionWizardTypes';
-import { commitResult } from '../__fixtures__/decisionWizardFixtures';
+import { commitResult, pathBItem, pathBPlan, PATH_B_ID } from '../__fixtures__/decisionWizardFixtures';
 
 const failure = (overrides: Partial<DecisionCommitFailure>): DecisionCommitFailure => ({
   httpStatus: 500,
@@ -63,6 +71,66 @@ describe('isFailedOutcome / closesSignal', () => {
     });
     expect(['a', 'b', 'c', 'd', 'z'].map(id => closesSignal(result, id))).toEqual([true, true, false, false, false]);
     expect(closesSignal(commitResult({ signals: [] }), 'a')).toBe(true);
+  });
+});
+
+describe('task 191 fix round 1', () => {
+  const unfinished = failure({
+    httpStatus: 409,
+    reasonCode: 'ontology.decision.review_unfinished',
+    detail:
+      'An earlier decision on this item is unfinished. Close this and open the item again to finish it. Nothing was done.',
+  });
+
+  it('a refusal because ANOTHER review is unfinished stored nothing, so it does not pin this one, and says what to do', () => {
+    expect(failureKeepsReview(unfinished)).toBe(false);
+    expect(failureHeading(unfinished)).toBe('An earlier decision on this item is unfinished');
+    expect(failureMessage(unfinished)).toMatch(/open the item again to finish it/);
+  });
+
+  it('F1: an inquiry recorded without sending reads "inquiry not sent", not "Inquiry sent"', () => {
+    const review: DecisionReview = {
+      reviewId: 'r',
+      confirmed: true,
+      actions: [{ code: 'send-budget-inquiry', taken: true }],
+    };
+    const result = commitResult({
+      steps: [
+        {
+          key: 'a',
+          code: 'send-budget-inquiry',
+          phase: 4,
+          status: 'NotSentByChoice',
+          written: [],
+          possiblyWritten: [],
+        },
+      ],
+      signals: [{ signalId: PATH_B_ID, state: 'InquirySent' }],
+    });
+    const resolution = resolutionFromRecord(pathBPlan, pathBItem, emptyDraft('r'), review, result, new Date());
+    expect(resolution.leftOpen).toBe(true);
+    expect(resolution.note).toBe('Decision recorded, inquiry not sent - this item is still open');
+
+    const sent = commitResult({ signals: [{ signalId: PATH_B_ID, state: 'InquirySent' }] });
+    expect(resolutionFromRecord(pathBPlan, pathBItem, emptyDraft('r'), review, sent, new Date()).note).toBeUndefined();
+  });
+
+  it('F2: the locked note names the way on the item offers', () => {
+    const landed = [{ entity: 'sprk_servicerequest', id: 'sr' }];
+    expect(lockedNoteText(failure({ resumable: true, sendChoiceRequired: true, landed }))).toMatch(
+      /check Sent Items, then choose Send again or Record without sending/
+    );
+    expect(lockedNoteText(failure({ resumable: true, landed }))).toMatch(
+      /Retry recording finishes it without repeating/
+    );
+    expect(lockedNoteText(failure({ resumable: true, landed }))).toMatch(/finish it later from this item/);
+    expect(lockedNoteText(failure({ resumable: true }))).not.toMatch(/finish it later/);
+    expect(lockedNoteText(failure({ httpStatus: 0 }))).toMatch(/Try recording it again, or close without recording/);
+    for (const f of [
+      failure({ resumable: true, landed }),
+      failure({ resumable: true, sendChoiceRequired: true, landed }),
+    ])
+      expect(lockedNoteText(f)).not.toMatch(/same decision again/);
   });
 });
 

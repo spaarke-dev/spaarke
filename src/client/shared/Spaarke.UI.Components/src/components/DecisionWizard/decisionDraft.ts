@@ -429,6 +429,36 @@ export function buildReview(plan: DecisionPlan, draft: ItemDraft, options: { ret
 }
 
 /**
+ * Task 191 fix round 1: the draft a stored review was built from, so an unfinished review reopened from the item shows what was
+ * chosen and typed. It is display only: the resume posts the stored review itself, never one rebuilt from this. Picked Lookup /
+ * Person values show their ids (the names were not stored).
+ */
+export function draftFromReview(plan: DecisionPlan, review: DecisionReview): ItemDraft {
+  const draft = emptyDraft(review.reviewId);
+  const text = (values: Record<string, DecisionValue> | undefined): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const [code, value] of Object.entries(values ?? {})) out[code] = String(value);
+    return out;
+  };
+  for (const a of review.actions) {
+    draft.decisions[actionScope(a.code)] = a.taken ? 'taken' : 'skipped';
+    if (a.taken) draft.values[actionScope(a.code)] = text(a.values);
+  }
+  for (const n of review.nextSteps ?? []) {
+    if (!plan.nextSteps.some(p => p.code === n.code) || draft.nextSelected.includes(n.code)) continue;
+    draft.nextSelected.push(n.code);
+    draft.decisions[nextScope(n.code)] = 'taken';
+    draft.values[nextScope(n.code)] = text(n.values);
+  }
+  if (review.dismissal) {
+    draft.dismissalCode = review.dismissal.code;
+    draft.dismissalDetail = review.dismissal.detail ?? '';
+  }
+  draft.alsoResolve = [...(review.alsoResolve ?? [])];
+  return draft;
+}
+
+/**
  * Whether the draft holds UNRECORDED CHOICES (the discard check). A choice is a decision, a ticked card, a reason, an
  * "Also resolve" tick or a value the user typed. Starting values (templated drafts, the only budget) are not choices:
  * "Opening and browsing without choosing anything closes without asking".

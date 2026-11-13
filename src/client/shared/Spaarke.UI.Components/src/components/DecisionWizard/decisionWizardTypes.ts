@@ -107,6 +107,20 @@ export interface DecisionPlan {
   dismissalReasons: DismissalReason[];
   /** The rule body in words ("How this was determined"); null when the body could not be described. */
   ruleDescription?: { clauses: RuleClauseDescription[] } | null;
+  /**
+   * Task 191 fix round 1 (criterion 134): the caller's unfinished review of this item (an attempt that failed after writes
+   * landed). The wizard resumes it: the review is posted again unchanged with `retry`, never as a new review id.
+   */
+  unfinished?: DecisionUnfinishedReview | null;
+}
+
+/** Task 191 fix round 1: an unfinished review as the plan read returns it. */
+export interface DecisionUnfinishedReview {
+  reviewId: string;
+  /** The review exactly as it was posted (no `retry`, no `sendChoice`). */
+  review: DecisionReview;
+  /** Its stored failure (replayed): the steps, what landed, whether it can resume and whether a send choice is needed. */
+  failure: DecisionCommitFailure;
 }
 
 /** Task 034: the (policy, core record) dismissal count the dismissal step shows. */

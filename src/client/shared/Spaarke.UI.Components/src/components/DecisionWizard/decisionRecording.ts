@@ -28,6 +28,8 @@ import type { RecordClass } from '../ConsoleKit/consoleStatus';
  * at all (0), and anything that reports landed, possibly landed, resumable, record-may-exist or sent-but-not-recorded.
  */
 export function failureKeepsReview(failure: DecisionCommitFailure): boolean {
+  // Task 191 fix round 1: refused because ANOTHER review on the item is unfinished. This one stored nothing and wrote nothing.
+  if (failure.reasonCode === REVIEW_UNFINISHED) return false;
   if (
     failure.landed.length > 0 ||
     failure.possiblyLanded.length > 0 ||
@@ -40,6 +42,8 @@ export function failureKeepsReview(failure: DecisionCommitFailure): boolean {
   const plainRefusal = failure.httpStatus >= 400 && failure.httpStatus < 500 && failure.httpStatus !== 409;
   return !plainRefusal;
 }
+
+const REVIEW_UNFINISHED = 'ontology.decision.review_unfinished';
 
 /** The Signal states of a 200 answer that mean the item is closed. `InquirySent` and `Unchanged` leave it open. */
 const CLOSED_STATES: readonly string[] = ['Acted', 'Dismissed'];
@@ -76,6 +80,9 @@ export function reviewKey(review: DecisionReview): string {
   return JSON.stringify(content);
 }
 
+/** Task 191 (D-223): the step status of an inquiry the person recorded without sending. */
+const NOT_SENT_BY_CHOICE = 'NotSentByChoice';
+
 const RECORD_CLASSES: readonly RecordClass[] = ['Judgement', 'Routine', 'Dismissal'];
 
 /** What the closed item shows after this session recorded it: built from the review and the commit result, not re-read. */
@@ -95,8 +102,12 @@ export function resolutionFromRecord(
     return { code: n.code, entity: written?.entity ?? null, id: written?.id ?? null };
   });
   const derived = deriveRecordClass(plan, draft).recordClass;
+  const leftOpen = !closesSignal(result, item.row.signalId);
+  // Task 191 fix round 1 (F1): an inquiry recorded WITHOUT sending leaves the item open too, but no inquiry went out from it.
+  const notSent = result.steps.some(s => s.status === NOT_SENT_BY_CHOICE);
   return {
-    leftOpen: !closesSignal(result, item.row.signalId),
+    leftOpen,
+    ...(leftOpen && notSent ? { note: 'Decision recorded, inquiry not sent - this item is still open' } : {}),
     resolutionType: dismissed ? 'Dismissed' : 'Acted',
     recordClass: stored ?? derived,
     recordNumber: null,

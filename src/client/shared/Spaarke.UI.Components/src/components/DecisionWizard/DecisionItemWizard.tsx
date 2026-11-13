@@ -497,6 +497,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         justRecorded,
         failure,
         locked,
+        lockedBy: locked ? pinnedFailure : null,
         closedIds: ready.closedIds,
         recordResult: ready.recordResult,
         lookup: ready.lookup,

@@ -49,6 +49,41 @@ const landedProblem = {
 };
 
 describe('reads', () => {
+  it('task 191 fix round 1: maps the unfinished review of the plan - the review as the route reads it, the failure as a 409 replay', async () => {
+    const stored = {
+      reviewId: 'r-9',
+      confirmed: true,
+      alsoResolve: null,
+      actions: [{ code: 'send-budget-inquiry', taken: true, values: { to: 'a@b.example' } }],
+      nextSteps: null,
+      dismissal: null,
+      because: null,
+      retry: false,
+      sendChoice: null,
+    };
+    const failure = { ...landedProblem, status: 'Failed', resumable: true, sendChoiceRequired: true, replayed: true };
+    const fetch = jest.fn(async () => json({ ...pathBPlan, unfinished: { reviewId: 'r-9', review: stored, failure } }));
+    const plan = await createDecisionWizardService({ fetch, baseUrl: BASE }).getPlan(PATH_B_ID);
+
+    expect(plan.unfinished?.review).toEqual({
+      reviewId: 'r-9',
+      confirmed: true,
+      actions: [{ code: 'send-budget-inquiry', taken: true, values: { to: 'a@b.example' } }],
+    });
+    expect(plan.unfinished?.failure).toMatchObject({
+      httpStatus: 409,
+      replayed: true,
+      resumable: true,
+      sendChoiceRequired: true,
+      landed: [{ entity: 'sprk_budgetrevision', id: 'x-1' }],
+    });
+  });
+
+  it('task 191 fix round 1: a plan without one has none (must not fire)', async () => {
+    const fetch = jest.fn(async () => json(pathBPlan));
+    expect((await createDecisionWizardService({ fetch, baseUrl: BASE }).getPlan(PATH_B_ID)).unfinished).toBeNull();
+  });
+
   it('GETs the plan and the suppression from the signal routes', async () => {
     const fetch = jest.fn(async (url: string) =>
       json(url.endsWith('decision-plan') ? pathBPlan : { signalId: PATH_B_ID, threshold: 3 })

@@ -982,6 +982,104 @@ describe('a failed attempt pins the review (duplicate-write hazard)', () => {
   });
 });
 
+describe('task 191 fix round 1: an unfinished review is resumed from the item (criterion 134)', () => {
+  /** A first wizard records the threshold item and fails after writes landed; the review it posted is what the route stored. */
+  async function storedReview(failure: DecisionCommitFailure): Promise<DecisionReview> {
+    const u = user();
+    const first = setup([thresholdItem]);
+    first.service.commit.mockRejectedValueOnce(new DecisionCommitError(failure));
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    await screen.findByTestId('commit-failure');
+    const posted = first.service.commit.mock.calls[0][1] as DecisionReview;
+    first.unmount();
+    return posted;
+  }
+
+  /** The wizard opened again on the item; the plan read returns the unfinished review. */
+  function reopen(item: DecisionWizardItem, review: DecisionReview, failure: DecisionCommitFailure) {
+    const service = makeService({
+      plans: {
+        ...plans,
+        [THRESHOLD_ID]: {
+          ...approveFirstPlan,
+          unfinished: { reviewId: review.reviewId, review, failure: { ...failure, httpStatus: 409, replayed: true } },
+        },
+      },
+    });
+    renderWizard({ service, loadItem: makeLoader([item]), itemIds: [THRESHOLD_ID], startItemId: THRESHOLD_ID });
+    return service;
+  }
+
+  async function toConfirm(u: ReturnType<typeof user>) {
+    await loaded();
+    await next(u);
+    await next(u);
+    await u.click(button('Skip'));
+    await next(u);
+    await screen.findByTestId('step-confirm');
+  }
+
+  it('reopening resumes the same review (same id, retry, same content) and never posts a new review', async () => {
+    const u = user();
+    const failure = failedOutcome();
+    const posted = await storedReview(failure);
+
+    const service = reopen(thresholdItem, posted, failure);
+    await toConfirm(u);
+    expect(screen.getByTestId('locked-note')).toHaveTextContent('Retry recording finishes it without repeating');
+    expect(screen.getByTestId('locked-note')).toHaveTextContent('finish it later from this item');
+    await u.click(button('Retry recording'));
+    await screen.findByTestId('status-bar');
+
+    expect(service.commit).toHaveBeenCalledTimes(1);
+    const resumed = service.commit.mock.calls[0][1] as DecisionReview;
+    expect(resumed.reviewId).toBe(posted.reviewId);
+    expect(resumed.retry).toBe(true);
+    expect(reviewShape(resumed)).toEqual(reviewShape(posted));
+  });
+
+  it('an item the trigger closed meanwhile opens editable for the unfinished review, and the choice is offered', async () => {
+    const u = user();
+    const failure = failedOutcome({
+      sendChoiceRequired: true,
+      landed: [{ entity: 'sprk_servicerequest', id: 'sr-1' }],
+    });
+    const posted = await storedReview(failure);
+    const closed: DecisionWizardItem = {
+      ...thresholdItem,
+      resolution: {
+        resolutionType: 'ConditionCleared',
+        leftOpen: true,
+        note: 'Closed - how it closed was not recorded',
+      },
+    };
+
+    const service = reopen(closed, posted, failure);
+    await toConfirm(u);
+    expect(screen.getByTestId('locked-note')).toHaveTextContent('choose Send again or Record without sending');
+    await u.click(screen.getByTestId('record-without-sending'));
+    await screen.findByTestId('status-bar');
+
+    expect(service.commit).toHaveBeenCalledTimes(1);
+    expect(service.commit.mock.calls[0][1]).toMatchObject({
+      reviewId: posted.reviewId,
+      retry: true,
+      sendChoice: 'record-without-sending',
+    });
+  });
+
+  it('a plan with no unfinished review starts a new review as before (must not fire)', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    await thresholdToConfirm(u);
+    expect(screen.queryByTestId('locked-note')).toBeNull();
+    await u.click(button('Record decision'));
+    await screen.findByTestId('status-bar');
+    expect((service.commit.mock.calls[0][1] as DecisionReview).retry).toBeUndefined();
+  });
+});
+
 describe('a pinned review is posted exactly as first sent', () => {
   it('an item that closed before the first attempt stays out of the retry, so the content (and the id) still match', async () => {
     const u = user();

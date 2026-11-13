@@ -117,6 +117,7 @@ export function failureHeading(failure: DecisionCommitFailure): string {
   // Task 191: a stored failure returned again (409 + replayed) is the same failure, not a review in progress.
   if (failure.httpStatus === 409 && failure.replayed) return 'The decision was not recorded';
   if (failure.reasonCode === SIGNAL_NOT_OPEN) return 'This item is no longer open';
+  if (failure.reasonCode === REVIEW_UNFINISHED) return 'An earlier decision on this item is unfinished';
   switch (failure.httpStatus) {
     case 0:
       return 'The decision may not have been recorded';
@@ -136,6 +137,25 @@ export function failureHeading(failure: DecisionCommitFailure): string {
 }
 
 const SIGNAL_NOT_OPEN = 'ontology.decision.signal_not_open';
+const REVIEW_UNFINISHED = 'ontology.decision.review_unfinished';
+
+/**
+ * Task 191 fix round 1 (F2): what a step says while the review is pinned by `pinning`, the failure that pinned it. It names the way
+ * on that the item actually offers: the send choice, Retry recording (which runs only what did not land), or recording it again.
+ */
+export function lockedNoteText(pinning: DecisionCommitFailure | null): string {
+  const start = 'An earlier attempt to record this decision did not finish, so it cannot be changed now.';
+  // Only an attempt whose writes landed is offered again when the item is reopened (the plan read returns it).
+  const later =
+    pinning && pinning.resumable && pinning.landed.length > 0
+      ? ' You can also close and finish it later from this item.'
+      : '';
+  if (pinning?.sendChoiceRequired && pinning.resumable)
+    return `${start} The inquiry email may have been sent: check Sent Items, then choose Send again or Record without sending on the last step.${later}`;
+  if (pinning?.resumable)
+    return `${start} Retry recording finishes it without repeating what was already carried out.${later}`;
+  return `${start} Try recording it again, or close without recording.`;
+}
 
 /** Task 191 (D-223): what the person reads when the inquiry email may have been sent, before choosing. */
 export const SEND_CHOICE_MESSAGE =
@@ -153,6 +173,10 @@ export function failureMessage(failure: DecisionCommitFailure): string {
       return 'This decision is already being recorded. Wait a moment, then try again.';
     case SIGNAL_NOT_OPEN:
       return 'This item was closed in the meantime, so the decision was not recorded on it. Anything listed as already carried out stands.';
+    case REVIEW_UNFINISHED:
+      return failure.detail && failure.detail !== failure.title
+        ? failure.detail
+        : 'An earlier decision on this item is unfinished. Close this and open the item again to finish it. Nothing was done.';
   }
   if (failure.httpStatus === 409 && !failure.replayed)
     return 'This decision is already being recorded. Wait a moment, then try again.';

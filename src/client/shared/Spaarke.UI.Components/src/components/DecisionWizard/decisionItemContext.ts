@@ -48,6 +48,8 @@ export interface DecisionItemContextValue {
   failure: DecisionCommitFailure | null;
   /** A failed attempt pins the review: its fields and choices are read-only until the attempt is repeated. */
   locked: boolean;
+  /** Task 191 fix round 1: the failure that pinned the review (what the locked note says depends on it); null when not locked. */
+  lockedBy: DecisionCommitFailure | null;
   /** Items known to be closed (recorded here, resolved by Also resolve, or opened closed). */
   closedIds: ReadonlySet<string>;
   /** The route's 200 answer for the item just recorded (warnings, per-item states); null otherwise. */
