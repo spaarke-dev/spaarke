@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="191" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>A decision whose budget inquiry send failed can be finished from the item: retry sends only the unfinished step, no duplicates, no HTTP 500 (D-222)</title>
+    <phase>11 UAT (budget inquiry follow-up, D-222)</phase>
+    <gate>startable (after 190 merges, or rebase onto it)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies the decision route's resume logic (.cs) and the DecisionWizard (.tsx).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Ontology-owned data integrity on an append-only route that sends email: a wrong resumability call duplicates an email, a service request or a revision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>File overlap with task 190 (BudgetInquiryExecutor.cs, DecisionActionExecutors.cs).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, ontology</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+  <prompt>A decision whose inquiry send failed after Revise budget landed cannot be finished: the retry replays the failure as HTTP 500 and the Signal is auto-closed. Owner: retryable, and the Signal is not lost meanwhile (D-222 (owner 2026-11-13, notes/decisions.md) (b)).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core, the ontology decision commit route (ledger, resume, step 6) and the Signal evaluator.</role>
+  <goal>A Failed send-budget-inquiry step whose service request landed and whose email definitely did not go out is resumable: the retry reuses that service request, sends once, writes the Decision Record once and resolves the Signal; Revise budget is not re-run. A non-resumable replay answers a defined 409, never 500. A system close during the unfinished decision does not strand it.</goal>
+  <context>
+    <background>BudgetInquiryExecutor.cs:343-347 turns any send exception into SendFailed with the service request id; DecisionActionExecutors.cs:1594-1597 maps it to Failed(write_failed) with Written=[service request]; DecisionCommitService.cs:2049-2074 Failure() makes only a Refused, nothing-written step Resumable. The ledger (LedgerEntry :367, ITenantCache, 7-day OutcomeTtl) stores that; the retry at :654-657 returns it with reasonCode not_resumable and Status Failed, which DecisionCommitEndpoints.cs:74-80 maps to 500. The client already retries a resumable failure (DecisionWizard.tsx:224-239; LockedNote ParameterFields.tsx:59-67). Resume skips Done steps (:1023-1025, :1105-1112) but would run a non-Done inquiry from scratch (second service request). Signal: on failure AfterFailedCommitAsync (DecisionCommitService.cs:1137; DecisionCommitFollowUps.cs:131-134) queues the budget-revision trigger; the evaluator closes ConditionCleared (SignalReevaluationJob.cs ~596-625 -&gt; SignalWriter.CloseAsync :954, log :981). Step 6 already re-closes a system closure since reviewStart (SystemClosedSince :394, pre-check :1279, close :2141); reviewStart is bounded by the 4 h plan-read TTL (Bounded :555).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionCommitEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitFollowUps.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx</file>
+      <file role="modify">tests/integration/data-mutation/Signals/DecisionCommitServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/BudgetInquiryExecutorTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="190" status="pending">Cc/Bcc on BudgetInquiryRequest; same files, so run after it or rebase</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change this task makes to Sprk.Bff.Api follows .claude/constraints/bff-extensions.md: no new endpoint, no new DI registration or package unless a criterion names it, and the publish-size delta against a fresh master build is measured and recorded in the task notes.</constraint>
+    <constraint source="ADR-028">Every Dataverse write and the email send in this task stay AS THE CALLER (the inquiry email is sent by CommunicationService.SendAsync in SendMode.User, OBO); no app-only fallback is added on any path.</constraint>
+    <constraint source="ADR-019">Every refusal this task adds or changes on the decision route is a ProblemDetails with a stable reasonCode; never an unhandled 500.</constraint>
+    <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="owner">D-222 (owner 2026-11-13, notes/decisions.md) (b): retry re-sends instead of replaying the error; the Signal is not auto-closed while its decision is unfinished. (c): the dev records on MAT-34929-0040 stay as evidence; never edit or delete them.</constraint>
+    <constraint source="project">Append-only and D-17 order stand: no compensating delete, record last, the inquiry last, one Decision Record per review id.</constraint>
+    <constraint source="project">Only send-budget-inquiry gains resumability, and only when the service request id is known AND the send definitely did not go out (Graph answered an error, or refused before the call). Timeout, cancellation or no answer stays not resumable. Every other step's resumability is unchanged.</constraint>
+    <constraint source="project">The resumed inquiry reuses the landed service request (from the stored step's Written refs); it never creates a second row.</constraint>
+    <constraint source="DATAVERSE-WRITE-PATH">One server-side owner per invariant: the unfinished-decision state lives in the route's existing ledger or the Signal row; no plugin, no client-only guard.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </files>
+    <patterns>
+      <pattern name="Resume of landed steps" location="src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs">:1023-1025 and :1105-1112 carry stored Done steps forward. Extend this; no second journal.</pattern>
+      <pattern name="Record-only resume" location="src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs">RecordFailed() :2076-2118 already resumes a no-send record failure (Resumable = !sent). Same shape.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Confirm the line references on origin/master; record drift in the task notes.</step>
+    <step order="2">BudgetInquiryExecutor: classify a send failure as definitely-not-sent or possibly-sent from what the core throws; carry it on the result and outcome.</step>
+    <step order="3">Add a send-only path for a known service request id (InquiryEmailSender.SendAsync, no create), fed on resume from the stored step's Written refs.</step>
+    <step order="4">Failure(): a definitely-not-sent inquiry with its service request landed is Resumable; resume runs it send-only; Done steps are skipped as today.</step>
+    <step order="5">A replayed non-resumable Failed outcome answers 409 not_resumable with a clear detail (ToHttp), not 500.</step>
+    <step order="6">Signal: hold the system close for a Signal whose review holds a resumable failure, OR keep the item reachable and let step 6 re-close it. Record the choice and why in the task notes.</step>
+    <step order="7">Client: offer the retry for the new resumable state; word the 409 (decisionDisplay.ts); LockedNote says what the user can do.</step>
+    <step order="8">Tests per the acceptance criteria, including the seeding proof.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/`, the touched test classes and the Signals/Communication unit and data-mutation suites, plus jest on the DecisionWizard folder and tsc/ESLint on touched client files; all pass. Measure the BFF publish-size delta against a fresh master build (§10).</step>
+    <step order="10">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
+    <step order="11">Record deviations, the publish-size delta and the dev-check result in notes/task-191-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If "resume this one unfinished action with its landed service request" needs a schema change (new Dataverse column or table), STOP and escalate (root CLAUDE.md §6) with options; the ledger entry and DecisionCommitStep.Written are the expected carriers.</trigger>
+    <trigger>If CommunicationService does not expose enough to classify a send as definitely-not-sent, STOP and escalate; never treat every send failure as resumable (a re-send could deliver twice).</trigger>
+    <trigger>If holding the system close needs evaluator changes beyond the one Signal (episodes, suppression), STOP and escalate first.</trigger>
+  </escalation>
+  <justification>
+    <existing>DecisionCommitService.cs:615-760 (ledger, resume), :2049-2118 (resumability); BudgetInquiryExecutor.cs:276-348 (create then send, no send-only entry).</existing>
+    <extension>Extend: the resume mechanism and the inquiry executor gain one case each; no new service, endpoint, journal or DI registration.</extension>
+    <cost-of-doing-nothing>On dev the user could not finish the decision: retry gave 500, the Signal closed itself, the revision and service request stand with no record and no email (D-222).</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Retry after a failed send">
+      <steps>
+        <step>On {org}, take Revise budget + Send budget inquiry on a fresh zz- fee/scope Signal with the send made to fail</step>
+        <step>Press Record decision again from the item</step>
+      </steps>
+      <expected>Email sent once; one service request, one revision, one Decision Record; Signal resolved with the record linked; no 500 in the network log.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="dotnet">Build the BFF and run the unit and data-mutation tests</tool>
+    <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Signals/DecisionCommitEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/decisionDisplay.ts</output>
+    <output type="test">tests/integration/data-mutation/Signals/DecisionCommitServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/BudgetInquiryExecutorTests.cs</output>
+    <output type="docs">projects/spaarke-ontology-platform-r1/notes/task-191-notes.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given Revise budget Done and the inquiry failed definitely-not-sent with service request S landed, a retry of the same review sends the email once with S as the first association, makes no service-request create and does not call the revise-budget executor.</criterion>
+    <criterion testable="true">No duplicate service request: exactly one create across both attempts. Seeding proof: break the guard that routes a resumed inquiry send-only, show this test fails, restore, re-run (in task notes).</criterion>
+    <criterion testable="true">No duplicate budget revision: revise-budget runs once across both attempts and its trigger is queued for that one revision.</criterion>
+    <criterion testable="true">The Decision Record is written exactly once, listing both steps Done with the service request and communication; a further retry returns the Recorded outcome (Replayed) and writes nothing.</criterion>
+    <criterion testable="true">A possibly-sent failure (timeout, cancellation, no answer) is stored not resumable; its retry answers 409 not_resumable naming what landed, and sends or writes nothing.</criterion>
+    <criterion testable="true">Every replayed non-resumable Failed outcome answers 409 (not 500) with the stored steps in the extensions; first-attempt status codes are unchanged.</criterion>
+    <criterion testable="true">Signal, order 1 (retry before any system close): resolved and linked as today.</criterion>
+    <criterion testable="true">Signal, order 2 (budget-revision trigger runs between failure and retry): within the plan-read window the retry completes and the Signal ends in this decision's state (Acted, or InquirySent per D-119) with the record linked, never ConditionCleared with no record; outside the window the retry gets a defined refusal (not 500) the item explains.</criterion>
+    <criterion testable="true">The unfinished decision is reachable from the item in both orders (server test for the chosen mechanism; reachability rule in task notes).</criterion>
+    <criterion testable="true">Other steps unchanged: a possibly-landed Failed create stays not resumable; a Refused step and a record-only failure resume as before.</criterion>
+    <criterion testable="true">Client: a resumable send failure offers the retry; a 409 not_resumable shows its fixed message.</criterion>
+    <criterion testable="true">All existing tests in the touched test classes and folders pass unchanged unless a criterion above names the change; BFF builds with no new warnings in touched files; tsc clean and no new ESLint errors in touched client files.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above; anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+  <notes>Dev 2026-11-13 (MAT-34929-0040): revision 03:26:52Z, service request 03:26:54Z, no sprk_communication, Signal closed ConditionCleared 03:27:27Z with no record, retry 500 in 0.6 s; send exception lost to sampling (Graph 502/503/timeouts then). Resume/Retry/Resumable exist; the gap is that a Failed step is never resumable and a replayed failure maps to 500.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master (line numbers in this POML are origin/master d8b53ec0c3); PR to master.</protocol>
+  </execution>
+</task>

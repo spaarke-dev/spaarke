@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="190" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Send budget inquiry sends Cc and Bcc end to end; the "Cc and Bcc are not sent" warning goes away on that step (D-222)</title>
+    <phase>11 UAT (budget inquiry follow-up, D-222)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include bff-api; modifies .cs and .tsx code files.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Threads two optional fields through an existing path whose sink (CommunicationService.SendAsync) already sends and records Cc/Bcc; send-as-caller and ownership are unchanged.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>File overlap with task 191 (BudgetInquiryExecutor.cs, DecisionActionExecutors.cs): run 190 first, or rebase 191 onto it.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, ontology</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>The Send budget inquiry step accepts Cc and Bcc but the server sends To only, and the step warns "Cc and Bcc are not sent with this step. Add every recipient to To." The owner chose to send them (D-222 (owner 2026-11-13, notes/decisions.md) (a); D-219 Q4).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core, the ontology decision route (IDecisionActionExecutor) and the DecisionWizard / EmailComposer.</role>
+  <goal>For send-budget-inquiry only: optional `cc` and `bcc` catalog parameters, parsed and validated in Map like `to`, carried on BudgetInquiryRequest and set on SendCommunicationRequest.Cc/Bcc by InquiryEmailSender.Build; the wizard commits the composer's Cc/Bcc and shows no cc-not-sent warning for an action that declares them. send-reminder unchanged.</goal>
+  <context>
+    <background>DecisionActionCatalog.cs:160-165 MessageParameters (to/subject/body) is shared by send-budget-inquiry (:170-186) and send-reminder (:291-296). DecisionActionExecutors.cs:1537-1568 Map reads only `to` (split, de-dup, Address regex before any write). BudgetInquiryExecutor.cs:21-22 the request has no Cc/Bcc; Build :109-140 sets To only. The sink already sends Cc/Bcc and records sprk_cc/sprk_bcc and per-role participants (CommunicationService ~3181-3184, ~4916). ReadValues (DecisionCommitService.cs:1509-1516) refuses an undeclared parameter code, so cc/bcc must be catalog parameters. Client: EmailMessageFields.tsx:32 EMAIL_MESSAGE_CODES; :75-96 onStateChange commits to/subject/body only; :152-156 the warning (testid cc-not-sent). ParameterFields.tsx:306-313 shows the composer only when all three codes exist.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/EmailMessageFields.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/BudgetInquiryExecutorTests.cs</file>
+      <file role="modify">tests/unit/domain/Signals/DecisionActionExecutorsTests.cs</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/__tests__/DecisionWizardEmailComposer.test.tsx</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md §10">Every change this task makes to Sprk.Bff.Api follows .claude/constraints/bff-extensions.md: no new endpoint, no new DI registration or package unless a criterion names it, and the publish-size delta against a fresh master build is measured and recorded in the task notes.</constraint>
+    <constraint source="ADR-028">Every Dataverse write and the email send in this task stay AS THE CALLER (the inquiry email is sent by CommunicationService.SendAsync in SendMode.User, OBO); no app-only fallback is added on any path.</constraint>
+    <constraint source="ADR-019">Every refusal this task adds or changes on the decision route is a ProblemDetails with a stable reasonCode; never an unhandled 500.</constraint>
+    <constraint source="ADR-038">Tests added in this task cover the stated contract plus the edge cases named in the acceptance criteria; anything beyond needs a one-line justification in the task notes. No numeric test target.</constraint>
+    <constraint source="owner">D-222 (owner 2026-11-13, notes/decisions.md) (a): Cc and Bcc on the inquiry step are sent like the Send Email dialog and the warning goes away there.</constraint>
+    <constraint source="project">Scope: send-budget-inquiry only. Add cc/bcc to that action's parameters, NOT to the shared MessageParameters; send-reminder keeps its parameters, executor and warning.</constraint>
+    <constraint source="project">Reuse the shared EmailComposer (compose-only, EmailMessageFields); no new email form, endpoint, service or DI registration.</constraint>
+    <constraint source="project">Map validates Cc and Bcc exactly as To (separators, de-dup, Address regex) before the preflight and before the service request is written.</constraint>
+    <constraint source="ADR-012/021">Client changes stay in @spaarke/ui-components, no Xrm or auth import; no new UI element; light and dark unchanged.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+    </files>
+    <patterns>
+      <pattern name="To parsing" location="src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs">BudgetInquiryActionExecutor.Map :1543-1555: split, de-dup, Address regex, refusal before any write. Copy for cc/bcc.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Confirm the line references on origin/master; record drift in the task notes.</step>
+    <step order="2">Catalog: optional `cc` and `bcc` Text parameters on send-budget-inquiry only.</step>
+    <step order="3">BudgetInquiryRequest gains optional Cc/Bcc (default empty: existing calls compile unchanged). Map parses them; an address in To is not repeated in Cc/Bcc, one in Cc is not repeated in Bcc. Build sets Cc/Bcc (null when empty); the record-link choice stays keyed on To.</step>
+    <step order="4">Client: EmailMessageFields commits cc/bcc (joined with "; ") and hides the warning when the action declares them; ParameterFields does not render cc/bcc as separate fields when the composer is shown; starting Cc/Bcc come from the step values.</step>
+    <step order="5">Tests per the acceptance criteria.</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/`, the touched test classes and the Signals/Communication unit and data-mutation suites, plus jest on the DecisionWizard folder, tsc and ESLint on touched client files; all pass. Measure the BFF publish-size delta against a fresh master build (§10).</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` AND this POML's status element to completed; run `pwsh scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`.</step>
+    <step order="8">Record deviations, the publish-size delta and the dev-check result in notes/task-190-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If the review contract, plan read or client draft cannot carry two optional parameters without changing other actions, STOP and escalate (root CLAUDE.md §6); no side channel.</trigger>
+    <trigger>If CommunicationService refuses or alters Cc/Bcc on an internal-only, archived, SendMode.User send, STOP and escalate.</trigger>
+  </escalation>
+  <justification>
+    <existing>DecisionActionCatalog.cs:160-186 (no cc/bcc); BudgetInquiryExecutor.cs:21-22, :109-140 (To only); SendCommunicationRequest.Cc/Bcc already exist (Models/SendCommunicationRequest.cs:20,25).</existing>
+    <extension>Yes, and this task IS the extension: two optional parameters on an existing action and two optional fields on an existing request.</extension>
+    <cost-of-doing-nothing>A user who adds Cc or Bcc on the inquiry is told it will not be sent and must put everyone in To, so copied billing contacts get nothing or are exposed as direct recipients (owner UAT 2026-11-13).</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Inquiry with Cc and Bcc">
+      <steps>
+        <step>On {org}, open a fee/scope budget Signal (fresh zz- communication) in the Console</step>
+        <step>Take Send budget inquiry with To, Cc and Bcc; Record decision</step>
+      </steps>
+      <expected>No cc-not-sent warning; recipients see To and Cc, the Bcc recipient gets it hidden; the sprk_communication row has sprk_cc and sprk_bcc; light and dark unchanged.</expected>
+    </test>
+    <test name="Reminder unchanged">
+      <steps>
+        <step>Open a Do item, take Send a reminder, add a Cc</step>
+      </steps>
+      <expected>The reminder step still shows its Cc warning.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="dotnet">Build the BFF and run the unit and data-mutation tests</tool>
+    <tool name="npm">jest, tsc and ESLint in src/client/shared/Spaarke.UI.Components (npm install --legacy-peer-deps --no-audit --no-fund; in a fresh worktree build ../Spaarke.SdapClient and ../Spaarke.Auth first)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionCatalog.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/DecisionActionExecutors.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/Actions/BudgetInquiryExecutor.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/EmailMessageFields.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/steps/ParameterFields.tsx</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/BudgetInquiryExecutorTests.cs</output>
+    <output type="test">tests/unit/domain/Signals/DecisionActionExecutorsTests.cs</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/__tests__/DecisionWizardEmailComposer.test.tsx</output>
+    <output type="docs">projects/spaarke-ontology-platform-r1/notes/task-190-notes.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given To, Cc and Bcc, the request Build returns has To, Cc and Bcc equal to the trimmed, de-duplicated addresses; associations, IsInternalOnly, ArchiveToSpe, CreateThreadPrivate, SendMode.User and body are unchanged.</criterion>
+    <criterion testable="true">Given a Cc or Bcc token that is not an email address, Map refuses with RecipientUnresolved naming the field, and no preflight, service-request create or send runs (assert the seams were not called).</criterion>
+    <criterion testable="true">Given empty or absent cc and bcc, Cc and Bcc are null and the request equals today's To-only request; existing To-only tests pass unchanged.</criterion>
+    <criterion testable="true">An address in To and Cc (any case) is sent once, in To; one in Cc and Bcc is sent once, in Cc.</criterion>
+    <criterion testable="true">Bcc never appears in To, Cc, subject, body, footer or link lines (assert on the built request).</criterion>
+    <criterion testable="true">The send-budget-inquiry plan declares cc and bcc as optional; send-reminder's parameters are exactly as before.</criterion>
+    <criterion testable="true">Client: on the inquiry step a Cc is committed to the step's `cc` value and no cc-not-sent element renders; the existing F3b warning test is kept for a send-reminder action.</criterion>
+    <criterion testable="true">Client: Next stays disabled while any Cc or Bcc address is invalid, as for To.</criterion>
+    <criterion testable="true">All existing tests in the touched test classes and folders pass unchanged unless a criterion above names the change; BFF builds with no new warnings in touched files; tsc clean and no new ESLint errors in touched client files.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above; anything beyond needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+  <notes>Owner UAT 2026-11-13 on MAT-34929-0040 (D-222 (owner 2026-11-13, notes/decisions.md)). Failed-send recovery is task 191. The composer already shows Cc/Bcc in compose-only mode; only the commit path and the warning change.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master (line numbers in this POML are origin/master d8b53ec0c3); PR to master.</protocol>
+  </execution>
+</task>
