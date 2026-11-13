@@ -29,7 +29,7 @@
 >     - spa-r4: the dev SPA is live from master `2ef4a17915` (#2689's SPA changes and R4's Submit invoice).
 >     - word-add-in-r1: #2552 merged (`14b600192f`).
 >     - ontology-r1 is still owed the DEF-059 role note.
->   - **Owner:** publish SpaarkeMaster 1.3.1.0, then tell provisioning-r1. The 112 live role apply needs your typed OK.
+>   - **SpaarkeMaster 1.3.1.0 PUBLISHED** 2026-11-13 03:22Z (run 43358397122, master `d8b53ec0c3`, owner go; also carries field-mapping #2733 source). provisioning-r1 and field-mapping-r1 told. 084f dev role apply DONE (owner OK; both -Verify PASS; uac-r2 SecureChild PASS).
 >   - **Nothing is pushed:** work/ebilling-r1 has about 70 local commits.
 
 ## Quick recovery
