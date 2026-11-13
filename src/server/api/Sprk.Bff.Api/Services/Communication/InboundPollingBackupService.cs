@@ -5,6 +5,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
@@ -12,11 +13,9 @@ using Sprk.Bff.Api.Services.Jobs;
 namespace Sprk.Bff.Api.Services.Communication;
 
 /// <summary>
-/// Background service that polls receive-enabled mailboxes for new messages,
-/// catching any emails missed by the Graph webhook subscription.
-///
-/// A hand-rolled timer BackgroundService with PeriodicTimer (5-minute interval) — existing debt, ADR-052 §1.
-/// Follows the same pattern as GraphSubscriptionManager.
+/// Scheduled job (<see cref="IScheduledJob"/>, ADR-036) that polls receive-enabled mailboxes for new messages,
+/// catching any emails missed by the Graph webhook subscription. Every 5 minutes (<see cref="DefaultCronSchedule"/>);
+/// one run is one poll of every receive-enabled account (<see cref="PollAllAccountsAsync"/>).
 ///
 /// Messages found by polling are enqueued as IncomingCommunication jobs via JobSubmissionService.
 ///
@@ -32,9 +31,56 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// it is persisted in <see cref="IDistributedCache"/> so a restart or deploy resumes from it instead of from
 /// now − 15 minutes.
 /// </summary>
-public sealed class InboundPollingBackupService : BackgroundService
+/// <remarks>
+/// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): migrated by #2749 (PR #2757) from a hand-rolled
+/// <c>PeriodicTimer</c> <c>BackgroundService</c> — ADR-052 §1 migrates a timer service when a PR changes its behaviour,
+/// and #2749 changed it (owner decision 2026-11-13, ADR-052 §6.5 Path C). Same work, same 5-minute interval, same
+/// dependencies: replaced surface, not added. The interval was never configurable, so the cron is a constant. There is
+/// no startup run any more: the first poll after a deploy is the next 5-minute boundary (at most 5 minutes later, from
+/// the persisted watermark). Non-production slots run no scheduled jobs (ADR-036 A1 rule 2), so a staging slot no longer
+/// polls the production mailboxes.</para>
+/// <para><b>One dispatch per tick</b> (ADR-036 A1 rule 1): the host runs each tick on ONE instance under its distributed
+/// lease. That removes the previous known limit — every scaled-out instance polled every mailbox on its own timer and
+/// enqueued the same messages once per instance.</para>
+/// <para><b>State across runs.</b> This class is the singleton <c>AddScheduledJob</c> registers, so the per-account
+/// cursors (<see cref="_cursors"/>) outlive a run. But consecutive ticks can run on different instances, so an
+/// instance's in-memory watermark can be stale — behind a later one another instance persisted. Every run therefore
+/// re-reads the persisted watermark first and starts from the LATER of it and the in-memory one (see
+/// <see cref="GetCursorAsync"/>). Both are true "everything unread before this point was enqueued" claims, so the later
+/// one is too. A stale cursor alone would only ever point BACKWARD: it would re-list mail another instance already
+/// enqueued (duplicates the processor absorbs), never skip any. Re-reading also stops a stale instance from writing an
+/// older watermark over a newer one, so under the lease the persisted watermark only moves forward — each run writes a
+/// value at or after the one it started from, and a run whose cache read failed writes nothing. (Were a backward write
+/// ever to happen, it too could only re-list: every forward move is made by a run that listed from where it started.)
+/// The in-memory map is kept for its
+/// enqueued-id record (the ids at or after the watermark this instance already enqueued); an instance that did not run
+/// the previous tick lacks the other instance's ids in the watermark's own second and overlap window, and may enqueue
+/// those once more if still unread.</para>
+/// <para><b>Per-unit idempotency</b> (ADR-036 A1 rule 3; ADR-052). The unit is one Graph message. Its side effect —
+/// a <c>sprk_communication</c> — is created by IncomingCommunicationProcessor: its <c>sprk_graphmessageid</c> check skips
+/// a message already captured, and the create goes through <c>CreateCommunicationRaceProofAsync</c>, whose unique
+/// alternate key on <c>sprk_internetmessageid</c> is the atomic claim; marking the message read is the completion
+/// marker that takes it out of this poll's <c>isRead eq false</c> listing. A re-dispatched run (a host
+/// retry, a manual trigger, a tick on another instance) can therefore at worst enqueue a message again: the watermark
+/// only advances past what a run listed, the enqueued-id record skips what this instance already sent, and the
+/// processor's check drops the duplicate. The poll itself never claims a unit — Service Bus duplicate detection is off
+/// (ADR-004 §5, #980), so the enqueue is at-least-once by design.</para>
+/// <para><b>Retry and heartbeat</b> (ADR-036 A1 rules 4 and 5): the run never throws for a poll failure — a failed
+/// account query or a failed mailbox leaves its watermark where it was, so the next tick (5 minutes later) redoes it,
+/// and a host retry would only add load; the run is recorded as failed instead (<c>Success=false</c> with a message).
+/// It does not throw a Graph exception for a second reason: the host logs a thrown exception object, and a Graph error
+/// message can quote the mailbox address (ADR-015). Cancellation propagates. One heartbeat line per attempt, including
+/// a run with no accounts.</para>
+/// </remarks>
+public sealed class InboundPollingBackupService : IScheduledJob
 {
-    private static readonly TimeSpan DefaultPollingInterval = TimeSpan.FromMinutes(5);
+    /// <summary>The scheduled job id (ADR-036).</summary>
+    public const string JobIdConstant = "inbound-polling-backup";
+
+    /// <summary>Every 5 minutes — the interval the hand-rolled timer kept (the host evaluates cron in UTC).</summary>
+    internal const string DefaultCronSchedule = "*/5 * * * *";
+
+    private static readonly JsonSerializerOptions ResultJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     /// <summary>Graph page size for the message listing.</summary>
     private const int PageSize = 50;
@@ -67,13 +113,13 @@ public sealed class InboundPollingBackupService : BackgroundService
     private readonly IDistributedCache _cache;
     private readonly ILogger<InboundPollingBackupService> _logger;
     private readonly TimeProvider _timeProvider;
-    private readonly TimeSpan _pollingInterval;
 
     /// <summary>
-    /// Per-account polling cursor (keyed by account ID). The watermark is loaded from the distributed cache the first
-    /// time this instance polls an account and written back after every poll; the enqueued-id record is in memory only
-    /// (after a restart, a message sharing the persisted watermark's second may be enqueued once more, and the
-    /// processor's <c>sprk_graphmessageid</c> check absorbs it).
+    /// Per-account polling cursor (keyed by account ID), kept across runs on this singleton. At the start of every poll
+    /// the persisted watermark is re-read and the cursor moved up to it when it is later (another instance ran a later
+    /// tick); the watermark is written back after every poll. The enqueued-id record is in memory only (after a restart,
+    /// or a tick another instance ran, a message sharing the persisted watermark's second may be enqueued once more, and
+    /// the processor's <c>sprk_graphmessageid</c> check absorbs it).
     /// </summary>
     private readonly ConcurrentDictionary<Guid, MailboxCursor> _cursors = new();
 
@@ -97,74 +143,60 @@ public sealed class InboundPollingBackupService : BackgroundService
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _pollingInterval = DefaultPollingInterval;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    /// <inheritdoc />
+    public string JobId => JobIdConstant;
+
+    /// <inheritdoc />
+    public string DisplayName => "Inbound Mail Polling Backup";
+
+    /// <inheritdoc />
+    public string Description =>
+        "Every 5 minutes, lists each receive-enabled mailbox's unread mail since its persisted watermark (oldest first, " +
+        "keyset paging, at most " + MaxMessagesPerPoll + " per mailbox per run) and enqueues an IncomingCommunication job " +
+        "for each message the Graph webhook may have missed (#2749).";
+
+    /// <summary>What one run did.</summary>
+    internal sealed record PollCounts(int Accounts, int Enqueued, int FailedAccounts, bool AccountQueryFailed);
+
+    /// <inheritdoc />
+    public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        var started = _timeProvider.GetTimestamp();
+
+        // Never throws for a poll failure (see the class remarks); only cancellation propagates.
+        var counts = await PollAllAccountsAsync(context.CorrelationId, cancellationToken);
+
+        var duration = _timeProvider.GetElapsedTime(started);
         _logger.LogInformation(
-            "InboundPollingBackupService starting with {Interval} minute interval",
-            _pollingInterval.TotalMinutes);
+            "[INBOUND-POLL] heartbeat attempt={Attempt} accounts={Accounts} enqueued={Enqueued} " +
+            "failedAccounts={FailedAccounts} accountQueryFailed={AccountQueryFailed} durationMs={DurationMs} " +
+            "correlation {CorrelationId}",
+            context.Attempt, counts.Accounts, counts.Enqueued, counts.FailedAccounts, counts.AccountQueryFailed,
+            (long)duration.TotalMilliseconds, context.CorrelationId);
 
-        // Brief delay to let dependencies warm up during app startup
-        await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
-
-        // Use PeriodicTimer for efficient periodic execution (ADR-001 pattern)
-        using var timer = new PeriodicTimer(_pollingInterval);
-
-        // Execute immediately on startup, then on interval
-        // Wrapped in try-catch so a startup failure doesn't kill the service
-        try
-        {
-            await PollAllAccountsAsync(stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                "Initial inbound polling cycle failed ({ExceptionType}, Graph error code {GraphErrorCode}), " +
-                "will retry on next interval",
-                ex.GetType().Name, GraphErrorCode(ex));
-        }
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                if (await timer.WaitForNextTickAsync(stoppingToken))
-                {
-                    await PollAllAccountsAsync(stoppingToken);
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogInformation("InboundPollingBackupService stopping due to cancellation");
-                break;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(
-                    "Error during inbound polling cycle ({ExceptionType}, Graph error code {GraphErrorCode}), " +
-                    "will retry on next interval",
-                    ex.GetType().Name, GraphErrorCode(ex));
-                // Continue running -- don't let one failure stop the service
-            }
-        }
-
-        _logger.LogInformation("InboundPollingBackupService stopped");
+        var success = !counts.AccountQueryFailed && counts.FailedAccounts == 0;
+        return new JobRunResult(
+            Success: success,
+            ErrorMessage: success
+                ? null
+                : counts.AccountQueryFailed
+                    ? "The receive-enabled accounts could not be queried; the next run retries."
+                    : $"{counts.FailedAccounts} of {counts.Accounts} mailboxes failed to poll — see the errors naming each " +
+                      "account; their watermarks did not move and the next run retries them.",
+            ProcessedItems: counts.Enqueued,
+            Duration: duration,
+            ResultJson: JsonSerializer.Serialize(counts, ResultJsonOptions));
     }
 
     /// <summary>
-    /// Queries all receive-enabled accounts and polls each one for unprocessed messages.
-    /// <c>internal</c> so a test drives one cycle without the startup delay or the timer.
+    /// One poll: queries all receive-enabled accounts and polls each one for unprocessed messages. A failed account
+    /// query or a failed mailbox is logged and counted, never thrown; cancellation propagates.
     /// </summary>
-    internal async Task PollAllAccountsAsync(CancellationToken ct)
+    private async Task<PollCounts> PollAllAccountsAsync(string correlationId, CancellationToken ct)
     {
-        var correlationId = Guid.NewGuid().ToString();
-
         _logger.LogDebug(
             "Starting inbound polling cycle, correlation {CorrelationId}",
             correlationId);
@@ -174,18 +206,18 @@ public sealed class InboundPollingBackupService : BackgroundService
         {
             accounts = await _accountService.QueryReceiveEnabledAccountsAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogError(ex,
                 "Failed to query receive-enabled accounts, correlation {CorrelationId}",
                 correlationId);
-            return;
+            return new PollCounts(0, 0, 0, AccountQueryFailed: true);
         }
 
         if (accounts.Length == 0)
         {
             _logger.LogDebug("No receive-enabled accounts found, skipping inbound polling");
-            return;
+            return new PollCounts(0, 0, 0, AccountQueryFailed: false);
         }
 
         _logger.LogInformation(
@@ -202,7 +234,7 @@ public sealed class InboundPollingBackupService : BackgroundService
                 var enqueued = await PollAccountAsync(account, correlationId, ct);
                 totalEnqueued += enqueued;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
             {
                 totalErrors++;
                 // The exception object is not logged: a Graph error message can quote the mailbox address
@@ -218,6 +250,8 @@ public sealed class InboundPollingBackupService : BackgroundService
             "Inbound polling cycle complete: {AccountCount} accounts polled, " +
             "{MessageCount} messages enqueued, {ErrorCount} errors, correlation {CorrelationId}",
             accounts.Length, totalEnqueued, totalErrors, correlationId);
+
+        return new PollCounts(accounts.Length, totalEnqueued, totalErrors, AccountQueryFailed: false);
     }
 
     /// <summary>
@@ -255,10 +289,11 @@ public sealed class InboundPollingBackupService : BackgroundService
     /// webhook and delta-reconciliation paths are the backstop.
     /// </para>
     /// <para>
-    /// The persisted watermark is only trusted when the cache answers. A read that THROWS (as opposed to the key being
-    /// absent) polls from now − 15 minutes for that cycle only, keeps no cursor for the account and writes no watermark,
-    /// so a transient cache fault cannot overwrite an older backlog watermark with a later one; the next cycle reads
-    /// the cache again. Mail enqueued during such a cycle is not remembered, so it may be enqueued once more later and
+    /// The persisted watermark is read at the start of every poll and only trusted when the cache answers. A read that
+    /// THROWS (as opposed to the key being absent) polls from this instance's own cursor when it has one, otherwise from
+    /// now − 15 minutes for that cycle only, keeping no cursor for the account; either way it writes no watermark, so a
+    /// transient cache fault cannot overwrite an older backlog watermark with a later one; the next cycle reads the cache
+    /// again. Mail enqueued during a cycle without a cursor is not remembered, so it may be enqueued once more later and
     /// the processor's <c>sprk_graphmessageid</c> check absorbs it.
     /// </para>
     /// </remarks>
@@ -400,26 +435,39 @@ public sealed class InboundPollingBackupService : BackgroundService
     }
 
     /// <summary>
-    /// This instance's cursor for the account, created on first use from the persisted watermark (or now − 15 minutes
-    /// when there is none or the cache cannot be read).
+    /// This instance's cursor for the account, re-synchronised with the persisted watermark at the start of every poll:
+    /// created on first use from the persisted watermark (or now − 15 minutes when there is none or the cache cannot be
+    /// read), and moved up to the persisted watermark when that is later than the in-memory one — another instance ran a
+    /// later tick (see the class remarks for why the later of the two is safe and the earlier is not needed).
     /// </summary>
     private async Task<(MailboxCursor Cursor, bool CacheReadFailed)> GetCursorAsync(
         Guid accountId, DateTimeOffset pollStartTime, CancellationToken ct)
     {
-        if (_cursors.TryGetValue(accountId, out var existing))
-            return (existing, false);
-
         var read = await TryGetWatermarkAsync(accountId, ct);
+        _cursors.TryGetValue(accountId, out var existing);
+
         if (read.Failed)
         {
-            // Not stored: a cursor kept for the instance's life would make a transient cache fault permanent, and the
-            // poll would then persist a later watermark over an older backlog one. The caller writes no watermark either.
-            return (new MailboxCursor(pollStartTime - InitialLookbackWindow), true);
+            // This instance's own cursor is still a valid starting point (at worst behind a newer persisted one, which
+            // only re-lists). Without one, a transient cursor is NOT stored: a cursor kept for the instance's life would
+            // make a transient cache fault permanent, and the poll would then persist a later watermark over an older
+            // backlog one. The caller writes no watermark either way.
+            return (existing ?? new MailboxCursor(pollStartTime - InitialLookbackWindow), true);
         }
 
-        var cursor = _cursors.GetOrAdd(
-            accountId, _ => new MailboxCursor(read.Value ?? pollStartTime - InitialLookbackWindow));
-        return (cursor, false);
+        if (existing is null)
+        {
+            var cursor = _cursors.GetOrAdd(
+                accountId, _ => new MailboxCursor(read.Value ?? pollStartTime - InitialLookbackWindow));
+            return (cursor, false);
+        }
+
+        // An absent key (TTL, cache flush) keeps the in-memory cursor; an older persisted value (this instance's own
+        // write failed) keeps it too. Only a later one moves it — never backwards.
+        if (read.Value is { } persisted && MailboxCursor.Floor(persisted) > existing.Watermark)
+            existing.Advance(persisted);
+
+        return (existing, false);
     }
 
     /// <summary>
@@ -444,11 +492,12 @@ public sealed class InboundPollingBackupService : BackgroundService
                 accountId);
             return (null, false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             _logger.LogWarning(ex,
-                "Failed to read inbound poll watermark for account {AccountId}; polling this cycle from the default " +
-                "lookback without saving a watermark, will re-read the cache next cycle",
+                "Failed to read inbound poll watermark for account {AccountId}; polling this cycle from this instance's " +
+                "cursor, or the default lookback when it has none, without saving a watermark, will re-read the cache " +
+                "next cycle",
                 accountId);
             return (null, true);
         }

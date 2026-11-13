@@ -10,6 +10,11 @@
 // and mail was skipped again. The service now pages by keyset (a fresh `receivedDateTime ge` query per page) and
 // persists its watermark in IDistributedCache so a restart does not abandon an older backlog.
 //
+// The same PR moved the poll from a hand-rolled PeriodicTimer BackgroundService to an IScheduledJob on ScheduledJobHost
+// (ADR-052 §1, ADR-036). Each test drives the job's run entry, ExecuteAsync(JobRunContext): one dispatch = one poll of
+// every receive-enabled account. Consecutive ticks can run on different instances under the host's lease, so a run
+// re-reads the persisted watermark and starts from the later of it and its own in-memory cursor.
+//
 // Double: the Kiota IRequestAdapter — the Graph SDK's own boundary, which GraphServiceClient is built from (the
 // SpeContainerGraphStub / DocumentVersionListPagingTests precedent). The adapter below is a small mailbox that applies the
 // request's own $filter (received time AND isRead, per message) / $orderby / $top / $skip and hands out Graph-style
@@ -25,6 +30,8 @@ using System.Web;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -37,7 +44,9 @@ using Microsoft.Kiota.Abstractions.Store;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -374,6 +383,164 @@ public class Issue2749_InboundPollBacklogTests
             "no email address in any log line (ADR-015)");
     }
 
+    // ── The scheduled job (ADR-036): one dispatch = one poll ────────────────────
+
+    [Fact]
+    public async Task Run_EachDispatch_PollsEveryReceiveEnabledMailboxOnceAndReportsWhatItEnqueued()
+    {
+        var mailbox = new FakeMailbox();
+        mailbox.Add("one", Now.AddMinutes(-3));
+        mailbox.Add("two", Now.AddMinutes(-2));
+        var fixture = new Fixture(mailbox);
+
+        var first = await fixture.PollAsync();
+
+        fixture.AccountQueries.Should().Be(1, "one run reads the receive-enabled accounts once");
+        mailbox.Queries.Should().ContainSingle("one run polls the mailbox once (one page holds both messages)");
+        first.Success.Should().BeTrue();
+        first.ProcessedItems.Should().Be(2);
+        fixture.EnqueuedMessageIds.Should().Equal("one", "two");
+        fixture.Logs.Should().ContainSingle(l => l.Message.Contains("[INBOUND-POLL] heartbeat attempt=1"),
+            "one heartbeat per attempt (ADR-036 A1 rule 5)");
+
+        mailbox.Add("three", Now.AddMinutes(1));
+        fixture.Advance(TimeSpan.FromMinutes(5));
+        var second = await fixture.PollAsync();
+
+        fixture.AccountQueries.Should().Be(2);
+        mailbox.Queries.Should().HaveCount(2, "the next dispatch is the next poll — no timer, no startup cycle");
+        second.ProcessedItems.Should().Be(1);
+        fixture.EnqueuedMessageIds.Should().Equal("one", "two", "three");
+    }
+
+    [Fact]
+    public async Task Run_WhenAMailboxFails_CompletesAsAFailedRunWithoutThrowingOrNamingTheAddress()
+    {
+        // The host logs a thrown exception object, and Graph's message can quote the address: the run records the
+        // failure instead of throwing, and the next tick (whose watermark did not move) redoes the mailbox.
+        var mailbox = new FakeMailbox
+        {
+            FailRequestNumber = 1,
+            FailWith = new ODataError
+            {
+                Error = new MainError { Code = "ErrorInvalidUser", Message = $"The requested user '{Mailbox}' is invalid." },
+            },
+        };
+        mailbox.Add("one", Now.AddMinutes(-3));
+        var fixture = new Fixture(mailbox);
+
+        var result = await fixture.PollAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrEmpty().And.NotContain(Mailbox);
+        result.ProcessedItems.Should().Be(0);
+
+        fixture.Advance(TimeSpan.FromMinutes(5));
+        var retry = await fixture.PollAsync();
+        retry.Success.Should().BeTrue();
+        fixture.EnqueuedMessageIds.Should().Equal("one");
+    }
+
+    [Fact]
+    public async Task Run_WhenCancelled_PropagatesTheCancellationInsteadOfLoggingAPollFailure()
+    {
+        var mailbox = new FakeMailbox();
+        mailbox.Add("one", Now.AddMinutes(-3));
+        var cache = NewCache();
+        var fixture = new Fixture(mailbox, cache: cache);
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        var run = () => fixture.PollAsync(cancelled.Token);
+
+        await run.Should().ThrowAsync<OperationCanceledException>("the host records a cancelled run (NFR-07)");
+        fixture.Logs.Should().NotContain(l => l.Level >= LogLevel.Warning,
+            "a shutdown is neither a failed mailbox nor a failed watermark read");
+        fixture.EnqueuedMessageIds.Should().BeEmpty();
+        cache.GetString(WatermarkKey).Should().BeNull("a cancelled poll moves no watermark");
+    }
+
+    [Fact]
+    public async Task Run_AfterAnotherInstanceRanALaterTick_StartsFromThePersistedWatermarkNotItsStaleCursor()
+    {
+        // Under the host's lease each tick runs on ONE instance, not always the same one. Instance B polls, instance A
+        // runs the next tick and advances the persisted watermark, then B runs again with its own older cursor still in
+        // memory. B must start from A's watermark: from its stale one it re-lists mail A already enqueued that the
+        // processor has not marked read yet, and enqueues it a second time.
+        var mailbox = new FakeMailbox();
+        mailbox.Add("m1", Now.AddMinutes(-3));
+        var cache = NewCache();
+        var time = new FakeTimeProvider(Now);
+        var instanceB = new Fixture(mailbox, cache: cache, time: time);
+        var instanceA = new Fixture(mailbox, cache: cache, time: time);
+
+        await instanceB.PollAsync(); // 10:00 — enqueues m1, watermark 09:58
+
+        mailbox.Add("m2", Now.AddMinutes(1));
+        time.Advance(TimeSpan.FromMinutes(5));
+        await instanceA.PollAsync(); // 10:05 — resumes from B's 09:58, enqueues m2, watermark 10:03
+
+        time.Advance(TimeSpan.FromMinutes(5));
+        var bSecondRun = mailbox.Queries.Count;
+        await instanceB.PollAsync(); // 10:10 — B's in-memory cursor still says 09:58
+
+        mailbox.Queries[bSecondRun].From.Should().Be(Now.AddMinutes(3), "the later persisted watermark wins");
+        instanceB.EnqueuedMessageIds.Concat(instanceA.EnqueuedMessageIds).Should().BeEquivalentTo(mailbox.AllIds)
+            .And.OnlyHaveUniqueItems("m2 is not enqueued again by the instance that did not run its tick");
+    }
+
+    [Fact]
+    public async Task Run_WhenThePersistedWatermarkIsOlderThanTheInMemoryOne_DoesNotMoveTheCursorBackwards()
+    {
+        // This instance's last watermark write did not land (a Redis blip), so the cache still holds an older value.
+        // The in-memory cursor is the later true claim; the run must not go back to the older one.
+        var mailbox = new FakeMailbox();
+        mailbox.Add("m1", Now.AddMinutes(-3));
+        var cache = NewCache();
+        var fixture = new Fixture(mailbox, cache: cache);
+
+        await fixture.PollAsync(); // watermark 09:58
+        cache.SetString(WatermarkKey, Now.AddMinutes(-10).ToString("O", CultureInfo.InvariantCulture));
+
+        fixture.Advance(TimeSpan.FromMinutes(5));
+        var secondRun = mailbox.Queries.Count;
+        await fixture.PollAsync();
+
+        mailbox.Queries[secondRun].From.Should().Be(Now.AddMinutes(-2), "the cursor never moves backwards");
+        DateTimeOffset.Parse(cache.GetString(WatermarkKey)!, CultureInfo.InvariantCulture)
+            .Should().Be(Now.AddMinutes(3), "and the run writes its own later watermark back");
+    }
+
+    [Fact]
+    public void Registration_SchedulesTheJobEnabledEveryFiveMinutes_AndStartsNoHostedService()
+    {
+        // The interval the PeriodicTimer kept, now a cron the host dispatches once per tick across instances.
+        var configuration = new ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddSingleton(Mock.Of<ICommunicationDataverseService>());
+        services.AddSingleton(Mock.Of<IGenericEntityService>());
+        services.AddSingleton(Mock.Of<IDistributedCache>());
+        services.AddSingleton(Mock.Of<IGraphClientFactory>());
+        services.AddSingleton(new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+        services.AddSingleton<JobSubmissionService>();
+        services.AddCommunicationModule(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        var registration = provider.GetServices<ScheduledJobRegistration>()
+            .Single(r => r.Job.JobId == InboundPollingBackupService.JobIdConstant);
+
+        registration.CronSchedule.Should().Be("*/5 * * * *");
+        registration.Enabled.Should().BeTrue("the backup poll may be the only working inbound path (#1561)");
+        registration.Job.Should().BeSameAs(provider.GetRequiredService<InboundPollingBackupService>(),
+            "one singleton keeps the per-mailbox cursors across runs");
+        services.Should().NotContain(
+            d => d.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService)
+                && d.ImplementationType == typeof(InboundPollingBackupService),
+            "the poll is no longer a hand-rolled timer BackgroundService (ADR-052 §1)");
+    }
+
     // ── Harness ─────────────────────────────────────────────────────────────────
 
     private static string WatermarkKey => "comm:inbound-poll-watermark:" + AccountId;
@@ -386,6 +553,7 @@ public class Issue2749_InboundPollBacklogTests
         private readonly InboundPollingBackupService _sut;
         private readonly List<JobContract> _jobs = [];
         private readonly CapturingLogger _logger = new();
+        private int _accountQueries;
 
         public Fixture(
             FakeMailbox mailbox, IDistributedCache? cache = null, FakeTimeProvider? time = null, bool processorMarksRead = false)
@@ -393,7 +561,7 @@ public class Issue2749_InboundPollBacklogTests
             _time = time ?? new FakeTimeProvider(Now);
             var graph = new GraphServiceClient(mailbox);
             _sut = new InboundPollingBackupService(
-                CreateAccountService(),
+                CreateAccountService(() => _accountQueries++),
                 Mock.Of<IGraphClientFactory>(f => f.ForApp() == graph),
                 CreateJobSubmission(_jobs, processorMarksRead ? mailbox : null),
                 cache ?? NewCache(),
@@ -406,7 +574,14 @@ public class Issue2749_InboundPollBacklogTests
 
         public IReadOnlyList<LogEntry> Logs => _logger.Entries;
 
-        public Task PollAsync() => _sut.PollAllAccountsAsync(CancellationToken.None);
+        /// <summary>How many times a run asked Dataverse for the receive-enabled accounts.</summary>
+        public int AccountQueries => _accountQueries;
+
+        /// <summary>One scheduler dispatch: the job's run entry, as ScheduledJobHost calls it.</summary>
+        public Task<JobRunResult> PollAsync(CancellationToken ct = default)
+            => _sut.ExecuteAsync(
+                new JobRunContext(Guid.NewGuid(), "issue-2749-test", JobRunTrigger.Scheduled, new Dictionary<string, object>()),
+                ct);
 
         public void Advance(TimeSpan by) => _time.Advance(by);
     }
@@ -464,7 +639,7 @@ public class Issue2749_InboundPollBacklogTests
         public Task RemoveAsync(string key, CancellationToken token = default) => inner.RemoveAsync(key, token);
     }
 
-    private static CommunicationAccountService CreateAccountService()
+    private static CommunicationAccountService CreateAccountService(Action onQuery)
     {
         var account = new DataverseEntity("sprk_communicationaccount") { Id = AccountId };
         account["sprk_emailaddress"] = Mailbox;
@@ -478,6 +653,7 @@ public class Issue2749_InboundPollBacklogTests
                 It.Is<string>(f => f.Contains("sprk_receiveenabled")),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
+            .Callback(onQuery)
             .ReturnsAsync(new[] { account });
 
         return new CommunicationAccountService(
@@ -567,6 +743,9 @@ public class Issue2749_InboundPollBacklogTests
             var top = int.Parse(query["$top"] ?? "10", CultureInfo.InvariantCulture);
             var skip = int.Parse(query["$skip"] ?? "0", CultureInfo.InvariantCulture);
             var orderby = query["$orderby"] ?? "";
+
+            // Like the HTTP stack under the real adapter, a cancelled request does not go out.
+            cancellationToken.ThrowIfCancellationRequested();
 
             Queries.Add((from, top, skip));
             if (Queries.Count == FailRequestNumber)
