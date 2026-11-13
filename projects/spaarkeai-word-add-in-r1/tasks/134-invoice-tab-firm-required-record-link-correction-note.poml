@@ -3,7 +3,7 @@
   <metadata>
     <title>Invoice tab: firm required, "Open in Spaarke" record link, firm on the already-submitted banner, Correction Note, inline firm assign</title>
     <phase>8 — UAT findings and cross-project fixes</phase>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what the pane sends to a finance route and reverses a merged behaviour (#2552's no-firm path); a later slice sets a field that grants external access (through ebilling's route).</rigor-reason>
     <model-tier>sonnet</model-tier>
