@@ -118,6 +118,24 @@ describe('commit', () => {
     expect(failure.resumable).toBe(false);
     expect(failure.reasonCode).toBe('ontology.decision.step_failed');
     expect(failure.correlationId).toBe('trace-1');
+    expect(failure.sendChoiceRequired).toBe(false);
+  });
+
+  it('task 191: a replayed failure (409) that needs the send choice says so', async () => {
+    const service = createDecisionWizardService({
+      fetch: jest
+        .fn()
+        .mockResolvedValue(
+          json(
+            { ...landedProblem, resumable: true, sentButNotRecorded: false, sendChoiceRequired: true, replayed: true },
+            409
+          )
+        ),
+      baseUrl: BASE,
+    });
+    const error = await service.commit(PATH_B_ID, { ...review, retry: true }).catch((e: unknown) => e);
+    const failure = (error as DecisionCommitError).failure;
+    expect(failure).toMatchObject({ httpStatus: 409, replayed: true, resumable: true, sendChoiceRequired: true });
   });
 
   it('a refusal (422) carries its reason and lists nothing as landed', async () => {

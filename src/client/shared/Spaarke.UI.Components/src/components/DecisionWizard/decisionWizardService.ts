@@ -61,6 +61,7 @@ function failureFrom(
     recordMayExist: p.recordMayExist === true,
     sentButNotRecorded: p.sentButNotRecorded === true,
     resumable: p.resumable === true,
+    sendChoiceRequired: p.sendChoiceRequired === true,
     replayed: p.replayed === true,
   };
 }

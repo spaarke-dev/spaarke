@@ -502,7 +502,9 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     await u.click(within(check).getByRole('button', { name: 'Keep deciding', hidden: true }));
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('Discard unrecorded choices?')).toBeNull());
-    expect(((await screen.findByRole('textbox', { name: /^To\b/, hidden: true })) as HTMLInputElement).value).toBe('typed');
+    expect(((await screen.findByRole('textbox', { name: /^To\b/, hidden: true })) as HTMLInputElement).value).toBe(
+      'typed'
+    );
 
     await u.click(screen.getByRole('button', { name: exact('Close'), hidden: true }));
     const again = await screen.findByRole('alertdialog', { hidden: true });
@@ -884,6 +886,83 @@ describe('a failed attempt pins the review (duplicate-write hazard)', () => {
       reviewShape(reviews[0]),
       reviewShape(reviews[0]),
     ]);
+  });
+
+  it('task 191: a maybe-sent inquiry offers exactly Send again and Record without sending, on the same review', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    service.commit.mockRejectedValueOnce(
+      new DecisionCommitError(
+        failedOutcome({
+          sendChoiceRequired: true,
+          reasonCode: 'ontology.action.write_failed',
+          landed: [{ entity: 'sprk_servicerequest', id: 'sr-1' }],
+        })
+      )
+    );
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    const panel = await screen.findByTestId('commit-failure');
+    expect(panel).toHaveTextContent('Check Sent Items');
+
+    // Exactly the two choices: no plain retry.
+    expect(screen.queryByRole('button', { name: 'Retry recording' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Record decision' })).toBeNull();
+    expect(screen.getByTestId('record-without-sending')).toBeInTheDocument();
+    await u.click(screen.getByTestId('send-again'));
+    await screen.findByTestId('status-bar');
+
+    const [first, second] = service.commit.mock.calls.map(c => c[1] as DecisionReview);
+    expect(second.reviewId).toBe(first.reviewId);
+    expect(first.sendChoice).toBeUndefined();
+    expect(second).toMatchObject({ retry: true, sendChoice: 'send-again' });
+    expect(reviewShape(second)).toEqual(reviewShape(first));
+  });
+
+  it('task 191: a 409 replay that needs the choice (after no answer) is the failure, and Record without sending posts that choice', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    service.commit
+      .mockRejectedValueOnce(new DecisionCommitError(failedOutcome({ httpStatus: 0, resumable: false, landed: [] })))
+      .mockRejectedValueOnce(
+        new DecisionCommitError(
+          failedOutcome({
+            httpStatus: 409,
+            replayed: true,
+            sendChoiceRequired: true,
+            reasonCode: 'ontology.decision.send_choice_required',
+            landed: [{ entity: 'sprk_servicerequest', id: 'sr-1' }],
+          })
+        )
+      );
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    await screen.findByTestId('commit-failure');
+    await u.click(button('Try again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('commit-failure')).toHaveTextContent('The decision was not recorded')
+    );
+    expect(screen.getByTestId('commit-failure')).not.toHaveTextContent('already being recorded');
+
+    await u.click(screen.getByTestId('record-without-sending'));
+    await screen.findByTestId('status-bar');
+    const reviews = service.commit.mock.calls.map(c => c[1] as DecisionReview);
+    expect(reviews).toHaveLength(3);
+    expect(new Set(reviews.map(r => r.reviewId)).size).toBe(1);
+    expect(reviews[2]).toMatchObject({ retry: true, sendChoice: 'record-without-sending' });
+  });
+
+  it('task 191: a resumable failure that needs no choice keeps the plain retry and sends no choice', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    service.commit.mockRejectedValueOnce(new DecisionCommitError(failedOutcome()));
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    await screen.findByTestId('commit-failure');
+    expect(screen.queryByTestId('send-again')).toBeNull();
+    await u.click(button('Retry recording'));
+    await screen.findByTestId('status-bar');
+    expect((service.commit.mock.calls[1][1] as DecisionReview).sendChoice).toBeUndefined();
   });
 
   it('a Failed outcome with nothing landed also keeps the id (a new id would run landed steps again)', async () => {

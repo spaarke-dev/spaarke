@@ -30,6 +30,7 @@ import {
   closesSignal,
   failureKeepsReview,
   isFailedOutcome,
+  needsSendChoice,
   resolutionFromRecord,
   reviewKey,
 } from './decisionRecording';
@@ -44,6 +45,7 @@ import type {
   DecisionOpenRecord,
   DecisionPlan,
   DecisionResolution,
+  DecisionSendChoice,
   DecisionWizardItem,
   DecisionWizardService,
   SuppressionStatus,
@@ -211,7 +213,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
 
   // ---- Record: the ONE write, single-flight --------------------------------------------------------------
   const record = React.useCallback(
-    async (id: string) => {
+    async (id: string, choice?: DecisionSendChoice) => {
       if (recordingRef.current) return; // a second click while a request is out sends nothing
       const l = live.current.loaded[id];
       const draft = live.current.drafts[id];
@@ -232,6 +234,16 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         if (stillOpen.length !== draft.alsoResolve.length) sendDraft = { ...draft, alsoResolve: stillOpen };
       }
       let review = buildReview(l.plan, sendDraft, { retry });
+      // Task 191 (D-223): the inquiry email of the pinned attempt may have been sent; the person's choice goes on the same POST.
+      // Without a choice such a retry would only get the stored failure back, so it is not sent at all.
+      if (retry && needsSendChoice(previous.pinning)) {
+        if (!choice) {
+          recordingRef.current = null;
+          setRecording(null);
+          return;
+        }
+        review = { ...review, sendChoice: choice };
+      }
       // An edit after a plain refusal (nothing stored) is a different decision and gets its own review id. A pinned review
       // is never edited and never changes id: a new id would run the steps that already landed again.
       if (previous && !isPinned && previous.key !== reviewKey(review)) {
@@ -340,6 +352,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const hasUnrecorded = Object.entries(drafts).some(
     ([id, d]) => d !== undefined && !recorded[id] && !alsoClosed.includes(id) && hasUnrecordedChoices(d)
   );
+  // Task 191: a pinned attempt that landed writes is an unfinished decision, not choices that write nothing when discarded.
+  const unfinishedWrites = Object.values(pinned).some(f => f !== undefined && f.landed.length > 0);
   const requestClose = React.useCallback(() => {
     if (recordingRef.current) return;
     if (hasUnrecorded) setConfirmClose(true);
@@ -411,7 +425,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         closedIds,
         recordResult: done?.result ?? null,
         recording: recording === currentId,
-        onRecord: () => record(currentId),
+        onRecord: (choice?: DecisionSendChoice) => record(currentId, choice),
         lookup: itemLookup,
         openLookup: itemOpenLookup,
         openRecord: openRecord ?? null,
@@ -449,7 +463,11 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
             onClose();
           }}
           title="Discard unrecorded choices?"
-          message="Some choices have not been recorded. Closing now discards them, and nothing is written."
+          message={
+            unfinishedWrites
+              ? 'An earlier attempt to record a decision already carried out part of it. Closing now leaves it unfinished: what was carried out stands, and the decision is not recorded.'
+              : 'Some choices have not been recorded. Closing now discards them, and nothing is written.'
+          }
           confirmLabel="Discard and close"
           cancelLabel="Keep deciding"
           destructive

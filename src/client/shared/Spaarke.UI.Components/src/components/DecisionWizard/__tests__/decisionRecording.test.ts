@@ -4,8 +4,9 @@
  * under a new id would run the steps that already landed again.
  */
 
-import { closesSignal, failureKeepsReview, isFailedOutcome } from '../decisionRecording';
-import type { DecisionCommitFailure } from '../decisionWizardTypes';
+import { closesSignal, failureKeepsReview, isFailedOutcome, needsSendChoice, reviewKey } from '../decisionRecording';
+import { failureHeading, failureMessage, describeWarning } from '../decisionDisplay';
+import type { DecisionCommitFailure, DecisionReview } from '../decisionWizardTypes';
 import { commitResult } from '../__fixtures__/decisionWizardFixtures';
 
 const failure = (overrides: Partial<DecisionCommitFailure>): DecisionCommitFailure => ({
@@ -46,6 +47,11 @@ describe('isFailedOutcome / closesSignal', () => {
     expect(isFailedOutcome(failure({ httpStatus: 422 }))).toBe(false);
   });
 
+  it('task 191: the stored failure returned again (409 + replayed) is the Failed outcome too', () => {
+    expect(isFailedOutcome(failure({ httpStatus: 409, replayed: true }))).toBe(true);
+    expect(isFailedOutcome(failure({ httpStatus: 422, replayed: true }))).toBe(false);
+  });
+
   it('counts only Acted and Dismissed as closed; an answer that lists no Signals is taken at the review’s word', () => {
     const result = commitResult({
       signals: [
@@ -57,5 +63,43 @@ describe('isFailedOutcome / closesSignal', () => {
     });
     expect(['a', 'b', 'c', 'd', 'z'].map(id => closesSignal(result, id))).toEqual([true, true, false, false, false]);
     expect(closesSignal(commitResult({ signals: [] }), 'a')).toBe(true);
+  });
+});
+
+describe('task 191 (D-223): the inquiry email that may have been sent', () => {
+  const choice = failure({ resumable: true, sendChoiceRequired: true, reasonCode: 'ontology.action.write_failed' });
+
+  it('needs the choice only for a resumable failure that asks for it', () => {
+    expect(needsSendChoice(choice)).toBe(true);
+    expect(needsSendChoice(failure({ resumable: true }))).toBe(false);
+    expect(needsSendChoice(failure({ resumable: false, sendChoiceRequired: true }))).toBe(false);
+    expect(needsSendChoice(null)).toBe(false);
+  });
+
+  it('tells the person to check Sent Items and names the two choices', () => {
+    expect(failureMessage(choice)).toMatch(/Check Sent Items/);
+    expect(failureMessage(choice)).toMatch(/Send again or Record without sending/);
+  });
+
+  it('a replayed failure (409) reads as the failure, not as a review in progress', () => {
+    const replay = failure({ httpStatus: 409, replayed: true, reasonCode: 'ontology.decision.not_resumable' });
+    expect(failureHeading(replay)).toBe('The decision was not recorded');
+    expect(failureMessage(replay)).not.toMatch(/already being recorded/);
+    expect(failureHeading(failure({ httpStatus: 409 }))).toBe('This decision is already being recorded');
+  });
+
+  it('a Signal that is no longer open says so, and that what landed stands', () => {
+    const closed = failure({ httpStatus: 409, reasonCode: 'ontology.decision.signal_not_open' });
+    expect(failureHeading(closed)).toBe('This item is no longer open');
+    expect(failureMessage(closed)).toMatch(/already carried out stands/);
+  });
+
+  it('the re-close warning is worded, not the generic follow-up text', () => {
+    expect(describeWarning('reclosed_after_system_resolution')).toMatch(/closed automatically/);
+  });
+
+  it('the choice is not part of the review content (the same review with a choice is the same review)', () => {
+    const review: DecisionReview = { reviewId: 'r', confirmed: true, actions: [] };
+    expect(reviewKey({ ...review, retry: true, sendChoice: 'send-again' })).toBe(reviewKey(review));
   });
 });

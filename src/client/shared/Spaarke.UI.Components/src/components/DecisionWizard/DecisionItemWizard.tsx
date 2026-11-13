@@ -45,8 +45,10 @@ import {
 } from './decisionDraft';
 import type { Decision, ItemDraft, StepScope } from './decisionDraft';
 import { DecisionItemContext } from './decisionItemContext';
+import { needsSendChoice } from './decisionRecording';
 import type { DecisionItemContextValue, DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import type {
+  DecisionSendChoice,
   DecisionCommitFailure,
   DecisionCommitResult,
   DecisionOpenRecord,
@@ -110,8 +112,11 @@ export interface DecisionItemReady {
   recordResult: DecisionCommitResult | null;
   /** True while the request is in flight. */
   recording: boolean;
-  /** Post the one review. Resolves when the attempt is over (recorded or failed); never rejects. */
-  onRecord: () => Promise<void>;
+  /**
+   * Post the one review. Resolves when the attempt is over (recorded or failed); never rejects. `choice` answers an earlier
+   * attempt whose inquiry email may have been sent (task 191, D-223); without it such an attempt is not posted.
+   */
+  onRecord: (choice?: DecisionSendChoice) => Promise<void>;
   lookup: DecisionLookup | null;
   /** The host's side-pane lookup with the item's core already filled in (D-182); null keeps the inline type-ahead. */
   openLookup?: DecisionOpenLookupForItem | null;
@@ -359,6 +364,8 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
             // A message went out and the first attempt cannot be resumed: the owner decides, not another click (task 043).
             const pinned = l.pinnedFailure ?? l.failure;
             if (pinned?.sentButNotRecorded && !pinned.resumable) return false;
+            // Task 191 (D-223): the inquiry email may have been sent; only one of the two choices in the footer goes on.
+            if (needsSendChoice(pinned)) return false;
             return reviewReady(l.plan, l.draft);
           },
           renderContent: handle => (
@@ -515,6 +522,16 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
     await onRecord?.();
   }, [onRecord]);
   const onNextOpenItem = ready?.onNextOpenItem;
+  // Task 191 (D-223): the earlier attempt's inquiry email may have been sent. Confirm offers exactly two ways on: send it again,
+  // or record the decision without sending. Never a plain retry.
+  const choiceRequired = !readOnly && needsSendChoice(pinnedFailure ?? failure);
+  const recording = ready?.recording ?? false;
+  const choose = React.useCallback(
+    (choice: DecisionSendChoice) => {
+      void onRecord?.(choice);
+    },
+    [onRecord]
+  );
 
   return (
     <DecisionItemContext.Provider value={contextValue}>
@@ -536,34 +553,62 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         nav={nav}
         statusBar={statusBar}
         footer={
-          ready && readOnly
+          ready && choiceRequired
             ? context => ({
-                start: (
-                  <Button appearance="secondary" onClick={context.close}>
-                    Close
-                  </Button>
-                ),
-                end: (
+                end: context.isLastStep ? (
                   <>
                     {!context.isFirstStep ? (
-                      <Button appearance="secondary" onClick={context.goBack}>
+                      <Button appearance="secondary" onClick={context.goBack} disabled={recording}>
                         Back
                       </Button>
                     ) : null}
-                    {!context.isLastStep ? (
-                      <Button appearance="secondary" onClick={context.goNext}>
-                        Next
-                      </Button>
-                    ) : null}
-                    {onNextOpenItem ? (
-                      <Button appearance="primary" onClick={onNextOpenItem}>
-                        Next open item
-                      </Button>
-                    ) : null}
+                    <Button
+                      appearance="secondary"
+                      onClick={() => choose('record-without-sending')}
+                      disabled={recording}
+                      data-testid="record-without-sending"
+                    >
+                      Record without sending
+                    </Button>
+                    <Button
+                      appearance="primary"
+                      onClick={() => choose('send-again')}
+                      disabled={recording}
+                      data-testid="send-again"
+                    >
+                      Send again
+                    </Button>
                   </>
-                ),
+                ) : undefined,
               })
-            : undefined
+            : ready && readOnly
+              ? context => ({
+                  start: (
+                    <Button appearance="secondary" onClick={context.close}>
+                      Close
+                    </Button>
+                  ),
+                  end: (
+                    <>
+                      {!context.isFirstStep ? (
+                        <Button appearance="secondary" onClick={context.goBack}>
+                          Back
+                        </Button>
+                      ) : null}
+                      {!context.isLastStep ? (
+                        <Button appearance="secondary" onClick={context.goNext}>
+                          Next
+                        </Button>
+                      ) : null}
+                      {onNextOpenItem ? (
+                        <Button appearance="primary" onClick={onNextOpenItem}>
+                          Next open item
+                        </Button>
+                      ) : null}
+                    </>
+                  ),
+                })
+              : undefined
         }
       />
     </DecisionItemContext.Provider>

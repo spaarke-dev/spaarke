@@ -54,9 +54,17 @@ export function closesSignal(result: DecisionCommitResult, signalId: string): bo
   return CLOSED_STATES.includes(state);
 }
 
-/** A `Failed` outcome (the route's 500): the answer that says what landed and whether the review can be resumed. */
+/**
+ * A `Failed` outcome: the answer that says what landed and whether the review can be resumed. The route answers 500 for the
+ * attempt that failed and 409 with `replayed` when it returns that stored failure again (task 191: a known state, not a fault).
+ */
 export function isFailedOutcome(failure: DecisionCommitFailure): boolean {
-  return failure.httpStatus === 500;
+  return failure.httpStatus === 500 || (failure.httpStatus === 409 && failure.replayed);
+}
+
+/** Task 191 (D-223): the review resumes only with the person's choice (the inquiry email may have been sent). */
+export function needsSendChoice(failure: DecisionCommitFailure | null | undefined): boolean {
+  return failure?.sendChoiceRequired === true && failure.resumable;
 }
 
 /** The content of a review without its identity: two reviews with the same key are the same decision. */
@@ -64,6 +72,7 @@ export function reviewKey(review: DecisionReview): string {
   const content: Partial<DecisionReview> = { ...review };
   delete content.reviewId;
   delete content.retry;
+  delete content.sendChoice;
   return JSON.stringify(content);
 }
 

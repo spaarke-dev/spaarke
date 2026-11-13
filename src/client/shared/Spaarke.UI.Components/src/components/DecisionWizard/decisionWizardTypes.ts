@@ -158,7 +158,15 @@ export interface DecisionReview {
   because?: string;
   /** Resume a review whose first attempt failed before its record. */
   retry?: boolean;
+  /**
+   * Task 191 (D-223): the person's answer when the earlier attempt's inquiry email MAY have been sent (`sendChoiceRequired`):
+   * send it again, or record the decision without sending. Sent only with `retry` on that review; not part of its content.
+   */
+  sendChoice?: DecisionSendChoice;
 }
+
+/** Task 191 (D-223): the two answers the item offers for an inquiry email that may have been sent. */
+export type DecisionSendChoice = 'send-again' | 'record-without-sending';
 
 export interface DecisionCommitRef {
   entity: string;
@@ -169,7 +177,7 @@ export interface DecisionCommitStep {
   key: string;
   code: string;
   phase: number;
-  /** `Done`, `Refused` or `Failed`. */
+  /** `Done`, `Refused` or `Failed`; `NotSentByChoice` for an inquiry recorded without sending (task 191). */
   status: string;
   written: DecisionCommitRef[];
   possiblyWritten: DecisionCommitRef[];
@@ -219,6 +227,11 @@ export interface DecisionCommitFailure {
   sentButNotRecorded: boolean;
   /** A failed first attempt that `retry: true` may resume. */
   resumable: boolean;
+  /**
+   * Task 191 (D-223): the inquiry email may have been sent, so the attempt resumes only with the person's `sendChoice`; a retry
+   * without one is answered with this failure again and does nothing.
+   */
+  sendChoiceRequired?: boolean;
   replayed: boolean;
 }
 
