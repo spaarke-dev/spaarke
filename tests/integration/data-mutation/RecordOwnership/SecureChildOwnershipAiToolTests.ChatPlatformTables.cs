@@ -232,6 +232,26 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByTheSecureTeam_FlagUnset)]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByTheSecureUnitsDefaultTeam)]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByAnotherSecureUnitTeam)]
+    public async Task AChatContactUnderAParentSecureByOwnership_IsNeverOwnedByTheCustomerTeam(
+        CustomerContactOwnerTests.SecureUnitParent kind)
+    {
+        // UAC-r2 pin: the parent is secure by ownership only (its sprk_issecure unset); the contact stays in isolation.
+        ChatPlatformCallerMayCreate();
+        var invoice = CustomerContactOwnerTests.InvoiceInTheSecureUnit(_world, kind);
+
+        var created = await ThroughTheService("contact", ChatContactUnder(invoice), CustomerContactOwner(oneDefaultTeam: true));
+
+        created.Succeeded.Should().BeFalse("never owned by the customer team out of the invoice's isolation");
+        created.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
+        created.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue("the resolver named the Secure team");
+        created.Refusal.OwnerDecision.OwningTeamId.Should().NotBe(CustomerContactOwnerTests.CustomerTeam);
+        _appCreates.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task AChatContactUnderAnOrdinaryInvoice_IsOwnedByTheCustomerTeam()
     {

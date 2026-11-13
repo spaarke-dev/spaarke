@@ -206,6 +206,23 @@ Re-check of 1e72d50962..4e22a086b5 (no F1/F2):
 | K — a failed cascade read was retried and logged per row | kept as unknown for the pass, logged once per table | `RecordRepairPassJobTests.AFailedRelationshipMetadataRead_IsKeptAsUnknownForThePass_*` |
 | K — contact owner rule inert until the cascades are reviewed; overlap inflates counters | noted (K11, K12) | — |
 
+UAC-r2 pin before merge (resolver part passed): a contact filed under a parent that is secure by OWNERSHIP only.
+`ContactOwnerAsync` lets the customer team replace a parent answer that is neither refused nor `IsSecureOwner`; the
+question was whether such a parent can reach it. It cannot: the secure decision treats every parent whose owning business
+unit is the Secure Record unit as secure, whatever its `sprk_issecure`, and answers the named Secure team
+(`IsSecureOwner = true`). **Both cases passed as written; no fix was needed.**
+
+| Case | Create (chat, step 7) | Repair | Reparent |
+|---|---|---|---|
+| (a) owned by the Secure Record owner team, `sprk_issecure` unset | `AChatContactUnderAParentSecureByOwnership_*` | `AContactUnderAParentSecureByOwnership_IsNeverReOwned_*` | gate: `AContact_IsNotAReparentableChild_*`; resolver: `ReFilingAContactUnderAParentSecureByOwnership_*` |
+| (b) owned by the Secure Record unit's default team, or by another team of that unit | same theories | same theories | same |
+
+The resolver question itself (which the create's step 7 and Repair's owner step ask) is pinned by
+`CustomerContactOwnerTests.AContactUnderAParentSecureByOwnership_KeepsTheSecureAnswer_NeverTheCustomerTeam`. Reparent is gated
+off for a contact (`IsReparentableChild("contact")` is false), so for that path the gate is pinned, and the resolver's own
+`ReparentAsync` answer is pinned too. Evidence the pins can fire: with `ContactOwnerAsync`'s `IsSecureOwner` check switched
+off, 12 of the 13 fail (all but the gate test); restored, 13/13 pass.
+
 ## Evidence
 
 - **Fail with the rule switched off, then pass** (production code mutated, test project rebuilt, restored with
@@ -230,7 +247,7 @@ Re-check of 1e72d50962..4e22a086b5 (no F1/F2):
 - `RecordRepairPassJobTests`: 50/50; `RecordRepairPassJobTests` + `RecordRepairModeTests`: 159/159.
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `tests/Spaarke.ArchTests`: 2537/2537.
 - Sprk.Bff.Api.Tests filtered (Repair, RecordOwnership, Scheduled, Job, Contact, ExternalAccess, RecordCreation,
-  SecureChildOwnership, AssignCascade, ColumnMetadata; `!~Api.Office.`): 11624/11624 after the re-check fixes.
+  SecureChildOwnership, AssignCascade, ColumnMetadata; `!~Api.Office.`): 11624/11624 after the re-check fixes; 11637/11637 with the secure-by-ownership pins.
 - `dotnet format whitespace --verify-no-changes` on every touched .cs file: clean.
 
 ## Known limits (K)

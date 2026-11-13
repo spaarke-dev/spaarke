@@ -139,6 +139,101 @@ public sealed class CustomerContactOwnerTests
         _store.Reads.Should().NotContain("owner-team", "the secure decision answered first");
     }
 
+    // ── UAC-r2 pin: a parent secure by OWNERSHIP keeps the contact in isolation ──────────────────────────────────────
+
+    /// <summary>The ways a parent sits in the Secure Record business unit without saying so through <c>sprk_issecure</c>.</summary>
+    public enum SecureUnitParent
+    {
+        /// <summary>(a) Owned by the Secure Record owner team, <c>sprk_issecure</c> unset ("the parent permissions control").</summary>
+        OwnedByTheSecureTeam_FlagUnset,
+
+        /// <summary>(b) Owned by the Secure Record unit's default team.</summary>
+        OwnedByTheSecureUnitsDefaultTeam,
+
+        /// <summary>(b) Owned by another (non-default, unnamed) team of the Secure Record unit.</summary>
+        OwnedByAnotherSecureUnitTeam,
+    }
+
+    internal static readonly Guid AnotherSecureUnitTeam = Guid.Parse("a052b000-0000-4000-8000-0000000001d0");
+
+    /// <summary>An invoice owned in the Secure Record unit as <paramref name="kind"/> says, with no <c>sprk_issecure</c> value.</summary>
+    internal static Guid InvoiceInTheSecureUnit(Directory directory, SecureUnitParent kind)
+    {
+        var id = Guid.NewGuid();
+        var team = kind switch
+        {
+            SecureUnitParent.OwnedByTheSecureTeam_FlagUnset => Directory.SecureNamedTeam,
+            SecureUnitParent.OwnedByTheSecureUnitsDefaultTeam => Directory.SecureDefaultTeam,
+            _ => AnotherSecureUnitTeam,
+        };
+        if (kind == SecureUnitParent.OwnedByAnotherSecureUnitTeam)
+            directory.WithTeam(AnotherSecureUnitTeam, Directory.SecureBu, isDefault: false, teamType: 0, "Another secure-unit team");
+        directory.WithRecord("sprk_invoice", id, Directory.SecureBu, owningTeam: team);
+        directory.Row("sprk_invoice", id).Contains("sprk_issecure").Should().BeFalse("the parent's flag is unset: secure by ownership only");
+        return id;
+    }
+
+    [Theory]
+    [InlineData(SecureUnitParent.OwnedByTheSecureTeam_FlagUnset)]
+    [InlineData(SecureUnitParent.OwnedByTheSecureUnitsDefaultTeam)]
+    [InlineData(SecureUnitParent.OwnedByAnotherSecureUnitTeam)]
+    public async Task AContactUnderAParentSecureByOwnership_KeepsTheSecureAnswer_NeverTheCustomerTeam(SecureUnitParent kind)
+    {
+        // The create's step 7 and Repair's owner step ask this resolver question.
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+        var invoice = InvoiceInTheSecureUnit(_directory, kind);
+
+        var answer = await Resolver(CustomerBu).ResolveOwnerAsync(AContactUnder(invoice), CancellationToken.None);
+
+        (answer.IsSecureOwner || answer.IsRefused).Should().BeTrue(answer.Reason);
+        answer.OwningTeamId.Should().NotBe(CustomerTeam, "a contact never leaves a secure record's isolation");
+        _store.Reads.Should().NotContain("owner-team", "the customer-team rule was never asked");
+    }
+
+    [Fact]
+    public void AContact_IsNotAReparentableChild_SoNoReparentPathReOwnsIt()
+    {
+        // The reparent writers (OwnedChildWrite, FieldMappingEndpoints, DataverseUpdateHandler, UpdateRecordActionCore) re-own
+        // only a reparentable child; a contact is not one, so Reparent is pinned by its gate.
+        RecordOwnershipResolver.IsReparentableChild("contact").Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(SecureUnitParent.OwnedByTheSecureTeam_FlagUnset)]
+    [InlineData(SecureUnitParent.OwnedByTheSecureUnitsDefaultTeam)]
+    [InlineData(SecureUnitParent.OwnedByAnotherSecureUnitTeam)]
+    public async Task ReFilingAContactUnderAParentSecureByOwnership_KeepsTheSecureAnswer(SecureUnitParent kind)
+    {
+        // Not reachable through a production writer (the gate above); the resolver's own answer is pinned as well.
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+        var invoice = InvoiceInTheSecureUnit(_directory, kind);
+        var contact = Guid.NewGuid();
+        _directory.WithRecord("contact", contact, Directory.GeneralBu, extra: new()
+        {
+            ["owninguser"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", Directory.CallerUserId),
+            ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", Directory.CallerUserId),
+        });
+        var change = new Microsoft.Xrm.Sdk.EntityReference("sprk_invoice", invoice);
+
+        var answer = await Resolver(CustomerBu).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "contact",
+                RecordId = contact,
+                ParentChanges = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?> { ["sprk_invoice"] = change },
+                CallerSystemUserId = Directory.CallerUserId,
+            },
+            _ =>
+            {
+                _directory.Write("contact", contact, new Dictionary<string, object?> { ["sprk_invoice"] = change });
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        answer.OwningTeamId.Should().NotBe(CustomerTeam, answer.Reason);
+        _store.Reads.Should().NotContain("owner-team");
+    }
+
     internal static readonly Guid UnitWithNoDefaultTeam = Guid.Parse("a052b000-0000-4000-8000-0000000001b0");
     internal static readonly Guid InvoiceInAUnitWithNoDefaultTeam = Guid.Parse("a052b000-0000-4000-8000-0000000001c3");
 

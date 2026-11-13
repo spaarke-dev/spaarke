@@ -370,6 +370,25 @@ public sealed class RecordRepairPassJobTests
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
     }
 
+    [Theory]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByTheSecureTeam_FlagUnset)]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByTheSecureUnitsDefaultTeam)]
+    [InlineData(CustomerContactOwnerTests.SecureUnitParent.OwnedByAnotherSecureUnitTeam)]
+    public async Task AContactUnderAParentSecureByOwnership_IsNeverReOwnedToTheCustomerTeam(CustomerContactOwnerTests.SecureUnitParent kind)
+    {
+        // UAC-r2 pin: the parent is secure by ownership only (its sprk_issecure unset); the contact stays in isolation.
+        _pass.CustomerTeamResolves();
+        var invoice = CustomerContactOwnerTests.InvoiceInTheSecureUnit(World.Directory, kind);
+        var id = _pass.NativeContactUnder(invoice);
+
+        var outcome = await World.RepairAsync("contact", id, _pass.Context());
+
+        World.Writes.Should().NotContain(w => w.Fields.ContainsKey("ownerid"), "never re-owned out of the invoice's isolation");
+        outcome.OwnerRefusal!.OwnerDecision!.IsSecureOwner.Should().BeTrue("the resolver named the Secure team");
+        World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+    }
+
     [Fact]
     public async Task AContactUnderAnOrdinaryInvoice_IsReOwnedToTheCustomerTeam()
     {
