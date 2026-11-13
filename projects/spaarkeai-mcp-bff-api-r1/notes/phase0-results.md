@@ -15,8 +15,8 @@
 | Gates Phase A (020+) | T0 | ✅ passed 2026-11-12 | 020+ may start |
 | Spaarke AI fallback (043) | T1 (Chat) | ✅ widget renders in Chat 2026-11-12 | 043 cancelled; re-check after Ignite (17–20 Nov) |
 | Route mechanism (020) | T13 | 🔲 local pass only; live pending | — |
-| Widget budget (030) | Size | 🔲 pending (spike change needed) | — |
-| Wizard copy (032) | T3 / T4 | 🔲 pending (spike change needed) | — |
+| Widget budget (030) | Size | ✅ Chat 2026-11-13 (1/3/6 MB render; init ≤ 80 ms; 6 MB paints ~8 s later); Cowork 🔲 | Keep < 1 MB aim, 3 MB fail |
+| Wizard copy (032) | T3 / T4 | ✅ Chat 2026-11-13: no host card for widget writes; per-call card with raw params for model writes; Cowork 🔲 | Wizard owns confirmation |
 
 ## Results
 
@@ -28,25 +28,25 @@
 | T1 — Cowork | | Cowork | 🔲 | | |
 | T1 — Word | | Copilot in Word | 🔲 | | |
 | T1 — Outlook | | Copilot in Outlook | 🔲 | | |
-| T1 — dark theme (ADR-021) | | Chat, M365 dark theme | 🔲 | | |
+| T1 — dark theme (ADR-021) | 2026-11-13 | Chat (web, dark host theme), test user | ✅ Widget reports `theme: dark` and renders on a dark panel (no white block); init 80 ms, connected. | Claude browser-pane observation, session `mcp-r1` 21:26Z (dev BFF `b100effac3`) | Widget follows host theme from host context |
 | **T2** Plugin package: widget in Cowork and Chat | | plugin package | 🔲 needs a spike plugin package | | |
-| **T3** Widget calls a write tool (app-only, not readOnly): confirmation card? per call? | | Chat, Cowork; test user | 🔲 needs spike write tool | | |
-| **T4** Model calls a write tool: parameters on the card? "Allow for conversation" persists? | | Chat, Cowork; test user | 🔲 needs spike write tool | | |
-| **T6** 20 prompts without "Spaarke": tool invocation rate | | Chat | 🔲 | | |
-| **T7** MCP `instructions` honoured | | Chat, Cowork | 🔲 needs spike `instructions` | | informational |
+| **T3** Widget calls a write tool (app-only, not readOnly): confirmation card? per call? | 2026-11-13 (Chat) | Chat; test user | **Chat: no card.** Two clicks on **Call write (app-only)** both ran `spike_write_app` straight away (`accepted: true`, 21:27:26Z and 21:27:39Z). App-only visibility honoured for the model: asked "which tools do you have", Copilot listed six spike tools and never `spike_write_app`. Cowork 🔲 | Browser-pane observation, `mcp-r1` | 032: the host gives NO confirmation for widget-initiated writes — the wizard's own explicit Confirm (FR-08) is the only gate. Matches design. |
+| **T4** Model calls a write tool: parameters on the card? "Allow for conversation" persists? | 2026-11-13 (Chat) | Chat; test user | **Chat: card per call, parameters shown.** Card: "Copilot wants to use *spike_write* from Spaarke MCP", expandable to `title` / `note` values with a **Write** tag; buttons Cancel / **Allow once ▾** (dropdown: **Always allow**). There is no "Allow for conversation". After Allow once the next call showed the card again (per call). Cancel → Copilot said the write was cancelled and it would not retry. "Always allow" not tested (persists a permission on the test user; owner's call). Also: on the first prompt the model called `spike_echo` instead of `spike_write` and still told the user "Recorded" — no write happened. Cowork 🔲 | Browser-pane observation, `mcp-r1` 21:28–21:30Z | 032 wizard copy: user sees the tool name and raw parameters; per-call card. Model can claim a write it did not make → keep complete app-only (O-14). |
+| **T6** 20 prompts without "Spaarke": tool invocation rate | 2026-11-13 | Chat, source on (default on for this user), test user | **13 / 15 target prompts called a tool (87%); 0 / 5 controls.** Called: 1, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 20. Not called: 2 (Copilot repeated the phrase itself), 19 (answered from its tool list, no call). Controls 11–15: none. #16 "phase zero platform test": the model chained `spike_unannotated` (card) then `spike_write` (card; left unanswered, no write). T6b 🔲 | Browser-pane observation, `mcp-r1` 21:32–21:39Z | Tool selection is reliable when the prompt names the domain; description quality matters (FR-03 descriptions) |
+| **T7** MCP `instructions` honoured | 2026-11-13 (Chat) | Chat | ❌ **Chat: not honoured.** "Echo 'instructions check' with the spike echo tool" → tool received `instructions check`, no `SPK-T7:` prefix. Cowork 🔲 | Widget tool result, `mcp-r1` 21:26:43Z | informational: do not rely on server `instructions`; put guidance in tool descriptions |
 | **T8** Cowork elicitation | | Cowork | 🔲 | | informational |
-| **T9** Work IQ plus our tool in the same turn | | Chat | 🔲 | | informational |
+| **T9** Work IQ plus our tool in the same turn | 2026-11-13 | Chat | ✅ One answer ran both: mail search (no contract email found) and `spike_echo` (21:40:27Z), "Reasoned for 16s". | Browser-pane observation, `mcp-r1` | informational: Work IQ and Spaarke MCP compose in one turn |
 | **T10** A skill naming a connector tool | | Cowork | 🔲 | | informational |
 | **T11** Behaviour without a Copilot licence | 2026-11-12 | Copilot Chat (Basic), test user before licence | ⚠️ Observed, informal: with only Copilot Chat (Basic) the connector is not offered in Sources; after the licence and a new chat it is. | `phase0-registration-facts.md` licence-precondition notes | informational: user-setup docs (042) state the licence requirement |
-| **T12** Cowork treating unannotated tools as destructive | | Cowork | 🔲 needs spike unannotated tool | | informational |
+| **T12** Cowork treating unannotated tools as destructive | 2026-11-13 (Chat side-observation) | Chat | Chat: `spike_unannotated` (no annotations) got the same per-call confirmation card as a write (seen in T6 #16). Cowork 🔲 | `mcp-r1` 21:37Z | informational: always set `readOnlyHint` explicitly (FR-03) or reads will prompt |
 | **T13** Two tool sets on two routes; display name in Sources and on the approval card | local: 2026-11-10 | `/mcp/legal-operations`, `/mcp/spike-area-b` | Local in-process pass (each route lists only its own tools); live pending a second connector on `/mcp/spike-area-b` | `notes/spikes/phase0-spike-measurements.md` §4 | 🔲 |
 | **T14** Two connectors in one app package | | plugin package | 🔲 needs a spike plugin package | | |
-| **E1** Skill under `/` in Chat | | Chat | 🔲 (MC1493223 rollout) | | |
+| **E1** Skill under `/` in Chat | 2026-11-13 | Chat | ✅ `/` opens a picker with an **Agents & Skills** tab listing skills (e.g. `analyze-related-contracts`, `build-case-chronology`, `draft-legal-memo`) and agents (Harvey, Legora, Researcher, a Copilot Studio agent "Spaarke Dataverse MCP"). No entry for the Spaarke MCP connector itself (expected: a connector is not a skill; our `spaarke-decisions` skill is not built yet). | Browser-pane observation, `mcp-r1` 21:41Z | Skills surface under `/` in Chat → the `spaarke-decisions` skill will be discoverable there |
 | **E2** Skill under `/` in Cowork | | Cowork | 🔲 | | |
 | **E3** Direct prompt | 2026-11-12 | Chat | ✅ A direct prompt ("can you see the spaarke mcp") with the source selected invoked the tool. Earlier, in a chat opened before the licence refreshed and with no source selected, Copilot answered without the tool (two causes at once, so not a clean negative). | `phase0-registration-facts.md` 16:12Z entry | Users select Spaarke MCP via **+ › Sources**; record for 042's user guide |
 | **E4** Org prompts | | Chat | 🔲 | | informational |
 | **E5** `@` mention | | Chat | 🔲 | | |
-| **Size** 1 / 3 / 6 MB init time | 1 MB: 2026-11-12 | Chat | 1 MB: init 30 ms in Chat. 3 and 6 MB: pending (not bound to a tool) | T1 Chat row | 🔲 budget for 030 |
+| **Size** 1 / 3 / 6 MB init time | 2026-11-12 / 2026-11-13 | Chat | All render. In-widget init (script start → connected): 1 MB 30–80 ms; 3 MB 28 ms (2,393,244 pad bytes); 6 MB 35 ms (5,538,972 pad bytes). Frame inserted after send (includes the model turn): 3 MB 6.4 s, 6 MB 8.5 s; visible paint: 3 MB by ~15 s, 6 MB blank at ~15 s and drawn by ~23 s. Cowork 🔲 | `mcp-r1` browser-pane, iframe timing via page script 21:30–21:31Z | 030 budget: init cost is flat; perceived delay grows with size (6 MB paints ~8 s later). Keep the < 1 MB aim; 3 MB fail threshold stands. |
 
 ## Open items for the owner
 

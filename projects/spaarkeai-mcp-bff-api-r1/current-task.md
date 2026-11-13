@@ -17,7 +17,9 @@
 
 **Gotchas:** 020's module and the spike both map `/mcp/legal-operations` → never in one build. Tool-written working copies can be LF → `rm` + `git checkout --` before `check-changed-cs-format.sh`. Never `python3`/`python -` in Bash. The Stop-hook quality gate fails while a background implementer is mid-edit in this worktree — that is in-progress work, not a branch break.
 
-## Task 003 (Phase 0 live tests) — open, waiting on the Copilot outage
+## Task 003 (Phase 0 live tests) — IN PROGRESS 2026-11-13 (Copilot back)
+
+**Live run (2026-11-13 ~21:25Z on):** the main session drives Copilot in the Claude Desktop built-in browser pane, signed in as the test user (Spaarke Demo Access, non-admin; the owner signed in, never enter credentials). Spaarke MCP source is on by default for this user. **Chat done and recorded in `notes/phase0-results.md`:** T1 dark ✅, Size 1/3/6 MB ✅, T3 (no host card for widget writes), T4 (per-call card with params; options Allow once / Always allow), T6 13/15 + 0/5 controls, T7 ❌ not honoured, T9 ✅, E1 ✅, T12 Chat side-observation. **Next, in order:** E5 (`@`), E4 (prompt gallery), T6b (toggle Spaarke MCP source OFF via + › Change data sources, prompts 1/3/5/7/9, then turn it back ON), then Cowork (T1, Size, T3, T4, T7, E2, T8, T12; T10 needs owner OK — creates a saved skill), then Word / Outlook T1. Not without the owner: "Always allow", T10, T13/T2/T14 admin steps, T5 memory. Evidence = browser-pane observations (no files); note the dev BFF SHA `b100effac3`. Never use `python -` in Bash (it hung once here 2026-11-13, stopped).
 
 | Field | Value |
 |-------|-------|
