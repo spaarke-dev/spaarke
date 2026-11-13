@@ -366,17 +366,25 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [MemberData(nameof(EveryPathAndInvoiceReference))]
-    public async Task OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatterThePersonCannotRead_IsRefusedReadFailed_AndNothingIsWritten(
+    public async Task OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatterThePersonCannotRead_IsRefusedReadFailed_WithoutReadingThatInvoiceAsTheApp(
         GenericPath path, string table, string invoiceColumn)
     {
-        ThePersonReads(readable: false);
+        // The person reads the row itself; only the invoice it is given is one they cannot read.
+        _personRows = (t, id) => t == table && id == FamilyRow
+            ? new Entity(table, FamilyRow) { ["sprk_regardingmatter"] = MatterRef(Matter) }
+            : null;
+        var app = ChildWorld(table, invoiceColumn);
 
         var outcome = await RunAsync(path, table, FamilyRow, Lookups((invoiceColumn, new EntityReference("sprk_invoice", OtherInvoice))), NoPlain,
-            ChildWorld(table, invoiceColumn).Object, playbookActsAs: Caller);
+            app.Object, playbookActsAs: Caller);
 
         outcome.Code.Should().Be(ExpectedChildRefusal(path, table, InvoiceFamilyCoreRecordGuard.ReadFailedCode, outcome), outcome.Message);
         NoGuid(outcome);
         NothingWritten();
+        app.Verify(a => a.RetrieveAsync("sprk_invoice", OtherInvoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "an invoice the person cannot read is never compared for them");
+        if (outcome.Code == InvoiceFamilyCoreRecordGuard.ReadFailedCode)
+            _personRowReads.Should().Equal($"sprk_invoice:{OtherInvoice:D}");
     }
 
     [Theory]
@@ -414,5 +422,132 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         outcome.Code.Should().BeNull(outcome.Message);
         _personRowReads.Should().BeEmpty();
         WrittenOnce(Approval, FamilyRow);
+    }
+
+    // ── Fix round 3: the stored invoice of a row whose core lookup the write sets, and an invoice's superseded invoice ──
+
+    [Theory]
+    [MemberData(nameof(EveryPathAndInvoiceReference))]
+    public async Task OnAPersonsRun_ARowFiledUnderItsInvoicesMatterWhoseStoredInvoiceThePersonCannotRead_IsRefusedReadFailed_AndNothingIsWritten(
+        GenericPath path, string table, string invoiceColumn)
+    {
+        ThePersonReads(readable: false);
+
+        var outcome = await RunAsync(path, table, FamilyRow, Lookups(("sprk_regardingmatter", MatterRef(Matter))), NoPlain,
+            ChildWorld(table, invoiceColumn, storedInvoice: Invoice).Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(ExpectedChildRefusal(path, table, InvoiceFamilyCoreRecordGuard.ReadFailedCode, outcome), outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryPathAndInvoiceReference))]
+    public async Task OnAPersonsRun_ARowFiledUnderItsInvoicesMatterWhoseStoredInvoiceThePersonReads_IsWritten(
+        GenericPath path, string table, string invoiceColumn)
+    {
+        ThePersonReads(readable: true);
+
+        var outcome = await RunAsync(path, table, FamilyRow, Lookups(("sprk_regardingmatter", MatterRef(Matter))), NoPlain,
+            ChildWorld(table, invoiceColumn, storedInvoice: Invoice).Object, playbookActsAs: Caller);
+
+        if (CoreLookupIsAnAccessColumnOn(path, table) && outcome.Code == InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode)
+        {
+            NothingWritten();
+            return;
+        }
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        _personRowReads.Should().Equal($"sprk_invoice:{Invoice:D}");
+        WrittenOnce(table, FamilyRow);
+    }
+
+    /// <summary>An invoice of <see cref="Matter"/>, the stored invoice's own matter, that an invoice may supersede.</summary>
+    private static readonly Guid SupersededOfTheSameMatter = Guid.Parse("02200000-0000-4000-8000-0000000000e1");
+
+    private static Mock<IGenericEntityService> InvoiceWithASupersededInvoiceOfTheSameMatter()
+    {
+        var app = InvoiceUnderAMatter();
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", SupersededOfTheSameMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_invoice", SupersededOfTheSameMatter) { ["sprk_matter"] = MatterRef(Matter) });
+        return app;
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
+    public async Task OnAPersonsRun_AnInvoiceGivenASupersededInvoiceOfItsMatterThePersonCannotRead_IsRefusedReadFailed_AndNothingIsWritten(
+        GenericPath path)
+    {
+        _personRows = (table, id) => table == "sprk_invoice" && id == Invoice
+            ? new Entity("sprk_invoice", Invoice) { ["sprk_matter"] = MatterRef(Matter) }
+            : null;
+
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice,
+            Lookups((InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, new EntityReference("sprk_invoice", SupersededOfTheSameMatter))), NoPlain,
+            InvoiceWithASupersededInvoiceOfTheSameMatter().Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
+    public async Task OnAPersonsRun_AnInvoiceGivenASupersededInvoiceOfItsMatterThePersonReads_IsWritten(GenericPath path)
+    {
+        _personRows = (table, id) => table == "sprk_invoice" && (id == Invoice || id == SupersededOfTheSameMatter)
+            ? new Entity("sprk_invoice", id) { ["sprk_matter"] = MatterRef(Matter) }
+            : null;
+
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice,
+            Lookups((InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn, new EntityReference("sprk_invoice", SupersededOfTheSameMatter))), NoPlain,
+            InvoiceWithASupersededInvoiceOfTheSameMatter().Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        _personRowReads.Should().Equal($"sprk_invoice:{SupersededOfTheSameMatter:D}");
+        WrittenOnce("sprk_invoice", Invoice);
+    }
+
+    // ── Fix round 3: the person's read of the invoice faults, or the request is cancelled during it ──────────────────
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
+    public async Task OnAPersonsRun_WhenThePersonsReadOfTheInvoiceFaults_IsRefusedReadFailed_AndNothingIsWritten(GenericPath path)
+    {
+        _personRows = (_, _) => throw new TimeoutException("socket 10.0.0.12 timed out");
+
+        var outcome = await RunAsync(path, Approval, FamilyRow, Lookups(("sprk_invoice", new EntityReference("sprk_invoice", Invoice))), NoPlain,
+            ChildWorld(Approval, "sprk_invoice").Object, playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, outcome.Message);
+        outcome.Message.Should().NotContain("10.0.0.12");
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
+    public async Task OnAPersonsRun_ACancellationDuringThePersonsReadOfTheInvoice_IsRethrown_AndNothingIsWritten(GenericPath path)
+    {
+        using var cancel = new CancellationTokenSource();
+        _personRows = (_, _) =>
+        {
+            cancel.Cancel();
+            throw new OperationCanceledException(cancel.Token);
+        };
+
+        var act = () => RunAsync(path, Approval, FamilyRow, Lookups(("sprk_invoice", new EntityReference("sprk_invoice", Invoice))), NoPlain,
+            ChildWorld(Approval, "sprk_invoice").Object, playbookActsAs: Caller, ct: cancel.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        NothingWritten();
     }
 }

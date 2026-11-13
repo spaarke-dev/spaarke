@@ -40,7 +40,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         return app;
     }
 
-    /// <summary>A submission's core lookups are access columns on the two app-only handlers (refused there before the guard).</summary>
+    /// <summary>
+    /// A submission's core lookups and its <c>sprk_invoice</c> are access columns for the playbook identity on the two app-only
+    /// handlers (the playbook update and the output orchestrator), which refuse a write of them before the guard.
+    /// </summary>
     private static bool CoreLookupIsAnAccessColumnOn(GenericPath path, string table) =>
         table == "sprk_invoicesubmission" && path != GenericPath.FieldMappingPush;
 

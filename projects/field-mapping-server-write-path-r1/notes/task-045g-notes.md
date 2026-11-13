@@ -211,17 +211,8 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
   `ARowWhoseInvoiceIsCleared_IsNotRefusedByTheseRules` and `UpdateRecordTool_ASubmissionsOrExternalIdentifiersInvoiceCleared_IsPatched`.
   - The child-record PATCH and the decision route do not write these two tables (`ChildRecordEndpoints.RefileTables`), and
     the push never clears a lookup (a null source value is skipped), so neither has a 3b cell.
-  - A create of an approval or a correction with no invoice is admitted today (the create's rule compares an invoice only
-    when one is named). Not changed: the rule's code and text speak of clearing an existing row's invoice.
+  - Rule 3b applies to updates; the create rule compares an invoice when one is named.
   - On a person's run, a 3b refusal is decided again on the row as the person reads it, as for rule 3.
-- **Write identity (for #2799).** The rule checks are a separate step from the write on every path; the write's identity can
-  change without moving them:
-  - push: check `FieldMappingEndpoints.cs:1477`, write `:1583` (`UpdateExistingAsync`);
-  - playbook update: check `UpdateRecordActionCore.cs:251`, write `:314`;
-  - output orchestrator: check `DataverseUpdateHandler.cs:139`, write `:316`;
-  - `InvoiceFamilyCoreRecordGuard.UpdateExistingAsync` (`InvoiceFamilyCoreRecordGuard.cs:1043`) holds no rule check, only the
-    update-only write;
-  - chat tool and child-record PATCH: check `OwnedChildWrite.cs:2348` (`CheckInvoiceFamilyAsync`), caller's PATCH `:2471`.
 - **No new writer.** 045g adds no code that writes an invoice-family core lookup or `sprk_billingevent.sprk_invoice`. It
   removes one: the Create Matter wizard's invoice re-file.
 - **Text (F4).** The work-assignment cycle wording and the line-invoice reasons in `ParentLineage.cs` and
@@ -277,6 +268,40 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
 - **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11851 passed, 4 skipped; ebilling
   filters 8404 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the two changed .cs files.
 
+## Fix round 3
+
+- **Rule.** On a person's run of the push, the playbook update or the output orchestrator, the one other invoice a rule
+  compares the write with is read AS THAT PERSON before any rule compares it:
+  - an invoice the patch sets: an invoice's `sprk_supersedesinvoice` (added this round), or the invoice of a line, an
+    approval, a submission, a correction or an external identifier (round 2);
+  - the STORED invoice of such a row (not an invoice) whose core lookup the patch writes, when the patch leaves that
+    invoice as stored (added this round).
+  One the person cannot read (403, 404, no row, a fault) is `invoice_family_read_failed` and nothing is written, whether
+  or not its core record matches. Decided once, in `InvoiceFamilyCoreRecordGuard.CheckGenericUpdateCoreAsync`
+  (`InvoiceComparedOnAPersonsRun`). A run with no person is unchanged; cancellation is rethrown.
+- **The push and cancellation.** A cancelled request stops the push: an `OperationCanceledException` with the request's
+  token cancelled is rethrown from the per-child loop, never counted as one child's failure.
+- **Tests** (`InvoiceFamilyGenericUpdatePathTests.FixedAfterCreate`, every generic path):
+  - superseded invoice of the same matter the person cannot read → read_failed (must fire); one they read → written,
+    reading only that invoice as the person (must not fire);
+  - a row whose core lookup is set to its stored invoice's own matter, stored invoice unreadable → read_failed (must fire,
+    every family table with an invoice); readable → written (must not fire);
+  - the person's read faults → read_failed, no fault text; the request is cancelled during it → rethrown; nothing written;
+  - test (b) now has the person read the row but not the invoice it is given, and checks that invoice is never read as the
+    app;
+  - chat tool: `UpdateRecordTool_AnInvoicesCoreRecordCleared_IsRefusedCoreRecordFixed_AndNothingIsPatched`.
+- **Each new must-fire, run once with its change off** (temporary local edits, files restored byte-identical):
+  - superseded invoice read off: must-fire **3 of 3 fail**; must-not-fire 3 of 3 fail on its read assertion;
+  - stored-invoice read off: must-fire **10 of 12 fail** (the 2 that pass are the submission cells on the playbook update
+    and the orchestrator, refused first by those handlers' access-column rule); must-not-fire 10 of 12 fail on its read
+    assertion;
+  - the whole person read off: test (b) **10 of 12 fail** (same 2 submission cells); fault **3 of 3 fail**; cancel
+    **3 of 3 fail**;
+  - the push loop's rethrow off: the push cancel cell **1 of 1 fails**;
+  - rule 1's clear branch off: the chat-tool clear cell **1 of 1 fails**.
+- **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11888 passed, 4 skipped; ebilling
+  filters 8440 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the six changed .cs files.
+
 ## Known limits
 
 - **K1.** D-96's app-only line count still runs for an invoice update that writes its core lookup with the record it
@@ -298,5 +323,4 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
   - `tests/integration/seam/RecordCreation/RecordCreationServicePipelineSeamTests.WriterOnlyTables.cs:93`;
   - `tests/unit/Sprk.Bff.Api.Tests/Services/Finance/InvoiceApprovalLineOriginTests.cs:182-191` (an ebilling-r1 test that
     builds the rows directly; it still passes).
-- **K8.** Rules 1-3 hold on every BFF write path. Locking an invoice's core lookups and `sprk_billingevent.sprk_invoice`
-  for writes made outside the BFF is tracked by unified-access-control-r2 as #2799.
+- **K8.** The rules are decided on every BFF write path; the field-security lock on these columns is tracked as #2799.

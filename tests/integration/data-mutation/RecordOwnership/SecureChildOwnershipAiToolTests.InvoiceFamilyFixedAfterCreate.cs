@@ -140,6 +140,20 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Patches.Should().ContainSingle();
     }
 
+    // ── Rule 1: an invoice's core record is never cleared ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateRecordTool_AnInvoicesCoreRecordCleared_IsRefusedCoreRecordFixed_AndNothingIsPatched()
+    {
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+
+        var result = await UpdateRecord("sprk_invoice", GuardInvoice, ("sprk_matter", JsonSerializer.SerializeToElement<object?>(null)));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode, result.ErrorMessage);
+        _user.Patches.Should().BeEmpty();
+    }
+
     // ── Rule 3 ────────────────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]

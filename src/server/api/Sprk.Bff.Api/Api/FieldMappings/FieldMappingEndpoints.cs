@@ -1772,6 +1772,10 @@ public static class FieldMappingEndpoints
                     Error = RefileRefusedMessage(unresolved.RefusalCode),
                 });
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // the request was cancelled: the push stops; a cancellation is never one child's failure
+            }
             catch (Exception ex)
             {
                 // #1437 / ADR-019 (task 040): the response names the row by id only, in a FIXED string. The exception's message can

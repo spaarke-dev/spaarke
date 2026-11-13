@@ -58,7 +58,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     private async Task<PathOutcome> RunAsync(
         GenericPath path, string table, Guid id,
         IReadOnlyDictionary<string, EntityReference?> lookups, IReadOnlyDictionary<string, object?> plain,
-        IGenericEntityService? app, Guid? playbookActsAs = null)
+        IGenericEntityService? app, Guid? playbookActsAs = null, CancellationToken ct = default)
     {
         switch (path)
         {
@@ -71,7 +71,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                     {
                         // Master merge (#2257): a person's run writes its output mapping AS that person (playbookActsAs).
                         await Handler(app!).UpdateAsync(
-                            table, id, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, CancellationToken.None, playbookActsAs);
+                            table, id, fields, Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, ct, playbookActsAs);
                         return new PathOutcome(null, null);
                     }
                     catch (RecordOwnerUnresolvedException refused)
@@ -97,7 +97,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                         await CoreOver(app).UpdateAsync(
                             new UpdateRecordActionInput(table, id, FieldMappings: null, LegacyFields: legacy, Lookups: rendered,
                                 ImpersonateSystemUserId: playbookActsAs),
-                            CancellationToken.None);
+                            ct);
                         return new PathOutcome(null, null);
                     }
                     catch (RecordOwnerUnresolvedException refused)
@@ -158,7 +158,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                     var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
                 Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                         _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
-                        NullLogger.Instance, CancellationToken.None, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app,
+                        NullLogger.Instance, ct, scopes: PushScopes(), lookupBinds: binds, appOnlyEntities: app,
                         callerQuery: CallerQuery());
                     if (failed == 0)
                         return new PathOutcome(null, null);
