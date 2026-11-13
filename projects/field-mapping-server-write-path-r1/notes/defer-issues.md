@@ -274,3 +274,12 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | F1, follow-up task 022c (unified-access-control-r2, round 90: fixed promptly, right after 022b merges) |
 | **Failure** | Rule: values mapped from a source whose `sprk_accesspermission` is Restricted, or cannot be read, are written only into a row that is Restricted. 022b applies it to the create. Repair mode (`RecordCreationService.Repair.cs`) and the field-mapping push (`FieldMappingPushSourceGate`) apply the secure copy gate; 022c applies the same Restricted predicate there. |
 | **Status** | Fixed on the work branch by task 022c (merge 74556c46df, 2026-11-12; UAC-r2 PASS). #2738 closes when it reaches master. |
+## DI-028 — `ExternalAccess:CustomerBusinessUnitId` is required, and names the customer's business unit
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-12, task 052b; unified-access-control-r2 condition 4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2771 |
+| **Class** | K, deployment dependency (customer-provisioning-orchestration-r1 and the deployment guide) |
+| **Failure** | Rule: a chat-created contact, and a contact the repair pass re-owns, is owned by the default team of the unit in `ExternalAccess:CustomerBusinessUnitId`. The setting is required where those run (unset: the chat create is refused with `record_owner_customer_contact_team_unresolved`, and the pass skips the contact table) and names the customer's business unit, never the Secure Record unit. Add it to the deployment guide and the provisioning flow. |
+| **Status** | Open |

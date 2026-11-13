@@ -1104,3 +1104,16 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
 - **045d, a derive failure (main session):** when the invoice-family re-derive fails (`ReadFailedCode`, `ResolverFieldsIncompleteCode` or `RecordNotFoundCode`), the write is refused through the existing `InvoiceFamilyPreWrite` refusal mapping. The refusal contract is unchanged (NFR-07).
   - Reason: the regarding pair decides filing, so a row whose core lookup changed is never written without its five fields (fail closed).
   - UAC-r2 and ebilling-r1 review the diff.
+
+## 2026-11-12 — Owner answers: sync-mode applied on dev, PR #2768 merge when green, 045d option (b)
+
+- **Sync-mode on dev (owner: "Apply on dev"):** `Set-FieldMappingRuleSyncMode.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -Verify` reported 36 changed, 0 failed, VERIFY PASS, exit 0. Assigned-To, display-copy and filing rules are One-time; plain data rules stay Manual Refresh. Other environments still need the owner's go.
+- **PR #2768 (022b + 022c, owner: "Merge when green"):** auto-merge is on, with a merge commit.
+- **045d, a blank name or number (owner: option (b), "write what it has"):** on the generic create and update paths, the record type, the id and the URL are always written; the name and the number are written when the record has them. A blank name or number no longer refuses. A missing catalog row, a missing record or a read fault still refuses through the `InvoiceFamilyPreWrite` mapping. The submission writers keep today's all-five rule unchanged.
+- **052b review (Opus):** the fix round covers:
+  - a re-own is refused for a table whose child relationships cascade on Assign (the allow-list starts empty);
+  - the contact owner rule applies only after the secure decision (a secure parent keeps today's answer);
+  - fault outcomes retry;
+  - an unconfigured customer team skips the contact table without moving its watermark.
+  
+  unified-access-control-r2 confirmed the resolver change with four conditions, all in that round. The deployment dependency is DI-028 (#2771).
