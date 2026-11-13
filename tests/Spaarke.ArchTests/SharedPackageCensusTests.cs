@@ -94,9 +94,7 @@ public class SharedPackageCensusTests
         new CensusEntry("@spaarke/ai-outputs", "Spaarke.AI.Outputs", PackageStatus.Grandfathered, "ADR-012",
             "AI output-pane and source-pane widgets and their registries. Its boundary with the sanctioned "
             + "@spaarke/ai-widgets package has not been assessed."),
-        new CensusEntry("@spaarke/ai-context", "Spaarke.AI.Context", PackageStatus.Grandfathered, "ADR-012",
-            "AI context providers, service clients and hooks with a single consumer, so it fails the "
-            + "cross-surface reuse test as it stands."),
+        // @spaarke/ai-context: retired 2026-11-13; its types moved to @spaarke/ai-widgets (src/types/aiContext.ts).
         new CensusEntry("@spaarke/legal-workspace", "Spaarke.LegalWorkspace", PackageStatus.Grandfathered, "ADR-012",
             "Source-only re-export boundary for the LegalWorkspace section registry (dataset-grid-framework-r2 "
             + "FR-10), with a single consumer; it exists to break a source-alias trap."),

@@ -5,7 +5,7 @@
 // imports, type mismatches) in surface-owned files (src/**) before Vite/Webpack
 // bundling, without blocking on pre-existing errors in shared libs at ../../client/shared.
 //
-// Why scoped: shared libs (@spaarke/ai-context, @spaarke/ai-outputs, @spaarke/ai-widgets,
+// Why scoped: shared libs (@spaarke/ai-outputs, @spaarke/ai-widgets,
 // @spaarke/events-components, @spaarke/ui-components) have ~30+ pre-existing
 // hygiene + import-path issues. Fixing those is Phase B follow-up. Until then,
 // this gate fails ONLY on errors in the surface's own src/** so the bug class

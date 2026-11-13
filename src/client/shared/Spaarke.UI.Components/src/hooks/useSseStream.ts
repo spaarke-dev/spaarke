@@ -29,19 +29,19 @@
  * Two prior implementations were merged here:
  *   1. SprkChat/hooks/useSseStream.ts — mature, feature-complete, but had duplicated
  *      event dispatch logic in main loop AND remainder-buffer loop (copy-paste drift risk).
- *   2. Spaarke.AI.Context/src/hooks/useSseStream.ts — refactored with processEvent()
+ *   2. the former ai-context shared package's hooks/useSseStream.ts — refactored with processEvent()
  *      dispatcher to eliminate the duplication, but lacked parsePaneEvent / setOnPaneEvent
  *      support needed by SprkChat/ChatPanel.
  * Decision: adopt the AI.Context processEvent() dispatcher structure (eliminates duplicate
  * event handling blocks) and extend it with the full SprkChat feature set
- * (parsePaneEvent, setOnPaneEvent, IAiPaneEvent). The AI.Context local copy is deleted;
- * its hooks/index.ts re-exports parseSseEvent from @spaarke/ui-components.
+ * (parsePaneEvent, setOnPaneEvent, IAiPaneEvent). The AI.Context copy was deleted, and the
+ * whole ai-context shared package was retired on 2026-11-13.
  *
  * @see ADR-013 — AI Architecture
  * @see ADR-022 — React 16 APIs only (useState, useEffect, useRef, useCallback)
  * @see ChatEndpoints.cs — SSE format: data: {"type":"token","content":"..."}\n\n
  * @see buildBffApiUrl() (@spaarke/auth) — MUST use to construct streaming URL
- *      (the @spaarke/ai-context ChatApiClient this used to cite was deleted 2026-10-03, C-14)
+ *      (the ai-context package ChatApiClient this used to cite was deleted 2026-10-03, C-14)
  */
 
 import { useState, useRef, useCallback } from 'react';

@@ -33,7 +33,7 @@ import type {
   SafetyPaneEvent,
   ConversationPaneEvent,
 } from '../events/PaneEventTypes';
-import type { AiPaneEvent } from '@spaarke/ai-context';
+import type { AiPaneEvent } from '../types/aiContext';
 
 // ---------------------------------------------------------------------------
 // Mock @spaarke/auth — AiSessionProvider imports buildBffApiUrl + useAuth and

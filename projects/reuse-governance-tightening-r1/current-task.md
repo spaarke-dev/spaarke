@@ -12,7 +12,9 @@
 - Task 020: weekly `duplication-sweep` job in `nightly-health.yml` (Mon 07:00 UTC cron, dispatch input `duplication_sweep_only`), `.jscpd.json`. Verified by dispatch runs 43289750101 and 43293619731: 38 s, artifact uploaded, 17 new / 192 old cross-area clusters, status failing in dry-run. The first master run after merge will open the `weekly/duplication-sweep` alert for those 17 (intended).
 
 **Done (10/19)**: + 030 (2026-11-13). Owner approved all 9 package decisions ("Approve all"); `notes/package-reviews.md` (findings P-1..P-14: 8 Medium, 6 Low, 0 High), `notes/decisions.md` row.
-**Active task**: none. **Next**: **031** ai-context types → `@spaarke/ai-widgets`, retire the package (FULL, sonnet/high; touches `.claude/adr/ADR-012` census + `SharedPackageCensusTests` — check PR #935 first). Then 032 legal-workspace, 033 document-operations (serial), 034 (file the other six + P-findings; can run alongside), 035 DEV deploy (owner OK), 040, 043, 080, 090.
+**Done (11/19)**: + 031 (2026-11-13). `@spaarke/ai-context` retired: types in ai-widgets `src/types/aiContext.ts`; census row + test entry removed; CI `client-typecheck`, deploy trigger, `Build-AllClientComponents.ps1`, `master-deploy` skill fixed. All builds/tests green (`notes/031-ai-context.md`). Item-4 changes stay on the branch — no PR yet (owner decides PR shape; merging auto-deploys SpaarkeAi to DEV).
+**Active task**: none. **Next**: **032** legal-workspace facade retire (FULL; check PR #935), then 033 document-operations (serial), 034 (file the other six + P-findings; can run alongside), 035 DEV deploy (owner OK), 040, 043, 080, 090.
+- Worktree now has node_modules/dist for all 13 shared libs + SpaarkeAi (from the 031 build) — reuse them for 032/033 verification.
 **Open, reported to owner**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
 - ISS-003 #2713 — done (PR #2751), closed.

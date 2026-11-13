@@ -30,7 +30,7 @@ import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
 import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
-import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { WorkspacePaneEvent, IChatSession } from "@spaarke/ai-widgets";
 // task 033 (FR-17 wizard→review auto-run bridge): the typed compose-seed shape the wizard hand-off
 // listener narrows `widget_load{widgetType:'compose'}` payloads to (composeSessionId / analysisId /
 // subDomain / autoRunReview — declared additively on the SAME seed every compose door already uses).
@@ -43,7 +43,6 @@ import type {
   ResolvedLookup,
   ConsumerChip,
 } from "@spaarke/ui-components";
-import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 // Compose three-pane coordination — ASSISTANT leg (task 104 / E2E-R5). Typed
 // receivers for Flow 2 (compose_selection_offer) + Flow 4 (compose_context_offer).

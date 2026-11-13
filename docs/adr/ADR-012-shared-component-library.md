@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** (Amended) |
 | Date | 2025-10-03 |
-| Updated | 2026-11-10 |
+| Updated | 2026-11-13 |
 | Authors | Spaarke Engineering |
 | Sprint | Sprint 5 - Universal Dataset PCF |
 
@@ -135,7 +135,7 @@ In this codebase the risk is **over-promotion**: feature areas becoming their ow
    - `@spaarke/auth`: ADR-028.
    - `@spaarke/notifications`: ADR-047.
    - `@spaarke/ai-widgets`: ADR-030 and ADR-031.
-3. **Grandfathered — under review** (9): `@spaarke/sdap-client`, `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`, `@spaarke/compose-components`, `@spaarke/document-operations`, `@spaarke/ai-outputs`, `@spaarke/ai-context`, `@spaarke/legal-workspace`.
+3. **Grandfathered — under review** (9 at the census; 8 since 2026-11-13): `@spaarke/sdap-client`, `@spaarke/smart-todo-components`, `@spaarke/communication-components`, `@spaarke/daily-briefing-components`, `@spaarke/compose-components`, `@spaarke/document-operations`, `@spaarke/ai-outputs`, `@spaarke/legal-workspace`. (`@spaarke/ai-context` was retired on 2026-11-13; see "Census changes" below.)
    - They may be used and extended.
    - Each one is later either sanctioned by a further amendment or consolidated into a sanctioned package.
    - This list is a ratchet baseline. It may shrink, and nothing is added to it.
@@ -157,6 +157,14 @@ Each detector has negative and positive controls, and the maintenance procedure 
 
 - Adding a shared package is now a visible, owner-approved decision, not a side effect of a feature project.
 - The nine grandfathered packages are an explicit review backlog. Resolving them is out of scope for this amendment.
+
+### Census changes
+
+Each change below was approved by the owner in `projects/reuse-governance-tightening-r1/notes/package-reviews.md` and lands with its census-table row and `SharedPackageCensusTests` entry in the same change.
+
+| Date | Package | Change |
+|---|---|---|
+| 2026-11-13 | `@spaarke/ai-context` | Retired. The package held only six types (`EntityContext`, `EntityType`, `StreamingState`, `AiPaneEvent`, `StreamingCallbacks`, `IChatSession`); they moved to `@spaarke/ai-widgets` (`src/types/aiContext.ts`, exported from the barrel), whose `AiSessionProvider` was their main consumer. |
 
 ---
 

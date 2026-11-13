@@ -12,7 +12,7 @@
 | 020 | Weekly jscpd duplication sweep in nightly-health | 3 | ✅ [done] | 001, 041 | Group B | STANDARD | sonnet / high |
 | 021 | Reviewer checks: capability duplication (F2) and requirements trace (F4) | 3 | ✅ [done] | 001 | — (.claude, main) | STANDARD | opus / high |
 | 030 | Decision records for the 9 grandfathered packages | 4 | ✅ [done] | none | — (main, owner gate) | STANDARD | opus / high |
-| 031 | Execute the decision for @spaarke/ai-context | 4 | 🔲 [open] | 030 | — (.claude + shared file) | FULL | sonnet / high |
+| 031 | Execute the decision for @spaarke/ai-context | 4 | ✅ [done] | 030 | — (.claude + shared file) | FULL | sonnet / high |
 | 032 | Execute the decision for @spaarke/legal-workspace | 4 | 🔲 [open] | 031 | — (.claude + shared file) | FULL | sonnet / high |
 | 033 | Execute the decision for @spaarke/document-operations | 4 | 🔲 [open] | 032 | — (.claude + shared file) | FULL | opus / high |
 | 034 | File the six remaining package actions and report defects | 4 | 🔲 [open] | 030 | Group C | MINIMAL | sonnet / medium |

@@ -111,6 +111,21 @@ export type {
 export * from './types/event-types';
 
 // ---------------------------------------------------------------------------
+// Types — AI session context (moved from the retired ai-context shared
+// package, 2026-11-13): host entity context, streaming and pane-event shapes,
+// chat-session identity.
+// ---------------------------------------------------------------------------
+
+export type {
+  EntityType,
+  EntityContext,
+  StreamingState,
+  AiPaneEvent,
+  StreamingCallbacks,
+  IChatSession,
+} from './types/aiContext';
+
+// ---------------------------------------------------------------------------
 // Registries: WorkspaceWidgetRegistry and ContextWidgetRegistry
 // ---------------------------------------------------------------------------
 

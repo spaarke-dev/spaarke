@@ -34,7 +34,7 @@
  *   </AiSessionProvider>
  * </PaneEventBusProvider>
  *
- * (The replaced R1 provider in Spaarke.AI.Context was deleted in Track-B batch 3.)
+ * (The replaced R1 provider in the former ai-context shared package was deleted in Track-B batch 3.)
  * @see PaneEventBus.ts — multi-subscriber typed bus
  * @see usePaneEvent — hook for pane components to subscribe to channels
  * @see useDispatchPaneEvent — hook used internally to route SSE events
@@ -47,7 +47,7 @@
 import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { buildBffApiUrl, useAuth, type AuthenticatedFetchFn } from '@spaarke/auth';
 import { useDispatchPaneEvent } from '../events/useDispatchPaneEvent';
-import type { AiPaneEvent, EntityContext, StreamingCallbacks, StreamingState } from '@spaarke/ai-context';
+import type { AiPaneEvent, EntityContext, StreamingCallbacks, StreamingState } from '../types/aiContext';
 import type { WorkspacePaneEvent, ContextPaneEvent, SafetyPaneEvent } from '../events/PaneEventTypes';
 
 // ---------------------------------------------------------------------------

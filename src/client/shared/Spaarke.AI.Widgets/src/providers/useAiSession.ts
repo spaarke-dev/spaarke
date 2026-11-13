@@ -6,7 +6,7 @@
  * itself must be inside a PaneEventBusProvider). `initAuth(...)` from
  * @spaarke/auth must have been called before the provider mounts.
  *
- * Replaces the R1 standalone hook from @spaarke/ai-context (deleted). Key differences:
+ * Replaces the R1 standalone hook from the former ai-context shared package (deleted). Key differences:
  *  - No `subscribePaneEvents` — pane components use usePaneEvent() instead.
  *  - Exposes `turnCount` (number of completed turns) instead of raw tokenCount.
  *  - `entityContext` is provided by the host shell, not resolved internally.

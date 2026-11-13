@@ -292,7 +292,7 @@ jobs:
               }
             }
             // tsconfig `paths` that point INTO a sibling's dist/ are build-time
-            // dependencies (e.g. AI.Widgets -> ../Spaarke.AI.Context/dist/index.d.ts):
+            // dependencies (e.g. AI.Widgets -> ../Spaarke.Auth/dist/index.d.ts):
             // that sibling must be built before this package's own `tsc` runs.
             for (const f of fs.readdirSync(dir).filter((n) => /^tsconfig[\w.-]*\.json$/.test(n))) {
               const text = fs.readFileSync(path.join(dir, f), 'utf8');

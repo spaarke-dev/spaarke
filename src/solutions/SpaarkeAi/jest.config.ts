@@ -45,7 +45,6 @@ const config: Config = {
     // source so component tests can import the widgets by package name.
     '^@spaarke/compose-components$': '<rootDir>/../../client/shared/Spaarke.Compose.Components/src/index.ts',
     '^@spaarke/compose-components/(.*)$': '<rootDir>/../../client/shared/Spaarke.Compose.Components/src/$1',
-    '^@spaarke/ai-context$': '<rootDir>/../../client/shared/Spaarke.AI.Context/src/index.ts',
     '^@spaarke/ai-outputs$': '<rootDir>/../../client/shared/Spaarke.AI.Outputs/src/index.ts',
     // spaarke-notification-spine-r1 task 051: `@spaarke/notifications` ships ESM `dist`
     // (Jest can't transform it) and drives a live SignalR connection. ConversationPane

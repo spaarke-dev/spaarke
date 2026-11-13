@@ -5,8 +5,6 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@spaarke/ai-context": ["../../client/shared/Spaarke.AI.Context/src/index.ts"],
-      "@spaarke/ai-context/*": ["../../client/shared/Spaarke.AI.Context/src/*"],
       "@spaarke/ai-outputs": ["../../client/shared/Spaarke.AI.Outputs/src/index.ts"],
       "@spaarke/ai-outputs/*": ["../../client/shared/Spaarke.AI.Outputs/src/*"],
       "@spaarke/auth": ["../../client/shared/Spaarke.Auth/src/index.ts"],

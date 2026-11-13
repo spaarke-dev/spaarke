@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (Amended 2026-11-10)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-11-10 (Amendment: enumerated shared-package census — see below; previous: 2026-07-12 `@spaarke/visuals`)
+> **Last Updated**: 2026-11-13 (census: `@spaarke/ai-context` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
 
 ---
 
@@ -73,9 +73,11 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 | `@spaarke/compose-components` | `Spaarke.Compose.Components` | Grandfathered — under review | TipTap Compose workspace; TipTap may justify quarantine, not yet assessed against the three tests |
 | `@spaarke/document-operations` | `Spaarke.DocumentOperations` | Grandfathered — under review | Open-in-Word / download / delete hooks; abstracted I/O, the same contract as `@spaarke/ui-components` |
 | `@spaarke/ai-outputs` | `Spaarke.AI.Outputs` | Grandfathered — under review | AI output / source pane widgets; boundary with `@spaarke/ai-widgets` not yet assessed |
-| `@spaarke/ai-context` | `Spaarke.AI.Context` | Grandfathered — under review | AI context providers, clients, hooks; 1 consumer |
 | `@spaarke/legal-workspace` | `Spaarke.LegalWorkspace` | Grandfathered — under review | Source-only re-export boundary for the LegalWorkspace section registry (dataset-grid-framework-r2 FR-10); 1 consumer |
 <!-- shared-package-census:end -->
+
+**Census changes since 2026-11-10** (each one owner-approved in `projects/reuse-governance-tightening-r1/notes/package-reviews.md`):
+- 2026-11-13: `@spaarke/ai-context` retired. It held only six types; they moved to `@spaarke/ai-widgets` (`src/types/aiContext.ts`, exported from its barrel).
 
 ---
 

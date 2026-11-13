@@ -359,14 +359,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx tsc
 
-      - name: Install Spaarke.AI.Context deps
-        working-directory: src/client/shared/Spaarke.AI.Context
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.AI.Context
-        working-directory: src/client/shared/Spaarke.AI.Context
-        run: npx tsc
-
       - name: Install Spaarke.SdapClient deps
         working-directory: src/client/shared/Spaarke.SdapClient
         run: npm install --legacy-peer-deps --no-audit --no-fund

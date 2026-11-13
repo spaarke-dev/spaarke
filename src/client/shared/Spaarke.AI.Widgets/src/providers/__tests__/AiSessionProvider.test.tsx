@@ -32,7 +32,7 @@ import { AiSessionProvider, chatSessionKeyForContext } from '../AiSessionProvide
 import { useAiSession } from '../useAiSession';
 import type { AiSessionContextValue } from '../AiSessionProvider';
 import type { WorkspacePaneEvent, ContextPaneEvent, SafetyPaneEvent } from '../../events/PaneEventTypes';
-import type { AiPaneEvent } from '@spaarke/ai-context';
+import type { AiPaneEvent } from '../../types/aiContext';
 
 // ---------------------------------------------------------------------------
 // Mock @spaarke/auth — AiSessionProvider calls buildBffApiUrl + useAuth at
@@ -191,7 +191,7 @@ describe('AiSessionProvider — SSE routing to PaneEventBus', () => {
 
     const { result } = renderSession(bus);
 
-    // The AiPaneEvent type in @spaarke/ai-context does not include safety_annotation
+    // The AiPaneEvent type (types/aiContext.ts) does not include safety_annotation
     // as a first-class event type — it arrives as an unknown type via the SSE stream
     // and the provider's default branch logs a warning. However the task specification
     // maps safety_annotation to the safety channel. We test the routing via a cast
