@@ -163,12 +163,13 @@ public sealed class ProcedureDryRunPlanningContractTests
             return H.Rule(set, code, ProposalState.Accepted, current: true).Policy;
         }
 
-        public Guid Procedure(int status = ProcedureEntity.StatusActive)
+        public Guid Procedure(int status = ProcedureEntity.StatusActive, int area = RuleDomains.PolicyDomainBilling)
         {
             var p = new Entity(ProcedureEntity.Entity, Guid.NewGuid())
             {
                 [ProcedureEntity.NameColumn] = "Acme OCG",
                 [ProcedureEntity.StatusColumn] = new OptionSetValue(status),
+                [ProcedureEntity.AreaColumn] = new OptionSetValue(area),
             };
             H.Seed(p);
             return p.Id;
@@ -298,7 +299,7 @@ public sealed class ProcedureDryRunPlanningContractTests
         remove.AfterImages.Should().BeEmpty();
     }
 
-    public static TheoryData<string> Refusals() => new() { "retired-procedure", "duplicate-exclude", "not-in-force", "no-reason", "set-conflict", "no-override" };
+    public static TheoryData<string> Refusals() => new() { "retired-procedure", "non-billing-procedure", "duplicate-exclude", "not-in-force", "no-reason", "set-conflict", "no-override" };
 
     [Theory(DisplayName = "084d-1 F1: the plan refuses with the write's own status and code (it runs the write's checks)")]
     [MemberData(nameof(Refusals))]
@@ -315,6 +316,12 @@ public sealed class ProcedureDryRunPlanningContractTests
                 var assign = new ProcedureAssignmentRequest(retired, null, null, null);
                 plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, assign, Ct));
                 write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, assign, Caller, Ct));
+                break;
+            case "non-billing-procedure":
+                // EB-D-228: the plan refuses a Procedure of another area as the write does, so a preview never shows an assign the write refuses.
+                var otherArea = new ProcedureAssignmentRequest(w.Procedure(area: RuleDomains.PolicyDomainBilling + 1), null, null, null);
+                plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, otherArea, Ct));
+                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, otherArea, Caller, Ct));
                 break;
             case "duplicate-exclude":
                 (await service.ExcludeRuleAsync(Matter, MatterId, new RuleExcludeRequest(rule, "Waived", null), Caller, Ct)).Kind.Should().Be(RuleSetOutcomeKind.Done);
@@ -354,6 +361,10 @@ public sealed class ProcedureDryRunPlanningContractTests
 
         planned.Item1.Should().NotBe(RuleSetOutcomeKind.Done);
         planned.Should().Be(written);
+        if (refusal == "non-billing-procedure")
+        {
+            planned.Should().Be((RuleSetOutcomeKind.Refused, 409, ProcedureAssignmentService.CodeProcedureNotBilling));
+        }
     }
 
     private static (RuleSetOutcomeKind, int, string?) Of<T>(RuleSetOutcome<T> outcome) where T : class =>

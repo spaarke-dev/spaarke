@@ -254,6 +254,7 @@ public class ProcedureAssignmentService
     internal const string CodeDuplicate = "assignment.duplicate";
     internal const string CodeProcedureNotFound = "assignment.procedure_not_found";
     internal const string CodeProcedureRetired = "assignment.procedure_retired";
+    internal const string CodeProcedureNotBilling = "assignment.procedure_not_billing";
     internal const string CodeRuleNotFound = "assignment.rule_not_found";
     internal const string CodeSystemRule = "assignment.system_rule";
     internal const string CodeConcurrentEdit = "assignment.concurrent_edit";
@@ -268,6 +269,10 @@ public class ProcedureAssignmentService
     internal const string KindRuleChanged = "RuleChanged";
 
     internal const string DuplicateDetail = "This record already has an override for it. Remove that override first.";
+
+    /// <summary>EB-D-228: the detail of <see cref="CodeProcedureNotBilling"/>.</summary>
+    internal const string NotBillingDetail =
+        "Only a Procedure whose Area is Billing can be assigned, pinned or excluded for a record; a Procedure of another area never applies to its invoices.";
 
     /// <summary>The confirmation of a changed rule's removal (model 15 answer 2, as the Procedure retire words it).</summary>
     internal const string RemoveChangedWarning =
@@ -398,7 +403,7 @@ public class ProcedureAssignmentService
         }
 
         var procedure = await LoadByIdAsync(entities, ProcedureEntity.Entity, procedureId,
-            new[] { ProcedureEntity.NameColumn, ProcedureEntity.StatusColumn }, ct);
+            new[] { ProcedureEntity.NameColumn, ProcedureEntity.StatusColumn, ProcedureEntity.AreaColumn }, ct);
         if (procedure is null)
         {
             return (null, Refused<T>(StatusCodes.Status404NotFound, CodeProcedureNotFound, "The Procedure was not found."));
@@ -407,6 +412,14 @@ public class ProcedureAssignmentService
         if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired)
         {
             return (null, Refused<T>(StatusCodes.Status409Conflict, CodeProcedureRetired, "A retired Procedure cannot be assigned, pinned or excluded."));
+        }
+
+        // EB-D-228 (O-24): the resolver reads Billing-area Procedures only (ProcedureResolver.ReadProceduresAsync), so a row for any other area
+        // would never apply and would only look as if it did. A missing Area is not Billing (fail closed, as RuleSetService's draft check). The
+        // versions are not read: a Procedure with only Draft versions is still accepted, ahead of publication.
+        if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.AreaColumn)?.Value != RuleDomains.PolicyDomainBilling)
+        {
+            return (null, Refused<T>(StatusCodes.Status409Conflict, CodeProcedureNotBilling, NotBillingDetail));
         }
 
         var pinned = mode == ProcedureAssignmentEntity.ModePinned ? request.PinnedVersionId : null;
