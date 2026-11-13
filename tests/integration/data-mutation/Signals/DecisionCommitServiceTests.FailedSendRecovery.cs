@@ -1,5 +1,7 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -263,24 +265,148 @@ public sealed partial class DecisionCommitServiceTests
     }
 
     [Fact]
-    public async Task ARetryAfterThePlanReadWindow_OfASignalTheSystemClosed_IsAConflict_AndDoesNothing()
+    public async Task AnUnfinishedReview_FinishedAfterThePlanReadWindow_StillReclosesTheSignalTheTriggerClosed_Acted()
     {
+        // Fix round 1 (D-222): the window does not apply to a review whose writes landed; the person may take days to check Sent Items.
         var rig = new Rig();
         rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
         var review = PathBReview();
         await rig.CommitAsync(review);
         CloseByTheSystem(rig, TimeSpan.FromSeconds(33));
-        rig.Clock.Advance(TimeSpan.FromHours(5));
-        var log = rig.Log.Count;
+        rig.Clock.Advance(TimeSpan.FromDays(3));
+        rig.Executors["send-budget-inquiry"].Result = null;
 
         var retried = await rig.CommitAsync(review with { Retry = true });
 
-        retried.Status.Should().Be(DecisionCommitStatus.Conflict);
-        retried.ReasonCode.Should().Be(DecisionCommitReasons.SignalNotOpen, "a defined refusal the item explains");
-        ((Microsoft.AspNetCore.Http.IStatusCodeHttpResult)DecisionCommitEndpoints.ToHttp(retried, Http())).StatusCode.Should().Be(409);
-        rig.Log.Should().HaveCount(log, "nothing runs");
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        retried.Warnings.Should().Contain("reclosed_after_system_resolution");
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed, "the decision being finished is what resolved it");
+        rig.LinkedRecord(Primary).Should().Be(RecordId);
+        Count(rig, "execute:revise-budget").Should().Be(1);
+    }
+
+    // ── Fix round 1 (criterion 134): the unfinished review is reachable from the item, and nothing can start beside it ──────
+
+    [Fact]
+    public async Task ThePlanRead_ReturnsTheUnfinishedReview_ToItsOwner_AndPostingItBackFinishesIt()
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.Unknown);
+        var review = PathBReview();
+        await rig.CommitAsync(review);
+
+        var unfinished = await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None);
+
+        unfinished.Should().NotBeNull("the wizard reopened on the item resumes this review instead of starting another");
+        unfinished!.ReviewId.Should().Be(review.ReviewId);
+        unfinished.Review.Retry.Should().BeFalse();
+        unfinished.Review.SendChoice.Should().BeNull();
+        unfinished.Failure.Status.Should().Be(DecisionCommitStatus.Failed);
+        unfinished.Failure.Replayed.Should().BeTrue();
+        unfinished.Failure.Resumable.Should().BeTrue();
+        unfinished.Failure.SendChoiceRequired.Should().BeTrue("the client offers Send again / Record without sending from it");
+        unfinished.Failure.Landed.Should().Contain(new DecisionCommitRef("sprk_servicerequest", ServiceRequestId));
+        unfinished.Failure.Steps.Select(s => (s.Code, s.Status)).Should().Contain(("revise-budget", "Done"));
+        var plan = DecisionPlanResponse.From(Primary, DecisionLane.Decide, Guid.NewGuid(), new ResolvedDecisionPlan([], [], []), unfinished: unfinished);
+        plan.Unfinished.Should().BeSameAs(unfinished);
+
+        // The review as stored is posted back unchanged (same content hash) with the choice.
+        rig.Executors["send-budget-inquiry"].Result = null;
+        var finished = await rig.CommitAsync(unfinished.Review with { Retry = true, SendChoice = DecisionReview.SendAgain });
+
+        finished.Status.Should().Be(DecisionCommitStatus.Recorded, finished.Detail);
+        Count(rig, "execute:revise-budget").Should().Be(1);
+        rig.Executors["send-budget-inquiry"].Requests[1].Landed.Should().Equal(LandedServiceRequest);
+        (await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None)).Should().BeNull("a recorded review is finished");
+        (await rig.CommitAsync(PathBReview())).ReasonCode.Should().NotBe(DecisionCommitReasons.ReviewUnfinished, "nothing holds the item any more");
+    }
+
+    [Fact]
+    public async Task ANewReview_OnASignalWithAnUnfinishedOne_IsRefused409_AndRunsNothing()
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        await rig.CommitAsync(PathBReview());
+        var log = rig.Log.Count;
+
+        // An old client (or a reopened wizard that ignores the plan's unfinished review) starts a new review id.
+        var fresh = await rig.CommitAsync(PathBReview());
+
+        fresh.Status.Should().Be(DecisionCommitStatus.Conflict);
+        fresh.ReasonCode.Should().Be(DecisionCommitReasons.ReviewUnfinished);
+        ((Microsoft.AspNetCore.Http.IStatusCodeHttpResult)DecisionCommitEndpoints.ToHttp(fresh, Http())).StatusCode.Should().Be(409);
+        rig.Log.Should().HaveCount(log, "nothing runs: no second revision, no second service request");
+        Count(rig, "execute:revise-budget").Should().Be(1);
         rig.Records.Should().BeEmpty();
-        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionConditionCleared);
+    }
+
+    [Fact]
+    public async Task AnotherPerson_DoesNotGetTheUnfinishedReview_AndCannotStartANewOne()
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        var review = PathBReview();
+        await rig.CommitAsync(review);
+        var other = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim("tid", Tenant), new System.Security.Claims.Claim("oid", Guid.NewGuid().ToString("D"))], "test")),
+        };
+        other.Request.Headers.Authorization = "Bearer other-token";
+        var log = rig.Log.Count;
+
+        (await rig.Service().ReadUnfinishedAsync(other, Primary, CancellationToken.None)).Should().BeNull();
+        var theirs = await rig.CommitAsync(review, http: other);
+
+        theirs.ReasonCode.Should().Be(DecisionCommitReasons.ReviewUnfinished, "even the same review id from another person would run the landed writes again");
+        rig.Log.Should().HaveCount(log);
+    }
+
+    [Fact]
+    public async Task AFailureThatCannotBeResumed_HoldsNothing_MustNotFire()
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = DecisionActionOutcome.Failed("send-budget-inquiry", DecisionActionReasons.WriteFailed, "no",
+            written: [LandedServiceRequest]);
+        await rig.CommitAsync(PathBReview());
+
+        (await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None)).Should().BeNull("only a resumable failure is unfinished");
+        rig.Executors["send-budget-inquiry"].Result = null;
+        var next = await rig.CommitAsync(PathBReview());
+        next.ReasonCode.Should().NotBe(DecisionCommitReasons.ReviewUnfinished);
+    }
+
+    [Fact]
+    public async Task APointerThatCannotBeRead_RefusesANewReview_503_FailClosed()
+    {
+        var rig = new Rig();
+        rig.LedgerStore = new UnfinishedFaultLedger(rig.Ledger);
+        var log = rig.Log.Count;
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.Log.Should().HaveCount(log);
+        (await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None)).Should().BeNull("the plan read never fails on it");
+    }
+
+    private sealed class UnfinishedFaultLedger(ITenantCache inner) : ITenantCache
+    {
+        public Task<T?> GetAsync<T>(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default) =>
+            resource == DecisionCommitService.UnfinishedResource
+                ? throw new InvalidOperationException("cache down")
+                : inner.GetAsync<T>(tenantId, resource, id, version, cacheInstance, ct);
+
+        public Task SetAsync<T>(string tenantId, string resource, string id, int version, T value, TimeSpan? ttl = null,
+            string cacheInstance = "default", CancellationToken ct = default) =>
+            inner.SetAsync(tenantId, resource, id, version, value, ttl, cacheInstance, ct);
+
+        public Task RemoveAsync(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default) =>
+            inner.RemoveAsync(tenantId, resource, id, version, cacheInstance, ct);
+
+        public Task<T> GetOrCreateAsync<T>(string tenantId, string resource, string id, int version, Func<CancellationToken, Task<T>> factory,
+            TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default) =>
+            inner.GetOrCreateAsync(tenantId, resource, id, version, factory, ttl, cacheInstance, ct);
     }
 
     // ── The HTTP mapping of a replayed failure ──────────────────────────────────────────────────────────────────
