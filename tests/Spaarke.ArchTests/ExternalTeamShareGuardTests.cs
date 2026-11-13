@@ -55,8 +55,9 @@ public class ExternalTeamShareGuardTests
             "allows it (DecideForDirectParticipantsAsync, participant-scoped NoRoot exemption); a hidden row's share is revoked.",
         ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
             "Task 197b: the Direct-team branch and the other Direct branch ask the predicate for participants flagged external " +
-            "(DecideForDirectParticipantsAsync; the NoRoot exemption only on the Direct-team branch). KNOWN LIMIT: the thread " +
-            "create share and the record-anchored branch do not (task notes).",
+            "(DecideForDirectParticipantsAsync; the NoRoot exemption only for a member of the stamped pair of a message " +
+            "recognized as an unfiled Direct message, bound i'). KNOWN LIMIT: the thread create share and the record-anchored " +
+            "branch do not (task notes).",
     };
 
     private static readonly string[] GrantMethods =

@@ -279,7 +279,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
             IReadOnlyList<Guid> principals = assignment.Audience switch
             {
-                // uac-r2 197b: a participant flagged external is granted only what THE predicate shows (no NoRoot exemption here).
+                // uac-r2 197b: a participant flagged external is granted only what THE predicate allows (the NoRoot exemption only
+                // for a member of a recognized unfiled Direct message's stamped pair, bound i').
                 ThreadGrantAudience.DirectParticipants => await ClearDirectParticipantsAsync(
                     communicationId, threadId, await ReadDirectParticipantsForGrantAsync(threadId, ct), ct),
                 ThreadGrantAudience.AnchorRecordMembers => await ClearAnchorGranteesAsync(
@@ -411,57 +412,88 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         var contentRows = await ReadDirectContentRowsAsync(communicationId, threadId, directTeam, ct);
 
         // uac-r2 task 197b: a participant flagged external is granted a row only when THE predicate allows it
-        // (DirectMessageParticipantShares.DecideForDirectParticipantsAsync, one call over the message and its content rows, with the
-        // participant-scoped NoRoot exemption: the owner was proven Direct above and the pair is the stamped one). This grant never
-        // revokes: a flagged participant's share on a hidden row is removed by the share job's reconcile, which lists the message
-        // after its owner write. Unflagged participants never ask the predicate.
+        // (DirectMessageParticipantShares.DecideForDirectParticipantsAsync, one call over the message and its content rows). The
+        // participant-scoped NoRoot exemption applies only when the message is positively recognized as an unfiled Direct message
+        // (bound i': RecognizeUnfiledDirectMessageAsync) whose stamped pair is this audience (bound iii). This grant never revokes:
+        // a flagged participant's share on a hidden row is removed by the share job's reconcile, which lists the message after its
+        // owner write. Unflagged participants never ask the predicate.
         var flagged = participants.Where(eligibility.FlaggedExternal.Contains).ToHashSet();
         Func<string, Guid, IReadOnlyList<Guid>> granteesFor = (_, _) => participants;
+        DirectMessageParticipantShares.DirectMessageRecognition? recognition = null;
         if (flagged.Count > 0)
         {
+            recognition = await DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync(_entityService, communicationId, _logger, ct);
+            if (recognition is not null && !recognition.Pair.SetEquals(derivedParticipants))
+                recognition = null; // re-stamped since the audience was read: no exemption on this pass
             var answers = await DecideForFlaggedParticipantsAsync(
-                communicationId, contentRows.Append((Table: MessageEntity, Id: communicationId)).ToList(), directTeamOwnedWithPair: true, ct);
+                communicationId, contentRows.Append((Table: MessageEntity, Id: communicationId)).ToList(),
+                directPairRecognized: recognition is not null, ct);
             granteesFor = (table, id) => participants
                 .Where(u => !flagged.Contains(u)
                             || (answers.TryGetValue((table, id), out var answer) && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant))
                 .ToList();
 
-            // 197b review F1: the NoRoot exemption rests on the Direct team owning the message (bound i). The decision above took
-            // reads of its own, so the owner is read again right before the message grant; a re-filed message grants nothing here
-            // (the share job lists it and reconciles).
-            if (!await DirectMessageParticipantShares.OwnerUnchangedAsync(
-                    _entityService, communicationId, directTeam, "grant after the visibility decision", _logger, ct))
-            {
+            // 197b review F1: the decision above took reads of its own, so the owner and what the exemption rests on (still unfiled,
+            // still on the same Direct thread and pair) are read again right before the message grant; a changed message grants
+            // nothing here (the share job lists it and reconciles).
+            if (!await StillTheSameDirectMessageAsync(communicationId, directTeam, recognition, "grant after the visibility decision", ct))
                 return;
-            }
         }
 
         await GrantReadAccessToPrincipalsAsync(communicationId, threadId, granteesFor(MessageEntity, communicationId), ct);
 
         // 197b review pass 2 F1: with flagged participants in the audience, the content rows are granted only while the message is
-        // still the Direct team's (each content row is also confirmed by its own owner below).
-        if (flagged.Count > 0 && !await DirectMessageParticipantShares.OwnerUnchangedAsync(
-                _entityService, communicationId, directTeam, "content grants", _logger, ct))
-        {
+        // still the Direct team's, and still the recognized Direct message (each content row is also confirmed by its own owner below).
+        if (flagged.Count > 0 && !await StillTheSameDirectMessageAsync(communicationId, directTeam, recognition, "content grants", ct))
             return;
-        }
 
         await GrantDirectContentRowsAsync(communicationId, threadId, directTeam, contentRows, granteesFor, ct);
     }
 
     /// <summary>
+    /// 197b review F1 (bound i'): the message is still owned by <paramref name="directTeam"/> and, when the NoRoot exemption was
+    /// in play (<paramref name="recognition"/> not null), still the same unfiled Direct message on the same thread and pair.
+    /// Either changed (or unreadable): <c>false</c>, logged, and the caller grants nothing more.
+    /// </summary>
+    private async Task<bool> StillTheSameDirectMessageAsync(
+        Guid communicationId, Guid directTeam, DirectMessageParticipantShares.DirectMessageRecognition? recognition, string step,
+        CancellationToken ct)
+    {
+        if (!await DirectMessageParticipantShares.OwnerUnchangedAsync(_entityService, communicationId, directTeam, step, _logger, ct))
+            return false;
+        return recognition is null || await StillRecognizedAsync(communicationId, recognition, step, ct);
+    }
+
+    /// <summary>
+    /// 197b bound (i'): the message is re-read and is still the unfiled Direct message <paramref name="recognition"/> found (same
+    /// thread, same pair). Otherwise (re-filed, moved, re-stamped, or unreadable) <c>false</c>, logged.
+    /// </summary>
+    private async Task<bool> StillRecognizedAsync(
+        Guid communicationId, DirectMessageParticipantShares.DirectMessageRecognition recognition, string step, CancellationToken ct)
+    {
+        var now = await DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync(_entityService, communicationId, _logger, ct);
+        if (recognition.SameAs(now))
+            return true;
+        _logger.LogInformation(
+            "Message {CommunicationId} is no longer the unfiled Direct message it was at the external visibility decision (before " +
+            "{Step}); nothing more is granted here (ThreadId={ThreadId}).", communicationId, step, recognition.ThreadId);
+        return false;
+    }
+
+    /// <summary>
     /// uac-r2 task 197b: THE predicate (the 191h seam, scoped, so resolved in a scope of its own: this service is a singleton) for
-    /// the flagged participants of a Direct message. <paramref name="directTeamOwnedWithPair"/>: the message's owner was proven to be
-    /// the Direct team and its stamped pair is the audience (the participant-scoped NoRoot exemption applies); otherwise NoRoot is
-    /// not granted. No scope factory (a test composition): every row defers (no flagged participant is granted here).
+    /// the flagged participants of a Direct message. <paramref name="directPairRecognized"/>: the message was positively
+    /// recognized as an unfiled Direct message (bound i', <see cref="DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync"/>)
+    /// and the answer is applied only to members of its stamped pair (the participant-scoped NoRoot exemption applies); otherwise
+    /// NoRoot is not granted. No scope factory (a test composition): every row defers (no flagged participant is granted here).
     /// </summary>
     private async Task<IReadOnlyDictionary<(string Table, Guid Id), DirectMessageParticipantShares.FlaggedAnswer>> DecideForFlaggedParticipantsAsync(
-        Guid communicationId, IReadOnlyCollection<(string Table, Guid Id)> rows, bool directTeamOwnedWithPair, CancellationToken ct)
+        Guid communicationId, IReadOnlyCollection<(string Table, Guid Id)> rows, bool directPairRecognized, CancellationToken ct)
     {
         if (_scopes is null)
         {
             return await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
-                null, communicationId, rows, directTeamOwnedWithPair, _logger, ct);
+                null, communicationId, rows, directPairRecognized, _logger, ct);
         }
 
         await using var scope = _scopes.CreateAsyncScope();
@@ -478,15 +510,19 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         }
 
         return await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
-            seam, communicationId, rows, directTeamOwnedWithPair, _logger, ct);
+            seam, communicationId, rows, directPairRecognized, _logger, ct);
     }
 
     /// <summary>
     /// uac-r2 task 197b: the Direct two-party list of a message the Direct team does NOT own (user-owned, or another ordinary team's:
     /// the join's Direct branch), cleared for users flagged external. A user the flag read returns unflagged is granted as before.
-    /// A flagged user, or one whose flag cannot be read (not returned, a read fault, no reader), is granted only when THE predicate
-    /// shows the message as Visible: the NoRoot exemption is the Direct team's alone (coordinator bound (i)), so an unfiled message
-    /// grants them nothing here. Never revokes (the 191c engine owns flagged users' shares on such rows).
+    /// A flagged user, or one whose flag cannot be read (not returned, a read fault, no reader; treated as flagged), is granted
+    /// only when THE predicate allows it: Visible, or, for a member of the message's stamped pair on a message positively
+    /// recognized as an unfiled Direct message (bound i', whoever owns it), exactly no root (the participant-scoped exemption).
+    /// An unfiled message that is not recognized (an ordinary email, no valid pair), or a grantee outside the pair, gets nothing
+    /// on no root. A Hidden message grants them nothing. When the exemption granted anyone, the message is re-recognized right
+    /// before returning; if it changed (re-filed, moved, re-stamped) nobody is granted here. Never revokes (the 191c engine owns
+    /// flagged users' shares on such rows, and consults the same exemption).
     /// </summary>
     private async Task<IReadOnlyList<Guid>> ClearDirectParticipantsAsync(
         Guid communicationId, Guid threadId, IReadOnlyList<Guid> participants, CancellationToken ct)
@@ -527,14 +563,37 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         if (others.Count == 0)
             return participants;
 
-        var answers = await DecideForFlaggedParticipantsAsync(
-            communicationId, [(MessageEntity, communicationId)], directTeamOwnedWithPair: false, ct);
-        var shown = answers.TryGetValue((MessageEntity, communicationId), out var answer)
-            && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant;
-        _logger.LogInformation("Message {CommunicationId}: {Count} Direct participant(s) flagged external (or unreadable) are {Outcome} " +
-            "(ThreadId={ThreadId}).", communicationId, others.Count, shown ? "granted: the message is externally visible" : "not granted",
-            threadId);
-        return shown ? participants : unflagged;
+        // Bound (i'): the exemption is asked only for the flagged members of a recognized unfiled Direct message's stamped pair
+        // (bound iii); everyone else flagged is asked without it.
+        var recognition = await DirectMessageParticipantShares.RecognizeUnfiledDirectMessageAsync(_entityService, communicationId, _logger, ct);
+        List<Guid> inPair = recognition is null ? [] : others.Where(recognition.Pair.Contains).ToList();
+        var outsidePair = others.Where(id => !inPair.Contains(id)).ToList();
+
+        var granted = new List<Guid>();
+        if (inPair.Count > 0 && await MessageAllowedAsync(directPairRecognized: true))
+            granted.AddRange(inPair);
+        var exemptionGranted = granted.Count > 0;
+        if (outsidePair.Count > 0 && await MessageAllowedAsync(directPairRecognized: false))
+            granted.AddRange(outsidePair);
+
+        _logger.LogInformation("Message {CommunicationId}: {Granted} of {Count} Direct participant(s) flagged external (or unreadable) " +
+            "are granted ({InPair} of them in its recognized Direct pair) (ThreadId={ThreadId}).",
+            communicationId, granted.Count, others.Count, inPair.Count, threadId);
+
+        // Bound (i') re-check: the exemption rests on the message being this unfiled Direct message; re-filed in between, nobody
+        // is granted here (its new filing's own grant and reconcile decide).
+        if (exemptionGranted && !await StillRecognizedAsync(communicationId, recognition!, "the participant grant", ct))
+            return [];
+
+        return participants.Where(id => unflagged.Contains(id) || granted.Contains(id)).ToList();
+
+        async Task<bool> MessageAllowedAsync(bool directPairRecognized)
+        {
+            var answers = await DecideForFlaggedParticipantsAsync(
+                communicationId, [(MessageEntity, communicationId)], directPairRecognized, ct);
+            return answers.TryGetValue((MessageEntity, communicationId), out var answer)
+                && answer == DirectMessageParticipantShares.FlaggedAnswer.Grant;
+        }
     }
 
     /// <summary>

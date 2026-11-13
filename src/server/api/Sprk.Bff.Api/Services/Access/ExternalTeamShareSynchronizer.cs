@@ -840,7 +840,8 @@ public sealed class ExternalTeamShareSynchronizer
                 // Flagged users' per-user shares on a child the predicate does not show (roots are I-14's; Secure-team-owned rows
                 // the mirror's; Direct-team-owned rows task 198's writer's — reported, never fought). Undecided revokes too, a
                 // transient one included (task constraint: fail closed); the bisecting decision keeps one faulting row from
-                // making the rest of its batch Undecided (F2).
+                // making the rest of its batch Undecided (F2). 197b: except the participant-scoped NoRoot exemption
+                // (RevocableOnNoRootAsync): a Direct pair member keeps a share on a recognized unfiled Direct message.
                 if (!decision.IsVisible && !SecureChildLineage.IsRoot(row.Table) && !(_secureTeam is { } st && fact.OwningTeam == st))
                 {
                     var flaggedHolders = flags is null
@@ -866,7 +867,8 @@ public sealed class ExternalTeamShareSynchronizer
                         }
                         else
                         {
-                            plan.FlaggedRevokes.AddRange(flaggedHolders);
+                            plan.FlaggedRevokes.AddRange(await RevocableOnNoRootAsync(row, visibility, decideFaulted, flaggedHolders)
+                                .ConfigureAwait(false));
                         }
                     }
                 }
@@ -887,6 +889,41 @@ public sealed class ExternalTeamShareSynchronizer
                 await ReownAsync(plans.Where(p => p.ReownFrom is not null).ToList()).ConfigureAwait(false);
 
             return Report(plans, present.Count, shareable, undecided, secureFamily);
+        }
+
+        /// <summary>
+        /// uac-r2 task 197b (limit 3): the flagged holders this pass may revoke on a row the predicate does not show. The
+        /// participant-scoped NoRoot exemption the live grant and the Direct share job apply holds here too, through the same seam
+        /// member (<see cref="ExternalRowVisibility.UndecidedOnlyForNoRoot"/>) and the same recognition
+        /// (<see cref="DirectMessageParticipantShares.NoRootExemptPairForRowAsync"/>): on a row undecided ONLY because its closure
+        /// reaches no root, of a message recognized as an unfiled Direct message (whoever owns it), a holder in that message's
+        /// stamped pair keeps the share. Every other answer (Hidden, any other Undecided, a faulted decision) revokes as before.
+        /// A recognition read that faults revokes nobody on the row and carries it.
+        /// </summary>
+        private async Task<IReadOnlyList<DataversePrincipalRef>> RevocableOnNoRootAsync(
+            (string Table, Guid Id) row, ExternalVisibilityResult visibility, IReadOnlySet<(string Table, Guid Id)> decideFaulted,
+            IReadOnlyList<DataversePrincipalRef> flaggedHolders)
+        {
+            if (decideFaulted.Contains(row) || !new ExternalRowVisibility(visibility).UndecidedOnlyForNoRoot(row.Table, row.Id))
+                return flaggedHolders;
+
+            var pair = await DirectMessageParticipantShares.NoRootExemptPairForRowAsync(owner._dataverse, row.Table, row.Id, Log, ct)
+                .ConfigureAwait(false);
+            if (pair is null)
+            {
+                Carry(row);
+                return [];
+            }
+
+            var kept = flaggedHolders.Count(p => pair.Contains(p.Id));
+            if (kept > 0)
+            {
+                Log.LogInformation("{Tag} {Table} {Id} reaches no root and is an unfiled Direct message (or its content); {Count} " +
+                    "flagged holder(s) in its stamped pair keep their share (the participant-scoped exemption).",
+                    LogTag, row.Table, row.Id, kept);
+            }
+
+            return flaggedHolders.Where(p => !pair.Contains(p.Id)).ToList();
         }
 
         /// <summary>A Secure-team-owned row, a root not stored <c>false</c>, or a row whose closure reaches such a root or a root

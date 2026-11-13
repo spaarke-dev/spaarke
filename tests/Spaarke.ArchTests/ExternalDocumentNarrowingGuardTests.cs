@@ -441,13 +441,13 @@ public class ExternalDocumentNarrowingGuardTests
             "to REMOVE a grant (Hidden or structurally undecidable) or keep it (Visible, or not decidable for now); no rows, " +
             "nothing returned to any caller.",
         ["Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares"] =
-            "uac-r2 197b: asks the visibility seam, for a Direct-team-owned message's participants flagged external only, whether " +
+            "uac-r2 197b: asks the visibility seam, for a Direct message's participants flagged external only, whether " +
             "each row may be granted (Visible, or undecided only for no root), hidden (revoke) or deferred; no rows, nothing " +
             "returned to any caller.",
         ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
             "uac-r2 197b: resolves the visibility seam in a scope of its own for the live Direct grant's participants flagged " +
             "external (DirectMessageParticipantShares.DecideForDirectParticipantsAsync), on the Direct-team branch and the other Direct " +
-            "branch (there without the no-root exemption); a grant decision only.",
+            "branch (the no-root exemption only for the stamped pair of a recognized unfiled Direct message); a grant decision only.",
         ["Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob"] =
             "uac-r2 197b: resolves the visibility seam from its run scope and hands it to DirectMessageParticipantShares.",
         ["Sprk.Bff.Api.Services.Access.SecureChildReconciler"] =

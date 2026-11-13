@@ -1584,17 +1584,55 @@ public class DirectMessageParticipantSharesTests
             Holds(table, id, Other).Should().BeTrue($"the unflagged participant reads {table}");
     }
 
-    [Fact(DisplayName = "197b must-not-fire: without the Direct-team bound, a NoRoot answer is withheld (the exemption is the Direct team's alone)")]
-    public async Task R197b_TheNoRootExemption_NeedsTheDirectTeamBound()
+    [Fact(DisplayName = "197b bound (i') must-not-fire: a Direct-team message whose thread carries a typed regarding lookup is not recognized; the flagged participant gets nothing on no root, settled")]
+    public async Task R197b_ANotRecognizedMessage_IsWithheld()
+    {
+        var (message, rows) = DirectMessage();
+        var thread = _world.Retrieve("sprk_communication", message, ["sprk_communicationthread"])
+            .GetAttributeValue<EntityReference>("sprk_communicationthread").Id;
+        var matter = Guid.NewGuid();
+        _world.OrdinaryRoot("sprk_matter", matter);
+        _world.Set("sprk_communicationthread", thread, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
+        _users.Flags[Other] = true;
+
+        var outcome = await Reconciler198(NoRoot(rows).Seam).AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeTrue("a structural answer without the exemption is settled");
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeFalse($"{table}: no exemption without recognition");
+        Holds("sprk_communication", message, Caller).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "197b bound (i') must-not-fire: a recognition read that faults grants the flagged participant nothing and is retried")]
+    public async Task R197b_ARecognitionReadFault_GrantsNothing_AndIsRetried()
+    {
+        var (message, rows) = DirectMessage();
+        _users.Flags[Other] = true;
+        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
+        entities // only the recognition reads the thread by RetrieveAsync (step 4 queries it)
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Test: the thread read faults."));
+        var reconciler = new DirectMessageParticipantShares(entities.Object, _shares, Lookup(), _configuration,
+            SecureChildShareWorld.ColumnProbe(), _users, NullLogger.Instance, NoRoot(rows).Seam);
+
+        var outcome = await reconciler.AfterRefileAsync(message, CancellationToken.None);
+
+        outcome.Complete.Should().BeFalse("a fault is retried");
+        foreach (var (table, id) in rows)
+            Holds(table, id, Other).Should().BeFalse(table);
+    }
+
+    [Fact(DisplayName = "197b must-not-fire: without a recognized Direct pair (bound i'), a NoRoot answer is withheld")]
+    public async Task R197b_TheNoRootExemption_NeedsARecognizedDirectPair()
     {
         var message = Guid.NewGuid();
         var rows = new List<(string Table, Guid Id)> { ("sprk_communication", message) };
         var seam = NoRoot(rows).Seam;
 
         var bounded = await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
-            seam, message, rows, directTeamOwnedWithPair: true, NullLogger.Instance, CancellationToken.None);
+            seam, message, rows, directPairRecognized: true, NullLogger.Instance, CancellationToken.None);
         var unbounded = await DirectMessageParticipantShares.DecideForDirectParticipantsAsync(
-            seam, message, rows, directTeamOwnedWithPair: false, NullLogger.Instance, CancellationToken.None);
+            seam, message, rows, directPairRecognized: false, NullLogger.Instance, CancellationToken.None);
 
         bounded[("sprk_communication", message)].Should().Be(DirectMessageParticipantShares.FlaggedAnswer.Grant);
         unbounded[("sprk_communication", message)].Should().Be(DirectMessageParticipantShares.FlaggedAnswer.Withhold);

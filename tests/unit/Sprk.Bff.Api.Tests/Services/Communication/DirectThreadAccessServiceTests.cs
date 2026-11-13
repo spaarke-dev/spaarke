@@ -999,20 +999,40 @@ public class DirectThreadAccessServiceTests
     private Guid? _stampedSender = Caller;
     private Guid? _stampedRecipient = Other;
 
-    /// <summary>The message row owned by <paramref name=teamId/>, with the stamped pair, projected to the query's select as
-    /// Dataverse answers (a column not selected is absent).</summary>
-    private Entity MessageRow(QueryExpression query, Guid teamId)
+    /// <summary>uac-r2 197b bound (i'): the message's thread lookup (<c>null</c>: none) and any filing lookups it names.</summary>
+    private Guid? _messageThread = ThreadId;
+    private readonly Dictionary<string, object> _messageFiling = new();
+
+    /// <summary>The message row owned by <paramref name=teamId/> (<c>null</c>: owned by the user <see cref="Caller"/>), with
+    /// the stamped pair and its thread, projected to the query's select as Dataverse answers (a column not selected is absent).</summary>
+    private Entity MessageRow(QueryExpression query, Guid? teamId)
     {
-        var row = new Entity("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", teamId) };
+        var row = new Entity("sprk_communication") { Id = CommunicationId };
+        if (teamId is { } team)
+            row["owningteam"] = new EntityReference("team", team);
+        else
+            row["owninguser"] = new EntityReference("systemuser", Caller);
         if (_stampedSender is { } sender)
             row["sprk_sentby"] = new EntityReference("systemuser", sender);
         if (_stampedRecipient is { } recipient)
             row["sprk_directrecipient"] = new EntityReference("systemuser", recipient);
+        if (_messageThread is { } thread)
+            row["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread);
+        foreach (var (column, value) in _messageFiling)
+            row[column] = value;
         var projected = new Entity(row.LogicalName, row.Id);
         foreach (var column in row.Attributes.Keys.Where(c => query.ColumnSet.AllColumns || query.ColumnSet.Columns.Contains(c)))
             projected[column] = row[column];
         return projected;
     }
+
+    /// <summary>uac-r2 197b bound (i'): the message is USER-owned and carries its thread lookup and stamped pair (an unfiled
+    /// Direct message from before fm 054a, or one the owner step left with its creator).</summary>
+    private void MessageOwnedByUser() =>
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => new EntityCollection(new List<Entity> { MessageRow(q, null) }));
 
     /// <summary>The message is owned by a non-default Owner team that is not the Secure team (the Direct team's shape).</summary>
     private void MessageOwnedByOwnerTeam(Guid teamId)
@@ -1068,6 +1088,15 @@ public class DirectThreadAccessServiceTests
             .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Shares(Other));
         MessageOwnedByOwnerTeam(DirectTeamId);
+        // 197b bound (i'): the message names its thread (as the join writes it), so the Restricted bar's walk reads the thread
+        // as a lineage parent: an Open Direct thread, not Restricted, filed under nothing.
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => new EntityCollection(new List<Entity>
+            {
+                new("sprk_communicationthread", _messageThread ?? ThreadId) { ["sprk_communicationthreadid"] = _messageThread ?? ThreadId },
+            }));
         ContentRows("sprk_communicationattachment", "sprk_communication",
             (AttachmentRowId, DirectTeamId), (OtherTeamAttachmentRowId, OtherTeamId));
         ContentRows("sprk_communicationparticipant", "sprk_communication", (ParticipantRowId, DirectTeamId));
@@ -1892,10 +1921,10 @@ public class DirectThreadAccessServiceTests
         VerifyGrant("sprk_emailreviewlogs", ReviewLogRowId, Other);
     }
 
-    [Fact(DisplayName = "197b must-not-fire: a NoRoot message the Direct team does not own (user-owned) grants a flagged participant nothing")]
-    public async Task R197b_UserOwned_ANoRootMessage_GrantsTheFlaggedParticipantNothing()
+    [Fact(DisplayName = "197b bound (i') must-not-fire: a user-owned unfiled communication with no Direct pair stamped (an ordinary email) grants a flagged participant nothing on no root")]
+    public async Task R197b_UserOwned_ANoRootMessageWithNoDirectPair_GrantsTheFlaggedParticipantNothing()
     {
-        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller); // the default message row: owner only, no pair, no thread lookup
         _accessGrant
             .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Shares(Other));
@@ -1971,25 +2000,37 @@ public class DirectThreadAccessServiceTests
         }
     }
 
-    [Fact(DisplayName = "197b review F2 must-fire: a flag read that faults twice grants no participant of a message the predicate does not show, and is logged as an Error")]
-    public async Task R197b_UserOwned_AFlagReadFaultingTwice_FailsClosed_WithAnError()
+    [Theory(DisplayName = "197b review F2 + limit 5: a flag read that faults twice is logged as an Error; the pair members of an unfiled Direct message are granted on no root (treated as flagged), and nobody on a Hidden one or one with no pair")]
+    [InlineData("NoRootRecognized", true)]
+    [InlineData("NoRootNoPair", false)]
+    [InlineData("Hidden", false)]
+    public async Task R197b_UserOwned_AFlagReadFaultingTwice_IsTreatedAsFlagged_WithAnError(string shape, bool granted)
     {
         SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
         _accessGrant
             .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Shares(Other));
+        if (shape != "NoRootNoPair")
+            MessageOwnedByUser();
         var users = new UserFlagDirectoryDouble { Faults = true };
         var stub = new ExternalVisibilitySeamStub().Set("sprk_communication", CommunicationId,
-            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided,
-            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NoRoot);
+            shape == "Hidden" ? Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Hidden
+                : Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided,
+            shape == "Hidden" ? Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.CommunicationHidden
+                : Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NoRoot);
         var logger = new Mock<ILogger<DirectThreadAccessService>>();
 
         await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, users, Scopes(stub.Seam), logger.Object)
             .GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
         users.Queries.Should().HaveCount(2);
-        VerifyNeverGranted(Caller);
-        VerifyNeverGranted(Other);
+        foreach (var user in new[] { Caller, Other })
+        {
+            _accessGrant.Verify(
+                g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(user), "ReadAccess", It.IsAny<CancellationToken>()),
+                granted ? Times.Once() : Times.Never());
+        }
+
         logger.Verify(
             l => l.Log(LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
@@ -2033,6 +2074,161 @@ public class DirectThreadAccessServiceTests
                 g => g.GrantAccessAsync(set, It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
                 Times.Never, set);
         }
+    }
+
+    // ── uac-r2 197b bound (i'): the NoRoot exemption rests on positive recognition of an unfiled Direct message ──────────
+
+    /// <summary>A user-owned message on a Direct thread (participants: the thread's owner <see cref="Caller"/> and its sharees),
+    /// carrying the stamped pair Caller/Other, unfiled.</summary>
+    private void UserOwnedDirectMessageWorld(params Guid[] threadSharees)
+    {
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(threadSharees.Length == 0 ? [Other] : threadSharees));
+        MessageOwnedByUser();
+    }
+
+    private static ExternalVisibilitySeamStub MessageAnswer(
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict verdict,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason reason) =>
+        new ExternalVisibilitySeamStub().Set("sprk_communication", CommunicationId, verdict, reason);
+
+    private static ExternalVisibilitySeamStub NoRootMessage() => MessageAnswer(
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Undecided,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason.NoRoot);
+
+    private void VerifyMessageGrant(Guid user, Times times) =>
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(user), "ReadAccess", It.IsAny<CancellationToken>()),
+            times);
+
+    [Fact(DisplayName = "197b bound (i') must-fire: a flagged participant on a USER-OWNED unfiled Direct message (no root) is shared it")]
+    public async Task R197b_UserOwned_AnUnfiledDirectMessage_GrantsTheFlaggedPairMember()
+    {
+        UserOwnedDirectMessageWorld();
+        var stub = NoRootMessage();
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, OtherFlagged(), Scopes(stub.Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyMessageGrant(Other, Times.Once());
+        VerifyMessageGrant(Caller, Times.Once());
+        stub.Calls.Should().ContainSingle("one decision, with the exemption, for the flagged pair member");
+    }
+
+    [Theory(DisplayName = "197b bound (i') must-not-fire: a user-owned message that is not a recognized unfiled Direct message grants a flagged participant nothing on no root")]
+    [InlineData("FiledUnderAMatter")]
+    [InlineData("ThreadCarriesATypedLookup")]
+    [InlineData("ThreadIsTheMasterThread")]
+    [InlineData("ThreadNotDirect")]
+    [InlineData("NoThreadLookup")]
+    [InlineData("NoRecipientStamped")]
+    public async Task R197b_UserOwned_ANotRecognizedMessage_GrantsTheFlaggedParticipantNothing(string shape)
+    {
+        UserOwnedDirectMessageWorld();
+        switch (shape)
+        {
+            case "FiledUnderAMatter": _messageFiling["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()); break;
+            case "ThreadCarriesATypedLookup": SetupThread(ThreadId, ThreadTypeDirect, Caller, regardingLookup: "sprk_regardingmatter"); break;
+            case "ThreadIsTheMasterThread": SetupThread(ThreadId, ThreadTypeDirect, Caller, isDefault: true); break;
+            case "ThreadNotDirect": SetupThread(ThreadId, ThreadTypeRecordAnchored, Caller); break;
+            case "NoThreadLookup": _messageThread = null; break;
+            default: _stampedRecipient = null; break;
+        }
+
+        var stub = NoRootMessage();
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, OtherFlagged(), Scopes(stub.Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(Other);
+        VerifyMessageGrant(Caller, Times.Once());
+    }
+
+    [Fact(DisplayName = "197b bound (iii) must-not-fire: a flagged thread participant outside the message's stamped pair gets no share on no root; the flagged pair member does")]
+    public async Task R197b_UserOwned_AFlaggedNonMemberOfThePair_IsNotGranted()
+    {
+        UserOwnedDirectMessageWorld(Other, ThirdUser); // the thread is shared to ThirdUser too; the message's pair is Caller/Other
+        var users = new UserFlagDirectoryDouble().Internal(Caller);
+        users.Flags[Other] = true;
+        users.Flags[ThirdUser] = true;
+        var stub = NoRootMessage();
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, users, Scopes(stub.Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(ThirdUser);
+        VerifyMessageGrant(Other, Times.Once());
+        VerifyMessageGrant(Caller, Times.Once());
+        stub.Calls.Should().HaveCount(2, "one decision with the exemption (pair members), one without (the rest)");
+    }
+
+    [Theory(DisplayName = "197b must-not-fire: a Hidden user-owned unfiled Direct message grants the flagged pair member nothing")]
+    [InlineData("CommunicationHidden")]
+    [InlineData("ThreadNotOpen")]
+    public async Task R197b_UserOwned_AHiddenDirectMessage_GrantsTheFlaggedPairMemberNothing(string reasonName)
+    {
+        UserOwnedDirectMessageWorld();
+        var stub = MessageAnswer(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityVerdict.Hidden,
+            Enum.Parse<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibilityReason>(reasonName));
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, OtherFlagged(), Scopes(stub.Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(Other);
+        VerifyMessageGrant(Caller, Times.Once());
+    }
+
+    [Fact(DisplayName = "197b bound (i') re-check must-not-fire: a user-owned Direct message filed under a record while the predicate decides grants nobody here")]
+    public async Task R197b_UserOwned_AMessageFiledDuringTheDecision_GrantsNobody()
+    {
+        UserOwnedDirectMessageWorld();
+        var stub = NoRootMessage();
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility seam = (rows, ct) =>
+        {
+            _messageFiling["sprk_regardingmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()); // re-filed meanwhile
+            return stub.Seam(rows, ct);
+        };
+
+        await BuildSut(new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, OtherFlagged(), Scopes(seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact(DisplayName = "197b bound (i') must-not-fire: a Direct-team message whose thread carries a typed regarding lookup grants a flagged participant nothing on no root")]
+    public async Task R197b_DirectTeam_ANotRecognizedMessage_GrantsTheFlaggedParticipantNothing()
+    {
+        DirectTeamMessageWorld();
+        SetupThread(ThreadId, ThreadTypeDirect, Caller, regardingLookup: "sprk_regardingmatter");
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true, scopes: Scopes(NoRootDirectMessage().Seam))
+            .GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        VerifyNeverGranted(Other);
+        VerifyGrant("sprk_communications", CommunicationId, Caller);
+    }
+
+    [Fact(DisplayName = "197b bound (i') re-check must-not-fire: a Direct-team message moved off its Direct thread while the predicate decides grants nothing on it")]
+    public async Task R197b_DirectTeam_AMessageMovedDuringTheDecision_GrantsNothing()
+    {
+        DirectTeamMessageWorld();
+        var stub = NoRootDirectMessage();
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility seam = (rows, ct) =>
+        {
+            _messageThread = Guid.NewGuid(); // the owner is unchanged; the thread is not the one recognized
+            SetupThread(_messageThread.Value, ThreadTypeDirect, Caller);
+            return stub.Seam(rows, ct);
+        };
+
+        await DirectTeamSut(users: OtherFlagged(), probe: true, scopes: Scopes(seam)).GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     /// <summary>
@@ -2080,7 +2276,7 @@ public class DirectThreadAccessServiceTests
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
-    private void SetupThread(Guid threadId, int threadType, Guid ownerId)
+    private void SetupThread(Guid threadId, int threadType, Guid ownerId, bool isDefault = false, string? regardingLookup = null)
     {
         var thread = new Entity("sprk_communicationthread")
         {
@@ -2088,6 +2284,10 @@ public class DirectThreadAccessServiceTests
             ["sprk_threadtype"] = new OptionSetValue(threadType),
             ["ownerid"] = new EntityReference("systemuser", ownerId),
         };
+        if (isDefault)
+            thread["sprk_isdefaultthread"] = true;
+        if (regardingLookup is not null)
+            thread[regardingLookup] = new EntityReference("sprk_matter", Guid.Parse("88888888-8888-8888-8888-888888888888"));
         _entityService
             .Setup(s => s.RetrieveAsync("sprk_communicationthread", threadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(thread);

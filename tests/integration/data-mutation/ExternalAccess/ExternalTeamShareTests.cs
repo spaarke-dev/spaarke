@@ -476,6 +476,96 @@ public class ExternalTeamShareTests
         _shares.WriteLog.Should().BeEmpty();
     }
 
+    // ── uac-r2 197b (limit 3): the participant-scoped NoRoot exemption in the 191c engine, through the same seam member ──
+
+    private static readonly Guid UserOwnedDirectMessage = Guid.Parse("e7700000-0191-4c00-8000-000000000002");
+    private static readonly Guid DirectThread = Guid.Parse("e7700000-0191-4c00-8000-000000000003");
+    private static readonly Guid DirectAttachment = Guid.Parse("e7700000-0191-4c00-8000-000000000004");
+    private static readonly Guid SecondPartner = Guid.Parse("e7000000-0191-4c00-8000-00000000000c");
+
+    /// <summary>A USER-owned unfiled message on a Direct thread, stamped with the pair Partner/Colleague (flagged/internal), its
+    /// attachment, and a second flagged user outside the pair. <paramref name="pair"/> false: no pair stamped (an ordinary
+    /// unfiled communication).</summary>
+    private static SecureChildShareWorld DirectWorld(bool pair = true)
+    {
+        var world = World();
+        world.Add("systemuser", SecondPartner, ("businessunitid", new EntityReference("businessunit", ExternalBu)), ("sprk_isexternal", true));
+        world.Add("sprk_communicationthread", DirectThread, ("sprk_threadtype", new OptionSetValue(100000001)));
+        var columns = new List<(string, object)>
+        {
+            ("owninguser", new EntityReference("systemuser", Colleague)),
+            ("sprk_communicationthread", new EntityReference("sprk_communicationthread", DirectThread)),
+        };
+        if (pair)
+        {
+            columns.Add(("sprk_sentby", new EntityReference("systemuser", Colleague)));
+            columns.Add(("sprk_directrecipient", new EntityReference("systemuser", Partner)));
+        }
+
+        world.Add("sprk_communication", UserOwnedDirectMessage, columns.ToArray());
+        world.Add("sprk_communicationattachment", DirectAttachment, ("owninguser", new EntityReference("systemuser", Colleague)),
+            ("sprk_communication", new EntityReference("sprk_communication", UserOwnedDirectMessage)));
+        return world;
+    }
+
+    private void SeedBothPartners(string table, Guid id)
+    {
+        _shares.Seed(table, id, User(Partner), Read);
+        _shares.Seed(table, id, User(SecondPartner), Read);
+    }
+
+    [Theory(DisplayName = "197b limit 3 must-fire: on a user-owned unfiled Direct message (and its content) that reaches no root, the flagged pair member keeps the share; a flagged non-member is revoked")]
+    [InlineData("sprk_communication")]
+    [InlineData("sprk_communicationattachment")]
+    public async Task Sync_ANoRootUnfiledDirectMessage_KeepsThePairMembersShare_AndRevokesANonMember(string table)
+    {
+        var id = table == "sprk_communication" ? UserOwnedDirectMessage : DirectAttachment;
+        SeedBothPartners(table, id);
+        _predicate.Says(table, id, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.NoRoot).RootsOf(table, id);
+
+        var result = await Engine(DirectWorld(), Config()).SyncRowsAsync([(table, id)], "test", CancellationToken.None);
+
+        _shares.MaskOf(table, id, User(Partner)).Should().Be(Read, "a member of the stamped pair keeps it on no root");
+        _shares.MaskOf(table, id, User(SecondPartner)).Should().BeNull("bound (iii): only the pair is exempt");
+        result.Carried.Should().NotContain((table, id));
+    }
+
+    [Fact(DisplayName = "197b limit 3 must-not-fire: a Hidden user-owned Direct message's flagged pair member's existing share is revoked")]
+    public async Task Sync_AHiddenUserOwnedDirectMessage_RevokesThePairMembersShare()
+    {
+        SeedBothPartners("sprk_communication", UserOwnedDirectMessage);
+        _predicate.Says("sprk_communication", UserOwnedDirectMessage, ExternalVisibilityVerdict.Hidden, ExternalVisibilityReason.CommunicationHidden);
+
+        await Engine(DirectWorld(), Config()).SyncRowsAsync([("sprk_communication", UserOwnedDirectMessage)], "test", CancellationToken.None);
+
+        _shares.MaskOf("sprk_communication", UserOwnedDirectMessage, User(Partner)).Should().BeNull("Hidden wins everywhere");
+        _shares.MaskOf("sprk_communication", UserOwnedDirectMessage, User(SecondPartner)).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "197b limit 3 must-not-fire: an unfiled communication with no Direct pair that reaches no root keeps no flagged share")]
+    public async Task Sync_ANoRootCommunicationWithNoDirectPair_RevokesTheFlaggedShare()
+    {
+        SeedBothPartners("sprk_communication", UserOwnedDirectMessage);
+        _predicate.Says("sprk_communication", UserOwnedDirectMessage, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.NoRoot)
+            .RootsOf("sprk_communication", UserOwnedDirectMessage);
+
+        await Engine(DirectWorld(pair: false), Config()).SyncRowsAsync([("sprk_communication", UserOwnedDirectMessage)], "test", CancellationToken.None);
+
+        _shares.MaskOf("sprk_communication", UserOwnedDirectMessage, User(Partner)).Should().BeNull();
+        _shares.MaskOf("sprk_communication", UserOwnedDirectMessage, User(SecondPartner)).Should().BeNull();
+    }
+
+    [Fact(DisplayName = "197b limit 3: a transient Undecided on a Direct message still revokes (fail closed; only exactly no root is exempt)")]
+    public async Task Sync_ATransientUndecidedDirectMessage_StillRevokes()
+    {
+        SeedBothPartners("sprk_communication", UserOwnedDirectMessage);
+        _predicate.Says("sprk_communication", UserOwnedDirectMessage, ExternalVisibilityVerdict.Undecided, ExternalVisibilityReason.ReadFailed);
+
+        await Engine(DirectWorld(), Config()).SyncRowsAsync([("sprk_communication", UserOwnedDirectMessage)], "test", CancellationToken.None);
+
+        _shares.MaskOf("sprk_communication", UserOwnedDirectMessage, User(Partner)).Should().BeNull();
+    }
+
     [Fact]
     public async Task Sync_WhenTheDirectTeamCannotBeTold_FlaggedRevokesAreWithheldAndCarried()
     {

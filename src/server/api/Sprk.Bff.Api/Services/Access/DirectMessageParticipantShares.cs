@@ -27,6 +27,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Access;
@@ -389,13 +390,17 @@ internal sealed class DirectMessageParticipantShares
         }
 
         // ── 7b. uac-r2 197b: THE predicate decides every row for the flagged participants (one call; unflagged never ask) ──
-        // Steps 2 and 5 positively recognized the Direct team as the owner and read a valid pair, and only participants are
-        // decided here: the three bounds of the participant-scoped NoRoot exemption.
+        // Bound (i'): the message is positively recognized as an unfiled Direct message (the same recognition as the live grant)
+        // whose stamped pair is the pair step 5 read; only participants are decided here (bound iii). A recognition read that
+        // faults is retried; a message that is not recognized is decided without the exemption.
         IReadOnlyDictionary<(string Table, Guid Id), FlaggedAnswer>? answers = null;
         if (flagged.Count > 0)
         {
+            var (recognition, recognitionFaulted) = await ReadRecognitionAsync(_dataverse, communicationId, _logger, ct).ConfigureAwait(false);
+            if (recognitionFaulted)
+                return Outcome.Retry("whether it is an unfiled Direct message could not be read");
             answers = await DecideForDirectParticipantsAsync(_visibility, communicationId, rows.Select(r => (r.Table, r.Id)).ToList(),
-                directTeamOwnedWithPair: true, _logger, ct).ConfigureAwait(false);
+                directPairRecognized: recognition is not null && recognition.Pair.SetEquals(participants), _logger, ct).ConfigureAwait(false);
         }
 
         FlaggedAnswer AnswerFor(string table, Guid id) =>
@@ -515,6 +520,141 @@ internal sealed class DirectMessageParticipantShares
 
     // ── uac-r2 task 197b: flagged participants and THE external visibility predicate ─────────────────────────────────
 
+    /// <summary>
+    /// uac-r2 task 197b bound (i'): a positively recognized unfiled Direct message: its Direct thread and its stamped pair.
+    /// </summary>
+    internal sealed record DirectMessageRecognition(Guid ThreadId, IReadOnlySet<Guid> Pair)
+    {
+        /// <summary>The same message as recognized before: the same thread and the same pair (and, by construction, unfiled).</summary>
+        internal bool SameAs(DirectMessageRecognition? other) =>
+            other is not null && other.ThreadId == ThreadId && other.Pair.SetEquals(Pair);
+    }
+
+    /// <summary>The columns that file a message under a record (its lineage lookups other than the thread lookup).</summary>
+    private static readonly string[] FilingColumns = SecureChildLineage.Children[CommunicationTable].LineageColumns
+        .Where(c => !string.Equals(c, ThreadLookup, StringComparison.OrdinalIgnoreCase))
+        .ToArray();
+
+    /// <summary>
+    /// uac-r2 task 197b bound (i') (coordinator 2026-11-12): recognizes <paramref name="communicationId"/> as an unfiled Direct
+    /// message, independent of its owner. Recognized only when ALL hold, read now: the message names no filing record (none of
+    /// <see cref="FilingColumns"/>); its thread is the join's Direct branch (typed Direct and carrying no typed regarding lookup,
+    /// <c>ThreadResolver</c>'s audience rule) and is not the per-user master thread (the share job's step 4); and its BFF-stamped
+    /// pair is valid (<see cref="ParticipantsOf"/>, the job's step 5 and the live grant's one audience rule). <c>null</c>: not
+    /// recognized, or a read faulted or found nothing (logged; never the exemption). Never throws (cancellation aside).
+    /// </summary>
+    internal static async Task<DirectMessageRecognition?> RecognizeUnfiledDirectMessageAsync(
+        IGenericEntityService dataverse, Guid communicationId, ILogger logger, CancellationToken ct) =>
+        (await ReadRecognitionAsync(dataverse, communicationId, logger, ct).ConfigureAwait(false)).Recognition;
+
+    /// <summary><see cref="RecognizeUnfiledDirectMessageAsync"/>, telling a read fault (<c>Faulted</c>) from "not recognized".</summary>
+    private static async Task<(DirectMessageRecognition? Recognition, bool Faulted)> ReadRecognitionAsync(
+        IGenericEntityService dataverse, Guid communicationId, ILogger logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverse);
+        ArgumentNullException.ThrowIfNull(logger);
+        try
+        {
+            var query = new QueryExpression(CommunicationTable)
+            {
+                ColumnSet = new ColumnSet(MessageColumns.Concat(FilingColumns).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(CommunicationTable + "id", ConditionOperator.Equal, communicationId);
+            var message = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
+            if (message is null)
+                return (null, false);
+            if (FilingColumns.Any(c => Names(message, c)))
+                return (null, false); // filed under a record: never the exemption
+            if (message.GetAttributeValue<EntityReference>(ThreadLookup)?.Id is not { } threadId || threadId == Guid.Empty)
+                return (null, false);
+            if (ParticipantsOf(message).Participants is not { } pair)
+                return (null, false);
+
+            var thread = await dataverse.RetrieveAsync(
+                    ThreadTable, threadId,
+                    ThreadResolver.ThreadRegardingColumns.Append(ThreadTypeColumn).Append(DefaultThreadColumn).ToArray(), ct)
+                .ConfigureAwait(false);
+            if (thread is null
+                || thread.GetAttributeValue<OptionSetValue>(ThreadTypeColumn)?.Value != ThreadTypeDirect
+                || thread.GetAttributeValue<bool?>(DefaultThreadColumn) == true
+                || ThreadResolver.ThreadRegardingColumns.Any(c => Names(thread, c)))
+            {
+                return (null, false);
+            }
+
+            return (new DirectMessageRecognition(threadId, pair), false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "{Prefix} {Table} {Id}: whether it is an unfiled Direct message could not be read; no participant " +
+                "flagged external is granted on the no-root exemption.", LogPrefix, CommunicationTable, communicationId);
+            return (null, true);
+        }
+
+        // A column names something: a lookup to a non-empty id, non-blank text, or any other value.
+        static bool Names(Entity row, string column) =>
+            row.Attributes.TryGetValue(column, out var value) && value switch
+            {
+                null => false,
+                EntityReference reference => reference.Id != Guid.Empty,
+                string text => !string.IsNullOrWhiteSpace(text),
+                _ => true,
+            };
+    }
+
+    /// <summary>
+    /// uac-r2 task 197b (limit 3, the 191c engine): the pair whose members keep a share on <paramref name="table"/>
+    /// <paramref name="id"/> under the no-root exemption: the message itself, or one of its content rows
+    /// (<see cref="ContentRows"/>; a content row follows its message), when that message is recognized
+    /// (<see cref="RecognizeUnfiledDirectMessageAsync"/>). Empty: any other table, not recognized. <c>null</c>: a read faulted
+    /// (the caller neither keeps nor removes on it).
+    /// </summary>
+    internal static async Task<IReadOnlySet<Guid>?> NoRootExemptPairForRowAsync(
+        IGenericEntityService dataverse, string table, Guid id, ILogger logger, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(dataverse);
+        Guid communicationId;
+        if (string.Equals(table, CommunicationTable, StringComparison.OrdinalIgnoreCase))
+        {
+            communicationId = id;
+        }
+        else if (ContentRows.FirstOrDefault(c => string.Equals(c.Table, table, StringComparison.OrdinalIgnoreCase)) is { Table: not null } content)
+        {
+            try
+            {
+                var query = new QueryExpression(content.Table)
+                {
+                    ColumnSet = new ColumnSet(content.MessageLookup),
+                    TopCount = 1,
+                    NoLock = true,
+                };
+                query.Criteria.AddCondition(content.Table + "id", ConditionOperator.Equal, id);
+                var row = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false))?.Entities.FirstOrDefault();
+                if (row?.GetAttributeValue<EntityReference>(content.MessageLookup) is not { } link
+                    || !string.Equals(link.LogicalName, CommunicationTable, StringComparison.OrdinalIgnoreCase) || link.Id == Guid.Empty)
+                {
+                    return new HashSet<Guid>();
+                }
+
+                communicationId = link.Id;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "{Prefix} {Table} {Id}: its message could not be read.", LogPrefix, table, id);
+                return null;
+            }
+        }
+        else
+        {
+            return new HashSet<Guid>();
+        }
+
+        var (recognition, faulted) = await ReadRecognitionAsync(dataverse, communicationId, logger, ct).ConfigureAwait(false);
+        return faulted ? null : recognition?.Pair ?? new HashSet<Guid>();
+    }
+
     /// <summary>What a flagged participant may have on one row of a Direct-team-owned message.</summary>
     internal enum FlaggedAnswer
     {
@@ -536,12 +676,14 @@ internal sealed class DirectMessageParticipantShares
     /// <summary>
     /// uac-r2 task 197b (owner option B, coordinator bounds 2026-11-12): one call to THE predicate (<paramref name="visibility"/>,
     /// the 191h seam) over the message and its content rows, answered for a FLAGGED participant.
-    /// <para><b>The participant-scoped NoRoot exemption</b> applies only when <paramref name="directTeamOwnedWithPair"/> is
-    /// <c>true</c>, which a caller passes only when ALL hold: (i) the message is positively owned by the Direct-message owner team
-    /// (<see cref="IsDirectOwnerTeamAsync"/> or the job's resolved team, compared by id); (ii) its stamped participant pair is valid
-    /// (<see cref="ParticipantsOf"/>); (iii) the answer is applied only to those two participants. Under them the message is filed
-    /// under no record by definition, so the predicate's <see cref="ExternalRowVisibility.UndecidedOnlyForNoRoot"/> counts as
-    /// allowed. Otherwise (a user-owned Direct message, another team's) NoRoot stays Undecided: no grant.</para>
+    /// <para><b>The participant-scoped NoRoot exemption</b> applies only when <paramref name="directPairRecognized"/> is
+    /// <c>true</c>, which a caller passes only when ALL hold (coordinator, 2026-11-12, bound (i) revised to (i')): (i') the message
+    /// is positively recognized as an unfiled Direct message, whoever owns it: it is on a Direct thread that is not the per-user
+    /// master thread, carries a valid stamped pair (<see cref="ParticipantsOf"/>) and names no filing record
+    /// (<see cref="RecognizeUnfiledDirectMessageAsync"/>; the Direct-team share job's own steps 4 and 5 are the same recognition);
+    /// (ii) the predicate answers exactly no root (<see cref="ExternalRowVisibility.UndecidedOnlyForNoRoot"/>); (iii) the caller
+    /// applies the answer only to a grantee in that pair. Otherwise (an unfiled ordinary email, no valid pair) NoRoot stays
+    /// Undecided: no grant.</para>
     /// <para><b>The message decides its content rows:</b> a content row is Hidden when it or its message is; allowed only when its
     /// message is allowed and its own answer allows it; deferred otherwise. No separate content-row exemption.</para>
     /// <para><b>Fail closed:</b> no seam, a throw, or a faulted decision defers every row a sound rule did not hide (a Hidden row
@@ -549,7 +691,7 @@ internal sealed class DirectMessageParticipantShares
     /// </summary>
     internal static async Task<IReadOnlyDictionary<(string Table, Guid Id), FlaggedAnswer>> DecideForDirectParticipantsAsync(
         AppOnlyExternalVisibility? visibility, Guid communicationId, IReadOnlyCollection<(string Table, Guid Id)> rows,
-        bool directTeamOwnedWithPair, ILogger logger, CancellationToken ct)
+        bool directPairRecognized, ILogger logger, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(logger);
@@ -582,7 +724,7 @@ internal sealed class DirectMessageParticipantShares
             if (decision.Faulted)
                 return FlaggedAnswer.Defer;
             if (decision.IsVisible(row.Table, row.Id)
-                || (directTeamOwnedWithPair && decision.UndecidedOnlyForNoRoot(row.Table, row.Id)))
+                || (directPairRecognized && decision.UndecidedOnlyForNoRoot(row.Table, row.Id)))
             {
                 return FlaggedAnswer.Grant;
             }
