@@ -578,3 +578,13 @@ Reviews B1–B7 (correctness and client) and A1–A4 (authorization). Commits `4
 - `tests/Spaarke.ArchTests`: 2516 passed, 0 failed (includes RouteAuthorizationGuardTests and the EB-D-218 and 084e guards).
 - `npx jest` in `src/solutions/RecordProcedures`: 12 suites, 243 tests, all pass after R1 (239 before R1; was 11 suites, 220). `npm run build` succeeds (tsc-surface-gate: 0 errors in the page's own files, 98 pre-existing in shared libs).
 - No package and no file of real size, so publish size was not re-measured.
+
+### 084g close (2026-11-13)
+
+- **Re-check of fix round 1.** Server and client pass, except one F2 in the client (R1). A row where no choice makes a call (for example a rule changed on the parent) went read-only even for a user with full rights, and showed "You can view this, but not change it." Fixed in `b85f637784` with `noAllowedCall`: read-only only when some offered choice makes a call and none of those is allowed. Must-fire and must-not-fire tests are in `WizardsAllowed.test.tsx`, proven by mutation.
+- **uac-r2 review** of `f823ac6489..767d682324` (all of src/server): **PASS**, U-1 to U-5 met. The Guid.Empty route value still denies with the no-target reason (unchanged behaviour). One known limit is recorded at the `Task.WhenAll` (`2dfa032667`): the concurrent checks share one request scope, which is safe while the scoped services on the path stay safe for concurrent use and nothing on the path writes `HttpContext.Items`. Otherwise ask the checks one at a time. A hint may over-promise (401 for a non-GUID oid, 409 for the owner refusal), never under-protect.
+- **Merged** into `work/ebilling-r1` as `fd885aaffb`. The BFF part reaches dev with task 112 (ping uac-r2 for that deploy).
+- **For task 112, ui-tests.**
+  - "Read-only user": a user who can read the lists but may not write the record sees every choice disabled, "You can view this, but not change it.", and no Confirm.
+  - A user with assign/exclude but without remove: on a row with no own override, Exclude, Follow and Pin are enabled; on a row with one, the choices that remove it are disabled with the reason.
+  - A rule changed on the parent, opened by a billing admin: the normal frame, with each choice's own reason.
