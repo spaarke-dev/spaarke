@@ -446,4 +446,12 @@ The overlay is 084d-1's, unchanged, so it keeps ontology-r1's F1-F4. Many assign
 4. `q`: escape the Like wildcards AND reject control characters; 400 is the only bad-input answer.
 5. The ledger reason text names all three GETs; the count stays 153.
 
+**Superseded for candidates by uac-r2's ruling of 2026-11-13** (084d-5a review round 1). This replaces Q2's "503" and binding note 2's "asks the own row and its Procedure" for the candidate list. EB-D-218 stays as written for every row the answer exposes; this narrows only which candidates are judged.
+
+1. A candidate the caller cannot Read is **dropped before judging**, by ONE batched caller Read check over the candidate ids, before the own-row step, the resolver, the bound and `tooMany`. An unreadable candidate changes nothing in the answer (byte-identical two-world tests).
+2. A fault of that check, or a refusal of the whole check, is 503, never an empty 200.
+3. No pre-filter cap: fetch up to a hard ceiling of 1000 (`MaxCandidateRows`), filter, then bound; past the ceiling the answer is `tooMany`. **K5:** the ceiling counts the record's own Procedures before they are removed, so `tooMany` can come at 1000 − N real candidates; no leak, since those rows are exposed and checked under Now.
+4. Own row: a denied own-row **Procedure** is dropped (200, not listed); a denied own **row** of a readable Procedure is still 503.
+5. **K6:** the cost of the candidate Read batch. How its timing is handled is with uac-r2 (sent privately, 2026-11-13).
+
 Reviews: one Opus pass here, then uac-r2's; ontology-r1 sees the code.
