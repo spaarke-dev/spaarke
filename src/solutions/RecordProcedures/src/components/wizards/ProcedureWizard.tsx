@@ -4,8 +4,8 @@
  *   Procedure -> On this record -> Impact -> Confirm
  *
  * "On this record" offers As set on the parent, Follow latest, Pin a version, Exclude here and Remove from this record, each on task 089's
- * `procedure-assignments` route or its override removal (`plan.ts` says which calls a choice makes). There is no Change choice (084c) and no
- * dry run: Impact shows the removal preview where an override is removed, and otherwise what changes from this row's own data.
+ * `procedure-assignments` route or its override removal (`plan.ts` says which calls a choice makes). There is no Change choice (084c).
+ * Impact reads the dry run of the plan (task 084d-4, WizardFrame); the row's own before/after shows only while it has no answer.
  *
  * The wizard does not know whether the caller may write: the route decides, and a refusal is shown with its title with the wizard still open.
  * The panel says which kinds of call the lists' answers allow (task 084g, `allowed`): a choice that needs another kind is disabled with the
@@ -18,6 +18,7 @@ import { Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Spinner,
 import { StatusBadge } from '@spaarke/ui-components';
 import type { CoreRoute, GapView, ProcedureItem, VersionView } from '../../services/recordProceduresApi';
 import { failureText, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
+import type { DryRunApi } from '../../services/dryRunApi';
 import { gapFor, procedureState, recordNoun, recordWords, shortDate, sourceLabel, versionLabel, versionLines, type AllowedSteps } from '../../services/model';
 import {
   MAX_REASON_CHARS,
@@ -48,6 +49,9 @@ export interface ProcedureWizardProps {
   /** Task 084g: the kinds of call the lists' answers allow; a choice needing another is disabled, and none left is read-only. */
   allowed: AllowedSteps;
   api: OverridesApi;
+  /** Task 084d-4: the dry run the Impact step reads, and the firm the lists were read for (the date is `date`). */
+  dryRunApi: DryRunApi;
+  firmId: string | null;
   nav?: WizardNav;
   onChanged: OnChanged;
   onClose: () => void;
@@ -91,7 +95,7 @@ export function procedureAfter(p: ProcedureItem, choice: ProcedureChoice, versio
   }
 }
 
-export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, core, recordId, record, date, allowed, api, nav, onChanged, onClose }) => {
+export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, core, recordId, record, date, allowed, api, dryRunApi, firmId, nav, onChanged, onClose }) => {
   const s = useWizardStyles();
   const [form, setForm] = React.useState<Form>(() => initialForm(row));
   const [seen, setSeen] = React.useState(row.id);
@@ -320,6 +324,8 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
       resetKey={`procedure:${row.id}`}
       nav={nav}
       api={api}
+      dryRunApi={dryRunApi}
+      query={{ firmId, date }}
       core={core}
       recordId={recordId}
       readOnly={readOnly}

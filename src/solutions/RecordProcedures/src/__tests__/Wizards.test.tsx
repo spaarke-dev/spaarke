@@ -383,6 +383,7 @@ describe('Impact and the removal preview', () => {
     expect(await within(d).findByTestId('o21-line')).toHaveTextContent(O21_LINE);
     expect(O21_LINE).toContain(`"${O21_TEXT}"`);
     expect(O21_LINE).toContain('Nothing is re-checked automatically.');
+    await waitFor(() => expect(next(d)).toBeEnabled()); // 084d-4: Next waits for the dry run's answer
     fireEvent.click(next(d));
     expect(await within(d).findByTestId('confirm-step')).toHaveTextContent('Nothing is re-checked automatically.');
     await finish(d, 'Save override');
@@ -450,7 +451,8 @@ describe('a refusal keeps the wizard open and re-reads nothing', () => {
     expect(within(d).queryByTestId('success-body')).not.toBeInTheDocument();
   });
 
-  it('a refused removal PREVIEW stops at Impact: the title is shown, Next stays disabled, nothing is deleted, and Retry asks again', async () => {
+  // 084d-4 changed this: the preview is advisory (the dry run's refusal and the removal preview's alike), so a refusal no longer blocks Next.
+  it('a refused removal PREVIEW (the fallback after a refused dry run) is shown with its title, does not block Next, deletes nothing, and Retry asks again', async () => {
     let attempts = 0;
     const { writeCalls } = renderHarness({
       writes: respond({
@@ -463,7 +465,8 @@ describe('a refusal keeps the wizard open and re-reads nothing', () => {
     chooseRadio(d, /^Follow latest/);
     fireEvent.click(next(d));
     expect(await within(d).findByTestId('preview-failed')).toHaveTextContent('Forbidden');
-    expect(next(d)).toBeDisabled();
+    expect(next(d)).toBeEnabled();
+    expect(within(d).getByTestId('dryrun-failed')).toBeInTheDocument();
     expect(routes(writeCalls)).toEqual(['preview']);
 
     fireEvent.click(within(d).getByTestId('preview-retry'));
@@ -533,10 +536,11 @@ describe('the Change choice belongs to the rule wizard, and nothing here dry-run
     }
   });
 
-  it('the page sources have no dry-run read (control: the scan sees one), and the Procedure wizard has no change call at all', () => {
+  it('the dry-run route is named in dryRunApi.ts only (control: the scan sees one), and the Procedure wizard has no change call at all', () => {
+    // 084d-4 replaced 084b's "no dry run" guard: the Impact step now reads the dry run, through the one services module that names its route.
     const root = path.join(__dirname, '..');
-    const files = ['services/overridesApi.ts', 'components/wizards/plan.ts', 'components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx'];
-    const forbidden = /\bdry[-_ ]?run\b/i;
+    const files = ['services/overridesApi.ts', 'components/wizards/plan.ts', 'components/wizards/steps.tsx', 'components/wizards/impact.ts', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx'];
+    const forbidden = /['"`/]dry-run\b/i;
     // Comments may say what the page does not do; the scan reads code only.
     const code = (f: string) =>
       fs
@@ -544,19 +548,24 @@ describe('the Change choice belongs to the rule wizard, and nothing here dry-run
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/^\s*\/\/.*$/gm, '');
     for (const f of files) expect([f, forbidden.test(code(f))]).toEqual([f, false]);
-    expect(forbidden.test('const dryRun = true')).toBe(true);
+    expect(forbidden.test(code('services/dryRunApi.ts'))).toBe(true);
+    expect(forbidden.test('`${base}/procedures/dry-run?x`')).toBe(true);
     // The change route is called from the one api module, and only the rule wizard's plan reaches it.
     expect(/changeRule|rule-overrides\/change/.test(code('components/wizards/ProcedureWizard.tsx'))).toBe(false);
     expect(/rule-overrides\/change/.test(code('services/overridesApi.ts')) || /changeRuleUrl/.test(code('services/overridesApi.ts'))).toBe(true);
   });
 
-  it('the only writes in the page are in overridesApi.ts, and they are the routes of the task (control: the scan sees one)', () => {
+  it('the only writes in the page are in overridesApi.ts, and they are the routes of the task (control: the scan sees one); dryRunApi.ts POSTs the dry run only', () => {
     const root = path.join(__dirname, '..');
     const write = /method:\s*['"](POST|PUT|PATCH|DELETE)['"]/g;
     const walk = (dir: string): string[] => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(e => (e.isDirectory() ? (e.name === '__tests__' ? [] : walk(path.join(dir, e.name))) : [path.join(dir, e.name)]));
     const withWrites = walk('.').filter(f => /\.(ts|tsx)$/.test(f) && write.test(fs.readFileSync(path.join(root, f), 'utf8')));
     write.lastIndex = 0;
-    expect(withWrites.map(f => f.replace(/\\/g, '/'))).toEqual(['services/overridesApi.ts']);
+    // 084d-4: the dry run is a POST that writes nothing (084d-2a); its module names that one route and no other.
+    expect(withWrites.map(f => f.replace(/\\/g, '/'))).toEqual(['services/dryRunApi.ts', 'services/overridesApi.ts']);
+    const dry = fs.readFileSync(path.join(root, 'services/dryRunApi.ts'), 'utf8');
+    expect([...dry.matchAll(/method:\s*['"](POST|PUT|PATCH|DELETE)['"]/g)].map(m => m[1])).toEqual(['POST']);
+    expect(/procedure-assignments|rule-overrides|\/overrides\//.test(dry.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''))).toBe(false);
     expect(write.test("fetch(u, { method: 'DELETE' })")).toBe(true);
     const api = fs.readFileSync(path.join(root, 'services/overridesApi.ts'), 'utf8');
     expect([...api.matchAll(/`\$\{[^`]*\}\/(procedure-assignments|rule-overrides\/exclude|overrides\/|removal-preview)/g)].length).toBeGreaterThan(0);

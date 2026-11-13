@@ -18,6 +18,10 @@
  * Task 084c adds an optional fifth step, "New values", between "On this record" and Impact: the rule wizard asks for it (`valuesStep.active`)
  * while "Change for this record" is chosen, and the shell inserts and removes it as a dynamic step.
  *
+ * Task 084d-4: Impact reads the dry run (`dryRunApi.ts`) of the plan, for the firm and date the lists were read for, in place of 084b's
+ * interim impact. It is advisory: a refusal is shown and Confirm stays reachable, because the write route decides. 089's removal preview
+ * is now only the fallback for a refused dry run of a plan that removes (see the preview section below).
+ *
  * Read-only (task 084g, EB-D-221): when the wizard has no choice left that makes a call the lists' answers allow (fix round 1, B1), it
  * shows the row and its choices with every choice disabled and the reason above them, and has no Impact or Confirm step and no Finish: Back,
  * Next and Close only. With `readOnly` false the frame is exactly 084b's,
@@ -28,10 +32,11 @@ import * as React from 'react';
 import { Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { CheckmarkCircle48Filled } from '@fluentui/react-icons';
 import { WizardShell, type IWizardShellHandle, type IWizardShellProps, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
-import type { CoreRoute } from '../../services/recordProceduresApi';
-import { failureText, type OverridesApi, type RemovalPreview, type WriteFailure } from '../../services/overridesApi';
+import type { CoreRoute, ProceduresQuery } from '../../services/recordProceduresApi';
+import { failureText, type OverridesApi, type RemovalPreview, type WriteFailure, type WriteResult } from '../../services/overridesApi';
+import { dryRunBody, dryRunRequestOf, requestFirmOf, type DryRunApi, type DryRunView } from '../../services/dryRunApi';
 import { executePlan, removalOf, type Plan, type PlanRun } from './plan';
-import { ConfirmStep, ImpactStep, O21_LINE, READ_ONLY_LINE, useWizardStyles, type PreviewState } from './steps';
+import { ConfirmStep, ImpactStep, O21_LINE, READ_ONLY_LINE, useWizardStyles, type DryRunState, type PreviewState } from './steps';
 
 /**
  * Told to the panel after a write: `done` (the plan ran to its end) or `partial` (its first call was accepted and the next refused). For a
@@ -64,6 +69,10 @@ export interface WizardFrameProps {
   resetKey: string;
   nav?: WizardNav;
   api: OverridesApi;
+  /** Task 084d-4: the dry run the Impact step reads. */
+  dryRunApi: DryRunApi;
+  /** Task 084d-4: the firm and date the lists were read for; the dry run is asked for the same ones. */
+  query: ProceduresQuery;
   core: CoreRoute;
   recordId: string;
   /** Task 084g: the wizard only shows (choices disabled, the reason, no Impact, no Confirm, no Finish). The wizards disable their choices. */
@@ -112,8 +121,48 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   const live = React.useRef(props);
   live.current = props;
 
+  // ── The dry run of the proposal (task 084d-4) ──────────────────────────
+  // Keyed by the exact body it sends, so a change of the proposal (Back, another choice or reason) asks again. Answers are tagged with the
+  // sequence number of their ask and only the latest ask's answer is kept: an earlier answer arriving late is dropped (the race of two asks).
+  const mapping = dryRunRequestOf(plan);
+  const dryRunKey = mapping.ok ? `${props.query.firmId ?? ''}|${props.query.date}|${dryRunBody(mapping.request)}` : null;
+  const [dryRunFetched, setDryRunFetched] = React.useState<{ key: string; result: WriteResult<DryRunView> } | null>(null);
+  const dryRunSeq = React.useRef(0);
+  const dryRunInFlight = React.useRef<string | null>(null);
+
+  const dryRun: DryRunState = !mapping.ok
+    ? { state: 'none' }
+    : dryRunFetched?.key === dryRunKey
+      ? dryRunFetched.result.ok
+        ? { state: 'ready', value: dryRunFetched.result.value }
+        : { state: 'failed', failure: dryRunFetched.result.failure, requestNamesFirm: requestFirmOf(mapping.request) !== null }
+      : { state: 'loading' };
+  const dryRunRef = React.useRef(dryRun);
+  dryRunRef.current = dryRun;
+
+  const loadDryRun = React.useCallback(() => {
+    const p = live.current;
+    const m = dryRunRequestOf(p.plan);
+    if (!m.ok) return;
+    const key = `${p.query.firmId ?? ''}|${p.query.date}|${dryRunBody(m.request)}`;
+    if (dryRunInFlight.current === key) return;
+    dryRunInFlight.current = key;
+    const seq = ++dryRunSeq.current;
+    void p.dryRunApi.dryRun(p.core, p.recordId, p.query, m.request).then(result => {
+      // Stale: a later ask (another proposal, or another row) was made meanwhile; its answer, not this one, is shown.
+      if (seq !== dryRunSeq.current) return;
+      dryRunInFlight.current = null;
+      setDryRunFetched({ key, result });
+    });
+  }, []);
+
   // ── The removal preview of the override the plan removes ────────────────
-  const removeId = removalOf(plan);
+  // Superseded by the dry run, which carries the same fields (`closes.d170` / `kinds` for `closesRule`, `closes.warning`,
+  // `affectedOpenInvoices.count` and `.text`) from the same selection (084d-2b). It is kept as a FALLBACK, asked only when the dry run of a plan
+  // that removes was refused: the dry run asks more of the caller than the preview does (finance.read on the record, the remove route's
+  // privileges, one Read check over every row of both lists, so one unreadable row is a 503: O-K1a), and without the fallback the section 15
+  // warning would not be shown at all before a changed rule's removal in that case.
+  const removeId = dryRun.state === 'failed' ? removalOf(plan) : null;
   const [fetched, setFetched] = React.useState<{ id: string; result: { ok: true; value: RemovalPreview } | { ok: false; failure: WriteFailure } } | null>(null);
   const inFlight = React.useRef<string | null>(null);
 
@@ -151,6 +200,9 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   if (seenKey !== resetKey) {
     setSeenKey(resetKey);
     setFetched(null);
+    setDryRunFetched(null);
+    dryRunSeq.current += 1; // an answer still in flight for the previous row is stale
+    dryRunInFlight.current = null;
     setStale(false);
     inFlight.current = null;
   }
@@ -257,14 +309,18 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
         <ImpactStep
           before={live.current.before}
           after={live.current.after}
+          dryRun={dryRunRef.current}
+          onLoadDryRun={loadDryRun}
           preview={previewRef.current}
           onLoadPreview={loadPreview}
           onRetryPreview={retryPreview}
           extra={live.current.impactExtra}
         />
       ),
-      // A removal is confirmed only after its preview was shown.
-      canAdvance: () => previewRef.current.state === 'none' || previewRef.current.state === 'ready',
+      // Next waits while a read is in flight, so an answer (a warning above all) is shown before Confirm. A refused or failed answer never
+      // blocks: the dry run and the removal preview are advisory, and the write route decides the save (084d-4; the design note sets no
+      // blocking case). 084b blocked a removal whose preview was refused; that is no longer so.
+      canAdvance: () => dryRunRef.current.state !== 'loading' && previewRef.current.state !== 'loading',
     },
     { id: 'confirm', label: 'Confirm', renderContent: () => <ConfirmStep rows={live.current.confirmRows} />, canAdvance: () => !staleRef.current },
   ];

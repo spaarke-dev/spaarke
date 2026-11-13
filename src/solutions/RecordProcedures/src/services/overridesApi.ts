@@ -20,7 +20,7 @@
  * Change form's values was removed in its fix round 1: the rules-in-force rows now carry `ruleBody`.)
  *
  * The page decides nothing about authorization: every refusal (400, 403, 404, 409, 422, 503 ...) comes back as a {@link WriteFailure} carrying
- * the ProblemDetails `title` and `detail`, and the wizard shows them. There is no dry-run read of any kind (task 084d).
+ * the ProblemDetails `title` and `detail`, and the wizard shows them. The dry-run read is not here: it is `dryRunApi.ts` (task 084d-4).
  *
  * Mirrors `recordProceduresApi.ts`: `authenticatedFetch` THROWS on any non-2xx (`ApiError`) and on an exhausted 401 (`AuthError`).
  */

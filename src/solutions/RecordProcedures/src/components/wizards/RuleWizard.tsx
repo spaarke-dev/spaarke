@@ -23,8 +23,9 @@
 import * as React from 'react';
 import { Button, Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Text, Textarea } from '@fluentui/react-components';
 import { StatusBadge } from '@spaarke/ui-components';
-import type { CoreRoute, RuleItem, RuleMark } from '../../services/recordProceduresApi';
+import type { CoreRoute, ProceduresQuery, RuleItem, RuleMark } from '../../services/recordProceduresApi';
 import type { OverridesApi, WriteFailure } from '../../services/overridesApi';
+import type { DryRunApi } from '../../services/dryRunApi';
 import type { FirmOption } from '../../services/firmChoices';
 import { levelLabel, recordWords, ruleBadges, versionLabel, type AllowedSteps } from '../../services/model';
 import {
@@ -74,6 +75,9 @@ export interface RuleWizardProps {
   /** Task 084g: the kinds of call the lists' answers allow; a choice needing another is disabled, and none left is read-only. */
   allowed: AllowedSteps;
   api: OverridesApi;
+  /** Task 084d-4: the dry run the Impact step reads, for the firm and date the lists were read for. */
+  dryRunApi: DryRunApi;
+  query: ProceduresQuery;
   nav?: WizardNav;
   onChanged: OnChanged;
   onClose: () => void;
@@ -138,7 +142,7 @@ export function ruleNow(r: RuleItem): string {
   return r.parameterSummary ? `${badges} · ${r.parameterSummary}` : badges;
 }
 
-export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, record, firms, allowed, api, nav, onChanged, onClose }) => {
+export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, record, firms, allowed, api, dryRunApi, query, nav, onChanged, onClose }) => {
   const s = useWizardStyles();
   const [form, setForm] = React.useState<Form>(() => initialForm(row));
   const [seen, setSeen] = React.useState(ruleKey(row));
@@ -458,6 +462,8 @@ export const RuleWizard: React.FC<RuleWizardProps> = ({ row, core, recordId, rec
       resetKey={`rule:${ruleKey(row)}`}
       nav={nav}
       api={api}
+      dryRunApi={dryRunApi}
+      query={query}
       core={core}
       recordId={recordId}
       readOnly={readOnly}
