@@ -117,6 +117,8 @@ export interface DecisionPlan {
 /** Task 191 fix round 1: an unfinished review as the plan read returns it. */
 export interface DecisionUnfinishedReview {
   reviewId: string;
+  /** Task 191 fix round 2: the item the review was posted to; it is finished there, also when opened from an "also resolve" item. */
+  signalId: string;
   /** The review exactly as it was posted (no `retry`, no `sendChoice`). */
   review: DecisionReview;
   /** Its stored failure (replayed): the steps, what landed, whether it can resume and whether a send choice is needed. */

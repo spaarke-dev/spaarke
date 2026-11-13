@@ -73,8 +73,9 @@ function failureFrom(
  */
 function unfinishedFrom(raw: unknown): DecisionUnfinishedReview | null {
   if (typeof raw !== 'object' || raw === null) return null;
-  const u = raw as { reviewId?: unknown; review?: unknown; failure?: unknown };
-  if (typeof u.reviewId !== 'string' || typeof u.review !== 'object' || u.review === null) return null;
+  const u = raw as { reviewId?: unknown; signalId?: unknown; review?: unknown; failure?: unknown };
+  if (typeof u.reviewId !== 'string' || typeof u.signalId !== 'string') return null;
+  if (typeof u.review !== 'object' || u.review === null) return null;
   const r = u.review as Record<string, unknown>;
   const review: DecisionReview = {
     reviewId: typeof r.reviewId === 'string' ? r.reviewId : u.reviewId,
@@ -91,7 +92,7 @@ function unfinishedFrom(raw: unknown): DecisionUnfinishedReview | null {
     typeof u.failure === 'object' && u.failure !== null ? (u.failure as IThrownProblemDetails) : null,
     'An earlier attempt to record this decision did not finish.'
   );
-  return { reviewId: u.reviewId, review, failure: { ...failure, replayed: true } };
+  return { reviewId: u.reviewId, signalId: u.signalId, review, failure: { ...failure, replayed: true } };
 }
 
 async function readProblem(response: Response): Promise<IThrownProblemDetails | null> {

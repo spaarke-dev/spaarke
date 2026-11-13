@@ -45,7 +45,7 @@ import {
 } from './decisionDraft';
 import type { Decision, ItemDraft, StepScope } from './decisionDraft';
 import { DecisionItemContext } from './decisionItemContext';
-import { needsSendChoice } from './decisionRecording';
+import { canRecordWithoutSending, needsSendChoice } from './decisionRecording';
 import type { DecisionItemContextValue, DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import type {
   DecisionSendChoice,
@@ -526,6 +526,9 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   // Task 191 (D-223): the earlier attempt's inquiry email may have been sent. Confirm offers exactly two ways on: send it again,
   // or record the decision without sending. Never a plain retry.
   const choiceRequired = !readOnly && needsSendChoice(pinnedFailure ?? failure);
+  // Task 191 fix round 2: an inquiry that did NOT go out (it may fail the same way on every retry, e.g. a mailbox that may not send)
+  // can also be recorded without sending, next to Retry recording, so the item is never stuck.
+  const notSentOffer = !readOnly && !choiceRequired && canRecordWithoutSending(pinnedFailure ?? failure);
   const recording = ready?.recording ?? false;
   const choose = React.useCallback(
     (choice: DecisionSendChoice) => {
@@ -554,7 +557,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         nav={nav}
         statusBar={statusBar}
         footer={
-          ready && choiceRequired
+          ready && (choiceRequired || notSentOffer)
             ? context => ({
                 end: context.isLastStep ? (
                   <>
@@ -571,14 +574,25 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
                     >
                       Record without sending
                     </Button>
-                    <Button
-                      appearance="primary"
-                      onClick={() => choose('send-again')}
-                      disabled={recording}
-                      data-testid="send-again"
-                    >
-                      Send again
-                    </Button>
+                    {choiceRequired ? (
+                      <Button
+                        appearance="primary"
+                        onClick={() => choose('send-again')}
+                        disabled={recording}
+                        data-testid="send-again"
+                      >
+                        Send again
+                      </Button>
+                    ) : (
+                      <Button
+                        appearance="primary"
+                        onClick={() => void onRecord?.()}
+                        disabled={recording}
+                        data-testid="retry-recording"
+                      >
+                        Retry recording
+                      </Button>
+                    )}
                   </>
                 ) : undefined,
               })

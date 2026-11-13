@@ -71,6 +71,22 @@ export function needsSendChoice(failure: DecisionCommitFailure | null | undefine
   return failure?.sendChoiceRequired === true && failure.resumable;
 }
 
+/**
+ * Task 191 fix round 2: the failure is resumable at a budget inquiry whose service request landed and whose email failed (sent or
+ * not), so the person may record the decision without sending. Mirrors the commit route's own test (`ResumedInquiry`).
+ */
+export function canRecordWithoutSending(failure: DecisionCommitFailure | null | undefined): boolean {
+  if (!failure?.resumable) return false;
+  return failure.steps.some(
+    s =>
+      s.code === 'send-budget-inquiry' &&
+      s.status === 'Failed' &&
+      s.possiblyWritten.length === 0 &&
+      s.written.length === 1 &&
+      s.written[0].entity.toLowerCase() === 'sprk_servicerequest'
+  );
+}
+
 /** The content of a review without its identity: two reviews with the same key are the same decision. */
 export function reviewKey(review: DecisionReview): string {
   const content: Partial<DecisionReview> = { ...review };

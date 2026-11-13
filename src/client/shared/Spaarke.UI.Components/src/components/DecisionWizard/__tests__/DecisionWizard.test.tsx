@@ -997,19 +997,85 @@ describe('task 191 fix round 1: an unfinished review is resumed from the item (c
   }
 
   /** The wizard opened again on the item; the plan read returns the unfinished review. */
-  function reopen(item: DecisionWizardItem, review: DecisionReview, failure: DecisionCommitFailure) {
+  function reopen(
+    item: DecisionWizardItem,
+    review: DecisionReview,
+    failure: DecisionCommitFailure,
+    postedTo = THRESHOLD_ID
+  ) {
+    const id = item.row.signalId;
     const service = makeService({
       plans: {
         ...plans,
-        [THRESHOLD_ID]: {
+        [id]: {
           ...approveFirstPlan,
-          unfinished: { reviewId: review.reviewId, review, failure: { ...failure, httpStatus: 409, replayed: true } },
+          signalId: id,
+          unfinished: {
+            reviewId: review.reviewId,
+            signalId: postedTo,
+            review,
+            failure: { ...failure, httpStatus: 409, replayed: true },
+          },
         },
       },
     });
-    renderWizard({ service, loadItem: makeLoader([item]), itemIds: [THRESHOLD_ID], startItemId: THRESHOLD_ID });
+    renderWizard({ service, loadItem: makeLoader([item]), itemIds: [id], startItemId: id });
     return service;
   }
+
+  const notSentInquiry = (): DecisionCommitFailure =>
+    failedOutcome({
+      landed: [{ entity: 'sprk_servicerequest', id: 'sr-1' }],
+      steps: [
+        {
+          key: 'action:send-budget-inquiry',
+          code: 'send-budget-inquiry',
+          phase: 4,
+          status: 'Failed',
+          written: [{ entity: 'sprk_servicerequest', id: 'sr-1' }],
+          possiblyWritten: [],
+        },
+      ],
+    });
+
+  it('fix round 2: a NotSent inquiry offers Record without sending beside Retry recording, and posts that choice', async () => {
+    const u = user();
+    const failure = notSentInquiry();
+    const posted = await storedReview(failure);
+
+    const service = reopen(thresholdItem, posted, failure);
+    await toConfirm(u);
+    expect(screen.getByTestId('locked-note')).toHaveTextContent(
+      'Record without sending records the decision without it'
+    );
+    expect(screen.getByTestId('retry-recording')).toBeInTheDocument();
+    expect(screen.queryByTestId('send-again')).toBeNull();
+    await u.click(screen.getByTestId('record-without-sending'));
+    await screen.findByTestId('status-bar');
+
+    expect(service.commit).toHaveBeenCalledTimes(1);
+    expect(service.commit.mock.calls[0][1]).toMatchObject({
+      reviewId: posted.reviewId,
+      retry: true,
+      sendChoice: 'record-without-sending',
+    });
+  });
+
+  it('fix round 2: opened from an "also resolve" item, the review is posted to its primary item', async () => {
+    const u = user();
+    const failure = failedOutcome();
+    const posted = await storedReview(failure);
+    const alsoItem: DecisionWizardItem = { ...thresholdItem, row: { ...thresholdItem.row, signalId: OTHER_ID } };
+
+    const service = reopen(alsoItem, posted, failure, THRESHOLD_ID);
+    await toConfirm(u);
+    await u.click(button('Retry recording'));
+    await screen.findByTestId('status-bar');
+
+    expect(service.commit).toHaveBeenCalledTimes(1);
+    expect(service.commit.mock.calls[0][0]).toBe(THRESHOLD_ID);
+    expect((service.commit.mock.calls[0][1] as DecisionReview).reviewId).toBe(posted.reviewId);
+  });
 
   async function toConfirm(u: ReturnType<typeof user>) {
     await loaded();

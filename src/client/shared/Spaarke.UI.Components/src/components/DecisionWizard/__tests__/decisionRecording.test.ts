@@ -5,6 +5,7 @@
  */
 
 import {
+  canRecordWithoutSending,
   closesSignal,
   failureKeepsReview,
   isFailedOutcome,
@@ -113,6 +114,25 @@ describe('task 191 fix round 1', () => {
 
     const sent = commitResult({ signals: [{ signalId: PATH_B_ID, state: 'InquirySent' }] });
     expect(resolutionFromRecord(pathBPlan, pathBItem, emptyDraft('r'), review, sent, new Date()).note).toBeUndefined();
+  });
+
+  it('fix round 2: a resumable failure at a landed inquiry may be recorded without sending; others may not', () => {
+    const inquiryStep = {
+      key: 'k',
+      code: 'send-budget-inquiry',
+      phase: 4,
+      status: 'Failed',
+      written: [{ entity: 'sprk_servicerequest', id: 'sr' }],
+      possiblyWritten: [],
+    };
+    const notSent = failure({ resumable: true, steps: [inquiryStep], landed: inquiryStep.written });
+    expect(canRecordWithoutSending(notSent)).toBe(true);
+    expect(lockedNoteText(notSent)).toMatch(/Record without sending records the decision without it/);
+    expect(canRecordWithoutSending({ ...notSent, resumable: false })).toBe(false);
+    expect(canRecordWithoutSending(failure({ resumable: true }))).toBe(false);
+    expect(canRecordWithoutSending(failure({ resumable: true, steps: [{ ...inquiryStep, status: 'Done' }] }))).toBe(
+      false
+    );
   });
 
   it('F2: the locked note names the way on the item offers', () => {

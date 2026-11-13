@@ -27,6 +27,7 @@ import { buildReview, draftFromReview, emptyDraft, hasUnrecordedChoices, newRevi
 import type { ItemDraft } from './decisionDraft';
 import type { DecisionLookup, DecisionOpenLookupForItem } from './decisionItemContext';
 import {
+  canRecordWithoutSending,
   closesSignal,
   failureKeepsReview,
   isFailedOutcome,
@@ -156,6 +157,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           pinning: DecisionCommitFailure | null;
           sent: ItemDraft | null;
           posted?: DecisionReview;
+          /** Fix round 2: the item the stored review is posted to (its primary), when it was opened from another item. */
+          postTo?: string;
         }
       >
     >
@@ -206,6 +209,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           pinning: unfinished.failure,
           sent: shown,
           posted: unfinished.review,
+          postTo: unfinished.signalId,
         };
         setDrafts(prev => ({ ...prev, [id]: shown }));
         setPinned(prev => ({ ...prev, [id]: unfinished.failure }));
@@ -276,6 +280,9 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           return;
         }
         review = { ...review, sendChoice: choice };
+      } else if (retry && choice && canRecordWithoutSending(previous.pinning)) {
+        // Fix round 2: an inquiry that was not sent may be recorded without sending (or retried) on the same POST.
+        review = { ...review, sendChoice: choice };
       }
       // An edit after a plain refusal (nothing stored) is a different decision and gets its own review id. A pinned review
       // is never edited and never changes id: a new id would run the steps that already landed again.
@@ -286,7 +293,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       }
 
       try {
-        const result = await live.current.service.commit(id, review);
+        const result = await live.current.service.commit(isPinned && previous.postTo ? previous.postTo : id, review);
         if (!mounted.current) return;
         const resolution = resolutionFromRecord(l.plan, l.item, sendDraft, review, result, new Date());
         delete attempts.current[id];
@@ -304,7 +311,11 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           return next;
         });
         // Only what the route says it closed (Acted or Dismissed) counts as closed here; an item it left open stays open.
-        const also = (review.alsoResolve ?? []).filter(x => closesSignal(result, x));
+        // Fix round 2: a review finished from one of its "also resolve" items was posted to its primary item, which it closes too;
+        // the item it was opened from is this one (recorded above), never one of the others.
+        const target = isPinned && previous.postTo ? previous.postTo : id;
+        const covered = target !== id ? [target, ...(review.alsoResolve ?? [])] : (review.alsoResolve ?? []);
+        const also = covered.filter(x => x !== id && closesSignal(result, x));
         if (also.length > 0) {
           setAlsoClosed(prev => [...prev, ...also.filter(x => !prev.includes(x))]);
           // Their cached copies are open; a later visit must read them again.
@@ -345,6 +356,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
           pinning,
           sent: wasPinned ? (prior.sent ?? sendDraft) : sendDraft,
           posted: wasPinned ? prior.posted : undefined,
+          postTo: wasPinned ? prior.postTo : undefined,
         };
         setFailures(prev => ({ ...prev, [id]: failure }));
         setPinned(prev => {

@@ -5,6 +5,7 @@
  * Task: spaarke-ontology-platform-r1, task 058.
  */
 
+import { canRecordWithoutSending } from './decisionRecording';
 import type {
   DecisionAction,
   DecisionCommitFailure,
@@ -152,6 +153,8 @@ export function lockedNoteText(pinning: DecisionCommitFailure | null): string {
       : '';
   if (pinning?.sendChoiceRequired && pinning.resumable)
     return `${start} The inquiry email may have been sent: check Sent Items, then choose Send again or Record without sending on the last step.${later}`;
+  if (pinning?.resumable && canRecordWithoutSending(pinning))
+    return `${start} The inquiry email was not sent. Retry recording sends it without repeating what was already carried out, or Record without sending records the decision without it.${later}`;
   if (pinning?.resumable)
     return `${start} Retry recording finishes it without repeating what was already carried out.${later}`;
   return `${start} Try recording it again, or close without recording.`;

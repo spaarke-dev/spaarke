@@ -62,9 +62,12 @@ describe('reads', () => {
       sendChoice: null,
     };
     const failure = { ...landedProblem, status: 'Failed', resumable: true, sendChoiceRequired: true, replayed: true };
-    const fetch = jest.fn(async () => json({ ...pathBPlan, unfinished: { reviewId: 'r-9', review: stored, failure } }));
+    const fetch = jest.fn(async () =>
+      json({ ...pathBPlan, unfinished: { reviewId: 'r-9', signalId: PATH_B_ID, review: stored, failure } })
+    );
     const plan = await createDecisionWizardService({ fetch, baseUrl: BASE }).getPlan(PATH_B_ID);
 
+    expect(plan.unfinished?.signalId).toBe(PATH_B_ID);
     expect(plan.unfinished?.review).toEqual({
       reviewId: 'r-9',
       confirmed: true,
