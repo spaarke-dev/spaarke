@@ -97,8 +97,8 @@
       <steps><step>On a matter, open a firm Procedure; choose Pin a version; reach Impact</step></steps>
       <expected>Now → After lists the rules that change, the firms reached and the affected open invoice count</expected>
     </test>
-    <test name="D-170 warning">
-      <steps><step>Exclude a rule that has open findings; reach Impact</step></steps>
+    <test name="Removal warning (section 15, D-170)">
+      <steps><step>Remove a changed-rule override whose rule has open findings; reach Impact</step></steps>
       <expected>The D-170 warning that open findings close is shown</expected>
     </test>
     <test name="Assign Procedure">

@@ -12,17 +12,12 @@
 >
 >   ArchTests 2505/2505; agreement and procedure tests 551/551. Publishing (`publish-dataverse-solutions-manifest.yml`, `publish: true`, from master) is the owner's step after merge. provisioning-r1 is waiting for the published version, because its H7b S26 stops new runs until 166's lock ships.
 > - **#2725 (profile matched by name):** our three scripts are fixed (`f7240c397b`, merged in #2727). The other 15 sites belong to uac-r2 and R3.
-> - **Next (checkpoint 2026-11-13, ~01:30Z):**
->   - **DONE and merged into work:** 084, 084a, 084b, 084e, 084f, and **084g** (`fd885aaffb`, closed `90da03b6ab`).
->     - Two adversarial passes, then fix round 1 (B1–B7, A1–A4) and R1: the wizards decide per choice, and a row with no call-making choice is never read-only.
->     - uac-r2 PASS. Its K: the concurrent privilege checks share one request scope; a comment at the `Task.WhenAll` records the assumption.
->     - ArchTests on work: 2516/2516 (`b00cl3yt8`). `C:\wt84e3` is removed.
->   - **084c RUNNING** (sonnet implementer impl-084c, branch `task/ebilling-084c` from `90da03b6ab`). Its brief adds a `change` kind to `AllowedSteps`, from `permissions.change`, in 084g's per-choice pattern. **When it reports:**
->     - one adversarial pass (frontend, so one);
->     - fix any findings;
->     - merge and mark it done.
->   - **Then:** 084d (opus; impact dry run and Assign; tell ontology-r1 before the dry-run read is built).
->   - **Worktree cleanup** (`bxmu6iyl7`): the 084e (2), 084g (2) and `afdaef28` agent worktrees, all clean and merged.
+> - **Next (checkpoint 2026-11-13, ~04:30Z):**
+>   - **DONE and merged into work:** 084, 084a, 084b, 084e, 084f, 084g (`fd885aaffb`), **084c** (`a74278e22c`, closed `cd30c642c7`; review + fix round 1: re-change of a changed/stale rule, rule bodies on the read model; uac-r2 PASS; scoped re-check clean; K1-K4 in notes). EB-D-222 (owner): only ApprovedRate refuses Change.
+>   - **084f dev role apply DONE** (owner OK; both -Verify PASS; uac-r2 SecureChild PASS). **SpaarkeMaster 1.3.1.0 PUBLISHED** (run 43358397122, master `d8b53ec0c3`; includes field-mapping #2733 source); provisioning-r1 and field-mapping-r1 told. **work/ebilling-r1 is PUSHED** (owner yes).
+>   - **084d NEXT:** design done, `notes/084d-dry-run-design.md` (row-source decorator `ProcedureRowOverlay`, no Signals change; dry-run auth = write routes' declarations; parity + no-write + concurrency tests). **Next action:** send it to ontology-r1 (overlay seam, chunk check) and uac-r2 (C5 auth, EB-D-218 exemptions, R6 body firm); on both OKs launch an opus implementer (base = work head). R1 decided (ui-test reworded to the changed-rule removal); R2 (Superseded warning text) proposed in the design.
+>   - **Owner questions open:** #2772 / ISS-017 (invoice-family regarding pair vs core lookup: refuse (recommended) or re-derive; field-mapping-r1 must confirm in its session).
+>   - **Peers:** field-mapping-r1 045d (H1 guard widened to all six family tables, uac-r2 agreed) - review its diff before merge. spa-r4: #2770 = DEF-067 (file types, supporting files, several invoices; scope ours); spa-r4 sends a SprkModal hosting + locked-record contract for review. Dev BFF `9411f604bb`.
 >   - **Filed:** ISS-015 (#2743); ISS-016 (#2755, WizardShell header nav and × stay active during a save).
 >   - **Peers:**
 >     - Dev BFF `4e64670ea0` contains #2689/#2708/#2724/#2727/#2681 (confirmed to uac-r2).
