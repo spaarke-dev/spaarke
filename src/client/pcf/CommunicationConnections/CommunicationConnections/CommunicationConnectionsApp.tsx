@@ -44,6 +44,9 @@ import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
   readSameOriginRecordTarget,
+  resolveRegardingPairTable,
+  type IRetrieveRecordWebApi,
+  resolveRegardingRecordTarget,
   resolveRecordDisplayNameFieldName,
   type IPolymorphicWebApi,
   OOB_MODAL_SIZES,
@@ -327,28 +330,35 @@ async function handleRefreshInternal(): Promise<void> {
 }
 
 /**
- * Resolve the entity + id the Row-2 record-number Link should open (the primary
- * regarding record). Primary source is the denormalized `sprk_regardingrecordurl`
- * (parse `etn` + `id`) when it is a same-origin record URL;
- * fallback matches a filed association by the primary record name. Returns null
- * when no target can be resolved. Never throws.
+ * Resolve the entity + id the Row-2 record-number Link should open (the primary regarding record) when nothing is
+ * filed yet, from the denormalized columns of the row:
+ *   1. the stored `sprk_regardingrecordurl` when it is a same-origin record URL (relative, or absolute on the current
+ *      origin) that names the row's regarding pair (`sprk_regardingrecordid`) or when no pair is known;
+ *   2. otherwise the row's PAIR: the record id plus the table of its record type (one `sprk_recordtype_ref` read).
+ * There is no name-based guess: once anything is filed the click uses the primary filed association instead, and a
+ * name match could pick a different record that shares the name.
+ * Returns null when no target can be resolved (the click then does not navigate). Never throws.
  */
-function resolvePrimaryOpenTarget(
-  url: string | null,
-  filed: IFiledAssociation[],
-  primaryName: string | null
-): { entityName: string; entityId: string } | null {
-  // Only a same-origin record URL is read; any other stored value is never opened (the filed-association
-  // fallback below, built from the row's own regarding lookups, takes over).
-  const fromUrl = readSameOriginRecordTarget(url);
-  if (fromUrl) return fromUrl;
-  if (primaryName) {
-    const hit = filed.find(f => f.recordName === primaryName);
-    if (hit?.entityType && hit?.recordId) {
-      return { entityName: hit.entityType, entityId: cleanGuid(hit.recordId) };
-    }
-  }
-  return null;
+async function resolvePrimaryOpenTarget(
+  denorm: IPrimaryDenorm,
+  webApi: IRetrieveRecordWebApi
+): Promise<{ entityName: string; entityId: string } | null> {
+  const pairId = cleanGuid(denorm.pairId);
+  const fromUrl = readSameOriginRecordTarget(denorm.url);
+  if (fromUrl && (!pairId || fromUrl.entityId === pairId)) return fromUrl;
+  const pairTable = pairId ? await resolveRegardingPairTable(webApi, denorm.pairTypeId) : null;
+  return resolveRegardingRecordTarget(denorm.url, pairTable, pairId);
+}
+
+/** The denormalized regarding columns of the host row the number link reads. */
+interface IPrimaryDenorm {
+  number: string | null;
+  name: string | null;
+  url: string | null;
+  /** `sprk_regardingrecordid` (the pair's record id) */
+  pairId: string | null;
+  /** `_sprk_regardingrecordtype_value` (the pair's record type row) */
+  pairTypeId: string | null;
 }
 
 export interface ICommunicationConnectionsAppProps {
@@ -466,14 +476,12 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   // `reloadKey` bump after each successful write.
   const [modalOpen, setModalOpen] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
-  const [primaryDenorm, setPrimaryDenorm] = React.useState<{
-    number: string | null;
-    name: string | null;
-    url: string | null;
-  }>({
+  const [primaryDenorm, setPrimaryDenorm] = React.useState<IPrimaryDenorm>({
     number: null,
     name: null,
     url: null,
+    pairId: null,
+    pairTypeId: null,
   });
   const [filedAssociations, setFiledAssociations] = React.useState<IFiledAssociation[]>([]);
 
@@ -494,6 +502,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
           // same synchronous outbound enrichment as number/name — the denorm fields are
           // the reliable source (provenance is a no-op for outbound).
           url: (rec['sprk_regardingrecordurl'] as string) ?? null,
+          // The pair the URL is derived from (read with the same WITHOUT-$select retrieve).
+          pairId: (rec['sprk_regardingrecordid'] as string) ?? null,
+          pairTypeId: (rec['_sprk_regardingrecordtype_value'] as string) ?? null,
         });
         // Use the COMMUNICATION regarding field names (sprk_regardingperson for Contact, …),
         // not the sprk_todo TODO_REGARDING_CATALOG names.
@@ -814,36 +825,38 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     (e: React.MouseEvent) => {
       e.preventDefault();
       // Prefer the primary FILED association's entity + id (the reliable target that
-      // matches the Number/Name now shown on the card); fall back to the denorm URL
-      // round-trip only when nothing is filed yet.
-      const target = primaryFiled
-        ? { entityName: primaryFiled.entity, entityId: cleanGuid(primaryFiled.targetId) }
-        : resolvePrimaryOpenTarget(primaryDenorm.url, filedAssociations, primaryDenorm.name);
-      if (!target) {
-        console.warn('[CommunicationConnections] Cannot open regarding record — no target resolved.');
-        return;
-      }
-      // Shared cross-frame walker (task 081 / C-8).
-      const xrm = getXrm('navigation');
-      if (typeof xrm?.Navigation?.navigateTo !== 'function') {
-        console.warn('[CommunicationConnections] Xrm.Navigation.navigateTo unavailable; cannot open record.');
-        return;
-      }
-      try {
-        // `record` OOB size (85%×85%) — record-modal-selection.md invariant;
-        // was an ad-hoc 80%×80% literal.
-        const result = xrm.Navigation.navigateTo(
-          { pageType: 'entityrecord', entityName: target.entityName, entityId: target.entityId },
-          { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
-        );
-        if (result && typeof result.catch === 'function') {
-          result.catch((err: unknown) => console.warn('[CommunicationConnections] navigateTo rejected:', err));
+      // matches the Number/Name now shown on the card); fall back to the row's denormalized
+      // URL / pair only when nothing is filed yet.
+      void (async () => {
+        const target = primaryFiled
+          ? { entityName: primaryFiled.entity, entityId: cleanGuid(primaryFiled.targetId) }
+          : await resolvePrimaryOpenTarget(primaryDenorm, context.webAPI as unknown as IRetrieveRecordWebApi);
+        if (!target) {
+          console.warn('[CommunicationConnections] Cannot open regarding record — no target resolved.');
+          return;
         }
-      } catch (err) {
-        console.warn('[CommunicationConnections] navigateTo threw:', err);
-      }
+        // Shared cross-frame walker (task 081 / C-8).
+        const xrm = getXrm('navigation');
+        if (typeof xrm?.Navigation?.navigateTo !== 'function') {
+          console.warn('[CommunicationConnections] Xrm.Navigation.navigateTo unavailable; cannot open record.');
+          return;
+        }
+        try {
+          // `record` OOB size (85%×85%) — record-modal-selection.md invariant;
+          // was an ad-hoc 80%×80% literal.
+          const result = xrm.Navigation.navigateTo(
+            { pageType: 'entityrecord', entityName: target.entityName, entityId: target.entityId },
+            { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+          );
+          if (result && typeof result.catch === 'function') {
+            result.catch((err: unknown) => console.warn('[CommunicationConnections] navigateTo rejected:', err));
+          }
+        } catch (err) {
+          console.warn('[CommunicationConnections] navigateTo threw:', err);
+        }
+      })();
     },
-    [primaryFiled, primaryDenorm.url, primaryDenorm.name, filedAssociations]
+    [primaryFiled, primaryDenorm, context.webAPI]
   );
 
   const hasNumber = typeof cardNumber === 'string' && cardNumber.trim().length > 0;

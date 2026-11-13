@@ -68,8 +68,8 @@ Checked, no change:
 |---|---|---|
 | 1 Event side pane | any stored value reached `openUrl` / `window.location` | `navigateToParentRecord` refuses anything but a same-origin record URL. The button calls `openParentRecord`: the stored URL when it is one and names the pair's record, else the URL built from `sprk_regardingrecordid` + the table of `_sprk_regardingrecordtype_value` (one `sprk_recordtype_ref` read), else nothing opens. The header select now also reads those two columns; the button also shows when only the pair exists |
 | 2 TodoDetail | the stored value went to the host callback as is | the host is handed only the safe URL (stored, else pair: `RECORD_TYPE_ENTITY_MAP[type name]` + `sprk_regardingrecordid`); when neither works it falls to the existing `onOpenRegardingRecord` path, else nothing |
-| 3 CommunicationConnections | `new URL(stored)`; a relative value threw and fell through to the filed association; an absolute value on any host was parsed and its `etn`/`id` opened | `readSameOriginRecordTarget`; a relative value (which the old `new URL()` threw on) or an absolute value on the current origin now opens directly; any other value is never read and the existing filed-association fallback applies |
-| 4 RegardingResolver | `new URL(stored)`, same as 3 | a same-origin value (relative, or absolute on the current origin) is read; any other value is never read: the target is built from `sprk_regardingrecordid` + the table of the record type (two extra reads, only on that path); else nothing opens |
+| 3 CommunicationConnections | `new URL(stored)`; a relative value threw and fell through to a name match against the filed associations; an absolute value on any host was parsed and its `etn`/`id` opened | When something is filed the click still opens the primary filed association (what the card shows). Otherwise `readSameOriginRecordTarget`: a same-origin value (relative, or absolute on the current origin) that names the row's pair, or any same-origin value when no pair is known, opens directly; any other value is never read and the target is built from the row's PAIR (`sprk_regardingrecordid` + the table of `_sprk_regardingrecordtype_value`, one `sprk_recordtype_ref` read, read from the same row retrieve as the denorm columns); with neither, nothing opens. The name match is removed (see known limits) |
+| 4 RegardingResolver | `new URL(stored)`, same as 3 | One read of the row (`sprk_regardingrecordurl`, `sprk_regardingrecordid`, `_sprk_regardingrecordtype_value`). A same-origin value (relative, or absolute on the current origin) that names the pair (or no pair is known) opens directly. Otherwise the PAIR wins: the record id plus the table of the record type (one `sprk_recordtype_ref` read, only on that path); an accepted same-origin URL is the fallback only when the table cannot be read; else nothing opens |
 
 ## Evidence
 
@@ -93,6 +93,16 @@ Round 2 (same-origin absolute accepted), fail-first: the round-1 helper (relativ
 | RegardingResolver | `__tests__/RegardingResolverApp.test.tsx` | 1 failed / 74 passed (of 75) | 75 passed; PCF suite 147 passed (3 suites) |
 | TodoDetail | `src/components/TodoDetail/__tests__/TodoDetail.test.tsx` | 20 passed (the old helper also reached the same URL through the pair) | 20 passed |
 
+Round 3 (fix round 2: reader 3 builds from the pair; pair wins in reader 4), fail-first against the round-2 reader sources
+(`8f896d5872`) with the round-3 tests:
+
+| Surface | Before (round-2 source) | After |
+|---|---|---|
+| CommunicationConnections app | 2 failed / 16 passed (of 18): other-origin URL naming P with the pair M opens M (no navigation before); same-origin URL naming P with the pair M opens M | 18 passed (2 tests added); PCF suite 54 passed (5 suites) |
+| RegardingResolver app | 6 failed / 70 passed (of 76): "the pair wins" plus 5 tests that now match the single-read select | 76 passed; PCF suite 148 passed (3 suites) |
+
+`build:prod` succeeded for both PCFs after round 3.
+
 The same-origin absolute happy path is covered in every suite: the CommunicationConnections default denorm URL and the
 RegardingResolver "pre-loaded record" / "fresh picker selection wins" fixtures use `${window.location.origin}/main.aspx?appid=..&etn=..&id=..`;
 relative, other-origin, other-scheme and protocol-relative cases are kept alongside. The pane test injects the origin
@@ -115,8 +125,12 @@ Other gates:
 
 ## Known limits
 
-- Rows with an absolute URL on a DIFFERENT origin than the page (a copied row, an admin edit, another org) are refused. Readers 1, 2 and 4 then use the pair; reader 3 (CommunicationConnections) uses its filed-association fallback (matched by record name) and does not read the pair columns.
+- Rows with an absolute URL on a DIFFERENT origin than the page (a copied row, an admin edit, another org alias) are refused. Readers 1, 2, 3 and 4 then build from the pair (reader 3 only when nothing is filed; with a filed association the click opens the primary filed association, as the card shows it).
 - The origin check compares to `window.location.origin`. Dataverse code pages and PCF controls run on the org origin, so the org's own absolute URLs match; a surface hosted elsewhere (for example a standalone SPA) would see no absolute URL as same-origin and rely on relative values or the pair.
-- When the record type table cannot be read (no privilege, fault), readers 1 and 4 open nothing. Reader 2 uses a fixed 11-entry type-name map, as its legacy path always did.
+- When the record type table cannot be read (no privilege, fault): readers 1, 3 and 4 fall back to an accepted same-origin stored URL (canonical, same-origin, so safe) even if it names another record than the pair, and open nothing when there is none. Reader 2 uses a fixed 11-entry type-name map, as its legacy path always did.
+- Reader 3 no longer matches a filed association by record name. That branch was reachable only when a filed association existed, and then the primary filed association is already used first, so it was dead; it was also ambiguous when two filed records share a name.
 - The generic `ColumnRendererService.renderUrl` renders any `Url` attribute as an `href` without knowing the attribute; it is not specific to this column and was left alone. A grid that shows `sprk_regardingrecordurl` as a link would need the attribute-aware rule.
 - HeaderSection (tsx, Fluent) has no component test harness in the pane (node jest, `.test.ts` only); its click handler is a one-line call into `openParentRecord`, which carries the tests, and the pane type-checks and builds.
+- K3: the Parent button (reader 1) is shown whenever a stored URL or a pair exists. A refused URL whose pair cannot be resolved leaves a visible button whose click does nothing visible (a console warning only).
+- K1: TodoDetail (reader 2) hands the host a RELATIVE record URL (`/main.aspx?...`); a host's `onOpenRegardingUrl` that opens it must resolve it against its own origin. No host in this repo passes the callback.
+- The `javascript:` case in the CommunicationConnections "never opens" table does not discriminate: the old `new URL()` code also did not navigate for it. The absolute other-origin cases and the two "pair wins" tests are the discriminating ones.

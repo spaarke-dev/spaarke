@@ -82,7 +82,16 @@ const HOST_ID = '22222222-2222-2222-2222-222222222222'; // matches jest.setup Xr
 const MINIMAL_PROVENANCE = JSON.stringify({ version: 1, candidates: [], signals: [] });
 
 function buildContext(overrides?: {
-  denorm?: { number?: string | null; name?: string | null; url?: string | null };
+  denorm?: {
+    number?: string | null;
+    name?: string | null;
+    url?: string | null;
+    /** The regarding pair the URL is derived from: the record id and the record-type row id. */
+    pairId?: string | null;
+    pairTypeId?: string | null;
+  };
+  /** Table logical name the record-type row `pairTypeId` stands for (sprk_recordtype_ref lookup). */
+  pairTable?: string | null;
   provenance?: string | null;
   showVersionFooter?: boolean | null;
   titleText?: string | null;
@@ -102,6 +111,8 @@ function buildContext(overrides?: {
     sprk_regardingrecordnumber: denorm.number ?? undefined,
     sprk_regardingrecordname: denorm.name ?? undefined,
     sprk_regardingrecordurl: denorm.url ?? undefined,
+    sprk_regardingrecordid: denorm.pairId ?? undefined,
+    _sprk_regardingrecordtype_value: denorm.pairTypeId ?? undefined,
   };
   // Add any filed typed lookups (bound-value + OData formatted-value pair) the App reads to build
   // the authoritative filed-association list.
@@ -111,6 +122,11 @@ function buildContext(overrides?: {
   }
   const retrieveRecord = jest.fn((entity: string, _id: string, opts?: string) => {
     if (entity === 'sprk_communication' && opts === undefined) return Promise.resolve(denormRecord);
+    if (entity === 'sprk_recordtype_ref') {
+      return overrides?.pairTable
+        ? Promise.resolve({ sprk_recordlogicalname: overrides.pairTable })
+        : Promise.reject(new Error('record type not readable'));
+    }
     return Promise.resolve({});
   });
 
@@ -260,6 +276,60 @@ describe('CommunicationConnectionsApp — RegardingResolver card parity (task 13
       entityName: 'sprk_matter',
       entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     });
+  });
+
+  it('number Link builds from the row pair when the stored URL is on another origin and names another record (nothing filed)', async () => {
+    const MATTER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    const PROJECT_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+    const navigateTo = jest.fn().mockResolvedValue(undefined);
+    (global as { Xrm?: unknown }).Xrm = {
+      WebApi: { retrieveRecord: jest.fn(), retrieveMultipleRecords: jest.fn() },
+      Navigation: { navigateTo },
+      Page: { data: { entity: { getId: () => HOST_ID } } },
+    };
+
+    const { context } = buildContext({
+      denorm: {
+        number: 'P-1',
+        name: 'Acme',
+        // Another org alias, naming the project ...
+        url: `https://other-alias.crm.dynamics.com/main.aspx?etn=sprk_project&id=${PROJECT_ID}`,
+        // ... while the row's pair is the matter.
+        pairId: MATTER_ID,
+        pairTypeId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+      },
+      pairTable: 'sprk_matter',
+    });
+    renderApp(context);
+
+    fireEvent.click(await screen.findByTestId('cc-record-number'));
+    await waitFor(() => expect(navigateTo).toHaveBeenCalledTimes(1));
+    expect(navigateTo.mock.calls[0][0]).toMatchObject({ entityName: 'sprk_matter', entityId: MATTER_ID });
+  });
+
+  it('number Link: a same-origin stored URL that names another record than the row pair — the pair wins', async () => {
+    const PAIR_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    const navigateTo = jest.fn().mockResolvedValue(undefined);
+    (global as { Xrm?: unknown }).Xrm = {
+      WebApi: { retrieveRecord: jest.fn(), retrieveMultipleRecords: jest.fn() },
+      Navigation: { navigateTo },
+      Page: { data: { entity: { getId: () => HOST_ID } } },
+    };
+    const { context } = buildContext({
+      denorm: {
+        number: 'M-1',
+        name: 'Acme',
+        url: `${window.location.origin}/main.aspx?etn=sprk_project&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa`,
+        pairId: PAIR_ID,
+        pairTypeId: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+      },
+      pairTable: 'sprk_matter',
+    });
+    renderApp(context);
+
+    fireEvent.click(await screen.findByTestId('cc-record-number'));
+    await waitFor(() => expect(navigateTo).toHaveBeenCalledTimes(1));
+    expect(navigateTo.mock.calls[0][0]).toMatchObject({ entityName: 'sprk_matter', entityId: PAIR_ID });
   });
 
   it.each([

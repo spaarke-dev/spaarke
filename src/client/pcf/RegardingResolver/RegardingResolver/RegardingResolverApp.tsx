@@ -286,6 +286,7 @@ import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import {
   readSameOriginRecordTarget,
   resolveRegardingPairTable,
+  resolveRegardingRecordTarget,
 } from '@spaarke/ui-components/dist/utils/safeRegardingRecordUrl';
 
 /**
@@ -635,6 +636,10 @@ async function handleRefreshInternal(): Promise<void> {
   }
 }
 
+/** The host row's stored regarding URL and the pair it is derived from, in one read. */
+const REGARDING_CLICK_SELECT =
+  '?$select=sprk_regardingrecordurl,sprk_regardingrecordid,_sprk_regardingrecordtype_value';
+
 /**
  * v1.3.6 (SRFR-043) — Click-time click-target resolution helper.
  *
@@ -683,21 +688,19 @@ async function resolveClickTarget(
   if (!webApi || typeof webApi.retrieveRecord !== 'function') return null;
 
   try {
-    const result = await webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl');
-    const urlValue = result?.sprk_regardingrecordurl;
-    // Only a same-origin record URL is read; any other stored value is never opened.
-    const fromUrl = readSameOriginRecordTarget(typeof urlValue === 'string' ? urlValue : null);
-    if (fromUrl) return fromUrl;
+    const result = await webApi.retrieveRecord(hostEntity, hostRecordId, REGARDING_CLICK_SELECT);
+    const urlValue = typeof result?.sprk_regardingrecordurl === 'string' ? result.sprk_regardingrecordurl : null;
+    const pairId = cleanGuid(String(result?.sprk_regardingrecordid ?? ''));
 
-    // Otherwise build the target from the row's pair: the record id and the table of its record type.
-    const pair = await webApi.retrieveRecord(
-      hostEntity,
-      hostRecordId,
-      '?$select=sprk_regardingrecordid,_sprk_regardingrecordtype_value'
-    );
-    const pairId = cleanGuid(String(pair?.sprk_regardingrecordid ?? ''));
-    const pairTable = pairId ? await resolveRegardingPairTable(webApi, pair?._sprk_regardingrecordtype_value) : null;
-    if (pairTable && pairId.length > 0) return { entityName: pairTable, entityId: pairId };
+    // The stored URL is read only when it is a same-origin record URL, and it is used as is when it names the
+    // row's pair (or no pair is known). Any other stored value is never opened.
+    const fromUrl = readSameOriginRecordTarget(urlValue);
+    if (fromUrl && (!pairId || fromUrl.entityId === pairId)) return fromUrl;
+
+    // Otherwise the row's PAIR wins: the record id and the table of its record type. When the table cannot be read, an
+    // accepted same-origin URL is still used; with neither, nothing opens.
+    const pairTable = pairId ? await resolveRegardingPairTable(webApi, result?._sprk_regardingrecordtype_value) : null;
+    return resolveRegardingRecordTarget(urlValue, pairTable, pairId);
   } catch (err) {
     // Record deleted, no privilege, or network error. Warn (developer-visible)
     // but do not throw — the host form must never crash from a click.
