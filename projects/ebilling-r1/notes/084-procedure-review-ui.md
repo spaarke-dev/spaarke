@@ -1093,3 +1093,110 @@ Merged into work at `c313c6c211`: 2a `224007eda7`, 2a fix1 `475c05ed8e`, 2b `97e
   - **O-K3:** no test pins that the dry-run cancellation token never reaches a write read. 084d-3 extends the write-side guard (`ProcedureAssignmentServiceTests` ~2246) to the `sprk_invoice`, `sprk_billingevent` and core-table reads.
   - **O-K4a:** an overlay refusal surfaces as 503 `assignment.read_failed` "Try again", although it is deterministic. No real path reaches it today.
   - **O-K4b:** the child-fault log line is written after the Signal select, so it is lost if that select throws. Operator log only.
+
+## 084d-3
+
+Parity, no-write and concurrency tests for the dry run. Test-only: no product code changed. Branch `task/084d-3`, from `b341a69005`.
+
+**What was built:**
+- `tests/integration/contract/Api/Finance/RecordProcedureWriteRig.cs`: `RecordProcedureRig` in a writable mode, on its own instance.
+  - A transaction interpreter over the same in-memory world. Each request is checked in order: a create of an existing id is a duplicate key, an update or delete of a missing row does not exist, and a conditional update needs the row version at its turn. Only then is the whole transaction applied, all or nothing.
+  - A created row gets the server-filled columns: `createdon` from the rig clock (UTC), `statecode` 0, `statuscode` 1, and a row version. An update advances the row version.
+  - Two REAL `ProcedureAssignmentService`s over it:
+    - the writer, with a stub ownership answer (owned, creator person = the rig's Reviewer) and a closure mock with its selections and the retired-close set up;
+    - the planner, built as 084d-2's host builds it: a STRICT ownership resolver and a STRICT closure with only its two selections.
+  - A per-table rig page size for the queries the resolver pages at 5000 (condition (a)), a page log, a `BeforeQuery` hook for the concurrency tests, and one lock around every read and transaction (the world is not thread-safe).
+  - `Strict()`: every write member of the seam throws, the transaction included.
+- `tests/integration/contract/Api/Finance/RecordProcedureDryRunParityContractTests.cs` (204 cases).
+- `RecordProcedureRig.RightsProbe`: `Batches.Add` under a lock, because concurrent dry runs share one probe.
+- `ProcedureAssignmentServiceTests`: the O-K3 extension (below).
+
+**Parity matrix (162 cases).** 9 kinds × 3 seeds × 3 record types (matter M, project P, work assignment W) × 2 dates (Feb 1 and Mar 15; the dry run's and the write's instant is Feb 10 12:00 UTC).
+- Kinds: assign Follow-latest, assign Pin (v1 of a two-version Procedure), exclude Procedure, exclude rule, change rule, re-change (a change replacing this record's own change of the rule), switch (Follow → Pin replacing the Follow row), remove, and remove of a changed rule.
+- An existing override that a kind needs is written by the REAL writer at Jan 20 09:00 UTC (switch, re-change, both removals), so its rows have the write's shapes.
+- Each case:
+  1. runs `DryRunAsync`;
+  2. reads both lists (`ListProceduresAsync`, `ListRulesInForceAsync`) before the write;
+  3. REALLY writes the same change through the writer (a replacement is the wizards' two calls: remove, then create);
+  4. reads both lists again.
+- Each case asserts:
+  - Now equals the read before the write;
+  - After equals the read after the write, Procedures and rules each;
+  - `proposedRowIds` equals the ids of every create the write sent;
+  - both sides carry no permissions (`RecordWritePermissions.None`);
+  - it is not vacuous: After differs from Now. The one exception is a first change on Feb 1, where After must EQUAL Now, because the record rule is in force only from the save and a change's Exclude row does not show before then. Where the write creates an override row that shows on the date (Mar 15), the raw post-write read differs from the normalised one, so the normalisation has something to blank.
+- Results: 162/162 pass.
+
+**Normalisations (one).**
+- A proposed row (an id in `proposedRowIds`) has its `stamp.byId` and `stamp.byName` blanked on both sides.
+  - Why: After shows no creator for a proposed row (ontology-r1 F3), while the written row carries the writer's creator person (`sprk_createdbyperson`; `sprk_procedureassignment` is a stamped table).
+  - Rows matched by `rowId` (Procedure overrides) or `overrideRowId` (rule marks).
+- Not normalised:
+  - `stamp.on`: the dry run's one created-on and the write's `createdon` come from the same instant, so they compare exactly;
+  - `permissions`: set by the route, so both are None at the service and compared;
+  - everything else.
+- K3 of 084d-1 (the record set's effective-from uses the build day) needs no normalisation: no view shows it.
+
+**Seeds and conditions.**
+- `plain`: the kind's own rows.
+- `chain`: also an Excluded Procedure and a Pinned Procedure on the matter, a firm-G-scoped rule Exclude on the project, and a legacy client-default rule.
+- `large`: conditions (a) and (b).
+  - Rig page size: 1 row on assignments and versions, 50 on rule sets and policies, plus a three-rule Procedure, so every read of the four tables spans pages.
+  - 510 filler Procedures applying to every record. Each has a version, a set and an enabled, versionless policy, with ids `fffffff1-…` to `fffffff4-…` that sort after every derived id. So there are two 500-id chunks of rule sets and of policies, and the record's set and record rule sit in the first.
+- Asserted per large case, on the pages the dry run read:
+  - (a) policies, rule sets and versions were each read over more than one page;
+  - (b) the policy image's parent (the record's set) and the version image's parent (the record rule) each sit in a chunk with a later chunk after it.
+- (b), exactly once: `EachPolicyAndVersionImage_IsAppendedExactlyOnce` (9 cases: change, change over an Off record rule, remove of a changed rule × 3 record types, large seed).
+  - It runs the REAL resolver over a `ProcedureRowOverlay` of the plan, counting every row each page returns.
+  - Each policy and version after-image is returned exactly once. The premise asserts above apply.
+  - In the dry run itself, a duplicate makes the resolver throw (503) and a missing image breaks the equality. The exception is a switched-off policy image, which the resolver drops either way; that is why the exactly-once case for removing a changed rule exists.
+- (c): before each dry run, every seeded `createdon` in the four tables is earlier than the clock.
+- One `createdon` per request, Kind Utc: the overlay refuses a non-UTC stamp (084d-1), and the parity's exact `stamp.on` comparison holds only with the request's one stamp.
+
+**Mutation proofs.** Each was applied to the product code, built, run against `RecordProcedureDryRunParityContractTests` (204), and restored:
+- M1, drop the overlay's `createdon` stamp (`ProcedureRowOverlay` ctor): 117 fail. That is every case of the 7 kinds that create an override row, 18 each, except the change: 9 (Mar 15 only; on Feb 1 the change shows nothing).
+- M2, drop the chunk check (`ImagesFor` returns every image to every chunk): 21 fail. 12 are the large-seed parity cases of change and re-change (the duplicate is a resolver fault, so a 503); 9 are the exactly-once cases.
+- M3, drop the policy switch-on (`PlanChangeRuleAsync`: `policyAfter = policy`): 42 fail. 36 are parity cases (change and re-change × every seed, record type and date); 6 are exactly-once cases (change, change over an Off rule).
+
+**No write** (`DryRun_OverAStrictRig_WritesNothing`, 27 cases: 9 kinds × 3 record types, chain seed).
+- Setup: the seeding writes are done first, then the rig is made strict, so every write member and the transaction throw.
+- Each dry run answers 200 and:
+  - calls no write member of the seam;
+  - sends no transaction;
+  - leaves the four tables byte-identical (row-by-row snapshot);
+  - asks the planner's strict ownership resolver nothing;
+  - calls only the closure's two selections;
+  - does not touch the writer's ownership or closure.
+- Must-fire control (`TheStrictRig_RefusesARealWrite`): a real write over the strict rig fails, the transaction is recorded, and the world is unchanged.
+
+**O-K3** (`ProcedureAssignmentServiceTests.Change_WhenTheTransactionCommitsButGivesNoAnswer_AndTheRequestIsCancelled_StillReadsBack`, extended).
+- The finding now sits on an invoice with a line.
+- The close window is the queries after stage 3 up to the last `sprk_signal` read. It must read `sprk_invoice`, `sprk_billingevent` and the records under the matter (premise), and every one of those reads must run on a token that cannot be cancelled.
+- Must-not-fire: the caller-scoped count after the close keeps the request's token.
+- Mutation M4: a cancellable token passed to `SelectBaseFindingsAsync` in the write fails the test, but already at the existing Signal-read line.
+- Mutation M4b: a cancellable token passed only to the record's invoice and line readers fails only the new assertion (1 fail of 131 `ProcedureAssignmentServiceTests`).
+
+**Concurrency.**
+- `InterleavedDryRuns_EachEqualTheirSequentialAnswer` (3 record types). An assign, an exclude rule and a re-change, two of them twice, plus a plain read, all run concurrently on ONE read service and planner, 3 rounds, with a yield before every query.
+  - Each answer equals its sequential answer, byte for byte, and the plain read equals Now.
+  - Premise: the trace switches between two dry runs at least 3 times.
+  - The world is unchanged and nothing is written.
+- `ADryRun_WithARealWriteBetweenItsReads_IsSelfConsistent` (project, work assignment). A real one-row write (assign) lands at every one of the dry run's queries in turn, on a fresh rig each time.
+  - Now and After are each exactly the sequential answer before or after the write.
+  - The post-write read equals the sequential one, so the write is unaffected by the overlay.
+  - The proposal's row is never written.
+  - Premise: the sweep produced (Now before, After after), so the write really landed between the two reads (R10), and also (after, after).
+
+**O-K1a (no behaviour change).** The parity probe can Read every row, so the whole-preview 503 for an unreadable comparison row never arose in this work. Nothing here shows it to be a problem, and no proposal is made from 084d-3. The question stays with uac-r2 as recorded at the 084d-1/2a/2b close.
+
+**Product bugs found:** none.
+- The first run failed until the interpreter filled `statecode` on create. That was rig fidelity: Dataverse fills it, and the resolver's re-checks require it.
+
+**Known limits:**
+- **K1.** The design's `outranked` and `change prefill` seeds are not separate seeds. `chain` covers the other chain rows, a legacy rule, a pinned and a firm-scoped row.
+- **K2.** "The 503s match" is not covered: every matrix case answers 200 on both sides.
+- **K3.** Every proposal is for no firm. A firm-scoped Exclude or change is not in the matrix.
+- **K4.** The exactly-once case plans directly (`PlanChangeRuleAsync`, `PlanRemoveAsync`) rather than through `DryRunAsync`, because the overlay is built inside `DryRunAsync` with no seam. The re-change's merged plan is covered by the parity alone.
+- **K5.** The concurrency tests run on the in-memory world with one lock between queries. They show that the overlay is per request; they say nothing of Dataverse's isolation. The write-between test uses a one-row write. A multi-row write landing between two queries of one resolution can tear that resolution (R10), as it can for the plain read.
+
+**Gates.** BFF build 0 warnings, 0 errors. ArchTests 2570/2570. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede) 8545 passed, 4 skipped, 0 failed (8341 before: +204, the new class). `dotnet format whitespace --verify-no-changes` clean on the four touched test files.
