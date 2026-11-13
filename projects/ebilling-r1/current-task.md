@@ -72,7 +72,7 @@
 - ISS-018 #2777 (Pending Spend)
 - ISS-019 #2782 (NFR-01 named firm)
 - ISS-020 #2794 (no invoice move; built as fm 045g)
-- ISS-021 #2797 (deactivated Procedure still applies)
+- ISS-021 #2797 (deactivated Procedure still applies): fix PR #2798 open (ontology-r1 OK at ab13e55015; comments fd17074268). Known limits: the two version reads. Parity case follows on work after merge
 - ISS-017 #2772 (decided, built in 045e)
 - DEF-067 #2770
 

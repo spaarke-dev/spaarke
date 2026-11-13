@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open. The resolver part is ontology-r1's (told 2026-11-13). The 089 assign refusal needs the owner's OK. |
+| **Status** | In progress: resolver fix PR https://github.com/spaarke-dev/spaarke/pull/2798 (ontology-r1 reviewed). Version reads are known limits. The 089 assign refusal needs the owner's OK. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | 084d-5a adversarial review (Opus), pre-existing finding, CONFIRMED |
