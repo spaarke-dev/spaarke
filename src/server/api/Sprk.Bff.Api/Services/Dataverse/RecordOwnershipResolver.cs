@@ -243,6 +243,10 @@ internal sealed record UnfiledCommunicationFacts(Guid CommunicationId, Guid? Cre
     /// <summary>The message moves to <paramref name="creatorSystemUserId"/>'s business-unit team.</summary>
     public static UnfiledCommunicationFacts ToCreator(Guid communicationId, Guid creatorSystemUserId) =>
         new(communicationId, creatorSystemUserId, null);
+
+    /// <summary>The facts say the message moves to its creator's team (no keep reason, a creator recorded). Members after the decision
+    /// ask this, never the creator id: only <c>NonDirectUnfileAnswerAsync</c> reads the creator (the 197a guard).</summary>
+    public bool MovesToCreator => KeepReason is null && CreatorSystemUserId is { } creator && creator != Guid.Empty;
 }
 
 /// <summary>
@@ -3251,7 +3255,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </summary>
     private static RecordOwnerResolution WithUnfiledContentFollowing(
         RecordOwnerResolution settled, RowBeforeChange before, bool filingIsOwn) =>
-        filingIsOwn && before.Unfiled is { CreatorSystemUserId: not null }
+        filingIsOwn && before.Unfiled is { MovesToCreator: true }
         && settled.IsOwned && settled.OwningTeamId is { } team && team != Guid.Empty
         && before.OwningTeam is { } previous && previous != Guid.Empty && previous != team
             ? settled with { UnfiledContentFollows = new Sprk.Bff.Api.Services.Communication.Access.UnfiledContentMove(previous, team) }
