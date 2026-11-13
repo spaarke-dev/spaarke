@@ -15,8 +15,9 @@
  * partial-save message can never land under another row, and the user is never left unaware of a half-done switch. After a partial save the
  * wizard holds the row it was opened on, which is out of date: Finish stays off until the panel hands back the re-read row.
  *
- * Read-only (task 084g, EB-D-221): when the panel says so, the wizard shows the row and its choices with every choice disabled and the reason
- * above them, and has no Impact or Confirm step and no Finish: Back, Next and Close only. With `readOnly` false the frame is exactly 084b's,
+ * Read-only (task 084g, EB-D-221): when the wizard has no choice left that makes a call the lists' answers allow (fix round 1, B1), it
+ * shows the row and its choices with every choice disabled and the reason above them, and has no Impact or Confirm step and no Finish: Back,
+ * Next and Close only. With `readOnly` false the frame is exactly 084b's,
  * and a refusal at Finish is still shown with its title (the flag is a hint; the route decides).
  */
 

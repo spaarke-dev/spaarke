@@ -8,7 +8,8 @@
  * dry run: Impact shows the removal preview where an override is removed, and otherwise what changes from this row's own data.
  *
  * The wizard does not know whether the caller may write: the route decides, and a refusal is shown with its title with the wizard still open.
- * The panel may open it `readOnly` (task 084g): every choice is then disabled, without its fields, and the frame has no Confirm.
+ * The panel says which kinds of call the lists' answers allow (task 084g, `allowed`): a choice that needs another kind is disabled with the
+ * reason and without its fields; with no choice left that makes a call, the wizard is read-only and the frame has no Confirm (fix round 1, B1).
  * The Pin picker's versions come from task 081's read of the Procedure (084's view lists the version in force and the newer one only).
  */
 
@@ -17,13 +18,17 @@ import { Caption1, Dropdown, Field, MessageBar, MessageBarBody, Option, Spinner,
 import { StatusBadge } from '@spaarke/ui-components';
 import type { CoreRoute, GapView, ProcedureItem, VersionView } from '../../services/recordProceduresApi';
 import { failureText, type OverridesApi, type WriteFailure } from '../../services/overridesApi';
-import { gapFor, procedureState, recordNoun, recordWords, shortDate, sourceLabel, versionLabel, versionLines } from '../../services/model';
+import { gapFor, procedureState, recordNoun, recordWords, shortDate, sourceLabel, versionLabel, versionLines, type AllowedSteps } from '../../services/model';
 import {
   MAX_REASON_CHARS,
+  allowedBlocker,
   currentProcedureChoice,
+  needsAny,
   ownOverride,
   parentOverrides,
   planProcedure,
+  planWithin,
+  procedureChoiceNeeds,
   procedureChoices,
   type ProcedureChoice,
 } from './plan';
@@ -40,8 +45,8 @@ export interface ProcedureWizardProps {
   record: { table: string; name: string | null };
   /** The work date the lists were read for (yyyy-MM-dd). */
   date: string;
-  /** Task 084g: show only; every choice disabled with the reason, no Confirm. */
-  readOnly: boolean;
+  /** Task 084g: the kinds of call the lists' answers allow; a choice needing another is disabled, and none left is read-only. */
+  allowed: AllowedSteps;
   api: OverridesApi;
   nav?: WizardNav;
   onChanged: OnChanged;
@@ -86,7 +91,7 @@ export function procedureAfter(p: ProcedureItem, choice: ProcedureChoice, versio
   }
 }
 
-export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, core, recordId, record, date, readOnly, api, nav, onChanged, onClose }) => {
+export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, core, recordId, record, date, allowed, api, nav, onChanged, onClose }) => {
   const s = useWizardStyles();
   const [form, setForm] = React.useState<Form>(() => initialForm(row));
   const [seen, setSeen] = React.useState(row.id);
@@ -97,9 +102,15 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
   }
   const set = (patch: Partial<Form>) => setForm(f => ({ ...f, ...patch }));
 
+  // ── What each choice needs, and whether the lists' answers allow it (084g fix round 1, B1) ──
+  const offered = procedureChoices(row);
+  const blockerOf = (c: ProcedureChoice) => allowedBlocker(procedureChoiceNeeds(row, c), allowed);
+  // Read-only only when no offered choice that makes a call is allowed.
+  const readOnly = !offered.some(c => needsAny(procedureChoiceNeeds(row, c)) && blockerOf(c) === null);
+
   // ── The Pin picker's versions (task 081's read), asked for when Pin is the selected choice ──
   const [versions, setVersions] = React.useState<Versions | null>(null);
-  const wantsVersions = !readOnly && form.choice === 'pin';
+  const wantsVersions = !readOnly && form.choice === 'pin' && blockerOf('pin') === null;
   const askedFor = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!wantsVersions || askedFor.current === row.id) return;
@@ -126,7 +137,8 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
   const versionRefused = versions?.id === row.id && versions.state === 'ready' && !!form.versionId && !pinnable.some(v => v.id.toLowerCase() === form.versionId.toLowerCase());
 
   const plan = planProcedure(row, form.choice, { versionId: form.versionId, reason: form.reason, pinnable: pinnable.map(v => v.id) });
-  const canChoose = plan.steps.length > 0;
+  // A plan goes on only when its choice is allowed and every call it makes is one the choice was said to need.
+  const canChoose = plan.steps.length > 0 && blockerOf(form.choice) === null && planWithin(plan, procedureChoiceNeeds(row, form.choice));
   const recordLabel = recordWords(record.table, record.name);
 
   // ── Step 1: the Procedure as the server describes it ─────────────────────
@@ -200,7 +212,6 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
 
   const latestNow = row.pinned ? (row.newerVersion ?? row.versionInForce) : row.versionInForce;
   const parentText = parents.map(o => overrideWords(o)).join('; ');
-  const offered = procedureChoices(row);
 
   const options: Array<ChoiceOption<ProcedureChoice>> = offered.map(value => {
     switch (value) {
@@ -271,13 +282,16 @@ export const ProcedureWizard: React.FC<ProcedureWizardProps> = ({ row, gaps, cor
     }
   });
 
-  // Read-only (084g): every choice disabled, and none shows its fields.
-  const shown = readOnly ? options.map(o => ({ ...o, disabled: true, body: undefined })) : options;
+  // 084g: a choice the answers do not allow is disabled with the reason and without its fields; read-only, every choice is disabled.
+  const shown = options.map(o => {
+    const blocker = blockerOf(o.value);
+    return blocker !== null ? { ...o, caption: blocker, disabled: true, body: undefined } : readOnly ? { ...o, disabled: true, body: undefined } : o;
+  });
 
   const modeStep = (
     <div className={s.step} data-testid="mode-step">
       <ChoiceGroup ariaLabel="On this record" options={shown} value={form.choice} onChange={choice => set({ choice })} />
-      {!readOnly && form.choice === 'pin' && versions?.state === 'ready' && pinnable.length === 0 && (
+      {wantsVersions && versions?.state === 'ready' && pinnable.length === 0 && (
         <MessageBar intent="warning">
           <MessageBarBody>No version of this Procedure has been in force yet, so there is nothing to pin.</MessageBarBody>
         </MessageBar>

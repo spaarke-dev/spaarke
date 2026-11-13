@@ -1,13 +1,14 @@
 /**
- * Task 084g (EB-D-221): the wizards open read-only from the `permissions` the two list reads return. With a false flag every write choice is
- * disabled with the reason and there is no Confirm (no Impact, no Finish); with true flags the wizard is exactly 084b's, and a refusal at Finish
- * is still shown with its title (a flag is a hint, U-2); a body without `permissions` (an older BFF) is all false.
+ * Task 084g (EB-D-221): the wizards open read-only from the `permissions` the two list reads return. When the answers allow no kind of call,
+ * every choice is disabled with the reason and there is no Confirm (no Impact, no Finish); with true flags the wizard is exactly 084b's, and a
+ * refusal at Finish is still shown with its title (a flag is a hint, U-2); a body without `permissions` (an older BFF) is all false. One flag
+ * false decides per choice (fix round 1, B1): WizardsAllowed.test.tsx.
  */
 
 import '@testing-library/jest-dom';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { READ_ONLY_LINE } from '../components/wizards/steps';
-import { wizardReadOnly } from '../services/model';
+import { allowedSteps } from '../services/model';
 import { readPermissions, readProceduresView, readRulesView, type WritePermissions } from '../services/recordProceduresApi';
 import { WRITE_ALL, matterProcedures, matterRules } from './fixtures';
 import { button, chooseRadio, createdBody, next, openProcedure, openRule, refusal, renderHarness, respond, toChoices, toConfirm, typeReason } from './wizardHarness';
@@ -68,21 +69,29 @@ describe('084g: a caller who may not write opens the wizards read-only', () => {
     await expectReadOnly(d, writeCalls);
   });
 
-  // Each wizard can plan an assignment or exclusion AND a removal (a switch is both): either flag false is read-only. `change` is 084c's.
+  // Fix round 1 (B1): the wizards decide per choice, so one flag false is no longer read-only by itself (WizardsAllowed.test.tsx). These are
+  // the answers that allow NO kind of call: each is read-only on both wizards. `change` is 084c's and opens nothing.
   const readOnlyWhen: Array<[string, unknown, unknown]> = [
-    ['assignOrExclude false', { ...WRITE_ALL, assignOrExclude: false }, WRITE_ALL],
-    ['remove false', { ...WRITE_ALL, remove: false }, WRITE_ALL],
+    ['both flags false, change true', { ...NONE, change: true }, { ...NONE, change: true }],
     ['the rules answer false, the Procedures answer true', WRITE_ALL, NONE],
     ['the Procedures answer false, the rules answer true', NONE, WRITE_ALL],
     ['no permissions in either answer (an older BFF)', undefined, undefined],
     ['no permissions in one answer', WRITE_ALL, undefined],
     ['flags that are not the boolean true', { assignOrExclude: 'true', remove: 1, change: true }, { assignOrExclude: 'true', remove: 1, change: true }],
     ['permissions that are not an object', true, true],
+    ['one answer allows only creates, the other only removals', { ...WRITE_ALL, remove: false }, { ...WRITE_ALL, assignOrExclude: false }],
   ];
 
-  it.each(readOnlyWhen)('read-only (negative) when %s', async (_name, procedures, rules) => {
+  it.each(readOnlyWhen)('the Procedure wizard is read-only (negative) when %s', async (_name, procedures, rules) => {
     const { writeCalls } = renderHarness(answers(procedures, rules));
     const d = await openProcedure('p-rate', 'Fenwick rate card');
+    await expectReadOnly(d, writeCalls);
+  });
+
+  // Fix round 1 (B6): the same table on the rule wizard.
+  it.each(readOnlyWhen)('the rule wizard is read-only (negative) when %s', async (_name, procedures, rules) => {
+    const { writeCalls } = renderHarness(answers(procedures, rules));
+    const d = await openRule('r-block', 'BLOCK · Block billing');
     await expectReadOnly(d, writeCalls);
   });
 });
@@ -141,11 +150,11 @@ describe('084g: reading permissions', () => {
     expect(readRulesView({ ...rules, permissions: WRITE_ALL })?.permissions).toEqual(WRITE_ALL);
   });
 
-  it('wizardReadOnly: writable only when every answer gives assignOrExclude and remove; no answer is read-only', () => {
-    expect(wizardReadOnly(WRITE_ALL, WRITE_ALL)).toBe(false);
-    expect(wizardReadOnly({ ...WRITE_ALL, change: false })).toBe(false);
-    expect(wizardReadOnly(WRITE_ALL, { ...WRITE_ALL, remove: false })).toBe(true);
-    expect(wizardReadOnly({ ...WRITE_ALL, assignOrExclude: false })).toBe(true);
-    expect(wizardReadOnly()).toBe(true);
+  it('allowedSteps: create is assignOrExclude and remove is remove, each only when every answer says so; no answer allows nothing', () => {
+    expect(allowedSteps(WRITE_ALL, WRITE_ALL)).toEqual({ remove: true, create: true });
+    expect(allowedSteps({ ...WRITE_ALL, change: false })).toEqual({ remove: true, create: true });
+    expect(allowedSteps(WRITE_ALL, { ...WRITE_ALL, remove: false })).toEqual({ remove: false, create: true });
+    expect(allowedSteps({ ...WRITE_ALL, assignOrExclude: false })).toEqual({ remove: true, create: false });
+    expect(allowedSteps()).toEqual({ remove: false, create: false });
   });
 });

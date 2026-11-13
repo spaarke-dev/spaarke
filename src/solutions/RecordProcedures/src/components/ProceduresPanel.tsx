@@ -10,8 +10,10 @@
  * the one not-available message, whether the record is missing or the caller cannot read it. The page decides nothing about who may see a
  * row: the server already refuses unless the caller can Read every row it names.
  *
- * Task 084g (EB-D-221): a wizard opens read-only unless the answers' `permissions` say the caller may write (`wizardReadOnly`). The flag is
- * taken with the row the wizard opens on, like the rest of the snapshot. It only disables: the write routes still decide every write.
+ * Task 084g (EB-D-221): the answers' `permissions` say which kinds of call the wizards may plan (`allowedSteps`); a wizard disables each
+ * choice that needs a kind they do not allow, and is read-only when no choice that makes a call is left (fix round 1, review B1). This is
+ * taken with the row the wizard opens on, like the rest of the snapshot, and kept when a partial save hands the wizard the re-read row (B2).
+ * It only disables: the write routes still decide every write.
  *
  * The panel imports shared components only through `@spaarke/ui-components` (MetricCardRow, StatusBadge) and Fluent v9 tokens, so the host's
  * light/dark theme (resolved in `main.tsx`) is the only thing that decides colours (ADR-021).
@@ -56,6 +58,7 @@ import type { FirmChoices, FirmOption, InvoicedFirms } from '../services/firmCho
 import {
   PROCEDURE_FILTERS,
   RULE_FILTERS,
+  allowedSteps,
   buildCountCards,
   gapBarText,
   matchesProcedureFilter,
@@ -63,7 +66,7 @@ import {
   resolveFilter,
   runningCount,
   todayIso,
-  wizardReadOnly,
+  type AllowedSteps,
   type ProcedureFilter,
   type RuleFilter,
 } from '../services/model';
@@ -123,13 +126,13 @@ const RETRYABLE: ReadonlySet<PanelFailureKind> = new Set(['signin', 'unavailable
 
 /**
  * The row a wizard is open on: a snapshot of the row and of the answer it came from, so a re-read after a write does not change the open wizard.
- * `readOnly` (084g) is taken from the same answers.
+ * `allowed` (084g) is taken from the same answers.
  */
 type OpenRow =
-  | { kind: 'procedure'; key: string; row: ProcedureItem; gaps: GapView[]; date: string; readOnly: boolean }
-  | { kind: 'rule'; key: string; row: RuleItem; readOnly: boolean };
+  | { kind: 'procedure'; key: string; row: ProcedureItem; gaps: GapView[]; date: string; allowed: AllowedSteps }
+  | { kind: 'rule'; key: string; row: RuleItem; allowed: AllowedSteps };
 
-const readOnlyOf = (procedures: RecordProceduresView, rules: RecordRulesInForceView): boolean => wizardReadOnly(procedures.permissions, rules.permissions);
+const allowedOf = (procedures: RecordProceduresView, rules: RecordRulesInForceView): AllowedSteps => allowedSteps(procedures.permissions, rules.permissions);
 
 const procedureKey = (p: ProcedureItem): string => p.id.toLowerCase();
 const ruleKey = (r: RuleItem): string => `${r.policyId}:${r.policyVersionId ?? ''}`.toLowerCase();
@@ -190,16 +193,18 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
             setLoad({ state: 'ready', procedures: procedures.value, rules: rules.value });
             const cur = openRef.current;
             if (outcome !== 'partial' || !cur) return false;
-            const readOnly = readOnlyOf(procedures.value, rules.value);
+            // The open wizard keeps what it was allowed (084g fix round 1, review B2): a re-read that allowed less would turn it read-only and
+            // reset it, losing the partial-save message. The routes still refuse a retry they would not allow.
+            const allowed = cur.allowed;
             if (cur.kind === 'procedure') {
               const row = procedures.value.procedures.find(p => procedureKey(p) === cur.key);
               if (!row) return false;
-              setOpen({ kind: 'procedure', key: cur.key, row, gaps: procedures.value.gaps, date: procedures.value.date, readOnly });
+              setOpen({ kind: 'procedure', key: cur.key, row, gaps: procedures.value.gaps, date: procedures.value.date, allowed });
               return true;
             }
             const row = rules.value.rules.find(r => ruleKey(r) === cur.key);
             if (!row) return false;
-            setOpen({ kind: 'rule', key: cur.key, row, readOnly });
+            setOpen({ kind: 'rule', key: cur.key, row, allowed });
             return true;
           }
           const [first, second] = [procedures, rules].flatMap(r => (r.ok ? [] : [r.failure]));
@@ -307,12 +312,12 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         row: p,
         gaps: readyLoad.procedures.gaps,
         date: readyLoad.procedures.date,
-        readOnly: readOnlyOf(readyLoad.procedures, readyLoad.rules),
+        allowed: allowedOf(readyLoad.procedures, readyLoad.rules),
       });
     }
   };
   const openRule = (r: RuleItem) => {
-    if (readyLoad) setOpen({ kind: 'rule', key: ruleKey(r), row: r, readOnly: readOnlyOf(readyLoad.procedures, readyLoad.rules) });
+    if (readyLoad) setOpen({ kind: 'rule', key: ruleKey(r), row: r, allowed: allowedOf(readyLoad.procedures, readyLoad.rules) });
   };
 
   /** ‹ › through the list as the user sees it (filters applied); absent when the open row is not in it any more. */
@@ -352,7 +357,7 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         recordId={recordId}
         record={record}
         date={open.date}
-        readOnly={open.readOnly}
+        allowed={open.allowed}
         api={overrides}
         nav={navFor(shownProcedureRows, procedureKey, open.key, openProcedure)}
         onChanged={refresh}
@@ -365,7 +370,7 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         recordId={recordId}
         record={record}
         firms={ruleFirms}
-        readOnly={open.readOnly}
+        allowed={open.allowed}
         api={overrides}
         nav={navFor(shownRuleRows, ruleKey, open.key, openRule)}
         onChanged={refresh}

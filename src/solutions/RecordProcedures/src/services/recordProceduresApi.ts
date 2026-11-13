@@ -368,7 +368,7 @@ export function readRulesView(body: unknown): RecordRulesInForceView | null {
     ...view,
     gaps: list(body.gaps),
     permissions: readPermissions(body.permissions),
-    rules:(body.rules as RuleItem[]).map(r => ({ ...r, marks: list(r.marks) })),
+    rules: (body.rules as RuleItem[]).map(r => ({ ...r, marks: list(r.marks) })),
   };
 }
 
