@@ -747,3 +747,75 @@ The base-retired Changed mark has no `baseRuleBody`, because nothing is publishe
   - **K4.** `testKit.ts` still classifies a `ruleset` route that the client no longer calls. Dead test code; remove it when next touching the file.
 - **Merged** into `work/ebilling-r1` as `a74278e22c`. The BFF part (read-model fields) reaches dev with task 112.
 - **Item 8 decided (EB-D-222, owner 2026-11-13):** keep as built. Only ApprovedRate refuses Change (ApprovedTimekeeper has no values); may be revisited at UAT.
+
+## 084d-1
+
+Planning without writes. Server only; there is no route, DI registration or client change. Branch `task/084d-1`, from `549c155ab2`. This is slice 1 of the approved 084d split: 084d-2 adds the dry-run read and the route, 084d-3 the parity, no-write and concurrency tests, and 084d-4 the client.
+
+**Placement.** Everything is in `Services/Finance/Procedures`. Nothing under `Services/Signals` changes: the resolver is reused as-is through its `IGenericEntityService` row source, so there is no Signals diff. Nothing is registered in DI. Both new types are `internal` and built per request.
+
+**What was built:**
+- `WriteRefusingEntityService`: the planning service (F1). Reads pass through. All nine write members are explicit interface implementations that throw before anything is sent: create, upsert, update, update-if-row-version-matches, bulk update, bulk update-if-row-versions-match, transaction, delete and associate. A subclass therefore cannot override them. The constructor refuses an inner service that already refuses writes.
+- `ProcedureRowOverlay`: the dry run's row source over the four override tables (F4). It derives from the planning service, so it inherits the write refusals.
+- `ProcedureOverridePlan`: what a proposed override would do. It holds the after-images, the ids it creates and the ids it deletes.
+- `Plan*Async` on `ProcedureAssignmentService`: `PlanAssignProcedureAsync`, `PlanExcludeRuleAsync`, `PlanChangeRuleAsync` and `PlanRemoveAsync`. Each takes the planning service as a `WriteRefusingEntityService` parameter. The write's validation was extracted into shared helpers (`PlanAssignmentRowAsync`, `PlanExcludeRowAsync`, `PlanChangeBasisAsync`), and the reads now take the service they read through. The write and the plan run the same checks.
+- The four row builders take `imageOnly`. In a dry run they return the row as built, before the owner question, so no owner is asked.
+- The change plan stops before each send. Stage 1 checks the record's set against the image (`IsTheRecordSet`), and stage 2 checks the policy and its versions (`IsReusableRecordRule`, `RecordRuleVersionsAsync`) the way the write does. The policy image is built with `sprk_enabled = false`, then the stage 3 switch-on is applied to it (§2).
+- A read fault while planning returns 503 `assignment.read_failed`. Nothing is written.
+
+**§11 justification:**
+- `WriteRefusingEntityService`:
+  - *Existing:* there is no read-only `IGenericEntityService`; only test doubles refuse writes.
+  - *Extension:* every existing implementation writes by design, so a refusing decorator is the only way to give planning a service it cannot write through.
+  - *Cost of doing nothing:* no-write would rest on reading the code, and the change path's stage 1 and 2 sends would be one refactor away from running in a preview.
+- `ProcedureRowOverlay`:
+  - *Existing:* the resolver reads only through `IGenericEntityService` and has no other row source.
+  - *Extension:* a typed overlay on the resolver's rows would need rows its first read never loads, and the readers of those rows are private to the resolver. The row-source seam is the one place that needs no Signals change.
+  - *Cost of doing nothing:* an admin confirms an override without seeing which rules it changes, or a second resolver drifts from the one that judges invoices.
+- `ProcedureOverridePlan`:
+  - *Existing:* the write's outcome types (`OverrideView`, `RuleChangedView`, `OverrideRemoved`) describe a written row, not rows to be written.
+  - *Extension:* adding images to those types would put unwritten state into answers the routes already return.
+  - *Cost of doing nothing:* the overlay has nothing exact to apply, and 084d-2's read cannot show "if saved now".
+- `Plan*Async`:
+  - *Existing:* the write methods themselves.
+  - *Extension:* they are extended by extracting their validation into shared helpers. A plan and a write therefore run one set of checks, not two copies.
+  - *Cost of doing nothing:* a dry run that re-implements the checks drifts from the write, and its refusals stop matching the write's.
+
+**The overlay's rules (F4).** A query on the four tables decides which after-images it gets from one exact top-level AND condition. It never evaluates the criteria:
+- A primary-key `Equal`/`In` condition gives the images with those ids. This form is added beside F4's chunk rule, because a later step reads a planned policy or version by id.
+- Otherwise, a policy query matches its `sprk_ruleset` condition and a version query its `sprk_policy` condition (the resolver's chunks). The image goes only to the chunk that holds its parent.
+- A policy or version query with neither condition, with two of them, or under an Or filter throws before it reads.
+- On every page, rows that are deleted or replaced (any id with an after-image) are dropped. Images are added once, on the last page, cut to the query's columns, as copies.
+- A created image gets `statecode` 0 and the request's one created-on stamp (UTC) when it lacks them. A real row's image stays as read, with the update applied.
+- On the four tables, by-id, alternate-key and FetchXML reads throw, and so does FetchXML that cannot be parsed. Other tables pass through.
+
+**Known limits:**
+- **K1.** On the assignment and rule-set tables, a query without a primary-key condition gets every image of the table, and the resolver's own per-row re-checks decide membership. The resolver re-checks every row it reads from those two tables after its query: an assignment row by state and chain record, a Procedure's set by its Procedure being in the chunk, and a record set by scope, firm, one home and chain record. An image outside a query's own filter is therefore dropped there, not counted. The resolver-level test covers policy and version images; a set or assignment image through the real resolver is 084d-3's parity test.
+- **K2.** The IL no-write guard scans the two dry-run types only. The `Plan*Async` methods share `ProcedureAssignmentService` with the write path, so an IL scan of that type cannot tell them apart. Their no-write rests on the `WriteRefusingEntityService` parameter type, and on contract tests asserting zero writes, transactions, owner questions and closes for every plan, including every refusal.
+- **K3.** The image-versus-write comparison skips the set's effective-from date. The builder stamps it with the build day, and the plan and the write are built at different instants of the same test.
+
+**Tests:**
+- `tests/integration/contract/Api/Finance/ProcedureDryRunPlanningContractTests.cs` (51):
+  - every seam member is classified as a read or a write, as a ratchet;
+  - each write throws on both types, and a strict inner service receives nothing;
+  - the change plan writes, sends, asks and closes nothing, and its images are the rows the real change then creates;
+  - a re-change over an Off record rule patches the real policy On, with version 2;
+  - the remove, assign and exclude plans;
+  - six refusals give the write's own status and code;
+  - a read fault gives 503;
+  - the overlay's F4 rules;
+  - the REAL resolver over 600+ procedures (more than one chunk of policies and of versions) reads each image exactly once and drops a replaced policy.
+- `tests/Spaarke.ArchTests/DryRunNoWriteGuardTests.cs` (8): the IL of the two dry-run types references no write member of the seam, and nothing of the Signal writer, the Decision Record writer, the owner question or Signal closure. It has five must-fire controls, one must-not-fire control and a non-vacuity check.
+- 089's tests (`ProcedureAssignmentServiceTests`, `ProcedureAssignmentEndpointsTests`) are unchanged and green.
+
+**Mutation seeds.** Each was applied, run and restored:
+- S1: drop the chunk check.
+- S2: stop dropping replaced ids.
+- S3: pass the row-version update through.
+- S4: pass by-id reads through on the four tables.
+- S5: planning builds the set with `imageOnly: false`.
+- S6: the guard forgets the transaction member.
+
+Each seed fails at least one test: S1 3 (unplaceable-query cases), S2 2 (the replaced-row test and the real-resolver test), S3 2 contract + 1 IL guard, S4 2 (by-id reads), S5 1 (the change plan's no-owner check), S6 1 (the lambda transaction control).
+
+**Publish size.** N/A for this slice: no package, no DI registration and no route; two internal types and internal methods only. 084d-2 adds the route and measures the delta against a fresh master build.
