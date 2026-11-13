@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="134" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Invoice tab: firm required, "Open in Spaarke" record link, firm on the already-submitted banner, Correction Note, inline firm assign</title>
+    <phase>8 — UAT findings and cross-project fixes</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what the pane sends to a finance route and reverses a merged behaviour (#2552's no-firm path); a later slice sets a field that grants external access (through ebilling's route).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Slice A is client-only, inside one view and its service, with exact files and a reference implementation (#2552's diff, reversed). Slices B and C follow a contract ebilling writes.</model-tier-reason>
+    <effort>high</effort>
+    <deps>133</deps>
+    <external-deps>Slice B: ebilling-r1 adds `correctionNote` to the from-email request and `firm {id,name}` to the 095a view (requested 2026-11-13). Slice C: ebilling-r1's firm list + assign route, reviewed by uac-r2 (requested 2026-11-13).</external-deps>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits InvoiceView and invoiceSubmissionService/Seam, which every slice touches.</parallel-reason>
+    <tags>office, office-addins, frontend, ebilling, unit-test</tags>
+  </metadata>
+  <prompt>Owner UAT on dev BFF 0c06f464e3 (2026-11-13). Owner: "yes proceed with all recommendations". The recommendations:
+1. No invoice without a firm. The owner: "it is not good practice to accept an invoice with no firm associated". Today a no-firm submit reaches the server, which refuses it with 400 `ebilling.submission.firm_invalid` "A firm is required." (no-firm phase gate). The pane then shows "The chosen firm isn't an active firm in Spaarke", which is wrong because no firm was chosen.
+2. After a record is associated, the pane offers no link to open it in Spaarke. Add one.
+3. The already-submitted banner should name the firm (needs ebilling's 095a view change).
+4. A correction carries a Correction Note (`sprk_correctionnote` on the new `sprk_invoice` row; needs ebilling's request field).
+5. The user picks a firm in the pane and it is saved to the record (needs ebilling's route; it sets `sprk_assignedlawfirm1/2`, which grants that firm's external users access, so uac-r2 reviews the route).
+
+RELEASE RULE: a master merge auto-deploys the add-in. Each slice merges on its own and must be safe against the live BFF at that time. A field the server has not shipped is never sent; a field the server may or may not return is read tolerantly.</prompt>
+  <steps mode="directional">
+    <step>Slice A1 (firm required). In InvoiceView.tsx, invoiceSubmissionSeam.ts and invoiceSubmissionService.ts, reverse #2552's (14b600192f, commit 8a3aa70c61) no-firm SEND path. New invoice: Submit stays disabled until a firm is chosen. When the record has no linked firm (§8 returns 200 []), the Firm field says "No firm is linked to this record. Add a firm to the record in Spaarke, then submit." and offers the A2 link. The wire type goes back to `firmId: string`, and `buildInvoiceSubmissionInput` never yields null. KEEP from #2552: "Submit it again." for the 095c-4 transient Failed codes, and the tolerant correction-prefill reader (`firm: null` still parses).</step>
+    <step>Slice A1b (correction of a no-firm invoice). If a correction prefill has `firm: null`, the correction cannot be submitted from the pane. Show "This invoice has no firm. Set its firm in Spaarke, then submit the correction." with the A2 link to the invoice. Never send a correction with no firm.</step>
+    <step>Slice A1c (message). `firm_invalid` keeps its sentence for a chosen firm. Add a test that the pane can no longer send `firmId: null` (the request builder refuses and the button is disabled), so the misleading sentence cannot appear for a missing firm.</step>
+    <step>Slice A2 ("Open in Spaarke"). On the selected-record card in the Invoice view, and on the Save view's associated/"Related to" card after a save, add an "Open in Spaarke" link to the record (Matter, Project, Work Assignment, Invoice). First grep for the existing Open-record helpers (task 027's Open buttons, ORG_URL deep link) and REUSE them. Do not build a second URL builder. Office on the web has no openBrowserWindow, so use window.open from the click (task 120 pattern). ORG_URL unset means no link (no-op, no error). The A1 messages reuse the same link.</step>
+    <step>Slice B1 (banner firm, tolerant). In readPreviousSubmission / the banner, when the 095a body has `firm: {id, name}` with a non-empty name, the banner text includes it (e.g. "... as INV-0012.1 for Ravenscroft and Vance LLP by ..."). When it is absent or null, the text is unchanged. This can merge before ebilling's change.</step>
+    <step>Slice B2 (Correction Note) waits for ebilling's contract: field name, max length and the server rule for a missing note. Then add a required multi-line "Correction note" to the correction form, with the counter at their max, and send it only on mode Correction. Not before their master SHA is on dev.</step>
+    <step>Slice C (inline firm assign) waits for ebilling's route contract and uac-r2's review. Then the Firm field offers "Add a firm to this record" (a searchable active-firm list, then assign), refreshes §8, and selects the new firm. Every refusal shows the server's sentence. Never write the record from the pane by any other route. uac-r2 conditions for the pane (2026-11-13): (a) show the server's refusal text as given, with no client reading of it; (b) replacing or clearing a firm revokes that firm's external users, so ask the user to confirm it first; (c) no client-side filtering or hiding of records as a security measure, because the server decides.</step>
+  </steps>
+  <goal>The Outlook Invoice tab never submits an invoice without a firm, tells the user how to fix a record with no firm without leaving the email, links to the record in Spaarke, names the firm on the already-submitted banner, and asks for a Correction Note on a correction.</goal>
+  <constraints>
+    <constraint>Client-only (src/client/office-addins/**). No BFF change in this task. Slices B2 and C use only ebilling's routes as their contract defines them.</constraint>
+    <constraint>Reuse the existing Open-record URL builder and the window.open fallback. No new URL builder (CLAUDE.md §11).</constraint>
+    <constraint>Never send a field the live BFF does not accept; read new response fields tolerantly (absent means today's behaviour).</constraint>
+    <constraint>Office add-in: `npm run build` in src/client/office-addins; type-aware lint ratchet clean; any new suite is listed in ci-gated-suites.txt. Run jest with the CI layout. The stray Spaarke.UI.Components/node_modules (a second React) must be moved aside for the run and then restored.</constraint>
+    <constraint>Pane error text appears twice in the DOM (MessageBar + sr-only live region): assert on the visible element.</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Must-fire: New invoice with no firm chosen cannot be submitted (button disabled; the request builder never yields firmId null).</criterion>
+    <criterion testable="true">Must-fire: a record whose §8 firm list is [] shows the "No firm is linked…" text with an "Open in Spaarke" link when ORG_URL is set, and the same text with no link when it is unset.</criterion>
+    <criterion testable="true">Must-fire: a correction prefill with firm null blocks the correction submit with its message; a prefill with a firm submits as before.</criterion>
+    <criterion testable="true">Must-not-fire: "Submit it again." still appears for the 095c-4 transient Failed codes, and a firm-chosen new invoice and a correction send the same body as before this task (contract test).</criterion>
+    <criterion testable="true">Must-fire: the selected-record card (Invoice view) and the post-save Related-to card (Save view) show "Open in Spaarke"; clicking it opens the record's URL via the existing helper (openBrowserWindow, or window.open on the web).</criterion>
+    <criterion testable="true">Banner: with `firm: {name}` in the 095a body the banner names the firm; with it absent or null the text is unchanged.</criterion>
+    <criterion testable="false">Owner check on dev after merge: the no-firm record shows the message and link; the link opens the record in Spaarke.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>#2552's firm handling in InvoiceView/Seam/Service (reversed in part); task 027's Open-record helper and ORG_URL deep link; task 120's window.open fallback; the 095a banner reader (#2533).</existing>
+    <extension>Every slice extends an existing view, reader or helper. The only new UI elements are the Correction note field and the firm-assign control, both on ebilling contracts.</extension>
+    <cost-of-doing-nothing>Today a no-firm submit is refused with a wrong sentence ("The chosen firm isn't an active firm") and the user has no way to fix the record without leaving the email; a correction carries no reason; the banner doesn't say which firm the invoice went to.</cost-of-doing-nothing>
+  </justification>
+  <notes>Created 2026-11-13 on the owner's go ("yes proceed with all recommendations"). Requests sent the same day: ebilling-r1 (ruling on no-firm for all channels; firm list + assign route; firm on the 095a view; correctionNote; invoice naming from the PDF issuer), uac-r2 (heads-up: the assign route grants external access and needs their review). Slice A runs now; B1 can merge any time; B2 and C wait for ebilling's contracts.</notes>
+</task>
