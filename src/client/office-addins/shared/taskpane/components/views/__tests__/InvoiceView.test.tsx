@@ -1910,17 +1910,23 @@ describe('InvoiceView — "Open in Spaarke" on the selected record (task 134, sl
       renderView();
       await findRow('INV-4711.pdf');
       await chooseMatter();
+      // useAnnounce clears its live region after clearDelay (1 s), so on a slow runner reading the region after the
+      // click can find it already empty. Record what the assertive region says AS it is written instead.
+      const announced: string[] = [];
+      const observer = new MutationObserver(() => {
+        document.querySelectorAll('[aria-live="assertive"]').forEach(r => {
+          if (r.textContent) announced.push(r.textContent);
+        });
+      });
+      observer.observe(document.body, { subtree: true, childList: true, characterData: true });
       await userEvent.click(await screen.findByRole('button', { name: 'Open in Spaarke' }));
       // The VISIBLE reason: the live region is sr-only, so it does not count.
       const visible = (await screen.findAllByText(/blocked the new window/)).filter(el => !el.closest('.sr-only'));
       expect(visible).toHaveLength(1);
       expect(visible[0]).toBe(screen.getByTestId('invoice-core-record-open-error'));
       // ...and still announced.
-      expect(
-        Array.from(document.querySelectorAll('[aria-live="assertive"]')).some(r =>
-          /blocked the new window/.test(r.textContent ?? '')
-        )
-      ).toBe(true);
+      await waitFor(() => expect(announced.some(t => /blocked the new window/.test(t))).toBe(true));
+      observer.disconnect();
       // A later successful open clears it.
       openSpy.mockReturnValue({} as Window);
       await userEvent.click(screen.getByRole('button', { name: 'Open in Spaarke' }));
