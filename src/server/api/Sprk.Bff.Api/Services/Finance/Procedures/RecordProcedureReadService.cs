@@ -684,7 +684,8 @@ public class RecordProcedureReadService
     /// <item><b>Now</b>: the record's Procedures list, read and built exactly as <see cref="ListProceduresAsync"/> does. Every Procedure in it, of
     /// any status, is on the record.</item>
     /// <item><b>Candidates and own rows</b>: <see cref="ProcedureAssignmentService.PlanAssignCatalogAsync"/> through a
-    /// <see cref="WriteRefusingEntityService"/>, minus the Procedures on the record, bounded (<see cref="AssignableBound"/>).</item>
+    /// <see cref="WriteRefusingEntityService"/>, minus the Procedures on the record, then minus the ones the caller cannot Read (dropped BEFORE
+    /// the bound and the resolver, <see cref="ReadableProceduresAsync"/>), bounded (<see cref="AssignableBound"/>).</item>
     /// <item><b>After</b>: the same reader over a per-request <see cref="ProcedureRowOverlay"/> of the catalog's ONE plan (each candidate's
     /// Follow-latest row image), with the plan's rows as proposed rows (ontology-r1 F3). <b>Offered</b> = the After items not in Now: the
     /// resolver decides applicability, firm, the published window and the version (an unpublished Procedure drops out there).</item>
@@ -693,6 +694,12 @@ public class RecordProcedureReadService
     /// exempted (a fault is 503); a colliding real id is asked. ONE batched caller check over Now's exposed rows (the record and a query firm
     /// among them), After's, and each <c>OwnRow</c> entry's Procedure and own rows (inactive included). It runs on the <c>tooMany</c> path too, over
     /// Now's. Any refusal, unanswered row or fault is <see cref="RecordProcedureReadStatus.Unavailable"/>: never a partial list.</para>
+    /// <para><b>Candidates (uac-r2 ruling 2026-11-13, replacing 503-on-an-unreadable-candidate).</b> The candidate query is app-only, so the
+    /// caller's Read on each candidate Procedure is asked first, in its own batch (<see cref="ReadableProceduresAsync"/>), and the unreadable
+    /// ones are dropped before the resolver, the bound and <c>tooMany</c>: the answer is the same as if they did not exist, so neither the status
+    /// nor the list nor <c>tooMany</c> can reveal one. That check refused as a whole or faulting is 503, never "drop all". Now's, own rows' and
+    /// the firm's rows stay all-or-nothing, as above. Accepted limit: the candidate batch adds one Read question per candidate (at most
+    /// <see cref="ProcedureAssignmentService.MaxCandidateRows"/>) to the request's time.</para>
     /// </remarks>
     internal virtual async Task<RecordProcedureReadResult<RecordAssignableProceduresView>> ListAssignableAsync(
         ProcedureAssignmentService planner, string coreTable, Guid recordId, Guid? firmId, DateOnly? date, string? nameContains,
@@ -713,7 +720,8 @@ public class RecordProcedureReadService
             var onRecord = nowView.Procedures.Select(p => p.Id).ToHashSet();
 
             var catalog = await planner.PlanAssignCatalogAsync(
-                new WriteRefusingEntityService(_entities), coreTable, recordId, nowReading.FirmId, onRecord, nameContains, AssignableBound, ct).ConfigureAwait(false);
+                new WriteRefusingEntityService(_entities), coreTable, recordId, nowReading.FirmId, onRecord, nameContains, AssignableBound,
+                (ids, token) => ReadableProceduresAsync(ids, callerBearerToken, token), ct).ConfigureAwait(false);
             if (catalog.Kind != RuleSetOutcomeKind.Done)
             {
                 _logger.LogWarning("Record procedures: the assignable Procedures of a {CoreTable} could not be read ({ErrorCode}); 503 {Unavailable}",
@@ -1103,30 +1111,70 @@ public class RecordProcedureReadService
     /// <summary>The batched check over <paramref name="exposed"/> (the dry run passes Now ∪ After: one check for both sides).</summary>
     private async Task<bool> CallerCanReadAllAsync(IReadOnlyCollection<(string Set, Guid Id)> exposed, string? callerBearerToken, CancellationToken ct)
     {
-        if (await _probe.GetCallerSystemUserIdAsync(callerBearerToken, ct).ConfigureAwait(false) is not { } caller || caller == Guid.Empty)
+        var rights = await RightsOfAsync(exposed, callerBearerToken, ct).ConfigureAwait(false);
+        if (rights is null)
         {
-            _logger.LogWarning("Record procedures: the caller could not be established; no list is returned");
             return false;
         }
 
-        foreach (var page in exposed.OrderBy(t => t.Set, StringComparer.Ordinal).ThenBy(t => t.Id).Chunk(RightsPageSize))
+        if (rights.Any(r => (r.Value & AccessRights.Read) != AccessRights.Read))
+        {
+            // Which row it was is not logged with an id: the caller may not be allowed to know it exists (K2).
+            _logger.LogInformation("Record procedures: the caller cannot Read a row the answer would expose; no list is returned");
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Task 084d-5a (round 1, item 5; uac-r2 ruling 2026-11-13): of the candidate Procedures <paramref name="ids"/>, the ones the caller can Read,
+    /// by the same batched check (<see cref="RightsOfAsync"/>). The assignable list drops the others BEFORE it judges anything, so an unreadable
+    /// Procedure leaves no trace in the answer. Null when the check could not be answered as a whole (the caller not established, a row with no
+    /// answer): the list is then 503, never "drop all". A fault propagates to the list's 503.
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>?> ReadableProceduresAsync(IReadOnlyList<Guid> ids, string? callerBearerToken, CancellationToken ct)
+    {
+        var asked = ids.Select(id => (ProcedureEntity.EntitySet, id)).ToList();
+        var rights = await RightsOfAsync(asked, callerBearerToken, ct).ConfigureAwait(false);
+        if (rights is null)
+        {
+            return null;
+        }
+
+        return rights.Where(r => (r.Value & AccessRights.Read) == AccessRights.Read).Select(r => r.Row.Id).ToHashSet();
+    }
+
+    /// <summary>
+    /// The one rights question behind both checks: the caller first (unestablished: null), then the rows in pages. One entry per row, with the
+    /// caller's rights, or null when any row went unanswered ("Dataverse said nothing" is never read as "cannot Read" or as "can").
+    /// </summary>
+    private async Task<List<((string Set, Guid Id) Row, AccessRights Value)>?> RightsOfAsync(
+        IReadOnlyCollection<(string Set, Guid Id)> rows, string? callerBearerToken, CancellationToken ct)
+    {
+        if (await _probe.GetCallerSystemUserIdAsync(callerBearerToken, ct).ConfigureAwait(false) is not { } caller || caller == Guid.Empty)
+        {
+            _logger.LogWarning("Record procedures: the caller could not be established; no list is returned");
+            return null;
+        }
+
+        var answered = new List<((string Set, Guid Id) Row, AccessRights Value)>(rows.Count);
+        foreach (var page in rows.OrderBy(t => t.Set, StringComparer.Ordinal).ThenBy(t => t.Id).Chunk(RightsPageSize))
         {
             var rights = await _probe.GetCallerRightsForRecordsOrUnknownAsync(callerBearerToken, page.ToList(), ct).ConfigureAwait(false);
             if (rights is null || rights.Count != page.Length || rights.Any(r => r is null))
             {
                 _logger.LogWarning("Record procedures: the caller's rights on {Count} row(s) were not answered; no list is returned", page.Length);
-                return false;
+                return null;
             }
 
-            if (rights.Any(r => (r!.Value & AccessRights.Read) != AccessRights.Read))
+            for (var i = 0; i < page.Length; i++)
             {
-                // Which row it was is not logged with an id: the caller may not be allowed to know it exists (K2).
-                _logger.LogInformation("Record procedures: the caller cannot Read a row the answer would expose; no list is returned");
-                return false;
+                answered.Add((page[i], rights[i]!.Value));
             }
         }
 
-        return true;
+        return answered;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════

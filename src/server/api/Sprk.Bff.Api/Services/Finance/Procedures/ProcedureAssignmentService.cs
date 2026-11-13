@@ -1623,6 +1623,13 @@ public class ProcedureAssignmentService
     internal const int MaxNameSearchChars = 100;
 
     /// <summary>
+    /// Task 084d-5a (round 1, item 5): the most Procedures the candidate query fetches, before the caller's Read filter. The fetch is never capped
+    /// lower: rows the caller cannot Read would crowd out rows it can, and the <c>tooMany</c> boundary would tell it about them. A set past this is
+    /// answered as <c>tooMany</c>. Known limit: that answer counts rows the caller cannot Read.
+    /// </summary>
+    internal const int MaxCandidateRows = 1000;
+
+    /// <summary>
     /// Task 084d-5a (design 084d-5 §1, §4; EB-D-227, EB-D-229): the Procedures an assign of Follow latest could be planned for on one record,
     /// without writing, as ONE plan. Reads through <paramref name="reads"/> only.
     /// </summary>
@@ -1633,9 +1640,16 @@ public class ProcedureAssignmentService
     /// (<c>ProcedureResolution.FirmConditionHolds</c>) and the Area pre-filter its area re-check (<c>ProcedureResolver.ReadProceduresAsync</c>);
     /// the resolver still re-checks both. <paramref name="nameContains"/> narrows by name (Like wildcards escaped). Nothing else is filtered here:
     /// applicability, the published window and the version are the resolver's (the After read). Ordered by name, then id.</item>
-    /// <item><b>The bound</b> (EB-D-227): the candidates not already on the record (<paramref name="onRecord"/>) number at most
-    /// <paramref name="bound"/>, or the answer is <see cref="AssignableCatalog.TooMany"/> with nothing else: never a partial list. The query
-    /// asks for <c>bound + 1 + |onRecord|</c> rows, so a candidate set past the bound is always seen as such.</item>
+    /// <item><b>Drop before judge</b> (uac-r2 ruling 2026-11-13, EB-D-218): the candidates not already on the record
+    /// (<paramref name="onRecord"/>) go through <paramref name="readable"/>, the caller's batched Read check on the Procedure rows, and the ones
+    /// the caller cannot Read are dropped HERE, before the bound, the own-row step and the resolver. An unreadable Procedure is then
+    /// indistinguishable from one that does not exist (no 503, no <c>tooMany</c>, no <c>notOffered</c> entry). The check returning null (a
+    /// refusal as a whole, or an answer it could not get) is 503 <c>assignment.read_failed</c>: never "drop all", never an empty 200. A fault in
+    /// it propagates to the caller's 503.</item>
+    /// <item><b>The bound</b> (EB-D-227): the READABLE candidates number at most <paramref name="bound"/>, or the answer is
+    /// <see cref="AssignableCatalog.TooMany"/> with nothing else: never a partial list. The fetch is NOT capped before the Read filter (rows the
+    /// caller cannot Read would crowd out rows it can, and the boundary would then tell it about them): it asks for every matching row up to
+    /// <see cref="MaxCandidateRows"/>; a set past that ceiling is <c>tooMany</c> as well.</item>
     /// <item><b>Own rows</b>: a candidate the record already has an override row for, of any state (<see cref="OwnRowQuery"/>, the duplicate
     /// refusal's own predicate), is not planned; it is returned with its rows.</item>
     /// <item><b>The plan</b>: each other candidate that <see cref="AssignRefusalOf{T}"/> accepts gets the write's own Follow-latest row image
@@ -1645,18 +1659,19 @@ public class ProcedureAssignmentService
     /// </remarks>
     internal async Task<RuleSetOutcome<AssignableCatalog>> PlanAssignCatalogAsync(
         WriteRefusingEntityService reads, string coreTable, Guid recordId, Guid? firmId, IReadOnlyCollection<Guid> onRecord, string? nameContains,
-        int bound, CancellationToken ct)
+        int bound, Func<IReadOnlyList<Guid>, CancellationToken, Task<IReadOnlySet<Guid>?>> readable, CancellationToken ct)
     {
         RequireCore(coreTable, recordId);
         ArgumentNullException.ThrowIfNull(reads);
         ArgumentNullException.ThrowIfNull(onRecord);
+        ArgumentNullException.ThrowIfNull(readable);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bound);
         try
         {
             var query = new QueryExpression(ProcedureEntity.Entity)
             {
                 ColumnSet = new ColumnSet(AssignProcedureColumns),
-                TopCount = bound + 1 + onRecord.Count,
+                TopCount = MaxCandidateRows + 1, // one past the ceiling, to see that it was hit
                 NoLock = true,
             };
             query.Criteria.AddCondition(ProcedureEntity.StatusColumn, ConditionOperator.Equal, ProcedureEntity.StatusActive);
@@ -1679,7 +1694,25 @@ public class ProcedureAssignmentService
             query.AddOrder(ProcedureEntity.NameColumn, OrderType.Ascending);
             query.AddOrder(ProcedureEntity.Entity + "id", OrderType.Ascending);
 
-            var candidates = (await ReadAsync(reads, query, ct)).Entities.Where(p => !onRecord.Contains(p.Id)).ToList();
+            var matching = (await ReadAsync(reads, query, ct)).Entities;
+            if (matching.Count > MaxCandidateRows)
+            {
+                // Known limit (084d-5a round 1, item 5): the set cannot be judged within the ceiling, so it is answered as too many.
+                return RuleSetOutcome<AssignableCatalog>.Done(AssignableCatalog.Over);
+            }
+
+            var offeredToTheCaller = matching.Where(p => !onRecord.Contains(p.Id)).ToList();
+            IReadOnlySet<Guid>? visible = offeredToTheCaller.Count == 0
+                ? new HashSet<Guid>()
+                : await readable(offeredToTheCaller.Select(p => p.Id).ToList(), ct);
+            if (visible is null)
+            {
+                _logger.LogWarning("Override: the caller's Read check on the candidate Procedures was refused as a whole; nothing was listed");
+                return Refused<AssignableCatalog>(StatusCodes.Status503ServiceUnavailable, CodeReadFailed,
+                    "The override could not be checked right now and nothing was written. Try again; if it keeps failing, contact support.");
+            }
+
+            var candidates = offeredToTheCaller.Where(p => visible.Contains(p.Id)).ToList();
             if (candidates.Count > bound)
             {
                 return RuleSetOutcome<AssignableCatalog>.Done(AssignableCatalog.Over);

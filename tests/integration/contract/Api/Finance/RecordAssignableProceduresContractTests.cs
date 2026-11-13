@@ -256,7 +256,8 @@ public sealed class RecordAssignableProceduresContractTests
         item["gap"].Should().BeNull();
         body.ToJsonString().Should().NotContain("pinned", "no pin versions in the list (084d-5 design)");
 
-        host.Rig.Probe.Batches.Should().ContainSingle("ONE batched check over Now and After");
+        host.Rig.Probe.Batches.Should().HaveCount(2, "the candidates' Read check (app-only fetch), then ONE batched check over Now and After");
+        host.Rig.Probe.Batches[0].Should().Equal(new[] { (ProcedureSet, assignable) }, "the first batch is the candidate Procedures, none on the record");
         host.Rig.Probe.Asked.Should().Contain(new[] { (core.Set, core.Id), (ProcedureSet, assignable), (ProcedureSet, general.Procedure) });
         var proposed = DerivedAssignmentId(core.Table, core.Id, assignable);
         host.Rig.Probe.Asked.Should().NotContain((AssignmentSet, proposed), "a planned row is synthetic, exempt");
@@ -347,12 +348,18 @@ public sealed class RecordAssignableProceduresContractTests
         host.Exempted.SelectMany(e => e).Select(e => e.Id).Should().NotContain(new[] { DerivedAssignmentId(Project, P, lapsed), DerivedAssignmentId(Project, P, draft) },
             "an own-row candidate is never planned");
 
-        foreach (var denied in new[] { (AssignmentSet, inactiveRow), (ProcedureSet, lapsed) })
-        {
-            host.Rig.Probe.Denied.Clear();
-            host.Rig.Probe.Denied.Add(denied);
-            await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
-        }
+        // The own ROW stays all-or-nothing (uac-r2 note 2): denying it is 503.
+        host.Rig.Probe.Denied.Add((AssignmentSet, inactiveRow));
+        await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
+
+        // The own-row Procedure is a candidate, so an unreadable one is dropped before judging (uac-r2 2026-11-13): no 503, and no notOffered entry.
+        host.Rig.Probe.Denied.Clear();
+        host.Rig.Probe.Denied.Add((ProcedureSet, lapsed));
+        host.Rig.Probe.Batches.Clear();
+        var dropped = await Ok(await host.Client.SendAsync(Get("projects", P)));
+        OfferedIds(dropped).Should().Equal(offered);
+        dropped["notOffered"]!.AsArray().Select(n => n!["id"]!.GetValue<Guid>()).Should().Equal(draft);
+        host.Rig.Probe.Asked.Should().NotContain((AssignmentSet, inactiveRow), "its Procedure was dropped before the own-row step, so its row is never asked");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -400,7 +407,8 @@ public sealed class RecordAssignableProceduresContractTests
         foreach (var listFirm in new Guid?[] { RecordProcedureRig.F, null })
         {
             var catalog = await planner.PlanAssignCatalogAsync(
-                new WriteRefusingEntityService(rig.Entities.Object), Project, P, listFirm, Array.Empty<Guid>(), null, 50, CancellationToken.None);
+                new WriteRefusingEntityService(rig.Entities.Object), Project, P, listFirm, Array.Empty<Guid>(), null, 50,
+                (ids, _) => Task.FromResult<IReadOnlySet<Guid>?>(ids.ToHashSet()), CancellationToken.None);
             catalog.Kind.Should().Be(RuleSetOutcomeKind.Done);
             var planned = catalog.Value!.Plan!.Created.Select(c => c.Id).ToHashSet();
             foreach (var (id, firm) in procedures)
@@ -487,12 +495,13 @@ public sealed class RecordAssignableProceduresContractTests
         var body = await Ok(await host.Client.SendAsync(Get("projects", P, query)));
 
         body["tooMany"]!.GetValue<bool>().Should().BeTrue();
-        host.Rig.Probe.Batches.Should().ContainSingle();
-        host.Rig.Probe.Asked.Should().Contain(new[]
+        host.Rig.Probe.Batches.Should().HaveCount(2, "the candidates' Read check, then the one batched check over Now's rows");
+        host.Rig.Probe.Batches[0].Select(a => a.RecordId).Should().BeEquivalentTo(fillers, "the candidates are asked before they are counted (drop before judge)");
+        host.Rig.Probe.Batches[1].Should().Contain(new[]
         {
             ("sprk_projects", P), (ProcedureSet, general.Procedure), (ProcedureEntity.VersionEntitySet, general.Version), (Organizations, RecordProcedureRig.F),
         });
-        host.Rig.Probe.Asked.Select(a => a.RecordId).Should().NotIntersectWith(fillers, "nothing past the bound is shown, so nothing of it is asked");
+        host.Rig.Probe.Batches[1].Select(a => a.RecordId).Should().NotIntersectWith(fillers, "nothing past the bound is shown, so none of it is in the answer's check");
         host.Exempted.Should().BeEmpty("nothing is planned past the bound");
 
         foreach (var denied in new[] { (ProcedureSet, general.Procedure), (Organizations, RecordProcedureRig.F) })
@@ -660,19 +669,166 @@ public sealed class RecordAssignableProceduresContractTests
         host.Rig.World.QueriedTables.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "084d-5a uac-r2 Q2 must-fire: a candidate the caller cannot Read is 503 (control: the same request is 200 and offers it when it is readable)")]
-    public async Task DeniedCandidate_Is503()
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Candidates the caller cannot Read: dropped before judging (uac-r2 ruling 2026-11-13, replacing Q2's 503)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>A published, Billing, unfirmed, in-reach Procedure whose name matches "secret": the row the two worlds differ by.</summary>
+    private static Guid Unreadable(Host host, string name = "Secret rate card")
+    {
+        var id = Candidate(host.Rig, name);
+        host.Rig.Probe.Denied.Add((ProcedureSet, id));
+        return id;
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 2026-11-13 must-fire: a candidate the caller cannot Read is dropped, never a 503 (the same request offers it when it is readable); no trace of it in the answer")]
+    public async Task DeniedCandidate_IsDropped_NotA503()
     {
         await using var host = await Host.StartAsync();
-        var assignable = Candidate(host.Rig, "Assignable");
-        OfferedIds(await Ok(await host.Client.SendAsync(Get("projects", P)))).Should().Equal(assignable);
+        var readable = Candidate(host.Rig, "Assignable");
+        var hidden = Candidate(host.Rig, "Secret rate card");
+        OfferedIds(await Ok(await host.Client.SendAsync(Get("projects", P)))).Should().Equal(readable, hidden);
 
-        host.Rig.Probe.Denied.Add((ProcedureSet, assignable));
-        await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
+        host.Rig.Probe.Denied.Add((ProcedureSet, hidden));
+        host.Rig.Probe.Batches.Clear();
+        var body = await Ok(await host.Client.SendAsync(Get("projects", P)));
 
-        host.Rig.Probe.Denied.Clear();
-        host.Rig.Probe.Unknown.Add((ProcedureSet, assignable));
+        OfferedIds(body).Should().Equal(readable);
+        body["notOffered"]!.AsArray().Should().BeEmpty();
+        body["tooMany"]!.GetValue<bool>().Should().BeFalse();
+        body.ToJsonString().Should().NotContain(hidden.ToString()).And.NotContain("Secret");
+        host.Rig.Probe.Batches[0].Should().Contain((ProcedureSet, hidden), "it was asked, then dropped before anything judged it");
+        host.Rig.Probe.Asked.Skip(host.Rig.Probe.Batches[0].Count).Should().NotContain((ProcedureSet, hidden), "no later check mentions it");
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 2026-11-13 must-fire (a): two worlds that differ ONLY by one unreadable, published, Billing, unfirmed, in-reach Procedure matching q give BYTE-IDENTICAL responses for a q that matches only that row; the readable control is offered")]
+    public async Task UnreadableCandidate_OnlyMatchOfQ_IsByteIdenticalToItsAbsence()
+    {
+        const string query = "?date=2026-02-01&q=secret";
+        await using var without = await Host.StartAsync();
+        Candidate(without.Rig, "Assignable");
+        await using var with = await Host.StartAsync();
+        Candidate(with.Rig, "Assignable");
+        Unreadable(with);
+
+        var absent = await without.Client.SendAsync(Get("projects", P, query));
+        var hidden = await with.Client.SendAsync(Get("projects", P, query));
+
+        absent.StatusCode.Should().Be(HttpStatusCode.OK);
+        hidden.StatusCode.Should().Be(absent.StatusCode);
+        (await ShapeOf(hidden)).Should().Be(await ShapeOf(absent), "an unreadable Procedure must leave no trace");
+        (await Json(absent))["procedures"]!.AsArray().Should().BeEmpty();
+
+        // Must-not-fire control: the same world with the row READABLE offers it, so the byte-identity above is the drop's doing.
+        await using var readable = await Host.StartAsync();
+        Candidate(readable.Rig, "Assignable");
+        var seen = Candidate(readable.Rig, "Secret rate card");
+        OfferedIds(await Ok(await readable.Client.SendAsync(Get("projects", P, query)))).Should().Equal(seen);
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 2026-11-13 must-fire (b): 50 readable candidates plus 1 unreadable give the SAME response as the 50 alone: not tooMany, a list of 50 (the unreadable one does not tip the bound)")]
+    public async Task UnreadableCandidate_DoesNotTipTheBound_ByteIdenticalToItsAbsence()
+    {
+        await using var without = await Host.StartAsync();
+        Enumerable.Range(1, 50).ToList().ForEach(n => Candidate(without.Rig, $"Candidate {n:D3}"));
+        await using var with = await Host.StartAsync();
+        Enumerable.Range(1, 50).ToList().ForEach(n => Candidate(with.Rig, $"Candidate {n:D3}"));
+        Unreadable(with, "Candidate 025 secret");
+
+        var absent = await without.Client.SendAsync(Get("projects", P));
+        var hidden = await with.Client.SendAsync(Get("projects", P));
+
+        var body = await Ok(hidden);
+        body["tooMany"]!.GetValue<bool>().Should().BeFalse();
+        Offered(body).Should().HaveCount(50);
+        (await ShapeOf(hidden)).Should().Be(await ShapeOf(absent), "an unreadable Procedure must leave no trace");
+
+        // Must-not-fire control: with the 51st READABLE, the list is tooMany.
+        await using var readable = await Host.StartAsync();
+        Enumerable.Range(1, 50).ToList().ForEach(n => Candidate(readable.Rig, $"Candidate {n:D3}"));
+        Candidate(readable.Rig, "Candidate 025 secret");
+        (await Ok(await readable.Client.SendAsync(Get("projects", P))))["tooMany"]!.GetValue<bool>().Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 2026-11-13: unreadable candidates never crowd out readable ones (no pre-filter cap): 951 unreadable that sort first and 49 readable behind them offer the 49; 1001 matching rows are tooMany (the ceiling)")]
+    public async Task NoPreFilterCap_AndTheCeilingIsTooMany()
+    {
+        await using var crowded = await Host.StartAsync();
+        for (var n = 1; n <= 951; n++)
+        {
+            var hidden = crowded.Rig.AddProcedure($"A hidden {n:D4}", ProcedureAppliesTo.AssignedRecordsOnly);
+            crowded.Rig.Probe.Denied.Add((ProcedureSet, hidden));
+        }
+
+        var readable = Enumerable.Range(1, 49).Select(n => Candidate(crowded.Rig, $"Candidate {n:D3}")).ToList();
+
+        var body = await Ok(await crowded.Client.SendAsync(Get("projects", P)));
+
+        body["tooMany"]!.GetValue<bool>().Should().BeFalse();
+        OfferedIds(body).Should().Equal(readable);
+        ProcedureAssignmentService.MaxCandidateRows.Should().Be(1000);
+        crowded.Rig.Probe.Batches.Take(4).SelectMany(b => b).Should().HaveCount(1000, "the whole matching set up to the ceiling (4 pages of 250) is asked, uncapped before the Read filter");
+
+        await using var over = await Host.StartAsync();
+        for (var n = 1; n <= 1001; n++)
+        {
+            var id = over.Rig.AddProcedure($"Candidate {n:D4}", ProcedureAppliesTo.AssignedRecordsOnly);
+            if (n > 1)
+            {
+                // All but one are unreadable: only the ceiling (not the bound, which they would not count toward) makes this tooMany.
+                over.Rig.Probe.Denied.Add((ProcedureSet, id));
+            }
+        }
+
+        var tooMany = await Ok(await over.Client.SendAsync(Get("projects", P)));
+        tooMany["tooMany"]!.GetValue<bool>().Should().BeTrue("past the ceiling the set is not judged");
+        tooMany["procedures"].Should().BeNull();
+        over.Rig.Probe.Batches.Should().ContainSingle("only Now's check: nothing past the ceiling was asked");
+        over.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 2026-11-13: the candidates' Read check faulting, or refused as a whole (an unanswered row, the caller not established), is 503, never 'drop all' and never an empty 200")]
+    public async Task CandidateReadCheck_FaultOrRefusal_Is503()
+    {
+        await using var host = await Host.StartAsync();
+        Candidate(host.Rig, "Assignable");
+        OfferedIds(await Ok(await host.Client.SendAsync(Get("projects", P)))).Should().HaveCount(1);
+
+        host.Rig.Probe.Batches.Clear();
+        host.Rig.Probe.Throws = true;
         await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
+        host.Rig.Probe.Batches.Should().ContainSingle("the fault is in the candidates' own check, the first one asked");
+        host.Rig.Probe.Batches[0].Should().OnlyContain(a => a.EntitySet == ProcedureSet);
+
+        host.Rig.Probe.Throws = false;
+        host.Rig.Probe.Unknown.Add((ProcedureSet, Candidate(host.Rig, "Unanswered")));
+        host.Rig.Probe.Batches.Clear();
+        await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
+        host.Rig.Probe.Batches.Should().ContainSingle("an unanswered candidate refuses the whole check");
+
+        host.Rig.Probe.Unknown.Clear();
+        host.Rig.Probe.Caller = null;
+        await AssertUnavailable(await host.Client.SendAsync(Get("projects", P)), host);
+    }
+
+    [Fact(DisplayName = "084d-5a uac-r2 2026-11-13: Now's rows, an own row and the firm stay all-or-nothing: one unreadable is 503 although unreadable candidates are dropped")]
+    public async Task NowOwnRowAndFirm_Unreadable_StillAre503()
+    {
+        await using var host = await Host.StartAsync();
+        var general = host.Rig.Simple("GENERAL");
+        var lapsed = Candidate(host.Rig, "Lapsed");
+        var ownRow = OwnRow(host.Rig, Project, P, lapsed, state: 1);
+        Candidate(host.Rig, "Assignable");
+        var query = $"?date=2026-02-01&firmId={RecordProcedureRig.F}";
+        (await host.Client.SendAsync(Get("projects", P, query))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        foreach (var denied in new[] { (ProcedureSet, general.Procedure), (AssignmentSet, ownRow), (Organizations, RecordProcedureRig.F) })
+        {
+            host.Rig.Probe.Denied.Clear();
+            host.Rig.Probe.Denied.Add(denied);
+            await AssertUnavailable(await host.Client.SendAsync(Get("projects", P, query)), host);
+        }
     }
 
     [Fact(DisplayName = "084d-5a EB-D-218: a Now row the caller cannot Read is 503; a rights check that faults is 503")]

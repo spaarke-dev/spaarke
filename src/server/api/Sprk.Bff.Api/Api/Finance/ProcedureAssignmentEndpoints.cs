@@ -514,7 +514,7 @@ public static class ProcedureAssignmentEndpoints
     /// <summary>
     /// Task 084d-5a (uac-r2 Q3): the assignable list's privilege filter (403), after <see cref="DryRunRecordTargets"/> (uniform 404):
     /// <see cref="AssignOrExcludePrivileges"/>, the privileges the assign write asks. The list offers only what the caller could assign, so it
-    /// asks no less; each candidate's own Read is the service's batched check (503), not a filter.
+    /// asks no less; each candidate Procedure the caller cannot Read is dropped by the service before it judges (uac-r2 2026-11-13), not by a filter.
     /// </summary>
     internal static FinanceAuthorizationTargets AssignableTargets(EndpointFilterInvocationContext context) =>
         FinanceAuthorizationTargets.Authorize(AssignOrExcludePrivileges().ToArray());

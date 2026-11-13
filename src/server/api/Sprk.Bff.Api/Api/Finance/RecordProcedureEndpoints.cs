@@ -42,7 +42,7 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <see cref="RecordProcedureReadService.AssignableBound"/>, else <c>procedures</c> is null and <c>tooMany</c> is set. Nothing is written.
 /// Filters: step 0; the dry run's record filter (<see cref="ProcedureAssignmentEndpoints.DryRunRecordTargets"/>, uniform 404); the assign
 /// write's privileges (<see cref="ProcedureAssignmentEndpoints.AssignableTargets"/>, 403); the kill switch. Then 401 for a non-GUID caller,
-/// the query (400 <c>procedures.invalid_query</c>, <c>q</c> included) and ONE batched Read check (503 <c>procedures.unavailable</c>).</para>
+/// the query (400 <c>procedures.invalid_query</c>, <c>q</c> included), a Read check on the candidates (the unreadable are dropped, a fault is 503), then ONE batched Read check on what the answer shows (503 <c>procedures.unavailable</c>).</para>
 /// <para><b>Known limit.</b> These routes are internal-only (step 0). Opening them to external callers needs the external-visibility
 /// predicate first (task 191).</para>
 /// </remarks>

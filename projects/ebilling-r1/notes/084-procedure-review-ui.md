@@ -1461,7 +1461,7 @@ The server half of 084d-5: the route that lists the Procedures a record could be
 | ontology-r1 1: Area/Firm/Billing constants; firm = resolver's | `:1662-1672` | `FirmPreFilter_IsTheResolversFirmCondition` (392), which pins `FirmConditionHolds` by reflection |
 | ontology-r1 2: order, truncated flag, parity over the bound | as above | `Parity_OfferedIffTheRealAssignAddsIt` (841), 14 cases, 2 past the bound |
 | ontology-r1 3: unpublished drops through the resolver | no publication condition in the query | `Unpublished_IsPlanned_ButNotOffered` (292) |
-| uac-r2 Q2: an unreadable candidate is a 503 | the one check `:773` | `DeniedCandidate_Is503` (623), with a 200 control |
+| uac-r2 Q2: an unreadable candidate is a 503. SUPERSEDED 2026-11-13: dropped before judging (round 1, item 5) | the one check `:773` | `DeniedCandidate_IsDropped_NotA503` and the byte-identity tests (round 1) |
 | uac-r2 Q3: `RecordWriteCheck` + `Admin()` after finance.read | routes; `AssignableTargets` | `NoAdminPrivilege_Is403` (586, every route), `Filters_AreTheWritesDeclarations` (600) |
 | uac-r2 note 1: tooMany still asks Now and the firm | `:773` runs on both paths | `TooMany_StillAsksNowRows` (439), `DeniedNowRow_OrFault_Is503` (638) |
 | uac-r2 note 2: OwnRow asks the row and its Procedure, inactive too | `:735`; `OwnRowQuery` has no state filter | `OwnRow_IncludingInactive_IsNotOffered_AndAsked` (331) |
@@ -1482,7 +1482,7 @@ The server half of 084d-5: the route that lists the Procedures a record could be
 
 **Known limits:**
 - **K1, finding (pre-existing).** A Procedure deactivated in Dataverse (`statecode` 1) but still Status Active and Billing is applied by the resolver and accepted by the assign write: neither reads `statecode`. The list drops it, by the binding `statecode` 0 condition. It is kept out of the parity seeds and reported, not fixed here: the resolver is ontology-r1's code.
-- **K2.** `TopCount` is `51 + |Procedures on the record|`. A record with more than about 4,949 Procedures in Now would pass Dataverse's 5,000 and get a 503.
+- **K2 (superseded 2026-11-13, round 1 item 5: the padding is gone; see K5).** `TopCount` was `51 + |Procedures on the record|`. A record with more than about 4,949 Procedures in Now would pass Dataverse's 5,000 and get a 503.
 - **K3.** The bound counts candidates before the resolver. Draft-only Procedures, or Procedures that would not apply, count toward 50, so `tooMany` can show although fewer than 50 would be offered. With `q` narrowing, the list stays usable.
 - **K4.** A Procedure the record has a row for, but that is not a candidate (Retired, another firm, another area), is not in `notOffered`. It is not offered either.
 
@@ -1533,3 +1533,33 @@ Each item: finding, then change, then test.
 | Offered from the candidates instead of After - Now | killed in 084d-5a as M4 (16 fail) |
 
 **4. (K4, notes only) EB-D-228 reach.** `AssignRefusalOf` also refuses a Pin, a Procedure-level Exclude and an empty Area, not only a non-Billing Procedure. Name this as a known limit in the PR. It is harmless: the resolver never reads such rows, so they never change what applies.
+
+**5. (uac-r2 ruling, 2026-11-13) Candidates the caller cannot Read are dropped before judging.**
+- **Ruling.** uac-r2 Q2 for candidates changes from "503 on an unreadable candidate" to "drop-before-judge". Finding: the candidate query is app-only, so a 503-versus-200 answer, combined with `q`, revealed the names of Procedures the caller cannot Read.
+- **Change.**
+  - `RecordProcedureReadService.ReadableProceduresAsync`: the existing batched Read check (`RightsOfAsync`, split out of `CallerCanReadAllAsync`, which behaves as before) over the candidate Procedure ids. No impersonation (EB-D-218).
+  - `ProcedureAssignmentService.PlanAssignCatalogAsync` takes it as `readable` and drops the unreadable candidates BEFORE the own-row step, the resolver, the 50 bound and `tooMany`. An unreadable Procedure then looks like one that does not exist: no 503, no `tooMany`, no `notOffered` entry, and its own-row rows are never asked.
+  - The `+ onRecord.Count` padding is gone. The candidate fetch is not capped before the filter: it asks for every matching row up to `MaxCandidateRows` (1000, named constant). Past it, the answer is `tooMany`.
+  - Faults: the candidate check faulting, or refused as a whole (the caller not established, any row unanswered), is 503 `procedures.unavailable`; never "drop all", never an empty 200. Now's rows, own rows and the firm stay all-or-nothing 503.
+  - The candidate batch is a second rights call, so the request now makes two (candidates, then Now ∪ After); each is paged at 250 rows as before.
+- **Tests** (`RecordAssignableProceduresContractTests`):
+  - `UnreadableCandidate_OnlyMatchOfQ_IsByteIdenticalToItsAbsence` (a): two worlds differing only by one unreadable published, Billing, unfirmed, in-reach Procedure matching `q`; the status and body are byte-identical (traceId excluded). Readable control: it is offered.
+  - `UnreadableCandidate_DoesNotTipTheBound_ByteIdenticalToItsAbsence` (b): 50 readable + 1 unreadable equals the 50 alone (not `tooMany`, a list of 50). Control: a readable 51st is `tooMany`.
+  - `NoPreFilterCap_AndTheCeilingIsTooMany`: 951 unreadable rows sorting first plus 49 readable offer the 49, and 1000 rows are asked; 1001 rows (1000 unreadable) are `tooMany`, with nothing asked but Now.
+  - `CandidateReadCheck_FaultOrRefusal_Is503`: a throw, an unanswered row, and an unestablished caller.
+  - `NowOwnRowAndFirm_Unreadable_StillAre503`; `DeniedCandidate_IsDropped_NotA503`. `OwnRow_IncludingInactive_IsNotOffered_AndAsked` now expects a dropped own-row Procedure (200, absent) and a denied own ROW as 503.
+- **Mutations** (each applied, run against the class, restored; baseline 63 passed):
+
+| Mutation | Result |
+|---|---|
+| M5a: no drop (judge every candidate) | 5 fail: (a), (b), `DeniedCandidate_IsDropped_NotA503`, the crowd and ceiling test, and the OwnRow test |
+| M5b: a pre-filter cap again (`TopCount = bound + 1 + onRecord.Count`) | 1 fails: the crowd and ceiling test |
+| M5c: `TopCount = bound + 1` | 2 fail: `Bound_OnRecordRowSortingFirst_NeverMakesAPartialList` and the crowd and ceiling test |
+| M5d: a refused check drops all instead of 503 | 1 fails: `CandidateReadCheck_FaultOrRefusal_Is503` |
+| M5e: no ceiling answer | 1 fails: the crowd and ceiling test |
+
+- **Known limits (name in the PR).**
+  - **K5.** The ceiling is `MaxCandidateRows` = 1000. A matching set past it is answered `tooMany`, which counts rows the caller cannot Read; narrowing by `q` brings it back. Replaces K2's padding limit (K2 is gone: there is no `+ |onRecord|` padding).
+  - **K6.** Read-batch timing, accepted: the candidate check asks one Read question per matching candidate (up to 1000, 250 per page, in addition to Now's and After's), so a large catalog with a broad `q` costs time. Measure at task 112; the bound on cost is the ceiling.
+
+**Round 1 gates (final state).** BFF build 0 warnings, 0 errors. Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede, RecordContainer, ContainerDocument): 8988 passed, 4 skipped, 0 failed (`RecordContainer` alone: 363 passed, after item 2). `RecordAssignableProceduresContractTests`: 63 passed. ArchTests: 2570/2570. `dotnet format whitespace --verify-no-changes` on the changed files: no finding except ENDOFLINE, which the working tree's LF checkout raises on every line of every file (git converts at commit).
