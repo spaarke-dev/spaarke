@@ -351,6 +351,10 @@ public static class ProcedureAssignmentEndpoints
             }
 
             var rest = flags.SelectMany(f => WritePermissionChecks(f, coreEntitySet, recordId)).Where(c => c != record).Distinct().ToArray();
+            // Known limit (uac-r2, 084g fix round 1): these checks run concurrently on ONE HttpContext and its request scope. That is safe only
+            // while every scoped service this path reaches (IAccessDataSource and its cache, CallerRecordAccessProbe, the IAuthorizationRule
+            // set) stays safe for concurrent use within a request, and while nothing on the path writes HttpContext.Items. A per-request cache
+            // that writes, or an Items write, would make this a race: then ask the checks one at a time.
             var answers = await Task.WhenAll(rest.Select(c => FinanceAuthorizationFilter.EvaluateCheckForCallerAsync(http, c, logger, ct))).ConfigureAwait(false);
             var verdicts = rest.Zip(answers).ToDictionary(x => x.First, x => x.Second);
             verdicts[record] = FinanceCheckVerdict.Allowed;
