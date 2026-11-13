@@ -38,6 +38,12 @@ public class AffectedInvoiceCounter
     /// <summary>The invoices per batched rights call (a page): bounded so one call never fans out unboundedly (the probe runs 4 at a time).</summary>
     internal const int RightsPageSize = 250;
 
+    /// <summary>
+    /// Task 084d-2b fix round 1 (K-5): the most invoices a DRY RUN asks the caller's rights for (four rights pages). Past it the count is null and
+    /// no rights call is made. The write's counts pass no bound (081/089 are unchanged).
+    /// </summary>
+    internal const int MaxDryRunInvoices = 4 * RightsPageSize;
+
     internal const string InvoiceEntity = "sprk_invoice";
     internal const string LineEntity = "sprk_billingevent";
     private const int MaxInValues = 500;
@@ -58,7 +64,7 @@ public class AffectedInvoiceCounter
     /// <c>null</c> when that cannot be told (see the remarks: the caller then sees no number). Reads only.
     /// </summary>
     internal virtual async Task<int?> CountVisibleOpenInvoicesAsync(
-        IReadOnlyCollection<OpenPolicySignal> signals, string? callerBearerToken, CancellationToken ct)
+        IReadOnlyCollection<OpenPolicySignal> signals, string? callerBearerToken, CancellationToken ct, int? maxInvoices = null)
     {
         ArgumentNullException.ThrowIfNull(signals);
 
@@ -76,7 +82,7 @@ public class AffectedInvoiceCounter
             return null;
         }
 
-        return await CountVisibleOpenInvoicesAsync(invoices, callerBearerToken, ct).ConfigureAwait(false);
+        return await CountVisibleOpenInvoicesAsync(invoices, callerBearerToken, ct, maxInvoices).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -84,24 +90,33 @@ public class AffectedInvoiceCounter
     /// that cannot be told (the same rules as the Signal overload, which maps its Signals to invoices and calls this). Reads only.
     /// </summary>
     internal virtual async Task<int?> CountVisibleOpenInvoicesAsync(
-        IReadOnlyCollection<Guid> invoiceIds, string? callerBearerToken, CancellationToken ct) =>
-        (await VisibleOpenInvoicesAsync(invoiceIds, callerBearerToken, ct).ConfigureAwait(false))?.Count;
+        IReadOnlyCollection<Guid> invoiceIds, string? callerBearerToken, CancellationToken ct, int? maxInvoices = null) =>
+        (await VisibleOpenInvoicesAsync(invoiceIds, callerBearerToken, ct, maxInvoices).ConfigureAwait(false))?.Count;
 
     /// <summary>
     /// Task 084d-2b: the ids among <paramref name="invoiceIds"/> of the open invoices the caller can Read; <c>null</c> when that cannot be told
     /// (an app read faults, the caller cannot be established, or any rights question is not answered). Empty input, or no open invoice among
     /// it, is the empty set without asking the caller. The dry run narrows to this set BEFORE it judges anything, so an invoice the caller
-    /// cannot Read takes no part in its count. Reads only.
+    /// cannot Read takes no part in its count. <paramref name="maxInvoices"/> (the dry run's bound): more invoices than that is <c>null</c> before
+    /// anything is asked. Reads only.
     /// </summary>
     internal virtual async Task<HashSet<Guid>?> VisibleOpenInvoicesAsync(
-        IReadOnlyCollection<Guid> invoiceIds, string? callerBearerToken, CancellationToken ct)
+        IReadOnlyCollection<Guid> invoiceIds, string? callerBearerToken, CancellationToken ct, int? maxInvoices = null)
     {
         ArgumentNullException.ThrowIfNull(invoiceIds);
+
+        var asked = invoiceIds.Where(id => id != Guid.Empty).ToHashSet();
+        if (maxInvoices is { } bound && asked.Count > bound)
+        {
+            // Past the bound the rights of the caller are not asked at all: the count is null, never a partial one (084d-2b fix round 1, K-5).
+            _logger.LogInformation("Affected-invoice count: {InvoiceCount} invoice(s) is past the bound of {Bound}; no count is shown", asked.Count, bound);
+            return null;
+        }
 
         HashSet<Guid> open;
         try
         {
-            open = await OpenInvoicesAsync(invoiceIds.Where(id => id != Guid.Empty).ToHashSet(), ct).ConfigureAwait(false);
+            open = await OpenInvoicesAsync(asked, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

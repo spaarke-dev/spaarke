@@ -652,10 +652,13 @@ public class RecordProcedureReadService
     /// a grandchild's chain does not reach the record, D-172).</item>
     /// <item>Narrowed FIRST to the ones the caller can Read (<see cref="AffectedInvoiceCounter.VisibleOpenInvoicesAsync"/>): an invoice the caller
     /// cannot Read is never judged, so nothing about it (or the record it is filed on) reaches the count or the check.</item>
+    /// <item>Only then is anything judged: a VISIBLE invoice that cannot be judged (no date, or not filed on exactly one core record) makes the count
+    /// null; one the caller cannot Read is dropped like any other, and its lines are never read (<see cref="ProcedureAssignmentService.JudgedOnAsync"/>).</item>
     /// <item>One resolution per (core record, firm) on each side, at most <see cref="MaxComparedResolutions"/>; the After side reads through the
     /// request's overlay.</item>
     /// </list>
-    /// Null, with no rows, when the reach cannot be read, a bound is passed, a visible invoice has no firm, or a resolution faults.
+    /// Null, with no rows, when the reach cannot be read, a bound is passed (the reach's invoices past <see cref="AffectedInvoiceCounter.MaxDryRunInvoices"/>,
+    /// or the resolutions past <see cref="MaxComparedResolutions"/>), a visible invoice has no firm or cannot be judged, or a resolution faults.
     /// </remarks>
     private async Task<(int? Count, HashSet<(string Set, Guid Id)> Compared)> ResolutionChangedAsync(
         ProcedureAssignmentService planner, ProcedureRowOverlay after, string coreTable, Guid recordId, string? callerBearerToken, CancellationToken ct)
@@ -663,7 +666,8 @@ public class RecordProcedureReadService
         var compared = new HashSet<(string Set, Guid Id)>();
         try
         {
-            var reach = await planner.InReviewInvoicesInReachAsync(new WriteRefusingEntityService(_entities), coreTable, recordId, ct).ConfigureAwait(false);
+            var reads = new WriteRefusingEntityService(_entities);
+            var reach = await planner.InReviewInvoicesInReachAsync(reads, coreTable, recordId, ct).ConfigureAwait(false);
             if (reach.Count == 0)
             {
                 return (0, compared);
@@ -674,7 +678,15 @@ public class RecordProcedureReadService
                 return (null, compared);
             }
 
-            var judged = reach.Where(i => visible.Contains(i.InvoiceId)).ToList();
+            var kept = reach.Where(i => visible.Contains(i.InvoiceId)).ToList();
+            if (kept.Any(i => !i.Judgeable))
+            {
+                // F-2: decided only now, among the invoices the caller can Read. An invoice the caller cannot Read was dropped above, judgeable or not.
+                _logger.LogInformation("Dry run: an invoice the caller can read cannot be judged (no date, or not filed on one core record); no count is shown");
+                return (null, compared);
+            }
+
+            var judged = (await planner.JudgedOnAsync(reads, kept).ConfigureAwait(false)).ToList();
             var groups = judged.GroupBy(i => (i.CoreTable, i.CoreId, i.FirmId)).ToList();
             if (judged.Any(i => i.FirmId is null || i.FirmId == Guid.Empty) || groups.Count > MaxComparedResolutions)
             {

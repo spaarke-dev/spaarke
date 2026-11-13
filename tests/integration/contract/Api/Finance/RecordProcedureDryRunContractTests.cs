@@ -624,7 +624,7 @@ public sealed class RecordProcedureDryRunContractTests
 
     private static int? CountOf(JsonObject body) => Affected(body)["count"]?.GetValue<int>();
 
-    [Fact(DisplayName = "084d-2b: an assignment closes nothing; it counts the In Review invoices the caller can Read, on the record and directly under it, whose resolution changes; not a parent's, not a decided one, not an unreadable one; the rows compared are asked in the ONE check; nothing selected or closed")]
+    [Fact(DisplayName = "084d-2b: an assignment closes nothing; it counts the In Review invoices the caller can Read, on the record and directly under it, whose resolution changes; not a decided one (a child's own nearer row), not an unreadable one; the rows compared are asked in the ONE check; nothing selected or closed")]
     public async Task Assign_ClosesNothing_CountsTheVisibleInvoicesWhoseResolutionChanges()
     {
         await using var host = await Host.StartAsync();
@@ -632,9 +632,14 @@ public sealed class RecordProcedureDryRunContractTests
         host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
         Invoice(host, Project, P, F, Feb1);                              // the record's own: changes
         Invoice(host, WorkAssignment, W, F, Feb1);                       // directly under it (W's chain reaches P): changes
-        Invoice(host, Matter, M, F, Feb1);                               // a parent's: out of reach
         var unreadable = Invoice(host, WorkAssignment, W, G, Feb1);      // changes, but the caller cannot Read it
         host.Rig.Probe.Denied.Add((InvoiceSet, unreadable));
+
+        // F-3: a child that decides the Procedure itself (its own nearer row), so the record's assignment changes nothing for it: not counted.
+        var decided = Guid.Parse("08400000-0000-4000-8000-0000000000c2");
+        host.Rig.World.Add(WorkAssignment, decided, ("sprk_name", "Work decided"), ("sprk_regardingproject", Ref(Project, P)));
+        host.Rig.Assign(WorkAssignment, decided, s.Procedure);
+        Invoice(host, WorkAssignment, decided, F, Feb1);
 
         var response = await host.Client.SendAsync(Post("projects", P, AssignBody(s.Procedure)));
 
@@ -644,7 +649,7 @@ public sealed class RecordProcedureDryRunContractTests
         Closes(body)["kinds"]!.AsArray().Should().BeEmpty();
         Closes(body)["warning"].Should().BeNull();
         Closes(body)["message"].Should().BeNull();
-        CountOf(body).Should().Be(2, "the record's and the child's In Review invoices the caller can Read; not M's, not the unreadable one");
+        CountOf(body).Should().Be(2, "the record's and the child's In Review invoices the caller can Read; not the decided child's (its own row wins), not the unreadable one");
         Affected(body)["text"]!.GetValue<string>().Should().Be(ProcedureService.AffectedText(2));
         Affected(body)["basis"]!.GetValue<string>().Should().Be(RecordProcedureReadService.AffectedBasisResolutionChanged);
 
@@ -685,6 +690,183 @@ public sealed class RecordProcedureDryRunContractTests
         var unanswered = await host2.Client.SendAsync(Post("projects", P, AssignBody(s2.Procedure)));
         unanswered.StatusCode.Should().Be(HttpStatusCode.OK);
         CountOf(await Json(unanswered)).Should().BeNull("an unanswered rights question is no count");
+
+        // F-3 must-not-fire: exactly AT the bound is a number (a > vs >= slip would null it).
+        await using var host3 = await Host.StartAsync();
+        var s3 = host3.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        host3.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s3.Procedure);
+        for (var i = 0; i < RecordProcedureReadService.MaxComparedResolutions; i++)
+        {
+            var firm = Guid.NewGuid();
+            host3.Rig.World.Add("sprk_organization", firm, ("sprk_organizationname", $"Firm {i}"));
+            Invoice(host3, Project, P, firm, Feb1);
+        }
+
+        var atBound = await host3.Client.SendAsync(Post("projects", P, AssignBody(s3.Procedure)));
+        atBound.StatusCode.Should().Be(HttpStatusCode.OK, await atBound.Content.ReadAsStringAsync());
+        CountOf(await Json(atBound)).Should().Be(RecordProcedureReadService.MaxComparedResolutions, "exactly the bound's worth of resolutions is compared");
+    }
+
+    private const int SizeOfTheInvoiceBound = AffectedInvoiceCounter.MaxDryRunInvoices;
+
+    [Fact(DisplayName = "084d-2b fix round 1 (K-5): more In Review invoices in reach than the rights bound is a null count and the caller's rights on invoices are never asked; exactly at the bound is a number; the same bound on the findings-closed count")]
+    public async Task InvoiceCount_PastTheRightsBound_IsNull_AndAtTheBoundANumber()
+    {
+        await using var past = await Host.StartAsync();
+        var s = past.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        past.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
+        for (var i = 0; i <= SizeOfTheInvoiceBound; i++) Invoice(past, Project, P, F, Feb1);
+
+        var pastResponse = await past.Client.SendAsync(Post("projects", P, AssignBody(s.Procedure)));
+
+        pastResponse.StatusCode.Should().Be(HttpStatusCode.OK, await pastResponse.Content.ReadAsStringAsync());
+        CountOf(await Json(pastResponse)).Should().BeNull("past the bound the count is null, never a partial one");
+        past.Rig.Probe.Asked.Should().NotContain(a => a.EntitySet == InvoiceSet, "the rights of the caller on the invoices are not asked past the bound");
+
+        await using var at = await Host.StartAsync();
+        var s2 = at.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        at.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s2.Procedure);
+        for (var i = 0; i < SizeOfTheInvoiceBound; i++) Invoice(at, Project, P, F, Feb1);
+
+        var atResponse = await at.Client.SendAsync(Post("projects", P, AssignBody(s2.Procedure)));
+
+        atResponse.StatusCode.Should().Be(HttpStatusCode.OK, await atResponse.Content.ReadAsStringAsync());
+        CountOf(await Json(atResponse)).Should().Be(SizeOfTheInvoiceBound, "exactly at the bound is a number");
+        at.Rig.Probe.Asked.Count(a => a.EntitySet == InvoiceSet).Should().Be(SizeOfTheInvoiceBound);
+
+        // The findings-closed count passes the same bound.
+        await using var change = await Host.StartAsync();
+        var c = change.Rig.Changeable("CHANGE-ME");
+        change.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, c.Rule);
+        for (var i = 0; i <= SizeOfTheInvoiceBound; i++) Finding(change, c.Rule, Invoice(change, Project, P, F, new DateOnly(2026, 2, 12)));
+
+        var changeResponse = await change.Client.SendAsync(Post("projects", P, ChangeBody(c.Rule)));
+
+        changeResponse.StatusCode.Should().Be(HttpStatusCode.OK, await changeResponse.Content.ReadAsStringAsync());
+        var changeBody = await Json(changeResponse);
+        Affected(changeBody)["basis"]!.GetValue<string>().Should().Be(RecordProcedureReadService.AffectedBasisFindingsClosed);
+        CountOf(changeBody).Should().BeNull("past the bound the findings-closed count is null too");
+        change.Rig.Probe.Asked.Should().NotContain(a => a.EntitySet == InvoiceSet);
+    }
+
+    /// <summary>An In Review invoice filed on P that cannot be judged: <paramref name="how"/> "no date" (no invoice date, no created-on) or "two lookups" (FR-05).</summary>
+    private static Guid Unjudgeable(Host host, string how, Guid firm)
+    {
+        var id = Guid.NewGuid();
+        var lookups = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"];
+        var columns = new List<(string, object)>
+        {
+            (lookups.Single(l => l.CoreEntity == Project).Column, Ref(Project, P)),
+            ("sprk_vendororg", Ref("sprk_organization", firm)),
+            ("statecode", Option(InvoiceStatusCodes.StateActive)),
+            ("statuscode", Option(InvoiceStatusCodes.InReview)),
+        };
+        if (how == "two lookups")
+        {
+            columns.Add((lookups.Single(l => l.CoreEntity == Matter).Column, Ref(Matter, M)));
+            columns.Add((InvoiceAdjustmentService.InvoiceDateColumn, Feb1.ToDateTime(TimeOnly.MinValue)));
+        }
+
+        host.Rig.World.Add("sprk_invoice", id, columns.ToArray());
+        return id;
+    }
+
+    [Theory(DisplayName = "084d-2b fix round 1 (F-2, K-c): an In Review invoice that cannot be judged (no date, or two core lookups) makes the count null only when the caller can Read it; one the caller cannot Read leaves the count a number")]
+    [InlineData("no date", true, null)]
+    [InlineData("no date", false, 1)]
+    [InlineData("two lookups", true, null)]
+    [InlineData("two lookups", false, 1)]
+    public async Task UnjudgeableInvoice_NullsTheCount_OnlyWhenTheCallerCanReadIt(string how, bool readable, int? expected)
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
+        Invoice(host, Project, P, F, Feb1);                              // the record's own, readable: changes
+        var malformed = Unjudgeable(host, how, F);
+        if (!readable)
+        {
+            host.Rig.Probe.Denied.Add((InvoiceSet, malformed));
+        }
+
+        var response = await host.Client.SendAsync(Post("projects", P, AssignBody(s.Procedure)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        CountOf(await Json(response)).Should().Be(expected, readable
+            ? "an invoice the caller can Read and that cannot be judged is no count"
+            : "an invoice the caller cannot Read takes no part in the answer, judgeable or not");
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-2b fix round 1 (F-2): the lines of an invoice the caller cannot Read are never read, so they cannot change the answer (an endless lines table does not null a count whose only invoice is unreadable)")]
+    public async Task UnreadableInvoice_ItsLinesAreNeverRead()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
+        host.Rig.Probe.Denied.Add((InvoiceSet, Invoice(host, Project, P, F, Feb1)));
+        host.Rig.World.EndlessPagesOf("sprk_billingevent");
+
+        var response = await host.Client.SendAsync(Post("projects", P, AssignBody(s.Procedure)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        CountOf(await Json(response)).Should().Be(0, "the only invoice is unreadable: nothing to judge, and its lines are not read");
+    }
+
+    private static void Children(Host host, int total)
+    {
+        // W is the first child; add the rest under P.
+        for (var i = 1; i < total; i++)
+        {
+            host.Rig.World.Add(WorkAssignment, Guid.NewGuid(), ("sprk_name", $"Work {i}"), ("sprk_regardingproject", Ref(Project, P)));
+        }
+    }
+
+    [Theory(DisplayName = "084d-2b fix round 1 (F-1): a change whose records under the record were not read (more than the 100-child bound, or a child that cannot be read) says so with the write's own children-open message and has NO count, never the record's own invoices as the whole; exactly 100 children are read and counted")]
+    [InlineData("more than 100 children", false)]
+    [InlineData("a child that cannot be read", false)]
+    [InlineData("exactly 100 children", true)]
+    public async Task Change_WithUnreadChildren_IsANullCount_NeverAPartialOne(string how, bool childrenRead)
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Changeable("CHANGE-ME");
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+        Finding(host, s.Rule, Invoice(host, Project, P, F, new DateOnly(2026, 2, 12)));    // the record's own: a partial count would be 1
+        switch (how)
+        {
+            case "more than 100 children": Children(host, ProcedureAssignmentService.MaxChildRecords + 1); break;
+            case "exactly 100 children": Children(host, ProcedureAssignmentService.MaxChildRecords); break;
+            default: host.Rig.World.FailingRowReadsOf(WorkAssignment, W); break;
+        }
+
+        var response = await host.Client.SendAsync(Post("projects", P, ChangeBody(s.Rule)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        Closes(body)["kinds"]!.AsArray().Select(k => k!.GetValue<string>()).Should().Equal(PlannedCloses.BaseRuleSuperseded);
+        Closes(body)["message"]!.GetValue<string>().Should().Be(
+            childrenRead ? ProcedureAssignmentService.ChangeCloseCompleteMessage : ProcedureAssignmentService.ChangeCloseChildrenOpenMessage);
+        CountOf(body).Should().Be(childrenRead ? 1 : null);
+        Affected(body)["basis"]!.GetValue<string>().Should().Be(RecordProcedureReadService.AffectedBasisFindingsClosed);
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-2b fix round 1 (review finding 4): a change whose selection faults has the write's own 'could not be closed now' message and NO count")]
+    public async Task Change_SelectionFault_IsANullCount_WithTheIncompleteMessage()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Changeable("CHANGE-ME");
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+        Finding(host, s.Rule, Invoice(host, Project, P, F, new DateOnly(2026, 2, 12)));
+        host.SelectionFaults.Add(s.Rule);
+
+        var response = await host.Client.SendAsync(Post("projects", P, ChangeBody(s.Rule)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        Closes(body)["kinds"]!.AsArray().Select(k => k!.GetValue<string>()).Should().Equal(PlannedCloses.BaseRuleSuperseded);
+        Closes(body)["message"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.ChangeCloseIncompleteMessage);
+        CountOf(body).Should().BeNull();
+        host.Rig.NoWrites();
     }
 
     [Fact(DisplayName = "084d-2b (D-170, R1): a plain rule Exclude closes nothing, even with open findings on the rule; its count is the resolution count")]

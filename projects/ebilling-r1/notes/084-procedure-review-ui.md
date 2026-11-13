@@ -954,7 +954,7 @@ There are no new routes, DI registrations or packages, and nothing changes under
 - `AffectedInvoiceCounter`: `CountVisibleOpenInvoicesAsync(IReadOnlyCollection<Guid> invoiceIds, …)` and `VisibleOpenInvoicesAsync`, pulled out of the Signal overload, which now maps its Signals to invoices and calls them. The behaviour is the same: empty or no open invoice gives 0 without asking the caller; any unknown gives null.
 - `InReviewInvoicesInReachAsync`: the In Review invoices filed on the record and on the records directly under it, with every date each is judged on (the invoice date, and each Fee or Expense line's work date, else the invoice date).
   - It is bounded by `MaxChildRecords` (100).
-  - An invoice not filed on exactly one core record, more than one page, a missing date, or any fault throws, and the count is then null.
+  - More than one page, or any fault, throws, and the count is then null. (Fix round 1: an invoice not filed on exactly one core record, or with no date, is returned flagged, not thrown on; see F-2.)
 - `ResolutionChangedAsync` (in the read service), for kinds that close nothing:
   1. The reach.
   2. Narrowed FIRST to the invoices the caller can Read (the counter's own question).
@@ -1024,7 +1024,7 @@ There are no new routes, DI registrations or packages, and nothing changes under
 - **K-2.** A null count from the 100-child bound tells the caller that the record has more than 100 direct children, readable or not. The 089e write's `ChangeCloseChildrenOpenMessage` already says the same.
 - **K-3.** The findings-closed count depends on app-only rows that are not asked: the Signal selection, and for a change, the children's nearer override rows. This is the same count, from the same selection, that the write returns and 089c's preview returns (accepted by uac-r2). It is not narrowed further here, so that preview = sweep.
 - **K-4.** The resolution count reads at most 10 (record, firm) pairs on each side (20 `ReadRowsAsync`) plus the reach reads; R8's cost note applies. Past the bound it is null.
-- **K-5.** An In Review invoice with no firm, no date, or other than one core lookup makes the resolution count null rather than skipping the invoice.
+- **K-5 (corrected in fix round 1).** An In Review invoice that the caller CAN Read and that has no firm, no date, or other than one core lookup makes the resolution count null rather than skipping the invoice. One the caller cannot Read is dropped before it is judged and changes nothing. The number of invoices whose rights are asked is bounded (`AffectedInvoiceCounter.MaxDryRunInvoices`, 1000); past it the count is null and no rights call is made.
 - **K-6.** The change's selection judges dates against the dry run's clock day (ontology-r1 K1, "if saved now").
 
 **Tests.** `RecordProcedureDryRunContractTests.cs` 54 (40 before this slice): 6 new facts plus 4 new seeds × 2 guards, plus the key-set update. The host now builds a REAL `AffectedInvoiceCounter` over the rig's world and probe, and a STRICT closure mock.
@@ -1034,3 +1034,40 @@ There are no new routes, DI registrations or packages, and nothing changes under
 **Publish size.** Fresh local `master` (`2ef4a17915`, exported with `git archive`) against this branch: `dotnet publish -c Release -r linux-x64`, short output paths, `Compress-Archive -CompressionLevel Optimal`, 191 files each. Master 42,030,897 bytes, branch 42,079,298 bytes, delta +48,401 bytes (≈0.05 MB, far below the +5 MB threshold).
 - The delta is the whole ebilling-r1 branch against master, not this slice alone; the master used here differs from 2a's.
 - No package and no assembly is added: the file counts match.
+
+### 084d-2b fix round 1
+
+Branch `task/084d-2b-fix1`, from `97e8a59a2a`. Rule applied to every count: a count is a number only when it is complete. Past a bound, on a fault, or when a question about the rows the caller can see cannot be answered, it is null, never partial; and a row the caller cannot Read never changes the answer.
+
+**Findings -> change -> test** (all in `Services/Finance/Procedures`; tests in `RecordProcedureDryRunContractTests.cs`):
+- **F-1, a change with unreadable children gave a partial count.** `ProcedureAssignmentService.PlanClosesAsync` (about 1785-1795): when `selection.ChildrenFault` is set, `countable` is now false and the write's `ChangeCloseChildrenOpenMessage` is kept. Before, only the message changed, so past 100 children or on a child-read fault the number covered the record's own invoices only. Tests: `Change_WithUnreadChildren_IsANullCount_NeverAPartialOne` (more than 100 children, a child that cannot be read; must-not-fire: exactly 100 children give 1 and the complete message).
+- **Review finding 4, the change-selection fault branch had no test.** Test: `Change_SelectionFault_IsANullCount_WithTheIncompleteMessage` (null count plus `ChangeCloseIncompleteMessage`). No code change.
+- **F-2 and K-c, an invoice the caller cannot Read could turn the count null.**
+  - `InReviewInvoicesInReachAsync` no longer throws on an invoice with other than one core lookup (FR-05) or with no date. It returns it with `InvoiceInReach.Judgeable == false`, and reads no lines.
+  - `RecordProcedureReadService.ResolutionChangedAsync` (about 673-689) narrows by Read first, then returns null only when a VISIBLE invoice is not judgeable.
+  - The lines are read after the narrowing, for the kept invoices only (`ProcedureAssignmentService.JudgedOnAsync`, new, split out of the reach read). Before, a lines fault or page overflow on an unreadable invoice also changed the answer; the lines of an unreadable invoice are now never read.
+  - Tests: `UnjudgeableInvoice_NullsTheCount_OnlyWhenTheCallerCanReadIt` (no date and two core lookups, each readable -> null, unreadable -> a number); `UnreadableInvoice_ItsLinesAreNeverRead` (an endless lines table does not null a count whose only invoice is unreadable).
+- **F-3, tests that proved nothing.**
+  - `Assign_ClosesNothing_CountsTheVisibleInvoicesWhoseResolutionChanges`: added the decided child (it has its own row for the Procedure, so its resolution is unchanged and it is not counted). Dropped the parent's-invoice control: a parent's invoice is out of reach and the record's assignment cannot change a parent's resolution, so counting it or not gave the same answer.
+  - `ResolutionCount_PastTheBound_OrUnanswered_IsNull`: added exactly 10 resolutions -> a number (catches `>` against `>=`).
+- **K-5, cost bound.** `AffectedInvoiceCounter.MaxDryRunInvoices` (1000, four rights pages of 250). `VisibleOpenInvoicesAsync` and the two `CountVisibleOpenInvoicesAsync` overloads take an optional `maxInvoices` (default none, so 081 and 089 are unchanged). More distinct invoices than the bound gives null before any app read of states or any rights call. The dry run passes it on both counts: the resolution count (`ProcedureAssignmentService.VisibleOpenInvoicesAsync`) and the findings-closed count (`PlanClosesAsync`). Test: `InvoiceCount_PastTheRightsBound_IsNull_AndAtTheBoundANumber` (1001 -> null with no invoice rights asked; exactly 1000 -> 1000 with 1000 asked; the findings-closed count past the bound -> null).
+- **K-5, cancellation.** The request's `CancellationToken` now reaches the shared selection: `SelectBaseFindingsAsync`, `RecordsInReviewInvoicesAsync`, `ChildrensInReviewInvoicesAsync`, `InvoicesTakingTheChangeAsync`, `LinesOfInvoicesAsync` and the closure's subject selection take an optional token. The write calls them without one, so it gets `CancellationToken.None` as before and its behaviour is unchanged. The children side's catch does not swallow a cancellation of the request. No test: the write's path is the one covered, and the dry run only adds the token.
+
+**Mutation seeds** (each applied, `RecordProcedureDryRunContractTests` run, restored):
+- F-1: `countable = false` removed from the children-fault branch -> 2 fail (`Change_WithUnreadChildren...`: more than 100 children, a child that cannot be read).
+- F-2: judge before narrowing (`reach.Any(i => !i.Judgeable)` in place of the narrowed list) -> 2 fail (`UnjudgeableInvoice...`, both unreadable cases). A second seed, the lines read for the whole reach instead of the kept invoices -> 2 fail (`UnreadableInvoice_ItsLinesAreNeverRead` and the Assign count test).
+- K-5 bound: the bound check disabled -> 1 fails (`InvoiceCount_PastTheRightsBound...`).
+
+**Known limits** (084d-2b, as amended):
+- **K-a.** On the findings-closed basis the selection's app-only rows (Signals, and the children's override rows for nearer-wins) are not asked of the caller. The count can depend on a child's override the caller cannot Read, but it counts only invoices the caller CAN Read. This is the write's own response, from the same selection.
+- **K-b.** `ChangeCloseChildrenOpenMessage` tells the caller that not all of the records under the record could be read. The write says the same. With F-1, that case also has no count; whether the children were read can itself depend on invoices on the children that the caller cannot Read (a children read past one page of invoices is a fault), which is the same disclosure the write makes.
+- **K-6.** A dry run is repeatable, so the findings-closed count can be probed (propose, read the count, change the proposal, read again). It is bounded to invoices the caller can Read, as the write's is, so a probe learns nothing about a row the caller cannot Read.
+- **K-5 (corrected).** A visible invoice that has no firm, no date, or other than one core lookup makes the resolution count null. An unreadable one is dropped first and changes nothing. The invoices whose rights are asked are bounded at 1000 (above); the bound is on the total in reach, readable or not, so it discloses only that the total in reach is past 1000, an aggregate of the same kind as K-2.
+- **K-d.** The reach read throws on more than one page of In Review invoices in a batch (the reach is read before any Read can narrow it, and a partial page narrowed to Readable invoices would be a partial count). So the count is null when the total in reach, readable or not, is past one page (5000 in Dataverse). An aggregate only, no row. Paging the reach to narrow it is not done. Between 1001 invoices and a page the rights bound gives the null; past a page the reach read does.
+
+**Gates.**
+- BFF build: 0 warnings, 0 errors.
+- `RecordProcedureDryRunContractTests`: 64 (54 before; 10 new: one fact for the rights bound, one theory of 4 for F-2, one fact for the lines, one theory of 3 for F-1, one fact for the selection fault; the Assign and bound facts changed in place).
+- Filtered `Sprk.Bff.Api.Tests` (Finance, Procedure, RecordProcedure, RouteAuthorization, Supersede): 8341 passed, 4 skipped, 0 failed (8331 before this round).
+- ArchTests: 2570/2570 passed.
+- `dotnet format whitespace --verify-no-changes` clean on the four touched code files and the test file.
