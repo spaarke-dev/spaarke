@@ -4,7 +4,7 @@
     <title>File the six remaining package actions and report defects</title>
     <phase>4 Package reviews</phase>
     <gate>blocked until 030 approved</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Issue filing and a project note; no code</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,7 +84,7 @@
     <criterion testable="true">Negative: no code or ADR file changes in this task.</criterion>
   </acceptance-criteria>
 
-  <notes>Runs in parallel with 031 (no shared files).</notes>
+  <notes>Runs in parallel with 031 (no shared files). Completed 2026-11-13: six package actions filed as DEF-001..006 (#2801-#2806; four are sanctions, routed to one follow-up ADR-012 amendment PR, not task 080), P-1 as ISS-004 (#2807), the standalone-tsc findings from 032/033 as ISS-005 (#2808); each paired in notes/defer-issues.md, labelled, board Type set. "Defects found" list at the top of notes/package-reviews.md. No High finding.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

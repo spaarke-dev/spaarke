@@ -5,7 +5,7 @@
 
 ---
 
-**Checkpoint 2026-11-13** (after task 033; items 1–3 state below is from 2026-11-12). Branch `work/reuse-governance-tightening-r1`, all committed and pushed. **Items 1–3 merged to master: PR #2751 (`8c05f5b70f`, squash)**; master merged back, branch content = master.
+**Checkpoint 2026-11-13** (after task 034; items 1–3 state below is from 2026-11-12). Branch `work/reuse-governance-tightening-r1`, all committed and pushed. **Items 1–3 merged to master: PR #2751 (`8c05f5b70f`, squash)**; master merged back, branch content = master.
 
 **Done (9/19 as of 2026-11-12)**: 001, 002, 041, 042 (2026-11-11); 010, 011, 012, 021, 020 (2026-11-12). 041/042 merged to master (#2705, #2706); master merged into the branch (`29bcda5fe3`).
 - Items 1 (capability index), 2 (reuse scan: design-to-spec, pipeline fallback, task-create citation) and 3 (jscpd sweep + adversarial-reviewer checks) are complete on the branch.
@@ -15,7 +15,8 @@
 **Done (11/19)**: + 031 (2026-11-13). `@spaarke/ai-context` retired: types in ai-widgets `src/types/aiContext.ts`; census row + test entry removed; CI `client-typecheck`, deploy trigger, `Build-AllClientComponents.ps1`, `master-deploy` skill fixed. All builds/tests green (`notes/031-ai-context.md`). Item-4 changes stay on the branch — no PR yet (owner decides PR shape; merging auto-deploys SpaarkeAi to DEV).
 **Done (12/19)**: + 032 (2026-11-13). `@spaarke/legal-workspace` facade retired; SpaarkeAi declares `"legal-workspace": "file:../LegalWorkspace"` (LegalWorkspace `exports` `./src/index.ts`); census updated; docs + code-page-deploy skill corrected (the dual-deploy trap was never "resolved" — covered by the deploy path trigger). `notes/032-legal-workspace.md`.
 **Done (13/19)**: + 033 (2026-11-13). `@spaarke/document-operations` retired: `useDocumentActions` + test in ui-components `src/hooks` (main barrel, not pcf-safe); SemanticSearch (deep import), Compose, SpaarkeAi, LegalWorkspace re-pointed; CI compose gate, build script, client-lint list, CAPABILITY-INDEX fixed. PCF bundle unchanged. `notes/033-document-operations.md`.
-**Active task**: none. **Next**: **034** — file the other six package actions + P-findings (P-1 as its own issue) + the pre-existing standalone-tsc errors (LegalWorkspace: `notes/032-legal-workspace.md`; SemanticSearch: `notes/033-document-operations.md`, both "Found in passing"); then 035 DEV deploy (owner OK), 040, 043, 080, 090.
+**Done (14/19)**: + 034 (2026-11-13). Filed DEF-001..006 (#2801-#2806: sdap-client + ai-outputs consolidations; smart-todo, communication, daily-briefing, compose sanctions → one follow-up ADR-012 amendment PR, NOT task 080), ISS-004 #2807 (P-1 open-in-desktop, 9 surfaces), ISS-005 #2808 (LegalWorkspace + SemanticSearch standalone tsc). `package-reviews.md` has the "Defects found" list (no High).
+**Active task**: none. **Next**: 035 DEV deploy of SpaarkeAi + SemanticSearch (**needs owner OK**), 040 Learn MCP (owner per-machine approval), 043 LSP trial, then 080 (single adversarial pass over items 1–4 + PRs with owner OK), 090.
 - Worktree has node_modules/dist for all 12 shared libs, SpaarkeAi, LegalWorkspace, SemanticSearch, ScopeConfigEditor (PCF) and scripts/quality/client-lint.
 **Open, reported to owner**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).

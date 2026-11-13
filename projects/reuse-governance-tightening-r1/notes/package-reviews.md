@@ -5,17 +5,46 @@
 > Evidence: three `code-mapper` inventories (sonnet, low), re-verified from `package.json` files and import sites on 2026-11-13, plus main-session checks of each candidate defect. Recommendations are the main session's judgment. Design §6.2 hypotheses were starting points; two are overturned (feature-area packages; see §2–§4).
 > **Owner gate**: passed 2026-11-13. The owner approved all nine recommendations as written ("Approve all"), including the Pattern D feature-package amendment that overturns the §6.2 consolidate hypothesis for §2–§4.
 
+## Defects found (NFR-10) — status after tasks 031–034 (2026-11-13)
+
+No finding is High (wrong behaviour a user can see), so nothing was escalated. Every finding is either fixed on this branch or carried by a labelled issue (`reuse-governance-tightening-r1`) with a paired entry in `notes/defer-issues.md`.
+
+| Finding | Sev | Status |
+|---|---|---|
+| P-1 open-in-desktop on many surfaces (task 034 re-grep: nine, plus the Office add-ins, which differ on purpose) | Medium | ISS-004 [#2807](https://github.com/spaarke-dev/spaarke/issues/2807) |
+| P-2 delete/download through two BFF route families | Medium | DEF-001 [#2801](https://github.com/spaarke-dev/spaarke/issues/2801) |
+| P-3 regarding-write helpers duplicated (Connections vs RegardingResolver) | Medium | DEF-003 [#2803](https://github.com/spaarke-dev/spaarke/issues/2803) |
+| P-4 private nav-prop discovery in `useInlineTodoCreate` | Medium | DEF-004 [#2804](https://github.com/spaarke-dev/spaarke/issues/2804) |
+| P-5 ai-widgets imported ai-context without declaring it | Medium | **Fixed** (task 031) |
+| P-6 pane-event shapes defined three times, `IChatSession` twice | Medium | ai-context half **fixed** (task 031); rest DEF-006 [#2806](https://github.com/spaarke-dev/spaarke/issues/2806) |
+| P-7 registry metadata matches `OutputWidgetType` by string | Medium | DEF-006 [#2806](https://github.com/spaarke-dev/spaarke/issues/2806) |
+| P-8 hard-coded `sprk_*` literals in feature packages | Medium | DEF-002 [#2802](https://github.com/spaarke-dev/spaarke/issues/2802), DEF-003 [#2803](https://github.com/spaarke-dev/spaarke/issues/2803), DEF-004 [#2804](https://github.com/spaarke-dev/spaarke/issues/2804), DEF-005 [#2805](https://github.com/spaarke-dev/spaarke/issues/2805) (the amendment states the exception, or the literals move behind a map) |
+| SmartTodo `SmartToDo.tsx` likely duplicates the package's | Medium | DEF-002 [#2802](https://github.com/spaarke-dev/spaarke/issues/2802) |
+| P-9 sdap-client consumer count overstated | Low | DEF-001 [#2801](https://github.com/spaarke-dev/spaarke/issues/2801) |
+| P-10 listings and aliases disagree | Low | document-operations / legal-workspace parts **fixed** (tasks 032–033); rest in #2801, #2802, #2804, #2806 |
+| P-11 tsconfig `paths` to unbuilt `dist/` | Low | ai-context, legal-workspace, document-operations entries **fixed** (tasks 031–033); rest in #2803 (communication), #2805 (Compose), #2806 (ai-outputs) |
+| P-12 dead prototype `CommunicationPage` | Low | DEF-003 [#2803](https://github.com/spaarke-dev/spaarke/issues/2803) |
+| P-13 unused `@microsoft/signalr` peer | Low | DEF-003 [#2803](https://github.com/spaarke-dev/spaarke/issues/2803) |
+| P-14 `mammoth` pin, hard-coded colour | Low | DEF-005 [#2805](https://github.com/spaarke-dev/spaarke/issues/2805) |
+| ai-outputs has no `exports` map | Low | DEF-006 [#2806](https://github.com/spaarke-dev/spaarke/issues/2806) |
+| Found in passing (032, 033): LegalWorkspace and SemanticSearch fail standalone `tsc`, including a latent bad re-export in LegalWorkspace `sections/index.ts:23` | Low | ISS-005 [#2808](https://github.com/spaarke-dev/spaarke/issues/2808) |
+| Found in passing (031): CI `client-typecheck` still built the deleted ai-context package | — | **Fixed** (task 031) |
+| Found in passing (032): `code-page-deploy` skill called the dual-deploy trap "resolved" | — | **Fixed** (task 032; doc only) |
+| Found in passing (033): CI compose gate still built the deleted document-operations package; `deploy-spaarke-ai.yml` never watched it, so a hook edit did not redeploy SpaarkeAi | — | **Fixed** (task 033; the hook now sits under the watched ui-components path) |
+
+**Where the four sanctions land.** The sanctions for §2–§4 (one shared Pattern D amendment) and §5 (Compose) are **follow-up PRs** tracked by #2802–#2805, not task 080. FR-09 limits execution in r1 to three packages, and task 080 is the review pass plus PRs. One amendment PR can carry all four: ADR-012 concise and full, census rows flipped to Sanctioned with the citation, and `SharedPackageCensusTests` in the same PR.
+
 ## Decision summary
 
 | # | Package | Recommendation | Hypothesis (design §6.2) | Executed in r1? |
 |---|---|---|---|---|
-| 1 | `@spaarke/sdap-client` | **Consolidate** into `@spaarke/ui-components` | Sanction or consolidate | No — filed (task 034) |
-| 2 | `@spaarke/smart-todo-components` | **Sanction via one ADR-012 amendment** for Pattern D feature packages | Consolidate — **overturned** | No — filed (task 034) |
-| 3 | `@spaarke/communication-components` | **Sanction** under the same amendment | Consolidate — **overturned** | No — filed (task 034) |
-| 4 | `@spaarke/daily-briefing-components` | **Sanction** under the same amendment | Consolidate — **overturned** | No — filed (task 034) |
-| 5 | `@spaarke/compose-components` | **Sanction** (TipTap quarantine) | Sanction | No — filed (task 034) |
+| 1 | `@spaarke/sdap-client` | **Consolidate** into `@spaarke/ui-components` | Sanction or consolidate | No — filed (task 034): #2801 |
+| 2 | `@spaarke/smart-todo-components` | **Sanction via one ADR-012 amendment** for Pattern D feature packages | Consolidate — **overturned** | No — filed (task 034): #2802 |
+| 3 | `@spaarke/communication-components` | **Sanction** under the same amendment | Consolidate — **overturned** | No — filed (task 034): #2803 |
+| 4 | `@spaarke/daily-briefing-components` | **Sanction** under the same amendment | Consolidate — **overturned** | No — filed (task 034): #2804 |
+| 5 | `@spaarke/compose-components` | **Sanction** (TipTap quarantine) | Sanction | No — filed (task 034): #2805 |
 | 6 | `@spaarke/document-operations` | **Consolidate** into `@spaarke/ui-components` | Consolidate | **Yes — task 033** |
-| 7 | `@spaarke/ai-outputs` | **Consolidate** into `@spaarke/ai-widgets` | Consolidate | No — filed (task 034) |
+| 7 | `@spaarke/ai-outputs` | **Consolidate** into `@spaarke/ai-widgets` | Consolidate | No — filed (task 034): #2806 |
 | 8 | `@spaarke/ai-context` | **Consolidate** (types) into `@spaarke/ai-widgets`; retire the package | Retire or consolidate | **Yes — task 031** |
 | 9 | `@spaarke/legal-workspace` | **Retire** the facade; SpaarkeAi depends on the LegalWorkspace solution directly | Retire | **Yes — task 032** |
 
