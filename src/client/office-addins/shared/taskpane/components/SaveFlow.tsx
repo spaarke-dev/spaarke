@@ -328,6 +328,15 @@ const useStyles = makeStyles({
 type FiledTo = string | null | undefined;
 
 /**
+ * The record a save was filed to, as the confirmation bar's "Open in Spaarke" needs it: the Dataverse logical name and
+ * the record id. `null` / absent = none known (a document-only save, or a filing the pane never resolved): no link.
+ */
+interface FiledRecordRef {
+  entityType: string;
+  id: string;
+}
+
+/**
  * Task 111: what the green confirmation box shows. Built from the document this pane just saved (the post-save
  * state) OR from a document that was already in Spaarke when the pane opened (the resolved state) — one box, so the
  * two cannot drift. `filingUnknown` = the pane cannot tell which record the document is filed to (a stamp-only
@@ -337,6 +346,8 @@ interface SavedBarModel {
   documentId: string;
   title: string;
   filedTo: FiledTo;
+  /** The record `filedTo` names, for the bar's "Open in Spaarke" (only the post-save bar sets it). */
+  filedRecord?: FiledRecordRef | null;
   filingUnknown?: boolean;
   /** The wording for `filedTo === null`. */
   notFiledText: string;
@@ -352,6 +363,7 @@ interface PendingSaveSnapshot {
   /** The Document Name field's value at submission — "Saved" again once the field is reverted to it. */
   name: string;
   filedTo: FiledTo;
+  filedRecord?: FiledRecordRef | null;
   mode: SaveTarget['mode'];
 }
 
@@ -361,6 +373,8 @@ export interface SavedDocumentState {
   documentId: string;
   savedName: string;
   filedTo: FiledTo;
+  /** The record `filedTo` names (its logical name and id), for the confirmation bar's "Open in Spaarke". */
+  filedRecord?: FiledRecordRef | null;
   /** Whether the save that produced this state created the document or added a version to it. */
   lastSave: SaveTarget['mode'];
   /**
@@ -687,6 +701,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             documentId: cleanGuid(docId) || docId,
             savedName: pending?.name ?? '',
             filedTo: pending?.filedTo,
+            ...(pending?.filedRecord ? { filedRecord: pending.filedRecord } : {}),
             lastSave: pending?.mode ?? 'create',
             ...(emailFilingProblem ? { emailFilingProblem } : {}),
           },
@@ -960,6 +975,21 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     }
   }, []);
 
+  // The confirmation bar's "Open in Spaarke" for the record the save was filed to: the same opener as every other
+  // open-record affordance (`openRecord`, which falls back to `window.open` from the click on Office on the web).
+  const handleOpenFiledRecord = useCallback(
+    (record: FiledRecordRef | null | undefined) => {
+      if (!record) return;
+      const result = openRecord({ orgUrl: process.env.ORG_URL, entityType: record.entityType, recordId: record.id });
+      if (result.opened) {
+        hasOpenedExternalRecordRef.current = true;
+      } else if (result.reason) {
+        announce(result.reason, 'assertive');
+      }
+    },
+    [announce]
+  );
+
   // Task 105: transient per-button feedback state ('done' = check + "Copied"/"Opened", 'failed' = error label).
   const [buttonFeedback, setButtonFeedback] = useState<{
     copy?: 'done' | 'failed';
@@ -1121,11 +1151,27 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [selectedEntity, savedDocument, resolvedRelatedRecord]
   );
 
+  // The record a save to `target` is filed to, by logical name and id, for the bar's "Open in Spaarke" (null: none known).
+  const filingRecordOf = useCallback(
+    (target: SaveTarget): FiledRecordRef | null => {
+      if (target.mode === 'create') {
+        return selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null;
+      }
+      if (savedDocument && cleanGuid(target.existingDocumentId) === savedDocument.documentId) {
+        return savedDocument.filedRecord ?? null;
+      }
+      return resolvedRelatedRecord.kind === 'associated'
+        ? { entityType: resolvedRelatedRecord.entityType, id: resolvedRelatedRecord.id }
+        : null;
+    },
+    [selectedEntity, savedDocument, resolvedRelatedRecord]
+  );
+
   // Task 088: every submission records what the confirmation bar and the "Saved" comparison will need once it
   // completes. `retry()` resends the last context, so the snapshot taken for that context still applies.
   const submitSave = useCallback(
-    (context: SaveFlowContext, filedTo: FiledTo) => {
-      pendingSaveRef.current = { name: documentName, filedTo, mode: context.saveTarget?.mode ?? 'create' };
+    (context: SaveFlowContext, filedTo: FiledTo, filedRecord: FiledRecordRef | null = null) => {
+      pendingSaveRef.current = { name: documentName, filedTo, filedRecord, mode: context.saveTarget?.mode ?? 'create' };
       void startSave(context);
     },
     [documentName, startSave]
@@ -1179,8 +1225,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const handleSave = useCallback(() => {
     if (!activeTarget) return;
     setSubmittedTarget(activeTarget);
-    submitSave(buildSaveContext(), filingOf(activeTarget));
-  }, [activeTarget, buildSaveContext, filingOf, submitSave]);
+    submitSave(buildSaveContext(), filingOf(activeTarget), filingRecordOf(activeTarget));
+  }, [activeTarget, buildSaveContext, filingOf, filingRecordOf, submitSave]);
 
   // Cancel = clear the current selection + fields (wizard "Cancel" pattern), and return the save mode to
   // the identity's default. Task 088: in the saved state it also leaves that state — the pane returns to an
@@ -1263,7 +1309,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // instead of refusing again.
   const handleKeepBoth = useCallback(() => {
     clearError();
-    submitSave({ ...buildSaveContext(), allowRename: true }, selectedEntity?.name ?? null);
+    submitSave(
+      { ...buildSaveContext(), allowRename: true },
+      selectedEntity?.name ?? null,
+      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null
+    );
     announce('Saving under a new name.', 'polite');
   }, [buildSaveContext, clearError, submitSave, selectedEntity, announce]);
 
@@ -1278,7 +1328,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     // canSaveAsVersion means that document is filed to the selected record, so the bar can name it.
     submitSave(
       { ...buildSaveContext(), saveTarget: { mode: 'version', existingDocumentId } },
-      selectedEntity?.name ?? null
+      selectedEntity?.name ?? null,
+      selectedEntity ? { entityType: selectedEntity.logicalName, id: selectedEntity.id } : null
     );
     announce('Saving as a new version of the existing document.', 'polite');
   }, [buildSaveContext, clearError, submitSave, selectedEntity, announce, error]);
@@ -1651,6 +1702,18 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                 ) : (
                   <>
                     Filed to <Text weight="semibold">{bar.filedTo}</Text>.
+                    {/* NFR-10: the same gate as View Document (ORG_URL + a way to open a tab), never rendered disabled. */}
+                    {openRecordAvailable && bar.filedRecord && (
+                      <Button
+                        appearance="transparent"
+                        size="small"
+                        icon={<OpenRegular />}
+                        onClick={() => handleOpenFiledRecord(bar.filedRecord)}
+                        data-testid="saved-bar-open-filed-record"
+                      >
+                        Open in Spaarke
+                      </Button>
+                    )}
                   </>
                 )}
               </Text>
@@ -1729,6 +1792,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     documentId: saved.documentId,
     title: saved.lastSave === 'version' ? 'New version saved to Spaarke' : 'Saved to Spaarke',
     filedTo: saved.filedTo,
+    filedRecord: saved.filedRecord ?? null,
     notFiledText: 'Not filed to a record.',
     copyUrl: documentRecordLinkOf(saved.documentId),
   });

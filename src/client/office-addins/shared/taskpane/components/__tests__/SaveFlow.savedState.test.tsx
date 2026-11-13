@@ -299,6 +299,69 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
     expect(created.document.title).toBe('Brief — copy');
   });
 
+  // Task 134 (slice A2): the confirmation bar's "Filed to <record>" also opens that RECORD (View Document opens the
+  // document). Same launcher, same gate (ORG_URL + a way to open a tab); never rendered dead.
+  describe('the filed-to record opens in Spaarke (task 134, slice A2)', () => {
+    const matterUrl = `${ORG}/main.aspx?appname=sprk_MatterManagement&etn=sprk_matter&id=${MATTER.id}&pagetype=entityrecord&navbar=off`;
+
+    it('must-fire: after a create filed to a record, "Open in Spaarke" opens that record', async () => {
+      fileToMatter();
+      renderWord();
+      await saveAndWaitForSavedState();
+
+      fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
+
+      expect(screen.getByTestId('saved-bar-open-filed-record')).toHaveTextContent('Open in Spaarke');
+      expect(openBrowserWindow()).toHaveBeenCalledTimes(1);
+      expect(openBrowserWindow()).toHaveBeenCalledWith(matterUrl);
+    });
+
+    it('must-fire: after a VERSION save of a resolved document, it opens the record the document is filed to', async () => {
+      const identity: DocumentIdentityState = {
+        kind: 'resolved',
+        documentId: SAVED_ID,
+        documentName: 'Brief',
+        fileName: 'Brief.docx',
+        relatedRecord: {
+          entityType: 'sprk_matter',
+          id: MATTER.id,
+          name: 'PAT-1',
+          displayName: 'Gamma Merger',
+          number: 'PAT-1',
+        },
+      };
+      renderWord({ documentIdentity: identity, resolvedDocumentId: SAVED_ID });
+      saveResponses.push(accepted());
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await screen.findByText('New version saved to Spaarke');
+
+      fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
+
+      expect(openBrowserWindow()).toHaveBeenCalledWith(matterUrl);
+    });
+
+    it('must-not-fire: a save filed to no record offers no record link', async () => {
+      renderWord();
+      await saveAndWaitForSavedState();
+
+      expect(screen.getByText('Not filed to a record.')).toBeInTheDocument();
+      expect(screen.queryByTestId('saved-bar-open-filed-record')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['the host cannot open a tab', { canOpenRecord: false }, ORG],
+      ['ORG_URL is empty', {}, ''],
+    ])('must-not-fire: when %s, no record link is rendered', async (_case, props, orgUrl) => {
+      process.env.ORG_URL = orgUrl;
+      fileToMatter();
+      renderWord(props);
+      await saveAndWaitForSavedState();
+
+      expect(screen.getByText('Gamma Merger')).toBeInTheDocument();
+      expect(screen.queryByTestId('saved-bar-open-filed-record')).not.toBeInTheDocument();
+    });
+  });
+
   // Task 094 (AC3): the real content-change SUBSCRIPTION lives in `SaveView` (covered by
   // `WordAdapter.documentChangeDetection.test.ts` + `SaveView.documentChangeDetection.test.tsx`).
   // SaveFlow's own responsibility — pinned here directly via the lifted, controlled `savedState` — is
