@@ -73,5 +73,10 @@ InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync, asked by the create 
 (OwnedChildWrite.DecideInvoiceFamilyAsync) and the app-only guard (CheckGenericUpdateCoreAsync: playbook update, output
 orchestrator, push). One new code, invoice_family_regarding_pair_core_record_mismatch. The push maps no pair (the mapping engine
 skips pair targets, FR-05(e)), so on the push the pair moves only with the core lookup; its tests pin that (notes K8).
-FieldMappingEndpoints.cs needed no change. One existing test was adapted (ActionSeamTests, notes "What changed").</notes>
+FieldMappingEndpoints.cs needed no change. One existing test was adapted (ActionSeamTests, notes "What changed").
+
+Fix round 1 (2026-11-13, review F2/F4/K1/K2, D-68 pins): an agreeing pair id is written in canonical form on every path; the
+app-only paths decide the pair on the payload as it will be written, after the planner (KeepRegardingPairAgreeingAsync, first
+step of KeepInvoiceFamilyResolverFieldsAppOnlyAsync), and drop a sent pair on a core move so only the derive writes it; the caller
+paths check the derived pair on a move too. Notes: rules 2, 5, 6, §11 rows, K2b/K3b/K4b/K6b.</notes>
 </task>

@@ -12,7 +12,10 @@ FR-23 (the regarding pair stays pushable) is amended for the six invoice-family 
    invoice only, the effective core record is that invoice (D-68).
 2. "Agrees" means: the id parses as a GUID equal to the core record's id (any case, braces allowed), and the type is the
    catalog row (`sprk_recordtype_ref`, active, by `sprk_recordlogicalname`) of the core record's table. The catalog is read
-   app-only, on every path.
+   app-only, on every path. An agreeing id is WRITTEN in canonical form (lowercase, "D": `CanonicalPairId`) on every path,
+   because the pair is a column of the external identifier's alternate key (D-68) and must not take another spelling of the
+   same id (fix round 1, F2). Canonicalising was chosen over refusing: the id names the right record, and every reader
+   already parses it, so refusing would reject a correct write over its spelling.
 3. A write that disagrees is refused through the path's existing refusal form, with ONE code
    (`invoice_family_regarding_pair_core_record_mismatch`), and nothing is written:
    - create (`RecordCreationService` step 5½, `RecordTableRules.InvoiceFamilyRule`): `PreWriteRefusal.Refused`, 400;
@@ -23,19 +26,29 @@ FR-23 (the regarding pair stays pushable) is amended for the six invoice-family 
 4. Only the halves a write sends are checked; a half it does not send is not read. On an update a sent clear (null) of
    either half disagrees: the row would no longer describe its core record. On a create a null half is not checked (the
    045d derive writes the pair).
-5. A write that moves the core lookup (sets or clears one so the row names another record) is never refused by this rule:
-   045d's derive replaces the pair with the pair of the record the row will name. A write that re-names the record the row
-   already names moves nothing, so the pair it sends is checked.
-6. Order, unchanged otherwise: the agreement check is asked after the guard's own decision admits the row (a row the guard
-   refuses keeps its own code), and before any derive or write. On the caller update paths it is asked in
-   `OwnedChildWrite.DecideInvoiceFamilyAsync`, i.e. inside `RefileAsync`, after 045b's planner (`KeepRegardingPairWholeAsync`);
-   the planner never moves a core lookup, so the pair it leaves is the one checked.
+5. A write that moves the core lookup (sets or clears one so the row names another record) writes only the pair 045d's
+   derive gives it, the pair of the record the row will name; the pair it sends is never written (fix round 1, K1):
+   - app-only paths: the gate removes every sent pair and display column (`RegardingPairAndResolverColumns`) before the
+     derive. If the derive then derives nothing (the core lookup already moved, e.g. a concurrent write), the stored pair is
+     left as it is.
+   - caller paths (PATCH, chat tool): the derive runs before the check and writes over the sent pair, so the check is asked
+     on the pair as derived (`aCoreMoveIsChecked: true`). It agrees by construction; in the concurrent-move case the sent
+     pair is refused rather than dropped.
+   A write that re-names the record the row already names moves nothing, so the pair it sends is checked.
+6. Order: the agreement check is asked after the guard's own decision admits the row (a row the guard refuses keeps its own
+   code), on the payload as it will be written:
+   - caller update paths: in `OwnedChildWrite.DecideInvoiceFamilyAsync` (inside `RefileAsync`), after 045b's planner
+     (`KeepRegardingPairWholeAsync`) and 045d's derive; the agreeing id is canonicalised in `KeepRegardingPairWholeAsync`.
+   - app-only paths (playbook update, output orchestrator, push): guard → planner → `KeepRegardingPairAgreeingAsync` (the
+     gate, first step of `OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync`) → derive → write. A pair the planner
+     itself writes is therefore checked too (fix round 1, K2); the guard no longer checks the pair before the planner.
+   - create: step 5½, as before; 045d's derive replaces the pair with the canonical one.
 7. Fail closed: a fault reading the stored row or the catalog writes nothing (`invoice_family_read_failed`, the fault's text
    never in the reason); no active catalog row for the core table is `invoice_family_resolver_fields_incomplete`; a stored
    row that names no single core record keeps the guard's own answer (`no_core_record`, `multiple_core_records`).
    Cancellation is rethrown.
-8. The field-mapping push asks the same guard (`CheckGenericUpdateAsync`, push order unchanged: source gate → access-column
-   scrub → guard → planner → derive), so a pair in a family child's payload would refuse that child only. A push never puts
+8. The field-mapping push asks the same gate (push order unchanged: source gate → access-column scrub → guard → planner →
+   gate + derive), so a pair in a family child's payload would refuse that child only. A push never puts
    a pair in its payload: the mapping engine (`CreateTimeFieldMapping.ApplyRule`, FR-05(e)) skips a rule aimed at the pair or
    the resolver fields on every table. On the push a family child's pair moves only with its core lookup (045d).
 9. Not in scope (ebilling-r1, held): a rule that a child's core record equals its invoice's.
@@ -60,12 +73,19 @@ reason, which is this code's intended status. No per-path code.
 | `OwnedChildWrite.PairWriteOf(MappedItem)` | `PairOf(item)`. | Maps `PairOf` onto `RegardingPairWrite` (`InvalidId` → `Unreadable`); no new parsing. | The create's step 5½ cannot hand its item's pair to the one check. |
 | `OwnedChildWrite.DecidePairOnlyUpdateAsync` (private) | `DecideInvoiceFamilyAsync` returned Proceed for an update writing no guarded column. | A private branch of `DecideInvoiceFamilyAsync`, reusing `ReadLookupsAsCallerAsync` and `Check`. | A pair-only PATCH or chat update of a family row is never checked (the core lookup is not written, so the old path read nothing). |
 | `recordTypes` parameter on `DecideInvoiceFamilyAsync` (optional) | `PreWriteRow.RecordTypes` (the create's app-only catalog reader, 045d). | Optional, defaults to `AppOnlyRecordTypes(appOnlyEntities)`; the create passes its own reader. | The create cannot read the catalog through the reader it already holds. |
+| Fix round 1: `InvoiceFamilyCoreRecordGuard.KeepRegardingPairAgreeingAsync` (the app-only gate) | The guard's early pair check in `CheckGenericUpdateCoreAsync` (removed: it saw the request, not the planned payload). | It replaces that check, moved after the planner into the one function every app-only path already calls (`KeepInvoiceFamilyResolverFieldsAppOnlyAsync`); no call site changes. | A pair the planner writes is never checked (K2), and a sent pair on a core move could be written when the derive derives nothing (K1). |
+| Fix round 1: `CanonicalPairId`, `WithCanonicalPairId` (guard), `OwnedChildWrite.WithCanonicalFamilyPairId` | 045d's derive already writes the canonical id on a move; `WithColumnsSet`. | One formatter, applied by the app-only gate and by the caller-path planner entry over the existing `WithColumnsSet`. | Another spelling of the same id is stored in the D-68 alternate key (F2). |
+| Fix round 1: `aCoreMoveIsChecked` parameter (optional) on `CheckRegardingPairAgreesAsync` | The move exemption. | Optional flag; the caller paths pass it because their derive runs before the check. | On the caller paths a sent pair on a move would be exempt even when the derive did not write over it. |
 | Test-only: `EntitySetNameFixtures` pins `sprk_recordtype_ref` → `sprk_recordtype_refs` | The fixture's pinned set names. | One entry. | The playbook path's tests cannot bind the pair type. |
 
 ## What changed
 
-- `InvoiceFamilyCoreRecordGuard.cs`: the code and reason; `CheckRegardingPairAgreesAsync`; `CheckGenericUpdateCoreAsync`
-  asks it after its own decision (and on a pair-only update, on the stored decision); `RegardingPairWrite`.
+- `InvoiceFamilyCoreRecordGuard.cs`: the code and reason; `CheckRegardingPairAgreesAsync`; `RegardingPairWrite`. Fix
+  round 1: the app-only gate `KeepRegardingPairAgreeingAsync` (asked after the planner; `CheckGenericUpdateCoreAsync` no
+  longer checks the pair), `CanonicalPairId` / `WithCanonicalPairId`, and `aCoreMoveIsChecked`.
+- `OwnedChildWrite.cs` (fix round 1): `KeepInvoiceFamilyResolverFieldsAppOnlyAsync` asks the gate first;
+  `KeepRegardingPairWholeAsync` canonicalises an agreeing family pair id (`WithCanonicalFamilyPairId`);
+  `DecideInvoiceFamilyAsync` checks a core move too (`aCoreMoveIsChecked: stored is not null`).
 - `OwnedChildWrite.cs`: `PairWriteOf`; `DecideInvoiceFamilyAsync` asks the check after an admitted decision (create and
   update) and on a pair-only update (`DecidePairOnlyUpdateAsync`); optional `recordTypes`.
 - `RecordTableRules.cs`: `InvoiceFamilyRule` passes `row.RecordTypes` to `DecideInvoiceFamilyAsync`.
@@ -108,14 +128,48 @@ New tests (267), all passing with the rule on:
   ActionSeam, minus `Api.Office.`): 9160 passed, 0 failed, 3 skipped. Before the new tests: 8861 passed, 1 failed (the
   `ActionSeamTests` case adapted above), 3 skipped.
 - ebilling-r1 filters (Finance | ProcedureAssignment | InvoiceFamily, minus `Api.Office.`): 8027 passed, 0 failed, 4 skipped.
-- ArchTests (run alone): 183 passed.
+- ArchTests (run alone, unfiltered): 2539 passed. (An earlier "183" figure here was wrong.)
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors.
 - `dotnet format whitespace --folder --verify-no-changes` on the touched files: clean.
+
+### Fix round 1 evidence
+
+| Set | Tests | Failed before the round |
+|---|---|---|
+| Domain: the gate (`Gate_*`: canonical id ×19, canonical sent as is, planned pair ×19, core move ×19, no pair, read fault), the derive step (`Derive_*` ×2), the caller-path move check (×19) | 81 | 59 (with the round's rule switched off; the gate's own agreement and fail-closed tests pass both ways, as they must) |
+| Integration, on the committed (pre-round) product code: generic canonical id ×12, D-68 ×4, planner clear ×2; chat canonical id ×6; PATCH canonical, PATCH move / same-matter, chat move / same-matter, chat D-68 ×2 | 31 | 24 |
+
+The 7 that pass both ways pin behaviour the round keeps: a core move with a disagreeing pair is written with the derived pair
+(PATCH, chat), a re-named core with a disagreeing pair is refused (PATCH, chat), and the D-68 must-fire (chat, generic ×2).
+
+- Filtered suites (as above, plus SearchIndexDefault | RecordOwnership, minus `Api.Office.`): 10081 passed, 0 failed, 3 skipped.
+- ebilling-r1 filters: 8113 passed, 0 failed, 4 skipped.
+- ArchTests (alone, unfiltered): 2539 passed.
+- `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `dotnet format whitespace --verify-no-changes` on the touched files: clean.
 
 ## Known limits (K)
 
 - K1: on a create, a type-only pair that step 4½ clears (no agreeing lookup) is not refused; the derive writes the pair.
-- K2: an update that sends one half is checked on that half only; the stored other half is not read or re-checked.
+- K2: an update that sends one half is checked on that half only; the stored other half is not read or re-checked. Example:
+  a row under matter M whose stored pair is (M, the project type), left by an earlier writer; a write sending only the id M
+  agrees and is written, and the stored type stays as it was. The write does not introduce the disagreement; an id-only
+  write can never store an id other than the core record's.
+- K2b (fix round 1): on the caller paths, a core move whose derive derives nothing (a concurrent move) refuses a sent
+  disagreeing pair rather than dropping it (the app-only paths drop it). Nothing is written either way.
+- K3b (fix round 1): on the app-only paths run as a person, the mismatch code (asked on the app's read) versus a later
+  Dataverse privilege error tells the person whether a guessed id is the row's core record — the same class as K7.
+- K4b (fix round 1): an update that sends a pair to a row that names no single core record is refused with the guard's own
+  code (`no_core_record`, `multiple_core_records`), where before this task it was written. An external identifier filed
+  under its invoice only names that invoice (D-68) and is not refused; ebilling-r1 confirmed none of its flows sends a pair
+  to an unfiled family row.
+- K5b (fix round 1): on a family table whose planner reads no agreement lookup (045b `PairAgreementColumns` is empty for the
+  approval, correction, submission and external identifier), a type-only pair write is cleared by the planner (rule 2: no
+  single agreeing lookup), and the cleared pair is then refused by the gate. Before the round it was written with the pair
+  cleared. A writer sends the id with the type (or moves the core lookup, and the derive writes both). On these tables the
+  planner cannot otherwise write a pair that names another record: their agreement lookups are their core lookups, and a
+  core move is the derive's.
+- K6b (fix round 1): extra reads on the app-only paths: one stored-row read (app-only) when the planned payload carries a
+  pair or display column; on the caller paths, one app-only catalog read when a core move also sends a type.
 - K3: the type agrees only with the catalog row the app reads as active for the core table (top 1). A pair naming another
   row for the same table (an inactive or duplicate row) is refused.
 - K4: on the caller update paths the stored core lookups are read as the caller (`ReadLookupsAsCallerAsync`, as the guard
