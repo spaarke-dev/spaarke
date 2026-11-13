@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance.Submission;
 using Sprk.Bff.Api.Services.Signals;
@@ -1672,7 +1673,7 @@ public class ProcedureAssignmentService
             query.Criteria.AddFilter(firm);
             if (nameContains is not null)
             {
-                query.Criteria.AddCondition(ProcedureEntity.NameColumn, ConditionOperator.Like, "%" + EscapeLike(nameContains) + "%");
+                query.Criteria.AddCondition(ProcedureEntity.NameColumn, ConditionOperator.Like, "%" + RecordContainerResolver.EscapeForLike(nameContains) + "%");
             }
 
             query.AddOrder(ProcedureEntity.NameColumn, OrderType.Ascending);
@@ -1720,21 +1721,6 @@ public class ProcedureAssignmentService
         {
             return ReadFailed<AssignableCatalog>(ex, "assignable list");
         }
-    }
-
-    /// <summary>
-    /// Task 084d-5a: <paramref name="text"/> as a literal inside a Like pattern. The Like wildcards <c>%</c>, <c>_</c> and <c>[</c> each become a
-    /// one-character class (<c>[%]</c>, <c>[_]</c>, <c>[[]</c>), so a name search matches the text as typed.
-    /// </summary>
-    internal static string EscapeLike(string text)
-    {
-        var escaped = new System.Text.StringBuilder(text.Length + 8);
-        foreach (var c in text)
-        {
-            escaped.Append(c is '%' or '_' or '[' ? $"[{c}]" : c.ToString());
-        }
-
-        return escaped.ToString();
     }
 
     /// <summary>The rows a rule Exclude would write (<see cref="ExcludeRuleAsync"/>), without writing: one created Exclude row.</summary>

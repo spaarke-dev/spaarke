@@ -268,7 +268,7 @@ public static class RecordProcedureEndpoints
     /// <summary>
     /// uac-r2 note 4: <c>q</c>, when present, must hold 1 to <see cref="ProcedureAssignmentService.MaxNameSearchChars"/> characters after
     /// trimming and no control character; otherwise 400. Absent, there is no name filter. The LIKE wildcards are escaped where the query is
-    /// built (<see cref="ProcedureAssignmentService.EscapeLike"/>), so any other text is a literal.
+    /// built (<see cref="Infrastructure.Dataverse.RecordContainerResolver.EscapeForLike"/>), so any other text is a literal.
     /// </summary>
     private static bool TryParseNameSearch(HttpContext http, string? q, out string? nameContains, out IResult? invalid)
     {

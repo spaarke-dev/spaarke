@@ -1431,7 +1431,7 @@ The server half of 084d-5: the route that lists the Procedures a record could be
   - `TopCount = bound + 1 + |onRecord|` (`:1658`); past the bound, `AssignableCatalog.Over` (`:1682`).
   - Own rows of any state come from `OwnRowQuery` (`:2218`, which is now also the duplicate refusal's query in `HasRowAsync`).
   - Each other candidate gets the write's Follow-latest image (`ProcedureRowOf` `:478`, the image-only builder), all in ONE `ProcedureOverridePlan`.
-- `AssignRefusalOf` (`:457`): the write's Procedure-row refusals (404 not found, 409 retired, 409 not billing), shared by the write and the list. `EscapeLike` (`:1729`): `%`, `_` and `[` become `[c]`.
+- `AssignRefusalOf` (`:457`): the write's Procedure-row refusals (404 not found, 409 retired, 409 not billing), shared by the write and the list. `RecordContainerResolver.EscapeForLike`, the one shared Like escaper (round 1): `%`, `_` and `[` become `[%]`, `[_]`, `[[]`.
 - `RecordProcedureReadService.ListAssignableAsync` (`:697`):
   - Now = `ReadAsync` + `BuildProcedures`, as `ListProceduresAsync`.
   - The catalog through a `WriteRefusingEntityService`.
@@ -1445,7 +1445,7 @@ The server half of 084d-5: the route that lists the Procedures a record could be
 - `PlanAssignCatalogAsync`. Existing: `PlanAssignAsync` plans one named Procedure. Extension: it is that planner fanned out over a query, reusing `AssignRefusalOf`, `ProcedureRowOf` and the image builder. Without it: no route can list what is assignable (the 084d-4 STOP).
 - `AssignRefusalOf` / `ProcedureRowOf`. Existing: the inline checks and constructor in `PlanAssignmentRowAsync`. Extension: pulled out unchanged (pure modification). Without it: the list and the write could disagree on what is refused.
 - `OwnRowQuery`. Existing: `HasRowAsync`'s inline query. Extension: the same predicate for many ids. Without it: an own-row candidate would be planned onto an id the write refuses as a duplicate.
-- `EscapeLike` and `MaxNameSearchChars`. Existing: none (grep: no Like escaper in the BFF). Without it: `q` of `%` or `_` matches everything (uac-r2 note 4).
+- `RecordContainerResolver.EscapeForLike` and `MaxNameSearchChars`. Existing: `RecordContainerResolver.EscapeForLike` (the Like escaper the container lookups use; round 1 corrected this line, which had said there was none in the BFF, and removed the duplicate `EscapeLike` this task had added). Extension: it is now `internal` and called from the planner. Without it: `q` of `%` or `_` matches everything (uac-r2 note 4).
 - `AssignableCatalog` / `AssignableOwnRow`. Existing: `ProcedureOverridePlan` holds a plan only. Without it: the tooMany state and the own rows have no carrier.
 - `ListAssignableAsync` and the four DTOs. Existing: `DryRunAsync` (one proposal) and `ListProceduresAsync`. Extension: the same reader, overlay and check, with one plan holding many rows. Without it: no answer shape for the wizard.
 - `AssignableTargets` and the three routes. Existing: `DryRunTargets` (body-driven). Extension: no body to read here, so it states the assign write's privileges directly. Without it: the list would offer what the caller cannot assign (uac-r2 Q3).
@@ -1466,7 +1466,7 @@ The server half of 084d-5: the route that lists the Procedures a record could be
 | uac-r2 note 1: tooMany still asks Now and the firm | `:773` runs on both paths | `TooMany_StillAsksNowRows` (439), `DeniedNowRow_OrFault_Is503` (638) |
 | uac-r2 note 2: OwnRow asks the row and its Procedure, inactive too | `:735`; `OwnRowQuery` has no state filter | `OwnRow_IncludingInactive_IsNotOffered_AndAsked` (331) |
 | uac-r2 note 3: one 404 for unknown, unreadable, unwritable and step 0, before 403, no read | `DryRunRecordTargets` first | `RecordFilter_IsTheUniform404_BeforeAny403` (542, every route), `StepZero_RefusesFirst_WithTheUniform404` (564) |
-| uac-r2 note 4: `q` escaped; control characters, empty or over-long give 400 | `EscapeLike`; `TryParseNameSearch` | `Q_MatchesTheNameAsTyped` (491), `BadQ_Is400` (513), `Q_AtTheLimit_IsAccepted_AndOtherBadInputIs400` (523) |
+| uac-r2 note 4: `q` escaped; control characters, empty or over-long give 400 | `RecordContainerResolver.EscapeForLike`; `TryParseNameSearch` | `Q_MatchesTheNameAsTyped` (491), `BadQ_Is400` (513), `Q_AtTheLimit_IsAccepted_AndOtherBadInputIs400` (523) |
 | uac-r2 note 5: ledger names the three GETs; count 153 | Ledger.cs | ArchTests |
 | EB-D-218 guards | — | `Every200Guid_WasAskedOfTheCaller_Assignable` (713), `EveryVersionRow_IsAsked_OrTheBodyDoesNotDependOnIt_Assignable` (736) |
 
@@ -1506,3 +1506,30 @@ The server half of 084d-5: the route that lists the Procedures a record could be
 - A Procedure with a hole between versions on the panel date shows the Gap warning.
 - A Procedure the matter has an inactive row for shows as not offered (OwnRow).
 - As a caller without the billing-admin privileges, expect the 403 state, not a list.
+
+### 084d-5a review round 1 (2026-11-13)
+
+Each item: finding, then change, then test.
+
+**1. (F2) The `+ onRecord.Count` padding in the candidate `TopCount` was untested.**
+- Change: none to product code (the padding was right). It is pinned by a test, and see item 5 below, which replaces the padding.
+- Test: `Bound_OnRecordRowSortingFirst_NeverMakesAPartialList`. A Procedure on the record that sorts first ("A on the record"), plus 51 candidates: `tooMany` is true and `procedures` is null.
+- Mutation `TopCount = bound + 1`: the new test fails (1 failed, 57 passed); restored, 58 passed.
+
+**2. (F2) `EscapeLike` duplicated `RecordContainerResolver.EscapeForLike`.**
+- Change: `RecordContainerResolver.EscapeForLike` is now `internal static` (it was `private`) and is the one Like escaper. `ProcedureAssignmentService.EscapeLike` is deleted; the planner calls the shared helper. The two gave identical output (`[`, `%`, `_` each become a one-character class). The §11 line above ("no Like escaper in the BFF") is corrected. No new public surface, no new file.
+- Test: `Q_MatchesTheNameAsTyped` (the `%`, `_` and `[` cases) goes through the shared helper and is unchanged. The existing `RecordContainerResolver` tests are unchanged and green (counts under Gates).
+
+**3. (F4) The parity test checked only that a Procedure is offered.**
+- Change: test only. When the real write gains P, the offered item's `statusIfAssigned` and `versionInForce` must equal the post-write list item's `Status` and `VersionInForce`, with a guard that the comparison ran. The 14 parity cases compare InForce, Gap and NotYetInForce items.
+- New test: `Bound_CountsOnlyCandidates` (50 candidates plus a Retired, another-area, another-firm and an inactive one: not `tooMany`, 50 offered).
+- Design §6 mutation seeds (each applied, run, restored):
+
+| Seed | Result |
+|---|---|
+| Drop the OwnRow step (`candidates.Count < 0` on the own-row query) | 15 fail (OwnRow tests and the parity cases) |
+| The query includes Retired (the Active condition removed) | survived the existing tests; added `Bound_CountsOnlyCandidates`, which now fails it (1 failed) |
+| No `ExposeVersionsOf` (empty loop) | 1 fails: `EveryVersionRow_IsAsked_OrTheBodyDoesNotDependOnIt_Assignable` |
+| Offered from the candidates instead of After - Now | killed in 084d-5a as M4 (16 fail) |
+
+**4. (K4, notes only) EB-D-228 reach.** `AssignRefusalOf` also refuses a Pin, a Procedure-level Exclude and an empty Area, not only a non-Billing Procedure. Name this as a known limit in the PR. It is harmless: the resolver never reads such rows, so they never change what applies.

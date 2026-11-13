@@ -435,6 +435,47 @@ public sealed class RecordAssignableProceduresContractTests
         host.Rig.NoWrites();
     }
 
+    [Fact(DisplayName = "084d-5a EB-D-227 (review round 1, must-fire): a Procedure ON the record that sorts first does not eat the bound: 51 candidates behind it are still tooMany with a null list, never a silently partial list of 50")]
+    public async Task Bound_OnRecordRowSortingFirst_NeverMakesAPartialList()
+    {
+        await using var host = await Host.StartAsync();
+        // On the record Now (applies to all records) and first by name, so it takes a slot in the candidate query's top rows.
+        var onRecord = host.Rig.AddProcedure("A on the record", ProcedureAppliesTo.AllRecords);
+        var version = host.Rig.AddVersion(onRecord, 1, Jan1, null);
+        var rule = host.Rig.AddProcedureRule(onRecord, "R-A");
+        host.Rig.AddRuleVersion(rule, version, Jan1);
+        for (var n = 1; n <= 51; n++)
+        {
+            Candidate(host.Rig, $"Candidate {n:D3}");
+        }
+
+        var body = await Ok(await host.Client.SendAsync(Get("projects", P)));
+
+        body["tooMany"]!.GetValue<bool>().Should().BeTrue("51 candidates are past the bound; the on-record Procedure must not hide one of them");
+        body["procedures"].Should().BeNull("never a partial list");
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-5a EB-D-227 (review round 1; design §6 mutation seed 'the query includes Retired'): what the query rules out (Retired, another area, another firm, inactive) never counts toward the bound: 50 candidates plus those are 50 offered, not tooMany")]
+    public async Task Bound_CountsOnlyCandidates()
+    {
+        await using var host = await Host.StartAsync();
+        var fifty = Enumerable.Range(1, 50).Select(n => Candidate(host.Rig, $"Candidate {n:D3}")).ToList();
+        var retired = Candidate(host.Rig, "Candidate 051 retired");
+        host.Rig.World.Set(ProcedureEntity.Entity, retired, ProcedureEntity.StatusColumn, Option(ProcedureEntity.StatusRetired));
+        var otherArea = Candidate(host.Rig, "Candidate 052 other area");
+        host.Rig.World.Set(ProcedureEntity.Entity, otherArea, ProcedureEntity.AreaColumn, Option(OtherArea));
+        Candidate(host.Rig, "Candidate 053 firm G", G);
+        var inactive = Candidate(host.Rig, "Candidate 054 inactive");
+        host.Rig.World.Set(ProcedureEntity.Entity, inactive, "statecode", Option(1));
+
+        var body = await Ok(await host.Client.SendAsync(Get("projects", P)));
+
+        body["tooMany"]!.GetValue<bool>().Should().BeFalse("only the 50 real candidates count");
+        OfferedIds(body).Should().Equal(fifty);
+        host.Rig.NoWrites();
+    }
+
     [Fact(DisplayName = "084d-5a uac-r2 note 1 (TooMany_StillAsksNowRows, must-fire): past the bound the ONE batched check still runs over Now's rows, the record and the query firm; denying a Now row or the firm is 503")]
     public async Task TooMany_StillAsksNowRows()
     {
@@ -853,7 +894,7 @@ public sealed class RecordAssignableProceduresContractTests
         listRig.WriteInvocations().Should().BeEmpty("the list writes nothing");
 
         var probes = seeded.Keys.ToList();
-        Func<string, Task<bool>> offered;
+        Func<string, Task<AssignableProcedureItem?>> offered;
         if (fillers > RecordProcedureReadService.AssignableBound)
         {
             whole.Value!.TooMany.Should().BeTrue();
@@ -864,17 +905,18 @@ public sealed class RecordAssignableProceduresContractTests
                 var narrowed = await listRig.Rig.Service.ListAssignableAsync(listRig.Planner, table, record, firm, date, name, Token, CancellationToken.None);
                 narrowed.Status.Should().Be(RecordProcedureReadStatus.Done);
                 narrowed.Value!.TooMany.Should().BeFalse($"'{name}' narrows the list within the bound");
-                return narrowed.Value.Procedures!.Any(p => p.Id == seeded[name]);
+                return narrowed.Value.Procedures!.SingleOrDefault(p => p.Id == seeded[name]);
             };
         }
         else
         {
             whole.Value!.TooMany.Should().BeFalse();
-            var ids = whole.Value.Procedures!.Select(p => p.Id).ToHashSet();
-            offered = name => Task.FromResult(ids.Contains(seeded[name]));
+            var items = whole.Value.Procedures!.ToDictionary(p => p.Id);
+            offered = name => Task.FromResult(items.GetValueOrDefault(seeded[name]));
         }
 
         var disagreements = new List<string>();
+        var comparedFields = 0;
         var verdicts = new List<(string Name, bool Offered, bool Written, string? Code)>();
         foreach (var name in probes)
         {
@@ -887,14 +929,28 @@ public sealed class RecordAssignableProceduresContractTests
             before.Status.Should().Be(RecordProcedureReadStatus.Done);
             var outcome = await w.Writer.AssignProcedureAsync(table, record, new(seeded[name], "FollowLatest", null, null), RecordProcedureWriteRig.CallerObjectId, CancellationToken.None);
             var gains = false;
+            ProcedureListItem? written = null;
             if (outcome.Kind == RuleSetOutcomeKind.Done)
             {
                 var after = await w.Rig.Service.ListProceduresAsync(table, record, firm, date, Token, CancellationToken.None);
                 after.Status.Should().Be(RecordProcedureReadStatus.Done);
-                gains = after.Value!.Procedures.Any(p => p.Id == seeded[name]) && before.Value!.Procedures.All(p => p.Id != seeded[name]);
+                written = after.Value!.Procedures.SingleOrDefault(p => p.Id == seeded[name]);
+                gains = written is not null && before.Value!.Procedures.All(p => p.Id != seeded[name]);
             }
 
-            var isOffered = await offered(name);
+            var item = await offered(name);
+            var isOffered = item is not null;
+            if (gains && isOffered)
+            {
+                // F4: what the list says it would be is what the list then says it is.
+                if (item!.StatusIfAssigned != written!.Status || item.VersionInForce != written.VersionInForce)
+                {
+                    disagreements.Add($"{name}: offered as {item.StatusIfAssigned} / {item.VersionInForce}, after the write {written.Status} / {written.VersionInForce}");
+                }
+
+                comparedFields++;
+            }
+
             verdicts.Add((name, isOffered, outcome.Kind == RuleSetOutcomeKind.Done, outcome.ErrorCode));
             if (isOffered != gains)
             {
@@ -903,6 +959,7 @@ public sealed class RecordAssignableProceduresContractTests
         }
 
         disagreements.Should().BeEmpty();
+        comparedFields.Should().BeGreaterThan(0, "the statusIfAssigned / versionInForce comparison ran (F4)");
 
         // The parity is not vacuous: in every case something is offered, the write refuses something (Retired, another area, an own row: the
         // EB-D-228 refusal among them), and the write accepts something the list does not gain (Draft only, or already on the record).
