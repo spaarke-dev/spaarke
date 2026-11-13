@@ -113,8 +113,8 @@ export interface InvoiceSubmissionMark {
 export interface InvoiceSubmissionInput {
   targetEntity: InvoiceSubmissionTarget;
   marks: InvoiceSubmissionMark[];
-  /** The firm, or null for an invoice submitted without one (contract §2, EB-D-185). Sent as `firmId: null`. */
-  firmId: string | null;
+  /** The firm (contract §2). Never empty: the server refuses an invoice with no firm, so the pane never sends one. */
+  firmId: string;
   firmInvoiceNumber: string;
   poNumber: string | null;
   mode: 'New' | 'Correction';
@@ -213,6 +213,11 @@ export interface InvoicePreviousSubmission {
   /** The submitter's name, or null when none is recorded. */
   submittedBy: string | null;
   isCorrection: boolean;
+  /**
+   * The firm the invoice was submitted for, when the server says (a `firm: { id, name }` on the §11 body; absent from
+   * the server today, so absent is the common case). Absent or null: the banner does not name a firm.
+   */
+  firmName?: string | null;
 }
 
 /**
@@ -245,8 +250,8 @@ export function previousSubmissionTitle(submission: InvoicePreviousSubmission): 
 }
 
 /**
- * "Submitted on 3 Nov 2026, 10:04 as INV-012.2 by Ana Diaz." — each part only when known; the date in the user's own
- * locale and time zone. `locale` is for tests.
+ * "Submitted on 3 Nov 2026, 10:04 as INV-012.2 for Ravenscroft and Vance LLP by Ana Diaz." — each part only when known;
+ * the date in the user's own locale and time zone. `locale` is for tests.
  */
 export function describeSubmittedLine(submission: InvoicePreviousSubmission, locale?: string): string {
   const when = submission.submittedOn ? new Date(submission.submittedOn) : null;
@@ -258,6 +263,7 @@ export function describeSubmittedLine(submission: InvoicePreviousSubmission, loc
     `${submission.isCorrection ? 'A correction was submitted' : 'Submitted'}` +
     `${date ? ` on ${date}` : ''}` +
     `${submission.trackingNumber ? ` as ${submission.trackingNumber}` : ''}` +
+    `${submission.firmName ? ` for ${submission.firmName}` : ''}` +
     `${submission.submittedBy ? ` by ${submission.submittedBy}` : ''}.`
   );
 }
@@ -439,22 +445,31 @@ export function normalizeFirmInvoiceNumber(raw: string): string | null {
   return trimmed.length >= 1 && trimmed.length <= FIRM_INVOICE_NUMBER_MAX ? trimmed : null;
 }
 
-/** Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number or firm is null. */
+/** Why {@link buildInvoiceSubmissionInput} refuses a blank firm (never shown: the view keeps Submit disabled first). */
+export const NO_FIRM_REFUSAL = 'An invoice cannot be submitted without a firm.';
+
+/**
+ * Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number is null. A blank firm is REFUSED (throws
+ * {@link NO_FIRM_REFUSAL}): an invoice is never submitted without a firm, so the input never carries a null or empty
+ * `firmId`.
+ */
 export function buildInvoiceSubmissionInput(args: {
   target: InvoiceSubmissionTarget;
   attachments: readonly InvoiceListedAttachment[];
   marking: InvoiceMarkingValue;
-  firmId: string | null;
+  firmId: string;
   firmInvoiceNumber: string;
   poNumber: string;
   mode: 'New' | 'Correction';
   invoiceId?: string | null;
 }): InvoiceSubmissionInput {
   const po = args.poNumber.trim();
+  const firmId = cleanGuid(args.firmId);
+  if (!firmId) throw new Error(NO_FIRM_REFUSAL);
   return {
     targetEntity: { entityType: args.target.entityType, entityId: cleanGuid(args.target.entityId) },
     marks: toSubmissionMarks(args.attachments, args.marking),
-    firmId: args.firmId && args.firmId.trim().length > 0 ? cleanGuid(args.firmId) : null,
+    firmId,
     firmInvoiceNumber: args.firmInvoiceNumber.trim(),
     poNumber: po.length > 0 ? po : null,
     mode: args.mode,

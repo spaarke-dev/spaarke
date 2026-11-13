@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceView, INVOICE_UPLOAD_HINT, type InvoiceViewProps } from '../InvoiceView';
 import { filedUnderRecord, invoiceFiledRecord } from '../../../services/invoiceSubmissionSeam';
+import { buildOpenRecordUrl, configuredSpaarkeAppName } from '../../../services/openRecordLauncher';
 import { fetchRelatedCandidates } from '../../../services/communicationSuggestionsService';
 import { searchOfficeEntities } from '../../../services/officeEntitySearch';
 import type { IHostAdapter } from '@shared/adapters';
@@ -92,9 +93,40 @@ async function findRow(fileName: string): Promise<HTMLElement> {
 
 const submitButton = () => screen.getByRole('button', { name: /^(Submit|Submitting…|Processing…|Submitted)$/ });
 
+const ORG_URL = 'https://org.crm.dynamics.com';
+const NO_FIRM_LINKED = 'No firm is linked to this record. Add a firm to the record in Spaarke, then submit.';
+const CORRECTION_NO_FIRM = 'This invoice has no firm. Set its firm in Spaarke, then submit the correction.';
+
+/** The "Open in Spaarke" URL for a record: the pane's one builder, with the build's app name. */
+function recordUrl(entityType: string, id: string): string {
+  return buildOpenRecordUrl(ORG_URL, entityType, id, configuredSpaarkeAppName());
+}
+
+/** jest.setup.js's Office mock: the runtime check the launcher makes for OpenBrowserWindowApi 1.1. */
+const isSetSupported = (): jest.Mock => Office.context.requirements.isSetSupported as unknown as jest.Mock;
+
+const originalOrgUrl = process.env.ORG_URL;
+/** Sets (or unsets) the build's ORG_URL for the test; the afterEach below restores it. */
+function withOrgUrl(value: string | undefined): void {
+  if (value === undefined) delete process.env.ORG_URL;
+  else process.env.ORG_URL = value;
+}
+
 beforeEach(() => {
   mockSearch.mockReset();
   mockCandidates.mockReset();
+  // Default for every test but the ones that set it: no ORG_URL, so no "Open in Spaarke" anywhere.
+  delete process.env.ORG_URL;
+  // Office on the web: no OpenBrowserWindowApi, so a record link opens through window.open from the click.
+  isSetSupported().mockReturnValue(false);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+  isSetSupported().mockReturnValue(true); // jest.setup.js's default
+  (Office.context.ui.openBrowserWindow as unknown as jest.Mock).mockClear();
+  if (originalOrgUrl === undefined) delete process.env.ORG_URL;
+  else process.env.ORG_URL = originalOrgUrl;
 });
 
 describe('invoiceFiledRecord — the record the open email is filed to', () => {
@@ -242,19 +274,19 @@ describe('InvoiceView — New invoice (task 133)', () => {
       await findRow('INV-4711.pdf');
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
       expect(submitButton()).toBeDisabled();
-      // The firm is optional (EB-D-185): it is never listed as still needed.
-      expect(screen.getByText('Still needed: the matter, project or work assignment.')).toBeInTheDocument();
+      // A firm is required again (owner ruling 2026-11-13): it is listed as still needed.
+      expect(screen.getByText('Still needed: the matter, project or work assignment, the firm.')).toBeInTheDocument();
     },
     TIMEOUT
   );
 
   it(
-    "Still needed lists the record and the firm's invoice number, never the firm",
+    "Still needed lists the record, the firm and the firm's invoice number",
     async () => {
       renderView();
       await findRow('INV-4711.pdf');
       expect(
-        screen.getByText("Still needed: the matter, project or work assignment, the firm's invoice number.")
+        screen.getByText("Still needed: the matter, project or work assignment, the firm, the firm's invoice number.")
       ).toBeInTheDocument();
     },
     TIMEOUT
@@ -441,62 +473,88 @@ describe('InvoiceView — New invoice (task 133)', () => {
   );
 
   it(
-    'no firm linked to the record (EB-D-185): the warning shows, Submit is enabled and sends firmId null',
+    'must-fire: no firm linked to the record: the message and (ORG_URL set) the Open in Spaarke link show, Submit is disabled and nothing is sent',
     async () => {
+      withOrgUrl(ORG_URL);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
       const { onSubmit } = renderView({ loadFirms: jest.fn(async () => []) });
       await findRow('INV-4711.pdf');
       await chooseMatter();
-      expect(
-        await screen.findByText('No firm is linked to this record. The invoice will be held until a reviewer adds one.')
-      ).toBeInTheDocument();
+      expect(await screen.findByText(NO_FIRM_LINKED)).toBeInTheDocument();
+      expect(screen.queryByText(/held until a reviewer/)).toBeNull();
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      expect(submitButton()).toBeDisabled();
+      expect(screen.getByText(/Still needed: .*the firm/)).toBeInTheDocument();
+      // One link (the message's), to the selected record, through the launcher's window.open fallback (Office on the web).
+      const links = screen.getAllByRole('button', { name: 'Open in Spaarke' });
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAttribute('data-testid', 'invoice-no-firm-open');
+      await userEvent.click(links[0]!);
+      expect(openSpy).toHaveBeenCalledWith(recordUrl('sprk_matter', MATTER_ID), '_blank');
+      await userEvent.click(submitButton());
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'ORG_URL unset: the no-firm message shows with no link and no error',
+    async () => {
+      withOrgUrl(undefined);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
+      renderView({ loadFirms: jest.fn(async () => []) });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      expect(await screen.findByText(NO_FIRM_LINKED)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open in Spaarke' })).toBeNull();
+      expect(openSpy).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: firms listed but none chosen: Submit stays disabled and the firm is still needed; choosing one sends that firm',
+    async () => {
+      const loadFirms = jest.fn(async () => [
+        { firmId: FIRM_ID, name: 'Firm F' },
+        { firmId: '9c1d7a2f-5d3b-4a8e-8b62-3a4e2d1f0c88', name: 'Firm G' },
+      ]);
+      const { onSubmit } = renderView({ loadFirms });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await screen.findByRole('combobox');
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      expect(submitButton()).toBeDisabled();
+      expect(screen.getByText('Still needed: the firm.')).toBeInTheDocument();
+      expect(screen.queryByText(/held until a reviewer/)).toBeNull();
+      await userEvent.selectOptions(screen.getByRole('combobox'), 'Firm F');
       await waitFor(() => expect(submitButton()).toBeEnabled());
       expect(screen.queryByText(/Still needed/)).toBeNull();
       await userEvent.click(submitButton());
       await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-      const [input] = onSubmit.mock.calls[0] as unknown as [Record<string, unknown>];
-      expect(input).toHaveProperty('firmId', null);
+      expect((onSubmit.mock.calls[0] as unknown as [{ firmId: string }])[0].firmId).toBe(FIRM_ID);
     },
     TIMEOUT
   );
 
   it(
-    'firms listed but none chosen (EB-D-185): the warning shows, Submit is enabled and sends firmId null',
+    'a failed firm list keeps Submit disabled; the message and Retry show, and Retry can recover',
     async () => {
-      const loadFirms = jest.fn(async () => [
-        { firmId: FIRM_ID, name: 'Firm F' },
-        { firmId: '9c1d7a2f-5d3b-4a8e-8b62-3a4e2d1f0c88', name: 'Firm G' },
-      ]);
-      const { onSubmit } = renderView({ loadFirms });
+      const failing = jest
+        .fn()
+        .mockRejectedValueOnce(
+          new Error("Spaarke couldn't list the firms for this record right now. Try again in a moment.")
+        )
+        .mockResolvedValueOnce([{ firmId: FIRM_ID, name: 'Firm F' }]);
+      const { onSubmit } = renderView({ loadFirms: failing });
       await findRow('INV-4711.pdf');
       await chooseMatter();
       expect(
-        await screen.findByText('No firm selected. The invoice will be held until a reviewer adds one.')
+        await screen.findByText("Spaarke couldn't list the firms for this record right now. Try again in a moment.")
       ).toBeInTheDocument();
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
-      await waitFor(() => expect(submitButton()).toBeEnabled());
-      await userEvent.click(submitButton());
-      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-      const [input] = onSubmit.mock.calls[0] as unknown as [Record<string, unknown>];
-      expect(input).toHaveProperty('firmId', null);
-    },
-    TIMEOUT
-  );
-
-  it(
-    'must-not-fire: choosing a firm clears the warning and sends that firm',
-    async () => {
-      const loadFirms = jest.fn(async () => [
-        { firmId: FIRM_ID, name: 'Firm F' },
-        { firmId: '9c1d7a2f-5d3b-4a8e-8b62-3a4e2d1f0c88', name: 'Firm G' },
-      ]);
-      const { onSubmit } = renderView({ loadFirms });
-      await findRow('INV-4711.pdf');
-      await chooseMatter();
-      await screen.findByText(/No firm selected/);
-      await userEvent.selectOptions(screen.getByRole('combobox'), 'Firm F');
-      expect(screen.queryByText(/No firm selected/)).toBeNull();
-      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      expect(submitButton()).toBeDisabled();
+      await userEvent.click(screen.getByRole('button', { name: 'Retry loading the firms' }));
       await waitFor(() => expect(submitButton()).toBeEnabled());
       await userEvent.click(submitButton());
       await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -506,40 +564,14 @@ describe('InvoiceView — New invoice (task 133)', () => {
   );
 
   it(
-    'a failed firm list no longer blocks Submit; the message and Retry stay',
-    async () => {
-      const failing = jest.fn(async () => {
-        throw new Error("Spaarke couldn't list the firms for this record right now. Try again in a moment.");
-      });
-      const { onSubmit } = renderView({ loadFirms: failing });
-      await findRow('INV-4711.pdf');
-      await chooseMatter();
-      expect(
-        await screen.findByText(
-          "Spaarke couldn't list the firms for this record right now. Try again in a moment. The invoice will be held until a reviewer adds one."
-        )
-      ).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Retry loading the firms' })).toBeInTheDocument();
-      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
-      await waitFor(() => expect(submitButton()).toBeEnabled());
-      await userEvent.click(submitButton());
-      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-      expect(onSubmit.mock.calls[0]![0]).toHaveProperty('firmId', null);
-    },
-    TIMEOUT
-  );
-
-  it(
-    'no firm loader (unavailable): the message says the invoice will be held, and Submit is enabled',
+    'no firm loader (unavailable): the message shows and Submit stays disabled',
     async () => {
       renderView({ loadFirms: undefined });
       await findRow('INV-4711.pdf');
       await chooseMatter();
-      expect(
-        await screen.findByText("Firms can't be listed here yet. The invoice will be held until a reviewer adds one.")
-      ).toBeInTheDocument();
+      expect(await screen.findByText("Firms can't be listed here yet.")).toBeInTheDocument();
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
-      await waitFor(() => expect(submitButton()).toBeEnabled());
+      expect(submitButton()).toBeDisabled();
     },
     TIMEOUT
   );
@@ -659,7 +691,7 @@ describe('InvoiceView — New invoice (task 133)', () => {
     async () => {
       const message = 'Submitted without a firm. A reviewer will add the firm before approval.';
       const onSubmit = jest.fn(async () => ({ kind: 'success' as const, trackingNumber: 'T-1', message }));
-      renderView({ onSubmit, loadFirms: jest.fn(async () => []) });
+      renderView({ onSubmit });
       await findRow('INV-4711.pdf');
       await chooseMatter();
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
@@ -915,19 +947,48 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
   );
 
   it(
-    'a correction of a no-firm invoice (EB-D-185) shows "Firm: none" and sends firmId null',
+    'must-fire: a correction of a no-firm invoice is blocked with its message and the invoice link; nothing is sent',
     async () => {
+      withOrgUrl(ORG_URL);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
       const loadCorrectionPrefill = jest.fn(async () => ({ ...PREFILL, firm: null }));
       const { onSubmit } = renderView({ correctionAvailable: true, loadCorrectionPrefill });
       await chooseCorrection();
       const details = await screen.findByTestId('invoice-correction-details');
       expect(within(details).getByText('Firm: none')).toBeInTheDocument();
-      await waitFor(() => expect(submitButton()).toBeEnabled());
+      expect(within(details).getByText(CORRECTION_NO_FIRM)).toBeInTheDocument();
+      expect(submitButton()).toBeDisabled();
       await userEvent.click(submitButton());
-      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-      const [input] = onSubmit.mock.calls[0] as unknown as [Record<string, unknown>];
-      expect(input).toMatchObject({ mode: 'Correction', invoiceId: INVOICE_ID, firmInvoiceNumber: 'INV-012' });
-      expect(input).toHaveProperty('firmId', null);
+      expect(onSubmit).not.toHaveBeenCalled();
+      // The link in the message opens the INVOICE record.
+      await userEvent.click(within(details).getByRole('button', { name: 'Open in Spaarke' }));
+      expect(openSpy).toHaveBeenCalledWith(recordUrl('sprk_invoice', INVOICE_ID), '_blank');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'ORG_URL unset: the no-firm correction message shows with no link',
+    async () => {
+      const loadCorrectionPrefill = jest.fn(async () => ({ ...PREFILL, firm: null }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      const details = await screen.findByTestId('invoice-correction-details');
+      expect(within(details).getByText(CORRECTION_NO_FIRM)).toBeInTheDocument();
+      expect(within(details).queryByRole('button', { name: 'Open in Spaarke' })).toBeNull();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: a correction of an invoice WITH a firm shows no no-firm message and no link without ORG_URL',
+    async () => {
+      const loadCorrectionPrefill = jest.fn(async () => PREFILL);
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      await screen.findByTestId('invoice-correction-details');
+      expect(screen.queryByText(CORRECTION_NO_FIRM)).toBeNull();
+      expect(screen.queryByTestId('invoice-correction-no-firm')).toBeNull();
     },
     TIMEOUT
   );
@@ -1701,4 +1762,164 @@ describe('InvoiceView — review fixes (task 133)', () => {
       TIMEOUT
     );
   });
+});
+
+describe('InvoiceView — "Open in Spaarke" on the selected record (task 134, slice A2)', () => {
+  it(
+    'must-fire: the chosen record offers Open in Spaarke when ORG_URL is set, and a click opens its record URL (window.open on the web)',
+    async () => {
+      withOrgUrl(ORG_URL);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
+      renderView();
+      await findRow('INV-4711.pdf');
+      expect(screen.queryByRole('button', { name: 'Open in Spaarke' })).toBeNull();
+      await chooseMatter();
+      const link = await screen.findByRole('button', { name: 'Open in Spaarke' });
+      expect(link).toHaveAttribute('data-testid', 'invoice-core-record-open');
+      await userEvent.click(link);
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(openSpy).toHaveBeenCalledWith(recordUrl('sprk_matter', MATTER_ID), '_blank');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: where the host has openBrowserWindow the click goes through it, not window.open',
+    async () => {
+      withOrgUrl(ORG_URL);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
+      // Desktop Outlook: OpenBrowserWindowApi 1.1 is supported, so the click goes through openBrowserWindow.
+      isSetSupported().mockReturnValue(true);
+      const openBrowserWindow = Office.context.ui.openBrowserWindow as unknown as jest.Mock;
+      renderView({
+        hostAdapter: {
+          getCapabilities: () => ({ canGetAttachments: true, canOpenBrowserWindow: true }),
+          getAttachments: jest.fn(async () => ATTACHMENTS),
+        } as unknown as IHostAdapter,
+      });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await userEvent.click(await screen.findByRole('button', { name: 'Open in Spaarke' }));
+      expect(openBrowserWindow).toHaveBeenCalledWith(recordUrl('sprk_matter', MATTER_ID));
+      expect(openSpy).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: ORG_URL unset shows no link, no error, and opens nothing',
+    async () => {
+      withOrgUrl(undefined);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
+      renderView();
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await screen.findByRole('combobox');
+      expect(screen.queryByRole('button', { name: 'Open in Spaarke' })).toBeNull();
+      expect(openSpy).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a blocked pop-up is said, not swallowed',
+    async () => {
+      withOrgUrl(ORG_URL);
+      jest.spyOn(window, 'open').mockReturnValue(null);
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      renderView();
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await userEvent.click(await screen.findByRole('button', { name: 'Open in Spaarke' }));
+      await waitFor(() =>
+        expect(
+          Array.from(document.querySelectorAll('[aria-live="assertive"]')).some(r =>
+            /blocked the new window/.test(r.textContent ?? '')
+          )
+        ).toBe(true)
+      );
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a record whose search result carries no logical name opens by its type (Project: sprk_project)',
+    async () => {
+      withOrgUrl(ORG_URL);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
+      const noName = { id: MATTER_ID, entityType: 'Project', name: 'Project X' } as unknown as EntitySearchResult;
+      renderView({ filedRecord: noName });
+      await findRow('INV-4711.pdf');
+      await userEvent.click(await screen.findByRole('button', { name: 'Open in Spaarke' }));
+      expect(openSpy).toHaveBeenCalledWith(recordUrl('sprk_project', MATTER_ID), '_blank');
+    },
+    TIMEOUT
+  );
+
+  it(
+    'the Existing invoice card offers Open in Spaarke for the chosen invoice (and none before one is chosen)',
+    async () => {
+      withOrgUrl(ORG_URL);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue({} as Window);
+      const INVOICE: EntitySearchResult = {
+        id: '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65',
+        entityType: 'Invoice',
+        logicalName: 'sprk_invoice',
+        name: 'INV-012',
+      };
+      renderView({ correctionAvailable: true });
+      await findRow('INV-4711.pdf');
+      await userEvent.click(screen.getByRole('radio', { name: 'Existing invoice' }));
+      expect(screen.queryByRole('button', { name: 'Open in Spaarke' })).toBeNull();
+      mockSearch.mockResolvedValue([INVOICE]);
+      await userEvent.type(screen.getByLabelText('Search Invoice records'), 'INV-012');
+      await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Select this record' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Open in Spaarke' }));
+      expect(openSpy).toHaveBeenCalledWith(recordUrl('sprk_invoice', INVOICE.id), '_blank');
+    },
+    TIMEOUT
+  );
+});
+
+describe('InvoiceView — the already-submitted banner names the firm (task 134, slice B1)', () => {
+  const SUBMISSION = {
+    submissionId: 'sub-1',
+    statusUrl: '/api/finance/invoice-submissions/sub-1',
+    trackingNumber: 'INV-0012.1',
+    status: 'Accepted' as const,
+    message: null,
+    invoiceId: null,
+    submittedOn: '2026-11-03T14:04:38Z',
+    submittedBy: 'Ana Diaz',
+    isCorrection: false,
+  };
+
+  it(
+    'must-fire: with the firm name the banner reads "... as INV-0012.1 for <firm> by <person>."',
+    async () => {
+      renderView({
+        loadPreviousSubmission: jest.fn(async () => ({ ...SUBMISSION, firmName: 'Ravenscroft and Vance LLP' })),
+      });
+      const bar = await screen.findByTestId('invoice-previous-submission');
+      expect(bar).toHaveTextContent(/Submitted on .+ as INV-0012\.1 for Ravenscroft and Vance LLP by Ana Diaz\./);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: without a firm name (absent, null) the banner text is exactly as before',
+    async () => {
+      const { unmount } = renderView({ loadPreviousSubmission: jest.fn(async () => SUBMISSION) });
+      const bar = await screen.findByTestId('invoice-previous-submission');
+      expect(bar).toHaveTextContent(/Submitted on .+ as INV-0012\.1 by Ana Diaz\./);
+      expect(bar).not.toHaveTextContent(/ for /);
+      unmount();
+      renderView({ loadPreviousSubmission: jest.fn(async () => ({ ...SUBMISSION, firmName: null })) });
+      const again = await screen.findByTestId('invoice-previous-submission');
+      expect(again).toHaveTextContent(/Submitted on .+ as INV-0012\.1 by Ana Diaz\./);
+      expect(again).not.toHaveTextContent(/ for /);
+    },
+    TIMEOUT
+  );
 });

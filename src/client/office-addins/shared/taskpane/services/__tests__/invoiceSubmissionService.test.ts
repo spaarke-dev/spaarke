@@ -9,6 +9,7 @@ import {
   FROM_EMAIL_ROUTE,
   loadCorrectionPrefill,
   loadInvoiceFirms,
+  loadPreviousSubmission,
   pollSubmission,
   submitInvoiceFromEmail,
   type InvoiceEmailSource,
@@ -247,23 +248,69 @@ describe('submitInvoiceFromEmail — the §2 request', () => {
   });
 });
 
-describe('submitInvoiceFromEmail — no firm (EB-D-185, §2)', () => {
-  it('must-fire: with no firm chosen the body carries firmId: null (present, not omitted, not "")', async () => {
-    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED));
-    await submitInvoiceFromEmail(
-      { ...INPUT, firmId: null },
-      { config, email: emailSource(), idempotencyKey: 'action-1' }
-    );
-    const body = sentBody();
-    expect(body).toHaveProperty('firmId', null);
-    expect(Object.keys(body)).toContain('firmId');
-    expect((mockFetch.mock.calls[0]![1] as RequestInit).body).toContain('"firmId":null');
-  });
+describe('submitInvoiceFromEmail — the firm on the wire (task 134: no invoice without a firm)', () => {
+  const FIRM = '8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77';
 
-  it('must-not-fire: a chosen firm is still sent as that id', async () => {
+  it('contract: a firm-chosen NEW invoice sends exactly the §2 body keys with the firm as a string id', async () => {
     mockFetch.mockResolvedValueOnce(res(202, ACCEPTED));
     await submitInvoiceFromEmail(INPUT, { config, email: emailSource(), idempotencyKey: 'action-1' });
-    expect(sentBody()).toHaveProperty('firmId', '8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77');
+    const body = sentBody();
+    expect(Object.keys(body).sort()).toEqual(
+      ['email', 'firmId', 'firmInvoiceNumber', 'invoiceId', 'marks', 'mode', 'poNumber', 'targetEntity'].sort()
+    );
+    expect(body).toMatchObject({ firmId: FIRM, mode: 'New', invoiceId: null });
+    expect(typeof body.firmId).toBe('string');
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).body).not.toContain('"firmId":null');
+  });
+
+  it('contract: a CORRECTION sends the same keys, the invoice id and the invoice firm as a string id', async () => {
+    mockFetch.mockResolvedValueOnce(res(202, ACCEPTED));
+    await submitInvoiceFromEmail(
+      { ...INPUT, mode: 'Correction', invoiceId: '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65' },
+      { config, email: emailSource(), idempotencyKey: 'action-2' }
+    );
+    const body = sentBody();
+    expect(Object.keys(body).sort()).toEqual(
+      ['email', 'firmId', 'firmInvoiceNumber', 'invoiceId', 'marks', 'mode', 'poNumber', 'targetEntity'].sort()
+    );
+    expect(body).toMatchObject({ firmId: FIRM, mode: 'Correction', invoiceId: '3c9d2b1a-7e4f-4a6b-8c2d-1e0f9a8b7c65' });
+  });
+});
+
+describe('loadPreviousSubmission — the firm on the banner (task 134, slice B1)', () => {
+  const MESSAGE_ID = '<CA+abc123@mail.firm.example>';
+  const BODY = {
+    submissionId: '5a1a526f-0000-4000-8000-000000000001',
+    trackingNumber: 'INV-0012.1',
+    status: 'Accepted',
+    invoiceId: '3d3009f7-0000-4000-8000-000000000002',
+    submittedOn: '2026-11-03T14:04:38Z',
+    submittedBy: { name: 'Ana Diaz' },
+    isCorrection: false,
+  };
+  const load = async (over: Record<string, unknown>) => {
+    mockFetch.mockResolvedValueOnce(res(200, { ...BODY, ...over }));
+    return loadPreviousSubmission(MESSAGE_ID, config);
+  };
+
+  it('must-fire: a firm { id, name } on the body is read as the firm name', async () => {
+    const previous = await load({
+      firm: { id: '8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77', name: ' Ravenscroft and Vance LLP ' },
+    });
+    expect(previous).toMatchObject({ trackingNumber: 'INV-0012.1', firmName: 'Ravenscroft and Vance LLP' });
+  });
+
+  it.each([
+    ['absent', {}],
+    ['null', { firm: null }],
+    ['a blank name', { firm: { id: 'x', name: '   ' } }],
+    ['no name', { firm: { id: 'x' } }],
+    ['not an object', { firm: 'Ravenscroft' }],
+  ])('must-not-fire: a firm that is %s adds no firm name and the body is still read', async (_label, over) => {
+    const previous = await load(over);
+    expect(previous).not.toBeNull();
+    expect(previous).toMatchObject({ trackingNumber: 'INV-0012.1', status: 'Accepted' });
+    expect(previous).not.toHaveProperty('firmName');
   });
 });
 

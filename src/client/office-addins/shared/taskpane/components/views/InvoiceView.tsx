@@ -15,7 +15,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { ReceiptRegular } from '@fluentui/react-icons';
+import { OpenRegular, ReceiptRegular } from '@fluentui/react-icons';
 import type { IHostAdapter } from '@shared/adapters';
 import type { EntitySearchResult, EntityType } from '../../hooks/useEntitySearch';
 import { useAnnounce } from '../../hooks/useAnnounce';
@@ -49,7 +49,12 @@ import {
   type LoadInvoiceFirms,
   type LoadPreviousSubmission,
 } from '../../services/invoiceSubmissionSeam';
-import { describeCorrectionBlock } from '../../utils/invoiceSubmissionMessages';
+import { canOpenSpaarkeRecords, openRecord } from '../../services/openRecordLauncher';
+import {
+  CORRECTION_NO_FIRM_MESSAGE,
+  NO_FIRM_LINKED_MESSAGE,
+  describeCorrectionBlock,
+} from '../../utils/invoiceSubmissionMessages';
 import {
   InvoiceAttachmentMarking,
   defaultInvoiceMarking,
@@ -63,18 +68,20 @@ import {
  * Reached from the pane's Invoice tab (package 1.1.4, owner UAT 2026-11-03; a received email only — `canGetAttachments`),
  * and from a cached older manifest's ribbon `?action=submitInvoice` (outlook/taskpane/index.tsx → App `initialAction`).
  *
- * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (OPTIONAL since ebilling
- *   EB-D-185: its options come from {@link InvoiceViewProps.loadFirms}; with none chosen the invoice is sent with
- *   `firmId: null` and held until a reviewer adds one), the firm's invoice number (required, 1-100), an optional PO
- *   number, and the email's attachments marked Invoice / Supporting / Don't save.
+ * - New invoice: the core record (Matter, Project or Work Assignment — required), the firm (required; its options come
+ *   from {@link InvoiceViewProps.loadFirms}; owner ruling 2026-11-13: an invoice is never submitted without one, so
+ *   Submit stays disabled until a firm is chosen, and a record with no linked firm says how to add one), the firm's
+ *   invoice number (required, 1-100), an optional PO number, and the email's attachments marked Invoice / Supporting /
+ *   Don't save. The chosen record, and the chosen invoice, offer "Open in Spaarke" (`openRecordLauncher`).
  * - Existing invoice: pick the invoice, then submit a corrected invoice or add supporting files. Corrections are shown
  *   disabled with their reason until {@link InvoiceViewProps.correctionAvailable} (ebilling 097 on the server); supporting
  *   files until the upload route exists (ebilling 123; its contract is agreed, the route is not built, so the add-in
  *   does not call it yet).
  * - Correction: the chosen invoice's prefill ({@link InvoiceViewProps.loadCorrectionPrefill}, contract §10) decides.
- *   When it can be corrected, the form shows the firm (or "none"), core record and firm invoice number the correction keeps (not
+ *   When it can be corrected, the form shows the firm, core record and firm invoice number the correction keeps (not
  *   editable: the server refuses any other) and the attachment marking; otherwise the view says why, and offers a
- *   Superseded invoice's replacement.
+ *   Superseded invoice's replacement. An invoice with no firm (`firm: null`) can't be corrected from the pane: the
+ *   view says to set its firm in Spaarke (with the link) and never sends the correction.
  *
  * Submit goes through the injected {@link InvoiceViewProps.onSubmit} seam (App wires `invoiceSubmissionService`);
  * without it the view says submitting is not available and Submit stays disabled. Once the server accepts the
@@ -155,9 +162,6 @@ export const INVOICE_UPLOAD_HINT = 'You can still submit this invoice in Spaarke
 /** Retryable failures in a row before the view also suggests uploading in Spaarke. */
 const RETRIES_BEFORE_HINT = 2;
 
-/** The firm is optional (EB-D-185); without one the server holds the invoice until a reviewer adds it. */
-const HELD_FOR_FIRM = 'The invoice will be held until a reviewer adds one.';
-
 const ENDED_TITLES: Record<'Rejected' | 'Failed', string> = {
   Rejected: 'The invoice was rejected',
   Failed: 'The invoice could not be processed',
@@ -186,6 +190,13 @@ const CORE_TYPE_LABEL: Record<InvoiceCoreRecordType, string> = {
   Matter: 'Matter',
   Project: 'Project',
   WorkAssignment: 'Work assignment',
+};
+
+/** The Dataverse logical name for an "Open in Spaarke" link to a core record whose search result carries none. */
+const CORE_LOGICAL_NAME: Record<InvoiceCoreRecordType, string> = {
+  Matter: 'sprk_matter',
+  Project: 'sprk_project',
+  WorkAssignment: 'sprk_workassignment',
 };
 
 type InvoiceMode = 'new' | 'existing';
@@ -554,21 +565,25 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     const list: string[] = [];
     if (mode !== 'new') return list;
     if (!coreRecord) list.push('the matter, project or work assignment');
+    if (!firmId) list.push('the firm');
     if (!normalizedNumber) list.push("the firm's invoice number");
     return list;
-  }, [mode, coreRecord, normalizedNumber]);
+  }, [mode, coreRecord, firmId, normalizedNumber]);
 
   const detailsReady =
     mode === 'new'
-      ? // The firm is optional (EB-D-185), but not while the list is loading: a record's only firm is auto-selected
-        // when it arrives, and a submit before that would send "no firm" for a record that has one. `firms` must also
-        // describe the CURRENT record: for the render in which the record changed, it still describes the previous one.
+      ? // A firm is required (owner ruling 2026-11-13). `firms` must describe the CURRENT record: for the render in which
+        // the record changed, it still describes the previous one (and a firm id chosen for it is cleared by the effect).
         coreRecord !== null &&
         isCoreRecordType(coreRecord.entityType) &&
-        firms.status !== 'loading' &&
+        firms.status === 'ready' &&
         firmsFor === firmsKey &&
+        firmId.length > 0 &&
         normalizedNumber !== null
-      : correction !== null && normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
+      : // A correction keeps the invoice's own firm; an invoice with no firm cannot be corrected from the pane.
+        correction !== null &&
+        correction.firm !== null &&
+        normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
 
   const canSubmit =
     onSubmit !== undefined &&
@@ -633,18 +648,20 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (!canSubmit) return;
     let input: InvoiceSubmissionInput;
     if (correction) {
+      // Never a correction without a firm (canSubmit already holds it back; this is the same rule at the point of use).
+      if (!correction.firm) return;
       input = buildInvoiceSubmissionInput({
         target: { entityType: correction.coreRecord.entityType, entityId: correction.coreRecord.entityId },
         attachments,
         marking,
-        firmId: correction.firm?.id ?? null,
+        firmId: correction.firm.id,
         firmInvoiceNumber: correction.firmInvoiceNumber,
         poNumber,
         mode: 'Correction',
         invoiceId: correction.invoiceId,
       });
     } else {
-      if (!coreRecord || !isCoreRecordType(coreRecord.entityType)) return;
+      if (!coreRecord || !isCoreRecordType(coreRecord.entityType) || firmId.trim().length === 0) return;
       input = buildInvoiceSubmissionInput({
         target: { entityType: coreRecord.entityType, entityId: coreRecord.id },
         attachments,
@@ -698,6 +715,29 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     setOutcome(null);
     announce(`${record.name} chosen. Submit to send the invoice to it.`);
   };
+
+  // "Open in Spaarke": the pane's one gate (ORG_URL set, and a way to open a tab: `openBrowserWindow`, or `window.open`
+  // on Office on the web) and its one opener (`openRecord`, which builds the link and falls back to `window.open` from
+  // this click). ORG_URL unset: no link at all, never a dead one.
+  const openRecordAvailable = canOpenSpaarkeRecords(hostAdapter.getCapabilities());
+  const handleOpenRecord = (entityType: string, recordId: string): void => {
+    const result = openRecord({ orgUrl: process.env.ORG_URL, entityType, recordId });
+    if (!result.opened && result.reason) announce(result.reason, 'assertive');
+  };
+  const renderOpenInSpaarke = (entityType: string, recordId: string, testId: string) =>
+    openRecordAvailable ? (
+      <div>
+        <Button
+          appearance="transparent"
+          size="small"
+          icon={<OpenRegular />}
+          onClick={() => handleOpenRecord(entityType, recordId)}
+          data-testid={testId}
+        >
+          Open in Spaarke
+        </Button>
+      </div>
+    ) : null;
 
   const doneAction = (
     <MessageBarActions>
@@ -912,7 +952,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const renderFirmField = () => {
     if (firms.status === 'none') {
       return (
-        <Field label="Firm" hint="Choose the matter, project or work assignment first.">
+        <Field label="Firm" required hint="Choose the matter, project or work assignment first.">
           <Select disabled value="">
             <option value="">Choose a firm</option>
           </Select>
@@ -921,18 +961,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     }
     if (firms.status === 'loading') {
       return (
-        <Field label="Firm">
+        <Field label="Firm" required>
           <Spinner size="tiny" label="Loading firms…" />
         </Field>
       );
     }
     if (firms.status === 'unavailable') {
       return (
-        <Field
-          label="Firm"
-          validationState="warning"
-          validationMessage={`Firms can't be listed here yet. ${HELD_FOR_FIRM}`}
-        >
+        <Field label="Firm" required validationState="warning" validationMessage="Firms can't be listed here yet.">
           <Select disabled value="">
             <option value="">Choose a firm</option>
           </Select>
@@ -942,7 +978,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     if (firms.status === 'error') {
       return (
         <>
-          <Field label="Firm" validationState="error" validationMessage={`${firms.message} ${HELD_FOR_FIRM}`}>
+          <Field label="Firm" required validationState="error" validationMessage={firms.message}>
             <Select disabled value="">
               <option value="">Choose a firm</option>
             </Select>
@@ -961,25 +997,26 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       );
     }
     if (firms.firms.length === 0) {
+      // Nothing can be submitted for this record until a firm is added to it in Spaarke: say how, and link to the record.
       return (
-        <Field
-          label="Firm"
-          validationState="warning"
-          validationMessage={`No firm is linked to this record. ${HELD_FOR_FIRM}`}
-        >
-          <Select disabled value="">
-            <option value="">Choose a firm</option>
-          </Select>
-        </Field>
+        <>
+          <Field label="Firm" required validationState="warning" validationMessage={NO_FIRM_LINKED_MESSAGE}>
+            <Select disabled value="">
+              <option value="">Choose a firm</option>
+            </Select>
+          </Field>
+          {coreRecord &&
+            isCoreRecordType(coreRecord.entityType) &&
+            renderOpenInSpaarke(
+              coreRecord.logicalName || CORE_LOGICAL_NAME[coreRecord.entityType],
+              coreRecord.id,
+              'invoice-no-firm-open'
+            )}
+        </>
       );
     }
     return (
-      <Field
-        label="Firm"
-        {...(firmId === ''
-          ? { validationState: 'warning' as const, validationMessage: `No firm selected. ${HELD_FOR_FIRM}` }
-          : {})}
-      >
+      <Field label="Firm" required>
         <Select value={firmId} onChange={(_, data) => setFirmId(data.value)} disabled={locked}>
           <option value="">Choose a firm</option>
           {firms.firms.map(firm => (
@@ -1008,6 +1045,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
           {`This email is filed to ${filedRecord.displayInfo ? `${filedRecord.displayInfo} ` : ''}${filedRecord.name} in Spaarke, but this invoice is for ${c.coreRecord.name}. Spaarke accepts a correction only from an email filed to the invoice's record.`}
         </Text>
+      )}
+      {c.firm === null && (
+        <>
+          <Text size={200} className={styles.note} role="status" data-testid="invoice-correction-no-firm">
+            {CORRECTION_NO_FIRM_MESSAGE}
+          </Text>
+          {renderOpenInSpaarke('sprk_invoice', c.invoiceId, 'invoice-correction-no-firm-open')}
+        </>
       )}
       {normalizeFirmInvoiceNumber(c.firmInvoiceNumber) === null && (
         <Text size={200} className={styles.note} role="status" data-testid="invoice-correction-no-number">
@@ -1100,6 +1145,15 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           defaultType={filedRecord && isCoreRecordType(filedRecord.entityType) ? filedRecord.entityType : 'Matter'}
           disabled={locked}
         />
+        {/* Not while the Firm field's "No firm is linked" message is showing: its link opens this same record. */}
+        {coreRecord &&
+          isCoreRecordType(coreRecord.entityType) &&
+          !(firms.status === 'ready' && firms.firms.length === 0 && firmsFor === firmsKey) &&
+          renderOpenInSpaarke(
+            coreRecord.logicalName || CORE_LOGICAL_NAME[coreRecord.entityType],
+            coreRecord.id,
+            'invoice-core-record-open'
+          )}
         {filedRecord && coreRecord && (
           <Text size={200} className={styles.note} data-testid="invoice-filed-record-note">
             {sameRecordId(coreRecord.id, filedRecord.id)
@@ -1228,6 +1282,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                 defaultType="Invoice"
                 disabled={choicesLocked}
               />
+              {invoice && renderOpenInSpaarke('sprk_invoice', invoice.id, 'invoice-existing-open')}
               {/* Both choices are shown disabled with their reason until the server can take them. A correction is
                   offered once the server accepts one (ebilling 097). Adding supporting files is ebilling 123
                   (POST /api/finance/invoices/{invoiceId}/files; contract 123-upload-contract.md, agreed) — the
