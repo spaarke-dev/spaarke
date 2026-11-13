@@ -26,6 +26,8 @@ export interface HarnessOptions {
   writes?: WriteHandler;
   /** Task 084d-4: the dry run's answers. Absent: every dry run fails (as an unanswered call), so the Impact step shows the refusal. */
   dryRun?: WriteHandler;
+  /** Review round 1: the clients' timeout in ms (the real one is 20 s), so a test of a read that never answers need not wait for it. */
+  timeoutMs?: number;
 }
 
 export function renderHarness(o: HarnessOptions = {}) {
@@ -45,8 +47,8 @@ export function renderHarness(o: HarnessOptions = {}) {
         table={k.table}
         recordId={k.id}
         api={createRecordProceduresApi(server.fetchFn, BASE)}
-        overrides={createOverridesApi(server.fetchFn, BASE)}
-        dryRun={createDryRunApi(server.fetchFn, BASE)}
+        overrides={createOverridesApi(server.fetchFn, BASE, { timeoutMs: o.timeoutMs })}
+        dryRun={createDryRunApi(server.fetchFn, BASE, { timeoutMs: o.timeoutMs })}
         firmChoices={firmChoices}
         today={TODAY}
       />

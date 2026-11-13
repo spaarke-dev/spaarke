@@ -27,6 +27,9 @@ import {
 
 const parentOf = { ...MATTER, distance: 1 };
 
+/** The Impact step's result area (the live region the answer or its refusal is in). */
+const impactOf = (d: HTMLElement) => within(d).getByTestId('impact-result');
+
 /** Pick an option of the one open Fluent dropdown inside the wizard. */
 async function pick(d: HTMLElement, optionName: string | RegExp) {
   fireEvent.click(await within(d).findByRole('combobox', { hidden: true }));
@@ -452,9 +455,9 @@ describe('a refusal keeps the wizard open and re-reads nothing', () => {
   });
 
   // 084d-4 changed this: the preview is advisory (the dry run's refusal and the removal preview's alike), so a refusal no longer blocks Next.
-  it('a refused removal PREVIEW (the fallback after a refused dry run) is shown with its title, does not block Next, deletes nothing, and Retry asks again', async () => {
+  it('a refused removal PREVIEW (the fallback after a refused dry run) is ONE message with the preview\'s title, does not block Next, deletes nothing, and Retry asks the dry run again', async () => {
     let attempts = 0;
-    const { writeCalls } = renderHarness({
+    const { writeCalls, dryRunCalls } = renderHarness({
       writes: respond({
         preview: () => (++attempts === 1 ? refusal(403, 'Forbidden', 'access.denied') : previewBody()),
         remove: () => removedBody(),
@@ -466,11 +469,16 @@ describe('a refusal keeps the wizard open and re-reads nothing', () => {
     fireEvent.click(next(d));
     expect(await within(d).findByTestId('preview-failed')).toHaveTextContent('Forbidden');
     expect(next(d)).toBeEnabled();
-    expect(within(d).getByTestId('dryrun-failed')).toBeInTheDocument();
+    // One message, not a warning bar plus an error alert.
+    expect(within(d).queryByTestId('dryrun-failed')).not.toBeInTheDocument();
+    expect(within(impactOf(d)).getAllByRole('alert', { hidden: true })).toHaveLength(1);
     expect(routes(writeCalls)).toEqual(['preview']);
+    expect(dryRunCalls).toHaveLength(1);
 
+    // Retry forgets both failures and asks the dry run again; it is refused again, so the preview is asked again and now answers.
     fireEvent.click(within(d).getByTestId('preview-retry'));
     expect(await within(d).findByTestId('removal-preview')).toBeInTheDocument();
+    expect(dryRunCalls).toHaveLength(2);
     expect(routes(writeCalls)).toEqual(['preview', 'preview']);
     expect(next(d)).toBeEnabled();
   });
@@ -536,20 +544,38 @@ describe('the Change choice belongs to the rule wizard, and nothing here dry-run
     }
   });
 
-  it('the dry-run route is named in dryRunApi.ts only (control: the scan sees one), and the Procedure wizard has no change call at all', () => {
+  it('the dry-run route is named in dryRunApi.ts only: EVERY non-test source file under src is scanned (must-fire and must-not-fire controls), and the Procedure wizard has no change call at all', () => {
     // 084d-4 replaced 084b's "no dry run" guard: the Impact step now reads the dry run, through the one services module that names its route.
+    // Review round 1: the scan walks the whole tree (as the write scan below does), not a list of files, so a new file cannot slip past it.
     const root = path.join(__dirname, '..');
-    const files = ['services/overridesApi.ts', 'components/wizards/plan.ts', 'components/wizards/steps.tsx', 'components/wizards/impact.ts', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx'];
     const forbidden = /['"`/]dry-run\b/i;
     // Comments may say what the page does not do; the scan reads code only.
-    const code = (f: string) =>
-      fs
-        .readFileSync(path.join(root, f), 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/^\s*\/\/.*$/gm, '');
-    for (const f of files) expect([f, forbidden.test(code(f))]).toEqual([f, false]);
-    expect(forbidden.test(code('services/dryRunApi.ts'))).toBe(true);
-    expect(forbidden.test('`${base}/procedures/dry-run?x`')).toBe(true);
+    const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const namingTheRoute = (files: readonly string[], read: (f: string) => string): string[] => files.filter(f => forbidden.test(stripComments(read(f)))).map(f => f.replace(/\\/g, '/')).sort();
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(e => (e.isDirectory() ? (e.name === '__tests__' || e.name === 'node_modules' ? [] : walk(path.join(dir, e.name))) : [path.join(dir, e.name)]));
+    const read = (f: string) => fs.readFileSync(path.join(root, f), 'utf8');
+    const sources = walk('.').filter(f => /\.(ts|tsx)$/.test(f));
+    expect(sources.length).toBeGreaterThan(30); // the scan sees the whole tree, not a short list
+    expect(sources.map(f => f.replace(/\\/g, '/'))).toEqual(expect.arrayContaining(['main.tsx', 'services/dryRunApi.ts', 'components/wizards/steps.tsx', 'components/ProceduresPanel.tsx']));
+    expect(namingTheRoute(sources, read)).toEqual(['services/dryRunApi.ts']);
+
+    // Must fire: a second file that names the route (in a template, a string or a path) is caught.
+    const fake: Record<string, string> = {
+      'services/dryRunApi.ts': '`${base}/procedures/dry-run?x`',
+      'components/Other.tsx': "fetch('/api/finance/matters/1/procedures/dry-run')",
+      'components/Third.ts': 'const u = "dry-run";',
+    };
+    expect(namingTheRoute(Object.keys(fake), f => fake[f])).toEqual(['components/Other.tsx', 'components/Third.ts', 'services/dryRunApi.ts']);
+    // Must not fire: a comment, and a name that only looks like it (dryRun, dry-running without a leading quote or slash).
+    const quiet: Record<string, string> = {
+      'a.ts': '// the dry-run route is named in dryRunApi.ts\nconst dryRun = 1;',
+      'b.ts': '/* "dry-run" in a block comment */ const x = dryRunKey;',
+      'c.ts': 'const label = data-dryrun-x; const y = a-dry-run;',
+    };
+    expect(namingTheRoute(Object.keys(quiet), f => quiet[f])).toEqual([]);
+
+    const code = (f: string) => stripComments(read(f));
     // The change route is called from the one api module, and only the rule wizard's plan reaches it.
     expect(/changeRule|rule-overrides\/change/.test(code('components/wizards/ProcedureWizard.tsx'))).toBe(false);
     expect(/rule-overrides\/change/.test(code('services/overridesApi.ts')) || /changeRuleUrl/.test(code('services/overridesApi.ts'))).toBe(true);

@@ -81,8 +81,9 @@ export function serverFake(handlers: { procedures: Handler; rules: Handler; writ
     const write = classify(url, init);
     if (write?.route === 'dryrun') {
       dryRunCalls.push(write);
-      // No dry-run handler: the dry run fails as an unanswered call would (the Impact step shows the refusal, Confirm still works).
-      if (!handlers.dryRun) throw new Error('No dry run in this test');
+      // No dry-run handler: the dry run is refused as a 503 (the Impact step shows the refusal, Confirm still works, and a plan that removes
+      // asks 089's removal preview in its place: a 503 is one of the refusals that does).
+      if (!handlers.dryRun) throw problem(503, 'procedures.unavailable', { title: 'No dry run in this test' });
       const out = await handlers.dryRun(write);
       if (out instanceof Error) throw out;
       return jsonResponse(out);

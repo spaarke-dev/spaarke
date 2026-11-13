@@ -4,6 +4,8 @@
  */
 
 import { createDryRunApi, dryRunBody, dryRunRequestOf, dryRunUrl, readDryRunView, requestFirmOf, type DryRunRequest } from '../services/dryRunApi';
+import { CODE_ABANDONED, CODE_TIMED_OUT } from '../services/overridesApi';
+import { COUNT_UNKNOWN, FALLBACK_STATUSES, affectedLine, asksRemovalPreview, dryRunFailureText } from '../components/wizards/impact';
 import { planProcedure, planRule, procedureChoices, type Plan, type ProcedureChoice, type RuleChoice } from '../components/wizards/plan';
 import { BASE, jsonResponse, problem } from './testKit';
 import { FENWICK, MATTER_ID, matterProcedures, matterRules, projectProcedures, projectRules, waProcedures, waRules } from './fixtures';
@@ -139,6 +141,63 @@ describe('the route and the reader', () => {
     expect(readDryRunView(view({ affectedOpenInvoices: { count: null, text: null, basis: 'ResolutionChanged' } }))!.affectedOpenInvoices.count).toBeNull();
     expect(readDryRunView(view({ affectedOpenInvoices: { text: null, basis: 'ResolutionChanged' } }))!.affectedOpenInvoices.count).toBeNull();
     expect(readDryRunView(view({ affectedOpenInvoices: { count: 0, text: '0 open invoices you can see are affected.', basis: 'ResolutionChanged' } }))!.affectedOpenInvoices.count).toBe(0);
+  });
+});
+
+describe('review round 1: the timeout and the abort signal', () => {
+  const req: DryRunRequest = { kind: 'Remove', overrideId: 'x' };
+
+  it('a call that does not answer within the timeout is a failure with the client timeout code, even when the fetch ignores its signal', async () => {
+    const fetchFn = jest.fn(() => new Promise<never>(() => undefined)); // never answers, never looks at the signal
+    const r = await createDryRunApi(fetchFn as never, BASE, { timeoutMs: 30 }).dryRun('matters', MATTER_ID, { date: 'd' }, req);
+    expect(r).toEqual({ ok: false, failure: expect.objectContaining({ status: 0, errorCode: CODE_TIMED_OUT }) });
+    // The fetch was given a signal, and the timeout aborted it.
+    const init = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init[1].signal?.aborted).toBe(true);
+    if (r.ok) throw new Error('expected a failure');
+    expect(dryRunFailureText(r.failure, false)).toBe('The preview took too long to come back.');
+  });
+
+  it('the caller\'s signal abandons the call: the fetch\'s signal is aborted and the answer is the abandoned failure', async () => {
+    const fetchFn = jest.fn(() => new Promise<never>(() => undefined));
+    const outer = new AbortController();
+    const pending = createDryRunApi(fetchFn as never, BASE, { timeoutMs: 60_000 }).dryRun('matters', MATTER_ID, { date: 'd' }, req, outer.signal);
+    outer.abort();
+    expect(await pending).toEqual({ ok: false, failure: expect.objectContaining({ errorCode: CODE_ABANDONED }) });
+    expect((fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1].signal?.aborted).toBe(true);
+    // Already aborted before the call: nothing is left waiting.
+    const again = await createDryRunApi(fetchFn as never, BASE, { timeoutMs: 60_000 }).dryRun('matters', MATTER_ID, { date: 'd' }, req, outer.signal);
+    expect(again).toEqual({ ok: false, failure: expect.objectContaining({ errorCode: CODE_ABANDONED }) });
+  });
+
+  it('an answer inside the timeout is the answer, and no timer is left running', async () => {
+    jest.useFakeTimers();
+    try {
+      const fetchFn = jest.fn(async () => jsonResponse(view()));
+      const r = await createDryRunApi(fetchFn as never, BASE, { timeoutMs: 20_000 }).dryRun('matters', MATTER_ID, { date: 'd' }, req);
+      expect(r.ok).toBe(true);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('review round 1: the client composes no findings text, and the fallback statuses', () => {
+  it('affectedLine shows the server\'s text; a number with no text is the number alone; a null count is "can\'t be counted"', () => {
+    expect(affectedLine({ count: 3, text: '3 open invoices you can see are affected.', basis: 'x' })).toBe('3 open invoices you can see are affected.');
+    expect(affectedLine({ count: 1, text: null, basis: 'x' })).toBe('1');
+    expect(affectedLine({ count: 0, text: null, basis: 'x' })).toBe('0');
+    expect(affectedLine({ count: null, text: 'ignored', basis: 'x' })).toBe(COUNT_UNKNOWN);
+  });
+
+  it('only 403, 404 and 503 stand the removal preview in for a refused dry run (never 400, 409, a network failure or a timeout)', () => {
+    expect([...FALLBACK_STATUSES]).toEqual([403, 404, 503]);
+    const failure = (status: number, errorCode: string | null = null, signInFailed = false) => ({ status, errorCode, title: null, detail: null, problems: [], fieldErrors: [], signInFailed });
+    for (const s of [403, 404, 503]) expect([s, asksRemovalPreview(failure(s))]).toEqual([s, true]);
+    for (const s of [400, 409, 422, 500, 0]) expect([s, asksRemovalPreview(failure(s))]).toEqual([s, false]);
+    expect(asksRemovalPreview(failure(0, CODE_TIMED_OUT))).toBe(false);
+    expect(asksRemovalPreview(failure(503, null, true))).toBe(false);
   });
 });
 

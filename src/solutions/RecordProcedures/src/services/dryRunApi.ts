@@ -13,12 +13,15 @@
  * `ebilling.disabled`; 503 `procedures.unavailable` (a row the answer depends on could not be read, or the caller cannot Read it: R6 says a
  * firm the request names is asked of the caller, so a firm the caller cannot Read is this 503). Every refusal is a {@link WriteFailure}
  * carrying the ProblemDetails title and detail, as the wizards' writes are.
+ *
+ * A call has a timeout ({@link READ_TIMEOUT_MS} unless the client is made with another) and an abort signal from the caller (the wizard closed
+ * or moved to another row). A timeout is a failure with `CODE_TIMED_OUT`; an abandoned call is one with `CODE_ABANDONED`, which nobody is shown.
  */
 
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import type { CoreRoute, FirmRef, ChainRecord, ProceduresQuery, RecordProceduresView, RecordRulesInForceView } from './recordProceduresApi';
 import { readProceduresView, readRulesView } from './recordProceduresApi';
-import { toWriteFailure, type WriteFailure, type WriteResult } from './overridesApi';
+import { ABANDONED_FAILURE, READ_TIMEOUT_MS, TIMED_OUT_FAILURE, raceTimeout, toWriteFailure, type WriteFailure, type WriteResult } from './overridesApi';
 import type { Plan, PlanStep } from '../components/wizards/plan';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -140,7 +143,7 @@ export const dryRunBody = (request: DryRunRequest): string => JSON.stringify(com
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface DryRunApi {
-  dryRun(core: CoreRoute, recordId: string, query: ProceduresQuery, request: DryRunRequest): Promise<WriteResult<DryRunView>>;
+  dryRun(core: CoreRoute, recordId: string, query: ProceduresQuery, request: DryRunRequest, signal?: AbortSignal): Promise<WriteResult<DryRunView>>;
 }
 
 const trimBase = (bffBaseUrl: string): string => bffBaseUrl.replace(/\/+$/, '');
@@ -200,17 +203,23 @@ export function readDryRunView(body: unknown): DryRunView | null {
 
 const BAD_BODY: WriteFailure = { status: 200, errorCode: null, title: 'The server answered with an unexpected body.', detail: null, problems: [], fieldErrors: [], signInFailed: false };
 
-export function createDryRunApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string): DryRunApi {
+export function createDryRunApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: string, options: { timeoutMs?: number } = {}): DryRunApi {
+  const timeoutMs = options.timeoutMs ?? READ_TIMEOUT_MS;
   return {
-    async dryRun(core, recordId, query, request) {
+    async dryRun(core, recordId, query, request, signal) {
       try {
-        const res = await fetchFn(dryRunUrl(bffBaseUrl, core, recordId, query), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: dryRunBody(request),
+        const raced = await raceTimeout(timeoutMs, signal, async s => {
+          const res = await fetchFn(dryRunUrl(bffBaseUrl, core, recordId, query), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: dryRunBody(request),
+            signal: s,
+          });
+          return readDryRunView((await res.json()) as unknown);
         });
-        const view = readDryRunView((await res.json()) as unknown);
-        return view ? { ok: true, value: view } : { ok: false, failure: BAD_BODY };
+        if (raced.kind === 'timeout') return { ok: false, failure: TIMED_OUT_FAILURE };
+        if (raced.kind === 'aborted') return { ok: false, failure: ABANDONED_FAILURE };
+        return raced.value ? { ok: true, value: raced.value } : { ok: false, failure: BAD_BODY };
       } catch (err) {
         return { ok: false, failure: toWriteFailure(err) };
       }

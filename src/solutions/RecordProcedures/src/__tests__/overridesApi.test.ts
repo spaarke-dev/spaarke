@@ -46,7 +46,8 @@ describe('the requests are exactly the shapes of task 089\'s routes', () => {
     const { fetchFn, client } = api({ overrideId: 'row' });
     await client.removalPreview('matters', REC, 'ROW-1');
     await client.removeOverride('matters', REC, 'ROW-1');
-    expect(fetchFn.mock.calls[0]).toEqual([`https://bff.example.com/api/finance/matters/${rec}/overrides/row-1/removal-preview`, { method: 'GET' }]);
+    // Review round 1: the read carries an abort signal (the timeout, and the wizard closing); the request itself is unchanged.
+    expect(fetchFn.mock.calls[0]).toEqual([`https://bff.example.com/api/finance/matters/${rec}/overrides/row-1/removal-preview`, { method: 'GET', signal: expect.any(AbortSignal) }]);
     expect(fetchFn.mock.calls[1]).toEqual([`https://bff.example.com/api/finance/matters/${rec}/overrides/row-1`, { method: 'DELETE' }]);
   });
 

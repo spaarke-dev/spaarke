@@ -33,9 +33,10 @@ import { Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { CheckmarkCircle48Filled } from '@fluentui/react-icons';
 import { WizardShell, type IWizardShellHandle, type IWizardShellProps, type IWizardStepConfig, type IWizardSuccessConfig } from '@spaarke/ui-components';
 import type { CoreRoute, ProceduresQuery } from '../../services/recordProceduresApi';
-import { failureText, type OverridesApi, type RemovalPreview, type WriteFailure, type WriteResult } from '../../services/overridesApi';
-import { dryRunBody, dryRunRequestOf, requestFirmOf, type DryRunApi, type DryRunView } from '../../services/dryRunApi';
+import { failureText, toWriteFailure, type OverridesApi, type RemovalPreview, type WriteFailure, type WriteResult } from '../../services/overridesApi';
+import { dryRunBody, dryRunRequestOf, requestFirmOf, type DryRunApi, type DryRunRequest, type DryRunView } from '../../services/dryRunApi';
 import { executePlan, removalOf, type Plan, type PlanRun } from './plan';
+import { asksRemovalPreview } from './impact';
 import { ConfirmStep, ImpactStep, O21_LINE, READ_ONLY_LINE, useWizardStyles, type DryRunState, type PreviewState } from './steps';
 
 /**
@@ -113,29 +114,57 @@ export interface WizardFrameProps {
   onRefused?: (failure: WriteFailure) => void;
 }
 
+/** The key a dry run's answer is kept under: the exact request, for the firm and date the lists were read with. */
+const dryRunKeyOf = (query: ProceduresQuery, request: DryRunRequest): string => `${query.firmId ?? ''}|${query.date}|${dryRunBody(request)}`;
+
+/** A read that throws (a client other than the real one) is a failure like any other, so the step never waits for it for ever. */
+const settle = <T,>(call: Promise<WriteResult<T>>): Promise<WriteResult<T>> => call.then(r => r, (err: unknown) => ({ ok: false as const, failure: toWriteFailure(err) }));
+
+const abortAll = (inFlight: Map<string, AbortController>): void => {
+  inFlight.forEach(c => c.abort());
+  inFlight.clear();
+};
+
 export const WizardFrame: React.FC<WizardFrameProps> = props => {
-  const { title, resetKey, nav, api, core, recordId, plan, readOnly } = props;
+  const { title, resetKey, nav, plan, readOnly } = props;
   const s = useWizardStyles();
 
   // Live values for the step predicates and `onFinish`: the shell keeps calling the closures it was handed on an earlier render.
   const live = React.useRef(props);
   live.current = props;
 
+  // ── Reads in flight (task 084d-4, review round 1) ──────────────────────
+  // Each read has its own abort controller. They are all abandoned when the wizard closes (unmount) or moves to another row, and an answer
+  // that arrives after that is dropped: nothing sets state once the wizard is gone. The clients also give a read up after their timeout.
+  const mounted = React.useRef(true);
+  const epoch = React.useRef(0);
+  const dryRunInFlight = React.useRef(new Map<string, AbortController>());
+  const previewInFlight = React.useRef(new Map<string, AbortController>());
+  React.useEffect(() => {
+    mounted.current = true;
+    const dry = dryRunInFlight.current;
+    const prev = previewInFlight.current;
+    return () => {
+      mounted.current = false;
+      abortAll(dry);
+      abortAll(prev);
+    };
+  }, []);
+
   // ── The dry run of the proposal (task 084d-4) ──────────────────────────
-  // Keyed by the exact body it sends, so a change of the proposal (Back, another choice or reason) asks again. Answers are tagged with the
-  // sequence number of their ask and only the latest ask's answer is kept: an earlier answer arriving late is dropped (the race of two asks).
+  // Answers are kept by the exact request they answer (the body, the firm and the date), so a late answer to an earlier proposal is kept for
+  // THAT proposal and can never replace the live proposal's. A failed answer stays until Retry forgets it and asks again.
   const mapping = dryRunRequestOf(plan);
-  const dryRunKey = mapping.ok ? `${props.query.firmId ?? ''}|${props.query.date}|${dryRunBody(mapping.request)}` : null;
-  const [dryRunFetched, setDryRunFetched] = React.useState<{ key: string; result: WriteResult<DryRunView> } | null>(null);
-  const dryRunSeq = React.useRef(0);
-  const dryRunInFlight = React.useRef<string | null>(null);
+  const dryRunKey = mapping.ok ? dryRunKeyOf(props.query, mapping.request) : null;
+  const [dryRunAnswers, setDryRunAnswers] = React.useState<ReadonlyMap<string, WriteResult<DryRunView>>>(() => new Map());
+  const answer = dryRunKey === null ? undefined : dryRunAnswers.get(dryRunKey);
 
   const dryRun: DryRunState = !mapping.ok
     ? { state: 'none' }
-    : dryRunFetched?.key === dryRunKey
-      ? dryRunFetched.result.ok
-        ? { state: 'ready', value: dryRunFetched.result.value }
-        : { state: 'failed', failure: dryRunFetched.result.failure, requestNamesFirm: requestFirmOf(mapping.request) !== null }
+    : answer
+      ? answer.ok
+        ? { state: 'ready', value: answer.value }
+        : { state: 'failed', failure: answer.failure, requestNamesFirm: requestFirmOf(mapping.request) !== null }
       : { state: 'loading' };
   const dryRunRef = React.useRef(dryRun);
   dryRunRef.current = dryRun;
@@ -144,49 +173,67 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     const p = live.current;
     const m = dryRunRequestOf(p.plan);
     if (!m.ok) return;
-    const key = `${p.query.firmId ?? ''}|${p.query.date}|${dryRunBody(m.request)}`;
-    if (dryRunInFlight.current === key) return;
-    dryRunInFlight.current = key;
-    const seq = ++dryRunSeq.current;
-    void p.dryRunApi.dryRun(p.core, p.recordId, p.query, m.request).then(result => {
-      // Stale: a later ask (another proposal, or another row) was made meanwhile; its answer, not this one, is shown.
-      if (seq !== dryRunSeq.current) return;
-      dryRunInFlight.current = null;
-      setDryRunFetched({ key, result });
+    const key = dryRunKeyOf(p.query, m.request);
+    if (dryRunInFlight.current.has(key)) return;
+    const ctrl = new AbortController();
+    dryRunInFlight.current.set(key, ctrl);
+    const asked = epoch.current;
+    void settle(p.dryRunApi.dryRun(p.core, p.recordId, p.query, m.request, ctrl.signal)).then(result => {
+      if (dryRunInFlight.current.get(key) === ctrl) dryRunInFlight.current.delete(key);
+      if (!mounted.current || asked !== epoch.current || ctrl.signal.aborted) return;
+      setDryRunAnswers(prev => new Map(prev).set(key, result));
     });
   }, []);
 
   // ── The removal preview of the override the plan removes ────────────────
   // Superseded by the dry run, which carries the same fields (`closes.d170` / `kinds` for `closesRule`, `closes.warning`,
-  // `affectedOpenInvoices.count` and `.text`) from the same selection (084d-2b). It is kept as a FALLBACK, asked only when the dry run of a plan
-  // that removes was refused: the dry run asks more of the caller than the preview does (finance.read on the record, the remove route's
-  // privileges, one Read check over every row of both lists, so one unreadable row is a 503: O-K1a), and without the fallback the section 15
-  // warning would not be shown at all before a changed rule's removal in that case.
-  const removeId = dryRun.state === 'failed' ? removalOf(plan) : null;
-  const [fetched, setFetched] = React.useState<{ id: string; result: { ok: true; value: RemovalPreview } | { ok: false; failure: WriteFailure } } | null>(null);
-  const inFlight = React.useRef<string | null>(null);
+  // `affectedOpenInvoices.count` and `.text`) from the same selection (084d-2b). It is kept as a FALLBACK, asked only after a dry run of a plan
+  // that removes was refused with 403, 404 or 503 (`asksRemovalPreview`): the dry run asks more of the caller than the preview does
+  // (finance.read on the record, the remove route's privileges, one Read check over every row of both lists, so one unreadable row is a 503:
+  // O-K1a), and without the fallback the section 15 warning would not be shown at all before a changed rule's removal in that case. A bad
+  // request, a conflict, a timeout or a network failure say nothing about the preview, so it is not asked then.
+  const removeId = dryRun.state === 'failed' && asksRemovalPreview(dryRun.failure) ? removalOf(plan) : null;
+  const [previewAnswers, setPreviewAnswers] = React.useState<ReadonlyMap<string, WriteResult<RemovalPreview>>>(() => new Map());
+  const previewAnswer = removeId ? previewAnswers.get(removeId) : undefined;
 
   const preview: PreviewState = !removeId
     ? { state: 'none' }
-    : fetched?.id === removeId
-      ? fetched.result.ok
-        ? { state: 'ready', value: fetched.result.value }
-        : { state: 'failed', failure: fetched.result.failure }
+    : previewAnswer
+      ? previewAnswer.ok
+        ? { state: 'ready', value: previewAnswer.value }
+        : { state: 'failed', failure: previewAnswer.failure }
       : { state: 'loading' };
   const previewRef = React.useRef(preview);
   previewRef.current = preview;
 
   const loadPreview = React.useCallback(() => {
-    const id = removalOf(live.current.plan);
-    if (!id || inFlight.current === id) return;
-    inFlight.current = id;
-    void api.removalPreview(core, recordId, id).then(result => {
-      if (inFlight.current === id) inFlight.current = null;
-      setFetched({ id, result });
+    const p = live.current;
+    const id = removalOf(p.plan);
+    if (!id || previewInFlight.current.has(id)) return;
+    const ctrl = new AbortController();
+    previewInFlight.current.set(id, ctrl);
+    const asked = epoch.current;
+    void settle(p.api.removalPreview(p.core, p.recordId, id, ctrl.signal)).then(result => {
+      if (previewInFlight.current.get(id) === ctrl) previewInFlight.current.delete(id);
+      if (!mounted.current || asked !== epoch.current || ctrl.signal.aborted) return;
+      setPreviewAnswers(prev => new Map(prev).set(id, result));
     });
-  }, [api, core, recordId]);
+  }, []);
 
-  const retryPreview = React.useCallback(() => setFetched(null), []);
+  /** Retry of a failed answer: forget it (and the fallback's), so the dry run is asked again. */
+  const retryDryRun = React.useCallback(() => {
+    const p = live.current;
+    const m = dryRunRequestOf(p.plan);
+    if (m.ok) {
+      const key = dryRunKeyOf(p.query, m.request);
+      setDryRunAnswers(prev => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+    setPreviewAnswers(new Map());
+  }, []);
 
   // A partial save leaves the wizard on a row that is out of date; it is held (Finish off) until the panel hands back the re-read row.
   const [stale, setStale] = React.useState(false);
@@ -195,16 +242,16 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   // True from the first call of a save to its answer: nothing may move the wizard to another row or close it meanwhile.
   const saving = React.useRef(false);
 
-  // The wizard moved to another row: forget the previous row's answer.
+  // The wizard moved to another row: forget the previous row's answers, and abandon the reads still in flight for it.
   const [seenKey, setSeenKey] = React.useState(resetKey);
   if (seenKey !== resetKey) {
     setSeenKey(resetKey);
-    setFetched(null);
-    setDryRunFetched(null);
-    dryRunSeq.current += 1; // an answer still in flight for the previous row is stale
-    dryRunInFlight.current = null;
+    setDryRunAnswers(new Map());
+    setPreviewAnswers(new Map());
+    epoch.current += 1;
+    abortAll(dryRunInFlight.current);
+    abortAll(previewInFlight.current);
     setStale(false);
-    inFlight.current = null;
   }
 
   // ── The write ────────────────────────────────────────────────────────────
@@ -291,6 +338,11 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     else handle.current.removeDynamicStep('values');
   }, [valuesActive]);
 
+  // A removal that nothing checked: neither the dry run nor the fallback preview said what the change closes. Confirm says so; it does not block.
+  const uncheckedClose = removalOf(plan) !== null && dryRun.state === 'failed' && preview.state !== 'ready';
+  const uncheckedCloseRef = React.useRef(uncheckedClose);
+  uncheckedCloseRef.current = uncheckedClose;
+
   const steps: IWizardStepConfig[] = readOnly ? readOnlySteps : [
     review,
     {
@@ -311,18 +363,24 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
           after={live.current.after}
           dryRun={dryRunRef.current}
           onLoadDryRun={loadDryRun}
+          onRetryDryRun={retryDryRun}
           preview={previewRef.current}
           onLoadPreview={loadPreview}
-          onRetryPreview={retryPreview}
           extra={live.current.impactExtra}
         />
       ),
       // Next waits while a read is in flight, so an answer (a warning above all) is shown before Confirm. A refused or failed answer never
       // blocks: the dry run and the removal preview are advisory, and the write route decides the save (084d-4; the design note sets no
-      // blocking case). 084b blocked a removal whose preview was refused; that is no longer so.
+      // blocking case). 084b blocked a removal whose preview was refused; that is no longer so. A read that does not answer is given up on
+      // by the clients at their timeout (a failure), so Next is never held longer than that.
       canAdvance: () => dryRunRef.current.state !== 'loading' && previewRef.current.state !== 'loading',
     },
-    { id: 'confirm', label: 'Confirm', renderContent: () => <ConfirmStep rows={live.current.confirmRows} />, canAdvance: () => !staleRef.current },
+    {
+      id: 'confirm',
+      label: 'Confirm',
+      renderContent: () => <ConfirmStep rows={live.current.confirmRows} uncheckedClose={uncheckedCloseRef.current} />,
+      canAdvance: () => !staleRef.current,
+    },
   ];
 
   // The shell disables only its own footer buttons while a save runs; the header ‹ › and × are guarded here.

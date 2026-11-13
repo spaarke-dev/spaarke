@@ -7,10 +7,10 @@
 import '@testing-library/jest-dom';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { O21_LINE } from '../components/wizards/steps';
-import { COUNT_UNKNOWN, R6_TEXT } from '../components/wizards/impact';
+import { ADVISORY_LINE, COUNT_UNKNOWN, R6_TEXT, UNCHECKED_CLOSE_LINE } from '../components/wizards/impact';
 import type { ProcedureItem, RecordProceduresView, RecordRulesInForceView, RuleItem } from '../services/recordProceduresApi';
-import { MATTER, MATTER_ID, TODAY, mark, matterProcedures, matterRules, override, rule } from './fixtures';
-import { button, chooseRadio, createdBody, next, openProcedure, openRule, previewBody, refusal, removedBody, renderHarness, respond, toChoices, typeReason } from './wizardHarness';
+import { MATTER, MATTER_ID, OKAFOR, TODAY, mark, matterProcedures, matterRules, override, rule } from './fixtures';
+import { button, chooseRadio, createdBody, next, openProcedure, openRule, previewBody, ready, refusal, removedBody, renderHarness, respond, toChoices, toConfirm, typeReason } from './wizardHarness';
 import type { WriteCall } from './testKit';
 
 /** The server's fixed disclosure notes (RecordProcedureReadService.cs): one of them says, in the negative, "will succeed". */
@@ -241,5 +241,331 @@ describe('the proposal changes: a new ask, and a stale answer is dropped', () =>
     fireEvent.click(next(d));
     expect(await within(d).findByTestId('impact-affected')).toHaveTextContent('CURRENT answer.');
     expect(dryRunCalls).toHaveLength(2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review round 1 (2026-11-13)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A plan that removes an override: the Procedure the record pins, "Remove from this record". Needs `writes` for the removal preview and the save. */
+const instr = () => openProcedure('p-instr', 'Acme v. Northwind billing instructions');
+async function removeInstr(d: HTMLElement) {
+  await toChoices(d);
+  chooseRadio(d, /^Remove from this record/);
+  fireEvent.click(next(d));
+  return within(d).findByTestId('impact-step');
+}
+const NEVER = () => new Promise<never>(() => undefined);
+const routesOf = (calls: WriteCall[]) => calls.map(c => c.route);
+const removalWrites = (preview: () => unknown = () => previewBody()) => respond({ preview, remove: () => removedBody() });
+
+describe('a firm picked in the panel is the dry run\'s firm', () => {
+  it('the dry-run URL carries the picked firm\'s firmId (the billing-firm default sends none)', async () => {
+    const { dryRunCalls } = renderHarness({
+      procedures: q => (q.firmId ? { ...matterProcedures, firm: OKAFOR, firmSource: 'Query', procedures: matterProcedures.procedures.filter(p => p.id !== 'p-instr') } : matterProcedures),
+      rules: q => (q.firmId ? { ...matterRules, firm: OKAFOR, firmSource: 'Query' } : matterRules),
+      dryRun: () => dryRunView(),
+    });
+    await ready();
+    fireEvent.click(screen.getByRole('combobox'));
+    fireEvent.click(await screen.findByRole('option', { name: OKAFOR.name! }));
+    // The Okafor reading has no p-instr row: the lists were re-read for the picked firm.
+    await waitFor(() => expect(screen.queryByTestId('procedure-row-p-instr')).not.toBeInTheDocument());
+    const d = await ocg();
+    await excludeOcg(d);
+    await within(d).findByTestId('dryrun');
+    expect(dryRunCalls).toHaveLength(1);
+    expect(new URL(dryRunCalls[0].url).searchParams.get('firmId')).toBe(OKAFOR.id.toLowerCase());
+    expect(new URL(dryRunCalls[0].url).searchParams.get('date')).toBe(TODAY);
+  });
+});
+
+describe('a dry run that does not answer', () => {
+  it('is given up on at the timeout: "took too long", Next is not held, Retry asks again, and the save goes', async () => {
+    let n = 0;
+    const { dryRunCalls, writeCalls } = renderHarness({
+      timeoutMs: 80,
+      dryRun: () => (++n === 1 ? NEVER() : dryRunView()),
+      writes: respond({ assign: () => createdBody() }),
+    });
+    const d = await ocg();
+    const impact = await excludeOcg(d);
+    expect(within(impact).getByTestId('dryrun-loading')).toBeInTheDocument();
+    expect(next(d)).toBeDisabled();
+
+    const failed = await within(impact).findByTestId('dryrun-failed');
+    expect(failed).toHaveTextContent('The preview took too long to come back.');
+    expect(within(failed).getByTestId('dryrun-advisory')).toHaveTextContent(ADVISORY_LINE);
+    expect(next(d)).toBeEnabled();
+
+    // Retry asks again, and the answer is shown.
+    fireEvent.click(within(d).getByTestId('dryrun-retry'));
+    expect(await within(d).findByTestId('dryrun')).toBeInTheDocument();
+    expect(dryRunCalls).toHaveLength(2);
+    expect(within(d).queryByTestId('dryrun-failed')).not.toBeInTheDocument();
+
+    fireEvent.click(next(d));
+    await within(d).findByTestId('confirm-step');
+    fireEvent.click(button(d, 'Save override'));
+    await within(d).findByTestId('success-body');
+    expect(routesOf(writeCalls)).toEqual(['assign']);
+  });
+
+  it('Confirm is reachable after a timeout without ever retrying, and the save goes', async () => {
+    const { writeCalls } = renderHarness({ timeoutMs: 80, dryRun: NEVER, writes: respond({ assign: () => createdBody() }) });
+    const d = await ocg();
+    await excludeOcg(d);
+    await within(d).findByTestId('dryrun-failed');
+    await waitFor(() => expect(next(d)).toBeEnabled());
+    fireEvent.click(next(d));
+    await within(d).findByTestId('confirm-step');
+    // A timed-out preview of a plan that removes nothing says nothing is unchecked.
+    expect(within(d).queryByTestId('confirm-unchecked')).not.toBeInTheDocument();
+    fireEvent.click(button(d, 'Save override'));
+    await within(d).findByTestId('success-body');
+    expect(routesOf(writeCalls)).toEqual(['assign']);
+  });
+
+  it('closing the wizard abandons the read (its abort signal fires); an answer after that changes nothing and reports nothing', async () => {
+    const pending: Array<(v: unknown) => void> = [];
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { mock } = renderHarness({ dryRun: () => new Promise(resolve => pending.push(resolve)) });
+      const d = await ocg();
+      await excludeOcg(d);
+      await waitFor(() => expect(pending).toHaveLength(1));
+      const call = mock.mock.calls.find(c => String(c[0]).includes('/dry-run'))!;
+      const signal = (call[1] as RequestInit).signal as AbortSignal;
+      expect(signal.aborted).toBe(false);
+
+      fireEvent.click(button(d, 'Cancel'));
+      await waitFor(() => expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument());
+      expect(signal.aborted).toBe(true);
+
+      await act(async () => pending[0](dryRunView()));
+      expect(logged).not.toHaveBeenCalled();
+    } finally {
+      logged.mockRestore();
+    }
+  });
+});
+
+describe('a failed dry run has a Retry that asks again', () => {
+  it('Retry forgets the cached failure for that proposal and shows the new answer; the failure also stays put until then (Back and Next do not re-ask)', async () => {
+    let n = 0;
+    const { dryRunCalls } = renderHarness({ dryRun: () => (++n === 1 ? refusal(403, 'Forbidden', 'sdap.access.deny.privilege', { detail: 'No.' }) : dryRunView({ affectedOpenInvoices: { count: 4, text: 'AFTER RETRY.', basis: 'ResolutionChanged' } })) });
+    const d = await ocg();
+    const impact = await excludeOcg(d);
+    expect(await within(impact).findByTestId('dryrun-failed')).toHaveTextContent('Forbidden');
+    expect(within(impact).getByRole('alert', { hidden: true })).toBe(within(impact).getByTestId('dryrun-failed'));
+
+    fireEvent.click(button(d, 'Back'));
+    fireEvent.click(next(d));
+    expect(await within(d).findByTestId('dryrun-failed')).toBeInTheDocument();
+    expect(dryRunCalls).toHaveLength(1);
+
+    fireEvent.click(within(d).getByTestId('dryrun-retry'));
+    expect(await within(d).findByTestId('impact-affected')).toHaveTextContent('AFTER RETRY.');
+    expect(dryRunCalls).toHaveLength(2);
+  });
+});
+
+describe('answers are kept by the request they answer', () => {
+  it('a late answer to an earlier proposal never replaces the live one: each proposal keeps its own, and nothing is asked twice', async () => {
+    const pending: Array<(v: unknown) => void> = [];
+    const { dryRunCalls } = renderHarness({ dryRun: () => new Promise(resolve => pending.push(resolve)) });
+    const d = await ocg();
+    await excludeOcg(d, 'first reason');
+    await waitFor(() => expect(pending).toHaveLength(1));
+
+    fireEvent.click(button(d, 'Back'));
+    typeReason(d, 'second reason');
+    fireEvent.click(next(d));
+    await waitFor(() => expect(pending).toHaveLength(2));
+
+    await act(async () => pending[1](dryRunView({ affectedOpenInvoices: { count: 2, text: 'ANSWER TO SECOND.', basis: 'ResolutionChanged' } })));
+    expect(await within(d).findByTestId('impact-affected')).toHaveTextContent('ANSWER TO SECOND.');
+    // The first proposal's answer comes late. It does not evict the live one.
+    await act(async () => pending[0](dryRunView({ affectedOpenInvoices: { count: 1, text: 'ANSWER TO FIRST.', basis: 'ResolutionChanged' } })));
+    expect(within(d).getByTestId('impact-affected')).toHaveTextContent('ANSWER TO SECOND.');
+
+    // Going to the first proposal shows ITS answer, going back to the second shows its own: no new ask for either.
+    fireEvent.click(button(d, 'Back'));
+    typeReason(d, 'first reason');
+    fireEvent.click(next(d));
+    expect(await within(d).findByTestId('impact-affected')).toHaveTextContent('ANSWER TO FIRST.');
+    fireEvent.click(button(d, 'Back'));
+    typeReason(d, 'second reason');
+    fireEvent.click(next(d));
+    expect(await within(d).findByTestId('impact-affected')).toHaveTextContent('ANSWER TO SECOND.');
+    expect(dryRunCalls).toHaveLength(2);
+  });
+});
+
+describe('the removal preview stands in only after a dry run refused with 403, 404 or 503', () => {
+  it.each([403, 404, 503])('a %i asks 089\'s removal preview, and its answer is the one message shown', async status => {
+    const { writeCalls } = renderHarness({ dryRun: () => refusal(status, 'Refused', 'x.refused'), writes: removalWrites(() => previewBody({ closesRule: true, warning: REMOVE_CHANGED_WARNING })) });
+    const d = await instr();
+    await removeInstr(d);
+    const shown = await within(d).findByTestId('removal-preview');
+    expect(shown).toHaveTextContent(REMOVE_CHANGED_WARNING);
+    expect(routesOf(writeCalls)).toEqual(['preview']);
+    // ONE message: the preview alone, never "The preview is not shown" over a preview that is shown.
+    expect(within(d).queryByText('The preview is not shown')).not.toBeInTheDocument();
+    expect(within(d).queryByTestId('dryrun-failed')).not.toBeInTheDocument();
+    expect(within(d).queryByTestId('preview-failed')).not.toBeInTheDocument();
+    expect(within(d).getByTestId('removal-preview-note')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['400', () => refusal(400, 'Bad request', 'procedures.invalid_query')],
+    ['409', () => refusal(409, 'Conflict', 'assignment.conflict')],
+    ['a network failure', () => new Error('Failed to fetch')],
+  ])('%s does not ask the removal preview: the dry run\'s own failure is shown, with Retry', async (_name, answer) => {
+    const { writeCalls } = renderHarness({ dryRun: answer as () => unknown, writes: removalWrites() });
+    const d = await instr();
+    await removeInstr(d);
+    expect(await within(d).findByTestId('dryrun-failed')).toBeInTheDocument();
+    expect(within(d).getByTestId('dryrun-retry')).toBeInTheDocument();
+    expect(within(d).queryByTestId('preview-loading')).not.toBeInTheDocument();
+    expect(within(d).queryByTestId('removal-preview')).not.toBeInTheDocument();
+    expect(routesOf(writeCalls)).toEqual([]);
+  });
+
+  it('a timeout does not ask the removal preview either', async () => {
+    const { writeCalls } = renderHarness({ timeoutMs: 80, dryRun: NEVER, writes: removalWrites() });
+    const d = await instr();
+    await removeInstr(d);
+    expect(await within(d).findByTestId('dryrun-failed')).toHaveTextContent('took too long');
+    expect(routesOf(writeCalls)).toEqual([]);
+  });
+
+  it('a removal preview that does not answer is given up on at the timeout too, so Next is not held for it', async () => {
+    renderHarness({ timeoutMs: 80, dryRun: () => refusal(503, 'Unavailable', 'procedures.unavailable'), writes: respond({ preview: NEVER }) });
+    const d = await instr();
+    await removeInstr(d);
+    expect(next(d)).toBeDisabled();
+    const failed = await within(d).findByTestId('preview-failed');
+    expect(failed).toHaveTextContent('took too long');
+    expect(next(d)).toBeEnabled();
+  });
+
+  it('both reads refused is ONE message (one alert) naming both, with the advisory line in its own element', async () => {
+    renderHarness({ dryRun: () => refusal(503, 'Unavailable', 'procedures.unavailable', { detail: 'Not now.' }), writes: respond({ preview: () => refusal(403, 'Forbidden', 'access.denied') }) });
+    const d = await instr();
+    const impact = await removeInstr(d);
+    const bar = await within(impact).findByTestId('preview-failed');
+    expect(within(impact).getAllByRole('alert', { hidden: true })).toEqual([bar]);
+    expect(within(impact).queryByTestId('dryrun-failed')).not.toBeInTheDocument();
+    expect(within(impact).getAllByText('The preview is not shown')).toHaveLength(1);
+    expect(within(bar).getByTestId('dryrun-failed-text')).toHaveTextContent('Unavailable');
+    expect(within(bar).getByTestId('preview-failed-text')).toHaveTextContent('could not be checked either');
+    expect(within(bar).getByTestId('preview-failed-text')).toHaveTextContent('Forbidden');
+    expect(within(bar).getByTestId('dryrun-advisory')).toHaveTextContent(ADVISORY_LINE);
+    expect(within(bar).getByTestId('dryrun-failed-text').textContent).not.toContain(ADVISORY_LINE);
+  });
+});
+
+describe('the advisory line is its own sentence', () => {
+  it('a refusal with a title and no detail does not run into the advisory line', async () => {
+    renderHarness({ dryRun: () => refusal(409, 'Conflict', 'assignment.conflict') });
+    const d = await ocg();
+    const impact = await excludeOcg(d);
+    const failed = await within(impact).findByTestId('dryrun-failed');
+    expect(within(failed).getByTestId('dryrun-failed-text').textContent).toBe('Conflict');
+    expect(within(failed).getByTestId('dryrun-advisory').textContent).toBe(ADVISORY_LINE);
+  });
+});
+
+describe('the client composes no findings text', () => {
+  it('a number with no text from the server is shown as the number alone; the server\'s text is shown when there is one', async () => {
+    renderHarness({ dryRun: () => dryRunView({ affectedOpenInvoices: { count: 3, text: null, basis: 'ResolutionChanged' } }) });
+    const d = await ocg();
+    const impact = await excludeOcg(d);
+    const line = await within(impact).findByTestId('impact-affected');
+    expect(line.textContent).toBe('3');
+  });
+});
+
+describe('Confirm says when what a removal closes could not be checked', () => {
+  it('both the dry run and the removal preview refused: one line on Confirm, and the removal can still be saved', async () => {
+    const { writeCalls } = renderHarness({
+      dryRun: () => refusal(503, 'Unavailable', 'procedures.unavailable'),
+      writes: respond({ preview: () => refusal(403, 'Forbidden', 'access.denied'), remove: () => removedBody() }),
+    });
+    const d = await instr();
+    await toChoices(d);
+    chooseRadio(d, /^Remove from this record/);
+    await toConfirm(d);
+    expect(within(d).getByTestId('confirm-unchecked')).toHaveTextContent(UNCHECKED_CLOSE_LINE);
+    fireEvent.click(button(d, 'Remove override'));
+    await within(d).findByTestId('success-body');
+    expect(routesOf(writeCalls)).toEqual(['preview', 'remove']);
+  });
+
+  it('a dry run that failed without the fallback being asked (a conflict) on a removal says it too', async () => {
+    renderHarness({ dryRun: () => refusal(409, 'Conflict', 'assignment.conflict'), writes: removalWrites() });
+    const d = await instr();
+    await toChoices(d);
+    chooseRadio(d, /^Remove from this record/);
+    await toConfirm(d);
+    expect(within(d).getByTestId('confirm-unchecked')).toHaveTextContent(UNCHECKED_CLOSE_LINE);
+  });
+
+  it('not said when the dry run answered, when the removal preview answered, or when the plan removes nothing', async () => {
+    // The dry run answered.
+    const answered = renderHarness({ dryRun: () => dryRunView({ proposal: { kind: 'Remove', overrideKind: 'Procedure', replacesOverrideId: null, overrideId: 'row', proposedRowIds: [] } }), writes: removalWrites() });
+    let d = await instr();
+    await toChoices(d);
+    chooseRadio(d, /^Remove from this record/);
+    await toConfirm(d);
+    expect(within(d).queryByTestId('confirm-unchecked')).not.toBeInTheDocument();
+    answered.unmount();
+
+    // The dry run refused and the removal preview answered.
+    const fallback = renderHarness({ dryRun: () => refusal(503, 'Unavailable', 'procedures.unavailable'), writes: removalWrites() });
+    d = await instr();
+    await toChoices(d);
+    chooseRadio(d, /^Remove from this record/);
+    await toConfirm(d);
+    expect(within(d).queryByTestId('confirm-unchecked')).not.toBeInTheDocument();
+    fallback.unmount();
+
+    // A plan that removes nothing, with the dry run refused.
+    renderHarness({ dryRun: () => refusal(503, 'Unavailable', 'procedures.unavailable'), writes: respond({ assign: () => createdBody() }) });
+    d = await ocg();
+    await excludeOcg(d);
+    await waitFor(() => expect(next(d)).toBeEnabled());
+    fireEvent.click(next(d));
+    await within(d).findByTestId('confirm-step');
+    expect(within(d).queryByTestId('confirm-unchecked')).not.toBeInTheDocument();
+  });
+});
+
+describe('the Impact result area is a live region', () => {
+  it('is polite and busy while the read is in flight, and not busy once it has answered or failed; a failure is an alert', async () => {
+    const pending: Array<(v: unknown) => void> = [];
+    renderHarness({ dryRun: () => new Promise(resolve => pending.push(resolve)) });
+    const d = await ocg();
+    const impact = await excludeOcg(d);
+    const region = within(impact).getByTestId('impact-result');
+    expect(region).toHaveAttribute('aria-live', 'polite');
+    expect(region).toHaveAttribute('aria-busy', 'true');
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await act(async () => pending[0](dryRunView()));
+    await within(impact).findByTestId('dryrun');
+    expect(region).toHaveAttribute('aria-busy', 'false');
+    expect(within(region).queryByRole('alert', { hidden: true })).not.toBeInTheDocument();
+  });
+
+  it('a failed dry run is role="alert" inside the live region', async () => {
+    renderHarness({ dryRun: () => refusal(403, 'Forbidden', 'x') });
+    const d = await ocg();
+    const impact = await excludeOcg(d);
+    const region = within(impact).getByTestId('impact-result');
+    const bar = await within(region).findByRole('alert', { hidden: true });
+    expect(bar).toBe(within(region).getByTestId('dryrun-failed'));
+    expect(region).toHaveAttribute('aria-busy', 'false');
   });
 });

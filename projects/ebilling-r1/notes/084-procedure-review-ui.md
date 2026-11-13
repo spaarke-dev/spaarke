@@ -1328,6 +1328,57 @@ An Xrm.WebApi read is ruled out: 084's POML forbids Xrm reads of the Procedure, 
 - `npm run build`: OK.
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors (no server file changed).
 
+### 084d-4 review round 1 (2026-11-13)
+
+Client only: no server file changed. Each item is finding, change, test.
+
+1. **A hung dry run held Next, and Confirm with it.**
+   - *Finding:* `WizardFrame` kept Next off while the dry run loaded, and the fetch had no timeout or abort. A call that never answered blocked Confirm for ever.
+   - *Change:* `raceTimeout` (`overridesApi.ts`) gives a read an abort signal that fires after `READ_TIMEOUT_MS` (20 s; `createDryRunApi` / `createOverridesApi` take `{ timeoutMs }`) or when the caller aborts. The race does not depend on the fetch honouring the signal. A timeout is a failure `client.timed_out`, worded "The preview took too long to come back." (`dryRunFailureText` / `previewFailureText`), so Next is held at most that long. 089's removal preview (the fallback) has the same bound, because Next waits on it too. `WizardFrame` holds one `AbortController` per read, aborts them all when the wizard closes (unmount) or moves to another row, and drops an answer that arrives after either (`mounted`, `epoch`), so nothing sets state after unmount. A client that throws is a failure too (`settle`).
+   - *Tests:* `Impact.test.tsx` "is given up on at the timeout …" (real 80 ms timeout, a never-answering handler: "took too long", Next enabled, Retry, save works), "Confirm is reachable after a timeout …", "closing the wizard abandons the read …" (the fetch's signal fires; a late answer reports nothing), "a removal preview that does not answer is given up on …". `dryRunApi.test.ts` "review round 1: the timeout and the abort signal" (timeout with a fetch that ignores its signal, the caller's signal, a fake-timer check that no timer is left; fake timers are used there only, with no real I/O).
+2. **A failed dry run had no Retry.**
+   - *Change:* the failed bar has Retry (`dryrun-retry`). `retryDryRun` forgets that proposal's cached failure (and the fallback's answer) so the step asks again, as 084b's `retryPreview` did for the preview. Failures stay cached until Retry (Back and Next do not re-ask).
+   - *Tests:* "a failed dry run has a Retry that asks again"; the timeout test above; the changed `Wizards.test.tsx` fallback test (Retry on the combined message).
+3. **One cached answer, evicted by a late one.**
+   - *Change:* answers are a `Map` keyed by the exact request (firm, date, body). A late answer is stored under its own key and cannot replace the live proposal's; there is no sequence number any more. Moving to another row clears the map and bumps `epoch`.
+   - *Test:* "a late answer to an earlier proposal never replaces the live one …" (the two proposals each keep their answer; two asks in all).
+4. **The removal-preview fallback.**
+   - *Change:* `asksRemovalPreview`: asked only after a dry run refused with 403, 404 or 503 (`FALLBACK_STATUSES`); never after 400, 409, a timeout, a network failure or a sign-in failure. When used, the Impact step shows ONE message: the preview alone when it answered (with a note that the lists' preview could not be read; never "The preview is not shown" over a shown preview), or one error bar with `role="alert"` and one Retry when both reads failed.
+   - *Tests:* `Impact.test.tsx` "the removal preview stands in only after …" (403, 404, 503 ask; 400, 409, network, timeout do not; one alert; the combined bar names both failures); `dryRunApi.test.ts` "only 403, 404 and 503 …"; `Wizards.test.tsx` fallback test (one alert, no `dryrun-failed`). Mutation: `asksRemovalPreview` made always true: 5 of the 31 `Impact.test.tsx` tests fail.
+5. **The advisory line ran into the next sentence.**
+   - *Change:* the failure text and the advisory line are separate elements (`dryrun-failed-text`, `dryrun-advisory`).
+   - *Test:* "a refusal with a title and no detail does not run into the advisory line" (the text is exactly "Conflict").
+6. **`affectedLine` composed a count sentence.**
+   - *Change:* the client composes nothing: a number shows the server's `text`; a number with no text shows the number alone; a null count shows "can't be counted".
+   - *Tests:* `dryRunApi.test.ts` "affectedLine shows the server's text …"; `Impact.test.tsx` "a number with no text from the server is shown as the number alone".
+7. **Confirm for an unchecked removal.**
+   - *Change:* when the plan removes an override and the dry run failed and no removal preview answered, Confirm shows `UNCHECKED_CLOSE_LINE`: "What this change closes could not be checked. You can still go on if you choose to; the save itself decides." It does not block. *Beyond the literal brief:* it also shows when the fallback was not asked (a 409, a timeout), because then too nothing said what the removal closes; the strict case (both refused) is a subset.
+   - *Tests:* "Confirm says when what a removal closes could not be checked" (both refused, with the removal saved; a conflict; and not shown when the dry run answered, when the preview answered, or when nothing is removed).
+8. **Accessibility.**
+   - *Change:* the Impact result area is `aria-live="polite"` (`impact-result`) with `aria-busy` while a read is in flight; the failed dry-run bar has `role="alert"`.
+   - *Tests:* "the Impact result area is a live region" (two tests).
+9. **Tests.**
+   - **9a, firm picked in the panel.** `Impact.test.tsx` "the dry-run URL carries the picked firm's firmId". **Mutation proof:** `queryOf` in `ProceduresPanel.tsx` changed to send `firmId: null`; the test fails (`Expected "0a0a0a0a-0000-4000-8000-0000000000a2"`, `Received: null`); the file was restored.
+   - **9b, source guard.** `Wizards.test.tsx` now walks EVERY non-test source file under `src` (not a list), asserts `services/dryRunApi.ts` is the only file naming the dry-run route, and has a must-fire control (two other files naming it are caught) and a must-not-fire control (comments and look-alikes).
+   - **9c, flakiness.** `jest.setup.cjs` has `configure({ asyncUtilTimeout: 5000 })`. The doubled `waitFor(Next enabled)` lines in `WizardsChange.test.tsx` are removed: the file had THREE (not four; old lines 130, 336, 439).
+   - **9d.** The tests listed above. Beyond the named ones, one line of reason each: the `raceTimeout` tests and the abort-on-close test (the contracts of item 1); the `FALLBACK_STATUSES` test (item 4's closed set).
+   - **Test plumbing:** the fake server's default dry run is now a 503 (not a plain `Error`), because a network failure no longer asks the removal preview and the old removal tests rely on the fallback; the harness takes `timeoutMs`; `overridesApi.test.ts` expects the preview read to carry an abort signal.
+
+**Known limits (this round).**
+- **K1 (R6, deliberate).** A 503 `procedures.unavailable` for a request-named firm still reads "This preview isn't available for this firm." uac-r2 accepted it: the design note's "R6 accepted" line says a body firm the caller cannot Read gives 503, worded "this preview isn't available for this firm", not as an outage. The server's 503 is deliberately the same for an unreadable firm and a fault. Not changed.
+- The "unsupported" plan shape shows no explanation. It is unreachable: `dryRunApi.test.ts` "every plan the two wizards make over the fixtures has a dry-run equivalent" runs every fixture row and choice.
+- A change of the reason only reads "The lists read the same." (the lists do not differ).
+- A 200 whose body is not JSON is worded "Check your connection." (it is read as a failure with no status).
+
+**Verification (round 1):**
+- `npm run typecheck`: surface-owned 0 (98 pre-existing errors in the shared libs).
+- `npm test`: 17 suites, 392/392 (365 before, plus 27 new).
+- Parallel runs: 3 of 3 green at 392/392 (106 s, 75 s, 58 s). `--runInBand` runs: 3 of 3 green at 392/392 (253 s, 235 s, 207 s). `asyncUtilTimeout: 5000` removes K-6 of the first round.
+- `npm run build`: OK.
+- Mutations (each applied, run, restored): `queryOf` sending `firmId: null`: 1 fails. `asksRemovalPreview` always true: 5 fail. Both that and the abort-on-close removed: 6 fail (so the abort mutation alone: 1).
+- No server file changed, so no `dotnet build`.
+
+
 ### For task 112 (ui-tests after deploy)
 - **Impact of a pin:**
   - On a matter, open a firm Procedure, choose Pin a version, and reach Impact.

@@ -127,7 +127,6 @@ describe('Change for this record: the flow', () => {
     fireEvent.click(next(d));
     await within(d).findByTestId('impact-step');
     await waitFor(() => expect(next(d)).toBeEnabled()); // 084d-4: Next waits for the dry run's answer
-    await waitFor(() => expect(next(d)).toBeEnabled());
     fireEvent.click(next(d));
     await within(d).findByTestId('confirm-step');
     fireEvent.click(button(d, 'Save record rule'));
@@ -333,7 +332,6 @@ describe('084c fix 1 (F1-1): a rule changed on this record can be changed again'
     fireEvent.click(next(d));
     await within(d).findByTestId('impact-step');
     await waitFor(() => expect(next(d)).toBeEnabled()); // 084d-4: Next waits for the dry run's answer
-    await waitFor(() => expect(next(d)).toBeEnabled());
     fireEvent.click(next(d));
     expect(await within(d).findByTestId('confirm-step')).toHaveTextContent("This record's current change is removed first.");
     fireEvent.click(button(d, 'Save record rule'));
@@ -436,7 +434,6 @@ describe('084c fix 1 (F3-4): a partial save of a Change', () => {
     fireEvent.click(next(d));
     await within(d).findByTestId('impact-step');
     await waitFor(() => expect(next(d)).toBeEnabled()); // 084d-4: Next waits for the dry run's answer
-    await waitFor(() => expect(next(d)).toBeEnabled());
     fireEvent.click(next(d));
     await within(d).findByTestId('confirm-step');
     const reads = calls.length;
