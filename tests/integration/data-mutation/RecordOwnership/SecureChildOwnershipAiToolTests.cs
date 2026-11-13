@@ -748,6 +748,10 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_communicationthread"] = "sprk_communicationthreads",
             // Field mapping task 017 (item 8): an invoice-family table filed by the regarding trio.
             ["sprk_invoicesubmission"] = "sprk_invoicesubmissions",
+            // Field mapping task 045e: the other invoice-family tables the chat update tool writes.
+            ["sprk_invoiceapproval"] = "sprk_invoiceapprovals",
+            ["sprk_externalidentifier"] = "sprk_externalidentifiers",
+            ["sprk_invoicecorrection"] = "sprk_invoicecorrections",
             // Field mapping task 017 (item 9): the budget inquiry's service request.
             ["sprk_servicerequest"] = "sprk_servicerequests",
             // Field mapping task 017 (2d-3): an Owned-path table with no registry entry (the chat create refuses it).
@@ -925,6 +929,30 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+            },
+            // Field mapping task 045e: the other invoice-family tables' regarding trio and pair type (and the external identifier's
+            // invoice, D-68), as the submission's below.
+            ["sprk_invoiceapproval"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+            },
+            ["sprk_externalidentifier"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+            },
+            ["sprk_invoicecorrection"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             // Field mapping task 017 (item 8): the invoice submission's core lookups are the regarding trio
             // (InvoiceFamilyCoreRecordGuard.CoreRecordLookups).

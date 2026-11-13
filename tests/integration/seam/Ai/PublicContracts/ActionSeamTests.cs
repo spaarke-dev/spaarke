@@ -425,19 +425,21 @@ public class ActionSeamTests
     /// <summary>
     /// Task 045b: the invoice-family guard runs before the regarding-pair planner (so the test above keeps the guard's code
     /// when both reads fail). The other half: the guard's read answers and the planner's row read faults — still fail closed,
-    /// the planner's own refusal, and nothing is written.
+    /// the planner's own refusal, and nothing is written. Task 045e: the guard also decides the pair the payload sends (it must
+    /// name the invoice's own matter), so the payload sends the matter's id, which the guard admits.
     /// </summary>
     [Fact]
     public async Task UpdateRecordAsync_AnInvoiceWhosePairPlannerReadFails_AfterTheFamilyGuardPassed_WritesNothing()
     {
         var invoice = Guid.NewGuid();
+        var matter = Guid.NewGuid();
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
             .Setup(e => e.RetrieveAsync("sprk_invoice", invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
                 columns.Contains("sprk_regardingrecordid", StringComparer.OrdinalIgnoreCase)
                     ? Task.FromException<Entity>(new TimeoutException("socket")) // the planner's row read
-                    : Task.FromResult(new Entity(table, id)));                  // the guard's stored-lookup read
+                    : Task.FromResult(new Entity(table, id) { ["sprk_matter"] = new EntityReference("sprk_matter", matter) })); // the guard's stored-lookup read
         var provider = new ServiceCollection().AddSingleton(entities.Object).BuildServiceProvider();
         _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(() => provider.CreateScope());
 
@@ -445,7 +447,7 @@ public class ActionSeamTests
         {
             EntityLogicalName = "sprk_invoice",
             RecordId = invoice,
-            LegacyFields = new Dictionary<string, string?> { ["sprk_regardingrecordid"] = Guid.NewGuid().ToString("D") },
+            LegacyFields = new Dictionary<string, string?> { ["sprk_regardingrecordid"] = matter.ToString("D") },
         }, CancellationToken.None);
 
         result.Success.Should().BeFalse();

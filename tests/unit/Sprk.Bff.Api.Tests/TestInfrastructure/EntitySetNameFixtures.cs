@@ -31,6 +31,7 @@ internal static class EntitySetNameFixtures
                 "systemuser" => "systemusers",
                 "team" => "teams",
                 "sprk_aisearchindex" => "sprk_aisearchindexes", // task 039 (FR-38): the catalog the six search-indexed tables look up
+                "sprk_recordtype_ref" => "sprk_recordtype_refs", // task 045e: the regarding pair's record-type catalog
                 _ => throw new ArgumentException($"Test: no live entity set is pinned for '{table}'.", nameof(table)),
             });
 }

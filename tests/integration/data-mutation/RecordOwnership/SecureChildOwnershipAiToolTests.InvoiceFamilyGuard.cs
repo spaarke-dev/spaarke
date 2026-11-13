@@ -234,6 +234,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private readonly List<Entity> _appLines = new();
     private readonly List<QueryExpression> _appLineQueries = new();
     private Exception? _appLinesFault;
+    private readonly List<string> _appCatalogQueries = new();
+    private Exception? _appCatalogFault;
 
     /// <summary>The app-only reader (<see cref="IGenericEntityService"/>): its RetrieveMultiple evaluates the line query over
     /// <see cref="_appLines"/>, the rows the APP sees, whatever the caller can read.</summary>
@@ -243,6 +245,21 @@ public sealed partial class SecureChildOwnershipAiToolTests
         app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression q, CancellationToken _) =>
             {
+                // Task 045e: the record-type catalog, read app-only by table name for the regarding-pair agreement check; the
+                // same row id the caller-side catalog read answers (ScriptedUserClient.RecordTypes, else a fixed id per table).
+                if (q.EntityName == "sprk_recordtype_ref")
+                {
+                    var catalogTable = q.Criteria.Conditions
+                        .First(c => c.AttributeName == "sprk_recordlogicalname").Values[0] as string ?? string.Empty;
+                    _appCatalogQueries.Add(catalogTable);
+                    if (_appCatalogFault is { } catalogFault)
+                        return Task.FromException<EntityCollection>(catalogFault);
+                    var typeId = _user.RecordTypes.FirstOrDefault(kv => kv.Value == catalogTable).Key;
+                    if (typeId == Guid.Empty)
+                        typeId = ScriptedUserClient.CatalogTypeIdOf(catalogTable);
+                    return Task.FromResult(new EntityCollection(new List<Entity> { new("sprk_recordtype_ref", typeId) }));
+                }
+
                 _appLineQueries.Add(q);
                 return _appLinesFault is { } fault
                     ? Task.FromException<EntityCollection>(fault)
