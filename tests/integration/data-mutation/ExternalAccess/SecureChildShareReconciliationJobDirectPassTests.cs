@@ -711,7 +711,7 @@ public class SecureChildShareReconciliationJobDirectPassTests
         if (overflows)
             overflowWarnings.Should().ContainSingle().Which.Should().Match<LogEntry>(e =>
                 Equals(e.Properties["Carry"], toCarry) && Equals(e.Properties["Cap"], Job.MaxDirectCarried)
-                && Equals(e.Properties["RunId"], context.RunId));
+                && Equals(e.Properties["Unlisted"], 0) && Equals(e.Properties["RunId"], context.RunId));
         else
             overflowWarnings.Should().BeEmpty("exactly the cap is carried without overflow");
 
