@@ -4,7 +4,7 @@
     <title>The regarding record URL names the row's own regarding record on every pair table, stored in canonical form; readers open only a same-origin record URL</title>
     <phase>3 W3 (follow-up to 045e)</phase>
     <gate>045e merged into the work branch (1c59df2ffc or later). Owner go 2026-11-13 ("Yes, do 045f here"). unified-access-control-r2 and ebilling-r1 review the server diff before merge.</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what five BFF write paths admit for one column on every pair table (.cs, bff-api); refusal behaviour; client navigation (.ts/.tsx); modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
