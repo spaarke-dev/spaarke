@@ -588,6 +588,12 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// caller's route has run step 0 already.
     /// Never throws except on a cancelled request: no caller, a missing service, a check that threw or a system failure is
     /// <see cref="FinanceCheckVerdict.Faulted"/>, logged at Warning.
+    /// <para><b>A record-rights answer Dataverse did not complete</b> (084g fix round 1, review A2). The production rights source does not
+    /// throw on a fault: it returns a snapshot with no rights and <see cref="AccessSnapshot.Faulted"/> set, which the filter (and
+    /// <see cref="CallerHoldsRightsAsync"/>, unchanged) answers as a denial. Here that answer is <see cref="FinanceCheckVerdict.Faulted"/>:
+    /// the evaluator runs on an <see cref="AuthorizationService"/> over the same registered <see cref="IAccessDataSource"/>, seen through a
+    /// decorator that only notes whether a snapshot came back faulted. Every question and answer is the registered source's own, so the
+    /// record decision is still <see cref="CallerHoldsRightsAsync"/>'s.</para>
     /// </summary>
     internal static async Task<FinanceCheckVerdict> EvaluateCheckForCallerAsync(
         HttpContext httpContext, FinanceAuthorizationCheck check, ILogger? logger, CancellationToken ct)
@@ -597,8 +603,8 @@ public class FinanceAuthorizationFilter : IEndpointFilter
 
         var userId = CallerResolution.ResolveObjectId(httpContext.User);
         var services = httpContext.RequestServices;
-        var authService = services.GetService<AuthorizationService>();
-        if (string.IsNullOrEmpty(userId) || authService is null)
+        var accessSource = services.GetService<IAccessDataSource>();
+        if (string.IsNullOrEmpty(userId) || accessSource is null || services.GetService<AuthorizationService>() is null)
         {
             logger?.LogWarning(
                 "Finance check {Operation} on {EntitySet} [{Source}] could not run (caller resolved: {HasCaller}); answered as faulted",
@@ -606,6 +612,10 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             return FinanceCheckVerdict.Faulted;
         }
 
+        var observed = new FaultObservingAccessDataSource(accessSource);
+        var authService = new AuthorizationService(
+            observed, services.GetServices<IAuthorizationRule>(),
+            services.GetService<ILogger<AuthorizationService>>() ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthorizationService>.Instance);
         var evaluator = new FinanceAuthorizationFilter(
             authService, static _ => FinanceAuthorizationTargets.Authorize(), FinanceDenial.UniformNotFoundFailClosed,
             services.GetService<CallerRecordAccessProbe>());
@@ -626,7 +636,7 @@ public class FinanceAuthorizationFilter : IEndpointFilter
             return FinanceCheckVerdict.Faulted;
         }
 
-        if (reason == SystemFailureReasonCode)
+        if (reason == SystemFailureReasonCode || observed.SawFaultedSnapshot)
         {
             logger?.LogWarning(
                 "Finance check {Operation} on {EntitySet} [{Source}] had no answer for caller {UserId}; answered as faulted",
@@ -635,6 +645,31 @@ public class FinanceAuthorizationFilter : IEndpointFilter
         }
 
         return reason is null ? FinanceCheckVerdict.Allowed : FinanceCheckVerdict.Denied;
+    }
+
+    /// <summary>
+    /// <see cref="EvaluateCheckForCallerAsync"/>'s view of the registered rights source: every call passes straight through, and a snapshot
+    /// that comes back <see cref="AccessSnapshot.Faulted"/> is noted. One instance per evaluated check, so nothing is shared.
+    /// </summary>
+    private sealed class FaultObservingAccessDataSource(IAccessDataSource inner) : IAccessDataSource
+    {
+        public bool SawFaultedSnapshot { get; private set; }
+
+        public async Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+            Note(await inner.GetUserAccessAsync(userId, resourceId, userAccessToken, ct).ConfigureAwait(false));
+
+        public async Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default) =>
+            Note(await inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct).ConfigureAwait(false));
+
+        private AccessSnapshot Note(AccessSnapshot snapshot)
+        {
+            if (snapshot.Faulted)
+            {
+                SawFaultedSnapshot = true;
+            }
+
+            return snapshot;
+        }
     }
 
     /// <summary>Returns <c>null</c> when allowed, otherwise the deny reason code.</summary>

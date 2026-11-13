@@ -456,21 +456,61 @@ internal sealed class RecordProcedureRig
         /// <summary>Task 084g: when set, every privilege question throws it.</summary>
         public Exception? PrivilegeThrows { get; set; }
 
-        /// <summary>Task 084g: every privilege asked, in order, with whether the caller's token came with it.</summary>
-        public List<(string Privilege, bool HasToken)> PrivilegeCalls { get; } = new();
+        private readonly List<(string Privilege, bool HasToken)> _privilegeCalls = new();
+        private int _inFlight;
+        private int _maxInFlight;
 
-        public override Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        /// <summary>Task 084g: every privilege asked, in the order the questions started, with whether the caller's token came with it.</summary>
+        public IReadOnlyList<(string Privilege, bool HasToken)> PrivilegeCalls
         {
-            PrivilegeCalls.Add((privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
-            if (PrivilegeThrows is not null)
+            get
             {
-                return Task.FromException<CallerPrivilegeAnswer>(PrivilegeThrows);
+                lock (_privilegeCalls)
+                {
+                    return _privilegeCalls.ToArray();
+                }
+            }
+        }
+
+        /// <summary>084g fix round 1: when set, each privilege answer takes this long, so overlapping questions can be seen.</summary>
+        public TimeSpan? PrivilegeDelay { get; set; }
+
+        /// <summary>084g fix round 1: the most privilege questions that were in flight at the same moment.</summary>
+        public int MaxPrivilegeQuestionsInFlight => Volatile.Read(ref _maxInFlight);
+
+        public override async Task<CallerPrivilegeAnswer> CallerPrivilegeAnswerAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            lock (_privilegeCalls)
+            {
+                _privilegeCalls.Add((privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
             }
 
-            return Task.FromResult(
-                string.IsNullOrEmpty(callerBearerToken) || PrivilegeFaults.Contains(privilegeName) ? CallerPrivilegeAnswer.Faulted
-                : Held.Contains(privilegeName) ? CallerPrivilegeAnswer.Held
-                : CallerPrivilegeAnswer.NotHeld);
+            var now = Interlocked.Increment(ref _inFlight);
+            int seen;
+            while ((seen = Volatile.Read(ref _maxInFlight)) < now && Interlocked.CompareExchange(ref _maxInFlight, now, seen) != seen)
+            {
+            }
+
+            try
+            {
+                if (PrivilegeDelay is { } delay)
+                {
+                    await Task.Delay(delay, ct);
+                }
+
+                if (PrivilegeThrows is not null)
+                {
+                    throw PrivilegeThrows;
+                }
+
+                return string.IsNullOrEmpty(callerBearerToken) || PrivilegeFaults.Contains(privilegeName) ? CallerPrivilegeAnswer.Faulted
+                    : Held.Contains(privilegeName) ? CallerPrivilegeAnswer.Held
+                    : CallerPrivilegeAnswer.NotHeld;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _inFlight);
+            }
         }
 
         public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)

@@ -328,42 +328,39 @@ public static class ProcedureAssignmentEndpoints
     /// <summary>
     /// Task 084g (EB-D-221): the caller's write permissions on one core record, for the record read routes. Each flag holds only when every
     /// check of <see cref="WritePermissionChecks"/> is answered and held, through the Finance filter's own evaluator for the caller
-    /// (<see cref="FinanceAuthorizationFilter.EvaluateCheckForCallerAsync"/>: the caller's token, no app-only branch, no role lookup). A check
-    /// shared by several flags is asked once; a flag stops at its first check that does not hold, as the filter does. Fail closed: a check that
-    /// is denied, faulted or not answered gives false, and any fault here gives every flag false, logged at Warning. Never throws except on a
-    /// cancelled request. A hint for the client: no write route reads it; the routes still decide.
+    /// (<see cref="FinanceAuthorizationFilter.EvaluateCheckForCallerAsync"/>: the caller's token, no app-only branch, no role lookup). Two
+    /// rounds (084g fix round 1, reviews B4 and A4): first <see cref="RecordWriteCheck"/>, which every flag starts with, so a caller who may
+    /// not write the record is asked nothing more (as the write route's first filter refuses before its privileges); then every other
+    /// distinct check of the three flags at once, each asked once whatever number of flags use it. Each check has its own verdict, so a fault
+    /// in one makes false only the flags that declare it (U-5). Fail closed: a check that is denied, faulted or not answered gives false, and
+    /// any fault here gives every flag false, logged at Warning. Never throws except on a cancelled request. A hint for the client: no write
+    /// route reads it; the routes still decide.
     /// </summary>
     internal static async Task<RecordWritePermissions> WritePermissionsForCallerAsync(
         HttpContext http, string coreEntitySet, Guid recordId, CancellationToken ct)
     {
         var logger = http.RequestServices.GetService<ILogger<FinanceAuthorizationFilter>>();
-        var verdicts = new Dictionary<FinanceAuthorizationCheck, FinanceCheckVerdict>();
-
-        async Task<bool> Holds(WriteFlag flag)
-        {
-            foreach (var check in WritePermissionChecks(flag, coreEntitySet, recordId))
-            {
-                if (!verdicts.TryGetValue(check, out var verdict))
-                {
-                    verdict = await FinanceAuthorizationFilter.EvaluateCheckForCallerAsync(http, check, logger, ct).ConfigureAwait(false);
-                    verdicts[check] = verdict;
-                }
-
-                if (verdict != FinanceCheckVerdict.Allowed)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
+        var flags = new[] { WriteFlag.AssignOrExclude, WriteFlag.Remove, WriteFlag.Change };
 
         try
         {
+            var record = RecordWriteCheck(coreEntitySet, recordId);
+            if (await FinanceAuthorizationFilter.EvaluateCheckForCallerAsync(http, record, logger, ct).ConfigureAwait(false) != FinanceCheckVerdict.Allowed)
+            {
+                return RecordWritePermissions.None;
+            }
+
+            var rest = flags.SelectMany(f => WritePermissionChecks(f, coreEntitySet, recordId)).Where(c => c != record).Distinct().ToArray();
+            var answers = await Task.WhenAll(rest.Select(c => FinanceAuthorizationFilter.EvaluateCheckForCallerAsync(http, c, logger, ct))).ConfigureAwait(false);
+            var verdicts = rest.Zip(answers).ToDictionary(x => x.First, x => x.Second);
+            verdicts[record] = FinanceCheckVerdict.Allowed;
+
+            bool Holds(WriteFlag flag) => WritePermissionChecks(flag, coreEntitySet, recordId).All(c => verdicts[c] == FinanceCheckVerdict.Allowed);
+
             return new RecordWritePermissions(
-                AssignOrExclude: await Holds(WriteFlag.AssignOrExclude).ConfigureAwait(false),
-                Remove: await Holds(WriteFlag.Remove).ConfigureAwait(false),
-                Change: await Holds(WriteFlag.Change).ConfigureAwait(false));
+                AssignOrExclude: Holds(WriteFlag.AssignOrExclude),
+                Remove: Holds(WriteFlag.Remove),
+                Change: Holds(WriteFlag.Change));
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

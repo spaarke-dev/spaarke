@@ -25,8 +25,9 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// <para><b>Write permissions (task 084g, EB-D-221).</b> A 200 also carries <c>permissions</c> {assignOrExclude, remove, change}: the caller's
 /// rights for each write of <see cref="ProcedureAssignmentEndpoints"/> on this record, from those routes' own record and privilege
 /// declarations (<see cref="ProcedureAssignmentEndpoints.WritePermissionsForCallerAsync"/>), asked after the list is complete. A hint for the
-/// client only; a fault there makes a flag false and never changes the list or its status. Computed per request for this caller; nothing is
-/// cached.</para>
+/// client only; a fault there makes a flag false and never changes the list or its status. The flags are computed per request for this
+/// caller; the record-rights answer comes from the per-caller 60-second cache the write route also uses, and the privilege questions are
+/// uncached.</para>
 /// <para><b>Known limit.</b> These routes are internal-only (step 0). Opening them to external callers needs the external-visibility
 /// predicate first (task 191).</para>
 /// </remarks>

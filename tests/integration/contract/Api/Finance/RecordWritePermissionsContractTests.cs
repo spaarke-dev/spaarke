@@ -90,22 +90,33 @@ public sealed class RecordWritePermissionsContractTests
             Entries.Add((logLevel, formatter(state, exception)));
     }
 
-    /// <summary>The recording rights source, faulting a record's check from its <see cref="FaultFromCall"/>-th ask on (the read's own Read is the first).</summary>
+    /// <summary>
+    /// The recording rights source, faulting a record's check from its <see cref="FaultFromCall"/>-th ask on (the read's own Read is the
+    /// first): by throwing, or (<see cref="FaultedSnapshot"/>) as the production source does, with a no-rights snapshot marked faulted.
+    /// </summary>
     private sealed class FaultingAccess(FinAuth.RecordingAccessDataSource inner) : IAccessDataSource
     {
         public int? FaultFromCall { get; set; }
+
+        public bool FaultedSnapshot { get; set; }
 
         private int _recordCalls;
 
         public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
             inner.GetUserAccessAsync(userId, resourceId, userAccessToken, ct);
 
-        public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
+        public async Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
         {
-            var call = ++_recordCalls;
-            return FaultFromCall is { } from && call >= from
-                ? Task.FromException<AccessSnapshot>(new HttpRequestException("RetrievePrincipalAccess faulted"))
-                : inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+            var call = Interlocked.Increment(ref _recordCalls);
+            var answer = await inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+            if (FaultFromCall is not { } from || call < from)
+            {
+                return answer;
+            }
+
+            return FaultedSnapshot
+                ? new AccessSnapshot { UserId = userId, ResourceId = recordId.ToString(), AccessRights = AccessRights.None, Faulted = true }
+                : throw new HttpRequestException("RetrievePrincipalAccess faulted");
         }
     }
 
@@ -264,6 +275,12 @@ public sealed class RecordWritePermissionsContractTests
 
         flags.Should().Be((assignOrExclude, remove, change), denied);
         host.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "a denial is an answer, not a fault");
+
+        // Fix round 1 (B3): the flags were evaluated, not merely defaulted. The flags' record check ran after the read's own Read, and past a
+        // held record check the privilege questions were asked (all six, at once); a refused record check asks none.
+        host.Access.Calls.Where(c => c.Set == "sprk_matters").Should().HaveCount(2, "the read's own Read check, then the flags' record check");
+        host.Rig.Probe.PrivilegeCalls.Select(c => c.Privilege).Should().BeEquivalentTo(
+            denied.StartsWith("record ", StringComparison.Ordinal) ? Array.Empty<string>() : AllPrivileges, denied);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -421,6 +438,52 @@ public sealed class RecordWritePermissionsContractTests
         host.Assignments.VerifyNoOtherCalls();
     }
 
+    /// <summary>Fix round 1 (A1): every write route × a record right short of Write and AppendTo (Read and Write without AppendTo; Read alone).</summary>
+    public static TheoryData<string, string, string, string, string> AllWriteRoutesShortOfTheRecordRights
+    {
+        get
+        {
+            var data = new TheoryData<string, string, string, string, string>();
+            foreach (var row in AllWriteRoutes)
+            {
+                foreach (var held in new[] { "Read|Write", "Read" })
+                {
+                    data.Add((string)row[0], (string)row[1], (string)row[2], (string)row[3], held);
+                }
+            }
+
+            return data;
+        }
+    }
+
+    [Theory(DisplayName = "084g fix round 1 (A1) guard (behaviour): each write route, with every privilege and subject Read held but the record short of Write+AppendTo, answers the uniform 404, and the matching flag on the same record is false")]
+    [MemberData(nameof(AllWriteRoutesShortOfTheRecordRights))]
+    public async Task EachWriteRoute_RefusesARecordShortOfWriteAndAppendTo_AndItsFlagIsFalse(string method, string url, string set, string writeName, string held)
+    {
+        await using var host = await Host.StartAsync();
+        host.Rig.Simple("GENERAL");
+        var write = Enum.Parse<Write>(writeName);
+        var core = Cores.First(c => c.Set == set);
+        host.Access.Grant(set, core.Id, held == "Read" ? AccessRights.Read : AccessRights.Read | AccessRights.Write);
+        // A stored override row whose subject the caller may Read, so a removal route is not refused for its subject.
+        host.Assignments.Setup(s => s.SubjectOfOverrideAsync(It.IsAny<string>(), core.Id, OverrideId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new OverrideSubject(BillingAdminAuthorization.ProcedureEntitySet, ProcedureId));
+
+        var response = await host.Client.SendAsync(Send(method, url, BodyOf(write)));
+        var flags = await FlagsOf(await host.Client.SendAsync(Send("GET", $"/api/finance/{core.Segment}/{core.Id}/procedures?date=2026-02-01")), "procedures");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, $"{method} {url} with the record {held}: the record filter's uniform 404");
+        host.Rig.Probe.PrivilegeCalls.Should().BeEmpty("the record check refused first, on the write as on the flags");
+        host.Assignments.VerifyNoOtherCalls();
+        var flag = FlagOf(write) switch
+        {
+            ProcedureAssignmentEndpoints.WriteFlag.AssignOrExclude => flags.AssignOrExclude,
+            ProcedureAssignmentEndpoints.WriteFlag.Remove => flags.Remove,
+            _ => flags.Change,
+        };
+        flag.Should().BeFalse($"the {FlagOf(write)} flag stands for {method} {url}");
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // AC 3 and U-5: a faulted or unanswered check is false, the list 200, logged at Warning
     // ═══════════════════════════════════════════════════════════════════════════
@@ -433,10 +496,12 @@ public sealed class RecordWritePermissionsContractTests
             foreach (var list in Lists)
             {
                 data.Add("the record check faults", list);
+                data.Add("the record check answers a faulted snapshot", list);
                 data.Add("the Admin() privilege gets no answer", list);
                 data.Add("every privilege question throws", list);
                 data.Add("no probe is registered", list);
                 data.Add("Write on sprk_policy gets no answer", list);
+                data.Add("Create on rule set gets no answer", list);
             }
 
             return data;
@@ -453,9 +518,17 @@ public sealed class RecordWritePermissionsContractTests
         switch (fault)
         {
             case "the record check faults": host.Faulting.FaultFromCall = 2; break; // the read's own Read is call 1
+            case "the record check answers a faulted snapshot": // fix round 1 (A2): what DataverseAccessDataSource returns on a fault
+                host.Faulting.FaultFromCall = 2;
+                host.Faulting.FaultedSnapshot = true;
+                break;
             case "the Admin() privilege gets no answer": host.Rig.Probe.PrivilegeFaults.Add(BillingAdminAuthorization.WriteRuleSetPrivilege); break;
             case "every privilege question throws": host.Rig.Probe.PrivilegeThrows = new HttpRequestException("privilege read failed"); break;
             case "no probe is registered": break;
+            case "Create on rule set gets no answer": // fix round 1 (B4): asked at once with the others, a fault still turns off only its flag
+                host.Rig.Probe.PrivilegeFaults.Add(BillingAdminAuthorization.CreateRuleSetPrivilege);
+                expected = (true, true, false);
+                break;
             default:
                 host.Rig.Probe.PrivilegeFaults.Add(BillingAdminAuthorization.WritePolicyPrivilege);
                 expected = (true, false, false);
@@ -486,9 +559,9 @@ public sealed class RecordWritePermissionsContractTests
         host.Access.Calls.Should().ContainSingle("only the read's own record check");
     }
 
-    [Theory(DisplayName = "084g: the extra checks per read: every check held 1 record check + 6 privileges; Admin() not held 1 + 2 (the change flag asks its first check before the shared one); no Write on the record 1 + 0")]
+    [Theory(DisplayName = "084g: the extra checks per read: a held record check, then the 6 distinct privileges once each (Admin() held or not); no Write on the record 1 + 0")]
     [InlineData("every check", 6)]
-    [InlineData("no Admin()", 2)]
+    [InlineData("no Admin()", 6)]
     [InlineData("no record Write", 0)]
     public async Task ExtraChecksPerRead(string caller, int privilegeQuestions)
     {
@@ -500,8 +573,23 @@ public sealed class RecordWritePermissionsContractTests
         (await host.Client.SendAsync(Send("GET", $"/api/finance/matters/{M}/rules-in-force?date=2026-02-01"))).StatusCode.Should().Be(HttpStatusCode.OK);
 
         host.Access.Calls.Should().HaveCount(2, "the read's own Read check, plus ONE record check shared by the three flags");
-        host.Rig.Probe.PrivilegeCalls.Should().HaveCount(privilegeQuestions, "each distinct privilege at most once, none after a flag's first refusal");
+        host.Rig.Probe.PrivilegeCalls.Should().HaveCount(privilegeQuestions, "each distinct privilege at most once, none when the record check refuses");
         host.Rig.Probe.Batches.Should().ContainSingle("the read's one batched rights check is unchanged");
+    }
+
+    [Theory(DisplayName = "084g fix round 1 (B4/A4): the privilege questions are asked at once, not one after another: two rounds per read (the record check, then all six privileges together)")]
+    [InlineData("procedures")]
+    [InlineData("rules-in-force")]
+    public async Task ThePrivilegeQuestions_AreAskedConcurrently(string list)
+    {
+        await using var host = await Host.StartAsync();
+        host.Rig.Simple("GENERAL");
+        host.Rig.Probe.PrivilegeDelay = TimeSpan.FromMilliseconds(100);
+
+        (await FlagsOf(await host.Client.SendAsync(Send("GET", $"/api/finance/matters/{M}/{list}?date=2026-02-01")), list)).Should().Be((true, true, true));
+
+        host.Rig.Probe.PrivilegeCalls.Should().HaveCount(AllPrivileges.Length);
+        host.Rig.Probe.MaxPrivilegeQuestionsInFlight.Should().Be(AllPrivileges.Length, "every distinct privilege question is in flight at the same moment");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -536,10 +624,11 @@ public sealed class RecordWritePermissionsContractTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // U-3: no caching. Each read computes the caller's flags afresh
+    // U-3: no flag cache. Each read computes the caller's flags afresh. (In production the record half of a flag rides the per-caller
+    // 60-second record-rights cache the write route also uses; this host's rights source is uncached. The privilege half is uncached.)
     // ═══════════════════════════════════════════════════════════════════════════
 
-    [Fact(DisplayName = "084g (U-3): the flags are computed on every read for the caller; a right removed between two reads is false on the second")]
+    [Fact(DisplayName = "084g (U-3): the flags are not cached; each read asks the caller's checks again, so a right removed between two reads is false on the second (in production the record check rides the write route's 60 s per-caller rights cache; privileges are uncached)")]
     public async Task EveryRead_ComputesTheFlagsAfresh()
     {
         await using var host = await Host.StartAsync();
@@ -566,6 +655,8 @@ public sealed class RecordWritePermissionsContractTests
         host.Access.Grant("sprk_matters", M, AccessRights.Read);
 
         var flags = await FlagsOf(await host.Client.SendAsync(Send("GET", $"/api/finance/matters/{M}/procedures?date=2026-02-01")), "procedures");
+        // Fix round 1 (B3): the flags' own record check ran (after the read's own Read), so "false" is its answer, not a default.
+        host.Access.Calls.Where(c => c.Set == "sprk_matters").Should().HaveCount(2, "the read's own Read check, then the flags' record check");
         var assign = await host.Client.SendAsync(Send("POST", $"/api/finance/matters/{M}/procedure-assignments", BodyOf(Write.Assign)));
         var remove = await host.Client.SendAsync(Send("DELETE", $"/api/finance/matters/{M}/overrides/{OverrideId}"));
 
