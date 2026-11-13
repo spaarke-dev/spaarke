@@ -67,6 +67,12 @@ Full table: `spec.md` §Owner Clarifications; review record: `design.md` §9.0 a
 - 2026-11-09 — #2269 503: SPA auto-retries 3× (1 s/2 s/4 s), then a message with Retry.
 - 2026-11-09 — staged delivery: each phase ends with a dev deploy and E2E.
 - 2026-11-10 — **no task execution before the owner reviews the final plan and tasks.**
+- 2026-11-12 — **E2E feedback (task 018), applied in one rework task after the E2E:**
+  - each create action lives in its section (Upload → Documents, New message → Messages, Submit invoice → Invoices); the header toolbar keeps record-level actions;
+  - **no To Do (`sprk_todo`) in the SPA** — external users work only with `sprk_event` of type Task (D-6 #2703 → send the type); the to-do BFF routes stay until a filed retirement;
+  - Submit invoice opens as a modal over the record modal (same size and position) with the record fixed and no record step (R4 builds, ebilling reviews);
+  - on the Invoices grid, Submit invoice sits in the grid toolbar;
+  - invoice file types / supporting files / several invoices → ebilling-r1 (#2770).
 - 2026-11-11 — **Esc in a child dialog follows the modal standard (§6.5 Path C):** with a form or confirm child open, Esc closes neither the child nor the record and keeps the draft; Cancel/× close the child. Spec FR-03 amended. No local Esc handlers on presets.
 
 ## 4. Coordination

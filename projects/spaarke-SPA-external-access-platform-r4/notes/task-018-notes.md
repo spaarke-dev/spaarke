@@ -32,6 +32,34 @@ Status: **dev SPA deployed 2026-11-12 (run 43324493710); E2E not started (needs 
 PASS, no faults: 45 BFF requests, 0 5xx, 1 4xx, **0 on external routes** (new matter/WA event routes and `canCreate` not
 yet exercised). Tell uac-r2 when the E2E is done; it re-reads the external routes.
 
+## E2E results — part 1, write-capable partner (owner driving, 2026-11-12)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Sign-in (already-bound contact; #2761 not hit) | PASS |
+| 2 | Projects grid | PASS |
+| 3 | Project PRJ-000046 opens in the template (title, toolbar, sections, "Your access" = Collaborate) | PASS — but see defect E-1 |
+| 4 | Upload document on the project | PASS |
+| 5 | Submit invoice from the project → record preselected → invoice created, linked to the project, amount + date extracted | PASS |
+| 6 | Submitted invoice appears in the Invoices grid (INV-123456.7, In Review) | PASS |
+| — | Refresh / Copy link / console / New message / Add event / matter + WA / #2658 aria-hidden snippet | not yet reported |
+
+**Defect E-1 = D-12 #2769 (R4):** the record's Documents section overlaps columns at the record-modal width — the name runs into the
+Type badge and Date Added (screenshot 2026-11-12).
+
+**Owner feedback 2026-11-12 — decided: finish the E2E, then ONE rework task (R4 items + the Submit-invoice modal,
+R4 builds, ebilling reviews), redeploy, re-test. ebilling's own items filed as #2770. To-do BFF routes stay for now;
+SPA stops using them; retirement is a filed follow-up.**
+- R4 record template: move each create action into its section — Upload → Documents, New message → Messages,
+  Submit invoice → Invoices (the header toolbar keeps record-level actions).
+- R4: **no To Do in the SPA.** "Add to-do" creates `sprk_todo` (labelled "Task" in the UI — wrong). External users work
+  only with `sprk_event` of type **Task** (resolves D-6 #2703 towards "send the type").
+- R4/ebilling: Submit invoice should be a **modal over the record modal** (same size and position), not a page, and the
+  record should be fixed (no record step) when launched from a record. A modal also removes the #2658 navigation risk.
+- R4/ebilling: on the Invoices grid, Submit invoice belongs in the grid toolbar (with Refresh / Export), not its own button.
+- ebilling: invoice files beyond PDF (Excel / data files); "Submit other files" (supporting files not treated as the
+  invoice); several invoices in one submission.
+
 ## E2E (steps 6–9) — accounts and records needed (owner to supply/confirm)
 
 - ⚠️ **Watch-item #2761 (uac-r2's code, not R4):** on dev the identity store's contact-binding readability proof faults

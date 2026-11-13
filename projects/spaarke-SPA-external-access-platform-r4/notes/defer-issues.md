@@ -201,3 +201,15 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Why deferred.** Outside task 006's files.
 
 **Fix shape.** Use the label map exported from `record/recordAccess.ts` (or move it next to `mapAccessLevelString` in `hooks/useAccessLevel.ts`) in all five places; no behaviour change.
+
+## D-12 — Record Documents section columns overlap at the modal width (#2769)
+
+**Where.** `src/client/external-spa/src/components/record/sections/DocumentsSection.tsx` (the document list inside `RecordTemplateModal.tsx`).
+
+**What.** Found in the owner's E2E on dev (2026-11-12, task 018): the file name runs into the Type badge and the Date Added column.
+
+**Effect.** Document name, type and date are hard to read in every record with documents.
+
+**Why deferred.** Owner decision 2026-11-12: finish the E2E first, then one rework pass.
+
+**Fix shape.** In the post-E2E rework task: column widths / truncation at the modal width, with a layout test.
