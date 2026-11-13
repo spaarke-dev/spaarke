@@ -746,4 +746,4 @@ The base-retired Changed mark has no `baseRuleBody`, because nothing is publishe
   - **K3.** The Duplicate/Reject pre-check reads the record rule's consequence. A re-change goes to the base rule, whose consequence can differ after a Stale refresh. The server then refuses, and the message shows in the general bar; nothing is saved silently.
   - **K4.** `testKit.ts` still classifies a `ruleset` route that the client no longer calls. Dead test code; remove it when next touching the file.
 - **Merged** into `work/ebilling-r1` as `a74278e22c`. The BFF part (read-model fields) reaches dev with task 112.
-- **Open owner question (item 8):** which rules refuse Change? Today: ApprovedRate (rate card) and ApprovedTimekeeper (no values).
+- **Item 8 decided (EB-D-222, owner 2026-11-13):** keep as built. Only ApprovedRate refuses Change (ApprovedTimekeeper has no values); may be revisited at UAT.
