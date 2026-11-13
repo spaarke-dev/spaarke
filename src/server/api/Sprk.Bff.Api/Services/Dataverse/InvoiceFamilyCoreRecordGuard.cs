@@ -586,6 +586,10 @@ public static class InvoiceFamilyCoreRecordGuard
         if (!pair.SetsEither || ColumnsToRead(entityLogicalName) is not { } coreColumns)
             return null;
 
+        // A row that will name no single core record is refused with the guard's own answer — never exempted as a move.
+        if (after.IsRefused)
+            return after;
+
         var create = before is null;
         if (!create && !aCoreMoveIsChecked
             && writtenColumns.Select(ColumnOfKey).Any(c => coreColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
@@ -593,9 +597,6 @@ public static class InvoiceFamilyCoreRecordGuard
         {
             return null; // the core record moves: 045d's derive writes the pair of the record the row will name
         }
-
-        if (after.IsRefused)
-            return after;
         if (after.Regarding is not { } regarding || pair.Unreadable)
             return Disagrees(after);
 

@@ -230,6 +230,37 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Patches.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "045e (core move, concurrent): the chat tool refuses a sent pair the derive left in place when the check sees a move")]
+    public async Task UpdateRecordTool_AnApprovalMove_WhoseDeriveFoundNothingToMove_WithADisagreeingPair_IsRefusedMismatch()
+    {
+        // The caller path reads the row's core lookups twice: 045d's derive, then the guard's decision. The derive reads the row
+        // already on the new matter (a concurrent write), so it derives nothing and the sent pair stays in the write; the decision
+        // reads it on the old matter, so the write is a move. The pair as it will be written is checked all the same
+        // (aCoreMoveIsChecked) — it names the old matter, not the one the row will name — so the write is refused, nothing patched.
+        StoredFamilyRowUnderTheMatter("sprk_invoiceapproval", "sprk_regardingmatter", PairFamilyRow);
+        _world.WithRecord("sprk_matter", RederiveMatter, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        var coreReads = 0;
+        _user.GetOverride = path =>
+        {
+            if (path.StartsWith($"sprk_invoiceapprovals({PairFamilyRow:D})?$select=", StringComparison.Ordinal)
+                && path.Contains("_sprk_regardingmatter_value", StringComparison.Ordinal))
+            {
+                var seen = ++coreReads == 1 ? RederiveMatter : OrdinaryMatter;
+                _user.RowValues[PairFamilyRow] = new Dictionary<string, object?> { ["_sprk_regardingmatter_value"] = seen.ToString("D") };
+            }
+
+            return null;
+        };
+
+        var result = await UpdateRecord("sprk_invoiceapproval", PairFamilyRow,
+            Lookup("sprk_regardingmatter", "sprk_matter", RederiveMatter), PairIdItem(OrdinaryMatter), PairTypeItem(RecordTypeMatter));
+
+        coreReads.Should().Be(2, "the derive's read, then the decision's");
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode, result.ErrorMessage);
+        _user.Patches.Should().BeEmpty();
+    }
+
     // ── D-68: an external identifier filed under its invoice alone (no core lookup) ─────────────────────────────────
 
     private void StoredInvoiceOnlyExternalIdentifier()

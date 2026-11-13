@@ -312,6 +312,36 @@ public class InvoiceFamilyRegardingPairAgreementTests
         code.Should().Be(InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode);
     }
 
+    public static TheoryData<string, string, string, string> TwoCoreLookupsOfEachTable()
+    {
+        var rows = new TheoryData<string, string, string, string>();
+        foreach (var (table, lookups) in InvoiceFamilyCoreRecordGuard.CoreRecordLookups)
+            rows.Add(table, lookups[0].Column, lookups[1].Column, lookups[1].CoreEntity);
+        return rows;
+    }
+
+    [Theory]
+    [MemberData(nameof(TwoCoreLookupsOfEachTable))]
+    public async Task AWriteThatLeavesTwoCoreRecords_WithAPairSent_IsRefusedByTheGuardsAnswer_NotExemptedAsAMove(
+        string table, string kept, string written, string writtenCore)
+    {
+        // The stored row names Core through `kept`; the write adds a second core lookup. The row would name no single core
+        // record, so the write is refused with that answer — a core column written is not a move here.
+        var before = Decided(table, kept, InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table][0].CoreEntity, Core);
+        var after = InvoiceFamilyCoreRecordGuard.Check(table, c =>
+            string.Equals(c, kept, StringComparison.OrdinalIgnoreCase) ? new EntityReference(InvoiceFamilyCoreRecordGuard.CoreRecordLookups[table][0].CoreEntity, Core)
+            : string.Equals(c, written, StringComparison.OrdinalIgnoreCase) ? new EntityReference(writtenCore, OtherCore)
+            : null);
+        after.IsRefused.Should().BeTrue("the row names two core records");
+
+        var refusal = await InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync(table, [written],
+            Pair(id: Core, type: CatalogRow), after, before, Catalog());
+
+        refusal.Should().NotBeNull("a write that leaves two core records is never exempted as a move");
+        refusal!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        _reads.Should().BeEmpty();
+    }
+
     [Theory]
     [MemberData(nameof(FamilyCores))]
     public async Task OnACallerPath_ACoreMoveIsChecked_ThePairMustNameTheRecordTheRowWillName(string table, string column, string core)
