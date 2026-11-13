@@ -10,6 +10,36 @@
 
 ## Open (in priority order)
 
+### ISS-020 — Invoice family: a filed invoice is never moved; children match their invoice's core record
+
+| Field | Value |
+|---|---|
+| **Status** | Open. Decided by the owner (EB-D-231, 2026-11-13); the builder is being agreed with field-mapping-r1. |
+| **Urgency** | now |
+| **Filed** | 2026-11-13 |
+| **Source** | Owner question 2 (follow-on from #2772 / ISS-017); owner chose return-and-resubmit |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2794 |
+
+**Description**
+
+A wrongly filed invoice is corrected by returning it to the firm and resubmitting it on the right record; it is never moved (EB-D-231, fits EB-D-148). Two rules follow:
+
+1. Every invoice core-record change after create is refused. Today D-96 refuses it only while a line names another core record, and its message suggests detach, move and re-attach. That path splits the family, because approvals, submissions, corrections and identifiers never move. Every invoice has its submission row. The detach hint is dropped and the message points to return-and-resubmit.
+2. The approval, submission, correction and external-identifier rows each name the same core record as their invoice, as lines already must.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs`: D-96 ~282-304, `DetachMoveReattachHint` ~518, `CodeOnlyRefusalMessage` ~508.
+- The generic update paths that call the guard (field-mapping-r1 045d/e/f).
+
+**Suggested fix**: both rules in the guard, in one change by one owner, with tests over every family table and the generic paths plus must-fire controls. Decide whether detaching a line (clearing its invoice) is now refused too.
+
+**Estimated effort**: about a day.
+**Blockers**: none.
+**Related**: #2772 (ISS-017), D-96, D-68, EB-D-148, EB-D-231, field-mapping-r1 045e.
+
+---
+
 ### ISS-019 — Procedure assign and dry-run routes: one answer for a named firm (NFR-01)
 
 | Field | Value |
