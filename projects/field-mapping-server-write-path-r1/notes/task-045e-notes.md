@@ -147,6 +147,19 @@ The 7 that pass both ways pin behaviour the round keeps: a core move with a disa
 - ArchTests (alone, unfiltered): 2539 passed.
 - `dotnet build Spaarke.sln`: 0 warnings, 0 errors. `dotnet format whitespace --verify-no-changes` on the touched files: clean.
 
+### Fix round 2 evidence
+
+- F4: `CheckRegardingPairAgreesAsync` decides a refused after-state (no single core record) before the move exemption, so a
+  write that leaves two core records is refused with the guard's answer, never exempted as a move (as its doc says).
+  `AWriteThatLeavesTwoCoreRecords_WithAPairSent_IsRefusedByTheGuardsAnswer_NotExemptedAsAMove` (six tables): 6 of 6 failed
+  with the old order.
+- F3: the caller-path move check is pinned through `DecideInvoiceFamilyAsync`:
+  `UpdateRecordTool_AnApprovalMove_WhoseDeriveFoundNothingToMove_WithADisagreeingPair_IsRefusedMismatch`. The chat tool reads
+  the core lookups twice, the derive first and the decision second; the test answers the new matter to the derive (it
+  derives nothing, so the sent pair stays) and the old matter to the decision (a move). It failed (the write succeeded) with
+  the `aCoreMoveIsChecked` argument removed. The opposite order (old, then new) cannot reach the flag: the derive then writes
+  the derived pair over the sent one, and the decision sees no move.
+
 ## Known limits (K)
 
 - K1: on a create, a type-only pair that step 4½ clears (no agreeing lookup) is not refused; the derive writes the pair.
@@ -168,6 +181,13 @@ The 7 that pass both ways pin behaviour the round keeps: a core move with a disa
   cleared. A writer sends the id with the type (or moves the core lookup, and the derive writes both). On these tables the
   planner cannot otherwise write a pair that names another record: their agreement lookups are their core lookups, and a
   core move is the derive's.
+- K5c (fix round 2): on a K5b row, a type-only write that names the right type is refused with the mismatch code
+  (`invoice_family_regarding_pair_core_record_mismatch`), whose text speaks of a pair naming another record. The type itself
+  agrees; what is refused is the pair the planner clears. The code is kept (one code, fixed text); the wording is imprecise for
+  this case. ebilling-r1 confirmed none of its flows sends a type-only pair (K5b accepted).
+- K5d (fix round 2): a write that sends only display columns (`sprk_regardingrecordname`, `…url`, `…number`) and no pair is
+  written as sent, as before this task; the gate decides a pair only when one is sent (or the core record moves, when the
+  display columns are dropped for the derive).
 - K6b (fix round 1): extra reads on the app-only paths: one stored-row read (app-only) when the planned payload carries a
   pair or display column; on the caller paths, one app-only catalog read when a core move also sends a type.
 - K3: the type agrees only with the catalog row the app reads as active for the core table (top 1). A pair naming another
