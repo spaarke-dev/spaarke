@@ -228,8 +228,9 @@ internal static class InvoiceSubmissionFromEmailHttp
             }
         }
 
-        // Task 095c-2 (owner 2026-11-03): firmId may be null or absent (no firm). The handler decides whether that is accepted now (the
-        // tracking-scope phase) and, for a Correction, whether the replaced invoice has no firm either; it is no longer a body-shape error.
+        // EB-D-223 (task 095e): firmId may still be null or absent in the body. It is not a body-shape error here, because the refusal (400
+        // firm_invalid "A firm is required.") belongs to the handler, after the replay of K: a retry of an earlier accepted no-firm submission
+        // is answered as a replay, and an earlier refusal at this edge would refuse that retry.
 
         if (request.FirmInvoiceNumber?.Trim() is { Length: > TrackingNumberAllocator.MaxFirmInvoiceNumberLength })
         {

@@ -403,7 +403,8 @@ internal class SubmitInvoiceFromEmailOperation : ISubmitInvoiceFromEmail
                 || input.Mode == FromEmailModes.Correction && input.InvoiceId is { } invoiceId && invoiceId != Guid.Empty
                     && input.ResubmissionOf is { } target && InvoiceBlockedHold.IsOwnSubmission(invoiceId, target))
             // Review round 5 (pass-2 F4-2): the route's body shape and 095's own checks refuse these first, with the contract's answers.
-            || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty
+            // EB-D-223 (task 095e): a submission names a firm; the service refuses a null one first, so this is defence in depth.
+            || input.FirmId is null || input.FirmId == Guid.Empty || input.CoreRecord is null || input.CoreRecord.RecordId == Guid.Empty
             || input.FirmInvoiceNumber.Trim().Length > TrackingNumberAllocator.MaxFirmInvoiceNumberLength
             || input.PoNumber?.Trim().Length > InvoiceSubmissionService.MaxPoNumberLength
             || input.MarkedParts.Count(p => p.Mark == FromEmailMarks.Invoice) != 1

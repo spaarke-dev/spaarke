@@ -168,8 +168,8 @@ internal sealed class FromEmailSubmissionService
             correctedInvoice = correction.Invoice;
         }
 
-        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). No firm (095c-2): nothing to check here; the
-        //       phase gate for it is step 6b, after the replay of K ──
+        // ── 4. The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). No firm: nothing to check here; the
+        //       refusal for it is step 6b (EB-D-223), after the replay of K ──
         if (await CheckFirmAsync(input, ct) is { } firmRefusal)
         {
             return firmRefusal;
@@ -215,12 +215,12 @@ internal sealed class FromEmailSubmissionService
                 "This email was already submitted as an invoice too many times. Nothing was saved.");
         }
 
-        // ── 6b. Task 095c-2 review F1: no firm is accepted only in phase P2. The gate sits AFTER the replay, so a retry of a no-firm
-        //        submission that an instance in P2 accepted is answered with that row (the allocator's contract: a redelivery landing on a stale
-        //        P1 instance returns the row, it does not refuse it). It is still before step 7, so a refusal has saved and filed nothing. ──
-        if (input.FirmId is null && await CheckNoFirmPhaseAsync(ct) is { } phaseRefusal)
+        // ── 6b. EB-D-223 (task 095e): a submission that names no firm is refused, in every channel. The refusal sits AFTER the replay, so a
+        //        retry of a no-firm submission that was accepted before this rule is answered with that row (a replay, not a refusal). It is
+        //        still before step 7, so a refusal has saved and filed nothing. ──
+        if (input.FirmId is null && CheckNoFirm() is { } noFirmRefusal)
         {
-            return phaseRefusal;
+            return noFirmRefusal;
         }
 
         // ── 7. The communication, if the email was already captured, must not be filed under another core record (409) ──
@@ -344,14 +344,14 @@ internal sealed class FromEmailSubmissionService
 
     /// <summary>
     /// The firm: active (400 / 503), then linked to the record (D-106: 403 / 503). A no-firm request (null or absent) has no firm to check, so
-    /// it passes here; <see cref="CheckNoFirmPhaseAsync"/> gates it after the replay of K. The empty id is the 400 <c>firm_invalid</c>. A
+    /// it passes here; <see cref="CheckNoFirm"/> refuses it after the replay of K. The empty id is the 400 <c>firm_invalid</c>. A
     /// Correction's firm is compared with the replaced invoice's later (<see cref="InvoiceSubmissionService.CorrectionKeepsFirm"/>).
     /// </summary>
     private async Task<FromEmailSubmissionOutcome?> CheckFirmAsync(FromEmailSubmissionInput input, CancellationToken ct)
     {
         if (input.FirmId is not { } firmId)
         {
-            // No firm: no firm to check. The phase gate is CheckNoFirmPhaseAsync, run after the replay of K (review F1).
+            // No firm: no firm to check. The refusal is CheckNoFirm, run after the replay of K (review F1).
             return null;
         }
 
@@ -379,18 +379,13 @@ internal sealed class FromEmailSubmissionService
     }
 
     /// <summary>
-    /// Task 095c-2 (owner 2026-11-03; review F1 moved it after the replay of K): a no-firm request is accepted only once this environment's
-    /// tracking-scope key is Active (phase P2, notes/095c section 8.2). In P0 and P1 it is the 400 <c>firm_invalid</c> "A firm is required."
-    /// that the empty id gets. It runs before the communication read and the save, so a refusal has written and filed nothing.
+    /// EB-D-223 (task 095e; supersedes the 095c-2 phase gate): a submission that names no firm is refused in every channel, so no new invoice
+    /// is created held for a firm. It is the 400 <c>firm_invalid</c> "A firm is required." that the empty id gets. It runs after the replay of K
+    /// (a retry of an earlier accepted no-firm submission is still answered as a replay) and before the communication read and the save, so a
+    /// refusal has written and filed nothing.
     /// </summary>
-    private async Task<FromEmailSubmissionOutcome?> CheckNoFirmPhaseAsync(CancellationToken ct)
-    {
-        if (await _submissions.CanSubmitWithoutFirmAsync(ct))
-        {
-            return null;
-        }
-
-        _logger.LogInformation("From-email submission with no firm refused before any write: the tracking-scope key is not Active yet (400)");
+    private FromEmailSubmissionOutcome? CheckNoFirm()
+    {        _logger.LogInformation("From-email submission with no firm refused before any write (400)");
         return FromEmailSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
     }
 

@@ -318,6 +318,8 @@ public sealed class InvoiceAssignFirmService
     private static readonly string[] InvoiceColumns =
     [
         "statecode", "statuscode", "versionnumber", InvoiceSubmissionPersister.InvoiceVendorOrg, InvoiceReviewService.InvTrackingNumber,
+        // EB-D-226 (task 095e): the name the apply re-names, and the date its fallback uses.
+        InvoiceReviewService.InvName, InvoiceReviewService.InvInvoiceDate,
         .. EligibleApproverResolver.CoreLookupColumns(InvoiceReviewReadService.InvoiceEntity),
     ];
 
@@ -657,12 +659,17 @@ public sealed class InvoiceAssignFirmService
         // ── What the apply renames and the firm_missing Signal set (read app-only, before any write). ──
         InvoiceSubmissionAfterSteps.ResolvedSignalSet signals;
         IReadOnlyList<Entity> lines, approvals, files;
+        string firmRecordName;
         try
         {
             signals = await ReadFirmMissingSignalsAsync(invoiceId, ct).ConfigureAwait(false);
             lines = await ReadLinesAsync(invoiceId, ct).ConfigureAwait(false);
             approvals = await ReadApprovalsAsync(invoiceId, ct).ConfigureAwait(false);
             files = await ReadStoredFilesAsync(invoiceId, ct).ConfigureAwait(false);
+
+            // EB-D-226 (task 095e): the firm's record name names the invoice. Read here, once, before any write; a fault (or no name) is a 503
+            // with nothing changed, never a rename from some other name.
+            firmRecordName = await ReadFirmRecordNameAsync(firmId, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -682,6 +689,8 @@ public sealed class InvoiceAssignFirmService
             state.Submission.GetAttributeValue<int?>(TrackingNumberAllocator.SequenceColumn), state.InvoiceVersion, state.Findings, signals,
             lines, approvals, files)
         {
+            InvoiceNameFrom = invoice.GetAttributeValue<string>(InvoiceReviewService.InvName),
+            InvoiceNameTo = InvoiceReviewService.BuildInvoiceName(firmRecordName, firmInvoiceNumber, invoice.GetAttributeValue<DateTime?>(InvoiceReviewService.InvInvoiceDate)),
             WriteReviewDetail = await ReviewDetailProbe.IsPresentAsync(_entities, _logger, ct).ConfigureAwait(false),
             SubmissionReasonCode = state.Submission.GetAttributeValue<string>(InvoiceSubmissionPersister.SubmissionReasonCode),
             OtherSubmissions = state.OtherSubmissions
@@ -1036,6 +1045,13 @@ public sealed class InvoiceAssignFirmService
         IReadOnlyList<Entity> Approvals,
         IReadOnlyList<Entity> Files)
     {
+        /// <summary>EB-D-226 (task 095e): the invoice's name before the apply (the rename mapping's <c>from</c>), as read with the invoice.</summary>
+        public string? InvoiceNameFrom { get; init; }
+
+        /// <summary>EB-D-226 (task 095e): the invoice's name from the firm now on it (<see cref="InvoiceReviewService.BuildInvoiceName"/>: the firm
+        /// record's name and the firm invoice number), written in the apply's invoice update. Null only in a test plan that names none.</summary>
+        public string? InvoiceNameTo { get; init; }
+
         /// <summary>082c-2: whether <see cref="InvoiceReviewDetail.Column"/> exists (read by the service before it builds the plan).</summary>
         public bool WriteReviewDetail { get; init; }
 
@@ -1069,6 +1085,18 @@ public sealed class InvoiceAssignFirmService
                 [InvoiceReviewService.InvTrackingNumber] = number,
                 [InvoiceFirmHold.InvoiceHoldColumn] = InvoiceFirmHold.InvoiceRerunPendingValue,
             };
+
+            // EB-D-226 (task 095e): the invoice is named from the firm now on it, in this same update, as its lines and approval are renamed
+            // for the new number. Recorded in the rename mapping only when the name changed.
+            if (InvoiceNameTo is { } newInvoiceName)
+            {
+                invoice[InvoiceReviewService.InvName] = newInvoiceName;
+                if (!string.Equals(InvoiceNameFrom, newInvoiceName, StringComparison.Ordinal))
+                {
+                    renamed.Add(new AssignFirmRename(
+                        InvoiceReviewReadService.InvoiceEntity, InvoiceId, InvoiceReviewService.InvName, InvoiceNameFrom ?? string.Empty, newInvoiceName));
+                }
+            }
 
             // (The review detail, 082c-2 ontology D-205 writer 3, is set below, once the findings this apply stores are built.)
             if (InvoiceVersion is not null)
@@ -1288,6 +1316,19 @@ public sealed class InvoiceAssignFirmService
         query.Criteria.AddCondition(InvoiceSubmissionPersister.ApprovalInvoice, ConditionOperator.Equal, invoiceId);
         query.AddOrder($"{InvoiceSubmissionPersister.ApprovalEntity}id", OrderType.Ascending);
         return InvoiceReviewReadService.ReadPagedAsync(_entities, query, ct);
+    }
+
+    /// <summary>EB-D-226 (task 095e): the firm record's name (<c>sprk_organization</c>), app-only. Throws when there is no row or no name, so the
+    /// caller's read-fault answer (503, nothing changed) applies.</summary>
+    private async Task<string> ReadFirmRecordNameAsync(Guid firmId, CancellationToken ct)
+    {
+        const string organization = "sprk_organization";
+        var nameColumn = Sprk.Bff.Api.Services.Communication.RegardingNameFields.PrimaryNameField(organization)
+            ?? throw new InvalidOperationException("No primary name column is known for sprk_organization.");
+        var row = await _entities.RetrieveAsync(organization, firmId, [nameColumn], ct).ConfigureAwait(false);
+        return row?.GetAttributeValue<string>(nameColumn) is { } name && !string.IsNullOrWhiteSpace(name)
+            ? name
+            : throw new InvalidOperationException("The firm record has no name.");
     }
 
     /// <summary>The invoice's Stored File rows (a read: names only).</summary>

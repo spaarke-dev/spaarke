@@ -920,8 +920,9 @@ public static class InvoiceSubmissionEndpoints
 
                 var view = InvoiceSubmissionService.ToView(row);
                 var name = await ReadSubmitterNameAsync(row, entities, logger, ct);
+                var firmName = await ReadFirmNameAsync(view.FirmId, entities, logger, ct);
                 var shown = await service.WithReplacementNoteAsync([view], ReplacementGate(http, authorization), ct);
-                return Results.Ok(InvoiceSubmissionByEmailView.From(shown[0], name));
+                return Results.Ok(InvoiceSubmissionByEmailView.From(shown[0], name, firmName));
             }
 
             if (attempts.Count > MaxAttemptCandidates)
@@ -1012,6 +1013,43 @@ public static class InvoiceSubmissionEndpoints
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             logger.LogWarning(ex, "Submission by email: the submitter's name could not be read ({Fault})", ex.GetType().Name);
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+    }
+
+    /// <summary>
+    /// Task 095e (EB-D-226): the display name of the firm the attempt names (<c>sprk_organization</c>), read app-only, so the pane shows it without
+    /// a second call. Read whether or not the firm is still active (the attempt names it either way). Null when the attempt names no firm, the firm
+    /// row is gone, or it has no name; never an id. A read fault is the route's 503, like the other reads here.
+    /// </summary>
+    private static async Task<string?> ReadFirmNameAsync(Guid? firmId, IGenericEntityService entities, ILogger logger, CancellationToken ct)
+    {
+        if (firmId is not { } id || id == Guid.Empty)
+        {
+            return null;
+        }
+
+        const string organization = "sprk_organization";
+        var nameColumn = Services.Communication.RegardingNameFields.PrimaryNameField(organization);
+        if (nameColumn is null)
+        {
+            logger.LogWarning("Submission by email: no primary name column is known for {Entity}", organization);
+            throw InvoiceSubmissionService.ReadUnavailable();
+        }
+
+        try
+        {
+            var firm = await entities.RetrieveAsync(organization, id, [nameColumn], ct);
+            var name = firm?.GetAttributeValue<string>(nameColumn);
+            return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        }
+        catch (Exception ex) when (IsNotFound(ex))
+        {
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Submission by email: the firm's name could not be read ({Fault})", ex.GetType().Name);
             throw InvoiceSubmissionService.ReadUnavailable();
         }
     }
@@ -1251,6 +1289,10 @@ public sealed record InvoiceSubmissionByEmailView
 
     public Guid? FirmId { get; init; }
 
+    /// <summary>Task 095e (EB-D-226): the name of the firm <see cref="FirmId"/> names (read even when the firm is no longer active); null when
+    /// the attempt names no firm (an invoice held for a firm, from before EB-D-223) or the firm has no readable name.</summary>
+    public string? FirmName { get; init; }
+
     public InvoiceCoreRecord? CoreRecord { get; init; }
 
     public DateTime? CreatedOn { get; init; }
@@ -1271,7 +1313,7 @@ public sealed record InvoiceSubmissionByEmailView
     /// <summary>True when the attempt corrects an existing invoice (it names the earlier submission it replaces).</summary>
     public bool IsCorrection { get; init; }
 
-    internal static InvoiceSubmissionByEmailView From(InvoiceSubmissionView view, string? submittedByName) => new()
+    internal static InvoiceSubmissionByEmailView From(InvoiceSubmissionView view, string? submittedByName, string? firmName = null) => new()
     {
         SubmissionId = view.SubmissionId,
         TrackingNumber = view.TrackingNumber,
@@ -1283,6 +1325,7 @@ public sealed record InvoiceSubmissionByEmailView
         OutcomeReasonCode = view.OutcomeReasonCode,
         DocumentId = view.DocumentId,
         FirmId = view.FirmId,
+        FirmName = view.FirmId is null ? null : firmName,
         CoreRecord = view.CoreRecord,
         CreatedOn = view.CreatedOn,
         ReplacedBy = view.ReplacedBy,
