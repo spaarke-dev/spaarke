@@ -385,6 +385,12 @@ internal static class OwnedChildWrite
         if (BffManagedPairColumnsOf(table).Count == 0)
             return await KeepRegardingPairWholeAsync(user, table, entitySetName, recordId, item, logger, ct).ConfigureAwait(false);
 
+        // Task 045f: a sent record URL names the record the pair names after the write (the stored half read as the caller).
+        var url = await KeepRegardingRecordUrlAsync(user, table, entitySetName, recordId, item, ct).ConfigureAwait(false);
+        if (url.Refusal is not null)
+            return url;
+        item = url.Item;
+
         var pair = PairOf(item);
         if (!pair.SetsEither || (pair.SetsId && pair.SetsType))
             return (item, null);
@@ -1044,7 +1050,10 @@ internal static class OwnedChildWrite
         ILogger? logger, CancellationToken ct)
     {
         item = WithCanonicalFamilyPairId(table, item);
+        var sentUrl = RegardingRecordUrlRuleApplies(table) && PairWriteOf(item).SetsUrl; // not a url the planner derives
         var kept = await KeepRegardingPairWholeCoreAsync(user, table, entitySetName, recordId, item, logger, ct).ConfigureAwait(false);
+        if (kept.Refusal is null && sentUrl) // task 045f: a sent record URL names the record the pair names after the write
+            kept = await KeepRegardingRecordUrlAsync(user, table, entitySetName, recordId, kept.Item, ct).ConfigureAwait(false);
         return kept.Refusal is not null
             ? kept
             : await KeepInvoiceFamilyResolverFieldsAsync(user, table, entitySetName, recordId, kept.Item, logger, ct).ConfigureAwait(false);
@@ -1281,17 +1290,62 @@ internal static class OwnedChildWrite
 
     /// <summary>
     /// Task 045b: the update planner on an APP-ONLY path's Web API dictionary (the playbook Update Record node and confirmed
-    /// proposals, the playbook output mapping, the field-mapping push), with the app-only reader the path already has. It adds
-    /// no check (UAC-r2, 2026-11-07). A row or catalog row that does not exist leaves the payload as sent (the write answers
-    /// its own not-found); any other failed read refuses, nothing written (fail closed).
+    /// proposals, the playbook output mapping, the field-mapping push), with the app-only reader the path already has. The
+    /// planner adds no check (UAC-r2, 2026-11-07): a row or catalog row that does not exist leaves the pair as sent (the write
+    /// answers its own not-found); any other failed read refuses, nothing written (fail closed).
     /// </summary>
+    /// <remarks>Task 045f: then a record URL the payload sends is decided (<see cref="KeepRegardingRecordUrlAppOnlyAsync"/>): it
+    /// must name the record the pair names after the write. On a write run as a person, the stored row is read as that person
+    /// first, before the planner, whatever halves the write sends: a row they cannot read or that is not there for them is
+    /// refused (read failed) and nothing is written. On an app-only write, the stored row is read only when the write does not
+    /// send both pair halves (on the thread, does not set the deciding lookup), and a row that does not exist is then refused.
+    /// A URL the planner derives is not decided again.</remarks>
     /// <returns>The payload to write: <paramref name="payload"/> itself when nothing applies, otherwise a copy.</returns>
-    /// <exception cref="RecordOwnerUnresolvedException">A read the planner needs failed; nothing was written.</exception>
+    /// <exception cref="RecordOwnerUnresolvedException">A read the planner needs failed, or a sent record URL does not name the
+    /// row's regarding record; nothing was written.</exception>
+    /// <param name="storedRowAsPerson">Task 045f: on a write run AS a person, the reader of the stored row as that person
+    /// (<see cref="PersonStoredRowReader"/>), so a sent URL is decided on what they can read; null on an app-only write.</param>
     internal static async Task<Dictionary<string, object?>> KeepRegardingPairWholeAppOnlyAsync(
         IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
         ILogger? logger, CancellationToken ct, bool lookupsAreMapped = false,
         Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? displayRecord = null,
-        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? movedDisplayRecord = null)
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? movedDisplayRecord = null,
+        Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>>? storedRowAsPerson = null)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        var sent = RegardingPairWrite.Of(table, payload);
+        var sentUrl = RegardingRecordUrlRuleApplies(table) && sent.SetsUrl; // not a derived one
+
+        // Task 045f fix round 3: on a write run as a person that sends a URL, the stored row is read as that person FIRST,
+        // whatever pair halves the write sends — before the planner fills a half from what it reads app-only. A row they
+        // cannot read, or that is not there for them, is the read-failed refusal, so the answer never turns on a row they
+        // cannot see. A readable row is decided as before (the one read is reused).
+        if (sentUrl && storedRowAsPerson is not null && !string.IsNullOrWhiteSpace(sent.UrlText))
+        {
+            var asPerson = await storedRowAsPerson(ct).ConfigureAwait(false);
+            if (asPerson.Value is null)
+            {
+                throw new RecordOwnerUnresolvedException(table, RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                    "what it is filed under could not be read, so it was not written"));
+            }
+
+            storedRowAsPerson = _ => Task.FromResult(asPerson);
+        }
+
+        var planned = await KeepRegardingPairWholeAppOnlyCoreAsync(
+                entities, table, recordId, payload, path, logger, ct, lookupsAreMapped, displayRecord, movedDisplayRecord)
+            .ConfigureAwait(false);
+        return sentUrl
+            ? await KeepRegardingRecordUrlAppOnlyAsync(entities, table, recordId, planned, ct, storedRowAsPerson).ConfigureAwait(false)
+            : planned;
+    }
+
+    /// <summary>The 045b planner on an app-only path's payload (see <see cref="KeepRegardingPairWholeAppOnlyAsync"/>).</summary>
+    private static async Task<Dictionary<string, object?>> KeepRegardingPairWholeAppOnlyCoreAsync(
+        IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
+        ILogger? logger, CancellationToken ct, bool lookupsAreMapped,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? displayRecord,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? movedDisplayRecord)
     {
         if (!RegardingPairPlannerApplies(table, payload))
             return payload;
@@ -1348,6 +1402,397 @@ internal static class OwnedChildWrite
         var change = PairChangeOf(table, payload);
         return !change.Unreadable && (change.WritesPair || change.LookupsSet.Count > 0 || change.LookupsCleared.Count > 0);
     }
+
+    // ── Task 045f: the regarding record URL names the row's regarding record, on every pair table and the thread ───────────
+
+    /// <summary>Task 045f: the communication thread. It carries no ADR-024 pair, but it is filed under the record its typed
+    /// regarding lookups name (<see cref="Sprk.Bff.Api.Services.Communication.ThreadResolver.ThreadRegardingColumns"/>, in
+    /// ADR-024 priority order), and it stores that record's URL.</summary>
+    internal const string ThreadTable = "sprk_communicationthread";
+
+    private static bool IsThread(string table) => string.Equals(table.Trim(), ThreadTable, StringComparison.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlyDictionary<string, Guid?> NoSentLookups = new Dictionary<string, Guid?>();
+
+    /// <summary>
+    /// Task 045f: the tables whose record URL <see cref="DecideRegardingRecordUrlAsync"/> decides — every pair table
+    /// (<see cref="RegardingPairTables"/>) except the six invoice-family tables, whose URL is decided against the core record
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync"/>, task 045e), and the communication thread
+    /// (<see cref="ThreadTable"/>), against its typed regarding.
+    /// </summary>
+    internal static bool RegardingRecordUrlRuleApplies(string table) =>
+        IsThread(table)
+        || (RegardingPairTables.Contains(table.Trim())
+            && !InvoiceFamilyCoreRecordGuard.CoreRecordLookups.ContainsKey(table.Trim().ToLowerInvariant()));
+
+    /// <summary>
+    /// Task 045f: whether an app-only path that asks <see cref="KeepRegardingPairWholeAppOnlyAsync"/> only when it applies must
+    /// ask it for <paramref name="payload"/> — the update planner applies (<see cref="RegardingPairPlannerApplies"/>), or the
+    /// payload sends a record URL the 045f rule decides (<see cref="RegardingRecordUrlRuleApplies"/>).
+    /// </summary>
+    internal static bool RegardingPairWriteApplies(string table, IEnumerable<KeyValuePair<string, object?>> payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        var pairs = payload as IReadOnlyCollection<KeyValuePair<string, object?>> ?? payload.ToList();
+        return RegardingPairPlannerApplies(table, pairs)
+               || (RegardingRecordUrlRuleApplies(table) && RegardingPairWrite.Of(table, pairs).SetsUrl);
+    }
+
+    /// <summary>What <see cref="DecideRegardingRecordUrlAsync"/> answered: nothing to do, the URL to store (canonical), a
+    /// refusal (<see cref="RegardingPairWrite.RecordUrlMismatchCode"/>), or the read that failed (nothing is written).</summary>
+    internal readonly record struct RegardingRecordUrlDecision(
+        string? CanonicalUrl, bool Refused, int? FailedStatus, DataverseUserResponse? Failure)
+    {
+        public static RegardingRecordUrlDecision Unchanged => default;
+
+        public static RegardingRecordUrlDecision Refuse => new(null, true, null, null);
+
+        public bool Failed => FailedStatus is not null;
+    }
+
+    /// <summary>
+    /// Task 045f, the ONE decision every BFF write path asks (the child-record PATCH, the chat update tool, the playbook Update
+    /// Record node, the output orchestrator, the create): on a table the rule decides (<see cref="RegardingRecordUrlRuleApplies"/>),
+    /// a record URL the write sends names the record the row is filed under after the write — on a pair table the pair the same
+    /// write sends, else the stored one; on the thread the first typed regarding lookup, in priority order, that the row holds
+    /// after the write (a lookup the write sets or clears replaces the stored value of that column only, so a stored
+    /// higher-priority lookup still beats a lower one the write sets) — read with the path's own reader.
+    /// <list type="bullet">
+    /// <item>No URL sent, or a clear (null or blank): unchanged, nothing read.</item>
+    /// <item>A URL that names no record (<see cref="RegardingPairWrite.TryReadRecordUrl"/>), a row that names none after the
+    /// write (no id, an id that is not one, an unreadable pair value, a type naming no table the reader can see, no typed
+    /// regarding), or a URL naming another table or record: refused.</item>
+    /// <item>Otherwise admitted, and stored in canonical form (<see cref="RegardingPairWrite.TryAdmitRecordUrl"/>).</item>
+    /// <item>Fail closed: a read that fails is returned as failed (nothing is written); the caller's cancellation propagates.</item>
+    /// </list>
+    /// </summary>
+    /// <param name="written">What the write sends of the pair and the URL, after the update planner.</param>
+    /// <param name="storedRow">The stored row (its pair, and on the thread its typed regarding lookups); null on a create.</param>
+    /// <param name="pairType">The catalog reader: the table a pair type names.</param>
+    /// <param name="sentLookups">On the thread: the typed regarding lookups the write sets (an id) or clears (null).</param>
+    internal static async Task<RegardingRecordUrlDecision> DecideRegardingRecordUrlAsync(
+        string table, RegardingPairWrite written,
+        Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>>? storedRow,
+        Func<Guid, CancellationToken, Task<RegardingPairRead<RegardingPairType>>> pairType,
+        CancellationToken ct,
+        IReadOnlyDictionary<string, Guid?>? sentLookups = null)
+    {
+        ArgumentNullException.ThrowIfNull(pairType);
+        if (!RegardingRecordUrlRuleApplies(table) || !written.SetsUrl || string.IsNullOrWhiteSpace(written.UrlText))
+            return RegardingRecordUrlDecision.Unchanged;
+        if (written.Unreadable || !RegardingPairWrite.TryReadRecordUrl(written.UrlText, out _, out _))
+            return RegardingRecordUrlDecision.Refuse;
+        if (IsThread(table))
+            return await DecideThreadRecordUrlAsync(written.UrlText, sentLookups ?? NoSentLookups, storedRow, ct).ConfigureAwait(false);
+
+        var idText = written.SetsId ? written.IdText : null;
+        var typeId = written.SetsType ? written.TypeId : null;
+        if ((!written.SetsId || !written.SetsType) && storedRow is not null)
+        {
+            var read = await storedRow(ct).ConfigureAwait(false);
+            if (read.Value is not { } stored)
+                return new RegardingRecordUrlDecision(null, false, read.Status, read.Failure);
+            if (!written.SetsId)
+                idText = stored.IdText;
+            if (!written.SetsType)
+                typeId = stored.TypeId;
+        }
+
+        if (!Guid.TryParse(idText?.Trim(), out var pairId) || pairId == Guid.Empty)
+            return RegardingRecordUrlDecision.Refuse;
+
+        string? pairTable = null;
+        if (typeId is { } type && type != Guid.Empty)
+        {
+            var named = await pairType(type, ct).ConfigureAwait(false);
+            if (named.Value is null)
+            {
+                return named.Status is 403 or 404
+                    ? RegardingRecordUrlDecision.Refuse // a type naming no table this reader can see names no record
+                    : new RegardingRecordUrlDecision(null, false, named.Status, named.Failure);
+            }
+
+            if (named.Value.Table is not { } namedTable)
+                return RegardingRecordUrlDecision.Refuse;
+            pairTable = namedTable;
+        }
+
+        return Admit(written.UrlText, pairTable, pairId);
+    }
+
+    private static RegardingRecordUrlDecision Admit(string? url, string? table, Guid id) =>
+        RegardingPairWrite.TryAdmitRecordUrl(url, table, id, out var canonical)
+            ? new RegardingRecordUrlDecision(canonical, false, null, null)
+            : RegardingRecordUrlDecision.Refuse;
+
+    /// <summary>The thread's half of <see cref="DecideRegardingRecordUrlAsync"/>: the record it is filed under after the write
+    /// is its first typed regarding lookup, in ADR-024 priority order, that the write sets, else that the row holds (a lookup the
+    /// write clears holds nothing). The stored row is read only when the write does not decide it.</summary>
+    private static async Task<RegardingRecordUrlDecision> DecideThreadRecordUrlAsync(
+        string? url, IReadOnlyDictionary<string, Guid?> sentLookups,
+        Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>>? storedRow, CancellationToken ct)
+    {
+        IReadOnlyDictionary<string, Guid>? stored = null;
+        foreach (var (recordTable, column) in Sprk.Bff.Api.Services.Communication.Engine.RegardingFieldMap.All)
+        {
+            if (!Sprk.Bff.Api.Services.Communication.ThreadResolver.ThreadRegardingColumns.Contains(column, StringComparer.OrdinalIgnoreCase))
+                continue;
+            if (sentLookups.TryGetValue(column, out var sentId))
+            {
+                if (sentId is { } id && id != Guid.Empty)
+                    return Admit(url, recordTable, id);
+                continue; // cleared by this write
+            }
+
+            if (stored is null)
+            {
+                if (storedRow is null)
+                {
+                    stored = new Dictionary<string, Guid>();
+                }
+                else
+                {
+                    var read = await storedRow(ct).ConfigureAwait(false);
+                    if (read.Value is not { } row)
+                        return new RegardingRecordUrlDecision(null, false, read.Status, read.Failure);
+                    stored = row.Lookups;
+                }
+            }
+
+            if (stored.TryGetValue(column, out var storedId) && storedId != Guid.Empty)
+                return Admit(url, recordTable, storedId);
+        }
+
+        return RegardingRecordUrlDecision.Refuse; // filed under nothing: the URL names no record of the row
+    }
+
+    /// <summary>Task 045f: the thread's typed regarding lookups a mapped item sets (an id) or clears (null); empty elsewhere.</summary>
+    internal static IReadOnlyDictionary<string, Guid?> SentThreadLookups(string table, DataverseWriteItemMapper.MappedItem item)
+    {
+        if (!IsThread(table))
+            return NoSentLookups;
+        var columns = Sprk.Bff.Api.Services.Communication.ThreadResolver.ThreadRegardingColumns;
+        var sent = new Dictionary<string, Guid?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var lookup in item.Lookups.Where(l => columns.Contains(l.Column, StringComparer.OrdinalIgnoreCase)))
+            sent[lookup.Column] = lookup.RecordId;
+        foreach (var cleared in item.ClearedColumns.Where(c => columns.Contains(c, StringComparer.OrdinalIgnoreCase)))
+            sent[cleared] = null;
+        return sent;
+    }
+
+    /// <summary>Task 045f: the thread's typed regarding lookups a Web API dictionary sets (a reference or a bind path) or clears
+    /// (null); empty elsewhere. A value that names no record is a clear.</summary>
+    internal static IReadOnlyDictionary<string, Guid?> SentThreadLookups(string table, IEnumerable<KeyValuePair<string, object?>> payload)
+    {
+        if (!IsThread(table))
+            return NoSentLookups;
+        var columns = Sprk.Bff.Api.Services.Communication.ThreadResolver.ThreadRegardingColumns;
+        var sent = new Dictionary<string, Guid?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, raw) in payload)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = SecureRootInheritance.NormalizeColumn(key).Trim();
+            if (columns.Contains(column, StringComparer.OrdinalIgnoreCase))
+                sent[column] = raw is null or JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined } ? null : ReferencedId(raw);
+        }
+
+        return sent;
+    }
+
+    /// <summary>The catalog read AS THE CALLER of <see cref="DecideRegardingRecordUrlAsync"/>: the table a pair type names
+    /// (<see cref="CallerWriteAuthorization.PairTypeTableAsync"/>), or the caller's failed read.</summary>
+    internal static Func<Guid, CancellationToken, Task<RegardingPairRead<RegardingPairType>>> CallerPairTypeTable(IDataverseUserClient user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        return async (typeId, ct) =>
+        {
+            var (typeRow, pairTable) = await PairTypeTableAsync(user, typeId, null, ct).ConfigureAwait(false);
+            return typeRow.IsSuccess
+                ? RegardingPairRead<RegardingPairType>.Ok(new RegardingPairType(pairTable, null))
+                : new RegardingPairRead<RegardingPairType>(null, typeRow.StatusCode, typeRow);
+        };
+    }
+
+    /// <summary>Task 045f: the thread's stored typed regarding lookups AS THE CALLER (one read of the row), or the caller's
+    /// failed read.</summary>
+    private static Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>> CallerThreadRow(
+        IDataverseUserClient user, string entitySetName, Guid recordId) =>
+        async ct =>
+        {
+            var row = await user.GetAsync($"{entitySetName}({recordId:D})", ct).ConfigureAwait(false);
+            if (!row.IsSuccess)
+                return new RegardingPairRead<RegardingPairRow>(null, row.StatusCode, row);
+            if (row.Body is not { ValueKind: JsonValueKind.Object } body)
+            {
+                return new RegardingPairRead<RegardingPairRow>(null, row.StatusCode, DataverseUserResponse.Fail(row.StatusCode,
+                    DataverseUserClientErrorCodes.BadRequest, "The record could not be read, so what it is filed under cannot be checked."));
+            }
+
+            return RegardingPairRead<RegardingPairRow>.Ok(new RegardingPairRow(null, null,
+                ThreadLookupsOf(c => body.TryGetProperty($"_{c}_value", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null)));
+        };
+
+    /// <summary>The thread's typed regarding lookups a row holds, read by <paramref name="valueOf"/> (the column → its id text).</summary>
+    private static Dictionary<string, Guid> ThreadLookupsOf(Func<string, string?> valueOf)
+    {
+        var lookups = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in Sprk.Bff.Api.Services.Communication.ThreadResolver.ThreadRegardingColumns)
+        {
+            if (Guid.TryParse(valueOf(column), out var id) && id != Guid.Empty)
+                lookups[column] = id;
+        }
+
+        return lookups;
+    }
+
+    /// <summary>
+    /// Task 045f (fix round 1, F1c): the stored row AS THE PERSON an app-only path's write runs as (the playbook node or the
+    /// output orchestrator impersonating a user), so a sent record URL is decided only on a row that person can read — never
+    /// on what the app read, which could tell them about a row they cannot. Null when the write is not run as a person. A row
+    /// the person cannot read, or that is not there, answers 403 or 404; any other fault, or no person query, 500 — the path's
+    /// read-failed answer, never the URL refusal. The caller's cancellation propagates.
+    /// </summary>
+    internal static Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>>? PersonStoredRowReader(
+        Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? query, IGenericEntityService? entities,
+        Guid? person, string table, Guid recordId)
+    {
+        if (person is not { } personId || personId == Guid.Empty)
+            return null;
+
+        return async ct =>
+        {
+            if (query is null || entities is null)
+                return new RegardingPairRead<RegardingPairRow>(null, 500, null);
+            var thread = IsThread(table);
+            var select = thread
+                ? string.Join(",", Sprk.Bff.Api.Services.Communication.ThreadResolver.ThreadRegardingColumns.Select(c => $"_{c}_value"))
+                : $"{SecureRootInheritance.PairIdColumn},_{SecureRootInheritance.PairTypeColumn}_value";
+            try
+            {
+                var entitySet = await entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
+                var rows = await query.QueryAsync(
+                    entitySet, $"$select={select}&$filter={table.Trim().ToLowerInvariant()}id eq {recordId:D}", personId, ct)
+                    .ConfigureAwait(false);
+                if (rows.Count == 0)
+                    return new RegardingPairRead<RegardingPairRow>(null, 404, null);
+                var row = rows[0];
+                string? Text(string column) =>
+                    row.TryGetValue(column, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+                return RegardingPairRead<RegardingPairRow>.Ok(thread
+                    ? new RegardingPairRow(null, null, ThreadLookupsOf(c => Text($"_{c}_value")))
+                    : new RegardingPairRow(
+                        Text(SecureRootInheritance.PairIdColumn),
+                        Guid.TryParse(Text($"_{SecureRootInheritance.PairTypeColumn}_value"), out var type) && type != Guid.Empty ? type : null,
+                        new Dictionary<string, Guid>()));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                var status = ex is HttpRequestException { StatusCode: { } code } ? (int)code : 500;
+                return new RegardingPairRead<RegardingPairRow>(null, status is 403 or 404 ? status : 500, null);
+            }
+        };
+    }
+
+    /// <summary>
+    /// Task 045f on a CALLER update path's mapped item (the child-record PATCH, the chat update tool), after the update planner:
+    /// <see cref="DecideRegardingRecordUrlAsync"/> with the stored row and the catalog read as the caller. An admitted URL is set
+    /// in canonical form; a refusal is the path's existing invalid-pair form with <see cref="RegardingPairWrite.RecordUrlMismatchCode"/>;
+    /// a failed read is the caller's own failure. Nothing is written on either.
+    /// </summary>
+    internal static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> KeepRegardingRecordUrlAsync(
+        IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
+        CancellationToken ct)
+    {
+        var written = PairWriteOf(item);
+        if (!RegardingRecordUrlRuleApplies(table) || !written.SetsUrl)
+            return (item, null);
+
+        var decided = await DecideRegardingRecordUrlAsync(
+                table, written,
+                IsThread(table) ? CallerThreadRow(user, entitySetName, recordId) : CallerReaders(user, table, entitySetName, recordId).Row,
+                CallerPairTypeTable(user), ct, SentThreadLookups(table, item))
+            .ConfigureAwait(false);
+        if (decided.Refused)
+            return (item, new RefileOutcome { Invalid = RegardingRecordUrlRefusalText });
+        if (decided.Failed)
+        {
+            return (item, new RefileOutcome
+            {
+                ClientFailure = decided.Failure ?? DataverseUserResponse.Fail(decided.FailedStatus!.Value,
+                    DataverseUserClientErrorCodes.BadRequest, "The record could not be read, so what it is filed under cannot be checked."),
+            });
+        }
+
+        return decided.CanonicalUrl is { } canonical && !string.Equals(written.UrlText, canonical, StringComparison.Ordinal)
+            ? (WithColumnsSet(table, item, new Dictionary<string, object?> { [RegardingPairWrite.RecordUrlColumn] = canonical }), null)
+            : (item, null);
+    }
+
+    /// <summary>
+    /// Task 045f on an APP-ONLY path's payload (the playbook Update Record node, the output orchestrator), after the update
+    /// planner: <see cref="DecideRegardingRecordUrlAsync"/> with the stored row and the catalog read app-only (a row that does
+    /// not exist holds nothing) — or, on a write run as a person, the stored row read as that person
+    /// (<paramref name="storedRowAsPerson"/>, <see cref="PersonStoredRowReader"/>), where a row they cannot read or that is not
+    /// there is the read-failed answer. An admitted URL is set in canonical form; a refusal is thrown with
+    /// <see cref="RegardingPairWrite.RecordUrlMismatchCode"/>, a failed read as the planner's own refusal. Nothing is written on
+    /// either.
+    /// </summary>
+    /// <exception cref="RecordOwnerUnresolvedException">The URL is refused, or a read failed.</exception>
+    internal static async Task<Dictionary<string, object?>> KeepRegardingRecordUrlAppOnlyAsync(
+        IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, CancellationToken ct,
+        Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>>? storedRowAsPerson = null)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        var written = RegardingPairWrite.Of(table, payload);
+        if (!RegardingRecordUrlRuleApplies(table) || !written.SetsUrl || string.IsNullOrWhiteSpace(written.UrlText))
+            return payload;
+
+        if (entities is null)
+        {
+            throw new RecordOwnerUnresolvedException(table, RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                "what it is filed under cannot be read here, so it was not written"));
+        }
+
+        var readers = AppOnlyReaders(entities, table, recordId);
+        var appOnlyRow = readers.Row;
+        if (IsThread(table))
+        {
+            appOnlyRow = async token =>
+            {
+                var read = await AppOnlyAsync(() => entities.RetrieveAsync(
+                    ThreadTable, recordId, Sprk.Bff.Api.Services.Communication.ThreadResolver.ThreadRegardingColumns, token), token)
+                    .ConfigureAwait(false);
+                return read.Value is { } row
+                    ? RegardingPairRead<RegardingPairRow>.Ok(new RegardingPairRow(null, null,
+                        ThreadLookupsOf(c => row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(c)?.Id.ToString("D"))))
+                    : new RegardingPairRead<RegardingPairRow>(null, read.Status, null);
+            };
+        }
+
+        var decided = await DecideRegardingRecordUrlAsync(
+                table, written,
+                storedRowAsPerson ?? (async token => await appOnlyRow(token).ConfigureAwait(false) is var row && row is { Value: null, Status: 404 }
+                    ? RegardingPairRead<RegardingPairRow>.Ok(new RegardingPairRow(null, null, new Dictionary<string, Guid>()))
+                    : row),
+                readers.Type, ct, SentThreadLookups(table, payload))
+            .ConfigureAwait(false);
+        if (decided.Refused)
+            throw new RecordOwnerUnresolvedException(table, RegardingPairWrite.RecordUrlMismatchCode, $"The update was NOT written: {RegardingRecordUrlRefusalText}.");
+        if (decided.Failed)
+        {
+            throw new RecordOwnerUnresolvedException(table, RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                "what it is filed under could not be read, so it was not written"));
+        }
+
+        return decided.CanonicalUrl is { } canonical && !string.Equals(written.UrlText, canonical, StringComparison.Ordinal)
+            ? WithColumnsSet(table, payload, new Dictionary<string, object?> { [RegardingPairWrite.RecordUrlColumn] = canonical })
+            : payload;
+    }
+
+    /// <summary>The refusal text of <see cref="RegardingPairWrite.RecordUrlMismatchCode"/>: its fixed reason and the code.</summary>
+    internal static string RegardingRecordUrlRefusalText =>
+        $"{RegardingPairWrite.RecordUrlMismatchReason} ({RegardingPairWrite.RecordUrlMismatchCode})";
 
     /// <summary><paramref name="item"/> without <paramref name="columns"/> — its body keys (a column, or a lookup's
     /// <c>{nav}@odata.bind</c>), columns, lookups and clears — so planned columns replace the item's own.</summary>

@@ -1485,7 +1485,8 @@ public static class FieldMappingEndpoints
 
                     // Task 045b (owner rulings Q4, Q7): the push never writes the pair, but a lookup it moves or clears takes the
                     // pair that repeated it along (the update planner, with the push's own app-only reader), before the checks
-                    // below and the write. It adds no check. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
+                    // below and the write. The planner adds no check; the same call decides a sent regarding record URL (task 045f),
+                    // which the push never maps. A failed read fails THIS child (RecordOwnerUnresolvedException, below).
                     // The push derives display values as the caller (CallerDisplayReader): a record the caller cannot read has
                     // its display columns cleared; any other failed read fails this child.
                     updatePayload = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
