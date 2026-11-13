@@ -174,6 +174,77 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Should().BeEmpty();
     }
 
+    // UAC-r2 condition 1: each refusal reaches the chat as the tool's plain error (its stable code and a sentence), never a
+    // thrown fault the host turns into a 500.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AChatContactRefusal_ReachesTheUserAsAPlainMessage_NeverABareFault(bool lookupFails)
+    {
+        ChatPlatformCallerMayCreate();
+        var store = new InMemoryContactIdentityStore { FailTeamLookup = lookupFails };
+        store.DefaultTeams[CustomerContactOwnerTests.CustomerBu] = lookupFails ? [CustomerContactOwnerTests.CustomerTeam] : [];
+
+        var created = await ThroughTheService(
+            "contact", ChatContact(), IdentityBindingTestKit.OwnerAwareBinder(store, CustomerContactOwnerTests.CustomerBu));
+
+        var refusal = created.Refusal!;
+        var code = Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler.RefusalErrorCode(refusal);
+        var text = Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler.RefusalText(refusal, "contact", "corr-052b");
+        text.Should().StartWith("The record ", "a plain sentence the chat shows");
+        text.Should().NotContain("Exception").And.NotContain("InvalidOperation").And.NotContain(" at Sprk.");
+        if (lookupFails)
+        {
+            refusal.Kind.Should().Be(RecordCreationRefusalKind.Unavailable);
+            code.Should().Be(Sprk.Bff.Api.Services.Ai.ToolErrorCodes.InternalError, "a fault keeps the tool's fault code");
+            text.Should().NotContain("CustomerBusinessUnitId", "a fault is not blamed on the configuration");
+        }
+        else
+        {
+            code.Should().Be(RecordOwnerRefusal.CustomerContactTeamUnresolved, "the resolver's own stable code");
+            text.Should().Contain("owner could not be decided");
+        }
+
+        _appCreates.Should().BeEmpty();
+    }
+
+    // ── Review F1-b: the secure decision comes first for a chat contact filed under an invoice ──────────────────────
+
+    private static DataverseWriteItemMapper.MappedItem ChatContactUnder(Guid invoice) =>
+        new($$"""{"firstname":"Ada","lastname":"Lovelace","sprk_Invoice@odata.bind":"/sprk_invoices({{invoice:D}})"}""",
+            ["firstname", "lastname", "sprk_invoice"])
+        {
+            Lookups = [new("sprk_invoice", "sprk_invoice", "sprk_invoices", invoice)],
+        };
+
+    [Fact]
+    public async Task AChatContactUnderASecureInvoice_IsRefusedAsTheSecureFilingRefusal_AsToday()
+    {
+        ChatPlatformCallerMayCreate();
+        CustomerContactOwnerTests.WithTheInvoices(_world);
+
+        var created = await ThroughTheService(
+            "contact", ChatContactUnder(CustomerContactOwnerTests.SecureInvoice), CustomerContactOwner(oneDefaultTeam: true));
+
+        created.Succeeded.Should().BeFalse("never owned by the customer team out of the invoice's isolation");
+        created.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.OwnerUnresolved);
+        created.Refusal.OwnerDecision!.IsSecureOwner.Should().BeTrue("the resolver named the Secure team, as it does today");
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AChatContactUnderAnOrdinaryInvoice_IsOwnedByTheCustomerTeam()
+    {
+        ChatPlatformCallerMayCreate();
+        CustomerContactOwnerTests.WithTheInvoices(_world);
+
+        var created = await ThroughTheService(
+            "contact", ChatContactUnder(CustomerContactOwnerTests.OrdinaryInvoice), CustomerContactOwner(oneDefaultTeam: true));
+
+        created.Succeeded.Should().BeTrue(created.Refusal?.Detail);
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(CustomerContactOwnerTests.CustomerTeam);
+    }
+
     [Fact]
     public async Task ATaskRegardingASecureMatter_IsRefusedOnBothPaths_AsTheSecureFilingRefusal_AndNothingIsCreated()
     {

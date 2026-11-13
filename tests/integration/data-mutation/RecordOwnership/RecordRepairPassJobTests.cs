@@ -247,6 +247,39 @@ public sealed class RecordRepairPassJobTests
     }
 
     // =====================================================================================
+    // Review F1-b: the secure decision comes first for a contact filed under an invoice
+    // =====================================================================================
+
+    [Fact]
+    public async Task AContactUnderASecureInvoice_IsNotReOwnedToTheCustomerTeam_TodaysRefusalStands()
+    {
+        _pass.CustomerTeamResolves();
+        CustomerContactOwnerTests.WithTheInvoices(World.Directory);
+        var id = _pass.NativeContactUnder(CustomerContactOwnerTests.SecureInvoice);
+
+        var outcome = await World.RepairAsync("contact", id, _pass.Context());
+
+        World.Writes.Should().NotContain(w => w.Fields.ContainsKey("ownerid"), "never re-owned out of the invoice's isolation");
+        outcome.OwnerRefusal!.OwnerDecision!.IsSecureOwner.Should().BeTrue("the resolver named the Secure team, as it does today");
+        World.Directory.Row("contact", id).GetAttributeValue<EntityReference>("ownerid")
+            .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+    }
+
+    [Fact]
+    public async Task AContactUnderAnOrdinaryInvoice_IsReOwnedToTheCustomerTeam()
+    {
+        _pass.CustomerTeamResolves();
+        CustomerContactOwnerTests.WithTheInvoices(World.Directory);
+        var id = _pass.NativeContactUnder(CustomerContactOwnerTests.OrdinaryInvoice);
+
+        var outcome = await World.RepairAsync("contact", id, _pass.Context());
+
+        outcome.Status.Should().Be(RecordRepairStatus.Repaired, outcome.ReasonCode);
+        World.Writes.Should().ContainSingle().Which.Fields["ownerid"]
+            .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam));
+    }
+
+    // =====================================================================================
     // AC4 (must fire): a contact whose customer team cannot be resolved
     // =====================================================================================
 
@@ -548,6 +581,14 @@ public sealed class RecordRepairPassJobTests
         /// <summary>A native contact owned by its creator (a person).</summary>
         public Guid NativeContact() =>
             NativeRow("contact");
+
+        /// <summary>A native contact filed under <paramref name="invoice"/>, owned by its creator (a person).</summary>
+        public Guid NativeContactUnder(Guid invoice) =>
+            Seed("contact", World.RowOf("contact", Directory.ChildBu, new Dictionary<string, object>
+            {
+                ["ownerid"] = new EntityReference("systemuser", RepairWorld.PersonInChild),
+                ["sprk_invoice"] = new EntityReference("sprk_invoice", invoice),
+            }), createdOn: null, createdBy: null, withoutCreatedOn: false);
 
         /// <summary>A native row of <paramref name="table"/>, filed under nothing, owned by its creator (a person).</summary>
         public Guid NativeRow(string table) =>

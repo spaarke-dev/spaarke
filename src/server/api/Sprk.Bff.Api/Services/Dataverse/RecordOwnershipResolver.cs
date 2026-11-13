@@ -2297,6 +2297,34 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
     }
 
+    /// <summary>
+    /// fm task 052b: the owner of a contact. The secure decision comes first, so the customer-team rule never moves a contact
+    /// out of a secure record's isolation: a contact filed under records (its <c>sprk_invoice</c> is an ownership parent) is
+    /// asked today's question over them, and a secure answer, or a refusal (a parent that cannot be read, a filing that cannot be
+    /// decided), stands; so does a secure answer over its Secure-only parents. A contact filed under nothing, or only under
+    /// records that are not secure, is owned by the customer business unit's default Owner team
+    /// (<see cref="CustomerContactOwnerAsync"/>). A fault propagates, as every resolver read does.
+    /// </summary>
+    private async Task<RecordOwnerResolution> ContactOwnerAsync(
+        IReadOnlyList<RecordOwnershipParent> parents, RecordOwnershipContext context, bool committedParentReads,
+        CancellationToken ct)
+    {
+        if (parents.Count > 0)
+        {
+            var filed = await ResolveFromParentsAsync(parents, context, committedParentReads, ct).ConfigureAwait(false);
+            if (filed.IsRefused || filed.IsSecureOwner)
+                return filed;
+        }
+        else if (context.SecureOnlyParents.Count > 0
+                 && await SecureDecisionAsync(Array.Empty<ParentFacts>(), context, committedParentReads, ct).ConfigureAwait(false)
+                     is { } secureOnlyDecided)
+        {
+            return secureOnlyDecided;
+        }
+
+        return await CustomerContactOwnerAsync(ct).ConfigureAwait(false);
+    }
+
     /// <summary>The owner decision alone — <see cref="ResolveOwnerAsync"/> without the person who asked.</summary>
     /// <param name="committedParentReads">#2143 round 3 (K1): <c>true</c> on the re-file path only — every parent fact
     /// (owning business unit, owning team, <c>sprk_issecure</c>, a parent's own filing) is read committed
@@ -2304,13 +2332,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private async Task<RecordOwnerResolution> ResolveOwnerOnlyAsync(
         RecordOwnershipContext context, bool committedParentReads, CancellationToken ct)
     {
-        // fm task 052b (owner 2026-11-08): a contact is filed under no record, so record-first has nothing to follow. Every
-        // contact — the chat create and the repair pass alike — is owned by the customer business unit's default Owner team,
-        // through the one lookup the identity-contact creates use. Asked first, whatever the question names.
-        if (string.Equals(context.ChildEntityLogicalName, ContactEntity, StringComparison.OrdinalIgnoreCase))
-            return await CustomerContactOwnerAsync(ct).ConfigureAwait(false);
-
         var parents = CollectParents(context);
+
+        // fm task 052b (owner 2026-11-08): a contact is owned by the customer business unit's default Owner team — AFTER the
+        // secure decision (ContactOwnerAsync).
+        if (string.Equals(context.ChildEntityLogicalName, ContactEntity, StringComparison.OrdinalIgnoreCase))
+            return await ContactOwnerAsync(parents, context, committedParentReads, ct).ConfigureAwait(false);
 
         // #2468: a DOCUMENT whose primary parent is a communication filed under nothing. Such a communication keeps its
         // creating identity (E1: the application user, or a root team) — a technical owner, never the family the document

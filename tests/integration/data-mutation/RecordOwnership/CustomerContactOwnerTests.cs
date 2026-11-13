@@ -113,6 +113,98 @@ public sealed class CustomerContactOwnerTests
         _store.Reads.Should().NotContain("owner-team");
     }
 
+    // ── The secure decision comes first: a contact filed under a secure record keeps today's answer ─────────────────────
+
+    internal static readonly Guid SecureInvoice = Guid.Parse("a052b000-0000-4000-8000-0000000001c1");
+    internal static readonly Guid OrdinaryInvoice = Guid.Parse("a052b000-0000-4000-8000-0000000001c2");
+
+    /// <summary>An invoice owned in the Secure Record business unit by its named team (secure), and an ordinary one.</summary>
+    internal static Directory WithTheInvoices(Directory directory) => directory
+        .WithRecord("sprk_invoice", SecureInvoice, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam)
+        .WithRecord("sprk_invoice", OrdinaryInvoice, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+    private static RecordOwnershipContext AContactUnder(Guid invoice) =>
+        AContact() with { Parents = [new RecordOwnershipParent("sprk_invoice", invoice)] };
+
+    [Fact]
+    public async Task AContactUnderASecureInvoice_KeepsTodaysSecureAnswer_NeverTheCustomerTeam()
+    {
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+        WithTheInvoices(_directory);
+
+        var answer = await Resolver(CustomerBu).ResolveOwnerAsync(AContactUnder(SecureInvoice), CancellationToken.None);
+
+        answer.IsSecureOwner.Should().BeTrue(answer.Reason);
+        answer.OwningTeamId.Should().NotBe(CustomerTeam, "the customer-team rule never takes a contact out of a secure record's isolation");
+        _store.Reads.Should().NotContain("owner-team", "the secure decision answered first");
+    }
+
+    [Fact]
+    public async Task AContactUnderAnOrdinaryInvoice_IsOwnedByTheCustomerTeam()
+    {
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+        WithTheInvoices(_directory);
+
+        var answer = await Resolver(CustomerBu).ResolveOwnerAsync(AContactUnder(OrdinaryInvoice), CancellationToken.None);
+
+        answer.OwningTeamId.Should().Be(CustomerTeam, "a contact under records that are not secure takes the customer team");
+        answer.IsSecureOwner.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AContactUnderAnInvoiceThatCannotBeRead_IsRefusedAsToday_NeverTheCustomerTeam()
+    {
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+
+        var answer = await Resolver(CustomerBu).ResolveOwnerAsync(AContactUnder(Guid.NewGuid()), CancellationToken.None);
+
+        answer.IsRefused.Should().BeTrue("a named parent that cannot be read is undecided: never read as not secure");
+        answer.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        _store.Reads.Should().NotContain("owner-team");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReFilingAContactUnderAnInvoice_DecidesTheSameAnswer(bool secure)
+    {
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+        var contact = Guid.NewGuid();
+        var invoice = secure ? SecureInvoice : OrdinaryInvoice;
+        WithTheInvoices(_directory).WithRecord("contact", contact, Directory.GeneralBu, extra: new()
+        {
+            ["owninguser"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", Directory.CallerUserId),
+            ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", Directory.CallerUserId),
+        });
+        var change = new Microsoft.Xrm.Sdk.EntityReference("sprk_invoice", invoice);
+        var request = new RecordReparent
+        {
+            EntityLogicalName = "contact",
+            RecordId = contact,
+            ParentChanges = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?> { ["sprk_invoice"] = change },
+            CallerSystemUserId = Directory.CallerUserId,
+        };
+
+        var answer = await Resolver(CustomerBu).ReparentAsync(
+            request,
+            _ =>
+            {
+                _directory.Write("contact", contact, new Dictionary<string, object?> { ["sprk_invoice"] = change });
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        if (secure)
+        {
+            answer.OwningTeamId.Should().NotBe(CustomerTeam, "re-filed under a secure invoice: today's secure answer");
+            _store.Reads.Should().NotContain("owner-team");
+        }
+        else
+        {
+            answer.OwningTeamId.Should().Be(CustomerTeam, answer.Reason);
+        }
+    }
+
     // ── Must fire: no team, no owner — and never the creator's ───────────────────────────────────────────────────────
 
     [Theory]
