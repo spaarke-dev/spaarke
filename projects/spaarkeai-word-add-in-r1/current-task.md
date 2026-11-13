@@ -12,7 +12,7 @@
 | **Open PR** | None. **#2793** ("Check again" after a firm is added in Spaarke; answers the Codex review comment on #2789) merged 2026-11-13 as **c2f366bf52** on the owner's go. Router, Gated jest, Production typecheck and ESLint passed; the server-test jobs were still pending and cannot be affected by a 2-file `.tsx` change. C:\wt134b removed. SWA deploy run 43482244492. |
 | **Next Action** | (1) Confirm the SWA deploy run 43482244492. (2) Owner check on dev after the deploys: a record with no firm shows the message, the link and Check again; "Open in Spaarke" works from the Invoice tab and the Save bar; a blocked pop-up shows its reason. (3) Wait for ebilling's 095e/095f/095g SHAs and contracts (B1 is already tolerant of 095e), uac-r2 deploy notices (range check, reply), and ontology's task 189 SHA + contract (Word Email tab). |
 | **Uncommitted** | Nothing in this worktree after this checkpoint commit. C:\wt134b is clean (pushed). |
-| **Live dev BFF** | **0c06f464e3** (live since 2026-11-13T13:26Z): master **92d0ca09f7** + mcp-r1 spike **d7369fecf1**. Every later dev deploy must include the spike. After-notice check: no add-in concern. `FlaggedOfficeEdit` is still unset; uac-r2 will say when it is on. |
+| **Live dev BFF** | **b100effac3** (live since 2026-11-13T20:39Z): master **c2f366bf52** + mcp-r1 spike **d7369fecf1**. Before it: 0c06f464e3. Every later dev deploy must include the spike. After-notice check: no add-in concern. `FlaggedOfficeEdit` is still unset; uac-r2 will say when it is on. |
 | **Owner checks** | All done. Word passed on 9411f604bb. On 0c06f464e3 the Outlook checks passed: email with attachments (030b), To Do, Submit Invoice, the correction (INV-0012.2 supersedes .1), and the banner plus its second-submit refusal. Child-BU team ownership is covered. The no-firm submit led to task 134. All of it was reported to uac-r2, who recorded the passes. |
 | **Last merge to master** | **#2789** (c534bc0b82, 2026-11-13, owner's go). The first CI run failed on our blocked-pop-up test: `useAnnounce` clears the live region after 1 s, and the suite took 92 s, so the test read it empty. Fixed in e243475993 with a MutationObserver. There was also a one-off Spaarke.Auth `BrowserMsalStrategy.dataverseUser` failure, which passed on the rerun. |
 
@@ -49,6 +49,7 @@
 - **Roles:** add-in user = Core User + Office Add In User; service and demo accounts never get the add-in role.
 
 ## Recent deploy checks (newest first; older ones in git log)
+- 2026-11-13 b100effac3 (master c2f366bf52 + spike d7369fecf1, live 20:39Z; parents verified): range 92d0ca09f7..c2f366bf52 is 19 commits. No Office, Finance, Communications or record-creation/ownership server files. The add-in commits are task 134 only (#2789, #2793, client). No add-in concern; sent to uac-r2.
 - 2026-11-13 0c06f464e3 (master 92d0ca09f7 + spike): 77 commits, with no add-in or Office/Finance server files. 197a (unfile/re-file ownership) and 022b (Restricted-source mapping, existing 400 code) need no pane change. No add-in concern.
 - 2026-11-12 9411f604bb (master e9208abc5e + spike): no add-in concern.
 - 2026-11-12 4e64670ea0, 6dbe69b9e2: no add-in concern. #2666 D-217: a Word Email-tab send filed to a record is archived as `.eml` server-side.
