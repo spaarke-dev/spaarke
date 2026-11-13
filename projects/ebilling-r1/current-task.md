@@ -31,7 +31,7 @@
 ## Next action (exact)
 
 1. **084d-5a fix round in progress**: implementer agent a5c9fb9f832058d79 (sonnet, base de52771371) is fixing the Opus findings (padding test, shared Like escaper, parity fields, a K4 note) plus uac-r2's drop-before-judge ruling as a separate commit (batched caller Read over the candidates, dropped before resolver/bound/tooMany; ceiling 1000). Then a scoped Sonnet re-check, the diff to uac-r2 (gates merge) and to ontology-r1, the merge, TASK-INDEX and notes.
-2. **DONE: ISS-021 #2797 filed** (deactivated Procedure still applies and can be assigned); ontology-r1 told 2026-11-13. The 089 refusal half needs the owner's OK; ask when 5a closes.
+2. **ISS-021 #2797:** resolver fix PR #2798 (ontology-r1 signed off; squash auto-merge on, owner OK merge-on-green). Then add the dry-run/write parity case on work. **EB-D-232 (owner, 2026-11-13): 089 assign/pin/exclude refuse statecode != 0** (409 `assignment.procedure_inactive`); being built on `task/eb-d-232-assign-inactive` from 914d343033 (after 5a). Tell ontology-r1 when built.
 3. **084d-5b, the client wizard.** Gate the entry point on `allowedSteps(...).create`. The pick list comes from the assignable route. Offer Follow latest or Pin, with versions from `GET /api/finance/procedures/{id}`. Show the Gap warning, and Impact on the dry run. Write through 089. Then jest, an Opus review, and the uac-r2 and ontology-r1 reviews.
 4. **Then mark 084d ✅** and go to task 112: deploy, ui-tests, the access-invariant check from session memory, and the step 3 probe. Its live changes need the owner's typed OK.
 5. **Then 095e → 095f → 095g** (owner rulings EB-D-223..226; `notes/095g-assign-firm.md`). 095g needs a design note to uac-r2 before any code.

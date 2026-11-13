@@ -14,7 +14,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | In progress: resolver fix PR https://github.com/spaarke-dev/spaarke/pull/2798 (ontology-r1 reviewed). Version reads are known limits. The 089 assign refusal needs the owner's OK. |
+| **Status** | In progress: resolver fix PR https://github.com/spaarke-dev/spaarke/pull/2798 (ontology-r1 reviewed, auto-merge on). Version reads are known limits. The 089 assign refusal was decided by the owner as EB-D-232 and is being built. |
 | **Urgency** | next-round |
 | **Filed** | 2026-11-13 |
 | **Source** | 084d-5a adversarial review (Opus), pre-existing finding, CONFIRMED |
