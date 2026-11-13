@@ -5,7 +5,7 @@
 
 ---
 
-**Checkpoint 2026-11-12** (after task 020). Branch `work/reuse-governance-tightening-r1`, all committed and pushed. **Items 1–3 merged to master: PR #2751 (`8c05f5b70f`, squash)**; master merged back, branch content = master.
+**Checkpoint 2026-11-13** (after task 033; items 1–3 state below is from 2026-11-12). Branch `work/reuse-governance-tightening-r1`, all committed and pushed. **Items 1–3 merged to master: PR #2751 (`8c05f5b70f`, squash)**; master merged back, branch content = master.
 
 **Done (9/19 as of 2026-11-12)**: 001, 002, 041, 042 (2026-11-11); 010, 011, 012, 021, 020 (2026-11-12). 041/042 merged to master (#2705, #2706); master merged into the branch (`29bcda5fe3`).
 - Items 1 (capability index), 2 (reuse scan: design-to-spec, pipeline fallback, task-create citation) and 3 (jscpd sweep + adversarial-reviewer checks) are complete on the branch.
@@ -14,8 +14,9 @@
 **Done (10/19)**: + 030 (2026-11-13). Owner approved all 9 package decisions ("Approve all"); `notes/package-reviews.md` (findings P-1..P-14: 8 Medium, 6 Low, 0 High), `notes/decisions.md` row.
 **Done (11/19)**: + 031 (2026-11-13). `@spaarke/ai-context` retired: types in ai-widgets `src/types/aiContext.ts`; census row + test entry removed; CI `client-typecheck`, deploy trigger, `Build-AllClientComponents.ps1`, `master-deploy` skill fixed. All builds/tests green (`notes/031-ai-context.md`). Item-4 changes stay on the branch — no PR yet (owner decides PR shape; merging auto-deploys SpaarkeAi to DEV).
 **Done (12/19)**: + 032 (2026-11-13). `@spaarke/legal-workspace` facade retired; SpaarkeAi declares `"legal-workspace": "file:../LegalWorkspace"` (LegalWorkspace `exports` `./src/index.ts`); census updated; docs + code-page-deploy skill corrected (the dual-deploy trap was never "resolved" — covered by the deploy path trigger). `notes/032-legal-workspace.md`.
-**Active task**: none. **Next**: **033** document-operations → ui-components (FULL; `package-reviews.md` §6 outline incl. SemanticSearch + Compose re-points and the 6 Compose `jest.mock` paths), then 034 (file the other six + P-findings + the pre-existing LegalWorkspace standalone-tsc errors from `notes/032-legal-workspace.md` "Found in passing"), 035 DEV deploy (owner OK), 040, 043, 080, 090.
-- Worktree now has node_modules/dist for all 13 shared libs + SpaarkeAi (from the 031 build) — reuse them for 032/033 verification.
+**Done (13/19)**: + 033 (2026-11-13). `@spaarke/document-operations` retired: `useDocumentActions` + test in ui-components `src/hooks` (main barrel, not pcf-safe); SemanticSearch (deep import), Compose, SpaarkeAi, LegalWorkspace re-pointed; CI compose gate, build script, client-lint list, CAPABILITY-INDEX fixed. PCF bundle unchanged. `notes/033-document-operations.md`.
+**Active task**: none. **Next**: **034** — file the other six package actions + P-findings (P-1 as its own issue) + the pre-existing standalone-tsc errors (LegalWorkspace: `notes/032-legal-workspace.md`; SemanticSearch: `notes/033-document-operations.md`, both "Found in passing"); then 035 DEV deploy (owner OK), 040, 043, 080, 090.
+- Worktree has node_modules/dist for all 12 shared libs, SpaarkeAi, LegalWorkspace, SemanticSearch, ScopeConfigEditor (PCF) and scripts/quality/client-lint.
 **Open, reported to owner**
 - ISS-001 #2683 — `node-executor-authoring.md` still names `ActionType` (≈15 min; offered to fix here).
 - ISS-003 #2713 — done (PR #2751), closed.

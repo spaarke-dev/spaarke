@@ -294,14 +294,6 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx tsc
 
-      - name: Install Spaarke.DocumentOperations deps
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npm install --legacy-peer-deps --no-audit --no-fund
-
-      - name: Build Spaarke.DocumentOperations
-        working-directory: src/client/shared/Spaarke.DocumentOperations
-        run: npx tsc
-
       - name: Install Spaarke.Compose.Components deps
         working-directory: src/client/shared/Spaarke.Compose.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund

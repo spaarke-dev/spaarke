@@ -139,11 +139,12 @@ jest.mock('@spaarke/auth', () => {
   };
 });
 
-// `@spaarke/ui-components` + `@spaarke/document-operations` resolve to built `dist/` bundles in this jest
+// `@spaarke/ui-components` resolves to its built `dist/` bundle in this jest
 // project whose own transitive `@spaarke/auth` require is unresolvable without a full sibling-package
 // build (the same pre-existing condition that stops the other ComposeWorkspace.*.test suites from running
-// here). Mock them to the tiny surface ComposeWorkspace actually consumes so this test is self-contained.
+// here). Mock it to the tiny surface ComposeWorkspace actually consumes so this test is self-contained.
 jest.mock('@spaarke/ui-components', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
   // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
   // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
   // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
@@ -166,13 +167,6 @@ jest.mock('@spaarke/ui-components', () => ({
   // above. A missing stub here resolved to `undefined` and threw the identical "Element
   // type is invalid" error the moment a promoted-document scenario rendered it.
   RichFilePreviewDialog: () => null,
-}));
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({
-    openInWeb: jest.fn(),
-    openInDesktop: jest.fn(),
-    isActing: false,
-  }),
 }));
 
 jest.mock('@spaarke/ai-widgets/events', () => ({

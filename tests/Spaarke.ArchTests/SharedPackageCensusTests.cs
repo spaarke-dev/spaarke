@@ -88,9 +88,7 @@ public class SharedPackageCensusTests
         new CensusEntry("@spaarke/compose-components", "Spaarke.Compose.Components", PackageStatus.Grandfathered, "ADR-012",
             "TipTap-based Compose workspace. TipTap may justify quarantine as a heavy dependency, but the "
             + "package has not been assessed against the three tests."),
-        new CensusEntry("@spaarke/document-operations", "Spaarke.DocumentOperations", PackageStatus.Grandfathered, "ADR-012",
-            "Open-in-Word, download, delete and send-to-index hooks. Abstracted I/O is the same contract as "
-            + "@spaarke/ui-components, which makes it a consolidation candidate."),
+        // @spaarke/document-operations: retired 2026-11-13; useDocumentActions moved to @spaarke/ui-components (src/hooks).
         new CensusEntry("@spaarke/ai-outputs", "Spaarke.AI.Outputs", PackageStatus.Grandfathered, "ADR-012",
             "AI output-pane and source-pane widgets and their registries. Its boundary with the sanctioned "
             + "@spaarke/ai-widgets package has not been assessed."),

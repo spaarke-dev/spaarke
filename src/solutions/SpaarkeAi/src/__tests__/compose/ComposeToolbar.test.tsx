@@ -23,7 +23,9 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 const mockOpenInWeb = jest.fn().mockResolvedValue(undefined);
 const mockOpenInDesktop = jest.fn().mockResolvedValue(undefined);
 
-jest.mock('@spaarke/document-operations', () => ({
+// ComposeToolbar imports only useDocumentActions from @spaarke/ui-components (moved there from the retired
+// document-operations package, reuse-governance-tightening-r1 task 033), so a full-module stub is enough.
+jest.mock('@spaarke/ui-components', () => ({
   useDocumentActions: jest.fn(() => ({
     openInWeb: mockOpenInWeb,
     openInDesktop: mockOpenInDesktop,

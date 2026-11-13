@@ -19,8 +19,6 @@
       "@spaarke/notifications/*": ["../../client/shared/Spaarke.Notifications/src/*"],
       "@spaarke/communication-components": ["../../client/shared/Spaarke.Communication.Components/src/index.ts"],
       "@spaarke/communication-components/*": ["../../client/shared/Spaarke.Communication.Components/src/*"],
-      "@spaarke/document-operations": ["../../client/shared/Spaarke.DocumentOperations/src/index.ts"],
-      "@spaarke/document-operations/*": ["../../client/shared/Spaarke.DocumentOperations/src/*"],
       "@spaarke/compose-components": ["../../client/shared/Spaarke.Compose.Components/src/index.ts"],
       "@spaarke/compose-components/*": ["../../client/shared/Spaarke.Compose.Components/src/*"],
       "legal-workspace": ["../LegalWorkspace/src/index.ts"],

@@ -34,11 +34,6 @@ const config: Config = {
     // ConversationPane tests).
     '^@spaarke/ui-components/(.*)$': '<rootDir>/../../client/shared/Spaarke.UI.Components/src/$1',
     '^@spaarke/auth$': '<rootDir>/../../client/shared/Spaarke.AI.Widgets/src/__mocks__/@spaarke/auth.ts',
-    // spaarkeai-compose-r1 task 043: `useDocumentActions` hook lives in
-    // @spaarke/document-operations (extracted from SemanticSearch in task 031).
-    // Map to source so ComposeToolbar tests can mock the hook directly.
-    '^@spaarke/document-operations$': '<rootDir>/../../client/shared/Spaarke.DocumentOperations/src/index.ts',
-    '^@spaarke/document-operations/(.*)$': '<rootDir>/../../client/shared/Spaarke.DocumentOperations/src/$1',
     // spaarkeai-compose-r1 task 091 (Phase 7): ComposeWorkspace + siblings
     // promoted from `src/solutions/SpaarkeAi/src/components/compose/` to
     // `@spaarke/compose-components` (Calendar Pattern D precedent). Map to

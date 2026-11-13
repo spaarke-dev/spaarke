@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ComposeWorkspace.saveLifecycle.test.tsx — spaarkeai-compose-r8 task 012 (FR-S05).
  *
  * THE CONTRACT: a save that never comes back cannot strand the editor, and two saves of the same
@@ -187,6 +187,7 @@ jest.mock('@spaarke/auth', () => {
 });
 
 jest.mock('@spaarke/ui-components', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
   // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
   // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
   // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
@@ -208,9 +209,6 @@ jest.mock('@spaarke/ui-components', () => ({
       ReactLib.createElement('button', { 'data-testid': 'form-modal-dismiss', onClick: props.onClose }, 'Cancel')
     );
   },
-}));
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
 }));
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),

@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (Amended 2026-11-10)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-11-13 (census: `@spaarke/ai-context` and `@spaarke/legal-workspace` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
+> **Last Updated**: 2026-11-13 (census: `@spaarke/ai-context`, `@spaarke/legal-workspace` and `@spaarke/document-operations` retired; previous: 2026-11-10 enumerated shared-package census, 2026-07-12 `@spaarke/visuals`)
 
 ---
 
@@ -71,13 +71,13 @@ The sanctioned packages are enumerated in the census below; the earlier open-end
 | `@spaarke/communication-components` | `Spaarke.Communication.Components` | Grandfathered — under review | Communications workspace components (Pattern D dual-use); a feature area, not a distinct contract |
 | `@spaarke/daily-briefing-components` | `Spaarke.DailyBriefing.Components` | Grandfathered — under review | Daily Briefing components (Pattern D dual-use); a feature area, not a distinct contract |
 | `@spaarke/compose-components` | `Spaarke.Compose.Components` | Grandfathered — under review | TipTap Compose workspace; TipTap may justify quarantine, not yet assessed against the three tests |
-| `@spaarke/document-operations` | `Spaarke.DocumentOperations` | Grandfathered — under review | Open-in-Word / download / delete hooks; abstracted I/O, the same contract as `@spaarke/ui-components` |
 | `@spaarke/ai-outputs` | `Spaarke.AI.Outputs` | Grandfathered — under review | AI output / source pane widgets; boundary with `@spaarke/ai-widgets` not yet assessed |
 <!-- shared-package-census:end -->
 
 **Census changes since 2026-11-10** (each one owner-approved in `projects/reuse-governance-tightening-r1/notes/package-reviews.md`):
 - 2026-11-13: `@spaarke/ai-context` retired. It held only six types; they moved to `@spaarke/ai-widgets` (`src/types/aiContext.ts`, exported from its barrel).
 - 2026-11-13: `@spaarke/legal-workspace` retired. It was a one-line re-export of the LegalWorkspace solution with one consumer. SpaarkeAi now declares a `file:` dependency on that solution (package `legal-workspace`, `exports` `./src/index.ts`). A solution exposing its own entry point to another solution is not a shared package.
+- 2026-11-13: `@spaarke/document-operations` retired. Its one hook, `useDocumentActions`, moved unchanged into `@spaarke/ui-components` (`src/hooks/useDocumentActions.ts`), exported from the main barrel only, not `pcf-safe`. Both consumers (SemanticSearch, Compose) already imported from ui-components.
 
 ---
 

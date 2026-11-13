@@ -2,7 +2,7 @@
  * ComposeWorkspace — a failed Open in Word is shown in the banner stack.
  *
  * The workspace binds Open in Word (web / desktop) through the REAL `useDocumentActions`
- * (@spaarke/document-operations source), whose fetch is `@spaarke/auth`'s authenticatedFetch. That fetch
+ * (@spaarke/ui-components source), whose fetch is `@spaarke/auth`'s authenticatedFetch. That fetch
  * THROWS ApiError (status + ProblemDetails) for a non-2xx; the hook turns it into "Couldn't open the
  * document: <reason>" as `actionError`. Before the fix the workspace never read `actionError`, so a failed
  * Open in Word showed nothing — the "Opening in Word…" indicator just stopped. Errors here are the REAL
@@ -81,9 +81,10 @@ jest.mock('@spaarke/auth', () => {
     }),
   };
 });
-// The REAL hook, from source (its dist is ESM).
-jest.mock('@spaarke/document-operations', () => jest.requireActual('../../../Spaarke.DocumentOperations/src/index'));
 jest.mock('@spaarke/ui-components', () => ({
+  // The REAL hook, from source (the package dist is ESM).
+  useDocumentActions: jest.requireActual('../../../Spaarke.UI.Components/src/hooks/useDocumentActions')
+    .useDocumentActions,
   ConfirmModal: () => null,
   createXrmNavigationService: () => ({ openLookup: jest.fn() }),
   createXrmDataService: () => ({ retrieveRecord: jest.fn() }),

@@ -8,7 +8,7 @@
  *
  * Heavy children are mocked to keep the test on the seam under test:
  *   - `./ComposeEditor`  — captured stub recording the `docxBytes` prop it receives.
- *   - `./ComposeToolbar` — pulls `@spaarke/document-operations` (auth-context runtime).
+ *   - `./ComposeToolbar` — pulls `useDocumentActions` (auth-context runtime).
  *   - `./hooks`          — BroadcastChannel / checkout / heartbeat side-effects.
  *   - `@spaarke/ai-widgets/events` — PaneEventBus dispatch/subscribe.
  *   - `@spaarke/auth`    — `authenticatedFetch` is the fetch boundary we drive.
@@ -69,7 +69,7 @@ jest.mock('./hooks', () => ({
   useComposeHeartbeatGate: () => undefined,
 }));
 
-// ── ComposeToolbar — avoid @spaarke/document-operations runtime auth ────────
+// ── ComposeToolbar — avoid useDocumentActions' runtime auth ────────────────
 jest.mock('./ComposeToolbar', () => ({
   ComposeToolbar: () => <div data-testid="compose-toolbar-stub" />,
 }));

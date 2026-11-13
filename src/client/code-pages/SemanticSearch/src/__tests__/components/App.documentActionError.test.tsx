@@ -1,7 +1,7 @@
 /**
  * App — a failed document action (open / download / delete / email link / send to index) is shown.
  *
- * `useDocumentActions` (real, from @spaarke/document-operations source) reads what `@spaarke/auth`'s
+ * `useDocumentActions` (real, from @spaarke/ui-components source) reads what `@spaarke/auth`'s
  * authenticatedFetch THROWS — ApiError (status + ProblemDetails) or AuthError — and sets `actionError`.
  * Before the fix App never read `actionError`, so every failure showed the user nothing at all.
  *

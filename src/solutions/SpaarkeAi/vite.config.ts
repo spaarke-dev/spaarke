@@ -41,11 +41,6 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // R4 task 020 (2026-06-10): @spaarke/smart-todo-components hoist for the
     // LegalWorkspace todo section + future SpaarkeAi Direct widget (Pattern D).
     path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
-    // spaarkeai-compose-r1 task 043 (2026-06-29): @spaarke/document-operations
-    // hosts the `useDocumentActions` hook (extracted from SemanticSearch in
-    // task 031). Compose toolbar consumes Open-in-Word handlers via this lib
-    // per FR-12 + FR-13.
-    path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
     // spaarkeai-compose-r1 task 042 (2026-06-29): @spaarke/compose-components
     // hosts the TipTap-based ComposeEditor widget (task 045). ComposeWorkspace
     // orchestrator (this task, lives in SpaarkeAi solution) imports the editor
@@ -135,11 +130,6 @@ export default defineConfig({
         // R4 task 020 (2026-06-10): transpile Spaarke.SmartTodo.Components source.
         path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.ts"),
-        // spaarkeai-compose-r1 task 043 (2026-06-29): transpile
-        // Spaarke.DocumentOperations source so SpaarkeAi can consume the
-        // `useDocumentActions` hook (FR-12 / FR-13).
-        path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src/**/*.tsx"),
-        path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src/**/*.ts"),
         // spaarkeai-compose-r1 task 042 (2026-06-29): transpile Spaarke.Compose.Components
         // source so SpaarkeAi can mount ComposeEditor (task 045) via the
         // @spaarke/compose-components alias. Required for ComposeWorkspace
@@ -203,12 +193,6 @@ export default defineConfig({
       // LegalWorkspace todo section (Pattern D dual-use).
       "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
       "@spaarke/smart-todo-components": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
-      // spaarkeai-compose-r1 task 043 (2026-06-29): @spaarke/document-operations
-      // hosts the `useDocumentActions` hook (extracted from SemanticSearch in
-      // task 031 — see notes/spikes/spike-1-tiptap-docx-roundtrip.md §4.5).
-      // FR-12 mandates Compose toolbar Open-in-Word buttons reuse this hook.
-      "@spaarke/document-operations/src": path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
-      "@spaarke/document-operations": path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
       // spaarkeai-compose-r1 task 042 (2026-06-29): @spaarke/compose-components
       // hosts the TipTap-based ComposeEditor widget (task 045). ComposeWorkspace
       // orchestrator imports ComposeEditor from this lib. The lib also re-exports

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ComposeWorkspace.tsx — workspace-level orchestrator for the Spaarke Compose surface.
  *
  * Project:   spaarkeai-compose-r1
@@ -136,6 +136,9 @@ import {
   // FR-C05 (r8 task 052) — the stale-target "apply anyway?" question. ADR-050 canonical shell +
   // ADR-021 semantic tokens; no bespoke chrome (assessment §4.4 O-6).
   ConfirmModal,
+  // Open in Word (web / desktop) through the BFF; moved here from the retired document-operations package
+  // (reuse-governance-tightening-r1 task 033).
+  useDocumentActions,
   type LookupResult,
 } from '@spaarke/ui-components';
 // FR-14 (task 051) — Review Summary toolbar control: shared types + pure email-body formatting for the
@@ -162,7 +165,6 @@ import {
 // toolbar's "Word" dropdown + right-aligned Save button. `ComposeToolbar.tsx` is
 // retained for its own standalone tests + potential reuse, but is no longer
 // rendered here (one toolbar row, not two).
-import { useDocumentActions } from '@spaarke/document-operations';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 // FR-05 (task 032, spaarkeai-compose-r6): "Apply firm template" dialog — 030 part-merge wiring.
@@ -1696,7 +1698,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // FIX #5 (UAT): Open-in-Word (Web + Desktop) handlers for the consolidated
   // toolbar's "Word" dropdown. Bound HERE (the host) and threaded to ComposeEditor
-  // so the shared-lib editor stays decoupled from `@spaarke/document-operations`.
+  // so the shared-lib editor stays decoupled from `useDocumentActions`.
   // Safe to call at mount — the hook only allocates `useState`/`useCallback`; the
   // authenticated fetch fires lazily on click.
   // `wordActionError` ("Couldn't open the document: <reason>") goes to the banner stack; the hook clears it

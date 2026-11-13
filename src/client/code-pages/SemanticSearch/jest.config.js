@@ -22,9 +22,6 @@ module.exports = {
     // Map @spaarke/auth path alias (mirrors tsconfig.json) so jest can resolve
     // imports without going through the webpack alias.
     '^@spaarke/auth$': '<rootDir>/../../shared/Spaarke.Auth/src/index',
-    // Map @spaarke/document-operations to source so jest resolves the
-    // canonical hook moved by task 031 (spaarkeai-compose-r1).
-    '^@spaarke/document-operations$': '<rootDir>/../../shared/Spaarke.DocumentOperations/src/index',
     // Map the oobModalSizes deep import (mirrors the webpack.config.js
     // barrel alias, but scoped to this one file) so jest can resolve
     // EntityRecordDialog.ts's OOB_MODAL_SIZES import. Added by
@@ -40,6 +37,11 @@ module.exports = {
     // (task 081 / C-8). xrmContext.ts has zero dependencies.
     '^@spaarke/ui-components/utils/xrmContext$':
       '<rootDir>/../../shared/Spaarke.UI.Components/src/utils/xrmContext',
+    // Same file-scoped pattern for the shared document-actions hook (moved from the retired
+    // document-operations package by reuse-governance-tightening-r1 task 033). Its only
+    // dependency is @spaarke/auth, mapped above.
+    '^@spaarke/ui-components/hooks/useDocumentActions$':
+      '<rootDir>/../../shared/Spaarke.UI.Components/src/hooks/useDocumentActions',
     // Force a single React instance — mirror webpack.config.js. Without this,
     // jest resolves a second react copy from the shared lib's node_modules
     // and React-19 hooks throw "Cannot read properties of null (reading 'useState')".

@@ -54,7 +54,7 @@
  *    likewise NEVER `console.log`s `selectionText` or full document HTML.
  *
  * Open-in-Word handoff (FR-12) — `useDocumentActions` from
- * `@spaarke/document-operations` is intentionally NOT wired here. The host
+ * `@spaarke/ui-components` is intentionally NOT wired here. The host
  * (ComposeWorkspace / ComposeToolbar — sibling W4 tasks 042/043) owns the
  * toolbar surface that drives Open-in-Web + Open-in-Desktop. ComposeEditor
  * exposes `documentRef` via its imperative handle so the host can pass it to
@@ -791,7 +791,7 @@ export interface ComposeEditorProps {
   // ComposeFormatToolbar's "Word" dropdown + right-aligned Save button. The HOST
   // (ComposeWorkspace) still OWNS the binding (Open-in-Word via `useDocumentActions`,
   // Save via `triggerSave`, Push via the annotations shuttle) — the editor is a
-  // pure forwarder, so the shared lib stays decoupled from `@spaarke/document-operations`.
+  // pure forwarder, so the shared lib stays decoupled from `useDocumentActions`.
   // All optional: the Word dropdown / Save button render only when their handlers
   // are threaded (standalone/library mounts omit them).
   // ---------------------------------------------------------------------------

@@ -190,6 +190,7 @@ jest.mock('@spaarke/auth', () => {
 // Mocked to the tiny surface ComposeWorkspace actually consumes so this suite is self-contained
 // (same set + rationale as ComposeWorkspace.saveOpLogPreservation.test.tsx).
 jest.mock('@spaarke/ui-components', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
   // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
   // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
   // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
@@ -199,9 +200,6 @@ jest.mock('@spaarke/ui-components', () => ({
   SendEmailDialog: () => null,
   SprkModal: () => null,
   RichFilePreviewDialog: () => null,
-}));
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
 }));
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),

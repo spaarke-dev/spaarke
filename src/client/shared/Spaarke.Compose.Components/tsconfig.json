@@ -24,8 +24,6 @@
     "paths": {
       "@spaarke/auth": ["../Spaarke.Auth/dist/index.d.ts"],
       "@spaarke/auth/*": ["../Spaarke.Auth/dist/*"],
-      "@spaarke/document-operations": ["../Spaarke.DocumentOperations/dist/index.d.ts"],
-      "@spaarke/document-operations/*": ["../Spaarke.DocumentOperations/dist/*"],
       "@spaarke/ai-widgets": ["../Spaarke.AI.Widgets/dist/index.d.ts"],
       "@spaarke/ai-widgets/*": ["../Spaarke.AI.Widgets/dist/*"]
     }

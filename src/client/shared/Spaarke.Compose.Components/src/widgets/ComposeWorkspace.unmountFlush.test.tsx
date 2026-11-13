@@ -115,6 +115,7 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 jest.mock('@spaarke/ui-components', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
   // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
   // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
   // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
@@ -127,13 +128,6 @@ jest.mock('@spaarke/ui-components', () => ({
   // (canPreviewDocument). This test's fixture doc IS promoted (sprkDocumentId set), so
   // the stub must exist or the component errors with "Element type is invalid".
   RichFilePreviewDialog: () => null,
-}));
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({
-    openInWeb: jest.fn(),
-    openInDesktop: jest.fn(),
-    isActing: false,
-  }),
 }));
 
 jest.mock('@spaarke/ai-widgets/events', () => ({
