@@ -1125,7 +1125,7 @@ public static class InvoiceFamilyCoreRecordGuard
         (IsBindKey(key) ? key[..^BindSuffix.Length] : key).Trim().ToLowerInvariant();
 
     /// <summary>The id in a Web API bind (<c>/sprk_matters(…)</c> or <c>sprk_matters(…)</c>).</summary>
-    private static bool TryParseBind(string bind, out Guid id)
+    internal static bool TryParseBind(string bind, out Guid id)
     {
         id = Guid.Empty;
         var open = bind.LastIndexOf('(');
