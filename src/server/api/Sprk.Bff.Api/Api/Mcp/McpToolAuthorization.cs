@@ -19,9 +19,15 @@ namespace Sprk.Bff.Api.Api.Mcp;
 /// every workforce route).</para>
 /// <para><b>Per-tool rule (<see cref="ValidateTool"/>).</b> Every tool carries <c>[Authorize]</c> on its
 /// <see cref="McpToolDefinition"/> class (the guard reads it there), checked by the SDK's <c>AddAuthorizationFilters()</c> on
-/// <c>tools/list</c> and <c>tools/call</c>; it may name an existing workforce policy but never an external, CIAM or API-key
-/// policy or scheme, and never <c>[AllowAnonymous]</c> (refused in source by the ArchTests). Every tool sets <c>ReadOnly</c> and a title explicitly. The catalog
-/// refuses to start on a tool that breaks this; <c>RouteAuthorizationGuardTests</c> checks the same rules in source.</para>
+/// <c>tools/list</c> and <c>tools/call</c>. The SDK takes that metadata from the declaring class of the handler method (or from
+/// <c>McpServerToolCreateOptions.Metadata</c>), so the rule requires the metadata the SDK enforces to EQUAL the tool class's own
+/// <c>[Authorize]</c>: a handler from a helper class, or a <c>Metadata</c> override, cannot swap the policy. The policy is one of
+/// <see cref="AllowedToolPolicies"/> (and the catalog checks it is registered); no scheme is named; no anonymity metadata. Every
+/// tool sets <c>ReadOnly</c> and a title explicitly. With <c>Mcp:Enabled</c> true the catalog is built at startup
+/// (<see cref="McpEndpoints.MapMcpEndpoints"/>), so a tool that breaks this stops the app from starting;
+/// <c>RouteAuthorizationGuardTests</c> checks the same rules in source.</para>
+/// <para><b>Limit, stated.</b> The SDK's per-tool filter judges every tool against the caller the A10 filter admitted: it evaluates
+/// the tool's policy requirements on <c>HttpContext.User</c> and does not re-run a policy's own authentication schemes.</para>
 /// </remarks>
 public static class McpToolAuthorization
 {
@@ -37,15 +43,21 @@ public static class McpToolAuthorization
     private const string ScopeSchemaClaim = "http://schemas.microsoft.com/identity/claims/scope";
 
     /// <summary>
-    /// Policies a tool may never name (FR-07): the external plane and the API-key webhook. Each authenticates a scheme other
-    /// than the workforce one, so naming it would let a non-A10 caller through.
+    /// The ONLY policies a tool's <c>[Authorize]</c> may name (FR-07, B-7): <c>""</c> is bare <c>[Authorize]</c> (the DefaultPolicy,
+    /// an authenticated workforce user), and <c>"SystemAdmin"</c> is the workforce admin-role policy <c>AuthorizationModule</c>
+    /// registers. An allow-list, not a deny-list: a policy that authenticates another scheme (<c>ExternalCollaboration</c>,
+    /// <c>CiamExternal</c>, <c>RagApiKey</c>) or one added later is refused until it is added here deliberately.
+    /// <c>RouteAuthorizationGuardTests</c> reads this set; there is no second copy. Ordinal: the exact registered name.
     /// </summary>
-    public static readonly IReadOnlySet<string> ForbiddenPolicies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    public static readonly IReadOnlySet<string> AllowedToolPolicies = new HashSet<string>(StringComparer.Ordinal)
     {
-        AuthPolicies.ExternalCollaboration,
-        AuthPolicies.CiamExternal,
-        AuthPolicies.RagApiKey,
+        "",
+        "SystemAdmin",
     };
+
+    // The full name of the ASP.NET Core anonymity metadata interface. Matched by name because the anonymity guard
+    // (RouteAuthorizationGuardTests.AnonymityIsDeclaredOnlyOnAScannedChain) bans any identifier containing it from BFF source.
+    private const string AnonymityMetadataInterface = "Microsoft.AspNetCore.Authorization.IAllowAnonymous";
 
     /// <summary>Why <see cref="A10DenyReason"/> refused a caller (logged as <c>Reason</c>; never sent to the caller).</summary>
     public static class Deny
@@ -53,7 +65,11 @@ public static class McpToolAuthorization
         /// <summary>No authenticated identity.</summary>
         public const string NotAuthenticated = "not_authenticated";
 
-        /// <summary>An identity from the CIAM (A1) or home-directory (A9) scheme.</summary>
+        /// <summary>
+        /// An identity from the home-directory (A9) scheme, which stamps its scheme name as the identity's authentication type.
+        /// The CIAM (A1) JwtBearer scheme sets no authentication type, so CIAM refusal rests on the <c>tid</c> and <c>iss</c>
+        /// checks (<see cref="TenantNotSpaarke"/>, <see cref="IssuerNotExactV2"/>), not on this one. The value is unchanged.
+        /// </summary>
         public const string ForeignScheme = "ciam_or_home_directory_scheme";
 
         /// <summary><c>AzureAd:TenantId</c> or <c>AzureAd:ClientId</c> is not a non-zero GUID: fail closed.</summary>
@@ -90,9 +106,8 @@ public static class McpToolAuthorization
             return Deny.NotAuthenticated;
         }
 
-        if (user.Identities.Any(i =>
-                string.Equals(i.AuthenticationType, AuthSchemes.Ciam, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(i.AuthenticationType, AuthSchemes.WorkforceHome, StringComparison.OrdinalIgnoreCase)))
+        // Only WorkforceHome stamps its scheme as the authentication type; a CIAM identity is refused below by tid and iss.
+        if (user.Identities.Any(i => string.Equals(i.AuthenticationType, AuthSchemes.WorkforceHome, StringComparison.OrdinalIgnoreCase)))
         {
             return Deny.ForeignScheme;
         }
@@ -143,8 +158,9 @@ public static class McpToolAuthorization
 
     /// <summary>
     /// Throws <see cref="InvalidOperationException"/> when <paramref name="tool"/> (built by <paramref name="definition"/>) breaks
-    /// the per-tool rule: no <c>[Authorize]</c>, a forbidden policy, an authentication scheme named on the
-    /// attribute, no explicit <c>ReadOnly</c>, or no title. Called by <see cref="McpToolCatalog"/> for every tool at startup.
+    /// the per-tool rule: no <c>[Authorize]</c> on the tool class; enforced <c>[Authorize]</c> metadata that differs from the
+    /// class's own; anonymity metadata; a policy outside <see cref="AllowedToolPolicies"/>; an authentication scheme named on the
+    /// attribute; no explicit <c>ReadOnly</c>; or no title. Called by <see cref="McpToolCatalog"/> for every tool at startup.
     /// </summary>
     public static void ValidateTool(McpServerTool tool, Type definition)
     {
@@ -154,25 +170,41 @@ public static class McpToolAuthorization
         var name = tool.ProtocolTool.Name;
         var where = $"MCP tool '{name}' ({definition.FullName})";
 
-        // Anonymity is not checked here: the anonymity guard (RouteAuthorizationGuardTests.AnonymityIsDeclaredOnlyOnAScannedChain)
-        // refuses the attribute anywhere in BFF source, and the MCP tool rule refuses it on a tool class.
-        var authorize = tool.Metadata.OfType<IAuthorizeData>().ToArray();
-        if (authorize.Length == 0)
+        // The source guard bans the attribute in BFF code; this refuses anonymity metadata however it got onto the tool.
+        if (tool.Metadata.Any(IsAnonymityMetadata) || definition.GetCustomAttributes(inherit: true).Any(IsAnonymityMetadata))
         {
-            throw new InvalidOperationException(
-                $"{where} has no [Authorize]. Put [Authorize] (or [Authorize(Policy = \"<existing workforce policy>\")]) on the tool class and build the tool from a static method of that class (B-7).");
+            throw new InvalidOperationException($"{where} carries anonymity metadata; every MCP tool requires an authenticated A10 caller (FR-02).");
         }
 
-        foreach (var data in authorize)
+        var declared = definition.GetCustomAttributes(inherit: false).OfType<IAuthorizeData>().ToArray();
+        if (declared.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"{where} has no [Authorize]. Put [Authorize] (or [Authorize(Policy = \"SystemAdmin\")]) on the tool class and build the tool from a static method of that class (B-7).");
+        }
+
+        // What the SDK's authorization filter enforces is tool.Metadata: the handler's DECLARING class plus the method, or
+        // McpServerToolCreateOptions.Metadata. It must be exactly the tool class's own [Authorize], or a helper-class handler
+        // (or a Metadata override) would enforce a different policy than the one the class, the guard and the ledger show.
+        var enforced = tool.Metadata.OfType<IAuthorizeData>().ToArray();
+        if (!AuthorizeKeys(enforced).SequenceEqual(AuthorizeKeys(declared), StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"{where}: the [Authorize] the SDK enforces ({Describe(enforced)}) is not the tool class's own ({Describe(declared)}). Build the tool "
+                + "from a static method of the tool class passed as an unqualified method group, and do not set McpServerToolCreateOptions.Metadata (B-7).");
+        }
+
+        foreach (var data in declared)
         {
             if (!string.IsNullOrWhiteSpace(data.AuthenticationSchemes))
             {
                 throw new InvalidOperationException($"{where} names an authentication scheme on [Authorize]; MCP tools run on the A10 workforce scheme only.");
             }
 
-            if (data.Policy is { } policy && ForbiddenPolicies.Contains(policy))
+            if (!AllowedToolPolicies.Contains(data.Policy ?? string.Empty))
             {
-                throw new InvalidOperationException($"{where} names the '{policy}' policy, which MCP tools may never use (FR-07).");
+                throw new InvalidOperationException(
+                    $"{where} names the '{data.Policy}' policy, which is not in McpToolAuthorization.AllowedToolPolicies (FR-07, B-7).");
             }
         }
 
@@ -186,6 +218,16 @@ public static class McpToolAuthorization
             throw new InvalidOperationException($"{where} has no title (FR-03).");
         }
     }
+
+    private static bool IsAnonymityMetadata(object metadata) => metadata.GetType().GetInterface(AnonymityMetadataInterface) is not null;
+
+    // One comparable key per [Authorize]: policy, roles and schemes (null and empty are the same), sorted as a multiset.
+    private static IEnumerable<string> AuthorizeKeys(IEnumerable<IAuthorizeData> data) =>
+        data.Select(d => $"policy={d.Policy ?? string.Empty};roles={d.Roles ?? string.Empty};schemes={d.AuthenticationSchemes ?? string.Empty}")
+            .OrderBy(k => k, StringComparer.Ordinal);
+
+    private static string Describe(IEnumerable<IAuthorizeData> data) =>
+        AuthorizeKeys(data).ToList() is { Count: > 0 } keys ? string.Join(" | ", keys) : "none";
 
     private static List<string> Values(ClaimsPrincipal user, params string[] claimTypes) =>
         claimTypes.SelectMany(type => user.FindAll(type)).Select(c => c.Value).ToList();

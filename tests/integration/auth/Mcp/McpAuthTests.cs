@@ -49,6 +49,7 @@ using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Tests.Api.Mcp;
 using Sprk.Bff.Api.Tests.Domain.Signals;
 using Xunit;
 
@@ -129,6 +130,10 @@ public sealed class McpAuthTests
         { "copilot-audience", McpToolAuthorization.Deny.AudienceNotBff },
         { "no-user-impersonation-scope", McpToolAuthorization.Deny.ScopeMissing },
         { "app-token", McpToolAuthorization.Deny.AppToken },
+        // Fix round 1: a v1-issuer Spaarke token for the BFF (the workforce scheme accepts v1 and v2 issuers; A10 pins v2).
+        { "v1-issuer", McpToolAuthorization.Deny.IssuerNotExactV2 },
+        // Fix round 1 (uac-r2): an app-only token WITHOUT idtyp (roles, no scp) is refused for its missing delegated scope.
+        { "app-token-without-idtyp", McpToolAuthorization.Deny.ScopeMissing },
     };
 
     [Theory]
@@ -140,6 +145,12 @@ public sealed class McpAuthTests
         {
             "copilot-audience" => SpaarkeToken(audience: CopilotAudience),
             "no-user-impersonation-scope" => SpaarkeToken(edit: c => c["scp"] = "Files.Read"),
+            "v1-issuer" => V1SpaarkeToken(),
+            "app-token-without-idtyp" => SpaarkeToken(edit: c =>
+            {
+                c.Remove("scp");
+                c["roles"] = new[] { "Data.Read" };
+            }),
             _ => SpaarkeToken(edit: c =>
             {
                 c.Remove("scp");
@@ -265,12 +276,85 @@ public sealed class McpAuthTests
         McpToolAuthorization.A10DenyReason(A10Principal(), tenantId, clientId).Should().Be(McpToolAuthorization.Deny.NotConfigured);
     }
 
+    // ───────────────────────────── each A10 check on its own (fix round 1) ─────────────────────────────
+    // The route tests cannot reach the tid, iss, oid or scheme checks: the default scheme refuses CIAM and A9 tokens first. These
+    // rows call the rule directly with the principal each plane would produce, so deleting any one check turns a row red.
+
+    public static TheoryData<string, string> PrincipalsA10Refuses() => new()
+    {
+        { "ciam", McpToolAuthorization.Deny.TenantNotSpaarke },
+        { "a9-home-directory", McpToolAuthorization.Deny.TenantNotSpaarke },
+        { "spaarke-tid-foreign-v2-iss", McpToolAuthorization.Deny.IssuerNotExactV2 },
+        { "spaarke-tid-v1-iss", McpToolAuthorization.Deny.IssuerNotExactV2 },
+        { "oid-missing", McpToolAuthorization.Deny.ObjectIdMissing },
+        { "oid-not-a-guid", McpToolAuthorization.Deny.ObjectIdMissing },
+        { "workforce-home-scheme", McpToolAuthorization.Deny.ForeignScheme },
+    };
+
+    [Theory]
+    [MemberData(nameof(PrincipalsA10Refuses))]
+    public void A10DenyReason_PrincipalOutsideA10_ReturnsItsReason(string shape, string reason)
+    {
+        McpToolAuthorization.A10DenyReason(A10Principal(), SpaarkeTenantId, BffClientId).Should().BeNull("the control: an A10 caller passes");
+
+        var principal = shape switch
+        {
+            "ciam" => A10Principal(c =>
+            {
+                c["tid"] = CiamTenantId;
+                c["iss"] = CiamIssuer;
+                c["aud"] = CiamAppId;
+            }),
+            "a9-home-directory" => A10Principal(c =>
+            {
+                c["tid"] = CustomerTenantId;
+                c["iss"] = V2Issuer(CustomerTenantId);
+                c["idtyp"] = "user";
+            }),
+            "spaarke-tid-foreign-v2-iss" => A10Principal(c => c["iss"] = V2Issuer(CustomerTenantId)),
+            "spaarke-tid-v1-iss" => A10Principal(c => c["iss"] = $"https://sts.windows.net/{SpaarkeTenantId}/"),
+            "oid-missing" => A10Principal(c => c.Remove("oid")),
+            "oid-not-a-guid" => A10Principal(c => c["oid"] = "not-a-guid"),
+            "workforce-home-scheme" => A10Principal(authenticationType: AuthSchemes.WorkforceHome),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape)),
+        };
+
+        McpToolAuthorization.A10DenyReason(principal, SpaarkeTenantId, BffClientId).Should().Be(reason);
+    }
+
+    // ───────────────────────────── every method MapMcp maps (fix round 1, uac-r2) ─────────────────────────────
+
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("DELETE")]
+    [InlineData("HEAD")]
+    public async Task McpRoute_NonPostMethod_NeverOpensAStreamOrRunsATool(string method)
+    {
+        await using var host = await McpAuthHost.StartAsync();
+
+        using var copilot = await host.SendAsync(new HttpMethod(method), SpaarkeToken(audience: CopilotAudience));
+        using var valid = await host.SendAsync(new HttpMethod(method), SpaarkeToken());
+
+        // SDK 2.3.1 in stateless mode maps POST only: every other method is 405 from routing, for either token (recorded 2026-11-12).
+        copilot.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed);
+        valid.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed);
+        foreach (var response in new[] { copilot, valid })
+        {
+            response.Content.Headers.ContentType?.MediaType.Should().NotBe("text/event-stream");
+        }
+
+        host.Probe.CallerInvocations.Should().Be(0);
+    }
+
     // ───────────────────────────── the catalog's per-tool rule (startup refusal) ─────────────────────────────
 
     public static TheoryData<string> ToolsTheCatalogRefuses() => new()
     {
         nameof(ToolShapes.NoAuthorizeTool), nameof(ToolShapes.ExternalPolicyTool),
         nameof(ToolShapes.NamedSchemeTool), nameof(ToolShapes.NoReadOnly), nameof(ToolShapes.NoTitle),
+        // Fix round 1: the enforced metadata must equal the tool class's own [Authorize], with an allow-listed policy.
+        ToolShapes.HelperClassHandler, ToolShapes.MetadataOverride, ToolShapes.AnonymityMetadata,
+        nameof(ToolShapes.UnlistedPolicyTool), nameof(ToolShapes.MethodLevelAuthorizeTool),
     };
 
     [Theory]
@@ -284,19 +368,71 @@ public sealed class McpAuthTests
         act.Should().Throw<InvalidOperationException>().WithMessage($"*'{shape}'*");
     }
 
-    [Fact]
-    public void ValidateTool_AuthorizedReadOnlyTitledTool_IsAccepted()
+    [Theory]
+    [InlineData(nameof(ToolShapes.Sanctioned))]
+    [InlineData(nameof(ToolShapes.AdminTool))]
+    public void ValidateTool_AuthorizedReadOnlyTitledTool_IsAccepted(string shape)
     {
-        var (tool, definition) = ToolShapes.Build(nameof(ToolShapes.Sanctioned));
+        var (tool, definition) = ToolShapes.Build(shape);
 
         var act = () => McpToolAuthorization.ValidateTool(tool, definition);
 
-        act.Should().NotThrow("the control: the sanctioned tool shape passes");
+        act.Should().NotThrow("the control: bare [Authorize] and the allow-listed SystemAdmin policy, built from the class's own method, pass");
+    }
+
+    // ───────────────────────────── startup refusal (fix round 1) ─────────────────────────────
+
+    [Fact]
+    public async Task McpHost_ToolWhoseHandlerComesFromAHelperClass_RefusesToStart()
+    {
+        // The reviewer's reproduction: the tool CLASS says SystemAdmin, its handler's helper class says bare [Authorize]; before
+        // the fix the host started and a non-admin saw the tool in tools/list.
+        var types = McpProbeTools.Served.Append(typeof(StartupRefusals.McpHelperHandlerRefusedTool));
+
+        var start = async () => await McpAuthHost.StartAsync(toolTypes: types);
+
+        (await start.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*probe_refused_helper_handler*is not the tool class's own*");
+    }
+
+    [Fact]
+    public async Task McpHost_KillSwitchOff_StartsWithoutValidatingTools()
+    {
+        var types = McpProbeTools.Served.Append(typeof(StartupRefusals.McpHelperHandlerRefusedTool));
+
+        await using var host = await McpAuthHost.StartAsync(toolTypes: types, mcpEnabled: false);
+
+        using var response = await host.CallToolAsync("probe_a10_caller", SpaarkeToken());
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "switched off, the null catalog validates nothing and the route answers 503");
+    }
+
+    [Fact]
+    public void McpToolCatalog_ToolNamingAPolicyThatIsNotRegistered_Throws()
+    {
+        static IServiceProvider Services(bool registerSystemAdmin) => new ServiceCollection()
+            .AddLogging()
+            .AddAuthorization(o =>
+            {
+                if (registerSystemAdmin)
+                {
+                    o.AddPolicy("SystemAdmin", p => p.RequireRole("SystemAdmin"));
+                }
+            })
+            .BuildServiceProvider();
+
+        var registered = () => new McpToolCatalog([typeof(McpA10AdminProbeTool)], Services(registerSystemAdmin: true));
+        var missing = () => new McpToolCatalog([typeof(McpA10AdminProbeTool)], Services(registerSystemAdmin: false));
+
+        registered.Should().NotThrow("the control: the allow-listed policy is registered");
+        missing.Should().Throw<InvalidOperationException>().WithMessage("*probe_a10_admin*'SystemAdmin' policy, which is not registered*");
     }
 
     /// <summary>Tool shapes for the per-tool rule; none is tagged [McpArea], so no catalog in this assembly serves them.</summary>
     private static class ToolShapes
     {
+        public const string HelperClassHandler = nameof(HelperClassHandler);
+        public const string MetadataOverride = nameof(MetadataOverride);
+        public const string AnonymityMetadata = nameof(AnonymityMetadata);
+
         public static (McpServerTool Tool, Type Definition) Build(string shape) => shape switch
         {
             nameof(NoAuthorizeTool) => (Make(NoAuthorizeTool.Run, shape), typeof(NoAuthorizeTool)),
@@ -304,11 +440,42 @@ public sealed class McpAuthTests
             nameof(NamedSchemeTool) => (Make(NamedSchemeTool.Run, shape), typeof(NamedSchemeTool)),
             nameof(NoReadOnly) => (Make(Sanctioned.Run, shape, readOnly: null), typeof(Sanctioned)),
             nameof(NoTitle) => (Make(Sanctioned.Run, shape, title: null), typeof(Sanctioned)),
+            nameof(AdminTool) => (Make(AdminTool.Run, shape), typeof(AdminTool)),
+            nameof(UnlistedPolicyTool) => (Make(UnlistedPolicyTool.Run, shape), typeof(UnlistedPolicyTool)),
+            nameof(MethodLevelAuthorizeTool) => (Make(MethodLevelAuthorizeTool.Run, shape), typeof(MethodLevelAuthorizeTool)),
+            HelperClassHandler => (Make(BareAuthorizeHelper.Run, shape), typeof(AdminTool)),
+            MetadataOverride => (Make(AdminTool.Run, shape, metadata: [new AuthorizeAttribute()]), typeof(AdminTool)),
+            AnonymityMetadata => (Make(Sanctioned.Run, shape, metadata: [new AuthorizeAttribute(), new AllowAnonymousAttribute()]), typeof(Sanctioned)),
             _ => (Make(Sanctioned.Run, shape), typeof(Sanctioned)),
         };
 
-        private static McpServerTool Make(Func<string> run, string name, bool? readOnly = true, string? title = "A title") =>
-            McpServerTool.Create(run, new McpServerToolCreateOptions { Name = name, Title = title, ReadOnly = readOnly });
+        private static McpServerTool Make(Func<string> run, string name, bool? readOnly = true, string? title = "A title", object[]? metadata = null) =>
+            McpServerTool.Create(run, new McpServerToolCreateOptions { Name = name, Title = title, ReadOnly = readOnly, Metadata = metadata });
+
+        [Authorize(Policy = "SystemAdmin")]
+        public static class AdminTool
+        {
+            public static string Run() => "x";
+        }
+
+        [Authorize]
+        public static class BareAuthorizeHelper
+        {
+            public static string Run() => "x";
+        }
+
+        [Authorize(Policy = "SomeOtherWorkforcePolicy")]
+        public static class UnlistedPolicyTool
+        {
+            public static string Run() => "x";
+        }
+
+        [Authorize]
+        public static class MethodLevelAuthorizeTool
+        {
+            [Authorize(Policy = "SystemAdmin")]
+            public static string Run() => "x";
+        }
 
         public static class NoAuthorizeTool
         {
@@ -338,12 +505,19 @@ public sealed class McpAuthTests
         public const string NoTitle = nameof(NoTitle);
     }
 
-    private static ClaimsPrincipal A10Principal() => new(new ClaimsIdentity(
-        [
-            new Claim("tid", SpaarkeTenantId), new Claim("iss", V2Issuer(SpaarkeTenantId)), new Claim("aud", BffClientId),
-            new Claim("scp", "user_impersonation"), new Claim("oid", Caller.ToString()),
-        ],
-        authenticationType: "AuthenticationTypes.Federation"));
+    private static ClaimsPrincipal A10Principal(Action<Dictionary<string, string>>? edit = null, string authenticationType = "AuthenticationTypes.Federation")
+    {
+        var claims = new Dictionary<string, string>
+        {
+            ["tid"] = SpaarkeTenantId,
+            ["iss"] = V2Issuer(SpaarkeTenantId),
+            ["aud"] = BffClientId,
+            ["scp"] = "user_impersonation",
+            ["oid"] = Caller.ToString(),
+        };
+        edit?.Invoke(claims);
+        return new ClaimsPrincipal(new ClaimsIdentity(claims.Select(c => new Claim(c.Key, c.Value)), authenticationType));
+    }
 
     private static IEnumerable<string?> ToolNames(JsonElement list) =>
         list.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString());
@@ -387,6 +561,18 @@ public sealed class McpAuthTests
         edit?.Invoke(claims);
         return Sign(V2Issuer(SpaarkeTenantId), audience, claims, EntraKey);
     }
+
+    /// <summary>A v1 access token for the BFF from the Spaarke tenant: <c>iss</c> = <c>https://sts.windows.net/{tid}/</c>, <c>ver</c> 1.0.</summary>
+    private static string V1SpaarkeToken() => Sign($"https://sts.windows.net/{SpaarkeTenantId}/", BffClientId, new Dictionary<string, object>
+    {
+        ["ver"] = "1.0",
+        ["tid"] = SpaarkeTenantId,
+        ["oid"] = Caller.ToString(),
+        ["sub"] = Guid.NewGuid().ToString(),
+        ["scp"] = "user_impersonation",
+        ["appid"] = "a0210007-0000-4000-8000-000000000007", // the connector client (v1 form of azp)
+        ["appidacr"] = "1",
+    }, EntraKey);
 
     private static string HomeToken() => Sign(V2Issuer(CustomerTenantId), BffClientId, new Dictionary<string, object>
     {
@@ -450,14 +636,15 @@ public sealed class McpAuthTests
             "\n",
             _logs.Entries.SelectMany(e => e.Properties.Select(p => p.Value?.ToString() ?? string.Empty).Prepend(e.Message)));
 
-        public static async Task<McpAuthHost> StartAsync(IDecisionCapability? capability = null)
+        /// <param name="toolTypes">The tool scan set; default <see cref="McpProbeTools.Served"/> (never the startup-refusal tools).</param>
+        public static async Task<McpAuthHost> StartAsync(IDecisionCapability? capability = null, IEnumerable<Type>? toolTypes = null, bool mcpEnabled = true)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.WebHost.UseTestServer();
             builder.Configuration.Sources.Clear();
             builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Mcp:Enabled"] = "true",
+                ["Mcp:Enabled"] = mcpEnabled ? "true" : "false",
                 ["AzureAd:Instance"] = "https://login.microsoftonline.com/",
                 ["AzureAd:TenantId"] = SpaarkeTenantId,
                 ["AzureAd:ClientId"] = BffClientId,
@@ -497,18 +684,37 @@ public sealed class McpAuthTests
             services.AddSingleton(probe);
             services.AddSingleton(capability ?? new Mock<IDecisionCapability>(MockBehavior.Strict).Object);
             services.AddRateLimitingModule();
-            services.AddMcpModule(builder.Configuration, typeof(McpAuthTests).Assembly);
+            services.AddMcpModule(builder.Configuration, toolTypes ?? McpProbeTools.Served);
 
             var app = builder.Build();
-            app.UseAuthentication();
-            app.UseAuthorization();
-            app.UseRateLimiter();
-            app.MapMcpEndpoints();
-            app.MapGet(ExternalRoute, () => "ok").RequireAuthorization(AuthPolicies.ExternalCollaboration);
-            app.MapGet(WorkforceRoute, () => "ok").RequireAuthorization();
-            app.MapPost(UnguardedMcpRoute, () => "ok"); // no RequireAuthorization: only the FallbackPolicy guards it
-            await app.StartAsync();
+            try
+            {
+                app.UseAuthentication();
+                app.UseAuthorization();
+                app.UseRateLimiter();
+                app.MapMcpEndpoints(); // builds the tool catalog: a tool breaking the per-tool rule throws here
+                app.MapGet(ExternalRoute, () => "ok").RequireAuthorization(AuthPolicies.ExternalCollaboration);
+                app.MapGet(WorkforceRoute, () => "ok").RequireAuthorization();
+                app.MapPost(UnguardedMcpRoute, () => "ok"); // no RequireAuthorization: only the FallbackPolicy guards it
+                await app.StartAsync();
+            }
+            catch
+            {
+                await app.DisposeAsync();
+                throw;
+            }
+
             return new McpAuthHost(app, logs, probe);
+        }
+
+        /// <summary>A bodiless request with <paramref name="method"/> to the MCP route, asking for JSON or an event stream.</summary>
+        public Task<HttpResponseMessage> SendAsync(HttpMethod method, string token)
+        {
+            var request = new HttpRequestMessage(method, McpEndpoints.LegalOperationsRoute);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            return _client.SendAsync(request);
         }
 
         public async Task<HttpStatusCode> StatusAsync(string route, string token)

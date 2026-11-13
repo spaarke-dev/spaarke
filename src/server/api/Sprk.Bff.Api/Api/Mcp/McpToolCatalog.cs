@@ -1,4 +1,6 @@
 using System.Reflection;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 using Sprk.Bff.Api.Configuration;
 
@@ -32,7 +34,7 @@ public sealed class McpAreaAttribute(string area) : Attribute
 public abstract class McpToolDefinition
 {
     /// <summary>
-    /// Builds the tool. Called once, when the catalog is first resolved; give it an explicit name, title, annotations and a
+    /// Builds the tool. Called once, when the catalog is built at startup; give it an explicit name, title, annotations and a
     /// use-for / not-for description. <paramref name="services"/> is the application provider: pass it as
     /// <c>McpServerToolCreateOptions.Services</c> (it only tells the SDK which parameters are services; each call resolves them from its own request).
     /// </summary>
@@ -60,16 +62,24 @@ public class McpToolCatalog
     /// <summary>For the null object only: no tools, nothing scanned.</summary>
     protected McpToolCatalog() => _toolsByArea = new Dictionary<string, McpServerTool[]>(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Scans <paramref name="assemblies"/> for tool classes. Throws at construction on a malformed tool.</summary>
-    public McpToolCatalog(IEnumerable<Assembly> assemblies, IServiceProvider services)
+    /// <summary>
+    /// Builds the catalog from the tool classes among <paramref name="types"/> (production: every type of the BFF assembly).
+    /// Throws at construction on a malformed tool or a tool whose named policy is not registered; with <c>Mcp:Enabled</c> true
+    /// <see cref="McpEndpoints.MapMcpEndpoints"/> constructs it at startup, so either stops the app from starting.
+    /// </summary>
+    public McpToolCatalog(IEnumerable<Type> types, IServiceProvider services)
     {
-        ArgumentNullException.ThrowIfNull(assemblies);
+        ArgumentNullException.ThrowIfNull(types);
         ArgumentNullException.ThrowIfNull(services);
 
         var byArea = new Dictionary<string, List<McpServerTool>>(StringComparer.OrdinalIgnoreCase);
         var seenNames = new HashSet<string>(StringComparer.Ordinal);
+        // The configured policies, read the way the framework's default policy provider reads them. The BFF never replaces that
+        // provider (RouteAuthorizationGuardTests.NothingButAnAuthenticatedUserSatisfiesSignIn bans naming it in BFF source), so a
+        // policy missing from these options is a policy the SDK's authorization filter cannot find either.
+        var policies = services.GetService<IOptions<AuthorizationOptions>>()?.Value;
 
-        foreach (var type in assemblies.Distinct().SelectMany(a => a.GetTypes()).OrderBy(t => t.FullName, StringComparer.Ordinal))
+        foreach (var type in types.Distinct().OrderBy(t => t.FullName, StringComparer.Ordinal))
         {
             var area = type.GetCustomAttribute<McpAreaAttribute>(inherit: false)?.Area;
             if (area is null || type.IsAbstract)
@@ -83,7 +93,16 @@ public class McpToolCatalog
             }
 
             var tool = ((McpToolDefinition)Activator.CreateInstance(type, nonPublic: true)!).Create(services);
-            McpToolAuthorization.ValidateTool(tool, type); // [Authorize], no forbidden policy, explicit ReadOnly and title (B-7, FR-03)
+            McpToolAuthorization.ValidateTool(tool, type); // [Authorize] = the class's own, allow-listed policy, explicit ReadOnly and title (B-7, FR-03)
+
+            // A named policy must exist: the SDK's filter would otherwise throw on every tools/list instead of refusing at startup.
+            foreach (var policy in tool.Metadata.OfType<IAuthorizeData>().Select(d => d.Policy).Where(p => !string.IsNullOrEmpty(p)).Distinct())
+            {
+                if (policies?.GetPolicy(policy!) is null)
+                {
+                    throw new InvalidOperationException($"MCP tool '{tool.ProtocolTool.Name}' ({type.FullName}) names the '{policy}' policy, which is not registered.");
+                }
+            }
 
             // A tool name is unique across areas too: the connector's approval card and the model address a tool by name.
             if (!seenNames.Add(tool.ProtocolTool.Name))

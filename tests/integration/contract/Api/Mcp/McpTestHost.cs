@@ -93,7 +93,7 @@ internal sealed class McpTestHost : IAsyncDisposable
         // admin probe tool (tests/integration/auth/Mcp) is in this assembly too; here it admits nobody.
         builder.Services.AddAuthorization(o => o.AddPolicy("SystemAdmin", p => p.RequireAssertion(_ => false)));
         builder.Services.AddRateLimitingModule();
-        builder.Services.AddMcpModule(builder.Configuration, typeof(McpTestHost).Assembly);
+        builder.Services.AddMcpModule(builder.Configuration, McpProbeTools.Served);
 
         var app = builder.Build();
         app.Use(async (context, next) =>
@@ -217,6 +217,19 @@ internal sealed class McpTestHost : IAsyncDisposable
             public Task CompleteAsync() => inner.CompleteAsync();
         }
     }
+}
+
+/// <summary>
+/// The tool scan set of every MCP test host in this assembly: all its types EXCEPT the tools in
+/// <see cref="StartupRefusalNamespace"/>, which break the per-tool rule on purpose (task 021 fix round 1) and are served only by
+/// the host that proves the app refuses to start on them.
+/// </summary>
+internal static class McpProbeTools
+{
+    internal const string StartupRefusalNamespace = "Sprk.Bff.Api.Tests.Auth.Mcp.StartupRefusals";
+
+    public static IEnumerable<Type> Served =>
+        typeof(McpProbeTools).Assembly.GetTypes().Where(t => !string.Equals(t.Namespace, StartupRefusalNamespace, StringComparison.Ordinal));
 }
 
 /// <summary>What the probe tools and the request pipeline saw in one <see cref="McpTestHost"/>.</summary>

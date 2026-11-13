@@ -40,6 +40,10 @@ public static class McpEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
 
+        // Build the catalog now, not on the first request: with Mcp:Enabled true this runs McpToolAuthorization.ValidateTool on
+        // every tool, so a tool that breaks the per-tool rule stops startup. Switched off, it is the null catalog (validates nothing).
+        _ = app.Services.GetRequiredService<McpToolCatalog>();
+
         // The policy name is a literal on purpose: the health-probe policy guard (RouteAuthorizationGuardTests) reads only string literals.
         // Keep it equal to RateLimitingModule.McpPolicyName.
         app.MapMcp(LegalOperationsRoute)
