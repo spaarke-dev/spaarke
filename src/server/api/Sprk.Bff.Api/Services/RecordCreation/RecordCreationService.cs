@@ -757,6 +757,13 @@ internal sealed partial class RecordCreationService
             }
         }
 
+        // ── Task 045f: a sent regarding record URL names the record the row's pair names, stored in canonical form ──────
+        var recordUrl = await KeepRegardingRecordUrlAsync(table, user, callerItem, item, noun, ct).ConfigureAwait(false);
+        if (recordUrl.Refusal is { } recordUrlRefusal)
+            return Decision.Refuse(recordUrlRefusal);
+        callerItem = recordUrl.CallerItem!;
+        item = recordUrl.Item!;
+
         // ── Step 5½: the table's pre-write rules, on the row as it will be written (ebilling-r1 recipe) ────────────────
         if (rule.PreWriteRules.Count > 0)
         {
@@ -2039,6 +2046,54 @@ internal sealed partial class RecordCreationService
             _ => (null, new RecordCreationRefusal(RecordCreationRefusalKind.Invalid, RecordCreationRefusal.InvalidPayloadCode,
                 mapped.ValidationError ?? $"The {noun} could not be mapped.")),
         };
+    }
+
+    /// <summary>
+    /// Task 045f, on a create: a regarding record URL the row sends names the record its regarding pair names
+    /// (<see cref="OwnedChildWrite.DecideRegardingRecordUrlAsync"/>; a create has no stored pair, so only the pair it sends), on
+    /// the row as it is written (after step 4½ and step 5). The pair type's table is read as the caller, or app-only for the
+    /// system principal. An admitted URL is set in canonical form on both items; a refusal is the pre-write rules' coded refusal
+    /// (400, <see cref="RegardingPairWrite.RecordUrlMismatchCode"/>); a failed read is the caller's own failure, or "not
+    /// saved" for the app-only read. Nothing is written on either. The invoice-family tables are not decided here: their
+    /// step 5½ derive writes the URL.
+    /// </summary>
+    private async Task<(DataverseWriteItemMapper.MappedItem? CallerItem, DataverseWriteItemMapper.MappedItem? Item, RecordCreationRefusal? Refusal)>
+        KeepRegardingRecordUrlAsync(
+            string table, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem callerItem,
+            DataverseWriteItemMapper.MappedItem item, string noun, CancellationToken ct)
+    {
+        var written = OwnedChildWrite.PairWriteOf(item);
+        if (!OwnedChildWrite.RegardingRecordUrlRuleApplies(table) || !written.SetsUrl)
+            return (callerItem, item, null);
+
+        var decided = await OwnedChildWrite.DecideRegardingRecordUrlAsync(
+                table, written, storedRow: null,
+                user is null ? OwnedChildWrite.AppOnlyReaders(_entities, table, Guid.Empty).Type : OwnedChildWrite.CallerPairTypeTable(user),
+                ct)
+            .ConfigureAwait(false);
+        if (decided.Refused)
+        {
+            return (null, null, MapPreWriteRefusal(
+                PreWriteRefusal.Refused(RegardingPairWrite.RecordUrlMismatchCode, RegardingPairWrite.RecordUrlMismatchReason), noun));
+        }
+
+        if (decided.Failed)
+        {
+            return (null, null, decided.Failure is { } failure
+                ? Upstream(failure, noun)
+                : new RecordCreationRefusal(RecordCreationRefusalKind.Undecided, RecordCreationRefusal.CheckFailedCode,
+                    $"The regarding record of the {noun} could not be checked, so it was not created."));
+        }
+
+        if (decided.CanonicalUrl is not { } canonical || string.Equals(written.UrlText, canonical, StringComparison.Ordinal))
+            return (callerItem, item, null);
+
+        var set = new Dictionary<string, object?> { [RegardingPairWrite.RecordUrlColumn] = canonical };
+        var canonicalItem = OwnedChildWrite.WithColumnsSet(table, item, set);
+        var canonicalCaller = ReferenceEquals(callerItem, item) ? canonicalItem
+            : OwnedChildWrite.PairWriteOf(callerItem).SetsUrl ? OwnedChildWrite.WithColumnsSet(table, callerItem, set)
+            : callerItem;
+        return (canonicalCaller, canonicalItem, null);
     }
 
     /// <summary>

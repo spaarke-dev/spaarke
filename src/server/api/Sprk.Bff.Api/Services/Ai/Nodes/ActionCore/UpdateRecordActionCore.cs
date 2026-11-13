@@ -261,7 +261,7 @@ internal sealed class UpdateRecordActionCore
         // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
         // planner, with the app-only reader this core already uses for the invoice-family guard) BEFORE the filing gate below and
         // the write, so they see the pair as it will be written. It adds no check (UAC-r2, 2026-11-07). A failed read refuses.
-        if (OwnedChildWrite.RegardingPairPlannerApplies(input.EntityLogicalName, updatePayload))
+        if (OwnedChildWrite.RegardingPairWriteApplies(input.EntityLogicalName, updatePayload)) // task 045f: a record URL too
         {
             using var pairScope = _scopeFactory.CreateScope();
             var pairEntities = pairScope.ServiceProvider.GetService<IGenericEntityService>();

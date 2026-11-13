@@ -1555,4 +1555,46 @@ public readonly record struct RegardingPairWrite(bool SetsId, string? IdText, bo
         id = named;
         return true;
     }
+
+    /// <summary>
+    /// Task 045f: the reason code a write path refuses with when a regarding record URL it would store does not name the record
+    /// the row's regarding pair names after the write (every pair table outside the invoice family; the family keeps
+    /// <see cref="InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode"/>).
+    /// </summary>
+    public const string RecordUrlMismatchCode = "regarding_record_url_mismatch";
+
+    /// <summary>The words of <see cref="RecordUrlMismatchCode"/>: fixed text that names no record.</summary>
+    public const string RecordUrlMismatchReason =
+        "the regarding record URL does not name the record this row is regarding";
+
+    /// <summary>
+    /// Task 045f: whether <paramref name="url"/> names the record a row's regarding pair names — <paramref name="pairTable"/>'s
+    /// record <paramref name="pairId"/> — read as <see cref="TryReadRecordUrl"/> reads it (its <c>etn</c> any case, its
+    /// <c>id</c> any case or braced). When it does, <paramref name="canonical"/> is the URL as the server writes it
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl"/>: the table lower case, the id lower-case "D"); its scheme,
+    /// host and other parameters are not kept. A pair with an id and no type names no table, so only the id is compared and
+    /// the URL's own <c>etn</c> is kept, when it is a logical name. Pure: no read.
+    /// </summary>
+    public static bool TryAdmitRecordUrl(string? url, string? pairTable, Guid pairId, out string canonical)
+    {
+        canonical = string.Empty;
+        if (pairId == Guid.Empty || !TryReadRecordUrl(url, out var named, out var namedId) || namedId != pairId)
+            return false;
+        if (pairTable is not null)
+        {
+            if (!string.Equals(named, pairTable.Trim(), StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        else if (!IsLogicalName(named))
+        {
+            return false;
+        }
+
+        canonical = InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(pairTable ?? named, pairId);
+        return true;
+
+        static bool IsLogicalName(string text) =>
+            text.Length is > 0 and <= 64 && (char.IsAsciiLetterLower(text[0]) || char.IsAsciiLetterUpper(text[0]))
+            && text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+    }
 }
