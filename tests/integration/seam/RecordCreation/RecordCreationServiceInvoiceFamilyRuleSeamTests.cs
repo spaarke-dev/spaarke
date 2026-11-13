@@ -244,6 +244,8 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     [Fact]
     public async Task CreateAsync_AnInvoiceUnderOneMatter_IsCreatedWithTheMattersFiveResolverFields_OverTheCallersOwn()
     {
+        CallerReadsTheMatterAs("Acme v Beta", "MAT-000013");
+
         var outcome = await Service().CreateAsync(InvoiceRequest(new
         {
             sprk_name = "One core record",
@@ -301,20 +303,30 @@ public sealed partial class RecordCreationServicePipelineSeamTests
 
     [Theory]
     [InlineData("catalog")]
-    [InlineData("matter")]
+    [InlineData("matter, as the caller")]
+    [InlineData("matter's exists-check")]
     public async Task CreateAsync_AReadFaultInTheDerive_Is500ReadFailed_AndTheFaultsOwnTextIsNotInTheResponse(string faulted)
     {
         const string faultText = "socket 10.0.0.9 timed out";
-        if (faulted == "catalog")
+        switch (faulted)
         {
-            _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new TimeoutException(faultText));
-        }
-        else
-        {
-            _readBack
-                .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new TimeoutException(faultText));
+            case "catalog":
+                _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new TimeoutException(faultText));
+                break;
+            case "matter, as the caller":
+                // Fix round 5: the name and number are read as the caller; a read that fails (not a 403 or 404) is a fault.
+                _scripted.GetOverride = path => path.StartsWith($"sprk_matters({OrdinaryMatter:D})?$select=sprk_mattername", StringComparison.Ordinal)
+                    ? DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.BadRequest, faultText)
+                    : null;
+                break;
+            default:
+                // The caller may not read the matter, and the app-only check that it exists faults.
+                _scripted.UnreadableRows.Add(OrdinaryMatter);
+                _readBack
+                    .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new TimeoutException(faultText));
+                break;
         }
 
         var outcome = await Service().CreateAsync(InvoiceRequest(new
@@ -355,12 +367,8 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     [InlineData("no name")]
     public async Task CreateAsync_WhenTheMatterHasNoNameOrNoNumber_IsCreated_WithTheTypeIdAndUrl_AndWithoutTheBlankOne(string gap)
     {
-        // Owner, 2026-11-12, option (b): the row takes what the record has.
-        _readBack
-            .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => gap == "no number"
-                ? new Entity(table, id) { ["sprk_mattername"] = "Acme v Beta" }
-                : new Entity(table, id) { ["sprk_matternumber"] = "MAT-000013" });
+        // Owner, 2026-11-12, option (b): the row takes what the record has (as the caller reads it, fix round 5).
+        CallerReadsTheMatterAs(gap == "no name" ? null : "Acme v Beta", gap == "no number" ? null : "MAT-000013");
 
         var outcome = await Service().CreateAsync(InvoiceRequest(new
         {
@@ -380,6 +388,8 @@ public sealed partial class RecordCreationServicePipelineSeamTests
     [Fact]
     public async Task CreateAsync_WhenTheMatterIsGoneByTheDerive_IsTheUniformNotFound_AndWritesNothing()
     {
+        // The caller's read finds no matter (404), and the app-only check agrees: it does not exist.
+        _scripted.InvisibleRows.Add(OrdinaryMatter);
         _readBack
             .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity)null!);
@@ -396,5 +406,57 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         problem.Status.Should().Be(StatusCodes.Status404NotFound);
         problem.Extensions["errorCode"].Should().Be(RecordCreationRefusal.NotFoundCode);
         AssertNothingWritten();
+    }
+
+    // =====================================================================================
+    // Task 045d fix round 5: the name and number are read as the caller
+    // =====================================================================================
+
+    /// <summary>The matter's name and number as the caller reads them (the app-only read answers "Acme v Beta", "MAT-000013").</summary>
+    private void CallerReadsTheMatterAs(string? name, string? number) =>
+        _scripted.RowValues[OrdinaryMatter] = new Dictionary<string, object?>
+        {
+            ["sprk_mattername"] = name,
+            ["sprk_matternumber"] = number,
+        };
+
+    [Fact]
+    public async Task CreateAsync_ACallerWhoMayAppendToTheMatterButNotReadIt_GetsTheRowWithTheTypeIdAndUrl_AndNoNameOrNumber()
+    {
+        // Append without read: step 5 admits the row, but the caller never sees the matter's name or number, so the server does
+        // not copy them into a row the caller can read. The matter is checked to exist (app-only); its name and number are cleared.
+        _scripted.UnreadableRows.Add(OrdinaryMatter);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Appended, not read",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordtype@odata.bind"]).Should().Be($"/sprk_recordtype_refs({CatalogRowOf("sprk_matter"):D})");
+        Describe(fields["sprk_regardingrecordid"]).Should().Be(MatterId);
+        Describe(fields["sprk_regardingrecordurl"]).Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={MatterId}");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordname")).Should().BeNull("the caller may not read the matter's name");
+        WrittenAs(fields.GetValueOrDefault("sprk_regardingrecordnumber")).Should().BeNull("the caller may not read the matter's number");
+        _journal.Should().Contain("readback", "the matter is checked to exist, app-only");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ACallerWhoMayReadTheMatter_GetsItsNameAndNumberAsTheyReadThem()
+    {
+        CallerReadsTheMatterAs("As the caller reads it", "C-0001");
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Read by the caller",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordname"]).Should().Be("As the caller reads it", "read as the caller, never app-only");
+        Describe(fields["sprk_regardingrecordnumber"]).Should().Be("C-0001");
     }
 }

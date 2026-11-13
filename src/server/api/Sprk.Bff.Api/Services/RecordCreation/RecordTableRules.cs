@@ -91,9 +91,10 @@ internal static partial class RecordTableRules
     /// (<see cref="PreWriteRow.Caller"/>), on the row as it will be written; the guard owns the rule, this only maps its answer
     /// (<see cref="InvoiceFamilyPreWrite"/>). Declared before <see cref="All"/>: static initialisers run in textual order.
     /// <para>Task 045d (owner ruling Q8 (a)): an admitted row gets the five resolver fields of the core record the guard decided
-    /// (<see cref="InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync"/>, all five or none), read with the row's app-only
-    /// readers as the dedicated writers read them — step 5½ runs after step 5's AppendTo on every record the row names. A
-    /// derive that fails refuses through the same mapping (fail closed): the row is never written without them.</para>
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.DeriveGenericResolverFieldsAsync"/>: the type, id and URL always, the name and
+    /// number when the caller may read them), read with the row's readers (<see cref="PreWriteRow.Records"/>, as the caller;
+    /// the catalog app-only) — step 5½ runs after step 5's AppendTo on every record the row names. A derive that fails refuses
+    /// through the same mapping (fail closed): the row is never written without them.</para>
     /// </summary>
     internal static readonly PreWriteRule InvoiceFamilyRule = new(
         new NamedRule("InvoiceFamilyCoreRecord",
@@ -1074,8 +1075,9 @@ internal sealed record NamedRule
 /// The row a pre-write rule decides on: the table and the payload AS IT WILL BE WRITTEN (caller values merged with mapped
 /// values), with the caller's own Dataverse client for any read the rule needs as the caller (ADR-028).
 /// </summary>
-/// <param name="Records">Task 045d: the APP-ONLY reader of a record the row names, for a rule that derives columns from it
-/// (asked only after step 5's AppendTo on every record the row names). Null: such a rule fails closed.</param>
+/// <param name="Records">Task 045d: the reader of a record the row names, for a rule that derives columns from it (asked only
+/// after step 5's AppendTo on every record the row names). Fix round 5: its values as the CALLER reads them; a record the
+/// caller may not read is checked to exist app-only and comes back with no values. Null: such a rule fails closed.</param>
 /// <param name="RecordTypes">Task 045d: the APP-ONLY reader of a table's <c>sprk_recordtype_ref</c> row. Null: such a rule
 /// fails closed.</param>
 internal sealed record PreWriteRow(

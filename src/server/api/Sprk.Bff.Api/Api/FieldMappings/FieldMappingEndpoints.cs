@@ -1502,9 +1502,10 @@ public static class FieldMappingEndpoints
                     // access-column scrub above, and are no access column. A derive that cannot be done fails THIS child as
                     // the guard above does: its code only.
                     var familyFields = await Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
-                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH", logger, ct,
-                        displayRecord: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
-                            callerQuery, appOnlyEntities, callerSystemUserId));
+                        appOnlyEntities, targetEntity, childRecordId, updatePayload, "FIELD-MAPPING-PUSH",
+                        Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.CallerDisplayReader(
+                            callerQuery, appOnlyEntities, callerSystemUserId),
+                        logger, ct);
                     if (familyFields.RefusalCode is { } derivedCode)
                     {
                         failed++;

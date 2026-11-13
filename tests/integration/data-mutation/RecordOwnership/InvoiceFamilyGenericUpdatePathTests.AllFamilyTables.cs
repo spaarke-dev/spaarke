@@ -177,7 +177,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull(outcome.Message);
         WrittenOnce(table, FamilyRow);
+        ShouldCarryNoResolverField(SentPayload(table, FamilyRow), "the row still names that matter, so its fields are kept");
     }
+
+    /// <summary>None of the five resolver fields is in <paramref name="payload"/>: the row keeps the ones it has.</summary>
+    private static void ShouldCarryNoResolverField(Dictionary<string, object?> payload, string because) =>
+        payload.Keys.Should().NotContain(k => ResolverColumns.Contains(k, StringComparer.OrdinalIgnoreCase)
+                                             || k.StartsWith("sprk_regardingrecordtype", StringComparison.OrdinalIgnoreCase), because);
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
@@ -193,6 +199,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         outcome.Code.Should().BeNull(outcome.Message);
         WrittenOnce("sprk_externalidentifier", FamilyRow);
+        ShouldCarryNoResolverField(SentPayload("sprk_externalidentifier", FamilyRow), "the row still regards its matter");
+        _deriveReads.Should().BeEmpty("nothing is derived for a row whose record does not change");
     }
 
     [Fact]

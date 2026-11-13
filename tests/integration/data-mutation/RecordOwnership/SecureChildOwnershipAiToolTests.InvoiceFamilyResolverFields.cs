@@ -174,4 +174,38 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var body = BodyOf(_user.Patches.Should().ContainSingle().Subject.Body);
         body.Keys.Should().NotContain(ResolverColumns).And.NotContain("sprk_regardingrecordtype@odata.bind");
     }
+
+    // ── Fix round 5: an update that re-names the matter the row already names derives nothing ────────────────────────
+
+    [Theory]
+    [InlineData("child re-file")]
+    [InlineData("update tool")]
+    public async Task AnInvoiceGivenTheMatterItAlreadyNames_ReadsNoCatalog_AndWritesNoneOfTheFive(string route)
+    {
+        // The row keeps the fields it has, as the pair planner keeps a pair that does not move (045b rule 4).
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
+
+        if (route == "child re-file")
+        {
+            var result = await RefileChild("sprk_invoice", GuardInvoice,
+                new() { ["sprk_Matter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" });
+            Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        }
+        else
+        {
+            var result = await UpdateRecord("sprk_invoice", GuardInvoice, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+            result.Success.Should().BeTrue(result.ErrorMessage);
+        }
+
+        reads.Should().NotContain(p => p.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal), "nothing is derived");
+        var body = BodyOf(_user.Patches.Should().ContainSingle().Subject.Body);
+        body.Keys.Should().NotContain(ResolverColumns).And.NotContain("sprk_regardingrecordtype@odata.bind");
+    }
 }

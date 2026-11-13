@@ -890,7 +890,18 @@ internal static class OwnedChildWrite
                     : null;
             return RegardingPairRead<RegardingPairType>.Ok(new RegardingPairType(pairTable, number));
         },
-        async (recordTable, id, asked, ct) =>
+        CallerRecordDisplay(user));
+
+    /// <summary>
+    /// A record's display columns read AS THE CALLER (<paramref name="user"/>'s own client): the record, or the caller's failed
+    /// read (403 when they may not read it, 404 when it is missing), or 500 for an answer that is not a row. The planner's
+    /// <see cref="CallerReaders"/> and the create's step 5½ derive (task 045d fix round 5) read with it.
+    /// </summary>
+    internal static Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>
+        CallerRecordDisplay(IDataverseUserClient user)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        return async (recordTable, id, asked, ct) =>
         {
             var set = await user.GetAsync($"EntityDefinitions(LogicalName='{recordTable}')?$select=EntitySetName", ct).ConfigureAwait(false);
             if (!set.IsSuccess)
@@ -906,7 +917,8 @@ internal static class OwnedChildWrite
             return RegardingPairRead<IReadOnlyDictionary<string, string?>>.Ok(asked.ToDictionary(c => c,
                 c => values.TryGetProperty(c, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null,
                 StringComparer.OrdinalIgnoreCase));
-        });
+        };
+    }
 
     /// <summary>The planner's reads with the APP-ONLY reader the playbook and push paths already use for their own guards
     /// (design §2.2, item 4). A row or catalog row that does not exist answers 404; any other fault answers 500.</summary>
@@ -1083,6 +1095,14 @@ internal static class OwnedChildWrite
         var decided = InvoiceFamilyCoreRecordGuard.Check(table, column => effective.TryGetValue(column, out var value) ? value : null);
         if (decided.IsRefused)
             return (item, null);
+
+        // An update that re-names the record the row already names (the same table and id) moves nothing: the row keeps the
+        // fields it has, as the pair planner keeps a pair that does not move (045b rule 4).
+        if (InvoiceFamilyCoreRecordGuard.NamesTheSameRecord(decided,
+                InvoiceFamilyCoreRecordGuard.Check(table, column => stored.TryGetValue(column, out var kept) ? kept : null)))
+        {
+            return (item, null);
+        }
 
         var derived = await InvoiceFamilyCoreRecordGuard.DeriveGenericResolverFieldsAsync(
             decided, CallerRecordReader(user, table, entitySetName, recordId), CallerRecordTypeReader(user), ct).ConfigureAwait(false);
@@ -1409,23 +1429,25 @@ internal static class OwnedChildWrite
 
     /// <summary>
     /// Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): the app-only update half on one path — the five resolver
-    /// fields of the core record an invoice-family row will name, derived app-only
-    /// (<see cref="InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync"/>) and set over <paramref name="payload"/> for the
-    /// same write (<see cref="WithColumnsSet(string, Dictionary{string, object?}, IReadOnlyDictionary{string, object?})"/>).
+    /// fields of the core record an invoice-family row will name (<see cref="InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync"/>:
+    /// the stored row and the catalog app-only, the name and number through <paramref name="displayRecord"/>) and set over
+    /// <paramref name="payload"/> for the same write
+    /// (<see cref="WithColumnsSet(string, Dictionary{string, object?}, IReadOnlyDictionary{string, object?})"/>).
     /// The payload unchanged when nothing is derived; the guard's refusal (its code) when the derive cannot be done, which the
     /// path answers through the refusal form it uses for <see cref="InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync"/>.
     /// </summary>
     /// <param name="displayRecord">The path's display read, the one its pair planner uses for a moved pair: the push's caller
     /// (<see cref="CallerDisplayReader"/>), or on the two handlers the person the run acts as (<see cref="MovedDisplayReader"/>,
-    /// which answers 403 with no person, so the name and number are cleared). Through <see cref="CallerDisplayRecords"/>. Null:
-    /// read app-only.</param>
+    /// which answers 403 with no person, so the name and number are cleared). Through <see cref="CallerDisplayRecords"/>.
+    /// Required, so no path falls back to an app-only read of them.</param>
     internal static async Task<(Dictionary<string, object?> Payload, string? RefusalCode)> KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
         IGenericEntityService? entities, string table, Guid recordId, Dictionary<string, object?> payload, string path,
-        ILogger? logger, CancellationToken ct, bool writeIsImpersonated = false,
-        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>>? displayRecord = null)
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>> displayRecord,
+        ILogger? logger, CancellationToken ct, bool writeIsImpersonated = false)
     {
-        var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync(table, recordId, payload, entities, ct, writeIsImpersonated,
-                displayRecord is not null && entities is not null ? CallerDisplayRecords(entities, displayRecord) : null)
+        ArgumentNullException.ThrowIfNull(displayRecord);
+        var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync(table, recordId, payload, entities,
+                CallerDisplayRecords(entities, displayRecord), ct, writeIsImpersonated)
             .ConfigureAwait(false);
         if (derived is null)
             return (payload, null);
@@ -1438,17 +1460,19 @@ internal static class OwnedChildWrite
     }
 
     /// <summary>
-    /// Task 045d (fix rounds 3-4): an app-only path's record reader for the derive — the name and number as the push's caller,
-    /// or the person a handler's run acts as, sees them (<paramref name="displayRecord"/>), as the 045b planner reads a moved
-    /// pair's display values on that path. A record the caller may not
-    /// read, or cannot find (403 or 404), is checked to exist app-only: it exists, so its name and number are cleared (owner,
-    /// 2026-11-12, option (b)); it does not, so the derive refuses as for any missing record. Any other failed read throws,
-    /// which the derive refuses as a read failure.
+    /// Task 045d (fix rounds 3-5): a generic writer's record reader for the derive — the name and number as the person the
+    /// write is for sees them (<paramref name="displayRecord"/>): the push's caller, the person a handler's run acts as (as the
+    /// 045b planner reads a moved pair's display values on that path), or the caller of a create (<see cref="CallerRecordDisplay"/>).
+    /// A record they may not read, or cannot find (403 or 404), is checked to exist app-only: it exists, so its name and number
+    /// are cleared (owner, 2026-11-12, option (b)); it does not, so the derive refuses as for any missing record. Any other
+    /// failed read, or no app-only reader for that check, throws, which the derive refuses as a read failure.
     /// </summary>
     internal static InvoiceFamilyCoreRecordGuard.RecordLookup CallerDisplayRecords(
-        IGenericEntityService entities,
-        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>> displayRecord) =>
-        async (table, id, columns, ct) =>
+        IGenericEntityService? entities,
+        Func<string, Guid, IReadOnlyList<string>, CancellationToken, Task<RegardingPairRead<IReadOnlyDictionary<string, string?>>>> displayRecord)
+    {
+        ArgumentNullException.ThrowIfNull(displayRecord);
+        return async (table, id, columns, ct) =>
         {
             var shown = await displayRecord(table, id, columns, ct).ConfigureAwait(false);
             if (shown.Value is { } values)
@@ -1459,7 +1483,7 @@ internal static class OwnedChildWrite
                 return row;
             }
 
-            if (shown.Status is 403 or 404)
+            if (shown.Status is 403 or 404 && entities is not null)
             {
                 return await entities.RetrieveAsync(table, id, columns, ct).ConfigureAwait(false) is null
                     ? null
@@ -1468,6 +1492,7 @@ internal static class OwnedChildWrite
 
             throw new InvalidOperationException("The record's name and number could not be read as the caller.");
         };
+    }
 
     /// <summary>One mapped item carrying <paramref name="item"/>'s writes and <paramref name="added"/>'s (which win).</summary>
     private static DataverseWriteItemMapper.MappedItem Merge(DataverseWriteItemMapper.MappedItem item, DataverseWriteItemMapper.MappedItem added)

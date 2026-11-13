@@ -197,6 +197,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     private DataverseUpdateHandler Handler(IGenericEntityService app)
     {
         AnswerDeriveReads(app);
+        // Fix round 5: a run as a person reads the derived name and number with the person's query, which names the record's
+        // entity set from metadata through this same service.
+        if (app is IMocked<IGenericEntityService> mocked)
+        {
+            mocked.Mock.Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string t, CancellationToken _) => EntitySetNameFixtures.SetOf(t));
+        }
         return new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
             SecureChildReconcilerFixtures.OverEmptyWorld(), readAsPerson: CallerQuery());

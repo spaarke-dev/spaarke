@@ -2167,8 +2167,9 @@ internal sealed partial class RecordCreationService
     /// <see cref="RecordCreationRefusalKind.Invalid"/> (400) with its code (task 017, F2). A system principal has no
     /// caller to ask as, so a table with rules refuses it (fail closed; task 012's open point).
     /// Task 045d (owner ruling Q8 (a)): with no refusal, the columns the rules derived, merged in rule order (a later rule's
-    /// value wins); each rule decides on the row as the caller sent it. The row's app-only readers (the regarded record, the
-    /// record-type catalog) are the ones the dedicated writers use; they are asked here, after step 5's AppendTo.
+    /// value wins); each rule decides on the row as the caller sent it. The regarded record's name and number are read as
+    /// the caller (fix round 5); the record-type catalog app-only, as the dedicated writers read it. Both are asked here,
+    /// after step 5's AppendTo.
     /// </summary>
     private async Task<(RecordCreationRefusal? Refusal, IReadOnlyDictionary<string, object?> Columns)> RunPreWriteRulesAsync(
         string table, RecordTableRule rule, IDataverseUserClient? user, DataverseWriteItemMapper.MappedItem item, string noun,
@@ -2182,8 +2183,12 @@ internal sealed partial class RecordCreationService
                 "and this create acts for no caller, so it was not created."), columns);
         }
 
+        // Task 045d fix round 5: the regarded record's name and number are read AS THE CALLER, so a caller who may append to
+        // a record but not read it never gets its name or number copied into a row they can read: it is checked to exist
+        // app-only and its name and number are cleared (OwnedChildWrite.CallerDisplayRecords); a missing record is refused as
+        // before. The catalog row stays app-only (it names no record's values).
         var row = new PreWriteRow(user, table, item,
-            async (recordTable, id, asked, token) => await _entities.RetrieveAsync(recordTable, id, asked, token).ConfigureAwait(false),
+            OwnedChildWrite.CallerDisplayRecords(_entities, OwnedChildWrite.CallerRecordDisplay(user)),
             RecordTypeRowAsync);
         foreach (var preWrite in rule.PreWriteRules)
         {

@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -85,8 +86,11 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "no name")]
+    [InlineData(GenericPath.PlaybookUpdate, "no number")]
+    [InlineData(GenericPath.OutputOrchestrator, "no name")]
     [InlineData(GenericPath.OutputOrchestrator, "no number")]
     [InlineData(GenericPath.FieldMappingPush, "no name")]
+    [InlineData(GenericPath.FieldMappingPush, "no number")]
     public async Task AnInvoiceMovedToAMatterWithABlankNameOrNumber_IsWritten_WithTheTypeIdAndUrl_AndTheBlankOneCleared(GenericPath path, string gap)
     {
         // Owner, 2026-11-12, option (b): the row takes what the record has; a blank is never a refusal on the generic path.
@@ -96,12 +100,14 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             [columns[1]] = gap == "no number" ? null : "MAT-000077",
         };
 
+        // Fix round 5: the handlers run as a person who may read the matter, so their row tests the blank one alone (with no
+        // person both would be cleared whatever the matter holds); the push reads as its caller either way.
         var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain,
-            WorldWithLines(OtherMatter).Object);
+            WorldWithLines(OtherMatter).Object, playbookActsAs: Caller);
 
         outcome.Code.Should().BeNull(outcome.Message);
         ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
-            ShownOn(path, gap == "no name" ? null : "Acme v Beta"), ShownOn(path, gap == "no number" ? null : "MAT-000077"));
+            gap == "no name" ? null : "Acme v Beta", gap == "no number" ? null : "MAT-000077");
     }
 
     // ── Fail closed: a derive that cannot be done is the path's existing invoice-family refusal ─────────────────────
@@ -215,6 +221,66 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             OtherMatter, "As the person sees it", "P-1");
     }
 
+    // ── Fix round 5: a write that re-names the record the row already names derives nothing ────────────────────────────
+
+    public static TheoryData<GenericPath, string> ReNamingRuns() => new()
+    {
+        { GenericPath.PlaybookUpdate, "no person" },
+        { GenericPath.OutputOrchestrator, "no person" },
+        { GenericPath.PlaybookUpdate, "a person" },
+        { GenericPath.OutputOrchestrator, "a person" },
+        { GenericPath.FieldMappingPush, "a caller who may not read it" },
+        { GenericPath.FieldMappingPush, "a caller who may read it" },
+    };
+
+    [Theory]
+    [MemberData(nameof(ReNamingRuns))]
+    public async Task AWriteThatReNamesTheMatterTheRowAlreadyNames_LeavesItsNameAndNumberUntouched(GenericPath path, string runAs)
+    {
+        // The pair planner keeps a pair that does not move (045b rule 4); so does the derive. Before, a run that could not read
+        // the matter (no person, or a caller with append but no read) wrote its name and number null on every re-run.
+        _callerMayNotRead = runAs == "a caller who may not read it";
+
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(Matter))), NoPlain,
+            InvoiceUnderAMatter().Object, playbookActsAs: runAs == "a person" ? Caller : null);
+
+        outcome.Code.Should().BeNull(outcome.Message);
+        var payload = SentPayload("sprk_invoice", Invoice);
+        payload.Keys.Should().NotContain(["sprk_regardingrecordname", "sprk_regardingrecordnumber"], "the row keeps the name and number it has");
+        payload.Keys.Should().NotContain(ResolverColumns);
+        _deriveReads.Should().BeEmpty("nothing is derived for a row whose record does not change");
+    }
+
+    // ── Fix round 5: a row that changes between the guard and the derive is refused, never written with stale fields ──
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
+    public async Task ARowGivenASecondCoreRecordAfterTheGuard_IsRefusedByTheDerive_AndNothingIsWritten(GenericPath path)
+    {
+        // The guard reads the stored invoice under one matter and admits the move; by the derive's own read (the core lookups
+        // only) it is also filed under a project, which the derive's Check refuses. The path answers that code; it does not
+        // move the core with stale resolver fields.
+        var app = new Mock<IGenericEntityService>();
+        app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            {
+                var row = new Entity(table, id) { ["sprk_matter"] = MatterRef(Matter) };
+                if (columns.Length == 3 && columns.Contains("sprk_project") && !columns.Contains(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn))
+                    row["sprk_project"] = new EntityReference("sprk_project", Project); // the derive's read, after the change
+                return Task.FromResult(row);
+            });
+
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, app.Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
     // ── Fix round 4: the push's caller read, when it fails ─────────────────────────────────────────────────────────────
 
     [Theory]
@@ -326,8 +392,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         if (answersNotFoundFault) read.ThrowsAsync(ObjectDoesNotExist()); else read.ReturnsAsync((Entity)null!);
 
         var derived = await InvoiceFamilyCoreRecordGuard.DeriveForGenericUpdateAsync("sprk_invoiceapproval", MissingRow,
-            new Dictionary<string, object?> { ["sprk_regardingmatter"] = MatterRef(OtherMatter) }, app.Object, CancellationToken.None,
-            writeIsImpersonated);
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = MatterRef(OtherMatter) }, app.Object,
+            InvoiceFamilyCoreRecordGuard.AppOnlyRecords(app.Object), CancellationToken.None, writeIsImpersonated);
 
         derived.Should().BeNull();
     }

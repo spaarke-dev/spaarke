@@ -285,11 +285,12 @@ internal sealed class UpdateRecordActionCore
             var familyEntities = familyFieldsScope.ServiceProvider.GetService<IGenericEntityService>();
             var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
                     familyEntities, input.EntityLogicalName, input.RecordId,
-                    updatePayload, "UpdateRecord", _logger, cancellationToken,
-                    writeIsImpersonated: input.ImpersonateSystemUserId is not null,
-                    displayRecord: OwnedChildWrite.MovedDisplayReader(
+                    updatePayload, "UpdateRecord",
+                    OwnedChildWrite.MovedDisplayReader(
                         familyFieldsScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
-                        familyEntities, input.ImpersonateSystemUserId))
+                        familyEntities, input.ImpersonateSystemUserId),
+                    _logger, cancellationToken,
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null)
                 .ConfigureAwait(false);
             if (familyFields.RefusalCode is { } derivedCode)
                 throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, derivedCode);

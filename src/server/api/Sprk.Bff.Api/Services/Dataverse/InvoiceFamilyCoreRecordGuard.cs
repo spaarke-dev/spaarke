@@ -415,30 +415,34 @@ public static class InvoiceFamilyCoreRecordGuard
     /// orchestrator and the field-mapping push. For an update of an invoice-family row whose patch sets or clears one of the
     /// row's own core lookups (<see cref="ColumnsToRead"/>), the stored lookups are read with <paramref name="appOnly"/>,
     /// overlaid with the patch, decided by <see cref="Check(string, Func{string, object?})"/>, and the resolver fields of the
-    /// record the row will name are derived app-only (<see cref="DeriveGenericResolverFieldsAsync"/>). The path writes them in
+    /// record the row will name are derived (<see cref="DeriveGenericResolverFieldsAsync"/>). The path writes them in
     /// the same write (<see cref="InvoiceFamilyCoreRecord.ResolverFields"/>, <see cref="InvoiceFamilyResolverFields.ToGenericFields"/>),
     /// or answers a refusal through the refusal form it uses for <see cref="CheckGenericUpdateAsync"/>.
     /// Null when nothing is derived: a table outside the family, a patch that moves no core lookup, a stored row that does not
-    /// exist (the path answers it as any missing row), or a row
-    /// <see cref="Check(string, Func{string, object?})"/> refuses (left to the path's guard, which answers it as before).
+    /// exist (the path answers it as any missing row), or a patch that leaves the row naming the record it already names
+    /// (the same table and id: the row keeps the fields it has, as the pair planner keeps a pair that does not move).
+    /// A row <see cref="Check(string, Func{string, object?})"/> refuses here is refused with its code: the path's guard ran
+    /// before this and admitted it, so the row changed in between, and the write must not move the core with stale fields.
     /// </summary>
     /// <param name="patch">As <see cref="CheckGenericUpdateAsync"/>'s: a column → <see cref="EntityReference"/> or null, or a
     /// <c>{navigation}@odata.bind</c> → <c>/{set}({id})</c> or null.</param>
-    /// <param name="appOnly">The path's app-only reader; null fails closed (<see cref="ReadFailedCode"/>) when a derive is due.</param>
+    /// <param name="appOnly">The path's app-only reader of the stored row and the catalog row; null fails closed
+    /// (<see cref="ReadFailedCode"/>) when a derive is due.</param>
+    /// <param name="records">The reader of the regarded record's name and number, as the path reads display values: the push's
+    /// caller, or the person a handler's run acts as (<c>OwnedChildWrite.CallerDisplayRecords</c>). Required, so no path falls
+    /// back to an app-only read of them.</param>
     /// <param name="writeIsImpersonated">As <see cref="CheckGenericUpdateAsync"/>'s: a record not found is answered
     /// <see cref="ReadFailedCode"/>, the path's answer for a missing record when the write runs as a user.</param>
-    /// <param name="records">The reader of the regarded record's name and number; null reads it with <paramref name="appOnly"/>.
-    /// The field-mapping push passes one that reads as its caller. The stored row and the catalog row are read with
-    /// <paramref name="appOnly"/> either way.</param>
     public static async Task<InvoiceFamilyCoreRecord?> DeriveForGenericUpdateAsync(
         string entityLogicalName,
         Guid recordId,
         IEnumerable<KeyValuePair<string, object?>> patch,
         IGenericEntityService? appOnly,
+        RecordLookup records,
         CancellationToken ct = default,
-        bool writeIsImpersonated = false,
-        RecordLookup? records = null)
+        bool writeIsImpersonated = false)
     {
+        ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(patch);
         var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
         if (ColumnsToRead(entity) is not { } coreColumns)
@@ -497,13 +501,28 @@ public static class InvoiceFamilyCoreRecordGuard
                 : stored.Attributes.TryGetValue(column, out var kept) ? kept
                 : null);
             if (decided.IsRefused)
+                return NotFoundAs(decided, writeIsImpersonated);
+            if (NamesTheSameRecord(decided, Check(entity, column => stored.Attributes.TryGetValue(column, out var kept) ? kept : null)))
                 return null;
 
-            derived = await DeriveGenericResolverFieldsAsync(decided, records ?? AppOnlyRecords(appOnly), AppOnlyRecordTypes(appOnly), ct)
-                .ConfigureAwait(false);
+            derived = await DeriveGenericResolverFieldsAsync(decided, records, AppOnlyRecordTypes(appOnly), ct).ConfigureAwait(false);
         }
 
         return NotFoundAs(derived, writeIsImpersonated);
+    }
+
+    /// <summary>
+    /// True when <paramref name="after"/> and <paramref name="before"/> are both decided and name the same record (table and
+    /// id): a write that re-names the record a row already names moves nothing, so nothing is derived for it. Pure.
+    /// </summary>
+    public static bool NamesTheSameRecord(InvoiceFamilyCoreRecord after, InvoiceFamilyCoreRecord before)
+    {
+        ArgumentNullException.ThrowIfNull(after);
+        ArgumentNullException.ThrowIfNull(before);
+        return !after.IsRefused && !before.IsRefused
+               && after.Regarding is { } next && before.Regarding is { } kept
+               && string.Equals(next.LogicalName, kept.LogicalName, StringComparison.OrdinalIgnoreCase)
+               && next.Id == kept.Id;
     }
 
     /// <summary>A record not found, answered <see cref="ReadFailedCode"/> when the write runs as a user (#2081 fix round 2).</summary>

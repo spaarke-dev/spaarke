@@ -159,9 +159,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // display (MovedDisplayReader): as the person the write runs for, cleared when they may not read it, and cleared with
         // no person (never derived app-only). A derive that cannot be done is refused as the guard above refuses: its code only.
         var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
-                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING", _logger, ct,
-                writeIsImpersonated: impersonateSystemUserId is not null,
-                displayRecord: OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId))
+                _genericEntityService, entityLogicalName, recordId, fields, "OUTPUT-MAPPING",
+                OwnedChildWrite.MovedDisplayReader(_readAsPerson, _genericEntityService, impersonateSystemUserId),
+                _logger, ct, writeIsImpersonated: impersonateSystemUserId is not null)
             .ConfigureAwait(false);
         if (familyFields.RefusalCode is { } derivedCode)
             throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, derivedCode);
