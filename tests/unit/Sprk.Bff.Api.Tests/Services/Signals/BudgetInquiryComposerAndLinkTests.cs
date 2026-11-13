@@ -377,6 +377,26 @@ public sealed class BudgetInquiryComposerAndLinkTests
     }
 
     [Fact]
+    public async Task PrepareAsync_chooses_the_link_by_the_To_recipients_only_and_carries_Cc_and_Bcc_task190()
+    {
+        // D-222: the record-link choice stays keyed on To. Cc and Bcc recipients are never asked about, so a hidden recipient
+        // cannot change the audience of the link and does not appear in the facts call.
+        var facts = StubFacts(new InquiryEmailExtras("Acme v. Roe (MAT-000123)", ["Open this matter in Spaarke: https://org.example/m"]));
+        var sender = new InquiryEmailSender(null!, new HttpContextAccessor(), facts.Object);
+        var request = new BudgetInquiryRequest(Matter, ["counsel@firm.example"], "Budget inquiry: Acme", "Please explain.", true, Firm,
+            ["copy@firm.example"], ["hidden@firm.example"]);
+
+        var send = await sender.PrepareAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        facts.Verify(f => f.ResolveAsync(
+            "sprk_matter", Matter, It.Is<IReadOnlyList<string>>(r => r.SequenceEqual(new[] { "counsel@firm.example" })),
+            It.IsAny<CancellationToken>()), Times.Once);
+        send.Cc.Should().Equal("copy@firm.example");
+        send.Bcc.Should().Equal("hidden@firm.example");
+        send.Body.Should().NotContain("hidden@firm.example");
+    }
+
+    [Fact]
     public async Task PrepareAsync_with_the_real_facts_links_each_audience_and_names_the_matter()
     {
         var sender = new InquiryEmailSender(null!, new HttpContextAccessor(), Facts(internalAddresses: ["a@spaarke.example"]));

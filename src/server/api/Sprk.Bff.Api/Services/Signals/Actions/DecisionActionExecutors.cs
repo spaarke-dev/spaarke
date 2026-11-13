@@ -1551,6 +1551,19 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
         if (to.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
                 "A recipient is not a valid email address. Check the To field."));
+        // Task 190 (D-222): Cc and Bcc are optional and validated exactly as To, before the preflight and before any write. An address
+        // already in To is not repeated in Cc or Bcc, and one in Cc is not repeated in Bcc, so a recipient gets one copy.
+        var cc = SplitRecipients(request.Param("cc"));
+        if (cc.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
+                "A recipient is not a valid email address. Check the Cc field."));
+        var bcc = SplitRecipients(request.Param("bcc"));
+        if (bcc.Any(address => !OutsideFirmContactResolver.Address.IsMatch(address)))
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved,
+                "A recipient is not a valid email address. Check the Bcc field."));
+        cc = cc.Where(a => !to.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList();
+        bcc = bcc.Where(a => !to.Contains(a, StringComparer.OrdinalIgnoreCase) && !cc.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList();
+
         if (request.Param("subject") is not { } subject)
             return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, "Give the inquiry a subject."));
         if (request.Param("body") is not { } body)
@@ -1564,8 +1577,15 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
             firm = firmId;
         }
 
-        return (new BudgetInquiryRequest(matterId, to, subject, body, Confirmed: true, firm), null);
+        return (new BudgetInquiryRequest(matterId, to, subject, body, Confirmed: true, firm, cc.Count > 0 ? cc : null, bcc.Count > 0 ? bcc : null), null);
     }
+
+    /// <summary>The distinct (any case) addresses of a recipient field, split on the composer's separators.</summary>
+    private static List<string> SplitRecipients(string? text) =>
+        (text ?? string.Empty)
+            .Split(RecipientSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     /// <summary>070's outcome as a decision-action outcome (the mapping the #1512/#1515 reviews fixed).</summary>
     /// <remarks>uac-r2 K4 on #1665: 070's <see cref="BudgetInquiryResult.Error"/> can carry Dataverse's own error text (a client

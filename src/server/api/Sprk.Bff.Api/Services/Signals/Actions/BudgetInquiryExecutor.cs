@@ -18,8 +18,11 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 /// <param name="Body">Email body, as the human edited and confirmed it in the wizard.</param>
 /// <param name="Confirmed">True only when the wizard's Confirm step ran (D-52). Anything else makes the executor do nothing.</param>
 /// <param name="OutsideFirmId">The outside firm (<c>sprk_organization</c>) the inquiry is to. Only the caller knows which of the matter's two firm slots it is; it is written to <c>sprk_regardingorganization</c> so the disposition is queryable per outside firm.</param>
+/// <param name="Cc">Task 190 (D-222): copied recipients, optional. Sent on the email's Cc line and recorded on <c>sprk_communication.sprk_cc</c>.</param>
+/// <param name="Bcc">Task 190 (D-222): blind-copied recipients, optional. Sent as Bcc only (never in To, Cc, the subject, the body or a link line) and recorded on <c>sprk_communication.sprk_bcc</c>.</param>
 public sealed record BudgetInquiryRequest(
-    Guid MatterId, IReadOnlyList<string> To, string Subject, string Body, bool Confirmed, Guid? OutsideFirmId = null);
+    Guid MatterId, IReadOnlyList<string> To, string Subject, string Body, bool Confirmed, Guid? OutsideFirmId = null,
+    IReadOnlyList<string>? Cc = null, IReadOnlyList<string>? Bcc = null);
 
 /// <summary>How an Inquiry execution ended. The commit route records this in the Decision Record's step list.</summary>
 public enum BudgetInquiryOutcome
@@ -112,10 +115,17 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
         if (to.Length == 0)
             throw new ArgumentException("An inquiry email needs at least one recipient.", nameof(request));
 
+        // Task 190 (D-222): Cc and Bcc are optional. An address already in To is not repeated in Cc or Bcc, and one in Cc is not repeated in
+        // Bcc (any case), so a recipient gets one copy. Empty means null, so a To-only inquiry builds exactly the request it always did.
+        var cc = CleanCopies(request.Cc, to);
+        var bcc = CleanCopies(request.Bcc, [.. to, .. cc]);
+
         var lines = extras?.LinkLines ?? [];
         return new SendCommunicationRequest
         {
             To = to,
+            Cc = cc.Length > 0 ? cc : null,
+            Bcc = bcc.Length > 0 ? bcc : null,
             Subject = request.Subject,
             Body = lines.Count > 0 ? $"{request.Body}\n\n{string.Join("\n", lines)}" : request.Body,
             BodyFormat = BodyFormat.PlainText,
@@ -138,6 +148,15 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
             ],
         };
     }
+
+    /// <summary>Trimmed, de-duplicated (any case) addresses of a copy line, without any address in <paramref name="already"/>.</summary>
+    private static string[] CleanCopies(IReadOnlyList<string>? addresses, IReadOnlyCollection<string> already) =>
+        (addresses ?? [])
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(a => a.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(a => !already.Contains(a, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
 }
 
 /// <summary>

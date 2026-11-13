@@ -1418,7 +1418,7 @@ public sealed partial class DecisionCommitServiceTests
         var missing = PathBReview() with { Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"))), Skip("revise-budget"), Skip("approve-variance")] };
         var unknown = PathBReview() with
         {
-            Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"), ("subject", "s"), ("body", "b"), ("bcc", "x"))), Skip("revise-budget"), Skip("approve-variance")],
+            Actions = [Take("send-budget-inquiry", Values(("to", "a@x.example"), ("subject", "s"), ("body", "b"), ("replyBy", "x"))), Skip("revise-budget"), Skip("approve-variance")],
         };
 
         (await rig.CommitAsync(missing)).ReasonCode.Should().Be(DecisionCommitReasons.InvalidParameter);

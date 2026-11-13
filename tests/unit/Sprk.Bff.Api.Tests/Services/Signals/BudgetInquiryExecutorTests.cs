@@ -358,6 +358,73 @@ public sealed class BudgetInquiryExecutorTests
         act.Should().Throw<ArgumentException>();
     }
 
+    // ---- task 190 (D-222): Cc and Bcc end to end ---------------------------------------------------------------------------
+
+    private static BudgetInquiryRequest CopyReq(string[]? cc, string[]? bcc, string[]? to = null) =>
+        new(Matter, to ?? ["firm@example.com"], "Budget inquiry", "Please explain the overage.", true, null, cc, bcc);
+
+    [Fact]
+    public void Build_sets_To_Cc_and_Bcc_trimmed_and_deduplicated_and_changes_nothing_else_task190()
+    {
+        var sr = Guid.NewGuid();
+        var withCopies = InquiryEmailSender.Build(
+            CopyReq([" c1@example.com ", "C1@Example.com", "c2@example.com"], ["b1@example.com ", "B1@example.com"]), sr);
+        var toOnly = InquiryEmailSender.Build(Req(), sr);
+
+        withCopies.To.Should().Equal("firm@example.com");
+        withCopies.Cc.Should().Equal("c1@example.com", "c2@example.com");
+        withCopies.Bcc.Should().Equal("b1@example.com");
+        // Everything else is the To-only request: associations, internal-only, archive, private thread, send mode, body.
+        withCopies.Associations.Should().BeEquivalentTo(toOnly.Associations);
+        withCopies.IsInternalOnly.Should().Be(toOnly.IsInternalOnly).And.BeTrue();
+        withCopies.ArchiveToSpe.Should().Be(toOnly.ArchiveToSpe).And.BeTrue();
+        withCopies.CreateThreadPrivate.Should().Be(toOnly.CreateThreadPrivate).And.BeTrue();
+        withCopies.SendMode.Should().Be(SendMode.User);
+        withCopies.Body.Should().Be(toOnly.Body);
+        withCopies.Subject.Should().Be(toOnly.Subject);
+        withCopies.BodyFormat.Should().Be(toOnly.BodyFormat);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(new string[0], new string[0])]
+    [InlineData(new[] { " " }, new[] { "" })]
+    public void Build_with_empty_or_absent_Cc_and_Bcc_is_the_To_only_request_task190(string[]? cc, string[]? bcc)
+    {
+        var built = InquiryEmailSender.Build(CopyReq(cc, bcc), Guid.NewGuid());
+
+        built.Cc.Should().BeNull();
+        built.Bcc.Should().BeNull();
+        built.To.Should().Equal("firm@example.com");
+    }
+
+    [Fact]
+    public void Build_sends_an_address_once_in_the_first_line_it_is_on_task190()
+    {
+        var built = InquiryEmailSender.Build(
+            CopyReq(["FIRM@example.com", "c@example.com"], ["firm@example.com", "C@example.com", "b@example.com"]), Guid.NewGuid());
+
+        built.To.Should().Equal("firm@example.com");
+        built.Cc.Should().Equal(new[] { "c@example.com" }, "an address in To is sent once, in To");
+        built.Bcc.Should().Equal(new[] { "b@example.com" }, "an address in To or Cc is sent once, in To or Cc");
+    }
+
+    [Fact]
+    public void Build_never_puts_Bcc_in_To_Cc_subject_body_footer_or_link_lines_task190()
+    {
+        const string hidden = "hidden-recipient@example.com";
+        var built = InquiryEmailSender.Build(
+            CopyReq(["c@example.com"], [hidden]), Guid.NewGuid(),
+            new InquiryEmailExtras("Acme v. Roe (MAT-000123)", ["Open this matter in Spaarke: https://org.example/record"]));
+
+        built.Bcc.Should().Equal(hidden);
+        built.To.Should().NotContain(hidden);
+        built.Cc.Should().NotContain(hidden);
+        built.Subject.Should().NotContain(hidden);
+        built.Body.Should().NotContain(hidden);
+        built.Associations!.Select(a => a.EntityName).Should().NotContain(n => n != null && n.Contains(hidden));
+    }
+
     [Fact]
     public async Task Outside_firm_is_written_to_regardingorganization()
     {
