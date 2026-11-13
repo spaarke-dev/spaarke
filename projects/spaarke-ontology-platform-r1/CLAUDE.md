@@ -161,6 +161,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
   remove System Administrator from the existing BFF identities; strip `Service Writer` / `Service Deleter` (held only
   by Microsoft first-party app identities — benign, verified); add a field security profile to these tables.
 - **Deploy order**: role edits land **before** any BFF build carrying new secure-record config, in every environment.
+- **Dev BFF deploys are uac-r2's (2026-11-13):** every dev BFF deploy is master + the mcp spike (`d7369fecf1`), pinged to mcp-r1 first, cleared with any session running an owner E2E (spa-r4), behind uac-r2's pre-deploy checks and 30-min gate. We do not run `Deploy-BffApi.ps1` on dev ourselves: ask uac-r2 to include our merged PRs, then deploy our code pages after their AFTER notice.
 - **Writer identity**: config key `Ontology:Writer:ManagedIdentityClientId` (UAMI `mi-ontology-writer-dev`);
   live seam tests run with `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`.
 
