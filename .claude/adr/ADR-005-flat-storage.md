@@ -46,7 +46,7 @@ User Request → BFF → AuthorizationService → SpeFileStore → SPE
               Dataverse UAC (associations, permissions)
 ```
 
-**See**: [Data Access Pattern](../patterns/data/spefilestore-usage.md)
+**See**: [`SpeFileStore.cs` (implementation)](../../src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs)
 
 ---
 

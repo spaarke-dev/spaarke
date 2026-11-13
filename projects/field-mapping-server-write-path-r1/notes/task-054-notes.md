@@ -541,3 +541,438 @@ No new package, plugin, DI registration, endpoint or Dataverse column.
 - **Filtered run:** **2535 passed, 0 failed, 2 skipped.** **ArchTests:** **153 passed.** **Builds:** 0 warnings, 0 errors; `dotnet format --verify-no-changes` clean.
 
 rework: 054a piece 2b — an outbound Direct send (Message, no ThreadId, no typed regarding) whose To ∪ Cc ∪ Bcc is one address that the A9 internal-user email read maps to one enabled, non-application systemuser other than the sender is filed into FindOrCreateDirectThreadAsync(sender, recipient) through the respond path's explicit join (one filing update carrying the recipient, then the grant); otherwise today's resolver path, with one Information `direct_message.pair_routing_skipped` and its reason; faults log a Warning and take today's path; no owner is written.
+
+## 054b — the five BFF-owned columns (field security + BFF refusals)
+
+### The rule
+
+- Five columns decide who may read a message, and only the BFF's own typed writers write them:
+  - `sprk_communicationthread`: `sprk_threadtype`, `sprk_isdefaultthread`;
+  - `sprk_communication`: `sprk_sentby`, `sprk_directrecipient`, and the thread lookup `sprk_communicationthread`.
+- Creates by the typed writers are allowed. The one UPDATE writer of `sprk_threadtype` / `sprk_isdefaultthread` is `ThreadResolver.AnchorThreadForFilingAsync` (owner decision 2026-11-11, option A). Enforced by the ArchTest `ThreadFlagUpdateWriterGuardTests` (must-fire / must-not-fire controls; the in-memory projection in `RecordFamilyReader.ToNode` is listed with its reason).
+- Every generic write path refuses a payload naming any of the five, for every identity and payload source:
+  - `InheritedAccessPermission.RefuseAppOnlyWrite` (app-only and caller identity; reason `sdap.access.communication_bff_column_server_only`). A thread's type is also an app-only access column (#2253), which keeps its own code app-only;
+  - `RecordTableRules.RefuseFixedAfterCreateColumns`, the one update-side check. That covers:
+    - the `/child-records` PATCH core;
+    - `OwnedChildWrite.RefileAsync`, which is the chat update tool's re-file and the communication filing route's core;
+    - the chat update tool, before the confirm dialog (`ValidateChat`) and after it;
+    - `UpdateRecordActionCore` (every payload source, including the ConfirmedProposal write impersonated as its user);
+    - `DataverseUpdateHandler`;
+    - `WorkProductRecordPersister`;
+    - the field-mapping push.
+
+    `CoreRecordPairUpdateCheckGuardTests` makes every future update path inherit it;
+  - `RecordCreationService.CallerBlockedColumnRefusal` (the filed chat create through the one server create), except the "for" person the server stamps itself (`sprk_sentby` in `ServerSetLookupColumns`);
+  - `DataverseCreateRecordHandler` before its run-as-user POST (an unfiled communication, a thread);
+  - create-time mapping and Repair drop a rule targeting one (they already ask `RefuseAppOnlyWrite`).
+- The filing routes (`/communications/{id}/filing`, the event / child-record filing shape) accept regarding columns only, so they already refused all five (pinned). The generic child-record re-file route does not take `sprk_communication` (pinned).
+- `scripts/Set-ThreadFlagFieldSecurity.ps1` secures the same five columns (reader profile on every BU default team; writer profile = the BFF application users only). `CommunicationBffOwnedColumnRefusalTests` reads the script's target lines and keeps them equal to `BffOwnedCommunicationColumns`, with a must-fire control.
+
+### Behaviour change on the generic paths
+
+A message's thread lookup can no longer be moved by a generic update (plain PATCH, re-file core, Update Record node, output mapping, field-mapping push). The #2110 / #2143 tests that moved a thread that way now pin the refusal: nothing is written, and no reconcile runs. A message moves between threads only through the BFF's typed writers (the thread join, the filing reconcile).
+
+### Owner decision (option A, 2026-11-11) and the rule-2 type guard
+
+- **Option A:** `AnchorThreadForFilingAsync` is sanctioned as the one update writer of `sprk_threadtype` (it writes Record-Anchored when a filed email conversation follows its record whole).
+- **Rule-2 strict-pair guard (A1), owner decision 2026-11-11 (option (a)).** Filing never anchors a strict Direct pair thread to a record:
+  - Rule 2 does not anchor a thread typed Direct (100000001) when either:
+    - `DirectMessageRecipient.ReadStrictPairShapeAsync` answers `IsStrictPair` for it; or
+    - any message in the thread carries a non-empty `sprk_directrecipient`.
+  - It fails closed: a fault reading the pair shape (`participant_read_fault`), a fault reading the thread's messages, or no share read wired, also means do not anchor. The one exception: the message read refused because `sprk_directrecipient` does not exist means "none stamped" (a missing column holds no stamp).
+  - When the guard applies, rule 2 takes its declining path: only the email moves, to the record's default thread (rule 3). Nothing throws and the filing stands.
+  - Event: EventId **5413** `thread_filing.direct_pair_not_anchored`, structured `Reason` from a bounded set: `strict_pair`, `stamped_message`, `participant_read_fault`, `message_read_fault`, `share_read_unavailable`. Information for a decision, Warning (with the exception) for a fault.
+  - Unchanged:
+    - a Direct-typed thread that is neither a strict pair nor holds a stamped message still anchors. That is an inbound email conversation's thread (owner clarification 2026-10-11); `ThreadResolverTests.ReconcileThreadForFiling_DirectThread_IsAnchoredToTheRecord_OwnedByItsTeam_Renamed_AndGrantsFiledMessagesOnly` passes with its body unchanged;
+    - a thread not typed Direct (Record-Anchored) is not asked: no shape read, no message read.
+  - Implemented in `ThreadResolver.DirectPairThreadMayBeAnchoredAsync`, asked after `FiledToOnlyAsync` and before `AnchorThreadForFilingAsync`.
+- The A2 ArchTest holds the update writer to the one sanctioned member.
+
+### Binding rule (agreed with UAC-r2, 2026-11-11)
+
+`DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay unset on an environment until `Set-ThreadFlagFieldSecurity.ps1 -Verify` exits 0 there. While they are unset, `DirectMessageOwnerTeam` refuses as NotConfigured, so no message is owned by the Direct team and nothing grants from `sprk_sentby` / `sprk_directrecipient`. `-Verify` prints `PRECONDITION MET: DirectMessage:BusinessUnitName and DirectMessage:OwnerTeamName may now be set on <env>` on a pass, and `PRECONDITION NOT MET: leave ... UNSET` on a fail.
+
+### Live order (agreed)
+
+1. Deploy the dev BFF from master.
+2. 054b: `Set-ThreadFlagFieldSecurity.ps1` dry run, then `-Apply`, then `-Verify`.
+3. Direct setup (UAC-r2: the `DirectMessage:*` settings).
+4. 054c Stamp.
+5. Piece 3.
+6. 054c Move.
+
+Standing rules (also in `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`, after the SpaarkeMaster upgrade check, and in the script's help; worded as `SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7d words `Set-SecureFlagFieldSecurity.ps1`):
+
+- **New environment:** provisioning runs `Set-ThreadFlagFieldSecurity.ps1` after the SpaarkeMaster import, `Set-DirectRecipientSchema.ps1 -Apply` and `Set-RecordCreatorPersonSchema.ps1 -Apply`: dry run, then `-Apply`, then `-Verify` (each must exit 0). The import alone is not enough: the profiles' members (every business unit's default team, the BFF application users) are per environment, and `sprk_directrecipient` is not in the solution source.
+- **After every SpaarkeMaster import:** `-Verify`. A non-zero exit is a gap: `-Apply`, then `-Verify` again.
+- **A new business unit:** `Set-RecordCreatorPersonSchema.ps1 -Apply` puts its default team on the reader profile; then `-Verify`.
+
+### Solution source
+
+- `src/dataverse/solutions/SpaarkeMaster/Entities/sprk_Communication/Entity.xml` (`sprk_sentby`, `sprk_communicationthread`) and `sprk_CommunicationThread/Entity.xml` (`sprk_threadtype`, `sprk_isdefaultthread`) carry `<IsSecured>1</IsSecured>`, the same shape as `sprk_CreatedByPerson`.
+- `src/dataverse/solutions/SpaarkeMaster/Other/FieldSecurityProfiles.xml` carries the four columns' rows in both profiles, in the `sprk_createdbyperson` row shape: "Spaarke BFF-Managed Field Readers" read 4, create 0, update 0; "Spaarke BFF-Managed Field Writers" read 4, create 4, update 4. A secured column with no reader row is hidden from every user, so the two travel together. `sprk_directrecipient` has no rows (it is not in the solution source).
+- The form controls are left as they are: a secured field renders locked for a user without Update.
+- `CommunicationBffOwnedColumnRefusalTests.TheSolutionSource_SecuresEveryOwnedColumnItDefines` reads the Entity.xml files and the profiles file. It keeps the four at `IsSecured=1`, each with exactly one row per profile at those values (and `sprk_directrecipient` too, once exported). Must-fire controls: `TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured`, and `TheProfileRowCheck_FiresOnASecuredColumnWithoutReaderRows_OrWithAReaderThatMayWrite` (reader row removed, reader row allowed to update, writer row removed). `TheProfileRowValues_AreThePrecedentsOnTheSameTable` pins the values to `sprk_communication.sprk_createdbyperson`'s rows.
+
+### Known limits
+
+- **The ontology writer unit's default team.** `Set-ThreadFlagFieldSecurity.ps1` applies the ontology-writer-unit rule: its (p2) reader-profile precondition splits the default teams through `scripts/common/OntologyWriterUnit.ps1`, never requires the ontology writer unit's default team on the reader profile, and reports it as a FAIL if found there (every mode; `-Apply` refuses on it). `OntologyWriterUnitScriptGuardTests` enforces it.
+- **`sprk_directrecipient` is live-only.** It exists only where `scripts/Set-DirectRecipientSchema.ps1 -Apply` ran, and the solution source has no definition of it (none is hand-authored). An import therefore does not secure it; `Set-ThreadFlagFieldSecurity.ps1` does, and `-Verify` after every import catches a gap. The script refuses in every mode, before any write (precondition p0, exit 1, naming `Set-DirectRecipientSchema.ps1 -Apply`), until the column exists. The solution-source test accepts its absence and requires `IsSecured=1` and both profiles' rows once it is exported.
+- **A1 on an environment without `sprk_directrecipient`.** A column that does not exist holds no stamp. When the stamped-message read is refused because that column is missing (`CommunicationService.IsMissingColumnFault` on the recipient column), the read answers "none stamped". The strict-pair shape is still asked first, so a strict pair is still not anchored there; an ordinary Direct-typed email thread is anchored as anywhere else. Every other fault of that read (another column, any other error) still fails closed (`message_read_fault`).
+- **A1 and a missing share read.** A host with no `IDataverseRecordShareService` cannot tell a pair, so no Direct-typed thread is anchored there (`share_read_unavailable`). The BFF host always registers it.
+- The ArchTest's limits are in its remarks: a key in a local variable, a caller-supplied payload (refused at run time) and writes outside `src/server` are not seen.
+- **K1 — a user-owned email thread with one other user's Read share.** It has the strict-pair shape, so filing does not anchor it to the record; only the email moves (rule 3). This is the safe side of A1, and a behaviour change for that shape.
+- **K2 — check, then write.** The A1 reads and the anchor write are not atomic: a share or a stamp added between them is not seen. Same window as `FiledToOnlyAsync`.
+- **K3 — no repair.** A pair thread anchored to a record before A1 is not found or moved back.
+- **K4 — server-set columns.** A column the server sets itself (`sprk_sentby` as the "for" person) is exempt from the system-principal check in `RecordCreationService` step 2. No production caller sends one as the system principal.
+- **K5 — ArchTest shapes not seen** by `ThreadFlagUpdateWriterGuardTests`: `x.Id = id;` after an initializer, an expression-bodied alias of a column constant, `Add(new KeyValuePair(...))`, and the primary key set inside an initializer.
+
+### Scan (writers of the five columns in `src/server`)
+
+| Site | Column(s) | Identity | Kind | Verdict |
+|---|---|---|---|---|
+| `ThreadResolver.CreateThreadAsync` :227 | threadtype | app-only (`IGenericEntityService`) | create | typed writer |
+| `ThreadResolver` record-thread create :1678 | threadtype | app-only | create | typed writer |
+| `ThreadResolver` default / master thread create :1810, :1813 | threadtype, isdefaultthread | app-only | create | typed writer |
+| `DirectThreadAccessService.FindOrCreateDirectThreadAsync` :117 | threadtype | app-only | create | typed writer |
+| `ThreadResolver.AnchorThreadForFilingAsync` :1229 | threadtype | app-only | **update** | sanctioned (option A); the one update writer (ArchTest) |
+| `RecordFamilyReader.ToNode` :995 | threadtype | none (in-memory node) | — | never sent to Dataverse |
+| `DirectMessageRecipient.WriteThreadFilingAsync` / `ThreadResolver.ThreadFilingFields` :2013 | thread lookup, sentby, directrecipient | app-only | update | typed writer |
+| `ThreadResolver` join `ParentChanges` :591 | thread lookup | ownership resolver's reparent | update | typed writer |
+| `CommunicationService` :1164, :1366, :2024 | sentby | app-only | create (pre-create stamp) | typed writer |
+| `EmailDraftToolHandler` :1030 (filed draft) | sentby | one server create (app-only) | create | server-set "for" person (allowed) |
+| `DataverseCreateRecordHandler` `WithForPersonAsync` (filed chat create) | sentby | one server create | create | server-set "for" person (allowed) |
+| `ChildRecordEndpoints.UpdateAsync` PATCH | any (caller payload) | run as user | update | **refused** (one update-side check) |
+| `OwnedChildWrite.RefileAsync` | any (caller / model payload) | run as user | update | **refused** (one update-side check) |
+| `DataverseUpdateRecordHandler` (chat update) | any (model payload) | run as user | update | **refused** before the confirm dialog (`ValidateChat`), again after it, and via `RefileAsync` |
+| `UpdateRecordActionCore` (node, action seam, ConfirmedProposal impersonated) | any | app-only or impersonated | update | **refused** (one update-side check) |
+| `DataverseUpdateHandler`, `WorkProductRecordPersister`, field-mapping push | any (configuration) | app-only / caller | update | **refused** (push: rule skipped) |
+| `DataverseCreateRecordHandler` run-as-user POST | any (model payload) | run as user | create | **refused** before the confirm dialog (`BlockedColumnBeforeSuspend`) and again before the POST |
+| `RecordCreationService` step 2 | any (caller payload) | caller or system principal | create | **refused** (except the server-set "for" person) |
+
+No BFF path writes `sprk_threadtype` or `sprk_isdefaultthread` as an impersonated caller.
+
+### §11
+
+- **`InheritedAccessPermission.BffOwnedCommunicationColumns`** with `BffOwnedCommunicationColumnIn`, `RefuseBffOwnedCommunicationColumn` and the reason code:
+  - **Existing:** `BffOwnedDocumentColumns` (one flat set on the document), `AccessColumns` (table-keyed, app-only identity only), `RecordTableRule.TableServerOwnedColumns` / `CommonServerOwnedColumns` (the create-side caller policy).
+  - **Extension:** it extends the existing `InheritedAccessPermission` refusal family, through the same refusal type and the existing checks; there is no new mechanism. Why not extend those sets:
+    - `AccessColumns` is asked only for the app-only identity, so the push, the caller identity and a ConfirmedProposal impersonated write would skip it;
+    - `TableServerOwnedColumns` would also refuse the server-stamped "for" person (`sprk_sentby`) on the filed chat create and the email draft.
+
+    It is table-keyed because the names collide across tables (`sprk_communicationthread` is both a table and a column).
+  - **Cost of doing nothing:** a user-, model- or configuration-built payload could set a message's participants or thread, or a thread's type, through the BFF's generic writers. Those writers run as the BFF application user, past field security, and UAC-r2's share reconcile decides grants from these columns.
+- **`CallerBlockedColumnRefusal(..., serverSet)`** (an optional parameter on an existing method). Cost of doing nothing: the server's own "for" person stamp would be refused.
+- **`DataverseCreateRecordHandler`**: a refusal on an existing path, asked before the confirm dialog too; no new surface.
+- **`RecordCreationService` system-principal step 2**: the existing refusal asked on the existing path; no new surface.
+- **`ThreadResolver.DirectPairThreadMayBeAnchoredAsync`** (a private step, EventId 5413). Existing: `DirectMessageRecipient.ReadStrictPairShapeAsync` (reused, not forked). Extension: it is the existing shape rule plus one bounded read, asked inside rule 2. Cost of doing nothing: filing a message of a strict Direct pair would anchor the pair thread to a record and grant the record's members every message in it.
+- **`scripts/Set-ThreadFlagFieldSecurity.ps1`**:
+  - **Existing:** `Set-SecureFlagFieldSecurity.ps1` and `Set-DocumentPointerFieldSecurity.ps1` use the same two profiles.
+  - **Extension:** each of those carries column-specific preconditions (null repair, a client-deploy flag) that do not apply here. Generalising them would change scripts already verified live, so this script copies their shape instead.
+  - **Cost of doing nothing:** any Dataverse surface outside the BFF (a form, the Web API, an import, a flow running as the user) could change the five columns.
+- **`ThreadFlagUpdateWriterGuardTests`**. Cost of doing nothing: the one-update-writer rule (option A) would be prose only.
+
+### Manual checks (after `-Verify` exits 0; they need a non-administrator sign-in)
+
+- (m1) As a non-administrator, PATCH a communication's `sprk_sentby`, `sprk_directrecipient` or `sprk_communicationthread` through the Web API: refused. Repeat on a message the user can write through a record team.
+- (m2) As a non-administrator, PATCH a thread's `sprk_threadtype` or `sprk_isdefaultthread`: refused.
+- (m3) As a non-administrator, read a Direct message and its thread: the five columns show their true values, not empty.
+- (m4) The BFF still creates a per-user master thread and a Direct thread, and files a message into it (thread lookup and both participants set).
+
+### Evidence
+
+- **Tests** (KEEP paths):
+  - `tests/integration/data-mutation/ChildAccessPermission/CommunicationBffOwnedColumnRefusalTests.cs`;
+  - `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.BffOwnedCommunicationColumns.cs`;
+  - updated: `AccessTableAppOnlyWriterTests` (as the caller, a thread's type is now refused), `RefileWriterBindShapeTests`, `SecureChildOwnershipAiToolTests.RefileThreadCaller` and `.ThreadJoin` (the generic thread moves now pin the refusal);
+  - ArchTest: `tests/Spaarke.ArchTests/ThreadFlagUpdateWriterGuardTests.cs`.
+- **Fail-then-pass** against 89274213eb. The three wiring files were checked out from it, and the one `RefuseAppOnlyWrite` call was removed. The new set and its helpers stayed so the tests compile, and the optional `serverSet` parameter was added to the old signature. The filter was the new and changed tests:
+  - Before: **Failed 137, Passed 40, Total 177.** The 40 that pass are:
+    - the must-not-fire cases;
+    - the set, script and typed-writer pins;
+    - the filing-shape pins;
+    - the four `sprk_threadtype` forms that the #2253 access-column refusal already refused app-only.
+  - After: **Passed 177, Failed 0.**
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` each have 0 warnings and 0 errors.
+- **Filtered run:** filters `Communication`, `ChildRecord`, `OwnedChildWrite`, `DataverseCreateRecord`, `ParentLineage`, `DataMutation`, `RecordCreation`, `UpdateRecord`, `ThreadResolver`, `DirectMessage` and `FieldMapping`, excluding `Api.Office.`:
+  - **9924 passed, 1 failed, 4 skipped.** The one failure was `ProvisionProjectIdempotencyTests.ProvisionProject_WhenRecordingTheContainerTimesOut_FailsLoudlyAndLogsTheContainerId`, a 1-minute timeout while the ArchTests ran in parallel. Re-run alone: 55 of 55 pass.
+- **ArchTests:** **2148 passed, 0 failed.**
+- **`dotnet format --verify-no-changes`** on the changed files: clean, except a pre-existing IMPORTS ordering finding at line 1 of `DataverseCreateRecordHandler.cs` (its usings are untouched).
+
+### Adversarial pass 1 fixes and A1 (2026-11-11)
+
+- **A1 strict-pair guard** (`ThreadResolver.DirectPairThreadMayBeAnchoredAsync`, EventId 5413). Tests in `ThreadResolverTests`:
+  - must fire: `ReconcileThreadForFiling_A1_StrictDirectPairThread_IsNotAnchored_OnlyTheEmailMoves_AndTheEventIsLogged`, `..._A1_DirectThreadNotAStrictPair_ButHoldingAStampedMessage_IsNotAnchored`, `..._A1_WhenThePairShapeReadFaults_TheDirectThreadIsNotAnchored`, `..._A1_WhenTheMessageReadFaults_TheDirectThreadIsNotAnchored`, `..._A1_WithNoShareReadWired_TheDirectThreadIsNotAnchored`;
+  - must not fire: `..._A1_UserOwnedDirectEmailThread_WithNoSharesAndNoStampedMessage_IsStillAnchored`, `..._A1_RecordAnchoredThread_IsUnaffected_EvenWithAStampedMessage`, and the unchanged dev-repro test `ReconcileThreadForFiling_DirectThread_IsAnchoredToTheRecord_OwnedByItsTeam_Renamed_AndGrantsFiledMessagesOnly`.
+  - The filing test compositions (`CreateFilingSut`, `CreateFilingSutWithScopes`, the `RefileThreadCaller` resolver) pass the share read the host always injects. `ReconcileThreadForFiling_TheMessageScan_IsTheThreadsActiveMessages_Bounded` ignores the separate Direct-recipient read.
+- **Solution source (F3):** `CommunicationBffOwnedColumnRefusalTests.TheSolutionSource_SecuresEveryOwnedColumnItDefines` and its control `TheSolutionSourceCheck_FiresOnAnOwnedColumnLeftUnsecured`. No Pester or ArchTest compared solution XML with the script, and the script has no Pester file, so the test sits next to the script pin.
+- **Chat create before the confirm dialog (F3):** `DataverseCreateRecordHandler.BlockedColumnBeforeSuspend` asks the BFF-owned refusal before its per-user / keeps-its-creator exit, in the post-confirm refusal's words. `ChatPreSuspendServiceRefusalTests.ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_054b` (six cases) and the must-not-fire `ValidateChat_AProposalWithoutTheFiveColumns_StillPassesToItsConfirmation_054b_MustNotFire`. An invalid validation never suspends (`SideEffectGatePreSuspendValidationTests`).
+- **ArchTest (F4):** `ThreadFlagUpdateWriterGuardTests` resolves derived constants to a fixed point, flags `[JsonPropertyName(...)]` on a flag column (no existing hit in `src/server`), and treats an entity initializer that sets `Id` as an update. Controls in `Detector_MustFireAndMustNotFire`; must-not-fire `AliasFixedPoint_MustNotFire_OnAnUnrelatedDerivedConstant`.
+- **Typed writer test (F4):** `CommunicationBffOwnedColumnRefusalTests.TheTypedThreadWriters_StillCreateTheThreadsTypeAndFileTheMessage_ThroughTheResolver_AppOnly` drives `ThreadResolver.ResolveAndAssignThreadAsync` (a Direct thread create, then the filing write) and asserts the same payloads are refused by `RefuseAppOnlyWrite`.
+- **System-principal create (K1):** `RecordCreationService` step 2 for `ForSystem` asks `RefuseBffOwnedCommunicationColumn`, except a server-set lookup. `RecordCreationServiceMappingSeamTests.CreateAsync_ASystemCommunicationNamingItsThreadLookup_IsRefused_BeforeAnythingIsAsked_054b`; must-not-fire `CreateAsync_ASystemCommunicationWhoseSenderTheServerSet_PassesStep2_054b`. `WriterBuilderOwnershipParityTests.ACommunicationCreatedInASecureRecordThread_...` (042b Q3) now marks the thread lookup server-set; its ownership assertions are unchanged.
+- **Fail-then-pass.** Each fix was removed in place (guard call short-circuited, pre-suspend check disabled, system-principal check disabled, both Entity.xml files from HEAD): **14 failed, 61 passed** of the new and neighbouring tests; every must-fire failed and every must-not-fire passed. With `WriteThreadFilingAsync` made to ask `RefuseAppOnlyWrite` first, the typed-writer test failed ("collection is empty"). Each ArchTest shape, removed singly, failed `Detector_MustFireAndMustNotFire`. All restored: pass.
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` 0 warnings, 0 errors.
+- **Filtered run** (ThreadResolver, DirectMessage, CommunicationBffOwnedColumn, SecureChildOwnershipAiTool, DataverseCreateRecordHandler, RecordCreationService, AccessTableAppOnlyWriter, RefileWriterBindShape, Communication, ChildRecord, OwnedChildWrite, ParentLineage, DataMutation, RecordCreation, UpdateRecord, FieldMapping, GateDecisionRecord, SecureChildReconciler; excluding `Api.Office.`): **10047 passed, 0 failed, 4 skipped.**
+- **ArchTests:** **2149 passed, 0 failed.**
+- **`dotnet format --verify-no-changes`** on the three changed BFF files: no finding in the changed lines (the pre-existing `DataverseCreateRecordHandler.cs` IMPORTS / line-ending findings remain).
+
+### Adversarial pass 2 fixes (2026-11-11)
+
+- **F1 — the solution source grants the profiles** (1c19179a3c). `Other/FieldSecurityProfiles.xml` rows on the four secured columns in both profiles; `TheSolutionSource_SecuresEveryOwnedColumnItDefines` checks them; controls `TheProfileRowCheck_FiresOnASecuredColumnWithoutReaderRows_OrWithAReaderThatMayWrite` and `TheProfileRowValues_AreThePrecedentsOnTheSameTable`. Deployment guide, script help and these notes state the per-environment order (new environment: dry run, `-Apply`, `-Verify`; every import: `-Verify`, `-Apply` if it fails).
+- **F2 — A1 where `sprk_directrecipient` is missing** (fb0126729b). Must not fire: `ThreadResolverTests.ReconcileThreadForFiling_A1_WhereTheRecipientColumnDoesNotExist_AnOrdinaryDirectEmailThread_IsStillAnchored` (typed fault, Web API text). Must fire: `..._A1_AMissingColumnFaultAboutAnotherColumn_StillDeclines`, `..._A1_WhereTheRecipientColumnDoesNotExist_AStrictPairThread_IsStillNotAnchored`.
+- **F3 — chat update before the confirm dialog** (b430256355). `DataverseUpdateRecordHandlerTests.ValidateChat_ABffOwnedCommunicationColumn_IsRefusedBeforeTheConfirmation_InThePostConfirmWords_054b` (14 forms); must not fire `ValidateChat_AnOrdinaryUpdate_StillPassesToItsConfirmation_054b_MustNotFire` (4 cases).
+- **F4 — the script's column precondition (p0)**. `tests/scripts/Set-ThreadFlagFieldSecurity.Tests.ps1` (Pester 5.7.1, in the `owner-teams-script-tests` job): 4 must-fire (missing recipient column in dry run, `-Apply`, `-Verify`; a missing solution column), 1 must-not-fire.
+- **Fail-then-pass.** With `FieldSecurityProfiles.xml`, `ThreadResolver.cs` and `DataverseUpdateRecordHandler.cs` taken from 3a0c35176b: **18 failed, 172 passed** of the new and neighbouring tests (both F1 checks, both F2 must-not-fire cases, all 14 F3 forms; every must-not-fire and the F2 must-fire tests passed, as they should). Restored: 190 passed. With the script taken from 3a0c35176b: Pester **4 failed, 1 passed** (the must-not-fire); restored: 5 passed.
+- **Builds:** `Sprk.Bff.Api` and `Sprk.Bff.Api.Tests` 0 warnings, 0 errors. `dotnet format --verify-no-changes` on the two changed BFF files: clean.
+- **Filtered run** (ThreadResolver, DirectMessage, CommunicationBffOwnedColumn, SecureChildOwnershipAiTool, DataverseCreateRecordHandler, DataverseUpdateRecordHandler, ChatPreSuspend, RecordCreationService, WriterBuilderOwnershipParity, RefileWriterBindShape, AccessTableAppOnlyWriter, Communication, FieldSecurity; excluding `Api.Office.`): **4949 passed, 0 failed, 2 skipped.** The profile-file agreement tests (`SecuritySchemaAgreement`, `FieldSecurity`): 273 passed.
+- **ArchTests:** **2149 passed, 0 failed.**
+
+## 054c — existing Direct messages (`scripts/Migrate-DirectMessagesToOwnerTeam.ps1`)
+
+Branch `task/fm-054c` (cut from 89274213eb). FULL rigor. Script and tests only: no live Dataverse read or write, no deploy.
+
+### Binding rules (agreed with UAC-r2, 2026-11-11)
+
+- The two settings `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` stay unset on an environment until 054b's field security verifies there. While they are unset, no message is owned by the Direct team and nothing grants from the stamped pair.
+- **Live order:** dev BFF from master → 054b (`-DryRun`, `-Apply`, `-Verify`) → the Direct setup (UAC-r2 198 Part A, `Set-CustomerOwnerTeams.ps1` Direct mode, plus the two settings) → **054c `-Phase Stamp`** → piece 3 (the owner move in the BFF) → **054c `-Phase Move`**.
+- `-Phase Move -Apply` runs only after the BFF build with 198's Direct share pass is deployed on that environment and its two settings `DirectMessage:BusinessUnitName` / `DirectMessage:OwnerTeamName` are live there with the values passed as `-DirectMessageBusinessUnitName` / `-DirectMessageOwnerTeamName`. The operator states this with `-DirectShareJobLive`. It cannot be passed honestly on an environment until those two settings are set there: that is an owner go in the unified-access-control-r2 session, which comes only after `Set-ThreadFlagFieldSecurity.ps1 -Verify` (054b) exits 0 there.
+- So `-Phase Stamp` does not depend on the Direct team or the two settings: it reads no business unit, no named team and no Direct-team parameter (pinned by a test). Only `-Phase Move` resolves the Direct team.
+
+### Why two phases
+
+- The stamp must land before 198 decides grants from the pair, and before any message is owned by the Direct team. Moving owners at that point would leave the moved messages readable by nobody.
+- The move needs the Direct team, its role and the owner-move code. It runs last.
+- The assign invariant ties them: Move assigns only a message with a valid stamped pair. A row Stamp could not stamp keeps its owner through Move.
+
+### Precondition (both phases, every mode)
+
+The script refuses (exit 1) and selects nothing unless all of these hold:
+- the five 054b columns are field-secured: `sprk_communicationthread.sprk_threadtype`, `sprk_communicationthread.sprk_isdefaultthread`, `sprk_communication.sprk_communicationthread`, `sprk_communication.sprk_sentby`, `sprk_communication.sprk_directrecipient`;
+- "Spaarke BFF-Managed Field Writers" exists once, reads and updates each column, and its members are exactly the `-BffApplicationIds` application users (no human, no other application user, no team);
+- "Spaarke BFF-Managed Field Readers" exists once, reads each column, and is on every business unit's default team;
+  - `Migrate-DirectMessagesToOwnerTeam.ps1` applies the ontology-writer-unit rule here: it splits the default teams through `scripts/common/OntologyWriterUnit.ps1`, does not require the ontology writer unit's default team on the reader profile, and refuses if that team is on it.
+- no other profile but the built-in System Administrator profile can create or update any of the five. That profile is recognised by its fixed id (`572329c1-a042-4e22-be47-367c6374ea45`), never by name: a custom profile named "System Administrator" is refused like any other.
+
+### Selection
+
+A Direct message is a Message row (`sprk_communicationtype` = 100000004) whose thread lookup names a thread typed Direct (`sprk_threadtype` = 100000001) and which carries no typed regarding lookup (the twelve `sprk_regarding*` columns of `RegardingFieldMap`). A Direct-typed thread with any typed regarding lookup of its own set is not a Direct thread: the thread's columns are the same set as `ThreadResolver.ThreadRegardingColumns` (`RegardingFieldMap.All` minus `sprk_regardingreportcard`, which the thread table lacks); its messages go to review (`thread_has_regarding`) in Stamp, and are not moved (and are listed) in Move.
+- The per-user master thread (`sprk_isdefaultthread` true) is never selected. A Direct thread whose flag reads null goes to review (`thread_default_flag_unread`).
+- `-NamePrefix` limits the selection by `sprk_name` (test rows: `FMSWP-`).
+
+**Stamp** selects those with an empty `sprk_directrecipient`. It stamps a row only when its thread yields exactly two distinct systemusers, one of them the row's `sprk_sentby`, both read enabled (`isdisabled` false) and neither with an `applicationid`.
+- The thread yields its systemuser owner (counted only when `_owningteam_value` is empty: a team-owned thread has no owner participant, even if its user-owner column reads a value; the BFF counts `ownerid` only when it is a systemuser) plus every systemuser holding a share on it whose mask has the Read bit (`mask & 1`). This is the rule the BFF stamp uses on an unrouted filing (`DirectMessageRecipient.ReadParticipantsAsync`). A team owner, a team share and a share without the Read bit are not participants.
+- The write is `sprk_DirectRecipient@odata.bind` with `If-Match: *`, after a re-read (still empty, same sender, same thread), then a read-back.
+- Every other row goes to the review list (`-ReviewPath`; `.json` gives JSON, anything else CSV) with a reason, and is not touched: `no_sentby`, `not_two_participants`, `sender_not_a_participant`, `participant_disabled`, `participant_application_user`, `participant_missing`, `read_fault`, `thread_default_flag_unread`, `thread_shares_changed_after_create`, `changed_since_selection`.
+- **Shares changed after creation:** the audit log is not read (whether the thread table is audited, and the audit action codes, cannot be confirmed without a live read). Instead, a thread with a current share row whose `changedon` is later than the thread's `createdon` plus `-ShareChangeToleranceSeconds` (default 300) sends its messages to review. A revoked share leaves no row, so this does not see a removal.
+
+**Move** resolves the Direct team first, then selects every Direct message.
+- A message owned by the Secure Record team is skipped.
+- A message without a valid stamped pair (`sprk_sentby` and `sprk_directrecipient`: two distinct, non-empty ids) is listed (`no_valid_pair`) and keeps its owner, with its content rows.
+- For a valid pair: the content rows are `sprk_communicationattachment`, `sprk_communicationparticipant` and `sprk_emailreviewlog` (by their `sprk_communication` lookup); `sprk_document` (by `sprk_relatedcommunication`); and the gate `sprk_decisionrecord` (by `sprk_regardingcommunication`, `sprk_confirmedby` empty, created by a `-GateRecordWriterApplicationIds` user — the gate writer's own test in `GateDecisionRecordSharing.FindGateRecordsAsync`). Gate records are created by the ontology writer's own managed identity, never the BFF application user (`OntologyWriterDataverseClient`), so `-GateRecordWriterApplicationIds` is a separate parameter, mandatory for Move (the script throws when it is empty) and used only to recognise gate-record creators; it never feeds the writer-profile membership check. A Decision Record created by an id in neither list is not moved, and neither is one created by a `-BffApplicationIds` user.
+- **Gate Decision Records:** Move takes only unconfirmed gate records created by the gate writer. That is the same set `GateDecisionRecordSharing.FindGateRecordsAsync` re-owns. A confirmed record carries a person's review and stays with its owner.
+- Rows owned by the Direct team or the Secure Record team are not moved.
+- **The acknowledgement:** `-Apply` refuses (exit 1) before any read or write unless `-DirectShareJobLive` is passed (see the live order above for what it asserts). `-DryRun` and `-Verify` do not need it.
+- **The Direct team checks** (as `DirectMessageOwnerTeam`):
+  - exactly one unit by name;
+  - not the root, and a direct child of the root;
+  - not the Secure Record unit, and the team not its team (both by id);
+  - exactly one named, non-default Owner team, which is not the unit's default team;
+  - the team has no members, and the unit has no users.
+  - The Secure Record lookup uses the default names. With a Secure name passed and not found, or a Secure lookup that is ambiguous, the script refuses. Any failure refuses (exit 1) before the selection.
+- **The Assign-cascade check** (ported from `Migrate-SecureRecordsToNamedOwnerTeam.ps1`), after the Direct team resolves and before anything is selected, in every mode: the script reads the `OneToManyRelationships` metadata of `sprk_communication` and of each content table it assigns, and refuses (exit 1) any relationship whose Assign cascade is not `NoCascade` and whose child table is not listed in `-AcceptedAssignCascade` (default: none). It lists each cascading relationship as ACCEPTED or NOT ACCEPTED. Each `-GateRecordWriterApplicationIds` id must also have an application user here, or the script refuses.
+
+### Apply, per row
+
+- **Stamp:** re-read, write, read back. A read-back mismatch stops the run (exit 1). The re-read covers the message (still empty, same sender, same thread, no typed regarding lookup) and its thread (still Direct-typed, `sprk_isdefaultthread` still false, no typed regarding lookup); a row that fails any of them is listed `changed_since_selection` and not written.
+- **Application ids** (`-BffApplicationIds`, `-GateRecordWriterApplicationIds`) are normalised to the plain dashed form before they reach a filter (`Guid.TryParse` also accepts braced, parenthesised, no-dash and `0x` forms).
+- **Move:**
+  - `sharetopreviousowneronassign` true refuses `-Apply` before any write. It is re-read before every row.
+  - The message and its thread are re-read. When the pair is no longer valid, the message is now owned by the Secure Record team, the message or its thread now carries a typed regarding lookup, or the thread is no longer Direct-typed or is now the per-user master thread (flag true or unread), nothing of that message moves and it is listed.
+  - **The participants keep Read** (per message, after that re-read, before any of its rows is assigned). The Direct team has no members and `sharetopreviousowneronassign` is false, so an assign keeps only the shares already on the row.
+    - The participants are `sprk_sentby` and `sprk_directrecipient`, read with the Stamp eligibility read. A disabled (or missing) participant is skipped, as 198 skips a disabled one. No enabled participant left: nothing moves (`participants_not_readable`).
+    - The message's share rows are read strictly. A participant or share read fault: nothing moves (`read_fault`).
+    - Each enabled participant:
+      - holds a systemuser share with the Read bit: nothing to do, no second grant;
+      - holds a share without the Read bit: nothing moves (`participant_share_without_read`); the script never upgrades such a share, as `DirectMessageParticipantShares.GrantContentRowAndConfirmAsync` does not;
+      - is the message's current owning user (`_owningteam_value` empty, `_owninguser_value` equal) and has no share: granted Read (`GrantAccess`, `AccessMask` `ReadAccess`, the systemuser principal) while the message is still user-owned, then the share rows are read back. The grant keeps access the owner already has and widens nobody's. A grant that throws, or a read-back without Read: nothing moves (`participant_grant_unconfirmed`), and the run goes on to the next message;
+      - otherwise (not the owner, no share): no grant, because a new grant would bypass the BFF's Restricted bar (`RestrictedFilingShareBar.EligibleForGrantAsync`). Nothing moves (`participants_not_readable`).
+    - `-DryRun` prints the grants it would make and lists the messages that would not move; it writes nothing.
+  - A request that throws mid-run (a PATCH or a read) writes the review list gathered so far, then rethrows (Stamp and Move).
+  - **Move review reasons:** `thread_has_regarding`, `thread_default_flag_unread`, `no_valid_pair`, `changed_since_selection`, `participants_not_readable`, `participant_share_without_read`, `participant_grant_unconfirmed`, `read_fault`, `participant_without_read` (`-Verify` only).
+  - Every phase and mode prints a count per review reason next to the review list (`review: no_valid_pair 2, participants_not_readable 1`, or `review: none`), so the owner sees how many rows stay behind before the go.
+  - Then each content row, the message last: count the shares (mask > 0), assign `ownerid@odata.bind` → `/teams(<Direct team>)`, read the owner back (stop if it did not land), count again.
+  - Stop if the count fell. A rise is reported, not stopped: once the row is Direct-owned, 198's share job may grant the participants.
+  - The message goes last so a stopped run resumes: its content rows are found again.
+- **Idempotent:** a second `-Apply` selects nothing. Stamp skips stamped rows. Move skips a message whose rows are all on the Direct or Secure team.
+- **`-Verify`:**
+  - Stamp: exit 1 while any row would stamp.
+  - Move: exit 1 while a valid-pair message, or a content row of one, is not on the Direct team (Secure-owned rows excepted), or while a Direct-team-owned valid-pair message has an enabled participant without a Read share (`participant_without_read`) or its participant or share read faults (`read_fault`).
+  - Otherwise exit 0. Review rows do not fail `-Verify`.
+
+### Known limits (stated, not defects)
+
+- **L11.** The operator runs the script as a System Administrator, whom field security does not restrict. The stamp is written by the operator, not the BFF, under the same rule.
+- **L12.** Stamp computes a thread's pair once per run. A share changed on that thread during the run is not re-read before each row.
+- **L13.** The message itself keeps its participants' Read across the assign (see "The participants keep Read"). The moved content rows rely on 198's share job to grant the participants: between their assign and 198's next run they are readable by neither participant (the piece-3 contract's stated limit). That gap ends at the job's next run only because `-Apply` runs after 198 and its two settings are live on that environment (`-DirectShareJobLive`, live order above). The script does not call the BFF's per-message grant.
+- **L15.** A table missing from the Assign-cascade metadata read ends the run with the raw request error rather than a named refusal. It fails closed: nothing is selected or written.
+- **L14.** The share-count check races 198's share job. If the job revokes a non-participant share on a just-moved message before the second count, the run stops. Re-running resumes.
+- **L16.** The owner grant's `GrantAccess` body names the target and principal as `@odata.id` entity references; the Web API's documented form uses typed entity objects with `@odata.type`. The shape is not verified live. If it is wrong, every owner grant throws and its message is listed `participant_grant_unconfirmed` and does not move (fail safe). **Rule (UAC-r2, 2026-11-11):** the first Move `-Apply` on an environment, after the owner's go, is scoped with `-NamePrefix` to one `FMSWP-` test message, and its grant and read-back are checked before a full run.
+
+### §11 for the script
+
+- **Existing:** `Migrate-SecureRecordsToNamedOwnerTeam.ps1` moves Secure roots to their named team (the assign, read-back and share-count pattern reused here). `Set-SecureFlagFieldSecurity.ps1` checks the profiles (the precondition pattern reused here). Neither selects Direct messages, stamps a recipient or moves message content rows.
+- **Extension:** neither can be extended without mixing two tables' ownership rules into one script. Their selection, invariants and stop conditions differ (Secure roots by `sprk_issecure` and business unit; Direct messages by thread type, the pair and content rows).
+- **Cost of doing nothing:** existing Direct messages keep an empty recipient, so 198 grants nothing from their pair. After piece 3 they are never moved to the Direct team, and AC2's recovery path ("re-run 054c -Verify, then -Apply") does not exist.
+- No new package, BFF code, DI registration, endpoint or Dataverse column. The CI job `owner-teams-script-tests` runs the new Pester file next to `Set-CustomerOwnerTeams.Tests.ps1`.
+
+### What the live runs need
+
+Each phase needs the owner's go in this project's session, on each environment, after 054b `-Verify` exits 0 there:
+- **Stamp**, after the Direct setup:
+  1. `-Phase Stamp` dry run;
+  2. review the plan and the review list;
+  3. the owner's go;
+  4. `-Apply`;
+  5. `-Verify` exits 0.
+- **Move**, after 198 and piece 3 are deployed there and the two settings are set:
+  1. `-Phase Move` dry run;
+  2. the owner's go;
+  3. `-Apply -DirectShareJobLive`;
+  4. `-Verify` exits 0.
+- AC2's after-the-fact recovery uses `-Phase Move`: `-Verify`, then `-Apply` on a seeded `FMSWP-` row.
+
+Not verified without a live environment:
+- that the Web API returns `principaltypecode` as `systemuser` / `team` on `principalobjectaccessset`, and `changedon` on its rows;
+- the paging of each read;
+- the gate Decision Record's creator being a `-GateRecordWriterApplicationIds` user (assumed from `OntologyWriterDataverseClient.GetWriterUserIdAsync`: the ontology writer's managed identity);
+- that `principaltypecode` comes back as the text `systemuser` / `team` (the script compares text; a numeric object-type code would make every share a non-participant and the stamp would stamp nothing);
+- that the unpaged `$expand` of the profile reads (`teamprofiles_association`, `systemuserprofiles_association`) returns every member of a profile (a long expansion is not followed to a next link, so a member beyond the first page would go unseen);
+- the real Assign cascade configuration of `sprk_communication` and the five content tables (the dry run lists it; the owner decides `-AcceptedAssignCascade`);
+- that a System Administrator's PATCH of a secured column succeeds;
+- the `If-Match: *` refusal on a missing row;
+- the `GrantAccess` body shape (`Target` / `Principal` as `@odata.id`, `AccessMask` `ReadAccess`), taken from the repo's existing call in `projects/unified-access-control-r2/notes/task-133-live-gate.ps1`.
+
+### Evidence
+
+- `tests/scripts/Migrate-DirectMessagesToOwnerTeam.Tests.ps1` (Pester 5.7.1): an in-memory world behind a mocked `Invoke-RestMethod` and `az`; every write is recorded.
+- **Fail-then-pass:**
+  - script absent: **Failed 50, Passed 0**;
+  - precondition refusal removed: **Failed 6** (the six must-fire precondition tests);
+  - Read-bit filter removed: **Failed 2** (zero-mask share, share without Read);
+  - team shares counted: **Failed 1**;
+  - Move invariant removed: **Failed 2** (no valid pair; pair invalid at write time);
+  - restored: **Passed 50, Failed 0**.
+- **Review-fix round** (the file now has 86 tests). Each fix reverted alone in the script, the new tests failing:
+  - gate creators read from the BFF list: **Failed 2**; `-GateRecordWriterApplicationIds` not mandatory: **Failed 2**; a gate-writer id with no application user not refused: **Failed 1**;
+  - thread regarding lookups ignored: **Failed 4** (Stamp x3, Move x1);
+  - Assign-cascade refusal removed: **Failed 4** (communication, content table, gate table, `-Verify`);
+  - thread user-owner counted for a team-owned thread: **Failed 2**;
+  - System Administrator exempt by name: **Failed 1**;
+  - duplicate profile accepted: **Failed 2**; reader missing from a default team ignored: **Failed 1**; writer lacking read or update ignored: **Failed 2**; reader lacking read ignored: **Failed 1**; precondition skipped under `-Verify`: **Failed 2** (Stamp, Move);
+  - write-time re-read checks removed: Secure-owned **Failed 1**, message regarding **Failed 2**, thread regarding **Failed 1**;
+  - empty `-BffApplicationIds` accepted: **Failed 1**; review list not kept when a write throws: **Failed 2** (Stamp, Move); OData literal not percent-encoded: **Failed 1**;
+  - restored: **Passed 86, Failed 0**.
+- **Re-check round** (scoped re-check of the fix diff; the file now has 95 tests). Each fix reverted alone:
+  - Move/Stamp thread re-read without the type check: **Failed 2**; without the master-flag check: **Failed 3**;
+  - Stamp without the thread re-read: **Failed 3**; Stamp without the message-regarding re-read: **Failed 1**;
+  - application ids not normalised: **Failed 1**;
+  - restored: **Passed 95, Failed 0**.
+- **Peer-review F1 round** (participants keep Read, `-DirectShareJobLive`, per-reason counts; the file now has 113 tests). Existing Move tests now seed both participants' Read share on the message; the per-row stop test's count reads `shares 2 -> 2` (Bob's share plus the owner's confirmed grant). The whole script at 0ff14442aa fails 58 (every Move test, on the unknown switch), so each fix was reverted alone:
+  - acknowledgement refusal removed: **Failed 1**;
+  - participant check removed from `-Apply`: **Failed 9**;
+  - owner grant removed (the owner treated like anyone else): **Failed 7**;
+  - share-without-Read check removed: **Failed 1**;
+  - grant read-back not checked: **Failed 1**;
+  - grant fault not caught per message: **Failed 1**;
+  - disabled participant not skipped: **Failed 2**;
+  - share read fault not caught: **Failed 1**;
+  - `-Verify` participant check removed: **Failed 1**;
+  - `-DryRun` participant pass removed: **Failed 2**;
+  - per-reason count removed: **Failed 2**;
+  - restored: **Passed 113, Failed 0**.
+- **CI job set** (`Set-CustomerOwnerTeams.Tests.ps1` + the new file, Pester 5.7.1 as CI pins): **131 passed, 0 failed** before the F1 round; **149 passed, 0 failed** after it. Under Pester 6.2 the files fail at load (the harness incompatibility the workflow's pin comment records), not a script defect.
+
+## 054a piece 3 — the Direct owner rule (3a, 3b, 3c)
+
+**Rule.** A Direct 1:1 message filed under no record is owned by the Direct message owner team (the `DirectMessage:BusinessUnitName` and `DirectMessage:OwnerTeamName` settings, resolved by `DirectMessageOwnerTeam`). One member assigns it: `DirectMessageOwnerStep.WriteDirectTeamOwnerAsync`. The step runs at the join (the chat ingestor and the outbound send) and on an unfile (the four re-file writers). A message filed under a record stays the resolver's.
+
+**Pieces.** 3a: lookup state `PartiallyConfigured`, the one owner step on the join sites, the pre-send 1:1 refusal, the resolver rule for a message's content rows, EventIds 5414–5418, ArchTest `DirectMessageOwnerStepGuardTests`. 3b: `UnfiledOwnership.UnfiledCommunication` and `DirectMessageOwnerStep.UnfiledOwnershipFor` on the four re-file writers, the unfile refusal (409 / 503), `RecordOwnershipResolver.NonDirectUnfileAnswer`, EventId 5419, ArchTest `RefileWriterUnfileRuleGuardTests`. 3c: the registry rationale text, the census reasons, the inbound-creators guard, the cross-surface owner tests and these notes. 3c changes no production behaviour.
+
+### Placement Justification (`.claude/constraints/bff-extensions.md`)
+
+- The rule is in the BFF because the BFF is the write path for a communication and its content rows. There is no Dataverse plugin (ADR-002): one server-side owner for the invariant (`DirectMessageOwnerStep`), wizards and clients preview only, and the security checks fail closed.
+- Placement: `Services/Communication/Access/DirectMessageOwnerStep.cs` (composed in `CommunicationModule`), the lookup in `Infrastructure/Dataverse/DirectMessageOwnerTeam.cs` (054a), the content-row and unfile answers in `Services/Dataverse/RecordOwnershipResolver.cs`. No new endpoint, no new package, no new background work, no AI surface (no `PublicContracts` change).
+- Publish-size delta against a fresh build: 3a +15,979 B, 3b +12,573 B (39.89 MB, 191 = 191 files). 3c edits one string literal in `RecordTableRules.cs`; it adds no production surface and was not measured again. No new vulnerable package.
+
+### §11 answers
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `DirectMessageOwnerStep` | `DirectThreadAccessService.GrantMessageAccessAsync` (the grant at the join) and `RecordOwnershipResolver` (owners of rows filed under a record). | The resolver answers Unchanged for a message filed under nothing by design (escalation E1), and it knows neither the stamped pair nor the Direct team; the grant must run on both sides of the owner write. The step composes the existing grant and the existing lookup instead of adding an owner path to each join site. | No writer assigns a Direct message to the Direct team, so the rule "a Direct 1:1 message filed under no record is owned by the Direct message owner team" has no owner and a message stays with its creator. |
+| `DirectMessageOwnerTeamRefusal.PartiallyConfigured` | The refusal set of `DirectMessageOwnerTeam` (`NotConfigured`, ambiguous name, team with members, and so on). | One new state in that set, not a new type: `NotConfigured` stays "both settings unset" (rule off). | A configuration with one setting unset reads as `NotConfigured`, which turns the rule off silently; the pre-send and unfile refusals could not tell "off" from "set but invalid". |
+| `UnfiledOwnership.UnfiledCommunication` (with `UnfiledOwnershipFor`) | `UnfiledOwnership.KeepCreator` and `ActingUserTeam`. | Neither can say "decided after the write: back to the Direct team, or Unchanged pending #2722". One new member, chosen in one static method that all four re-file writers call. | Each of the four writers would carry its own unfile rule for a communication, or an unfiled Direct message would keep the owner it had; the four paths would disagree. |
+| `record_owner_direct_team_unusable` (409) and `record_owner_direct_team_unavailable` (503) | `RecordOwnerRefusal.ParentUnresolved` and the ADR-019 problem mapping in `ProblemDetailsHelper`. | `ParentUnresolved` is a permanent refusal about a parent row. A configuration an admin must fix (409) and a fault the user can retry (503) need distinct stable codes; the mapping gains one status rule. | A lookup fault would be reported as a permanent 409, or the unfile would proceed with the owner unconfirmed, against the owner decision "refuse before any write: 409 config, 503 fault". |
+| `RecordOwnershipResolver.NonDirectUnfileAnswer` | The re-file answer inside `ReparentAsync` (`DirectUnfileAnswerAsync`). | A named private method extracted from the existing code; the body is unchanged (Unchanged). | #2722 would have to edit the middle of `ReparentAsync`; one named decision point lets UAC-r2 build it with one writer of the file at a time. |
+| `DirectMessageOwnerStepGuardTests` | `RecordOwnerAssignmentCensusTests` counts owner writes by member, not by which team the write names. | A source scan for the one member that both reads the Direct team's id and writes an owner, with must-fire and must-not-fire controls. | A new member could assign a communication to the Direct team and nothing would fail. |
+| `RefileWriterUnfileRuleGuardTests` | `RefileWriterAfterRefileGuardTests` (the task 198 step after a re-file). | A per-method scan that each re-file writer takes its unfile value from `UnfiledOwnershipFor`. | A fifth writer, or a changed writer, could re-file a communication with its own unfile value and nothing would fail. |
+
+3c adds no new production surface. Its test additions extend `InboundIngestionCreatorsGuardTests` and `CrossSurfaceOwnerTests`; the census gains no entry (the one writer was already listed in 3a) and only its reasons change.
+
+### EventIds 5414–5419
+
+| Id | Constant | Code | Level | Logs |
+|---|---|---|---|---|
+| 5414 | `DirectMessageOwnerStep.OwnerNotSetEvent` (`DirectMessageOwnerStep.cs:65`; logged at :161, :543) | `direct_message.owner_team_not_set` | Error | The step faulted, or the Direct team did not resolve at the join: the message keeps its owner. |
+| 5415 | `MessageNotMovedEvent` (:66; logged at :215, :510, :529, :561, :603) | `direct_message.owner_write_not_confirmed` | Error | The message was not moved: it or its thread could not be read, the owner changed since the unfile was decided, the owner write was not confirmed, or the return to the Direct team faulted. It keeps its owner. |
+| 5416 | `ContentRowNotMovedEvent` (:67; logged at :712, :720, :749) | `direct_message.content_row_not_moved` | Error | The message moved but a content row did not: its read faulted, the per-table cap was reached, or the row's own write failed. The row stays where it is. |
+| 5417 | `SendRefusedEvent` (:68; logged at :432, :440, :445) | `direct_message.send_refused` | Warning | A 1:1 send was refused before anything was sent: the thread's shape could not be read, the Direct team could not be read, or the team is not usable. |
+| 5418 | `RecordOwnershipResolver.DirectParentUndecidedEvent` (`RecordOwnershipResolver.cs:4303`) | `direct_message.content_owner_undecided` | Error | A content row's parent message is owned by a team that may be the Direct team, and whether it is cannot be decided: the row is given no owner (`ParentUnresolved`). |
+| 5419 | `UnfileRefusedEvent` (`DirectMessageOwnerStep.cs:69`; logged at :355, :369, :377) | `direct_message.unfile_refused` | Warning | An unfile of a Direct message was refused before any write: its thread could not be read, the Direct team could not be read, or the team is not usable. |
+
+### Known limits of 3a
+
+- With only one Direct setting set, a content row under a message owned by another named team is refused until the check can tell that team is not the Direct team; the check costs one uncached read per row. A per-team cache in `DirectMessageParticipantShares.IsDirectOwnerTeamAsync` is UAC-r2's to decide, and that file is UAC-r2's.
+- If the request is cancelled while the step moves content rows, the rows not yet moved keep their creator and nothing retries them. The 054c script is the recovery.
+- A 1:1 send to a single contact or external address is refused while the Direct settings are set but invalid.
+- `DirectOwnerJoin` has an internal constructor; "grant first, owner after the content rows exist" is kept by convention and by the call order the inbound-creators guard pins.
+- The configuration-key guard does not see `GetSection("DirectMessage")[...]`; the keys are read through the constants.
+- A reply into a deleted thread while the settings are invalid answers 503.
+
+### Known limits of 3b
+
+- The unfile guard checks the call shape (each writer takes its value from `UnfiledOwnershipFor`), not the arguments passed.
+- The unfile step grants the message to the thread's participants; task 198 Part C reconciles the audience.
+- If a paired message's thread cannot be read at an unfile, the unfile is refused with 503, even when the thread might not be a Direct thread.
+- If the owner assignment fails after the lookup resolved, the unfile stands, the failure is logged (5415) and the 054c script is the recovery.
+- A communication that is not an eligible Direct message keeps its owner on an unfile (Unchanged) until UAC-r2 builds #2722 in `RecordOwnershipResolver.NonDirectUnfileAnswer`.
+- #2728: a document linked only through `sprk_relatedcommunication` keeps its owner when its message is unfiled. Making it follow its communication is UAC-r2's follow-up, together with #2722.
+
+### Owner-assign scan (production sites that assign an owner on `sprk_communication` or its content rows)
+
+Content rows are `RestrictedFilingShareBar.ContentRows`: `sprk_communicationattachment`, `sprk_communicationparticipant`, `sprk_emailreviewlog` and a `sprk_document` linked through `sprk_relatedcommunication`. Scanned: every `"ownerid"` and `"ownerid@odata.bind"` write, `RecordOwnerResolution.ApplyTo`, and every `AssignAsync` / `AssignRequest` in `src/server`.
+
+| Site | Writes | Rule |
+|---|---|---|
+| `Services/Communication/Access/DirectMessageOwnerStep.cs:793` (`WriteDirectTeamOwnerAsync`; called at :601 for the message and :745 for its content rows) | `sprk_communication` and its content rows | **The Direct team's single writer.** Held by `DirectMessageOwnerStepGuardTests`; census kind `DirectMessageTeam`. |
+| `Services/Signals/GateDecisionRecordSharing.cs:991` (`ReownToDirectAsync`) | `sprk_decisionrecord` only | The gate Decision Record follows its message to the Direct team (D-215). Not a communication; the guard holds it to `sprk_decisionrecord`. |
+| `Services/Communication/IncomingCommunicationProcessor.cs:1019` | create of the mailbox communication | The resolver's team under `owner.IsOwned`; an unfiled row keeps its creator. |
+| `Services/Communication/IncomingCommunicationProcessor.cs:1622` (`ApplyOwner`) | the attachment documents, attachment rows and archived `.eml` | The communication's resolved owner, carried through. |
+| `Services/Communication/EmailUploadCaptureService.cs:188` | create of an uploaded email | The resolver's team under `owner.IsOwned`. |
+| `Services/Communication/CommunicationService.cs:1207`, `:2285`, `:3200`, `:3434` | create of an outbound or message communication | `RecordOwnerResolution.ApplyTo` (`RecordOwnershipResolver.cs:1847`); an unfiled row keeps its creator, and the step moves a Direct 1:1 message after the join. |
+| `Services/Communication/CommunicationService.cs:3334` (`ApplyContentOwner`; callers :690, :3851, :4148, :4309) | attachment documents, attachment rows and the archive document | The resolver's answer for content of the message (`ContentOf`). |
+| `Services/Communication/MessageAttachmentMaterializer.cs:285`, `:298` | attachment document and row of a chat message | The resolver's answer for content of the message. |
+| `Services/Communication/CommunicationEnrichmentService.cs:761` (`AssignOwningTeamAsync`) | `sprk_communication` | Category routing for a row filed under nothing only (`IsFiledOrUnreadableAsync` first). |
+| `Services/Communication/CommunicationEnrichmentService.cs:1287` | `sprk_emailreviewlog` | The resolver's answer for content of the message. |
+| `Services/Communication/CommunicationParticipantIndexer.cs:125` | `sprk_communicationparticipant` | The resolver's answer for content of the message. |
+| `Services/Dataverse/RecordOwnershipResolver.cs:3086`, `:3113` (`SettleOwnerAsync`), `:3292` (`ReleaseOwnSecureWriteAsync`) | the re-filed row (a communication after a re-file) | The re-file's owner assignment from the row's parents; for a Direct message the unfile value is `UnfiledCommunication` and the move to the Direct team is the step's (`AfterReparentAsync`). |
+| `Services/Access/SecureChildReconciler.cs:3067` (`AssignAsync`), `:3111` (`RestoreStartOwnerAsync`), `:883` (`ReownOrdinaryRowCoreAsync`), `:1071` (`ReownFiledRootAsync`) | child rows of a record, content rows of a Secure-owned message | Writes the team the resolver answered (for a content row of a Direct-team message, the Direct team by the 3a resolver rule); no reconciler member reads the Direct team. |
+| `Services/RecordCreation/RecordCreationService.cs:1536`, `:1621`, `:1639` | rows created or repaired through the unified service | Never a communication (the registry exception refuses an unfiled create, and a Direct message is never created here). |
+
+Rows not listed write other tables: thread rows (`ThreadResolver.cs:251`, `:1098`, `:1351`, `:1800`, `:1957`; `DirectThreadAccessService.cs:127`), root cascades (`AssignCascadeChildOwners.cs:231`, `ProvisionProjectEndpoint.cs:3723`, `UnsecureProjectEndpoint.cs:650`), and unrelated tables (finance, notifications, playbooks, documents outside a message).
+
+### 3c guards and tests
+
+- `RecordTableRules.cs`: `UnfiledCommunicationKeepsCreator` stays; its rationale now says the unified service never creates a Direct message and the Direct owner rule is a writer rule (`DirectMessageOwnerStep`), as the gate Decision Record is.
+- `RecordOwnerAssignmentCensusTests`: the `DirectMessageOwnerStep.WriteDirectTeamOwnerAsync` entry and its kind comment now cover the join and the unfile; the `MessagingIngestor` waiver reason names the step as the only owner change after the join.
+- `InboundIngestionCreatorsGuardTests`: rule (7). The chat ingestor calls `GrantAtJoinAsync` then `OwnDirectAfterContentAsync` once each, in that order after the thread resolver's join, calls no other member of the step, names no Assign and does not read the Direct team; the join members are called only from the chat ingestor and the outbound send. Must-fire controls mutate the real source (an Assign, a second call, a wrong member, a lookup read, a removed call, a step call added to the mailbox processor); must-not-fire controls cover comments and declarations.
+- `CrossSurfaceOwnerTests`: a content row of a Direct-team message gets the Direct team from every question a surface asks (content of the message, owning-team question, the gate record, each content table); a content row of a record-filed message does not; with both settings unset the answer is today's; a row that is not message content is not routed.

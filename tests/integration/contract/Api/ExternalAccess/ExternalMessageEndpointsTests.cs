@@ -17,8 +17,10 @@ using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.Privileges;
 using Sprk.Bff.Api.Services.Identity;
 using Xunit;
+using Wire = Sprk.Bff.Api.Tests.TestInfrastructure.CallerRecordAccessProbeDouble.WireShape;
 
 namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 
@@ -1787,6 +1789,168 @@ public class ExternalMessageEndpointsTests
         using var doc = JsonDocument.Parse(json);
         doc.RootElement.GetProperty("value")[0].EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon", "isMine");
+    }
+
+    // ── canCreate: the thread says whether the post route would admit this caller (R4 task 002, FR-06) ──────────
+    // The SPA hides Post on a thread whose canCreate is false, so canCreate must be exactly the post route's own decision:
+    // Create in the record's rights, an attributable sender, and (for a workforce contact) the post route's ceiling.
+
+    /// <summary>A caller holding <paramref name="level"/> on <paramref name="record"/> of the route's root type.</summary>
+    private static CallerPrincipal Holding(string root, Guid record, ExternalAccessLevel level, CallerPrincipalPlane plane,
+        Guid? systemUserId = null, bool dataverseDecides = false)
+    {
+        var rights = ExternalAccessLevels.ToAccessRights(level);
+        return new CallerPrincipal
+        {
+            Plane = plane,
+            ContactId = Guid.NewGuid(),
+            SystemUserId = systemUserId,
+            DataverseConfirmsWrites = dataverseDecides,
+            Email = "caller@outside.test",
+            ProjectAccess = root == "projects"
+                ? new[] { CallerProjectAccess.FromLevel(record, level) }
+                : Array.Empty<CallerProjectAccess>(),
+            MatterAccess = root == "matters"
+                ? new Dictionary<Guid, AccessRights> { [record] = rights }
+                : new Dictionary<Guid, AccessRights>(),
+            WorkAssignmentAccess = root == "workassignments"
+                ? new Dictionary<Guid, AccessRights> { [record] = rights }
+                : new Dictionary<Guid, AccessRights>(),
+        };
+    }
+
+    private Task<IResult> GetWithCeiling(string root, Guid id, CallerPrincipal caller, IDataversePrivilegeChecker? privileges)
+    {
+        var data = _roots.NewService();
+        return ExternalMessageEndpoints.GetMessagesCoreAsync(
+            root, id, caller, ProductionRegistry(), ReadRecord, ReadService(),
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            _invoiceHiding.Seam, privileges: privileges);
+    }
+
+    private static bool? CanCreateOf(IResult result)
+    {
+        result.Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>();
+        return ((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!.CanCreate;
+    }
+
+    [Theory]
+    [InlineData("projects", ExternalAccessLevel.Collaborate, true)]
+    [InlineData("projects", ExternalAccessLevel.ViewOnly, false)]
+    [InlineData("matters", ExternalAccessLevel.Collaborate, true)]
+    [InlineData("matters", ExternalAccessLevel.ViewOnly, false)]
+    [InlineData("workassignments", ExternalAccessLevel.Collaborate, true)]
+    [InlineData("workassignments", ExternalAccessLevel.ViewOnly, false)]
+    public async Task Thread_ForAPartner_ReportsCanCreate_FromTheRightsThePostRouteChecks(
+        string root, ExternalAccessLevel level, bool expected)
+    {
+        var record = Guid.NewGuid();
+        SetupMessages();
+
+        var result = await GetWithCeiling(root, record, Holding(root, record, level, CallerPrincipalPlane.CiamContact), privileges: null);
+
+        CanCreateOf(result).Should().Be(expected, "the ceiling does not apply to a partner; Create in the record's rights decides");
+    }
+
+    [Theory]
+    [InlineData("matters", true)]
+    [InlineData("matters", false)]
+    [InlineData("workassignments", true)]
+    [InlineData("workassignments", false)]
+    public async Task Thread_ForAWorkforceContact_CanCreate_FollowsThePostRoutesCeiling(string root, bool roleHoldsCreate)
+    {
+        var record = Guid.NewGuid();
+        SetupMessages();
+        var ceiling = new Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble();
+        if (!roleHoldsCreate)
+            ceiling.Ceiling = CeilingRouteTestData.Without(WorkforceRoleCeilingGate.CommunicationTable, AccessRights.Create);
+
+        var result = await GetWithCeiling(
+            root, record, Holding(root, record, ExternalAccessLevel.Collaborate, CallerPrincipalPlane.Workforce), ceiling);
+
+        CanCreateOf(result).Should().Be(roleHoldsCreate,
+            "a workforce contact whose role cannot create messages is refused by the post route's ceiling, so no Post is offered");
+        ceiling.Reads.Should().Be(1, "the role is read once for the post's ceiling (the read route's filter is not in this drive)");
+    }
+
+    [Fact]
+    public async Task Thread_ForAWorkforceContact_WithNoCeilingChecker_ReportsCanCreateFalse()
+    {
+        // Fail closed: a drive of the core with no checker cannot tell whether the post route's ceiling admits the caller.
+        var record = Guid.NewGuid();
+        SetupMessages();
+
+        var result = await GetWithCeiling(
+            "matters", record, Holding("matters", record, ExternalAccessLevel.Collaborate, CallerPrincipalPlane.Workforce), null);
+
+        CanCreateOf(result).Should().BeFalse();
+    }
+
+    // A caller whose access Dataverse decides (FR-20): the thread asks Dataverse exactly what the post route asks — through
+    // the route's own readers (CallerRightsReader / CallerPrivilegeReader) over the production probe and a scripted
+    // Dataverse. ExternalMessageSendTests drives PostMessageCoreAsync over the same wire shapes (201 / 403 / 503); these
+    // are the thread's side of each pair.
+    [Theory]
+    [InlineData("matters", Wire.AppendTo, Wire.Held, true)]
+    [InlineData("matters", Wire.AppendTo, Wire.NotHeld, false)]
+    [InlineData("matters", Wire.Denial, Wire.Held, false)]
+    [InlineData("matters", Wire.ServerFault, Wire.Held, false)]
+    [InlineData("matters", Wire.Timeout, Wire.Held, false)]
+    [InlineData("matters", Wire.AppendTo, Wire.ServerFault, false)]
+    [InlineData("workassignments", Wire.AppendTo, Wire.Held, true)]
+    [InlineData("workassignments", Wire.Denial, Wire.Held, false)]
+    [InlineData("workassignments", Wire.Unknown, Wire.Held, false)]
+    public async Task Thread_ForADataverseDecidedCaller_CanCreate_IsThePostRoutesDataverseAnswer(
+        string root, string rights, string privilege, bool expected)
+    {
+        var record = Guid.NewGuid();
+        var systemUserId = Guid.NewGuid();
+        SetupMessages();
+        _identity.Setup(i => i.IsExternalAsync(systemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var caller = Holding(root, record, ExternalAccessLevel.ViewOnly, CallerPrincipalPlane.Workforce, systemUserId, dataverseDecides: true);
+        var probe = new Sprk.Bff.Api.Tests.TestInfrastructure.CallerRecordAccessProbeDouble().UseAppOnlyWire(rights, privilege);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Items[CallerPrincipal.HttpContextItemsKey] = caller;
+        var data = _roots.NewService();
+
+        var result = await ExternalMessageEndpoints.GetMessagesCoreAsync(
+            root, record, caller, ProductionRegistry(), ReadRecord, ReadService(),
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            _invoiceHiding.Seam,
+            data.ReadAncestorLinksOfRowsAsync,
+            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext),
+            new Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble());
+
+        CanCreateOf(result).Should().Be(expected,
+            "the thread offers Post exactly when the post route would create; an unanswered question offers nothing");
+        probe.AppOnlyCalls.Should().ContainSingle("one rights question, for the record in hand — the post route's one probe");
+    }
+
+    [Fact]
+    public async Task Thread_ForACallerDataverseDoesNotDecide_AsksDataverseNothing()
+    {
+        // FR-06 constraint: no extra Dataverse read for a caller whose access Dataverse does not decide.
+        var record = Guid.NewGuid();
+        SetupMessages();
+        var probe = new Sprk.Bff.Api.Tests.TestInfrastructure.CallerRecordAccessProbeDouble().UseAppOnlyWire(Wire.AppendTo, Wire.Held);
+        var caller = Holding("matters", record, ExternalAccessLevel.Collaborate, CallerPrincipalPlane.CiamContact);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Items[CallerPrincipal.HttpContextItemsKey] = caller;
+        var data = _roots.NewService();
+
+        var result = await ExternalMessageEndpoints.GetMessagesCoreAsync(
+            "matters", record, caller, ProductionRegistry(), ReadRecord, ReadService(),
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync,
+            _invoiceHiding.Seam,
+            data.ReadAncestorLinksOfRowsAsync,
+            ExternalProjectDataEndpoints.CallerRightsReader(probe, httpContext),
+            ExternalProjectDataEndpoints.CallerPrivilegeReader(probe, httpContext),
+            new Sprk.Bff.Api.Tests.AccessControl.WorkforceCeilingDouble());
+
+        CanCreateOf(result).Should().BeTrue();
+        probe.AppOnlyCalls.Should().BeEmpty();
+        probe.AppOnlyPrivilegeCalls.Should().BeEmpty();
     }
 }
 

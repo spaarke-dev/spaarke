@@ -724,15 +724,16 @@ internal sealed class SecureChildShareWorld
         Microsoft.Extensions.Logging.ILogger<SecureChildReconciler>? logger = null,
         Microsoft.Extensions.Logging.ILogger<SecureChildShareSynchronizer>? sharesLogger = null,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore? links = null,
-        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null,
+        ExternalTeamShareSynchronizer? externalTeam = null, IConfiguration? configuration = null)
     {
         var entities = EntitiesOver(current).Object;
-        var configuration = Configuration();
+        configuration ??= Configuration();
         var resolver = new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver(
             entities, configuration, NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance);
         var synchronizer = new SecureChildShareSynchronizer(
             entities, shares, noAccessGuard ?? NobodyWalled(), configuration,
-            sharesLogger ?? NullLogger<SecureChildShareSynchronizer>.Instance);
+            sharesLogger ?? NullLogger<SecureChildShareSynchronizer>.Instance, externalTeam); // uac-r2 191c: the L1 hooks' engine, when a test composes it
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, logger ?? NullLogger<SecureChildReconciler>.Instance,
             gateDecisionRecords ?? new Sprk.Bff.Api.Tests.Services.Signals.GateSharingWorld().Sharing, // ontology 042b: a gate-record double over an empty world
@@ -1004,6 +1005,8 @@ internal sealed class SecureChildShareWorld
             // (every row a test does not touch) never matches.
             ConditionOperator.GreaterEqual => actual is DateTime at && condition.Values.Single() is DateTime since && at >= since,
             // Task 173: the Access Permission sweep pages by id (rows are answered in id order, as Dataverse orders them).
+            // Task 191c: the recent-changes key set ((modifiedon > At) OR (modifiedon = At AND id > AfterId)).
+            ConditionOperator.GreaterThan when actual is DateTime at && condition.Values.Single() is DateTime since => at > since,
             ConditionOperator.GreaterThan => actual is Guid a && condition.Values.Single() is Guid after && a.CompareTo(after) > 0,
             _ => throw new NotSupportedException($"The test world does not evaluate {condition.Operator}."),
         };

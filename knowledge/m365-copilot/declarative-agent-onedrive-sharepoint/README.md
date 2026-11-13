@@ -6,7 +6,7 @@ This sample demonstrates how to extend Microsoft 365 Copilot with a declarative 
 
 It uses content from the product's documentation stored in Microsoft 365 to provide accurate and relevant answers.
 
-![Product support declarative agent](./assets/preview.gif)
+*(image not included in this snapshot: Product support declarative agent)*
 
 ## Contributors
 

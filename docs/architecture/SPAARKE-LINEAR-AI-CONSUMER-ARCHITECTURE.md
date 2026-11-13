@@ -217,7 +217,7 @@ Six steps. Should take a couple of hours end-to-end, most of which is the typed 
 5. **Write a typed intermediate DTO** deserialized from the AI's structured output (usually mirrors the JPS output schema)
 6. **Write endpoint route** — thin, delegates to the service; response DTO is the wire contract
 
-Detailed step-by-step tutorial: [`docs/guides/BUILD-A-NEW-LINEAR-AI-CONSUMER.md`](../guides/BUILD-A-NEW-LINEAR-AI-CONSUMER.md) (to be authored after Doc Upload conversion ships as the reference implementation).
+Detailed step-by-step tutorial: `docs/guides/BUILD-A-NEW-LINEAR-AI-CONSUMER.md` (to be authored after Doc Upload conversion ships as the reference implementation).
 
 ## Future: Playbook-to-code compilation
 

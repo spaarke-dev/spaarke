@@ -374,6 +374,7 @@ internal sealed class UpdateRecordActionCore
         {
             using var scope = _scopeFactory.CreateScope();
             var ownership = scope.ServiceProvider.GetRequiredService<IRecordOwnershipResolver>();
+            var directOwner = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep>();
             var reparent = await ownership.ReparentAsync(
                 new RecordReparent
                 {
@@ -381,6 +382,13 @@ internal sealed class UpdateRecordActionCore
                     RecordId = input.RecordId,
                     ParentChanges = parentChanges,
                     CallerSystemUserId = input.ImpersonateSystemUserId,
+                    // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
+                    // to the Direct team; any other communication is Unchanged pending #2722). An update that impersonates
+                    // nobody keeps the acting-user rule, so with no person named it is refused as before.
+                    WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
+                        input.EntityLogicalName, actsForAPerson: input.ImpersonateSystemUserId is not null, directOwner),
+                    RegardingLinksSet = RecordReparent.RegardingLinksSetIn(input.EntityLogicalName, updatePayload),
+                    UnfileRuleColumnsWritten = RecordReparent.UnfileRuleColumnsWrittenIn(input.EntityLogicalName, updatePayload),
                     // Task 146 c1-r1, owner round 13 item 8: a move out of a secure root (F3) is asked of the user this
                     // update IMPERSONATES — the person it acts for — with RetrievePrincipalAccess asked as that user. An
                     // update that impersonates nobody (a system run's playbook node) passes no caller and is refused such
@@ -396,6 +404,10 @@ internal sealed class UpdateRecordActionCore
             {
                 throw new RecordOwnerUnresolvedException(input.EntityLogicalName, reparent);
             }
+
+            // Piece 3b: an unfiled Direct message returns to the Direct team now, before the step after the re-file.
+            if (directOwner is not null)
+                await directOwner.AfterReparentAsync(input.RecordId, reparent, CancellationToken.None).ConfigureAwait(false);
 
             refiled = !reparent.ParentsUnchanged;
             refiledBy = reparent;

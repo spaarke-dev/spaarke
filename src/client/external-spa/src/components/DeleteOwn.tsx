@@ -8,7 +8,9 @@
  *   <DeleteFailureNotice del={del} />                           // why a delete did not happen
  *
  * The confirmation is the shared `ConfirmModal` (`@spaarke/ui-components`): no light-dismiss, Cancel on the left,
- * a destructive Confirm that is busy while the call is in flight. Cancel and the x do nothing but close it.
+ * a destructive Confirm that is busy while the call is in flight. Cancel and the x do nothing but close it. Esc does nothing
+ * (the modal standard: an alert dialog ignores Esc, and the key never reaches a record dialog behind it). Focus returns to
+ * the control that asked when it closes (task 004, FR-03), or to the record dialog when that control is gone.
  *
  * On success the row is removed through `onRemoved` (no refetch: the server answered 204, which is the end state). On a
  * failure the dialog closes, the ROW STAYS, and the failure is shown (`deleteFailureOf`): a 403 as an error, never as a
@@ -22,6 +24,7 @@ import { DismissRegular } from '@fluentui/react-icons';
 import { ConfirmModal } from '@spaarke/ui-components/components/SprkModal';
 import { deleteFailureOf, type DeleteFailure } from '../api/delete-own';
 import { BffAccessState } from './auth/BffAccessState';
+import { currentFocusTarget, restoreFocusTo, type FocusTarget } from './createAction';
 
 export interface DeleteOwnState<T> {
   /** The row waiting for confirmation, with the name shown in the dialog; null when no dialog is open. */
@@ -63,16 +66,26 @@ export function useDeleteOwn<T>({ noun, remove, onRemoved }: UseDeleteOwnArgs<T>
     };
   }, []);
 
+  // The control that asked, so focus can return to it when the confirmation closes (Fluent restores focus only to a
+  // DialogTrigger; without this the page body has focus, and an Esc there reaches no dialog).
+  const invoker = React.useRef<FocusTarget | null>(null);
+  const returnFocus = React.useCallback(() => {
+    restoreFocusTo(invoker.current);
+    invoker.current = null;
+  }, []);
+
   const ask = React.useCallback((item: T, label: string) => {
     if (inFlight.current) return;
     setFailure(null);
+    invoker.current = currentFocusTarget();
     setPending({ item, label });
   }, []);
 
   const cancel = React.useCallback(() => {
     if (inFlight.current) return;
     setPending(null);
-  }, []);
+    returnFocus();
+  }, [returnFocus]);
 
   const confirm = React.useCallback(() => {
     if (inFlight.current || !pending) return;
@@ -85,6 +98,7 @@ export function useDeleteOwn<T>({ noun, remove, onRemoved }: UseDeleteOwnArgs<T>
         if (!mounted.current) return;
         setBusy(false);
         setPending(null);
+        returnFocus();
         onRemoved(item);
       },
       (err: unknown) => {
@@ -92,10 +106,11 @@ export function useDeleteOwn<T>({ noun, remove, onRemoved }: UseDeleteOwnArgs<T>
         if (!mounted.current) return;
         setBusy(false);
         setPending(null);
+        returnFocus();
         setFailure(deleteFailureOf(err, noun));
       }
     );
-  }, [pending, remove, onRemoved, noun]);
+  }, [pending, remove, onRemoved, noun, returnFocus]);
 
   const dismissFailure = React.useCallback(() => setFailure(null), []);
 

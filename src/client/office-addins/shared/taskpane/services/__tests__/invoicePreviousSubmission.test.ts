@@ -105,6 +105,14 @@ describe('loadPreviousSubmission (§11)', () => {
     expect((await loadPreviousSubmission(MESSAGE_ID, config))?.message).toBeNull();
   });
 
+  it('EB-D-185: an Accepted submission made without a firm says so (the banner, via the same wording)', async () => {
+    mockFetch.mockResolvedValueOnce(res(200, body({ outcomeReasonCode: 'ebilling.submission.firm_missing' })));
+    const previous = await loadPreviousSubmission(MESSAGE_ID, config);
+    expect(previous?.status).toBe('Accepted');
+    expect(previous?.message).toBe('Submitted without a firm. A reviewer will add the firm before approval.');
+    expect(previous).not.toHaveProperty('outcomeReasonCode');
+  });
+
   it('names the correcting submission of an invoice replaced by a correction (097f)', async () => {
     mockFetch.mockResolvedValueOnce(
       res(

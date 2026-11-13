@@ -29,6 +29,7 @@ import {
 import type { OntologyAuthoringService } from '../authoringService';
 import { RuleWizard } from '../RuleWizard';
 import type { RuleWizardResult } from '../RuleWizard';
+import type { INavigationService } from '../../../../types/serviceInterfaces';
 import type { MatterPicker, NewVersionMode, RuleWizardMode } from '../ruleWizardTypes';
 import { catalog, dryRunResult, failure, makeAuthoringService, published, saved, validation } from './fixtures';
 
@@ -1112,6 +1113,59 @@ describe('RuleWizard - matter scope', () => {
       expect(JSON.stringify(request)).not.toContain('Matter Two');
       expect(JSON.stringify(request)).not.toContain('tenant');
     }
+  });
+
+  // D-219 Q5 (task 187): with the host's navigation service the matter limit opens the Dataverse side pane for the subject table.
+  const withPane = (openLookup: jest.Mock) => ({
+    ...makePicker(),
+    navigationService: { openLookup } as unknown as INavigationService,
+  });
+
+  it('with a navigation service the matter limit opens the pane for the subject table, with no inline search input (D-219 Q5)', async () => {
+    const openLookup = jest.fn(async () => [{ id: 'M-2', name: 'Matter Two' }]);
+    const matterPicker = withPane(openLookup);
+    const { service } = setup({ matterPicker });
+    await toScopeAsNewRule();
+
+    expect(screen.queryByRole('textbox', { name: 'Limit to one matter', hidden: true })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: Matter Two'), WAIT);
+
+    expect(openLookup).toHaveBeenCalledTimes(1);
+    expect(openLookup).toHaveBeenCalledWith({ entityType: 'zz_widget' });
+    expect(matterPicker.search).not.toHaveBeenCalled();
+    await next('rule-wizard-test');
+    await runTest();
+    // Saved shape unchanged: only the normalised id reaches the request.
+    expect(service.dryRun.mock.calls[0][0].matterId).toBe('m-2');
+    expect(JSON.stringify(service.dryRun.mock.calls[0][0])).not.toContain('Matter Two');
+  });
+
+  it('cancelling the pane leaves the scope as it was; a failed pane is a cancel', async () => {
+    const openLookup = jest.fn().mockResolvedValueOnce([{ id: 'm-1', name: 'Matter One' }]);
+    const matterPicker = withPane(openLookup);
+    setup({ matterPicker });
+    await toScopeAsNewRule();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: Matter One'), WAIT);
+
+    // Clear, reopen and cancel (empty result): still no matter, still all matters.
+    openLookup.mockResolvedValueOnce([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Limit to one matter', hidden: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(openLookup).toHaveBeenCalledTimes(2), WAIT);
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+
+    // A rejected pane is a cancel, not an unhandled rejection; the wizard stays usable.
+    openLookup.mockRejectedValueOnce(new Error('no pane'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true }));
+    await waitFor(() => expect(openLookup).toHaveBeenCalledTimes(3), WAIT);
+    expect(byId('rule-wizard-scope-value')).toHaveTextContent('Applies to: All matters');
+    expect(screen.getByRole('button', { name: 'Select Limit to one matter', hidden: true })).toBeEnabled();
+    warn.mockRestore();
+    expect(byId('rule-wizard-scope')).toBeInTheDocument();
   });
 
   it('sends no matter for all matters, and says allMatters on validate and the test (fix rounds 1 and 2)', async () => {

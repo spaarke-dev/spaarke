@@ -300,20 +300,22 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
     }
 
     // =====================================================================
-    // Read only: event create stays project-only
+    // Event create on a matter / work assignment: a route since R4 task 002 (FR-08; it was GET-only through R3). Its
+    // contract (201, 400, 403, 409, 503, the ceiling, the bind) is ExternalRootEventCreateContractTests; here, a reader
+    // without Create is refused before anything reaches Dataverse.
     // =====================================================================
 
     [Theory]
     [InlineData("matters")]
     [InlineData("workassignments")]
-    public async Task EventCreate_OnAMatterOrWorkAssignment_IsNotARoute(string segment)
+    public async Task EventCreate_OnAMatterOrWorkAssignment_ForAViewOnlyReader_Is403_AndReachesNoDataverse(string segment)
     {
-        _fixture.Principal = Principal(segment, ExternalAccessLevel.FullAccess, RecordA);
+        _fixture.Principal = Principal(segment, ExternalAccessLevel.ViewOnly, RecordA);
 
         using var client = _fixture.CreateAuthenticatedClient();
         using var response = await client.PostAsJsonAsync($"/api/v1/external/{segment}/{RecordA}/events", new { sprk_name = "x" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed, "the path is a GET-only route");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the read route's reader may not create");
         _fixture.Data.Urls.Should().BeEmpty();
     }
 
@@ -440,7 +442,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                         .Build(),
                     new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
                     NullLogger<ExternalDataService>.Instance,
-                    Data.FilingReader));
+                    Data.FilingReader,
+                    visibility: Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible));
             });
         }
     }
@@ -765,7 +768,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// narrowed (the fail-closed default).
         /// </summary>
         public ExternalDataService NewService(
-            bool withFilingReader = true, Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null) => new(
+            bool withFilingReader = true, Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver? identity = null,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility? visibility = null) => new(
             new HttpClient(this),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
@@ -774,7 +778,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             NullLogger<ExternalDataService>.Instance,
             withFilingReader ? FilingReader : null,
             columns: null,
-            identity: identity);
+            identity: identity,
+            visibility: visibility ?? Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible);
 
         /// <summary>
         /// Task 188: seeds a communication as the 065 rule reads it: <c>sprk_isinternalonly</c> (<c>null</c> stays null, which

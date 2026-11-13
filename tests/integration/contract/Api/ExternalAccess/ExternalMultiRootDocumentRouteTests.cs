@@ -575,7 +575,8 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
                 .Build(),
             new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
             NullLogger<ExternalDataService>.Instance,
-            Data.FilingReader);
+            Data.FilingReader,
+            visibility: Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible);
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {

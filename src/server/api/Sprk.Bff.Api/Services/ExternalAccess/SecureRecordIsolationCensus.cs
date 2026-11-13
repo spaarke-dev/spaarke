@@ -148,11 +148,13 @@ public static class SecureRecordIsolationCensus
             privileges.Values.ToArray());
     }
 
-    private static QueryExpression Query(string entity, params string[] columns) =>
+    // Query, RetrieveAllAsync, OptionalGuid and RequiredGuid are internal so the flagged-user placement reads (task 191e,
+    // ExternalCollaboratorPlacement) page and fail exactly as this census does, instead of carrying a second copy.
+    internal static QueryExpression Query(string entity, params string[] columns) =>
         new(entity) { ColumnSet = new ColumnSet(columns), NoLock = true };
 
     /// <summary>Every page of a query, or a throw — a truncated census is never graded.</summary>
-    private static async Task<List<Entity>> RetrieveAllAsync(
+    internal static async Task<List<Entity>> RetrieveAllAsync(
         IGenericEntityService dataverse, QueryExpression query, CancellationToken ct)
     {
         var rows = new List<Entity>();
@@ -183,7 +185,7 @@ public static class SecureRecordIsolationCensus
             .ToDictionary(g => g.Key, g => (IReadOnlyList<Guid>)g.Select(row => RequiredGuid(row, valueColumn)).ToArray());
 
     /// <summary>A GUID column that may arrive as a Guid (intersect tables) or an EntityReference (lookups).</summary>
-    private static Guid? OptionalGuid(Entity row, string column) =>
+    internal static Guid? OptionalGuid(Entity row, string column) =>
         row.Attributes.TryGetValue(column, out var value)
             ? value switch
             {
@@ -193,7 +195,7 @@ public static class SecureRecordIsolationCensus
             }
             : null;
 
-    private static Guid RequiredGuid(Entity row, string column) =>
+    internal static Guid RequiredGuid(Entity row, string column) =>
         OptionalGuid(row, column) is { } id && id != Guid.Empty
             ? id
             : throw new InvalidOperationException(

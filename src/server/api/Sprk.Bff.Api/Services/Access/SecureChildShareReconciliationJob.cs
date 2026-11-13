@@ -51,7 +51,7 @@ namespace Sprk.Bff.Api.Services.Access;
 /// on, like the secure mirror; there is no report-only switch on this job, and no new setting. When the Direct team is not
 /// configured the pass does nothing; when it cannot be resolved it writes nothing and the run is not a success.</para>
 /// </remarks>
-public sealed class SecureChildShareReconciliationJob : IScheduledJob
+public sealed partial class SecureChildShareReconciliationJob : IScheduledJob
 {
     /// <summary>Task 198 Part C: the most Direct-team messages one run reconciles; the rest are carried to the next run.</summary>
     internal const int MaxDirectMessagesPerRun = 200;
@@ -133,6 +133,7 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
         var startedAt = _timeProvider.GetUtcNow();
         SecureChildShareSyncResult result;
         DirectMessageRun direct;
+        ExternalTeamRun external;
         using (var scope = _scopeFactory.CreateScope())
         {
             result = await scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>()
@@ -141,9 +142,26 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
             // Task 198 Part C: the Direct-team messages, after the secure children. Its own window; never throws.
             direct = await ReconcileDirectMessagesAsync(scope.ServiceProvider, startedAt, context.RunId, cancellationToken)
                 .ConfigureAwait(false);
+
+            // uac-r2 task 191c: the External-team share, after the Direct pass. Its own window; never throws for a Dataverse fault.
+            external = await ReconcileExternalTeamAsync(scope.ServiceProvider, startedAt, context.RunId, cancellationToken)
+                .ConfigureAwait(false);
         }
         var duration = _timeProvider.GetElapsedTime(started);
-        var complete = result.IsComplete && direct.Ok;
+        var complete = result.IsComplete && direct.Ok && external.Ok;
+
+        // Task 191c: the External-team pass's own heartbeat line (counts only; row ids are in the per-table report lines).
+        _logger.Log(
+            external.Clean ? LogLevel.Information : LogLevel.Warning,
+            "[EXTERNAL-TEAM-SHARE] heartbeat status={Status} writes={Writes} reownWrites={ReownWrites} carriedIn={CarriedIn} " +
+            "listed={Listed} swept={Swept} examined={Examined} undecided={Undecided} teamGrants={TeamGrants} teamChanges={TeamChanges} " +
+            "teamRevokes={TeamRevokes} flaggedUserRevokes={FlaggedUserRevokes} reowns={Reowns} written={Written} reowned={Reowned} " +
+            "externalTeamOwned={ExternalTeamOwned} directOwnedFlaggedShares={DirectOwnedFlagged} carried={Carried} " +
+            "sweepPassComplete={SweepPassComplete} failure={Failure} runId={RunId}",
+            external.Status, external.WritesEnabled, external.ReownWritesEnabled, external.CarriedIn, external.Listed, external.Swept,
+            external.Examined, external.Undecided, external.TeamGrants, external.TeamChanges, external.TeamRevokes,
+            external.FlaggedUserRevokes, external.Reowns, external.Written, external.Reowned, external.ExternalTeamOwned,
+            external.DirectOwnedFlaggedShares, external.Carried, external.SweepPassComplete, external.Failure, context.RunId);
 
         // THE HEARTBEAT (ADR-036 A1 rule 5) — every attempt, including one with nothing to do.
         _logger.Log(
@@ -183,8 +201,12 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                       : $"; Direct messages: {direct.Status}, {direct.Incomplete} not complete, {direct.BackedOff} backed off" +
                         (direct.ListingCapped ? ", a recent-changes listing capped" : "") +
                         (direct.Failure is null ? "" : $" ({direct.Failure})"))
+                  + (external.Ok
+                      ? ""
+                      : $"; External team: {external.Status}, {external.Failures} row(s) carried for a fault, {external.Carried} carried in all" +
+                        (external.Failure is null ? "" : $" ({external.Failure})"))
                   + "; the next run retries.",
-            ProcessedItems: result.ChildrenInScope + direct.Examined,
+            ProcessedItems: result.ChildrenInScope + direct.Examined + external.Examined,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(new
             {
@@ -221,6 +243,32 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
                     sweepPassComplete = direct.SweepPassComplete,
                     incompleteMessages = direct.IncompleteIds.Take(50).ToArray(),
                     failure = direct.Failure,
+                },
+                // Task 191c: the External Collaborators team share (planned when its writes are off, made when on).
+                externalTeam = new
+                {
+                    status = external.Status,
+                    writesEnabled = external.WritesEnabled,
+                    reownWritesEnabled = external.ReownWritesEnabled,
+                    carriedIn = external.CarriedIn,
+                    listed = external.Listed,
+                    swept = external.Swept,
+                    examined = external.Examined,
+                    undecided = external.Undecided,
+                    teamGrants = external.TeamGrants,
+                    teamChanges = external.TeamChanges,
+                    teamRevokes = external.TeamRevokes,
+                    flaggedUserRevokes = external.FlaggedUserRevokes,
+                    reowns = external.Reowns,
+                    written = external.Written,
+                    reowned = external.Reowned,
+                    externalTeamOwned = external.ExternalTeamOwned,
+                    directOwnedFlaggedShares = external.DirectOwnedFlaggedShares,
+                    carried = external.Carried,
+                    failures = external.Failures,
+                    leftToSweep = external.LeftToSweep,
+                    sweepPassComplete = external.SweepPassComplete,
+                    failure = external.Failure,
                 },
                 attempt = context.Attempt,
             }));
@@ -292,7 +340,11 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
         Dictionary<Guid, (int Failures, DateTimeOffset? RetryAt)> attempts;
         lock (_directGate)
         {
-            since = _directWatermark ?? startedAt - DirectInitialLookback;
+            // #2709: the first run's window start is stored before anything can fail. A run that holds the watermark (a
+            // listing or sweep fault, a carry past its cap, an unresolved Direct team) then leaves the next run listing from
+            // here; recomputing the look-back from each later run's own start would slide the window past what was never listed.
+            _directWatermark ??= startedAt - DirectInitialLookback;
+            since = _directWatermark.Value;
             carried = _directPending.OrderBy(id => id).ToList();
             sweepAfter = _directSweepCursor;
             attempts = new Dictionary<Guid, (int, DateTimeOffset?)>(_directAttempts);

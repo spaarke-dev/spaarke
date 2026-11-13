@@ -262,7 +262,9 @@ public class RecordOwnerAssignmentCensusTests
             + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
             + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync). The registry names this "
             + "rule UnfiledCommunicationKeepsCreator (the unified service refuses such a create); this file is its only "
-            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034).",
+            + "creator on the chat path, pinned by InboundIngestionCreatorsGuardTests (task 034). The Direct owner rule is "
+            + "not this file's: after the join the only owner change is DirectMessageOwnerStep (fm 054 piece 3a), called "
+            + "from here and pinned by the same guard.",
             WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
@@ -281,11 +283,10 @@ public class RecordOwnerAssignmentCensusTests
             + "communication, handed to the filing walk, which reads its columns; it is never written, so there is no row to own.",
             WaiverKind.Permanent),
         // ebilling-r1 (waiver agreed with spaarke-ontology-platform-r1 2026-10-20; task 089a narrowed it to Procedure rule sets and made
-        // it Permanent, model 5.2): the census keys on (file, table), so the one waiver is three entries with one text: sprk_ruleset (1
-        // site: CreateAsync's upload; ProcedureService's Procedure set is an UnscannedWriter), sprk_policy (1 site: CreateDraftRuleAsync's
-        // policy) and sprk_policyversion (3 sites: CreateDraftRuleAsync's first version, EditAsync's edit-path version created with the
-        // caller-chosen id VersionIdFor, and the copy-forward version).
-        new CensusEntry("RuleSetService.cs", "sprk_ruleset", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
+        // it Permanent, model 5.2): the census keys on (file, table), so the one waiver is two entries with one text: sprk_policy (1
+        // site: CreateDraftRuleAsync's policy) and sprk_policyversion (3 sites: CreateDraftRuleAsync's first version, EditAsync's edit-path
+        // version created with the caller-chosen id VersionIdFor, and the copy-forward version). Task 116 retired RuleSetService.CreateAsync
+        // (the uploaded rule set), so RuleSetService.cs creates no sprk_ruleset; a Procedure's set is ProcedureService's UnscannedWriter below.
         new CensusEntry("RuleSetService.cs", "sprk_policy", 1, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
         new CensusEntry("RuleSetService.cs", "sprk_policyversion", 3, Disposition.Waived, RuleSetServicePolicyWaiver, WaiverKind.Permanent),
         // ebilling-r1 task 086 (procedure model 5.2/9.1): the invoice Stored File joins the secure family as a leaf child of sprk_invoice.
@@ -571,6 +572,14 @@ public class RecordOwnerAssignmentCensusTests
         RootFollowsFiling,
 
         /// <summary>
+        /// field-mapping-server-write-path-r1 task 054 pieces 3a and 3b, the Direct owner rule: assigns a Direct message filed under NO
+        /// record, and its content rows, to the configured Direct message owner team (<c>DirectMessageOwnerStep</c>) at the join and on
+        /// an unfile, conditional on the row version. A message filed under a record stays the resolver's. Asserted
+        /// (<c>DirectMessageOwnerStepGuardTests</c>): it is the only member that reads the Direct team's id and writes an owner.
+        /// </summary>
+        DirectMessageTeam,
+
+        /// <summary>
         /// Task 182: a write the contract forbids, listed only until the named ontology task removes it. Used only by
         /// <see cref="BusinessUnitWrites"/> (a direct <c>owningbusinessunit</c> write is never anything else).
         /// </summary>
@@ -640,6 +649,12 @@ public class RecordOwnerAssignmentCensusTests
             "Project spend snapshots — owned by the project's team."),
         new OwnerWriteEntry("SignalEvaluationService.cs", "UpsertSignalAsync", 1, OwnerWriteKind.Routed,
             "Owned by the matter's team."),
+        new OwnerWriteEntry("ExternalTeamShareSynchronizer.cs", "ReownAsync", 1, OwnerWriteKind.Routed,
+            "uac-r2 task 191c (design v2 §3.8): a row a user flagged sprk_isexternal = true owns is re-owned to the answer of "
+            + "its own I-6 question (ForExistingRowAsync over the row, the flagged owner as the acting user), conditional on the "
+            + "version read with the owner check and read back; never the External Collaborators team, never the Secure team "
+            + "(the secure reconciler's move), never an unfiled communication (146 E1). Off unless "
+            + "ExternalAccess:ExternalTeamShare:ReownWritesEnabled."),
         new OwnerWriteEntry("DataverseObservationMirror.cs", "MirrorAsync", 1, OwnerWriteKind.Routed,
             "ForChild over the mirrored analysis row."),
         new OwnerWriteEntry("GrantExternalAccessEndpoint.cs", "BuildGrantPayload", 1, OwnerWriteKind.Routed,
@@ -772,6 +787,12 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
+        new OwnerWriteEntry("DirectMessageOwnerStep.cs", "WriteDirectTeamOwnerAsync", 1, OwnerWriteKind.DirectMessageTeam,
+            "The Direct owner rule's one writer (fm 054 pieces 3a and 3b): a Direct 1:1 message filed under no record, and the content "
+            + "rows that had its owner, to the resolved Direct message owner team. Reached from the join (GrantAtJoinAsync / "
+            + "OwnDirectAfterContentAsync, MessagingIngestor and CommunicationService) and from an unfile (AfterReparentAsync, behind "
+            + "UnfiledOwnershipFor on the four re-file writers). Owner only, conditional on the row version, evicted and read back; no "
+            + "other member of the server assigns a communication to the Direct team (DirectMessageOwnerStepGuardTests)."),
     };
 
     /// <summary>The gate an <see cref="OwnerWriteKind.UnfiledOnly"/> member must call before its owner write.</summary>
@@ -2441,9 +2462,10 @@ public class RecordOwnerAssignmentCensusTests
     {
         var files = ServerFiles();
 
-        // Not vacuous: the waived file holds the three rule-table entries, and every listed unscanned writer is in UnscannedWriters.
+        // Not vacuous: the waived file holds the two rule-table entries (task 116 retired its sprk_ruleset create; a new one fails the
+        // census), and every listed unscanned writer is in UnscannedWriters.
         Assert.Equal(
-            new[] { "sprk_policy", "sprk_policyversion", "sprk_ruleset" },
+            new[] { "sprk_policy", "sprk_policyversion" },
             Census.Where(e => e.FileName == "RuleSetService.cs" && e.Disposition == Disposition.Waived)
                 .Select(e => e.Table).OrderBy(t => t, StringComparer.Ordinal).ToArray());
         Assert.All(ProcedureRuleSetUnscannedFiles, f => Assert.Contains(UnscannedWriters, w => w.FileName == f));

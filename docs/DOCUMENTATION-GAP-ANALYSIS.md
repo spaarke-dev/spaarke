@@ -263,7 +263,7 @@ The DocumentIntelligenceService returns structured JSON with the following forma
 
 ## Related Documents
 
-- [SPAARKE-AI-ARCHITECTURE.md](ai-knowledge/guides/SPAARKE-AI-ARCHITECTURE.md)
+- [SPAARKE-AI-ARCHITECTURE.md](architecture/AI-ARCHITECTURE.md)
 - [ai-document-summary.md](guides/ai-document-summary.md)
-- [ADR-013-ai-architecture.md](reference/adr/ADR-013-ai-architecture.md)
-- [ai-file-entity-metadata-extraction/spec.md](../projects/ai-file-entity-metadata-extraction/spec.md)
+- [ADR-013-ai-architecture.md](adr/ADR-013-ai-architecture.md)
+- [ai-file-entity-metadata-extraction/spec.md](../projects/x-ai-file-entity-metadata-extraction/spec.md)

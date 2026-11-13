@@ -43,6 +43,9 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <see cref="AppOnlyInvoiceFamilyHiding"/>: an external caller's invoice-family record (an invoice, or a row derived from
 /// one) whose invoice the (a') predicate hides answers like a missing one. It can only HIDE a record the user's own read
 /// returned. (Raised with uac-r2 as an amendment to the round-111 exception.)
+/// uac-r2 task 191h (#2189): a THIRD hide-only app-only seam, <see cref="AppOnlyExternalVisibility"/> (THE external visibility
+/// predicate): an external caller's record of any root or lineage-child table the predicate does not show answers like a
+/// missing one. Same shape: by id, a hide decision only.
 /// </para>
 /// <para>
 /// <b>Registration</b>: <c>sprk_analysistool</c> row
@@ -87,6 +90,8 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
     private readonly AppOnlyDocumentNarrowing _narrowDocuments;
     /// <summary>Task 098: the (a') invoice-family hiding, app-only by id, hide-only (see the remarks).</summary>
     private readonly AppOnlyInvoiceFamilyHiding _hideInvoiceFamily;
+    /// <summary>Task 191h: THE external visibility predicate, app-only by id, hide-only (see the remarks).</summary>
+    private readonly AppOnlyExternalVisibility _externalVisibility;
 
     public DataverseDescribeHandler(
         IDataverseUserClient dataverse,
@@ -95,7 +100,8 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
         AppOnlyDocumentNarrowing narrowDocuments,
-        AppOnlyInvoiceFamilyHiding hideInvoiceFamily)
+        AppOnlyInvoiceFamilyHiding hideInvoiceFamily,
+        AppOnlyExternalVisibility externalVisibility)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -104,6 +110,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _narrowDocuments = narrowDocuments ?? throw new ArgumentNullException(nameof(narrowDocuments));
         _hideInvoiceFamily = hideInvoiceFamily ?? throw new ArgumentNullException(nameof(hideInvoiceFamily));
+        _externalVisibility = externalVisibility ?? throw new ArgumentNullException(nameof(externalVisibility));
     }
 
     /// <inheritdoc />
@@ -378,11 +385,13 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         var guardInvoice = false;
         var guardInvoiceLinks = false;
         var guardRootInvoiceLink = false;
+        var guardVisibility = false;
         // Task 130-0b: the classification is kept whole, so the invoice-family seam gets the caller's systemuser from it.
         InvoiceFamilyCaller? familyCaller = null;
         if ((ExternalCallerCommunicationGuard.IsCommunicationFamily(logicalName) ||
              ExternalCallerCommunicationGuard.IsDocumentTable(logicalName) ||
              ExternalCallerCommunicationGuard.IsDocumentDerivedTable(logicalName) ||
+             ExternalCallerCommunicationGuard.IsVisibilityGuarded(logicalName) ||
              ExternalInvoiceVisibility.IsInvoiceFamilyTable(logicalName) ||
              ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(logicalName) ||
              InvoiceLinks.IsRootWithInvoiceLink(logicalName)) &&
@@ -390,6 +399,10 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
                 _httpContextAccessor.HttpContext?.User, _callerResolver, _identityResolver, ct).ConfigureAwait(false)
                 is { IsExternal: true } verdict)
         {
+            // uac-r2 task 191h (#2189): a record of a root or lineage-child table is ALSO decided by THE external visibility
+            // predicate, on top of any guard below.
+            guardVisibility = ExternalCallerCommunicationGuard.IsVisibilityGuarded(logicalName);
+
             // Task 130-0b step 2: a record of a CHILD table with an invoice link (to-do, event, document, communication, analysis,
             // memo...) is ALSO decided by the invoices it links to, through the same seam, on top of any guard below.
             if (ExternalInvoiceVisibility.IsInvoiceLinkedChildTable(logicalName))
@@ -455,7 +468,7 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
         {
             // ISS-010 review K4: on a guarded path a real not-found answers with the SAME code and message as a hidden
             // record below, so the answer never tells an external caller that a hidden record exists.
-            if ((guardCommunication || guardDocument || guardDerived || guardInvoice || guardInvoiceLinks) &&
+            if ((guardCommunication || guardDocument || guardDerived || guardInvoice || guardInvoiceLinks || guardVisibility) &&
                 recordResponse.ErrorCode == DataverseUserClientErrorCodes.NotFound)
             {
                 return RecordNotVisible(tool, startedAt);
@@ -522,6 +535,20 @@ public sealed partial class DataverseDescribeHandler : IToolHandler
             _logger.LogInformation(
                 "[dataverse.describe] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason}",
                 logicalName, "record_hidden");
+            return RecordNotVisible(tool, startedAt);
+        }
+
+        // uac-r2 task 191h (#2189, #2179 design §3.3): a record of a root or lineage-child table THE external visibility predicate
+        // does not show (Hidden or Undecided: a Restricted root, an internal-only communication or a hidden document it is filed
+        // under or about, through ANY registry lookup) answers exactly as a hidden record above. Decided app-only by id; a
+        // decision that could not be made throws (no data).
+        if (guardVisibility &&
+            (await ExternalCallerCommunicationGuard.NotVisibleIdsAsync(_externalVisibility, logicalName, new[] { recordId }, ct)
+                .ConfigureAwait(false)).Contains(recordId))
+        {
+            _logger.LogInformation(
+                "[dataverse.describe] " + ExternalCallerCommunicationGuard.LogEvent + " entity={Entity} reason={Reason}",
+                logicalName, "external_visibility_hidden");
             return RecordNotVisible(tool, startedAt);
         }
 

@@ -1145,9 +1145,23 @@ public class ThreadResolverTests
     private static readonly Microsoft.Extensions.Configuration.IConfiguration SecureNames =
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
 
+    /// <summary>The strict share read the A1 pair-shape check asks (no shares unless a test sets them).</summary>
+    private readonly Mock<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService> _shares = new();
+
+    public ThreadResolverTests()
+    {
+        _shares
+            .Setup(s => s.GetPrincipalAccessOrThrowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DataversePrincipalAccess>());
+        // A1: the thread's Direct-recipient read finds no stamped message unless a test sets one.
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity>()));
+    }
+
     private ThreadResolver CreateFilingSut(bool withConfiguration = true, params IThreadKeyStrategy[] strategies) =>
         new(strategies, _entity.Object, _owners, NullLogger<ThreadResolver>.Instance, _grants.Object,
-            withConfiguration ? SecureNames : null);
+            withConfiguration ? SecureNames : null, recordShares: _shares.Object);
 
     /// <summary>R's primary name as Dataverse holds it (K2: the anchor's display name is read server-side).</summary>
     private void SetupRecordName(string entityType, Guid recordId, string name)
@@ -1387,6 +1401,250 @@ public class ThreadResolverTests
         // The email stays in its thread: nothing re-assigns it.
         _entity.Verify(e => e.UpdateAsync("sprk_communication", communicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // A1 (owner decision 2026-11-11): rule 2 never anchors a Direct pair thread to a record
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid PairOwner = Guid.NewGuid();
+    private static readonly Guid PairOther = Guid.NewGuid();
+
+    /// <summary>The thread's Direct-recipient read (A1 (b)): the thread's messages with a non-null <c>sprk_directrecipient</c>.</summary>
+    private static bool IsDirectRecipientRead(QueryExpression q) =>
+        q.EntityName == "sprk_communication"
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_directrecipient" && c.Operator == ConditionOperator.NotNull);
+
+    /// <summary>A filed email in an open, active Direct thread whose only message it is; R's default thread is where rule 3 moves it.</summary>
+    private (Guid CommunicationId, Guid ThreadId, Guid Matter, Guid RecordThread, DataverseEntity Thread) ArrangeDirectThreadFiling(
+        Guid? userOwner = null, int threadType = ThreadTypeDirect)
+    {
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        SetupRecordName("sprk_matter", matter, "PAT-444023");
+        var thread = OpenThread(threadId, threadType);
+        if (userOwner is { } owner)
+            thread["ownerid"] = new EntityReference("systemuser", owner);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        SetupThreadRead(threadId, Thread(threadId, name: "RE: invoice", nameIsAutoDerived: true,
+            regardingType: "sprk_matter", regardingId: matter.ToString(), regardingName: "PAT-444023", threadType: ThreadTypeRecordAnchored));
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+        return (communicationId, threadId, matter, recordThread, thread);
+    }
+
+    private void SetupPairShares(params Guid[] readers) =>
+        _shares
+            .Setup(s => s.GetPrincipalAccessOrThrowAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(readers.Select(r => new DataversePrincipalAccess(DataversePrincipalRef.User(r), 1, DateTimeOffset.UtcNow)).ToList());
+
+    private void SetupStampedMessage(Guid threadId)
+    {
+        var stamped = new DataverseEntity("sprk_communication") { Id = Guid.NewGuid() };
+        stamped["sprk_directrecipient"] = new EntityReference("systemuser", PairOther);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity> { stamped }));
+    }
+
+    private ThreadResolver CreateA1Sut(CapturingLogger<ThreadResolver> log, bool withShares = true) =>
+        new(Array.Empty<IThreadKeyStrategy>(), _entity.Object, _owners, log, _grants.Object, SecureNames,
+            recordShares: withShares ? _shares.Object : null);
+
+    private static void ShouldLogNotAnchored(CapturingLogger<ThreadResolver> log, Guid threadId, string reason) =>
+        log.Entries.Should().ContainSingle(e => e.EventId.Id == 5413
+                                                && e.EventId.Name == ThreadResolver.DirectPairNotAnchoredEventCode
+                                                && Equals(e.Fields["Reason"], reason)
+                                                && Equals(e.Fields["ThreadId"], threadId));
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_StrictDirectPairThread_IsNotAnchored_OnlyTheEmailMoves_AndTheEventIsLogged()
+    {
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        SetupPairShares(PairOther);
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.StrictPair);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_DirectThreadNotAStrictPair_ButHoldingAStampedMessage_IsNotAnchored()
+    {
+        // Two other readers: not a strict pair by shape — the stamped message alone decides.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        SetupPairShares(PairOther, Guid.NewGuid());
+        SetupStampedMessage(a.ThreadId);
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.StampedMessage);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_WhenThePairShapeReadFaults_TheDirectThreadIsNotAnchored()
+    {
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        _shares
+            .Setup(s => s.GetPrincipalAccessOrThrowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated share read fault"));
+        var log = new CapturingLogger<ThreadResolver>();
+
+        var act = () => CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.ParticipantReadFault);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_WhenTheMessageReadFaults_TheDirectThreadIsNotAnchored()
+    {
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated message read fault"));
+        var log = new CapturingLogger<ThreadResolver>();
+
+        var act = () => CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.MessageReadFault);
+    }
+
+    /// <summary>Dataverse refusing a read because <paramref name="column"/> does not exist on sprk_communication.</summary>
+    private static Exception MissingColumnFault(string column, bool typed) => typed
+        ? new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault
+            {
+                ErrorCode = unchecked((int)0x80041103),
+                Message = $"'sprk_communication' entity doesn't contain attribute with Name = '{column}'.",
+            },
+            new System.ServiceModel.FaultReason($"'sprk_communication' entity doesn't contain attribute with Name = '{column}'."))
+        : new InvalidOperationException($"400: Could not find a property named '{column}' on type 'Microsoft.Dynamics.CRM.sprk_communication'.");
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReconcileThreadForFiling_A1_WhereTheRecipientColumnDoesNotExist_AnOrdinaryDirectEmailThread_IsStillAnchored(bool typed)
+    {
+        // Must-not-fire: an environment without sprk_directrecipient. A column that does not exist holds no stamp, so the
+        // inbound email conversation's Direct thread follows its record as on an environment with the column.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(MissingColumnFault("sprk_directrecipient", typed));
+        var writes = new List<Dictionary<string, object>>();
+        _entity
+            .Setup(e => e.UpdateAsync("sprk_communicationthread", a.ThreadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, d, _) => writes.Add(d))
+            .Returns(Task.CompletedTask);
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        writes.Should().NotBeEmpty();
+        ((OptionSetValue)writes[0]["sprk_threadtype"]).Value.Should().Be(ThreadTypeRecordAnchored);
+        ((EntityReference)writes[0]["sprk_regardingmatter"]).Id.Should().Be(a.Matter);
+        VerifyAssigned(a.CommunicationId, a.RecordThread, Times.Never());
+        log.Entries.Should().NotContain(e => e.EventId.Id == 5413);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReconcileThreadForFiling_A1_AMissingColumnFaultAboutAnotherColumn_StillDeclines(bool typed)
+    {
+        // Must-fire: only the recipient column's absence means "none stamped"; any other fault still fails closed.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(MissingColumnFault("sprk_somethingelse", typed));
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.MessageReadFault);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_WhereTheRecipientColumnDoesNotExist_AStrictPairThread_IsStillNotAnchored()
+    {
+        // Must-fire: the strict-pair shape is read first and does not depend on the recipient column.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        SetupPairShares(PairOther);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(MissingColumnFault("sprk_directrecipient", typed: true));
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.StrictPair);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_WithNoShareReadWired_TheDirectThreadIsNotAnchored()
+    {
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log, withShares: false).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(a.CommunicationId, a.ThreadId, a.RecordThread, "sprk_matter", a.Matter);
+        ShouldLogNotAnchored(log, a.ThreadId, ThreadResolver.DirectPairNotAnchoredReason.ShareReadUnavailable);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_UserOwnedDirectEmailThread_WithNoSharesAndNoStampedMessage_IsStillAnchored()
+    {
+        // Must-not-fire: an inbound email conversation's Direct thread (owner clarification 2026-10-11) follows its record.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner);
+        var writes = new List<Dictionary<string, object>>();
+        _entity
+            .Setup(e => e.UpdateAsync("sprk_communicationthread", a.ThreadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, d, _) => writes.Add(d))
+            .Returns(Task.CompletedTask);
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        writes.Should().NotBeEmpty();
+        ((OptionSetValue)writes[0]["sprk_threadtype"]).Value.Should().Be(ThreadTypeRecordAnchored);
+        VerifyAssigned(a.CommunicationId, a.RecordThread, Times.Never());
+        log.Entries.Should().NotContain(e => e.EventId.Id == 5413);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_A1_RecordAnchoredThread_IsUnaffected_EvenWithAStampedMessage()
+    {
+        // Must-not-fire: the guard asks only of a Direct-typed thread; a Record-Anchored one follows its filing as before.
+        var a = ArrangeDirectThreadFiling(userOwner: PairOwner, threadType: ThreadTypeRecordAnchored);
+        SetupPairShares(PairOther);
+        SetupStampedMessage(a.ThreadId);
+        var writes = new List<Dictionary<string, object>>();
+        _entity
+            .Setup(e => e.UpdateAsync("sprk_communicationthread", a.ThreadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, d, _) => writes.Add(d))
+            .Returns(Task.CompletedTask);
+        var log = new CapturingLogger<ThreadResolver>();
+
+        await CreateA1Sut(log).ReconcileThreadForFilingAsync(a.CommunicationId, CancellationToken.None);
+
+        writes.Should().NotBeEmpty();
+        ((EntityReference)writes[0]["sprk_regardingmatter"]).Id.Should().Be(a.Matter);
+        _shares.Verify(s => s.GetPrincipalAccessOrThrowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _entity.Verify(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsDirectRecipientRead(q)), It.IsAny<CancellationToken>()), Times.Never);
+        log.Entries.Should().NotContain(e => e.EventId.Id == 5413);
     }
 
     [Fact]
@@ -1982,7 +2240,8 @@ public class ThreadResolverTests
 
     private ThreadResolver CreateFilingSutWithScopes(
         Microsoft.Extensions.DependencyInjection.IServiceScopeFactory scopes, params IThreadKeyStrategy[] strategies) =>
-        new(strategies, _entity.Object, _owners, NullLogger<ThreadResolver>.Instance, _grants.Object, SecureNames, scopes);
+        new(strategies, _entity.Object, _owners, NullLogger<ThreadResolver>.Instance, _grants.Object, SecureNames, scopes,
+            _shares.Object);
 
     [Fact]
     public async Task ReconcileThreadForFiling_TheMoveToTheRecordsDefaultThread_RunsNoStepAfterARefile_2091()
@@ -2515,7 +2774,9 @@ public class ThreadResolverTests
 
         await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
 
-        scans.Should().ContainSingle().Which.Should().Match<QueryExpression>(q => IsThreadMessageScan(q, threadId));
+        // The A1 Direct-recipient read (a Direct thread's pair check) is its own query, not the scan.
+        scans.Where(q => !IsDirectRecipientRead(q)).Should().ContainSingle()
+            .Which.Should().Match<QueryExpression>(q => IsThreadMessageScan(q, threadId));
     }
 
     // ── The backfill sweep: an anchored thread gets its S6 owner (ReconcileAnchoredThreadOwnerAsync) ────────────────

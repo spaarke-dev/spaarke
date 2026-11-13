@@ -976,8 +976,11 @@ public sealed class ThreadResolver : IThreadResolver
             // follows the filing as a whole when every active message in it is an email (F1-c) and none other is filed to a
             // different record — and neither its owner nor R's is the Secure team (F1-b; AnchorThreadForFilingAsync answers
             // false, and only the email moves).
+            // A1 (owner decision 2026-11-11): a Direct pair thread is never anchored to a record — see
+            // DirectPairThreadMayBeAnchoredAsync; the email alone moves (rule 3).
             if (!isDefaultThread && isActive
                 && await FiledToOnlyAsync(threadId, communicationId, regarding, recordId, ct) is { } filedToRecord
+                && await DirectPairThreadMayBeAnchoredAsync(thread, threadId, communicationId, regarding, recordId, ct)
                 && await AnchorThreadForFilingAsync(
                     threadId, thread, communicationId, regarding, recordId, filedToRecord, beforeMessageGrant, ct))
             {
@@ -1161,6 +1164,121 @@ public sealed class ThreadResolver : IThreadResolver
         }
 
         return filedToRecord;
+    }
+
+    /// <summary>The stable code of the event logged when rule 2 declines to anchor a Direct pair thread (A1).</summary>
+    internal const string DirectPairNotAnchoredEventCode = "thread_filing.direct_pair_not_anchored";
+
+    private static readonly EventId DirectPairNotAnchoredEvent = new(5413, DirectPairNotAnchoredEventCode);
+
+    /// <summary>The bounded <c>reason</c> values of <see cref="DirectPairNotAnchoredEventCode"/>.</summary>
+    internal static class DirectPairNotAnchoredReason
+    {
+        /// <summary>The thread is a strict 1:1 Direct pair (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>).</summary>
+        public const string StrictPair = "strict_pair";
+
+        /// <summary>A message in the thread carries a Direct recipient (stamped only on a Direct pair's messages).</summary>
+        public const string StampedMessage = "stamped_message";
+
+        /// <summary>The pair shape could not be read (<see cref="Access.DirectPairShapeReason.ParticipantReadFault"/>).</summary>
+        public const string ParticipantReadFault = Access.DirectPairShapeReason.ParticipantReadFault;
+
+        /// <summary>No share read is wired, so the pair shape cannot be told.</summary>
+        public const string ShareReadUnavailable = "share_read_unavailable";
+
+        /// <summary>The thread's messages could not be read for a Direct recipient.</summary>
+        public const string MessageReadFault = "message_read_fault";
+    }
+
+    /// <summary>
+    /// A1 (owner decision 2026-11-11): rule 2 never anchors a thread typed Direct when it is a strict 1:1 pair
+    /// (<see cref="Access.DirectMessageRecipient.ReadStrictPairShapeAsync"/>) or when any of its messages carries a
+    /// non-empty <c>sprk_directrecipient</c>. It fails closed: a fault reading the pair shape or the messages, or no share
+    /// read to ask, also answers <c>false</c>. The one exception is the message read refused because
+    /// <c>sprk_directrecipient</c> does not exist in the environment (<see cref="CommunicationService.IsMissingColumnFault"/>):
+    /// a column that does not exist holds no stamp, so that read answers "none stamped". A Direct-typed thread that is
+    /// neither (an inbound email conversation's thread, owner clarification 2026-10-11) and any thread not typed Direct
+    /// answer <c>true</c>. Never throws, except
+    /// the caller's cancellation; a <c>false</c> answer logs <see cref="DirectPairNotAnchoredEventCode"/> with its reason.
+    /// </summary>
+    private async Task<bool> DirectPairThreadMayBeAnchoredAsync(
+        DataverseEntity thread, Guid threadId, Guid communicationId, RegardingAnchor regarding, Guid recordId,
+        CancellationToken ct)
+    {
+        if (thread.GetAttributeValue<OptionSetValue>("sprk_threadtype")?.Value != ThreadTypeDirect)
+            return true;
+
+        bool Decline(string reason, Exception? fault = null)
+        {
+            _logger.Log(
+                fault is null ? LogLevel.Information : LogLevel.Warning,
+                DirectPairNotAnchoredEvent,
+                fault,
+                "Filing reconcile does not anchor Direct thread {ThreadId} to {RecordType}:{RecordId}: {Reason}; only " +
+                "{CommunicationId} moves | event={EventCode}",
+                threadId, regarding.RecordType, recordId, reason, communicationId, DirectPairNotAnchoredEventCode);
+            return false;
+        }
+
+        if (_recordShares is null)
+            return Decline(DirectPairNotAnchoredReason.ShareReadUnavailable);
+
+        var shape = await Access.DirectMessageRecipient.ReadStrictPairShapeAsync(_entityService, _recordShares, threadId, ct);
+        if (shape.Reason == Access.DirectPairShapeReason.ParticipantReadFault)
+            return Decline(DirectPairNotAnchoredReason.ParticipantReadFault, shape.Fault);
+        if (shape.IsStrictPair)
+            return Decline(DirectPairNotAnchoredReason.StrictPair);
+
+        EntityCollection? stamped;
+        try
+        {
+            stamped = await _entityService.RetrieveMultipleAsync(
+                new QueryExpression("sprk_communication")
+                {
+                    ColumnSet = new ColumnSet(Access.DirectMessageRecipient.RecipientColumn),
+                    TopCount = 1,
+                    Criteria =
+                    {
+                        Conditions =
+                        {
+                            new ConditionExpression(MessageThreadLookup, ConditionOperator.Equal, threadId),
+                            new ConditionExpression(Access.DirectMessageRecipient.RecipientColumn, ConditionOperator.NotNull),
+                        },
+                    },
+                },
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (CommunicationService.IsMissingColumnFault(ex, Access.DirectMessageRecipient.RecipientColumn))
+        {
+            // The recipient column does not exist in this environment, so no message can carry a stamp. The strict-pair
+            // shape above still declines a pair.
+            return true;
+        }
+        catch (Exception ex)
+        {
+            return Decline(DirectPairNotAnchoredReason.MessageReadFault, ex);
+        }
+
+        if (stamped is null)
+            return Decline(DirectPairNotAnchoredReason.MessageReadFault);
+
+        return stamped.Entities.Any(m => HasDirectRecipient(m))
+            ? Decline(DirectPairNotAnchoredReason.StampedMessage)
+            : true;
+
+        static bool HasDirectRecipient(DataverseEntity message) =>
+            message.Attributes.TryGetValue(Access.DirectMessageRecipient.RecipientColumn, out var value) && value switch
+            {
+                null => false,
+                EntityReference reference => reference.Id != Guid.Empty,
+                Guid id => id != Guid.Empty,
+                string text => !string.IsNullOrWhiteSpace(text),
+                _ => true,
+            };
     }
 
     /// <summary>
