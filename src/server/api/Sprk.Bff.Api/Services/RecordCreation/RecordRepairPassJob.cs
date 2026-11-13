@@ -37,8 +37,9 @@ namespace Sprk.Bff.Api.Services.RecordCreation;
 /// customer business unit's default team through <c>IRecordOwnershipResolver</c>. While that team cannot be resolved (asked once
 /// per run, review F2-b) the contact table is not swept: its watermark stays and its rows wait, and the run is partial.</para>
 /// <para><b>Claims (ADR-036 A1 rule 3).</b> The host's lease holds the tick. Each table is a unit: an owner-scoped claim
-/// (<c>IIdempotencyService</c>, owner = the run id) and, once the table is done for the run, a marker keyed to the run, so a host
-/// retry of the run no-ops a marked table. A table another runner holds is not read; the run reports it and fails.</para>
+/// (<c>IIdempotencyService</c>, owner = the run id), released when the table is done. No per-run marker: the host retries a run
+/// only when the job throws, which it never does, and Repair is fill-only, so a second sweep of a row writes nothing. A table
+/// another runner holds is not read; the run reports it and fails.</para>
 /// <para><b>State (the distributed cache, as the stamp reconciliation's cursor).</b> Per table: the watermark (the end of the last
 /// completed window), the window and cursor of a sweep the row cap stopped, and the rows to ask again with their attempt count.
 /// Without a readable state store a table is not swept (every row is still kept for a later run).</para>
@@ -109,7 +110,6 @@ public sealed class RecordRepairPassJob : IScheduledJob
     internal const string LogPrefix = "[RECORD-REPAIR-PASS]";
 
     private static readonly TimeSpan ClaimDuration = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan MarkerLifetime = TimeSpan.FromHours(1);
     private static readonly TimeSpan StateLifetime = TimeSpan.FromDays(30);
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -395,14 +395,7 @@ public sealed class RecordRepairPassJob : IScheduledJob
         CancellationToken ct)
     {
         var claimKey = $"{JobIdConstant}:{table}";
-        var markerKey = $"{claimKey}:{context.RunId:N}";
         var owner = context.RunId.ToString("N", CultureInfo.InvariantCulture);
-
-        if (await idempotency.IsEventProcessedAsync(markerKey, ct).ConfigureAwait(false))
-        {
-            counts.AlreadyDone++;
-            return;
-        }
 
         if (!await idempotency.TryAcquireProcessingLockAsync(claimKey, owner, ClaimDuration, ct).ConfigureAwait(false))
         {
@@ -413,16 +406,8 @@ public sealed class RecordRepairPassJob : IScheduledJob
             return;
         }
 
-        var done = false;
         try
         {
-            // Check again UNDER the claim: the claim is check-then-set and fails open (#984).
-            if (await idempotency.IsEventProcessedAsync(markerKey, ct).ConfigureAwait(false))
-            {
-                counts.AlreadyDone++;
-                return;
-            }
-
             var stateKey = $"{claimKey}:state";
             var state = await ReadStateAsync(store, stateKey, ct).ConfigureAwait(false);
             if (state is null)
@@ -526,21 +511,14 @@ public sealed class RecordRepairPassJob : IScheduledJob
                 problems.Add($"{table}: its state could not be saved; the next run asks the same window again.");
                 return;
             }
-
-            done = true;
         }
         finally
         {
             try
             {
-                if (done)
-                {
-                    await idempotency.MarkEventAsProcessedAsync(markerKey, MarkerLifetime, CancellationToken.None).ConfigureAwait(false);
-                }
-
                 await idempotency.ReleaseProcessingLockAsync(claimKey, owner, CancellationToken.None).ConfigureAwait(false);
             }
-            // The marker and the claim are advisory: Repair is fill-only and conditional, so a repeated row writes nothing.
+            // The claim is advisory: Repair is fill-only and conditional, so a repeated row writes nothing.
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "{Prefix} Claim bookkeeping for {Key} failed; it expires on its own", LogPrefix, claimKey);
@@ -700,13 +678,13 @@ public sealed class RecordRepairPassJob : IScheduledJob
             "{Prefix} heartbeat status={Status} attempt={Attempt} goLive={GoLive} scanned={Scanned} repaired={Repaired} noOp={NoOp} "
             + "skipped={Skipped} failed={Failed} ownerRefused={OwnerRefused} ownerAssignCascades={OwnerAssignCascades} "
             + "tablesWaiting={TablesWaiting} outsidePass={OutsidePass} retried={Retried} "
-            + "pendingRetry={PendingRetry} abandoned={Abandoned} claimHeld={ClaimHeld} alreadyDone={AlreadyDone} truncated={Truncated} "
+            + "pendingRetry={PendingRetry} abandoned={Abandoned} claimHeld={ClaimHeld} truncated={Truncated} "
             + "scanFailures={ScanFailures} stateFailures={StateFailures} metadataReads={MetadataReads} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, context.Attempt, goLive?.ToString("O", CultureInfo.InvariantCulture) ?? "(unset)", counts.Scanned,
             counts.Repaired, counts.NoOp, counts.Skipped, counts.Failed, counts.OwnerRefused, counts.OwnerAssignCascades,
             counts.TablesWaiting, counts.OutsidePass, counts.Retried,
-            counts.PendingRetry, counts.Abandoned, counts.ClaimHeld, counts.AlreadyDone, counts.Truncated, counts.ScanFailures,
+            counts.PendingRetry, counts.Abandoned, counts.ClaimHeld, counts.Truncated, counts.ScanFailures,
             counts.StateFailures, counts.MetadataReads, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
             context.CorrelationId);
 
@@ -735,7 +713,6 @@ public sealed class RecordRepairPassJob : IScheduledJob
                     counts.PendingRetry,
                     counts.Abandoned,
                     counts.ClaimHeld,
-                    counts.AlreadyDone,
                     counts.Truncated,
                     counts.ScanFailures,
                     counts.StateFailures,
@@ -778,7 +755,6 @@ public sealed class RecordRepairPassJob : IScheduledJob
         public int PendingRetry;
         public int Abandoned;
         public int ClaimHeld;
-        public int AlreadyDone;
         public int Truncated;
         public int ScanFailures;
         public int StateFailures;

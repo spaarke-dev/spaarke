@@ -288,11 +288,17 @@ internal sealed partial class RecordCreationService
     /// Task 052b (review F1-a): why <paramref name="table"/>'s owner must not be written — a relationship that cascades on
     /// Assign to a child the allow-list does not accept (<see cref="RecordRepairReason.OwnerAssignCascades"/>), or relationship
     /// metadata that could not be read (<see cref="RecordRepairReason.OwnerAssignCascadeUnknown"/>, fail closed) — or <c>null</c>.
-    /// Read app-only, once per pass when a pass is given (only a successful read is kept); a refusal is logged once per pass.
+    /// Read app-only, once per pass when a pass is given: a successful read is kept, and a failed one is kept as unknown (still a
+    /// fault, so the rows are asked again next run, which reads afresh). A refusal, and a failed read, is logged once per pass.
     /// </summary>
     private async Task<string?> AssignCascadeRefusalAsync(string table, Guid id, RecordRepairPassContext? pass, CancellationToken ct)
     {
         IReadOnlyList<AssignCascadeRelationship> cascades;
+        if (pass is not null && pass.AssignCascadesUnknown(table))
+        {
+            return RecordRepairReason.OwnerAssignCascadeUnknown;
+        }
+
         if (pass is not null && pass.TryGetAssignCascades(table, out var kept))
         {
             cascades = kept;
@@ -309,8 +315,13 @@ internal sealed partial class RecordCreationService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "[RECORD-REPAIR] the relationship metadata of {Table} could not be read, so whether an owner " +
-                                       "write of {Id} would cascade cannot be told; the owner was not changed", table, id);
+                if (pass is null || pass.KeepAssignCascadesUnknown(table))
+                {
+                    _logger.LogWarning(ex, "[RECORD-REPAIR] the relationship metadata of {Table} could not be read, so whether an " +
+                                           "owner write would cascade cannot be told; no {Table} row is re-owned this pass (first: {Id})",
+                        table, table, id);
+                }
+
                 return RecordRepairReason.OwnerAssignCascadeUnknown;
             }
 
@@ -1211,7 +1222,9 @@ internal static class RecordRepairReason
 
     /// <summary>Task 052b (review F1-a): the table has a one-to-many relationship that cascades on Assign to a child table the
     /// allow-list does not accept (<see cref="RecordCreationService.AcceptedAssignCascades"/>), so an owner write would re-own
-    /// child rows too — the owner is not written (an answer: not asked again until the metadata or the allow-list changes).</summary>
+    /// child rows too — the owner is not written. An answer, not a fault: the row is not asked again, and the pass does not
+    /// revisit it when the allow-list or the metadata changes later (its watermark has passed the row); the on-demand repair
+    /// (task 052c) is the path for such rows.</summary>
     internal const string OwnerAssignCascades = "record_repair.owner_assign_cascades";
 
     /// <summary>Task 052b (review F1-a): the table's relationship metadata could not be read, so whether an owner write would

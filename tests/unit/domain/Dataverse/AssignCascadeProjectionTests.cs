@@ -1,6 +1,7 @@
 // field-mapping-server-write-path-r1 task 052b (review F1-a) — the one-to-many relationships an Assign cascades along
 // (IGenericEntityService.GetAssignCascadesAsync), projected from the SDK's relationship metadata: every relationship whose Assign
-// cascade is not NoCascade, one whose cascade the metadata does not state included (fail closed).
+// cascade is not NoCascade, one whose cascade the metadata does not state included (fail closed); metadata that does not come
+// back, or comes back without its relationships, is a fault (review F3), never "nothing cascades".
 
 using FluentAssertions;
 using Microsoft.Xrm.Sdk.Metadata;
@@ -45,10 +46,20 @@ public sealed class AssignCascadeProjectionTests
     }
 
     [Fact]
-    public void NoEntity_OrNoRelationships_GivesNothing()
+    public void NoEntity_OrRelationshipsNotReturned_IsAFault_NeverNothingCascades()
     {
-        DataverseServiceClientImpl.AssignCascadesOf(null).Should().BeEmpty();
-        DataverseServiceClientImpl.AssignCascadesOf(new EntityMetadata { LogicalName = "contact" }).Should().BeEmpty();
+        // Metadata that does not come back cannot say "nothing cascades": the read is a fault, which Repair answers with
+        // owner_assign_cascade_unknown (transient) and writes no owner.
+        FluentActions.Invoking(() => DataverseServiceClientImpl.AssignCascadesOf(null))
+            .Should().Throw<InvalidOperationException>();
+        FluentActions.Invoking(() => DataverseServiceClientImpl.AssignCascadesOf(new EntityMetadata { LogicalName = "contact" }))
+            .Should().Throw<InvalidOperationException>().WithMessage("*contact*");
+    }
+
+    [Fact]
+    public void AnEntityWithNoRelationships_GivesNothing()
+    {
+        DataverseServiceClientImpl.AssignCascadesOf(Entity()).Should().BeEmpty("an empty list is an answer: nothing cascades");
     }
 
     private static OneToManyRelationshipMetadata Relationship(string schemaName, string child, CascadeType? assign) => new()

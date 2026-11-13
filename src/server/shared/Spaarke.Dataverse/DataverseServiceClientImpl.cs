@@ -1835,7 +1835,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     /// <inheritdoc />
     /// <remarks>One <c>RetrieveEntityRequest</c> (relationships, published metadata), projected by <see cref="AssignCascadesOf"/>.
-    /// A fault propagates: the caller fails closed.</remarks>
+    /// A fault propagates, and so does a response without the entity's relationships: the caller fails closed.</remarks>
     public async Task<IReadOnlyList<AssignCascadeRelationship>> GetAssignCascadesAsync(
         string entityLogicalName, CancellationToken ct = default)
     {
@@ -1856,8 +1856,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// cascade configuration or Assign value the metadata does not state is included (fail closed). Pure, and
     /// <c>public static</c> for direct testability (the <see cref="ColumnMetadataOf"/> precedent).
     /// </summary>
+    /// <exception cref="InvalidOperationException">The metadata, or its one-to-many relationships, did not come back: that is a
+    /// fault, never "nothing cascades" (an empty list is the answer "nothing cascades").</exception>
     public static IReadOnlyList<AssignCascadeRelationship> AssignCascadesOf(Microsoft.Xrm.Sdk.Metadata.EntityMetadata? entity) =>
-        (entity?.OneToManyRelationships ?? [])
+        (entity?.OneToManyRelationships
+         ?? throw new InvalidOperationException(
+             $"The one-to-many relationships of '{entity?.LogicalName ?? "(no entity)"}' did not come back, so whether an Assign "
+             + "cascades cannot be told."))
             .Where(r => r is not null
                         && r.CascadeConfiguration?.Assign != Microsoft.Xrm.Sdk.Metadata.CascadeType.NoCascade)
             .Select(r => new AssignCascadeRelationship(

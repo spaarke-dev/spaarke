@@ -139,6 +139,26 @@ public sealed class CustomerContactOwnerTests
         _store.Reads.Should().NotContain("owner-team", "the secure decision answered first");
     }
 
+    internal static readonly Guid UnitWithNoDefaultTeam = Guid.Parse("a052b000-0000-4000-8000-0000000001b0");
+    internal static readonly Guid InvoiceInAUnitWithNoDefaultTeam = Guid.Parse("a052b000-0000-4000-8000-0000000001c3");
+
+    [Fact]
+    public async Task AContactUnderAnOrdinaryInvoice_WhoseUnitHasNoDefaultOwnerTeam_IsRefused_EveryParentRefusalWins()
+    {
+        // Review F4 (agreed with UAC-r2: every parent refusal wins, fail closed): the invoice is not secure, but its own filing
+        // cannot be decided, so the contact is refused — never given the customer team in its place.
+        _store.DefaultTeams[CustomerBu] = [CustomerTeam];
+        _directory
+            .WithBusinessUnit(UnitWithNoDefaultTeam, "Unit with no default Owner team", parent: Directory.GeneralBu)
+            .WithRecord("sprk_invoice", InvoiceInAUnitWithNoDefaultTeam, UnitWithNoDefaultTeam);
+
+        var answer = await Resolver(CustomerBu).ResolveOwnerAsync(AContactUnder(InvoiceInAUnitWithNoDefaultTeam), CancellationToken.None);
+
+        answer.IsRefused.Should().BeTrue(answer.Reason);
+        answer.RefusalCode.Should().Be(RecordOwnerRefusal.NoDefaultOwnerTeam);
+        answer.OwningTeamId.Should().NotBe(CustomerTeam, "a parent's refusal is never replaced by the customer team");
+    }
+
     [Fact]
     public async Task AContactUnderAnOrdinaryInvoice_IsOwnedByTheCustomerTeam()
     {

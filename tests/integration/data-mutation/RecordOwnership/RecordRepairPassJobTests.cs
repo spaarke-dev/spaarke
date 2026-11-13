@@ -334,6 +334,23 @@ public sealed class RecordRepairPassJobTests
             .Should().Be(new EntityReference("team", CustomerContactOwnerTests.CustomerTeam), "the next run re-owned it");
     }
 
+    [Fact]
+    public async Task AFailedRelationshipMetadataRead_IsKeptAsUnknownForThePass_ReadAndLoggedOncePerTable()
+    {
+        _pass.CustomerTeamResolves();
+        World.AssignCascadeFaults["contact"] = new TimeoutException("metadata read timed out");
+        _pass.NativeContact();
+        _pass.NativeContact();
+
+        var result = await _pass.RunAsync();
+
+        World.AssignCascadeReads.Where(t => t == "contact").Should().ContainSingle("a failed read is kept for the rest of the pass");
+        World.Log.Entries.Where(e => e.Message.Contains("relationship metadata of contact")).Should().ContainSingle(
+            "logged once per table per pass, not per row");
+        PassWorld.Count(result, "pendingRetry").Should().Be(2, "unknown is a fault: both rows are asked again next run");
+        World.Writes.Should().NotContain(w => w.Fields.ContainsKey("ownerid"));
+    }
+
     // =====================================================================================
     // Review F1-b: the secure decision comes first for a contact filed under an invoice
     // =====================================================================================

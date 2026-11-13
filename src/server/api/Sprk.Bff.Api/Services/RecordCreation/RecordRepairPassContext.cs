@@ -112,6 +112,15 @@ internal sealed class RecordRepairPassContext
     internal void KeepAssignCascades(string table, IReadOnlyList<AssignCascadeRelationship> cascades) =>
         _assignCascades[table] = cascades;
 
+    private readonly ConcurrentDictionary<string, byte> _assignCascadesUnknown = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Review K: <c>true</c> when this pass's read of <paramref name="table"/>'s relationships failed — still unknown for
+    /// the rest of the pass (not asked again per row); the rows are retried next run, which reads it afresh.</summary>
+    internal bool AssignCascadesUnknown(string table) => _assignCascadesUnknown.ContainsKey(table);
+
+    /// <summary>Keeps a failed read as unknown for the rest of the pass; <c>true</c> the first time (log it once).</summary>
+    internal bool KeepAssignCascadesUnknown(string table) => _assignCascadesUnknown.TryAdd(table, 0);
+
     /// <summary><c>true</c> the first time this pass refuses an owner write of <paramref name="table"/> for its cascades.</summary>
     internal bool FirstAssignCascadeRefusal(string table) => _assignCascadeRefusalsLogged.TryAdd(table, 0);
 }

@@ -607,6 +607,23 @@ public sealed partial class RecordRepairModeTests
     }
 
     [Fact]
+    public async Task AThreadReadThatFaults_BeforeTheFilingIsKnown_MapsNothing_AndIsAskedAgain()
+    {
+        // Review F4: the fault comes before the row's filing is decided (its thread's parents could not be read), so whether
+        // the row is filed — and under what — is unknown. Nothing is mapped and the row is asked again; never "unfiled".
+        var id = _world.TeamOwnedCommunicationInAThread();
+        _world.ThreadReadFault = new TimeoutException("Test: thread read timed out.");
+
+        var outcome = await _world.RepairAsync("sprk_communication", id);
+
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUnavailable);
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.State == RecordRepairFieldState.Repaired);
+        outcome.NeedsRetry.Should().BeTrue("a fault, not an answer");
+        _world.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ASourceReadThatFaults_IsAskedAgain()
     {
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
@@ -1459,6 +1476,21 @@ internal sealed partial class RepairWorld
     /// <summary>Task 052b (review F1-a): every table whose relationship metadata the service read, in order.</summary>
     public List<string> AssignCascadeReads { get; } = [];
 
+    /// <summary>Task 052b (review F4): when set, a read of a communication thread throws it.</summary>
+    public Exception? ThreadReadFault { get; set; }
+
+    /// <summary>Task 052b (review F4): a communication in a thread, owned by the child unit's team (its owner is kept).</summary>
+    public Guid TeamOwnedCommunicationInAThread()
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_communication", id, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new Dictionary<string, object>
+            {
+                [RecordThreadFiling.ThreadColumn] = new EntityReference(RecordThreadFiling.ThreadTable, Guid.NewGuid()),
+            });
+        return id;
+    }
+
     /// <summary>Task 052a: the column lists the service asked of mapping sources (the system principal's app-only read).</summary>
     public List<(string Table, string[] Columns)> SourceReads { get; } = [];
 
@@ -1857,7 +1889,10 @@ internal sealed partial class RepairWorld
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(Directory.Answer(query)));
+            .Returns((QueryExpression query, CancellationToken _) =>
+                ThreadReadFault is { } threadFault && query.EntityName == RecordThreadFiling.ThreadTable
+                    ? Task.FromException<EntityCollection>(threadFault)
+                    : Task.FromResult(Directory.Answer(query)));
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(Read(table, id, columns)));
