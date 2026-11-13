@@ -289,6 +289,70 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         SentPayload("sprk_todo", Todo)[UrlColumn].Should().Be(CanonicalUrl("sprk_matter", Matter));
     }
 
+    // ── Fix round 3: on a write run as a person, the person's read comes first ───────────────────────────────────────────
+
+    /// <summary>
+    /// A todo with no stored pair but a stored matter lookup (<see cref="Matter"/>), which the 045b planner's rule 2 (a type
+    /// with no id) fills the pair's id from, read app-only.
+    /// </summary>
+    private static Mock<IGenericEntityService> NoPairButAMatterLookup()
+    {
+        var app = StoredPair("sprk_todo", pairTable: null, pairId: null);
+        var stored = new Entity("sprk_todo", Todo) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter) };
+        app.Setup(a => a.RetrieveAsync("sprk_todo", Todo, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ReturnsAsync(stored);
+        return app;
+    }
+
+    public static TheoryData<GenericPath, bool> EveryPersonPathAndUrlId()
+    {
+        var data = new TheoryData<GenericPath, bool>();
+        foreach (var path in new[] { GenericPath.PlaybookUpdate, GenericPath.OutputOrchestrator })
+        {
+            data.Add(path, true);
+            data.Add(path, false);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryPersonPathAndUrlId))]
+    public async Task AsAPerson_ATypeOnlyWriteWithAUrl_OnARowThePersonCannotRead_IsTheReadFailedRefusal(GenericPath path, bool urlNamesTheFilledId)
+    {
+        // The planner fills the id from a lookup it read app-only; the answer must not depend on that row the person cannot read.
+        _callerMayNotRead = true;
+
+        var outcome = await RunAsync(path, "sprk_todo", Todo, Lookups(PairType(CatalogRowOf("sprk_matter"))),
+            SendsUrl(CanonicalUrl("sprk_matter", urlNamesTheFilledId ? Matter : OtherMatter)), NoPairButAMatterLookup().Object,
+            playbookActsAs: Caller);
+
+        outcome.Code.Should().Be(RecordOwnerRefusal.ParentUndetermined, outcome.Message);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [MemberData(nameof(EveryPersonPathAndUrlId))]
+    public async Task AsAPerson_ATypeOnlyWriteWithAUrl_OnARowThePersonCanRead_IsDecidedAsBefore(GenericPath path, bool urlNamesTheFilledId)
+    {
+        _personAnswer = (table, id, _) => table == "sprk_todo" && id == Todo ? new Entity("sprk_todo", Todo) : null;
+
+        var outcome = await RunAsync(path, "sprk_todo", Todo, Lookups(PairType(CatalogRowOf("sprk_matter"))),
+            SendsUrl(CanonicalUrl("sprk_matter", urlNamesTheFilledId ? Matter : OtherMatter)), NoPairButAMatterLookup().Object,
+            playbookActsAs: Caller);
+
+        if (urlNamesTheFilledId)
+        {
+            outcome.Code.Should().BeNull(outcome.Message);
+            WrittenOnce("sprk_todo", Todo);
+            SentPayload("sprk_todo", Todo)[UrlColumn].Should().Be(CanonicalUrl("sprk_matter", Matter));
+        }
+        else
+        {
+            RefusedAsUrlMismatch(outcome);
+        }
+    }
+
     // ── Fix round 1 (F1b): the communication thread, anchored by typed regarding lookups, is under the same rule ────────────
 
     private static readonly Guid Thread = Guid.Parse("02200000-0000-4000-8000-0000000000c2");

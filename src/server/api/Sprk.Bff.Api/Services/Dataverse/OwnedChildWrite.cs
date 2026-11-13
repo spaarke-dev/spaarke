@@ -1295,10 +1295,11 @@ internal static class OwnedChildWrite
     /// answers its own not-found); any other failed read refuses, nothing written (fail closed).
     /// </summary>
     /// <remarks>Task 045f: then a record URL the payload sends is decided (<see cref="KeepRegardingRecordUrlAppOnlyAsync"/>): it
-    /// must name the record the pair names after the write. When the write does not send both pair halves (on the thread, does
-    /// not set the deciding lookup), the stored row is read: a row that does not exist (or, on a write run as a person, one they
-    /// cannot read) is then refused and nothing is written. When both halves are sent, nothing is read. A URL the planner
-    /// derives is not decided again.</remarks>
+    /// must name the record the pair names after the write. On a write run as a person, the stored row is read as that person
+    /// first, before the planner, whatever halves the write sends: a row they cannot read or that is not there for them is
+    /// refused (read failed) and nothing is written. On an app-only write, the stored row is read only when the write does not
+    /// send both pair halves (on the thread, does not set the deciding lookup), and a row that does not exist is then refused.
+    /// A URL the planner derives is not decided again.</remarks>
     /// <returns>The payload to write: <paramref name="payload"/> itself when nothing applies, otherwise a copy.</returns>
     /// <exception cref="RecordOwnerUnresolvedException">A read the planner needs failed, or a sent record URL does not name the
     /// row's regarding record; nothing was written.</exception>
@@ -1312,7 +1313,25 @@ internal static class OwnedChildWrite
         Func<CancellationToken, Task<RegardingPairRead<RegardingPairRow>>>? storedRowAsPerson = null)
     {
         ArgumentNullException.ThrowIfNull(payload);
-        var sentUrl = RegardingRecordUrlRuleApplies(table) && RegardingPairWrite.Of(table, payload).SetsUrl; // not a derived one
+        var sent = RegardingPairWrite.Of(table, payload);
+        var sentUrl = RegardingRecordUrlRuleApplies(table) && sent.SetsUrl; // not a derived one
+
+        // Task 045f fix round 3: on a write run as a person that sends a URL, the stored row is read as that person FIRST,
+        // whatever pair halves the write sends — before the planner fills a half from what it reads app-only. A row they
+        // cannot read, or that is not there for them, is the read-failed refusal, so the answer never turns on a row they
+        // cannot see. A readable row is decided as before (the one read is reused).
+        if (sentUrl && storedRowAsPerson is not null && !string.IsNullOrWhiteSpace(sent.UrlText))
+        {
+            var asPerson = await storedRowAsPerson(ct).ConfigureAwait(false);
+            if (asPerson.Value is null)
+            {
+                throw new RecordOwnerUnresolvedException(table, RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                    "what it is filed under could not be read, so it was not written"));
+            }
+
+            storedRowAsPerson = _ => Task.FromResult(asPerson);
+        }
+
         var planned = await KeepRegardingPairWholeAppOnlyCoreAsync(
                 entities, table, recordId, payload, path, logger, ct, lookupsAreMapped, displayRecord, movedDisplayRecord)
             .ConfigureAwait(false);

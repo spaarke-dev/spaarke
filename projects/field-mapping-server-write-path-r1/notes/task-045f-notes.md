@@ -215,9 +215,11 @@ The PATCH comment states that, with a URL sent, a missing row is refused.
 
 #### Deployment order
 
-The server now writes the relative canonical form (`/main.aspx?pagetype=entityrecord&etn=…&id=…`) for communication
-associations, thread inheritance and reply copies. The CommunicationConnections reader on master parses the URL with
-`new URL()`, which needs an absolute URL, so deploy part B (`task/fm-045f-client`) with or before this BFF.
+The server now writes the relative canonical form (`/main.aspx?pagetype=entityrecord&etn=…&id=…`) for every URL it admits
+or builds, including communication associations, thread inheritance and reply copies. Readers on master call `new URL()` on
+the stored value (`RegardingResolverApp.tsx` ~689 and CommunicationConnections among them), which throws on a relative URL.
+These bundles (part B, `task/fm-045f-client`) must be live before or with this BFF: `sprk_spaarkeai`,
+`sprk_eventdetailsidepane.html`, RegardingResolver and CommunicationConnections.
 
 #### Fix round 2
 
@@ -228,6 +230,24 @@ associations, thread inheritance and reply copies. The CommunicationConnections 
   (2 cases): with no typed lookup naming the copied id, a URL naming that id is copied in canonical form and a URL naming
   another id is not copied. Both cases fail with the reply copy reverted to the plain string copy.
 - The thread-anchor builder has no test: no write consumes its URL (see the grep table), so no behaviour shows it.
+
+#### Fix round 3 (UAC-r2 access review)
+
+- **Rule.** On the playbook node and the output orchestrator, a write run as a person that sends a URL reads the stored row
+  as that person FIRST, before the 045b planner and whatever pair halves the write sends. A row they cannot read (403), that
+  is not there for them (no row, 404) or whose read faults is refused with `record_owner_parent_undetermined`, and nothing is
+  written. The answer therefore never turns on a stored value the person cannot read (for example, the id the planner's
+  rule 2 fills from a lookup it read app-only). A readable row is decided as before; the one read is reused.
+- **Tests** (`InvoiceFamilyGenericUpdatePathTests.RegardingRecordUrl.cs`, both paths): a person run sending type only and a
+  URL, on a row with no pair and a matter lookup the planner fills the id from. Unreadable: `ParentUndetermined` for a URL of
+  the filled id and of another id (4 cases, all fail on the round-2 code: 2 were written, 2 answered the mismatch code).
+  Readable control: admitted in canonical form, or the mismatch code (4 cases, pass before and after).
+- **Known limits.**
+  - On a person run the catalog row (`sprk_recordtype_ref`) is read app-only. It is reference metadata naming a table, so the
+    risk is low; kept.
+  - On an app-only write with no person, a missing row answers the mismatch code (it holds no pair), by design.
+  - Rule 5 (`TryAdmitRecordUrl` on an id-only pair) can keep a wrong `etn` beside the right id; the id is the whole pair, so
+    this is harmless.
 
 #### Evidence
 
