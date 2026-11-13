@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -360,7 +361,32 @@ public sealed partial class DecisionCommitServiceTests
         var theirs = await rig.CommitAsync(review, http: other);
 
         theirs.ReasonCode.Should().Be(DecisionCommitReasons.ReviewUnfinished, "even the same review id from another person would run the landed writes again");
+        theirs.Detail.Should().StartWith("Another user started a decision on this item on ", "the author's token carried no name")
+            .And.Contain(" UTC that is unfinished. Ask them to finish it first.");
         rig.Log.Should().HaveCount(log);
+    }
+
+    [Fact]
+    public async Task FixRound3_TheRefusalAnotherPersonSees_NamesWhoStartedTheUnfinishedDecision_AndWhen()
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        var started = rig.Clock.GetUtcNow();
+        var author = Http();
+        ((System.Security.Claims.ClaimsIdentity)author.User.Identity!).AddClaim(new System.Security.Claims.Claim("name", "Pat Author"));
+        await rig.CommitAsync(PathBReview(), http: author);
+        var other = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim("tid", Tenant), new System.Security.Claims.Claim("oid", Guid.NewGuid().ToString("D"))], "test")),
+        };
+        other.Request.Headers.Authorization = "Bearer other-token";
+
+        var theirs = await rig.CommitAsync(PathBReview(), http: other);
+
+        theirs.ReasonCode.Should().Be(DecisionCommitReasons.ReviewUnfinished);
+        theirs.Detail.Should().Be(
+            $"Pat Author started a decision on this item on {started.UtcDateTime:yyyy-MM-dd HH:mm} UTC that is unfinished. Ask them to finish it first. Nothing was done.");
     }
 
     [Fact]
@@ -471,6 +497,84 @@ public sealed partial class DecisionCommitServiceTests
             "its author's plan read is the uniform 404 now, so the item is released to its new owner");
         rig.Executors["add-todo"].Result = null;
         (await rig.CommitAsync(review with { Retry = true }, DoSignal)).Status.Should().Be(DecisionCommitStatus.Recorded, "the open wizard still finishes it");
+    }
+
+    // ── Fix round 3: never release landed, unrecorded writes on an open item unless it is gone for good ───────────────────
+
+    /// <summary>A Do review whose Mark complete lands (a write) and whose To Do (a test fails it) does not: stored Failed, resumable.</summary>
+    private static DecisionReview MarkCompleteThenAddTodo() =>
+        new()
+        {
+            ReviewId = Guid.NewGuid(),
+            Confirmed = true,
+            Actions = [Take("mark-complete"), Skip("reschedule")],
+            NextSteps = [new DecisionReviewNextStep { Code = "add-todo", Values = TodoValues }],
+        };
+
+    [Fact]
+    public async Task FixRound3_AResumeWhoseMineCheckIsUnavailable_KeepsThePointer()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.Executors["mark-complete"].Result = DecisionActionOutcome.Done("mark-complete", [new("sprk_todo", ItemTodo)]);
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = MarkCompleteThenAddTodo();
+        var failed = await rig.CommitAsync(review, DoSignal);
+        failed.Resumable.Should().BeTrue(failed.Detail);
+        failed.Landed.Should().NotBeEmpty();
+        rig.MineReadFails = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var retried = await rig.CommitAsync(review with { Retry = true }, DoSignal);
+
+        retried.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        (await rig.Service().ReadUnfinishedAsync(Http(), DoSignal, CancellationToken.None)).Should().NotBeNull(
+            "a transient fault must not release landed, unrecorded writes");
+        rig.MineReadFails = null;
+        (await rig.CommitAsync(MarkComplete(), DoSignal)).ReasonCode.Should().Be(DecisionCommitReasons.ReviewUnfinished);
+    }
+
+    [Theory]
+    [InlineData(DecisionActionReasons.NotAuthorized, DecisionCommitStatus.Forbidden)]
+    [InlineData(DecisionActionReasons.InvalidState, DecisionCommitStatus.Refused)]
+    public async Task FixRound3_AResumeRefusedOrForbidden_KeepsThePointer_TheItemStaysHeld(string reason, DecisionCommitStatus status)
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        var review = PathBReview();
+        await rig.CommitAsync(review);
+        rig.Executors["send-budget-inquiry"].Result = null;
+        rig.Executors["send-budget-inquiry"].Refusal = DecisionActionOutcome.Refused("send-budget-inquiry", reason, "no");
+        var log = rig.Log.Count;
+
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(status, retried.Detail);
+        rig.Log.Skip(log).Should().NotContain(e => e.StartsWith("execute:"), "the preflight refused it; nothing runs");
+        (await rig.Service().ReadUnfinishedAsync(Http(), Primary, CancellationToken.None)).Should().NotBeNull(
+            "the Signal is open and the revision is unrecorded: the item stays held");
+        (await rig.CommitAsync(PathBReview())).ReasonCode.Should().Be(DecisionCommitReasons.ReviewUnfinished, "no second revision");
+        Count(rig, "execute:revise-budget").Should().Be(1);
+    }
+
+    [Fact]
+    public async Task FixRound3_AConditionClearedClosureBeforeTheReviewStarted_IsStillSignalNotOpen()
+    {
+        var rig = new Rig();
+        rig.Executors["send-budget-inquiry"].Result = InquiryFailed(DecisionSendFailure.NotSent);
+        var review = PathBReview();
+        var started = rig.Clock.GetUtcNow();
+        await rig.CommitAsync(review);
+        CloseByTheSystem(rig, TimeSpan.FromSeconds(33));
+        rig.Signals[Primary]["sprk_resolvedon"] = started.UtcDateTime.AddMinutes(-1);   // cleared BEFORE this review started
+        rig.Executors["send-budget-inquiry"].Result = null;
+        var log = rig.Log.Count;
+
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Conflict);
+        retried.ReasonCode.Should().Be(DecisionCommitReasons.SignalNotOpen);
+        rig.Log.Should().HaveCount(log, "nothing runs");
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionConditionCleared);
     }
 
     private sealed class UnfinishedFaultLedger(ITenantCache inner) : ITenantCache
