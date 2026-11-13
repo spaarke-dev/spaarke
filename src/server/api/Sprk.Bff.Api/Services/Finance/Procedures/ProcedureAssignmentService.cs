@@ -269,6 +269,7 @@ public class ProcedureAssignmentService
     internal const string CodeDuplicate = "assignment.duplicate";
     internal const string CodeProcedureNotFound = "assignment.procedure_not_found";
     internal const string CodeProcedureRetired = "assignment.procedure_retired";
+    internal const string CodeProcedureInactive = "assignment.procedure_inactive";
     internal const string CodeProcedureNotBilling = "assignment.procedure_not_billing";
     internal const string CodeRuleNotFound = "assignment.rule_not_found";
     internal const string CodeSystemRule = "assignment.system_rule";
@@ -448,11 +449,13 @@ public class ProcedureAssignmentService
     }
 
     /// <summary>The Procedure columns an assign's checks and its row read (<see cref="AssignRefusalOf{T}"/>, <see cref="ProcedureRowOf"/>).</summary>
-    private static readonly string[] AssignProcedureColumns = { ProcedureEntity.NameColumn, ProcedureEntity.StatusColumn, ProcedureEntity.AreaColumn };
+    private static readonly string[] AssignProcedureColumns = { ProcedureEntity.NameColumn, ProcedureEntity.StatusColumn, ProcedureEntity.AreaColumn, "statecode" };
 
     /// <summary>
     /// What an assign, pin or Procedure exclude refuses on the Procedure row alone, or null: no row (404 <c>procedure_not_found</c>), Retired
-    /// (409 <c>procedure_retired</c>), or an Area that is not Billing (409 <c>procedure_not_billing</c>, EB-D-228). Shared by the write and the
+    /// (409 <c>procedure_retired</c>), deactivated in Dataverse - <c>statecode</c> not Active, whatever its Status (409 <c>procedure_inactive</c>,
+    /// EB-D-232 / ISS-021), or an Area that is not Billing (409 <c>procedure_not_billing</c>, EB-D-228). Removing an assignment does not come through
+    /// here and stays allowed. Shared by the write and the
     /// assignable list (task 084d-5a), so the list never offers what this refuses. Pure.
     /// </summary>
     private static RuleSetOutcome<T>? AssignRefusalOf<T>(Entity? procedure) where T : class
@@ -465,6 +468,14 @@ public class ProcedureAssignmentService
         if (procedure.GetAttributeValue<OptionSetValue>(ProcedureEntity.StatusColumn)?.Value == ProcedureEntity.StatusRetired)
         {
             return Refused<T>(StatusCodes.Status409Conflict, CodeProcedureRetired, "A retired Procedure cannot be assigned, pinned or excluded.");
+        }
+
+        // EB-D-232 (ISS-021): a Procedure deactivated in Dataverse (statecode not Active) is refused whatever its Status says, on the same path as
+        // Retired. The resolver skips it (`is not (null or StateActive)`, PR #2798), so a row for it would never apply. A missing statecode reads
+        // as Active, as the resolver does.
+        if (procedure.GetAttributeValue<OptionSetValue>("statecode")?.Value is not (null or InvoiceStatusCodes.StateActive))
+        {
+            return Refused<T>(StatusCodes.Status409Conflict, CodeProcedureInactive, "A deactivated Procedure cannot be assigned, pinned or excluded.");
         }
 
         // EB-D-228 (O-24): the resolver reads Billing-area Procedures only (ProcedureResolver.ReadProceduresAsync), so a row for any other area

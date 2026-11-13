@@ -268,8 +268,8 @@ public sealed class ProcedureAssignmentServiceTests
             H.Ownership.Invocations.Where(i => i.Method.Name == nameof(IRecordOwnershipResolver.ResolveOwnerAsync))
                 .Select(i => (RecordOwnershipContext)i.Arguments[0]).ToList();
 
-        /// <summary>A Procedure; Billing-area unless <paramref name="area"/> says otherwise (0 leaves the Area empty).</summary>
-        public Guid Procedure(int status = ProcedureEntity.StatusActive, int area = RuleDomains.PolicyDomainBilling)
+        /// <summary>A Procedure; Billing-area unless <paramref name="area"/> says otherwise (0 leaves the Area empty); <paramref name="state"/> sets statecode when given (1 = deactivated in Dataverse).</summary>
+        public Guid Procedure(int status = ProcedureEntity.StatusActive, int area = RuleDomains.PolicyDomainBilling, int? state = null)
         {
             var p = new Entity("sprk_procedure", Guid.NewGuid())
             {
@@ -279,6 +279,11 @@ public sealed class ProcedureAssignmentServiceTests
             if (area != 0)
             {
                 p[ProcedureEntity.AreaColumn] = new OptionSetValue(area);
+            }
+
+            if (state is { } statecode)
+            {
+                p["statecode"] = new OptionSetValue(statecode);
             }
 
             H.Seed(p);
@@ -541,6 +546,56 @@ public sealed class ProcedureAssignmentServiceTests
 
         outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
         w.Rows.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_procedure").Id.Should().Be(procedure);
+    }
+
+    [Theory(DisplayName = "EB-D-232 must-fire: a Procedure deactivated in Dataverse (Status Active, statecode 1) is 409 assignment.procedure_inactive in every mode, and writes nothing")]
+    [InlineData(null)]
+    [InlineData("Pinned")]
+    [InlineData("Excluded")]
+    public async Task Assign_ADeactivatedProcedure_Is409Inactive_AndWritesNothing(string? mode)
+    {
+        var w = new World();
+        var procedure = w.Procedure(state: 1);
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
+
+        var refused = await w.Service().AssignProcedureAsync(
+            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, default);
+
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(ProcedureAssignmentService.CodeProcedureInactive);
+        refused.Detail.Should().Be("A deactivated Procedure cannot be assigned, pinned or excluded.");
+        w.H.Transactions.Should().BeEmpty();
+        w.OwnerContexts.Should().BeEmpty("the state refuses before the owner question");
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "EB-D-232 must-not-fire: an Active Procedure (statecode 0, or none read) is assigned")]
+    [InlineData(0)]
+    [InlineData(null)]
+    public async Task Assign_AnActiveProcedure_IsAccepted(int? state)
+    {
+        var w = new World();
+        var procedure = w.Procedure(state: state);
+
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.Rows.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_procedure").Id.Should().Be(procedure);
+    }
+
+    [Fact(DisplayName = "EB-D-232: removing an existing assignment to a Procedure since deactivated still succeeds (remove does not go through the assign refusal)")]
+    public async Task Remove_AnAssignmentToADeactivatedProcedure_StillSucceeds()
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+        assigned.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.H.Row("sprk_procedure", procedure)["statecode"] = new OptionSetValue(1);
+
+        var removed = await w.Service().RemoveAsync(Matter, MatterId, assigned.Value!.Id, Token, default);
+
+        removed.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.Rows.Should().BeEmpty();
     }
 
     [Fact]

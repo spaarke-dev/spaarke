@@ -163,7 +163,7 @@ public sealed class ProcedureDryRunPlanningContractTests
             return H.Rule(set, code, ProposalState.Accepted, current: true).Policy;
         }
 
-        public Guid Procedure(int status = ProcedureEntity.StatusActive, int area = RuleDomains.PolicyDomainBilling)
+        public Guid Procedure(int status = ProcedureEntity.StatusActive, int area = RuleDomains.PolicyDomainBilling, int? state = null)
         {
             var p = new Entity(ProcedureEntity.Entity, Guid.NewGuid())
             {
@@ -171,6 +171,11 @@ public sealed class ProcedureDryRunPlanningContractTests
                 [ProcedureEntity.StatusColumn] = new OptionSetValue(status),
                 [ProcedureEntity.AreaColumn] = new OptionSetValue(area),
             };
+            if (state is { } statecode)
+            {
+                p["statecode"] = new OptionSetValue(statecode);
+            }
+
             H.Seed(p);
             return p.Id;
         }
@@ -299,7 +304,7 @@ public sealed class ProcedureDryRunPlanningContractTests
         remove.AfterImages.Should().BeEmpty();
     }
 
-    public static TheoryData<string> Refusals() => new() { "retired-procedure", "non-billing-procedure", "duplicate-exclude", "not-in-force", "no-reason", "set-conflict", "no-override" };
+    public static TheoryData<string> Refusals() => new() { "retired-procedure", "non-billing-procedure", "inactive-procedure", "duplicate-exclude", "not-in-force", "no-reason", "set-conflict", "no-override" };
 
     [Theory(DisplayName = "084d-1 F1: the plan refuses with the write's own status and code (it runs the write's checks)")]
     [MemberData(nameof(Refusals))]
@@ -322,6 +327,12 @@ public sealed class ProcedureDryRunPlanningContractTests
                 var otherArea = new ProcedureAssignmentRequest(w.Procedure(area: RuleDomains.PolicyDomainBilling + 1), null, null, null);
                 plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, otherArea, Ct));
                 write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, otherArea, Caller, Ct));
+                break;
+            case "inactive-procedure":
+                // EB-D-232 (ISS-021): Status Active but statecode 1 - the plan refuses as the write does, so a preview never shows an assign the write refuses.
+                var inactive = new ProcedureAssignmentRequest(w.Procedure(state: 1), null, null, null);
+                plan = async () => Of(await service.PlanAssignProcedureAsync(w.Reads(), Matter, MatterId, inactive, Ct));
+                write = async () => Of(await service.AssignProcedureAsync(Matter, MatterId, inactive, Caller, Ct));
                 break;
             case "duplicate-exclude":
                 (await service.ExcludeRuleAsync(Matter, MatterId, new RuleExcludeRequest(rule, "Waived", null), Caller, Ct)).Kind.Should().Be(RuleSetOutcomeKind.Done);
@@ -364,6 +375,11 @@ public sealed class ProcedureDryRunPlanningContractTests
         if (refusal == "non-billing-procedure")
         {
             planned.Should().Be((RuleSetOutcomeKind.Refused, 409, ProcedureAssignmentService.CodeProcedureNotBilling));
+        }
+
+        if (refusal == "inactive-procedure")
+        {
+            planned.Should().Be((RuleSetOutcomeKind.Refused, 409, ProcedureAssignmentService.CodeProcedureInactive));
         }
     }
 
