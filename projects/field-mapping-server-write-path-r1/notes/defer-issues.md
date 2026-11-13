@@ -264,7 +264,7 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2701 |
 | **Class** | K, follow-up |
 | **Failure** | Rule: a strict Direct pair thread, or a thread holding a message with `sprk_directrecipient` set, stays typed Direct and is never anchored to a record. Since 054b, filing enforces this going forward (`ThreadResolver` rule 2, EventId 5413); it does not look back. Follow-up: a one-time per-environment check, before the `DirectMessage:*` settings are set, that no such thread is Record-Anchored, with an owner-approved dry-run / `-Apply` / `-Verify` correction if any is found (a script, or a phase of `Migrate-DirectMessagesToOwnerTeam.ps1`). Nothing with outbound Direct pair routing is deployed yet, so the expected count is zero |
-| **Status** | Open |
+| **Status** | Open for other environments. **dev (spaarkedev1), 2026-11-13: PASS**: a read-only check found no message with `sprk_directrecipient` set in a Record-Anchored thread (0 such messages in all), and no Record-Anchored thread shaped as a strict pair (0 of 66 user-owned; owner a systemuser and the only share row another systemuser with Read). The check is a one-time query; making it a reusable script (or a `-Verify` phase) for other environments is still to do. |
 ## DI-027 — Apply the Restricted source rule to Repair and the field-mapping push (task 022c)
 
 | Field | Value |
