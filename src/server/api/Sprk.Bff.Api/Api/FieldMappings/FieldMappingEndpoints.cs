@@ -1471,8 +1471,13 @@ public static class FieldMappingEndpoints
                     // Task 045b: and before the pair planner below, so a family row's refusal keeps its own code; the planner
                     // never writes a lookup this guard decides on (only the pair and its display columns), so the decision is the
                     // same. The filing gate below (work assignment, project — never a family table) stays after the planner.
+                    // Task 045g: the push writes AS THE CALLER, so a refusal of rules 1-3 is decided on the rows as the caller
+                    // reads them. A row not found keeps its own answer here: the push's ids come from a query the caller read
+                    // (#2081 fix round 2).
                     if (await Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
-                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct) is { RefusalCode: { } familyCode })
+                            targetEntity, childRecordId, updatePayload, appOnlyEntities, ct,
+                            asPerson: Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite.PersonRowReader(
+                                callerQuery, appOnlyEntities, callerSystemUserId)) is { RefusalCode: { } familyCode })
                     {
                         failed++;
                         errors.Add(new PushFieldMappingsError

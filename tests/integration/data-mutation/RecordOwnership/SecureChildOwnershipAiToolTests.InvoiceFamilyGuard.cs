@@ -198,8 +198,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
     // ── Update: PATCH /api/v1/child-records/sprk_invoice/{id} — the stored lookups overlaid with the change ─────
 
     [Fact]
-    public async Task ChildRefile_AnInvoiceFiledUnderAMatter_GivenAProjectToo_IsRefusedMultiple_AndNothingIsWritten()
+    public async Task ChildRefile_AnInvoiceFiledUnderAMatter_GivenAProjectToo_IsRefusedCoreRecordFixed_AndNothingIsWritten()
     {
+        // Task 045g rule 1: the stored matter stays, so the invoice would name a matter and a project — its core record changes.
         StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
         _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
 
@@ -207,8 +208,23 @@ public sealed partial class SecureChildOwnershipAiToolTests
             new() { ["sprk_Project@odata.bind"] = $"/sprk_projects({OrdinaryProject:D})" });
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode,
-            "the stored matter stays, so the row would name a matter and a project");
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        Detail(result).Should().EndWith(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ChildRefile_AnInvoiceWhoseMatterIsCleared_IsRefusedCoreRecordFixed_AndNothingIsWritten()
+    {
+        // Task 045g rule 1: an update that would leave an invoice under no core record changes its core record.
+        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+
+        var result = await RefileChild("sprk_invoice", GuardInvoice, new() { ["sprk_Matter@odata.bind"] = null });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        Detail(result).Should().EndWith(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint);
         _user.Patches.Should().BeEmpty();
         _world.Assignments.Should().BeEmpty();
     }
@@ -355,7 +371,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [InlineData("no invoice")]
     public async Task ChildRefile_AnInvoiceMovedUnderAWorkAssignment_IsRefusedCoreRecordFixed_AndTheWorkAssignmentIsNotRead(string filedUnder)
     {
-        // Task 045g rule 1: an update never files an invoice under a work assignment; the cycle is answered on the create.
+        // Task 045g rule 1: an update cannot move an invoice. The cycle check runs when an update names the invoice's own work
+        // assignment again.
         StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
         ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
         AppWorkAssignment(filedUnder switch { "that invoice" => GuardInvoice, "another invoice" => SupersededInvoice, _ => null });
@@ -617,7 +634,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
-    public async Task UpdateRecordTool_AnInvoiceFiledUnderAMatter_GivenAProjectToo_IsRefusedWithTheGuardsCode()
+    public async Task UpdateRecordTool_AnInvoiceFiledUnderAMatter_GivenAProjectToo_IsRefusedCoreRecordFixed()
     {
         StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
         _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
@@ -625,7 +642,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var result = await UpdateRecord("sprk_invoice", GuardInvoice, Lookup("sprk_project", "sprk_project", OrdinaryProject));
 
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         _user.Patches.Should().BeEmpty();
     }
 

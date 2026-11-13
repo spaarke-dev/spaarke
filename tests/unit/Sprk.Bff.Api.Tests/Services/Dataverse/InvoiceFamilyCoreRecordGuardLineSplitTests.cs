@@ -280,7 +280,7 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
             "sprk_invoice", InvoiceId, ProjectLookup(), app.Object, writeIsImpersonated: true);
 
         impersonated!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
-        second!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        second!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
     }
 
     // ── #2081 fix round 2: check-then-act. The write itself is update-only, and a vanished row is a refusal ─────────────
@@ -358,13 +358,20 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
     }
 
     [Fact]
-    public async Task GenericUpdate_AnInvoiceUnderAMatterGivenAProjectToo_IsRefusedMultiple()
+    public async Task GenericUpdate_AnInvoiceUnderAMatterGivenAProjectToo_OrItsMatterCleared_IsRefusedCoreRecordFixed()
     {
-        var result = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
+        // Task 045g rule 1: an update that would leave an invoice under two core records, or under none, changes its core record.
+        var second = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
             new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", ProjectId) },
             StoredInvoiceUnderMatter().Object);
+        var cleared = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
+            new Dictionary<string, object?> { ["sprk_matter"] = null },
+            StoredInvoiceUnderMatter().Object);
 
-        result!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode, "the stored matter stays");
+        second!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        second.Reason.Should().EndWith(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint);
+        cleared!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        cleared.Reason.Should().Be(second.Reason, "fixed text");
     }
 
     [Fact]

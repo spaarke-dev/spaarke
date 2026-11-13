@@ -811,15 +811,31 @@ public class InvoiceFamilyCoreRecordGuardTests
     }
 
     [Fact]
-    public async Task CheckWrite_AnInvoiceCreate_IsNeverRefusedCoreRecordFixed_AndAnUpdateNamingNoCoreRecordIsTheRowsOwnRule()
+    public async Task CheckWrite_AnInvoiceCreate_IsNeverRefusedCoreRecordFixed_AndAnUpdateLeavingItUnderNoneOrTwo_IsRefusedCoreRecordFixed()
     {
         var create = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
             Reads(("sprk_project", new EntityReference("sprk_project", ProjectId))), NeverRead);
+        var createUnderNone = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice", Reads(), NeverRead);
+        var createUnderTwo = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)), ("sprk_project", new EntityReference("sprk_project", ProjectId))),
+            NeverRead);
+        var storedUnderMatter = Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)));
         var cleared = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice", Reads(), NeverRead, default, null, null,
-            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId))));
+            storedUnderMatter);
+        var second = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice",
+            Reads(("sprk_matter", new EntityReference("sprk_matter", MatterId)), ("sprk_project", new EntityReference("sprk_project", ProjectId))),
+            NeverRead, default, null, null, storedUnderMatter);
+        // A stored row naming no single core record keeps the row's own rule.
+        var storedUnderNone = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync("sprk_invoice", Reads(), NeverRead, default, null, null,
+            Reads());
 
         create.IsRefused.Should().BeFalse(create.Reason);
-        cleared.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.NoCoreRecordCode, "the row's own rule is asked first");
+        createUnderNone.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.NoCoreRecordCode);
+        createUnderTwo.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        cleared.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        cleared.Reason.Should().EndWith(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint);
+        second.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        storedUnderNone.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.NoCoreRecordCode);
     }
 
     [Fact]
@@ -842,6 +858,34 @@ public class InvoiceFamilyCoreRecordGuardTests
         cleared.Reason.Should().NotContain(InvoiceId.ToString("D"));
         rePointed.IsRefused.Should().BeFalse(rePointed.Reason);
         neverHadOne.IsRefused.Should().BeFalse(neverHadOne.Reason);
+    }
+
+    [Theory]
+    [InlineData("sprk_invoiceapproval", "sprk_invoice", true)]
+    [InlineData("sprk_invoicecorrection", "sprk_invoice", true)]
+    [InlineData("sprk_invoicesubmission", "sprk_invoice", false)]
+    [InlineData("sprk_externalidentifier", "sprk_regardinginvoice", false)]
+    public async Task CheckWrite_ClearingTheInvoice_IsRefusedForAnApprovalOrCorrection_AndNotForASubmissionOrExternalIdentifier(
+        string table, string invoiceColumn, bool refused)
+    {
+        // Rule 3b (owner, 2026-11-13): an approval's and a correction's link to its invoice is never blank after create.
+        var underMatter = ("sprk_regardingmatter", new EntityReference("sprk_matter", MatterId));
+        var stored = Reads(underMatter, (invoiceColumn, new EntityReference("sprk_invoice", InvoiceId)));
+
+        var cleared = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table, Reads(underMatter), NeverRead, default, null, null, stored);
+        var created = await InvoiceFamilyCoreRecordGuard.CheckWriteAsync(table, Reads(underMatter), NeverRead);
+
+        if (refused)
+        {
+            cleared.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceClearedCode);
+            cleared.Reason.Should().NotContain(InvoiceId.ToString("D"));
+        }
+        else
+        {
+            cleared.IsRefused.Should().BeFalse(cleared.Reason);
+        }
+
+        created.IsRefused.Should().BeFalse("a create is not an update: these rules ask nothing of it");
     }
 
     [Fact]

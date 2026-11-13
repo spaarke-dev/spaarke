@@ -10,9 +10,10 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 
 /// <summary>
 /// unified-access-control-r2 ruling on RecordFamilyEdges (2026-10-28), end to end through each generic update path. Since task
-/// 045g (owner, EB-D-231) an update never files an invoice under a work assignment: its core record is fixed at create, so the
-/// move is <see cref="InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode"/> wherever the work assignment is filed, and the
-/// work assignment is not read. The cycle (<see cref="InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode"/>) is answered on the create.
+/// 045g rule 1 (owner, EB-D-231) an update cannot move an invoice: a move under a work assignment is
+/// <see cref="InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode"/> wherever the work assignment is filed, and the work
+/// assignment is not read. The cycle check (<see cref="InvoiceFamilyCoreRecordGuard.WorkAssignmentCycleCode"/>) runs when an
+/// update names the invoice's own work assignment again, and on the create.
 /// </summary>
 public partial class InvoiceFamilyGenericUpdatePathTests
 {
@@ -52,8 +53,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.FieldMappingPush, "no invoice")]
     public async Task AnInvoiceMovedUnderAWorkAssignment_IsRefusedCoreRecordFixed_AndTheWorkAssignmentIsNotRead(GenericPath path, string filedUnder)
     {
-        // Task 045g rule 1 (owner, EB-D-231): an invoice's core record is fixed at create, so an update never files it under a
-        // work assignment, wherever that work assignment is filed; the cycle is answered on the create.
+        // Task 045g rule 1 (owner, EB-D-231): an update cannot move an invoice, wherever the work assignment is filed. The cycle
+        // check runs when an update names the invoice's own work assignment again.
         var app = CycleWorld(filedUnder switch
         {
             "this invoice" => Invoice,

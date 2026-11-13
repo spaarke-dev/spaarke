@@ -117,13 +117,16 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <summary>
     /// Task 045g (owner, EB-D-231, #2794, rule 3): an update would clear the invoice of a line (<c>sprk_billingevent.sprk_invoice</c>)
     /// that names one. A line stays with its invoice; it may be pointed at another invoice of its own core record, never at none.
+    /// Rule 3b (owner, 2026-11-13): the same for an approval and a correction (<c>sprk_invoice</c>); an invoice may be for nothing,
+    /// but these rows' link to it is never blank. A submission's and an external identifier's invoice may be cleared. The code
+    /// string is kept from rule 3.
     /// </summary>
     public const string LineInvoiceClearedCode = "invoice_family_line_invoice_cleared";
 
     /// <summary>The reason of <see cref="LineInvoiceClearedCode"/>: fixed text, naming no record.</summary>
     internal const string LineInvoiceClearedReason =
-        "A line's invoice cannot be cleared after the line is created; a line stays with an invoice of its own matter, project or "
-        + "work assignment. Nothing was written.";
+        "The invoice of an invoice line, an approval or a correction cannot be cleared after the row is created; the row stays "
+        + "with an invoice of its own matter, project or work assignment. Nothing was written.";
 
     /// <summary>
     /// An invoice would be filed under a work assignment (<c>sprk_regardingworkassignment</c>) that is itself filed under that
@@ -286,7 +289,8 @@ public static class InvoiceFamilyCoreRecordGuard
     /// set), read by the writer as it reads <paramref name="read"/>'s stored half. Rule 1: an invoice whose core record would
     /// differ from its stored one is <see cref="InvoiceCoreRecordFixedCode"/>. Rule 3: a line whose stored invoice would be
     /// cleared is <see cref="LineInvoiceClearedCode"/>. Both are asked right after <see cref="Check(string, Func{string, object?})"/>
-    /// admits the row, before any other read. Null on a create.</param>
+    /// admits the row, before any other read; an invoice stored under one core record that the write would leave under none,
+    /// or under two, is <see cref="InvoiceCoreRecordFixedCode"/> too. Null on a create.</param>
     public static async Task<InvoiceFamilyCoreRecord> CheckWriteAsync(
         string entityLogicalName,
         Func<string, object?> read,
@@ -442,8 +446,8 @@ public static class InvoiceFamilyCoreRecordGuard
     /// of that user's access, so "<see cref="RecordNotFoundCode"/>" here versus the later privilege error would tell the
     /// caller whether a GUID names a row they cannot read. With this set, a row (or other invoice) that is not found is
     /// <see cref="ReadFailedCode"/>, the same answer as a row that cannot be read (#2081 fix round 2).</param>
-    /// <param name="asPerson">Task 045g: on a write run AS a person (the playbook update or the output orchestrator impersonating
-    /// a user), the row reader as that person (<c>OwnedChildWrite.PersonRowReader</c>); null otherwise. A refusal of rules 1-3
+    /// <param name="asPerson">Task 045g: on a write run AS a person (the playbook update or the output orchestrator impersonating a user, or
+    /// the field-mapping push, which writes as its caller), the row reader as that person (<c>OwnedChildWrite.PersonRowReader</c>); null otherwise. A refusal of rules 1-3
     /// (<see cref="InvoiceCoreRecordFixedCode"/>, <see cref="LineInvoiceCoreRecordMismatchCode"/>, <see cref="LineInvoiceClearedCode"/>)
     /// is then decided again on the stored row and the other invoice as the person reads them; a row they cannot read is
     /// <see cref="ReadFailedCode"/>, so no such refusal turns on a row the person cannot read.</param>
@@ -1092,7 +1096,17 @@ public static class InvoiceFamilyCoreRecordGuard
     {
         var decided = Check(entityLogicalName, read);
         if (decided.IsRefused)
-            return decided;
+        {
+            // Task 045g rule 1: an update of an invoice filed under one core record that would leave it under none, or under two,
+            // changes its core record, so it is answered by rule 1. A create, and a stored row naming no single core record,
+            // keep Check's answer.
+            return stored is not null
+                   && IsInvoice(decided.EntityLogicalName)
+                   && decided.RefusalCode is NoCoreRecordCode or MultipleCoreRecordsCode
+                   && !Check(decided.EntityLogicalName, stored).IsRefused
+                ? decided.Refuse(InvoiceCoreRecordFixedCode, InvoiceCoreRecordFixedReason)
+                : decided;
+        }
 
         // Task 045g rules 1 and 3: what an existing row cannot change, decided on the stored row before any other read.
         if (stored is not null && RefuseChangeAfterCreate(decided, read, stored) is { } fixedAfterCreate)
@@ -1439,6 +1453,13 @@ public static class InvoiceFamilyCoreRecordGuard
         entity.Trim().ToLowerInvariant() is "sprk_invoiceapproval" or "sprk_invoicesubmission" or "sprk_invoicecorrection";
 
     /// <summary>
+    /// Task 045g rules 3 and 3b: the rows whose stored invoice (<see cref="LineInvoiceColumn"/>) is never cleared — a line, an
+    /// approval and a correction. A submission (it exists before its invoice) and an external identifier are not among them.
+    /// </summary>
+    private static bool KeepsItsInvoice(string entity) =>
+        entity.Trim().ToLowerInvariant() is LineEntity or "sprk_invoiceapproval" or "sprk_invoicecorrection";
+
+    /// <summary>
     /// Task 045g rule 1 (owner, EB-D-231): true when <paramref name="after"/> is an invoice whose core record is not the one
     /// <paramref name="before"/> (the stored row) names — another table or id, or a stored row that named no single core record.
     /// Pure. Asked by the guard's write check and by 045d's derive, so an invoice move is never derived.
@@ -1453,8 +1474,8 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <summary>
     /// Task 045g rules 1 and 3 (owner, EB-D-231): what an existing row cannot change, decided on <paramref name="decided"/> (the
     /// admitted row as it will be, read through <paramref name="read"/>) against the stored row (<paramref name="stored"/>).
-    /// An invoice whose core record changes is <see cref="InvoiceCoreRecordFixedCode"/>; a line whose stored invoice is cleared
-    /// is <see cref="LineInvoiceClearedCode"/>. Null otherwise. Pure.
+    /// An invoice whose core record changes is <see cref="InvoiceCoreRecordFixedCode"/>; a line, an approval or a correction
+    /// whose stored invoice is cleared is <see cref="LineInvoiceClearedCode"/> (rules 3 and 3b). Null otherwise. Pure.
     /// </summary>
     internal static InvoiceFamilyCoreRecord? RefuseChangeAfterCreate(
         InvoiceFamilyCoreRecord decided, Func<string, object?> read, Func<string, object?> stored)
@@ -1465,7 +1486,7 @@ public static class InvoiceFamilyCoreRecordGuard
             return decided.Refuse(InvoiceCoreRecordFixedCode, InvoiceCoreRecordFixedReason);
         }
 
-        if (IsLine(decided.EntityLogicalName)
+        if (KeepsItsInvoice(decided.EntityLogicalName)
             && TryReadReference(stored(LineInvoiceColumn), InvoiceEntity, out var was) && was is not null
             && TryReadReference(read(LineInvoiceColumn), InvoiceEntity, out var now) && now is null)
         {

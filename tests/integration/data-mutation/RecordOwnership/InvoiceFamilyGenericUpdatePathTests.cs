@@ -129,7 +129,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 var select = Regex.Match(odata!, @"\$select=([^&]+)").Groups[1].Value.Split(',');
                 var filter = Regex.Match(odata!, @"\$filter=(\w+)id eq ([0-9a-fA-F-]{36})");
                 var table = filter.Groups[1].Value;
-                if (_personRows is not null && select.All(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
+                if ((_personRows is not null || _personReadsAsTheApp is not null)
+                    && select.All(c => c.StartsWith('_') && c.EndsWith("_value", StringComparison.Ordinal)))
                     return Task.FromResult(PersonRowAnswer(table, Guid.Parse(filter.Groups[2].Value), select));
                 _deriveReads.Add($"record:{table}");
                 if (_callerFault is { } fault)
@@ -160,11 +161,18 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// </summary>
     private Func<string, Guid, Entity?>? _personRows;
 
+    /// <summary>
+    /// Task 045g fix round 1: on the field-mapping push (which writes as its caller), with <see cref="_personRows"/> unset, the
+    /// caller reads each row's lookups as the app reads them (this reader; a row it does not find is one the caller cannot read).
+    /// </summary>
+    private IGenericEntityService? _personReadsAsTheApp;
+
     /// <summary>The person's lookup read: each selected <c>_{column}_value</c> as the row's reference id (null when unset).</summary>
     private IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> PersonRowAnswer(string table, Guid id, string[] select)
     {
         _personRowReads.Add($"{table}:{id:D}");
-        if (_personRows!(table, id) is not { } row)
+        var found = _personRows is not null ? _personRows(table, id) : RowAsTheAppReadsIt(table, id, select);
+        if (found is not { } row)
             return [];
         return
         [
@@ -175,6 +183,20 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                     row.Attributes.TryGetValue(column, out var value) && value is EntityReference reference ? reference.Id.ToString("D") : null);
             }),
         ];
+    }
+
+    /// <summary>The row's lookups as <see cref="_personReadsAsTheApp"/> reads them; null when it does not find the row.</summary>
+    private Entity? RowAsTheAppReadsIt(string table, Guid id, string[] select)
+    {
+        try
+        {
+            return _personReadsAsTheApp!.RetrieveAsync(table, id, select.Select(c => c[1..^"_value".Length]).ToArray(), CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch (System.ServiceModel.FaultException<OrganizationServiceFault>)
+        {
+            return null;
+        }
     }
 
     /// <summary>Each row the person's lookup read asked for (<c>table:id</c>).</summary>
@@ -245,7 +267,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
         CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which,
-            InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+            InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         NothingWritten();
     }
 
@@ -304,7 +326,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             CancellationToken.None);
 
         CodeOnly((await act.Should().ThrowAsync<RecordOwnerUnresolvedException>()).Which,
-            InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+            InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         NothingWritten();
     }
 
@@ -353,6 +375,12 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Fact]
     public async Task FieldMappingPush_AnInvoiceGivenASecondCoreRecord_IsRefusedByCodeOnly_AndNothingIsWritten()
     {
+        // Task 045g fix round 1: the push writes as its caller, so the refusal is decided again on the rows as the caller reads
+        // them (here, as the app reads them).
+        var app = InvoiceUnderAMatter();
+        app.Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string t, CancellationToken _) => EntitySetNameFixtures.SetOf(t));
+        _personReadsAsTheApp = app.Object;
         var (updated, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
             Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
             _writes.Object, new StampWorld().Restamper, [ProjectRule],
@@ -362,12 +390,12 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             {
                 [ProjectRule] = new("sprk_Project@odata.bind", $"/sprk_projects({Project:D})", null),
             },
-            appOnlyEntities: InvoiceUnderAMatter().Object);
+            appOnlyEntities: app.Object, callerQuery: CallerQuery());
 
         updated.Should().Be(0);
         failed.Should().Be(1);
         var error = errors.Should().ContainSingle().Subject.Error;
-        error.Should().Contain(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        error.Should().Contain(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         AnyGuid.IsMatch(error).Should().BeFalse("the reason can name records the caller has not read: code only");
         NothingWritten();
     }

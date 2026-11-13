@@ -1701,7 +1701,7 @@ internal static class OwnedChildWrite
 
     /// <summary>
     /// Task 045g: the invoice-family guard's row reader AS THE PERSON an app-only path's write runs as (the playbook node or the
-    /// output orchestrator impersonating a user), the pattern of <see cref="PersonStoredRowReader"/>: a refusal of rules 1-3 is
+    /// output orchestrator impersonating a user, or the field-mapping push writing as its caller), the pattern of <see cref="PersonStoredRowReader"/>: a refusal of rules 1-3 is
     /// decided again on what that person can read (<see cref="InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync"/>). Null when
     /// the write is not run as a person. A row the person cannot read, or that is not there for them, is null; a lookup the answer
     /// does not carry, any other fault, or no person query throws (the guard's read-failed answer). Cancellation propagates.

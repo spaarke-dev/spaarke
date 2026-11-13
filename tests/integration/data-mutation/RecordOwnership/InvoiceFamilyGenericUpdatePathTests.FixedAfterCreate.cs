@@ -125,12 +125,13 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate, "sprk_invoicesubmission", "sprk_invoice")]
     [InlineData(GenericPath.OutputOrchestrator, "sprk_invoicesubmission", "sprk_invoice")]
-    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval", "sprk_invoice")]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_externalidentifier", "sprk_regardinginvoice")]
     [InlineData(GenericPath.OutputOrchestrator, "sprk_externalidentifier", "sprk_regardinginvoice")]
     public async Task ARowWhoseInvoiceIsCleared_IsNotRefusedByTheseRules(GenericPath path, string table, string invoiceColumn)
     {
-        // Rule 3 is a line's alone: a submission's invoice is cleared when its commit is undone (an app-only writer of its own;
-        // the same write through a generic path is not refused by these rules). The push cannot clear a lookup.
+        // Rules 3 and 3b keep the invoice of a line, an approval and a correction. A submission exists before its invoice (its
+        // invoice is cleared when its commit is undone), and an external identifier may be filed under its core record alone,
+        // so clearing theirs is not refused by these rules. The push cannot clear a lookup.
         var outcome = await RunAsync(path, table, FamilyRow, Lookups((invoiceColumn, null)), NoPlain,
             ChildWorld(table, invoiceColumn, storedInvoice: Invoice).Object);
 
@@ -140,6 +141,21 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             WrittenOnce(table, FamilyRow);
         else
             outcome.Code.Should().Be(InheritedAccessPermission.AppOnlyAccessColumnWriteReasonCode, "only the handlers' access-column rule");
+    }
+
+    /// <summary>Rule 3b (owner, 2026-11-13): an approval's and a correction's invoice is never cleared after create.</summary>
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoicecorrection")]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoicecorrection")]
+    public async Task AnApprovalOrCorrectionWhoseInvoiceIsCleared_IsRefusedInvoiceCleared_AndNothingIsWritten(GenericPath path, string table)
+    {
+        var outcome = await RunAsync(path, table, FamilyRow, Lookups(("sprk_invoice", null)), NoPlain,
+            ChildWorld(table, "sprk_invoice", storedInvoice: Invoice).Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceClearedCode, outcome.Message);
+        NothingWritten();
     }
 
     [Theory]
@@ -216,6 +232,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)] // the push always writes as its caller
     public async Task OnAPersonsRun_AnInvoiceMove_IsRefusedCoreRecordFixed_WhenThePersonReadsTheInvoice_AndReadFailedWhenNot(GenericPath path)
     {
         _personRows = (table, id) => table == "sprk_invoice" && id == Invoice
@@ -238,6 +255,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_ARowGivenAnInvoiceOfAnotherMatter_IsRefusedLineMismatch_OnlyWhenThePersonReadsThatInvoice(GenericPath path)
     {
         var otherInvoiceReadable = true;
@@ -284,8 +302,33 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     }
 
     [Theory]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoiceapproval")]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoiceapproval")]
+    [InlineData(GenericPath.PlaybookUpdate, "sprk_invoicecorrection")]
+    [InlineData(GenericPath.OutputOrchestrator, "sprk_invoicecorrection")]
+    public async Task OnAPersonsRun_AnApprovalOrCorrectionsInvoiceCleared_IsRefusedInvoiceCleared_WhenThePersonReadsTheRow_AndReadFailedWhenNot(
+        GenericPath path, string table)
+    {
+        _personRows = (t, id) => t == table && id == FamilyRow
+            ? new Entity(table, FamilyRow) { ["sprk_regardingmatter"] = MatterRef(Matter), ["sprk_invoice"] = new EntityReference("sprk_invoice", Invoice) }
+            : null;
+        var reads = await RunAsync(path, table, FamilyRow, Lookups(("sprk_invoice", null)), NoPlain,
+            ChildWorld(table, "sprk_invoice", storedInvoice: Invoice).Object, playbookActsAs: Caller);
+
+        _personRows = (_, _) => null;
+        var cannotRead = await RunAsync(path, table, FamilyRow, Lookups(("sprk_invoice", null)), NoPlain,
+            ChildWorld(table, "sprk_invoice", storedInvoice: Invoice).Object, playbookActsAs: Caller);
+
+        reads.Code.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceClearedCode);
+        cannotRead.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        NoGuid(cannotRead);
+        NothingWritten();
+    }
+
+    [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
     public async Task OnAPersonsRun_AWriteNoRuleRefuses_ReadsNoRowAsThePerson(GenericPath path)
     {
         _personRows = (_, _) => throw new InvalidOperationException("must not be read");

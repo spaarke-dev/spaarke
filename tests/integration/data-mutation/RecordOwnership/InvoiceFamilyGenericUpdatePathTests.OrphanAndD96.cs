@@ -152,6 +152,9 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                         }
                     }
 
+                    // Task 045g fix round 1: the push writes as its caller, who reads each row's lookups as the app does unless
+                    // a test says otherwise (_personRows).
+                    _personReadsAsTheApp = app;
                     var (_, failed, _, errors, _) = await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
                 Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
                         _writes.Object, new StampWorld().Restamper, rules.ToArray(), values, table, [id], Caller,
@@ -274,7 +277,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
     [InlineData(GenericPath.FieldMappingPush)]
-    public async Task AnExistingInvoice_FollowsTheExistingRules_ARenameIsWritten_AndASecondCoreRecordIsRefused(GenericPath path)
+    public async Task AnExistingInvoice_FollowsTheExistingRules_ARenameIsWritten_AndASecondCoreRecordIsRefusedCoreRecordFixed(GenericPath path)
     {
         var renamed = await RunAsync(path, "sprk_invoice", Invoice, NoLookups, RenameOnly, InvoiceUnderAMatter().Object);
         renamed.Code.Should().BeNull();
@@ -283,7 +286,21 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         _writes.Invocations.Clear();
         var second = await RunAsync(path, "sprk_invoice", Invoice,
             Lookups(("sprk_project", new EntityReference("sprk_project", Project))), NoPlain, InvoiceUnderAMatter().Object);
-        second.Code.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        second.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        second.Message.Should().Contain(ReturnAndResubmitHint);
+        NothingWritten();
+    }
+
+    /// <summary>Task 045g rule 1: an update that would leave an invoice under no core record changes its core record.</summary>
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    public async Task AnInvoiceWhoseCoreLookupIsCleared_IsRefusedCoreRecordFixed_AndNothingIsWritten(GenericPath path)
+    {
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", null)), NoPlain, InvoiceUnderAMatter().Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        outcome.Message.Should().Contain(ReturnAndResubmitHint);
         NothingWritten();
     }
 

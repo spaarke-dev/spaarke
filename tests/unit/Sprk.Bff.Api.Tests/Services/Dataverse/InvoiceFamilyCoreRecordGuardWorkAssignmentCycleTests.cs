@@ -134,8 +134,9 @@ public class InvoiceFamilyCoreRecordGuardWorkAssignmentCycleTests
         ["sprk_RegardingWorkAssignment@odata.bind"] = $"/sprk_workassignments({WorkAssignmentId:D})",
     };
 
-    // Task 045g rule 1 (owner, EB-D-231): an invoice's core record is fixed at create, so an update never moves it under a work
-    // assignment; the cycle is answered on the create (above) and never reached by an update.
+    // Task 045g rule 1 (owner, EB-D-231): an update cannot move an invoice, so a move under a work assignment is refused before
+    // the work assignment is read. The cycle check runs on the create (above) and when an update names the invoice's own work
+    // assignment again.
     [Theory]
     [InlineData("this invoice")]
     [InlineData("another invoice")]

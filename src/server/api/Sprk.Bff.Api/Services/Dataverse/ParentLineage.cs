@@ -1196,13 +1196,11 @@ internal static class InheritedAccessPermission
     /// (<c>InvoiceMoneyColumnsAppOnlyWriteGuardTests</c>). The record-creation mapping refuses them as well
     /// (<c>RecordTableRules.MappingProtectedColumns</c>).</item>
     /// <para>Not listed: <c>sprk_billingevent.sprk_invoice</c>. A same-invoice repeat Duplicate about a line is judged by the
-    /// line's current invoice, the event's invoice (read as the caller), so the column is read. It is not refused because
-    /// a line may be pointed at another invoice of its own core record (task 045g: never cleared, <see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceClearedCode"/>)
-    /// through the playbook update and the output orchestrator (<c>InvoiceFamilyGenericUpdatePathTests</c>). A re-point of
-    /// it needs no misconfiguration: a same-core re-point through an Update Record node or an output mapping, a person's
-    /// run, and a native edit by a user with Write on the line all reach it. The read is
-    /// bounded: the line's invoice counts only when it is filed under the Signal's frozen core record (below), and every generic
-    /// write of it is held to the line's own core record by <see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode"/>.
+    /// line's current invoice, the event's invoice (read as the caller), so the column is read. It is not refused: a line's
+    /// invoice is re-pointed only to another invoice of the line's own core record and is never cleared, and every BFF write of
+    /// it is held to that rule (<see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode"/>,
+    /// <see cref="InvoiceFamilyCoreRecordGuard.LineInvoiceClearedCode"/>; task 045g). The read is bounded: the line's invoice
+    /// counts only when it is filed under the Signal's frozen core record (below).
     /// Residual (DEF-043, #2294): a same-invoice repeat on a line re-pointed within the same core record is judged by the
     /// caller's Read of the invoice it now names; a number-only Duplicate is withheld whatever the line names.</para></item>
     /// <item>UAC review F4 / DEF-043. <c>sprk_signal</c>: its frozen core-record pair <c>sprk_corerecordtype</c> /
