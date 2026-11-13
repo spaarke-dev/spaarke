@@ -4,7 +4,7 @@
     <title>Repair pass IScheduledJob: 5-minute, forward-only, leased; contact owner rule (FR-25, NFR-03, NFR-04)</title>
     <phase>5 W5 Records created outside the product</phase>
     <gate>052a on master (#2629); 032b-1 shared gates on the work branch. Nothing here enables the pass on any environment.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-critical: a background job that writes existing Dataverse rows as the system principal, and an owner rule for contacts; .cs in Sprk.Bff.Api; new tests at KEEP paths.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -82,7 +82,9 @@
     <criterion testable="true">AC11: registered only via `AddScheduledJob` with `*/5 * * * *`; RecordRepairReachabilityTests lists the job; owner-write census unchanged; build 0 warnings; ArchTests and affected suites green.</criterion>
   </acceptance-criteria>
 
-  <notes>Split from task 052 (TASK-INDEX: 052a-e). Brief from the coordinator, 2026-11-12. Review of 1e72d50962 (F1-a, F1-b, F2-a, F2-b, K5-K10) and the UAC-r2 conditions on the resolver change are fixed on the branch (AC12-AC16); one line in RecordCreationService.cs (RepairOwnerAsync's fault branch) was edited for F2-a, and Spaarke.Dataverse gained GetAssignCascadesAsync. Read each environment's live Assign-cascade metadata before enabling the pass. Re-check of 1e72d50962..4e22a086b5 (F3, three F4s, Ks) fixed: AC13a, AC14; the per-run marker is deleted; a contact's parent refusal wins (K10). Detail: notes/task-052b-notes.md.</notes>
+  <notes>Split from task 052 (TASK-INDEX: 052a-e). Brief from the coordinator, 2026-11-12. Review of 1e72d50962 (F1-a, F1-b, F2-a, F2-b, K5-K10) and the UAC-r2 conditions on the resolver change are fixed on the branch (AC12-AC16); one line in RecordCreationService.cs (RepairOwnerAsync's fault branch) was edited for F2-a, and Spaarke.Dataverse gained GetAssignCascadesAsync. Read each environment's live Assign-cascade metadata before enabling the pass. Re-check of 1e72d50962..4e22a086b5 (F3, three F4s, Ks) fixed: AC13a, AC14; the per-run marker is deleted; a contact's parent refusal wins (K10). Detail: notes/task-052b-notes.md.
+Completed 2026-11-13: merged into the work branch at b18d4fc394 (task/fm-052b 0bd424c42e); master d8b53ec0c3 merged after (c8d5f5bced). UAC-r2 PASS (resolver; secure-by-ownership pins pass as written, 12/13 fail with the check off). Gates on c8d5f5bced: sln 0 warnings; ArchTests 2539; project suites 8653/0/7; publish +18,893 B vs fresh master d8b53ec0c3 (40.13 MB, 191 = 191 files, Compress-Archive); no vulnerable packages. Not deployed; RecordRepair:Pass:GoLive unset everywhere.
+rework: fix-round-3 task 052b</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
