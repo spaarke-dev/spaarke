@@ -30,6 +30,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Kiota.Abstractions.Store;
@@ -263,6 +264,94 @@ public class Issue2749_InboundPollBacklogTests
         fixture.EnqueuedMessageIds.Should().Equal("recent");
         fixture.Logs.Should().Contain(l => l.Level == LogLevel.Warning && l.Message.Contains("watermark"));
         fixture.Logs.Should().NotContain(l => l.Message.Contains(Mailbox, StringComparison.OrdinalIgnoreCase));
+        cache.Verify(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(),
+            It.IsAny<CancellationToken>()), Times.Never, "a cycle whose read failed writes no watermark");
+    }
+
+    [Fact]
+    public async Task Poll_WhenOneCacheReadThrows_DoesNotLetTheWatermarkJumpPastAPersistedBacklog()
+    {
+        // A previous instance was capped mid-backlog and persisted a watermark 41 minutes back, with 120 unread
+        // messages after it (all older than the 15-minute default lookback). This instance's first cache read throws
+        // once. It must not poll from now − 15 min AND persist a later watermark over the backlog one, or those 120 are
+        // never enqueued: the next cycle must re-read the cache and resume from the persisted watermark.
+        var seeded = Now.AddMinutes(-41);
+        var cache = NewCache();
+        cache.SetString(WatermarkKey, seeded.ToString("O", CultureInfo.InvariantCulture));
+        var flaky = new FirstReadFailsCache(cache);
+        var mailbox = new FakeMailbox();
+        for (var i = 0; i < 120; i++)
+            mailbox.Add($"m{i:D3}", Now.AddMinutes(-40).AddSeconds(i));
+        var fixture = new Fixture(mailbox, cache: flaky);
+
+        await fixture.PollAsync(); // the cache read throws
+
+        fixture.EnqueuedMessageIds.Should().BeEmpty("nothing is newer than the default lookback");
+        flaky.SetCount.Should().Be(0, "a cycle whose cache read failed writes no watermark");
+        DateTimeOffset.Parse(cache.GetString(WatermarkKey)!, CultureInfo.InvariantCulture)
+            .Should().Be(seeded, "the persisted watermark never moves past the oldest un-enqueued message");
+
+        fixture.Advance(TimeSpan.FromMinutes(5));
+        await fixture.PollAsync(); // the cache answers again
+
+        fixture.EnqueuedMessageIds.Should().BeEquivalentTo(mailbox.AllIds, "the backlog after the persisted watermark is reached");
+        fixture.EnqueuedMessageIds.Should().OnlyHaveUniqueItems();
+        fixture.Logs.Where(l => l.Level == LogLevel.Warning && l.Message.Contains("watermark")).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Poll_WhenOneSecondHoldsMoreThanTheMaxPage_LogsTheStallAndKeepsTheWatermarkInThatSecond()
+    {
+        // 1100 unread messages share one second, the processor never marks them read (a mailbox granted only
+        // Mail.Read), and one more message arrives a minute later. Poll 1 stops at the per-poll cap; poll 2 widens its
+        // page up to MaxPageSize and still cannot get past the second, so it stalls. A stalled poll must keep the
+        // watermark in that second like a capped one, not move it to poll start − 2 min over the messages behind it.
+        var tie = Now.AddMinutes(-5);
+        var mailbox = new FakeMailbox();
+        for (var i = 0; i < 1100; i++)
+            mailbox.Add($"t{i:D4}", tie);
+        mailbox.Add("later", tie.AddMinutes(1));
+        var cache = NewCache();
+        var fixture = new Fixture(mailbox, cache: cache);
+
+        await fixture.PollAsync();
+        fixture.Advance(TimeSpan.FromMinutes(5));
+        await fixture.PollAsync();
+
+        var stall = fixture.Logs.Where(l => l.Message.Contains("one second holds more than the max page")).ToList();
+        stall.Should().ContainSingle();
+        stall.Single().Level.Should().Be(LogLevel.Warning);
+        fixture.Logs.Should().NotContain(l => l.Message.Contains(Mailbox, StringComparison.OrdinalIgnoreCase));
+        DateTimeOffset.Parse(cache.GetString(WatermarkKey)!, CultureInfo.InvariantCulture)
+            .Should().Be(tie, "the watermark stays in the stalled second, not poll start − 2 min");
+        fixture.EnqueuedMessageIds.Should().OnlyHaveUniqueItems();
+        fixture.EnqueuedMessageIds.Should().NotContain("later", "it is behind the stalled second");
+    }
+
+    [Fact]
+    public async Task Poll_WhenGraphFails_LogsTheErrorCodeAndNeverTheMailboxAddress()
+    {
+        // Graph's own error text can quote the address ("The requested user '...' is invalid"), and the exception's
+        // Message/ToString carry it. The poll logs the Graph error code and the exception type instead of the exception.
+        var mailbox = new FakeMailbox
+        {
+            FailRequestNumber = 1,
+            FailWith = new ODataError
+            {
+                Error = new MainError { Code = "ErrorInvalidUser", Message = $"The requested user '{Mailbox}' is invalid." },
+            },
+        };
+        mailbox.Add("one", Now.AddMinutes(-3));
+        var fixture = new Fixture(mailbox);
+
+        await fixture.PollAsync();
+
+        var failure = fixture.Logs.Single(l => l.Level == LogLevel.Error && l.Message.Contains("Failed to poll account"));
+        fixture.Logs.Should().NotContain(l => l.Message.Contains(Mailbox, StringComparison.OrdinalIgnoreCase));
+        fixture.Logs.Should().NotContain(
+            l => l.Exception != null && l.Exception.ToString().Contains(Mailbox, StringComparison.OrdinalIgnoreCase),
+            "the logged exception object would carry the address in its message");
+        failure.Message.Should().Contain("ErrorInvalidUser").And.Contain(nameof(ODataError));
     }
 
     [Fact]
@@ -315,16 +404,18 @@ public class Issue2749_InboundPollBacklogTests
         public IReadOnlyList<string> EnqueuedMessageIds
             => _jobs.Select(j => j.SubjectId!).ToList();
 
-        public IReadOnlyList<(LogLevel Level, string Message)> Logs => _logger.Entries;
+        public IReadOnlyList<LogEntry> Logs => _logger.Entries;
 
         public Task PollAsync() => _sut.PollAllAccountsAsync(CancellationToken.None);
 
         public void Advance(TimeSpan by) => _time.Advance(by);
     }
 
+    private sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
+
     private sealed class CapturingLogger : ILogger<InboundPollingBackupService>
     {
-        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+        public List<LogEntry> Entries { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -332,7 +423,45 @@ public class Issue2749_InboundPollBacklogTests
 
         public void Log<TState>(
             LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            => Entries.Add((logLevel, formatter(state, exception)));
+            => Entries.Add(new LogEntry(logLevel, formatter(state, exception), exception));
+    }
+
+    /// <summary>
+    /// A cache whose first <c>GetAsync</c> throws (a transient Redis fault) and which then behaves as the wrapped
+    /// MemoryDistributedCache. Counts writes so a test can show a failed read persisted nothing.
+    /// </summary>
+    private sealed class FirstReadFailsCache(IDistributedCache inner) : IDistributedCache
+    {
+        private int _reads;
+
+        public int SetCount { get; private set; }
+
+        public byte[]? Get(string key) => inner.Get(key);
+
+        public Task<byte[]?> GetAsync(string key, CancellationToken token = default)
+            => Interlocked.Increment(ref _reads) == 1
+                ? throw new InvalidOperationException("cache read failed (test)")
+                : inner.GetAsync(key, token);
+
+        public void Set(string key, byte[] value, DistributedCacheEntryOptions options)
+        {
+            SetCount++;
+            inner.Set(key, value, options);
+        }
+
+        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+        {
+            SetCount++;
+            return inner.SetAsync(key, value, options, token);
+        }
+
+        public void Refresh(string key) => inner.Refresh(key);
+
+        public Task RefreshAsync(string key, CancellationToken token = default) => inner.RefreshAsync(key, token);
+
+        public void Remove(string key) => inner.Remove(key);
+
+        public Task RemoveAsync(string key, CancellationToken token = default) => inner.RemoveAsync(key, token);
     }
 
     private static CommunicationAccountService CreateAccountService()
@@ -403,6 +532,9 @@ public class Issue2749_InboundPollBacklogTests
 
         public int? FailRequestNumber { get; set; }
 
+        /// <summary>What the failing request throws; defaults to an HttpRequestException.</summary>
+        public Exception? FailWith { get; set; }
+
         public IReadOnlyList<string> AllIds => _messages.Select(m => m.Id).ToList();
 
         public IReadOnlyList<string> UnreadIds => _messages.Where(m => !m.IsRead).Select(m => m.Id).ToList();
@@ -438,7 +570,7 @@ public class Issue2749_InboundPollBacklogTests
 
             Queries.Add((from, top, skip));
             if (Queries.Count == FailRequestNumber)
-                throw new HttpRequestException("Graph unavailable (test).");
+                throw FailWith ?? new HttpRequestException("Graph unavailable (test).");
 
             IEnumerable<FakeMessage> matching =
                 _messages.Where(m => !m.IsRead && TruncateToSecond(m.Received) >= from);

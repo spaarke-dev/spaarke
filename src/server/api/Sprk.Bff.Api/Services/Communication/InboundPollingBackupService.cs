@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
@@ -123,8 +124,10 @@ public sealed class InboundPollingBackupService : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
-                "Initial inbound polling cycle failed, will retry on next interval");
+            _logger.LogError(
+                "Initial inbound polling cycle failed ({ExceptionType}, Graph error code {GraphErrorCode}), " +
+                "will retry on next interval",
+                ex.GetType().Name, GraphErrorCode(ex));
         }
 
         while (!stoppingToken.IsCancellationRequested)
@@ -143,7 +146,10 @@ public sealed class InboundPollingBackupService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during inbound polling cycle, will retry on next interval");
+                _logger.LogError(
+                    "Error during inbound polling cycle ({ExceptionType}, Graph error code {GraphErrorCode}), " +
+                    "will retry on next interval",
+                    ex.GetType().Name, GraphErrorCode(ex));
                 // Continue running -- don't let one failure stop the service
             }
         }
@@ -199,9 +205,12 @@ public sealed class InboundPollingBackupService : BackgroundService
             catch (Exception ex)
             {
                 totalErrors++;
-                _logger.LogError(ex,
-                    "Failed to poll account {AccountId}, correlation {CorrelationId}",
-                    account.Id, correlationId);
+                // The exception object is not logged: a Graph error message can quote the mailbox address
+                // (ErrorInvalidUser: "The requested user '...' is invalid"), and ADR-015 keeps addresses out of logs.
+                _logger.LogError(
+                    "Failed to poll account {AccountId} ({ExceptionType}, Graph error code {GraphErrorCode}), " +
+                    "correlation {CorrelationId}",
+                    account.Id, ex.GetType().Name, GraphErrorCode(ex), correlationId);
             }
         }
 
@@ -241,7 +250,16 @@ public sealed class InboundPollingBackupService : BackgroundService
     /// that second because a widened page is still a fresh query, so it cannot skip; nextLink would reintroduce the
     /// offset skip inside the second. If even <see cref="MaxPageSize"/> messages share one second, the poll stops there
     /// and keeps the watermark at that second, like a capped poll; as the processor marks them read they leave the
-    /// listing, so later polls get past it.
+    /// listing, so later polls get past it. Escaping a stalled second therefore relies on the processor marking mail
+    /// read; if it never does (for example a mailbox granted only Mail.Read) the poll stays on that second, and the
+    /// webhook and delta-reconciliation paths are the backstop.
+    /// </para>
+    /// <para>
+    /// The persisted watermark is only trusted when the cache answers. A read that THROWS (as opposed to the key being
+    /// absent) polls from now − 15 minutes for that cycle only, keeps no cursor for the account and writes no watermark,
+    /// so a transient cache fault cannot overwrite an older backlog watermark with a later one; the next cycle reads
+    /// the cache again. Mail enqueued during such a cycle is not remembered, so it may be enqueued once more later and
+    /// the processor's <c>sprk_graphmessageid</c> check absorbs it.
     /// </para>
     /// </remarks>
     /// <returns>Number of messages enqueued.</returns>
@@ -250,7 +268,7 @@ public sealed class InboundPollingBackupService : BackgroundService
     {
         var started = _timeProvider.GetTimestamp();
         var pollStartTime = _timeProvider.GetUtcNow();
-        var cursor = await GetCursorAsync(account.Id, pollStartTime, ct);
+        var (cursor, cacheReadFailed) = await GetCursorAsync(account.Id, pollStartTime, ct);
         var watermark = cursor.Watermark;
 
         var monitorFolder = account.MonitorFolder ?? "Inbox";
@@ -351,7 +369,8 @@ public sealed class InboundPollingBackupService : BackgroundService
             ? lastEnqueuedReceived ?? watermark
             : pollStartTime - PollOverlap;
         cursor.Advance(next > watermark ? next : watermark);
-        await TrySetWatermarkAsync(account.Id, cursor.Watermark, ct);
+        if (!cacheReadFailed)
+            await TrySetWatermarkAsync(account.Id, cursor.Watermark, ct);
 
         var elapsed = _timeProvider.GetElapsedTime(started);
 
@@ -384,16 +403,30 @@ public sealed class InboundPollingBackupService : BackgroundService
     /// This instance's cursor for the account, created on first use from the persisted watermark (or now − 15 minutes
     /// when there is none or the cache cannot be read).
     /// </summary>
-    private async Task<MailboxCursor> GetCursorAsync(Guid accountId, DateTimeOffset pollStartTime, CancellationToken ct)
+    private async Task<(MailboxCursor Cursor, bool CacheReadFailed)> GetCursorAsync(
+        Guid accountId, DateTimeOffset pollStartTime, CancellationToken ct)
     {
         if (_cursors.TryGetValue(accountId, out var existing))
-            return existing;
+            return (existing, false);
 
-        var persisted = await TryGetWatermarkAsync(accountId, ct);
-        return _cursors.GetOrAdd(accountId, _ => new MailboxCursor(persisted ?? pollStartTime - InitialLookbackWindow));
+        var read = await TryGetWatermarkAsync(accountId, ct);
+        if (read.Failed)
+        {
+            // Not stored: a cursor kept for the instance's life would make a transient cache fault permanent, and the
+            // poll would then persist a later watermark over an older backlog one. The caller writes no watermark either.
+            return (new MailboxCursor(pollStartTime - InitialLookbackWindow), true);
+        }
+
+        var cursor = _cursors.GetOrAdd(
+            accountId, _ => new MailboxCursor(read.Value ?? pollStartTime - InitialLookbackWindow));
+        return (cursor, false);
     }
 
-    private async Task<DateTimeOffset?> TryGetWatermarkAsync(Guid accountId, CancellationToken ct)
+    /// <summary>
+    /// Reads the persisted watermark. <c>Failed</c> is true only when the cache THREW; an absent key or an unparseable
+    /// value is a normal "no watermark" (<c>Value</c> null, <c>Failed</c> false).
+    /// </summary>
+    private async Task<(DateTimeOffset? Value, bool Failed)> TryGetWatermarkAsync(Guid accountId, CancellationToken ct)
     {
         try
         {
@@ -401,22 +434,23 @@ public sealed class InboundPollingBackupService : BackgroundService
             // receive-enabled account per org/BFF); per ADR-029 single Redis instance per BFF org, cache is system-level.
             var value = await _cache.GetStringAsync(WatermarkKeyPrefix + accountId, ct);
             if (value is null)
-                return null;
+                return (null, false);
 
             if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
-                return parsed;
+                return (parsed, false);
 
             _logger.LogWarning(
                 "Persisted inbound poll watermark for account {AccountId} is unreadable; polling from the default lookback",
                 accountId);
-            return null;
+            return (null, false);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "Failed to read inbound poll watermark for account {AccountId}; polling from the default lookback",
+                "Failed to read inbound poll watermark for account {AccountId}; polling this cycle from the default " +
+                "lookback without saving a watermark, will re-read the cache next cycle",
                 accountId);
-            return null;
+            return (null, true);
         }
     }
 
@@ -437,6 +471,13 @@ public sealed class InboundPollingBackupService : BackgroundService
                 accountId);
         }
     }
+
+    /// <summary>
+    /// The Graph error code (<c>ErrorInvalidUser</c>, <c>ErrorAccessDenied</c>, ...) of a failure, or "none". Logged in
+    /// place of the exception, whose message may quote the mailbox address.
+    /// </summary>
+    private static string GraphErrorCode(Exception ex)
+        => (ex as ODataError ?? ex.InnerException as ODataError)?.Error?.Code ?? "none";
 
     private async Task EnqueueAsync(
         CommunicationAccount account, string monitorFolder, string messageId, CancellationToken ct)
