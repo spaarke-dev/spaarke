@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045f" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>The regarding record URL names the row's own regarding record on every pair table, stored in canonical form; readers open only a same-origin record URL</title>
+    <phase>3 W3 (follow-up to 045e)</phase>
+    <gate>045e merged into the work branch (1c59df2ffc or later). Owner go 2026-11-13 ("Yes, do 045f here"). unified-access-control-r2 and ebilling-r1 review the server diff before merge.</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what five BFF write paths admit for one column on every pair table (.cs, bff-api); refusal behaviour; client navigation (.ts/.tsx); modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-closed reasoning across the caller and app-only write paths that already carry the 045b planner and the 045e rule; client part is a scoped change (sonnet allowed for part B).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>045f</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Part A (server) and part B (client readers) touch disjoint files and may run as two agents at once.</parallel-reason>
+    <deps>045e</deps>
+    <tags>bff-api, field-mapping, frontend, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Owner go 2026-11-13. The regarding record URL (`sprk_regardingrecordurl`) is a display column derived from the regarding pair (record id + record type). Rule: on every table that carries the regarding pair, a URL the BFF writes names the record the row's regarding pair names after the write, and is stored in canonical form (`RegardingRecordType.BuildRecordUrl` of that table and the lowercase "D" id). A sent URL that names another record, or cannot be read as naming a record, is refused and nothing is written. A URL clear is allowed. Readers that open the stored URL open only a same-origin record URL, or build it from the pair. 045e already applies this on the six invoice-family tables (against the core record); 045f extends it to every other pair table (against the pair) and to the client readers.</prompt>
+  <role>SPAARKE platform developer, BFF write path and client surfaces. Security fails closed. Follow ADRs strictly.</role>
+  <goal>No BFF write path stores a regarding record URL that names a record other than the row's regarding pair, every URL the BFF stores is in canonical form, and no product surface opens a stored regarding URL that is not a same-origin record URL.</goal>
+
+  <context>
+    <background>
+045e (notes/task-045e-notes.md, rule 2a, fix round 4) added `RegardingPairWrite.TryReadRecordUrl` (exactly one non-blank `etn`, exactly one `id` that parses as a GUID), `RegardingPairWrite.UrlNamesRecord` and `InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl`, and applies them on the six invoice-family tables. On every other pair table the five BFF paths (child-record PATCH and chat tool via `OwnedChildWrite`; `UpdateRecordActionCore`; `DataverseUpdateHandler`; the create in `RecordCreationService`) store a sent URL as sent: the 045b planner derives only the display columns the update did not send (`OwnedChildWrite.cs:~830`), does nothing when no pair column is written (`~629-633`), and the create's step 4½ keeps a sent URL (`RecordCreationService.cs:~2024-2030`). The push never maps the URL (`CreateTimeFieldMapping.cs:~65`). Client surfaces that open the stored URL include the event side pane "Parent" button (`src/solutions/EventDetailSidePane/src/components/HeaderSection.tsx` → `services/sidePaneService.ts` `navigateToParentRecord` → `Xrm.Navigation.openUrl`); others to inventory: Notepad, external-spa, the todo presave web resource, TodoDetail.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step 4½)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs (RegardingPairWrite, CanonicalRecordUrl; may move to a shared helper)</file>
+      <file role="modify">src/solutions/EventDetailSidePane/src/services/sidePaneService.ts, src/solutions/EventDetailSidePane/src/components/HeaderSection.tsx</file>
+      <file role="read">projects/field-mapping-server-write-path-r1/notes/task-045e-notes.md, notes/task-045b-notes.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">Brief line 1: `git switch -c task/fm-045f-server origin/work/field-mapping-server-write-path-r1` (part A) or `task/fm-045f-client` (part B). Then confirm this POML exists on the branch.</constraint>
+    <constraint source="one rule, one place">Part A: one decision for "does this sent URL name the record this row's pair names", reused from 045e's helpers (move them to a shared place if needed; do not fork the parser). The record the pair names is the pair written in the same request, else the stored pair (read as the caller on caller paths, app-only on app-only paths, as 045b's planner already reads). The invoice-family tables keep 045e's decision (against the core record); do not change it.</constraint>
+    <constraint source="refusal">Refuse through each path's EXISTING refusal form with ONE reason code for "the regarding record URL does not name the row's regarding record" (fixed text, names no record; reuse an existing code if one already says this), with §11 answers. A write that moves the pair and sends no URL keeps the planner's derive. A URL sent with a pair move is decided against the new pair.</constraint>
+    <constraint source="first, inventory">Before implementing, inventory every writer of `sprk_regardingrecordurl` that reaches the five BFF paths (server, PCF/code pages through the BFF, wizards, playbooks, chat) and the form it sends. If any legitimate writer sends a form that would be refused, STOP and report.</constraint>
+    <constraint source="part B">Readers: open a stored regarding URL only when it is a same-origin relative record URL (`/main.aspx?...` naming `etn` and `id`), else build the URL from the row's pair type and id; when neither is possible, do not navigate. No new shared package; keep each surface's existing build (`npm run build:prod` for PCF, the code page's own build). Inventory the readers first; change only readers that navigate to (or render as a link) the stored regarding URL.</constraint>
+    <constraint source="fail closed">A fault reading the stored pair writes nothing. Cancellation is rethrown.</constraint>
+    <constraint source="no other change">045d/045e behaviour on the invoice-family tables, the submission writers and the push are unchanged. Do not edit UAC-r2's files (`SecureRootInheritance.cs` read only; `DirectThreadAccessService.cs`, `DirectMessageParticipantShares.cs`, `SecureChildShareReconciliationJob.cs`, `SecureChildReconciler.cs`).</constraint>
+    <constraint source="public repo">Commit messages, comments, test names and notes state rules only, never a hole.</constraint>
+    <constraint source="ADR-038 / §10 / §11">New tests under KEEP paths (`tests/integration/**`, `tests/unit/domain/**`; client tests beside the existing ones). Never run Sprk.Bff.Api.Tests unfiltered; add `&amp;FullyQualifiedName!~Api.Office.`. The publish delta is the main session's. No deploys.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; read 045e's notes (rule 2a, rounds 3-4) and 045b's planner.</step>
+    <step order="1">Inventory (writers for A, readers for B). Stop on a legitimate form that would be refused.</step>
+    <step order="2">A: the decision and canonical rewrite on the five paths; the reason code. B: the reader rule on each reader.</step>
+    <step order="3">Tests (AC1-AC5), each must-fire run once with the rule off to show it fails. Then build (0 warnings), ArchTests, filtered suites, ebilling-r1's filters (Finance, ProcedureAssignment, InvoiceFamily), format check on touched files; client: the surface's tests and production build. Notes in `notes/task-045f-notes.md` (rule, §11, inventory, evidence, known limits). Commit on the task branch.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (must fire): on a non-family pair table, on each of the five paths, a sent URL that names another table or record than the row's effective pair, or that cannot be read as naming a record, is refused through that path's form and nothing is written.</criterion>
+    <criterion testable="true">AC2 (canonical): an admitted URL (relative, absolute with another host or scheme, upper-case or braced id) is stored as `BuildRecordUrl(table, lowercase "D" id)`.</criterion>
+    <criterion testable="true">AC3 (must not fire): a write with no URL; a URL clear; a pair move with no URL (the planner derives); every existing pair, planner, create and push test — all behave as today. Invoice-family tables keep 045e's behaviour.</criterion>
+    <criterion testable="true">AC4 (fail closed): a fault reading the stored pair writes nothing; cancellation is rethrown.</criterion>
+    <criterion testable="true">AC5 (readers): each reader that navigates to the stored regarding URL opens a same-origin relative record URL as today, builds the URL from the pair for any other value, and does not navigate when it can do neither; tests show an off-origin or non-http value is never opened.</criterion>
+  </acceptance-criteria>
+
+  <notes>Added 2026-11-13 in the main session from the owner's go ("Yes, do 045f here"), after 045e (the same rule on the invoice-family tables) and unified-access-control-r2's reader inventory.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
