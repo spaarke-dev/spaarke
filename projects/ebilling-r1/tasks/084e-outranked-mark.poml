@@ -4,7 +4,7 @@
     <title>Rules in force (B5): one shared precedence function, and the "Outranked by X" mark on the record's rules-in-force list</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217, EB-D-219)</phase>
     <gate>084 merged into work. ontology-r1 is told the design before the build and reviews the Services/Signals/** diff before merge.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactors the evaluator's precedence step (the code that judges invoices) into a shared function, plus a new mark on 084's route.</rigor-reason>
     <model-tier>opus</model-tier>

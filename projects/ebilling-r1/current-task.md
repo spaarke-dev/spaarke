@@ -12,16 +12,24 @@
 >
 >   ArchTests 2505/2505; agreement and procedure tests 551/551. Publishing (`publish-dataverse-solutions-manifest.yml`, `publish: true`, from master) is the owner's step after merge. provisioning-r1 is waiting for the published version, because its H7b S26 stops new runs until 166's lock ships.
 > - **#2725 (profile matched by name):** our three scripts are fixed (`f7240c397b`, merged in #2727). The other 15 sites belong to uac-r2 and R3.
-> - **Next (checkpoint 2026-11-12, night):**
->   - **084: DONE** (re-closed after uac-r2's scoped re-check PASS; work `227e57c268`). 084f's role diff also passed uac-r2. 112 step 2 now holds the 084f role apply: a dry run that resolves both privileges from metadata, the owner's typed OK, uac-r2 BEFORE and AFTER notices, and uac-r2 re-running SecureChild -Verify. Step 5 deploys `sprk_recordprocedures`, with a Work Assignment Billing tab.
->   - **084a: DONE, MERGED** (`88c3ab01ea`). **084b: DONE, MERGED** (`0c4b97acc7`). The adversarial review's 10 findings were fixed in round 1, including the `'Manual'` vs `'AssignedRecordsOnly'` enum bug; 197 jest tests pass.
->   - **EB-D-221 (owner chose "Add canWrite field", 2026-11-12):** the read routes return `permissions` {assignOrExclude, remove, change}; the wizards open read-only from them. **Task 084g** (opus) is created, with uac-r2 design conditions U-1 to U-5 in its POML. Build it AFTER 084e merges, because both touch the read service. 084c and 112 now depend on 084g.
->   - **084e: fix round 1 RUNNING** (branch `task/ebilling-084e-r2` = `task/ebilling-084e` `47d8dbc337` + work `0c4b97acc7`). ontology-r1 approved the extraction (parity fine; handler order not observable). The fix list is in session scratchpad `084e-fix-findings.md`: (A) `TryPrepareBillingRuleForRead` over a private core, so the read drives no Error log and no `billing.rule.invalid` meter; (B) client rendering of Outranked/CapOutranked; (C) ontology-r1's exact singular and plural note wording; (D) the R6, O-7 and guard-seed tests; (E) the doc-comment move. **NEXT:** scoped re-check; send ontology-r1 the PolicyVersionValidator and evaluator diff; on its pass, merge and mark 084e done; then launch 084g.
->   - **Filed:** ISS-015 (#2743, eBilling pages not linted); ISS-016 (#2755, WizardShell keeps header nav and × active during a save; 084b guards it locally).
->   - **Agent worktrees** to remove with Remove-WorktreeSafe once merged and clean: `agent-afdaef28d1031b1cf` (locked earlier), plus the 084b, 084b-fix, 084e and review agents' worktrees.
->   - **Peers:** word-add-in-r1 #2552 MERGED (`14b600192f`); the owner retests a no-firm submit on dev. The dev BFF is `4e64670ea0` (uac-r2). ontology-r1 is still owed the DEF-059 role note.
->   - **Owner step:** publish SpaarkeMaster 1.3.1.0, then tell provisioning-r1.
->   - **After 084e and 084g:** 084c (Change, typed form), then 084d (opus; impact dry run and Assign; ontology-r1 reviews).
+> - **Next (checkpoint 2026-11-12, ~23:30Z):**
+>   - **DONE and merged into work today:** 084 (uac-r2 re-check PASS), 084a, 084b (`0c4b97acc7`, 10 review findings fixed), 084e (`e0b8da419b`: RulePrecedence shared by the evaluator and the read; Outranked/CapOutranked marks with ontology-r1's wording; gate read entry `TryPrepareBillingRuleForRead` with no log or meter, guarded by `BillingGateForReadCallerGuardTests`; ontology-r1 approved), and 084f (uac-r2 role-diff PASS). On work: BFF build 0 warnings. The ArchTests run on work was started in the background (task `b00cl3yt8`); check its result.
+>   - **084g RUNNING** (opus agent impl-084g, branch `task/ebilling-084g` from `f823ac6489` + work `fe87088821`; EB-D-221 write permissions; uac-r2 U-1 to U-5 in its POML). **When it reports:**
+>     - merge work `e0b8da419b` into it (it lacks 084e fix round 2 `068b0911de`);
+>     - run an adversarial review (opus; auth-tagged, so TWO full passes per root §8.5);
+>     - fix any findings;
+>     - send uac-r2 the BFF diff;
+>     - merge on its pass and mark 084g done.
+>   - **Then:** 084c (Change, typed form; deps 084b and 084g), then 084d (opus; impact dry run and Assign; ontology-r1 is told before the dry-run read is built).
+>   - **Temp worktree to remove:** `C:\wt84e3`, with `pwsh -NoProfile -File scripts/worktree/Remove-WorktreeSafe.ps1 -Path C:/wt84e3` (its branch is merged). Agent worktrees to remove once clean and merged: those of the 084e agents and 084g; `agent-afdaef28d1031b1cf` is still locked.
+>   - **Filed:** ISS-015 (#2743); ISS-016 (#2755, WizardShell header nav and × stay active during a save).
+>   - **Peers:**
+>     - Dev BFF `4e64670ea0` contains #2689/#2708/#2724/#2727/#2681 (confirmed to uac-r2).
+>     - spa-r4: the dev SPA is live from master `2ef4a17915` (#2689's SPA changes and R4's Submit invoice).
+>     - word-add-in-r1: #2552 merged (`14b600192f`).
+>     - ontology-r1 is still owed the DEF-059 role note.
+>   - **Owner:** publish SpaarkeMaster 1.3.1.0, then tell provisioning-r1. The 112 live role apply needs your typed OK.
+>   - **Nothing is pushed:** work/ebilling-r1 has about 50 local commits.
 
 ## Quick recovery
 
@@ -91,7 +99,7 @@
    - after 116;
    - the column add on dev (owner go already given);
    - ontology-r1 reviews `Services/Signals/**` before merge.
-6. **Task 134 (SPA invoice detail):** its RecordDetailModal trigger has fired. R4 task 005 (`8ad7e132f8`, PR #2681, not on master yet) deleted `RecordDetailModal.tsx`; records now open in the config-driven `components/record/RecordTemplateModal.tsx`.
+6. **Task 134 (SPA invoice detail):** its RecordDetailModal trigger has fired. R4 task 005 (`8ad7e132f8`, PR #2681, MERGED to master c53452bb0c 2026-11-12 and live in dev BFF 4e64670ea0) deleted `RecordDetailModal.tsx`; records now open in the config-driven `components/record/RecordTemplateModal.tsx`.
    - 134's Outcome section becomes a new `record/sections/OutcomeSection.tsx`, registered in `record/sections/index.ts` and added to the `sprk_invoice` entry in `record/recordTemplates.ts`. No modal edit is needed.
    - R4 task 021 also edits the `sprk_invoice` entry (Files over our `/invoices/{id}/files`). **Ping spa-r4 before 134 starts**, to agree the order.
    - **To file after the merge (`/project-defer-issue-tracking`):** the Invoice Review page does not notice on its own that the Set-firm gate has opened. It needs a review re-read (an action, the Pending-line poll or a reload), because nothing polls while `firmNeeded`. The Codex P2 fix `546296be5c` covers the re-read case only.
