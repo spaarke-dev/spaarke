@@ -2,7 +2,7 @@
 
 > **Last updated**: 2026-11-13 (checkpoint, desktop session `field-mapping-r1`). Recovery: read Quick Recovery first.
 > Previous version (054 and 022b detail): `notes/handoff-history/current-task-2026-11-12-pre-022c.md`.
-> **Done on master**: 001–006, 010–018, 030, 034, 037–040, 042c, 043, 044, 046, 046b, 046c (repo), 048, 049, 049b, 049c, 052a, 060, 070–075, 076c, 045a, 045b, 045c, 021, 022, 032b-1, 032b-1b, and all of **054** (#2733, merge d878e78a90). Nothing of this project deployed to dev except what the live dev BFF 4e64670ea0 carries (040 yes, 054 no).
+> **Done on master**: 001–006, 010–018, 030, 034, 037–040, 042c, 043, 044, 046, 046b, 046c (repo), 048, 049, 049b, 049c, 052a, 060, 070–075, 076c, 045a, 045b, 045c, 021, 022, 032b-1, 032b-1b, and all of **054** (#2733, merge d878e78a90). **Dev BFF live as 0c06f464e3 since 2026-11-13 13:26Z** (UAC-r2 deploy: master 92d0ca09f7 + mcp spike): carries master through #2768 (022b/022c, the 054 source, 197a/197a-2); NOT 052b, 045d, 045e, 045f. `DirectMessage:*` settings still unset (D-2), so 054c Stamp still waits on the owner's go here. The work branch merged master 92d0ca09f7 at 1627657d0c.
 > **On master via #2768 (merge d8b53ec0c3, 2026-11-13; #2738 closed):** 022b (88ef973e52), 022c (74556c46df). SpaarkeMaster 1.3.1.0 (published from d8b53ec0c3) carries the 054 source; its release row gained the 054b post-import steps (work branch, rides the next PR).
 > **On the work branch, not on master:** 052b (b18d4fc394, closed 2026-11-13), 045d (0af492ed1c + fixture 24bfd4a8e3, closed 2026-11-13), 045e (1c59df2ffc, closed 2026-11-13). Sync-mode applied on dev (2026-11-12); 054b applied on dev (2026-11-13).
 > **W3 direction:** named exceptions plus guards, no core redesign in R1.
