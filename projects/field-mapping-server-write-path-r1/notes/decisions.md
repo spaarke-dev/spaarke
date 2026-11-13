@@ -1093,3 +1093,14 @@ Design note: `task/fm-032b-design` 2692910f2d (`notes/task-032b-design.md`).
   - Push: the child gets `field_mapping.push.restricted_source_not_restricted`. An Unreadable source gives `UndeterminedReasonCode`.
 - **Reads:** the source column joins the existing source read. A child's value is read only when the source is Restricted or Unreadable.
 - **Known limit, in both the 022b and 022c notes:** Restricted-ness is decided at the write. A target loosened later keeps the mapped values, and nothing strips them again.
+
+## 2026-11-12 — Owner go-aheads (this session), and the 045d derive-failure rule
+
+- **Owner go-aheads, given in this session on 2026-11-12:**
+  - the PR to master for 022b and 022c;
+  - the class-aware sync-mode migration on dev. The dry run read 48 rules: 36 to demote to One-time (32 Assigned-To, 4 display copies), 12 plain data already at Manual Refresh, 0 unknown. `-Apply` waits for the owner's review of that list;
+  - task 054's live steps on dev, in the binding deploy order. UAC-r2 coordinates the dev BFF deploy from master `e9208abc5e`;
+  - tasks 045d and 052b.
+- **045d, a derive failure (main session):** when the invoice-family re-derive fails (`ReadFailedCode`, `ResolverFieldsIncompleteCode` or `RecordNotFoundCode`), the write is refused through the existing `InvoiceFamilyPreWrite` refusal mapping. The refusal contract is unchanged (NFR-07).
+  - Reason: the regarding pair decides filing, so a row whose core lookup changed is never written without its five fields (fail closed).
+  - UAC-r2 and ebilling-r1 review the diff.
