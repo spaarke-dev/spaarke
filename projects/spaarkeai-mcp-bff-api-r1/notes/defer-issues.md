@@ -65,6 +65,34 @@ Decide with the Copilot surface's owner. `spaarkeai-mcp-bff-api-r1` replaces thi
 
 Log the opaque caller key the limiter partitions by (`oid`, else `sub`), or no user at all; add a regression test that the rejected-request log has no UPN or email. Shared code: the BFF platform owner fixes it, not task 020.
 
+Fix in review 2026-11-12: PR #2759 (branch `fix/2756-ratelimit-log-claim`) logs the opaque caller key and `TraceIdentifier`, no name or IP; regression test `Issue2756_RateLimitRejectionLogTests`; ArchTests 2530/2530. Merge waits on the owner's go.
+
+### ISS-006 — CopilotAuth auth-failure log writes token audience and issuer on every route, /mcp included
+
+| Field | Value |
+|---|---|
+| **Status** | Open (pre-existing on master; not caused by this project) |
+| **Urgency** | soon (before `Mcp:Enabled` goes on in dev, task 041) |
+| **Filed** | 2026-11-12 |
+| **Source** | Task 021 adversarial review, pass 1 (reproduced with an expired connector-shaped token on `POST /mcp/legal-operations`) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2762 |
+
+**Description**
+
+The `CopilotAuth` `OnAuthenticationFailed` handler (`AuthorizationModule.cs:160-184`) decodes every bearer token that fails the default JwtBearer scheme and logs `aud`, `iss`, `appid`/`azp` and the exception message at Warning, on every route. ADR-028 A10 / NFR-05 forbid logging the caller's token claims (allowed: `oid`, `appid`, `obo`, `tenantId`, `correlationId`). Concrete failure: Copilot presents expired tokens on each refresh cycle, so with MCP on, each refresh writes the BFF audience, the issuer and the connector client id to App Insights. Not #1574 (a different logger).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs:160-184`
+
+**Suggested fix**
+
+Log only the failure code and correlation id (or remove the April-era diagnostic); regression test that the failure log has no audience or issuer. Shared auth file: uac-r2 owns the change; outside task 021's scope.
+
+**Estimated effort**: 1–2 hours plus the test
+**Blockers**: none
+**Related**: #1574, #2756, ADR-028 A10, ADR-015
+
 ---
 
 ### ISS-004 — The decision commit does not require a prior plan read, although the spec says it must
