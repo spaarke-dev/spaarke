@@ -65,9 +65,34 @@ describe('the requests are exactly the shapes of task 089\'s routes', () => {
     });
   });
 
-  it('has no call for the change route (this module knows no rule-overrides/change)', () => {
+  it('change rule: POST rule-overrides/change with { policyId, reason, firmId?, ruleBody } where ruleBody is JSON TEXT, not an object', async () => {
+    const created = { override: { id: 'row' }, recordRule: { ruleSetId: 'RS', policyId: 'POL-9' }, closeComplete: true };
+    const { fetchFn, client } = api(created);
+    const ruleBody = '{"type":"DailyHoursCap","maxHoursPerDay":12}';
+    const r = await client.changeRule('matters', REC, { policyId: 'POL-1', reason: '  Fixed cap ', firmId: 'F-1', ruleBody });
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe(`https://bff.example.com/api/finance/matters/${rec}/rule-overrides/change`);
+    expect(init?.method).toBe('POST');
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
+    const sent = JSON.parse(String(init?.body));
+    expect(sent).toEqual({ policyId: 'POL-1', reason: 'Fixed cap', firmId: 'F-1', ruleBody });
+    expect(typeof sent.ruleBody).toBe('string');
+    expect(r).toEqual({ ok: true, value: created });
+
+    await client.changeRule('projects', REC, { policyId: 'POL-1', reason: 'r', ruleBody });
+    expect(JSON.parse(String(fetchFn.mock.calls[1][1]?.body))).toEqual({ policyId: 'POL-1', reason: 'r', ruleBody });
+    expect(fetchFn.mock.calls[1][0]).toContain('/api/finance/projects/');
+  });
+
+  it('change rule: a 201 body without the override or the record rule is not taken as success', async () => {
+    const { client } = api({ id: 'row' });
+    const r = await client.changeRule('matters', REC, { policyId: 'POL-1', reason: 'r', ruleBody: '{}' });
+    expect(r.ok).toBe(false);
+  });
+
+  it('084c fix round 1 (F1-2): the client has no read of a rule set; the Change form starts from the rules-in-force row', () => {
     const { client } = api({});
-    expect(Object.keys(client).sort()).toEqual(['assignProcedure', 'excludeRule', 'procedureVersions', 'removalPreview', 'removeOverride']);
+    expect(Object.keys(client).sort()).toEqual(['assignProcedure', 'changeRule', 'excludeRule', 'procedureVersions', 'removalPreview', 'removeOverride']);
   });
 });
 
@@ -77,7 +102,7 @@ describe('refusals keep the server\'s words', () => {
     const r = await client.assignProcedure('matters', REC, { procedureId: 'P-1', mode: 'Excluded', reason: 'r' });
     expect(r).toEqual({
       ok: false,
-      failure: { status: 409, errorCode: 'assignment.duplicate', title: 'Conflict', detail: 'This record already has an override for it. Remove that override first.', problems: [], signInFailed: false },
+      failure: { status: 409, errorCode: 'assignment.duplicate', title: 'Conflict', detail: 'This record already has an override for it. Remove that override first.', problems: [], fieldErrors: [], signInFailed: false },
     });
   });
 
@@ -88,8 +113,29 @@ describe('refusals keep the server\'s words', () => {
     expect(b.problems).toEqual(['policyId is required.']);
   });
 
+  it('a 400 of the change route keeps each problem with the request member it names, and the dictionary form keeps its keys', () => {
+    const a = toWriteFailure(
+      problem(400, 'ruleoverride.invalid', {
+        title: 'Rule change is not valid',
+        errors: [
+          { policyId: 'POL-1', rule: 'DailyHoursCap', field: 'ruleBody', message: '/maxHoursPerDay: 30 should be at most 24', reason: 'schema' },
+          { field: 'firmId', message: 'The firm was not found.' },
+          { message: 'A reason is required.' },
+        ],
+      })
+    );
+    expect(a.fieldErrors).toEqual([
+      { field: 'ruleBody', message: '/maxHoursPerDay: 30 should be at most 24', reason: 'schema' },
+      { field: 'firmId', message: 'The firm was not found.', reason: null },
+      { field: '', message: 'A reason is required.', reason: null },
+    ]);
+    expect(a.problems).toHaveLength(3);
+    const b = toWriteFailure(problem(400, null, { errors: { ruleBody: ['bad'] } }));
+    expect(b.fieldErrors).toEqual([{ field: 'ruleBody', message: 'bad', reason: null }]);
+  });
+
   it('failureText leads with the title, then the detail and problems', () => {
-    const f: WriteFailure = { status: 400, errorCode: null, title: 'Override request is not valid', detail: '1 problem(s) found; nothing was written.', problems: ['A reason is required.'], signInFailed: false };
+    const f: WriteFailure = { status: 400, errorCode: null, title: 'Override request is not valid', detail: '1 problem(s) found; nothing was written.', problems: ['A reason is required.'], fieldErrors: [], signInFailed: false };
     expect(failureText(f)).toBe('Override request is not valid. 1 problem(s) found; nothing was written. A reason is required.');
     expect(failureText({ ...f, detail: null, problems: [] })).toBe('Override request is not valid');
     expect(failureText({ ...f, detail: 'Override request is not valid', problems: [] })).toBe('Override request is not valid');
@@ -98,7 +144,7 @@ describe('refusals keep the server\'s words', () => {
   it('with no title the words are ours: no response, a sign-in failure, or a refusal that was not ProblemDetails', () => {
     expect(failureText(toWriteFailure(new TypeError('Failed to fetch')))).toMatch(/could not be sent/);
     expect(failureText(toWriteFailure(new AuthError('no token', 'token_failed')))).toMatch(/Sign-in could not be verified/);
-    expect(failureText({ status: 500, errorCode: null, title: null, detail: null, problems: [], signInFailed: false })).toBe('The change was not saved.');
+    expect(failureText({ status: 500, errorCode: null, title: null, detail: null, problems: [], fieldErrors: [], signInFailed: false })).toBe('The change was not saved.');
   });
 
   it('a 2xx whose body is not what the route returns is a failure, never a reported change', async () => {

@@ -306,8 +306,10 @@ internal sealed class RecordProcedureRig
     /// <summary>The rows <see cref="ChangeRuleRows"/> seeded: the record rule, the record rule set, the base rule's Exclude row and the record rule's version.</summary>
     public sealed record ChangedRows(Guid RecordRule, Guid RuleSet, Guid Exclude, Guid RuleVersion);
 
-    /// <summary>As <see cref="ChangeRule"/>, naming every row it seeded.</summary>
-    public ChangedRows ChangeRuleRows(string table, Guid record, Guid basePolicy, Guid baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1", string? reason = null)
+    /// <summary>As <see cref="ChangeRule"/>, naming every row it seeded. 084c fix round 1: <paramref name="type"/> and <paramref name="body"/> are the record rule version's (default: an ApprovedRate body).</summary>
+    public ChangedRows ChangeRuleRows(
+        string table, Guid record, Guid basePolicy, Guid baseVersion, DateOnly from, Guid? firm = null, string code = "BRR-1", string? reason = null,
+        RuleType type = RuleType.ApprovedRate, string? body = null)
     {
         var at = Tick();
         var exclude = ExcludeRule(table, record, basePolicy, firm, at, reason);
@@ -320,7 +322,7 @@ internal sealed class RecordProcedureRig
         if (firm is { } f) setColumns.Add(("sprk_firm", Ref("sprk_organization", f)));
         World.Add(RuleSet, set, setColumns.ToArray());
         var recordRule = AddRule(set, code, ProcedureAssignmentService.RecordRulePolicyIdFor(set, basePolicy));
-        var ruleVersion = AddRuleVersion(recordRule, null, from, basedOn: baseVersion, created: at, headline: "Changed rate");
+        var ruleVersion = AddRuleVersion(recordRule, null, from, basedOn: baseVersion, created: at, headline: "Changed rate", type: type, body: body);
         return new ChangedRows(recordRule, set, exclude, ruleVersion);
     }
 

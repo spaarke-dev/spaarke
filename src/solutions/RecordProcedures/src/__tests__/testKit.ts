@@ -33,7 +33,7 @@ export interface Call {
 
 /** One call to a route of task 089 (or task 081's read of a Procedure), as the wizards make it. `body` is the parsed JSON body (undefined for GET and DELETE). */
 export interface WriteCall {
-  route: 'assign' | 'exclude' | 'preview' | 'remove' | 'procedure' | 'other';
+  route: 'assign' | 'exclude' | 'change' | 'ruleset' | 'preview' | 'remove' | 'procedure' | 'other';
   method: string | undefined;
   url: string;
   pathname: string;
@@ -54,10 +54,13 @@ function classify(url: string, init?: RequestInit): WriteCall | null {
   const base = { method: init?.method, url, pathname: u.pathname, body: init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined, headers: init?.headers };
   const none = { core: '', recordId: '', overrideId: null, procedureId: null };
   if (parts[2] === 'procedures' && parts.length === 4) return { ...base, ...none, route: 'procedure', procedureId: parts[3] };
+  // Rule Review's read of a rule set (task 084c reads the published values from it).
+  if (parts[2] === 'rulesets' && parts.length === 4) return { ...base, ...none, route: 'ruleset', recordId: parts[3] };
   const [core, recordId, a, b, c] = parts.slice(2);
   const rec = { ...none, core, recordId };
   if (a === 'procedure-assignments' && parts.length === 5) return { ...base, ...rec, route: 'assign' };
   if (a === 'rule-overrides' && b === 'exclude') return { ...base, ...rec, route: 'exclude' };
+  if (a === 'rule-overrides' && b === 'change') return { ...base, ...rec, route: 'change' };
   if (a === 'overrides' && c === 'removal-preview') return { ...base, ...rec, route: 'preview', overrideId: b };
   if (a === 'overrides' && parts.length === 6) return { ...base, ...rec, route: 'remove', overrideId: b };
   if (a === 'procedures' || a === 'rules-in-force') return null;

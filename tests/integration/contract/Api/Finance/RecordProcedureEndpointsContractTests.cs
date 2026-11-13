@@ -719,6 +719,15 @@ public sealed class RecordProcedureEndpointsContractTests
         ["outranked/rules-in-force/legacy rule 'LEGACY-CD-RATE'"] =
             "a legacy rule below the top rank of its key: precedence never consults it (084e O-1), so the body does not depend on it",
         ["outranked/rules-in-force/legacy rule 'LEGACY-BAD-TI'"] = GateRefusedLegacyAboveTop,
+
+        // 084c fix round 1: the change-prefill seed. The Procedures list shows no rule, so no rule body either.
+        ["change prefill/procedures/policy version 2 of rule 'HOURS' (in force from 2026-03-01)"] = ProceduresListShowsNoRule,
+        ["change prefill/procedures/policy version 1 of rule 'EXPENSE' (in force from 2026-01-01)"] = ProceduresListShowsNoRule,
+        ["change prefill/procedures/policy version 2 of rule 'EXPENSE' (in force from 2026-03-01)"] = ProceduresListShowsNoRule,
+        ["change prefill/procedures/policy version 1 of rule 'BRR-HOURS' (in force from 2026-01-15)"] = ProceduresListShowsNoRule,
+        // The version of Procedure version 1, which is out of its window on the date: the row shows (and its ruleBody is read from) version 2.
+        ["change prefill/rules-in-force/policy version 1 of rule 'EXPENSE' (in force from 2026-01-01)"] =
+            "the rule's version under the Procedure version that is not in force on the date: the row shows version 2 and its body, so the body does not depend on this one",
     };
 
     private const string ProceduresListShowsNoRule =
@@ -738,6 +747,8 @@ public sealed class RecordProcedureEndpointsContractTests
     {
         ["changed and base retired/procedures/policy version 1 of rule 'GENERAL' (in force from 2026-01-01)"] =
             "the record rule's version names this version as the one it is based on; without it the resolver faults (RequireBasedOn) even though the Procedures list shows no rule. The rules route asks about it",
+        ["change prefill/procedures/policy version 1 of rule 'HOURS' (in force from 2026-01-01)"] =
+            "084c fix round 1: as above, the version the record rule BRR-HOURS was copied from (RequireBasedOn). The rules route asks about it",
     };
 
     /// <summary>The rows the removal guard walks: every Procedure Version and policy version row, then (084e fix round 1) every legacy policy and
@@ -896,7 +907,7 @@ public sealed class RecordProcedureEndpointsContractTests
         get
         {
             var data = new TheoryData<string, string>();
-            foreach (var seed in new[] { "refusals seed", "changed and base retired", "conflicting parents", "parent pin", "excluded procedure", "outranked" })
+            foreach (var seed in new[] { "refusals seed", "changed and base retired", "conflicting parents", "parent pin", "excluded procedure", "outranked", "change prefill" })
             {
                 foreach (var list in Lists)
                 {
@@ -979,6 +990,13 @@ public sealed class RecordProcedureEndpointsContractTests
                         type: Sprk.Bff.Api.Services.Signals.RuleType.TimeIncrement, body: """{"type":"TimeIncrement"}""");
                     // The legacy rule's set decides its Level under "by", but its id is not in the body.
                     return new GuardSeed("projects", P, "2026-02-01", [], [legacy.RuleSet], [F]);
+                }
+
+            case "change prefill":
+                {
+                    // 084c fix round 1: every version carries a body of its own, so the rules route's ruleBody / baseRuleBody each depend on one row.
+                    var s = SeedChangePrefill(rig);
+                    return new GuardSeed("matters", M, "2026-03-15", [], [s.Changed.Exclude]);
                 }
 
             default: throw new ArgumentOutOfRangeException(nameof(name), name, null);
@@ -1095,6 +1113,140 @@ public sealed class RecordProcedureEndpointsContractTests
             log.Should().NotContain(e => e.Level >= LogLevel.Error);
             log.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Exception != null);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // 084c fix round 1: the base rule's id (F1-1), the bodies (F1-2) and the consequence (item 6) on the rules route
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private const string Hours9 = """{"type":"DailyHoursCap","maxHoursPerDay":9}""";
+    private const string Hours10 = """{"type":"DailyHoursCap","maxHoursPerDay":10}""";
+    private const string Hours11 = """{"type":"DailyHoursCap","maxHoursPerDay":11}""";
+    private const string ExpenseBody = """{"type":"ExpenseRule","nonReimbursableCodes":["E101","E102"],"maxAmountPerItem":250}""";
+
+    private sealed record ChangePrefill(Guid Hours, Guid HoursV1, Guid HoursV2, ChangedRows Changed, Guid Expense, Guid ExpenseV2);
+
+    /// <summary>
+    /// One Procedure (all records; version 1 to Mar 1, version 2 after). HOURS (DailyHoursCap) has 11 hours under version 1 and 10 under
+    /// version 2, and is changed on matter M to 9 from v1 (so on Mar15 it is Changed and Stale: its base moved on). EXPENSE (ExpenseRule,
+    /// Flag) has two codes and a cap under both versions. Ask for matter M, Mar15.
+    /// </summary>
+    private static ChangePrefill SeedChangePrefill(RecordProcedureRig rig)
+    {
+        var procedure = rig.AddProcedure("Prefill", ProcedureAppliesTo.AllRecords);
+        var v1 = rig.AddVersion(procedure, 1, Jan1, Mar1, ProcedureEntity.VersionStatusSuperseded);
+        var v2 = rig.AddVersion(procedure, 2, Mar1, null);
+        var hours = rig.AddProcedureRule(procedure, "HOURS");
+        var hoursV1 = rig.AddRuleVersion(hours, v1, Jan1, type: Sprk.Bff.Api.Services.Signals.RuleType.DailyHoursCap, body: Hours11);
+        var hoursV2 = rig.AddRuleVersion(hours, v2, Mar1, number: 2, type: Sprk.Bff.Api.Services.Signals.RuleType.DailyHoursCap, body: Hours10);
+        var expense = rig.AddProcedureRule(procedure, "EXPENSE");
+        var flag = (int)Sprk.Bff.Api.Services.Finance.BillingConsequence.Flag;
+        rig.AddRuleVersion(expense, v1, Jan1, type: Sprk.Bff.Api.Services.Signals.RuleType.ExpenseRule, body: ExpenseBody, consequence: flag);
+        var expenseV2 = rig.AddRuleVersion(expense, v2, Mar1, number: 2, type: Sprk.Bff.Api.Services.Signals.RuleType.ExpenseRule, body: ExpenseBody, consequence: flag);
+        var changed = rig.ChangeRuleRows(Matter, M, hours, hoursV1, Jan15, code: "BRR-HOURS", type: Sprk.Bff.Api.Services.Signals.RuleType.DailyHoursCap, body: Hours9);
+        return new ChangePrefill(hours, hoursV1, hoursV2, changed, expense, expenseV2);
+    }
+
+    private static JsonObject RuleOf(JsonObject body, Guid policyId) =>
+        body["rules"]!.AsArray().Single(r => r!["policyId"]!.GetValue<Guid>() == policyId)!.AsObject();
+
+    private static JsonObject ChangedMarkOf(JsonObject rule) =>
+        rule["marks"]!.AsArray().Single(m => m!["kind"]!.GetValue<string>() == "Changed")!.AsObject();
+
+    private static bool SameJson(JsonNode? actual, string expected) => JsonNode.DeepEquals(actual, JsonNode.Parse(expected));
+
+    [Theory(DisplayName = "084c fix 1 (F1-1) must-fire: a Changed mark names its base rule (basePolicyId), in force or base-retired; that row is asked, and denying it alone is 503")]
+    [InlineData("in force")]
+    [InlineData("base retired")]
+    public async Task ChangedMark_NamesItsBaseRule_WhichIsAsked(string which)
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.SeedChangedAndBaseRetired();
+        var (recordRule, basePolicy) = which == "in force" ? (s.Changed.RecordRule, s.ChangedBase) : (s.Retired.RecordRule, s.RetiredBase);
+        var url = $"/api/finance/projects/{P}/rules-in-force?date=2026-03-15";
+
+        var response = await host.Client.SendAsync(Get(url));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        ChangedMarkOf(RuleOf(await Json(response), recordRule))["basePolicyId"]!.GetValue<Guid>().Should().Be(basePolicy, "the change route takes the BASE rule's id");
+        host.Rig.Probe.Asked.Should().Contain(("sprk_policies", basePolicy), "an id in the answer is asked of the caller (EB-D-218)");
+
+        host.Rig.Probe.Denied.Add(("sprk_policies", basePolicy));
+        await AssertUnavailable(await host.Client.SendAsync(Get(url)), host);
+    }
+
+    [Fact(DisplayName = "084c fix 1 (F1-2, item 6): each row carries the body of the version it shows and its consequence; a Changed mark carries the base rule's body in force (not the one it was copied from)")]
+    public async Task RulesInForce_CarriesEachRowsBody_AndTheBaseBodyInForce()
+    {
+        await using var host = await Host.StartAsync();
+        var s = SeedChangePrefill(host.Rig);
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/matters/{M}/rules-in-force?date=2026-03-15"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        var expense = RuleOf(body, s.Expense);
+        SameJson(expense["ruleBody"], ExpenseBody).Should().BeTrue("both codes and the cap: every published value, optional ones included");
+        expense["consequence"]!.GetValue<string>().Should().Be("Flag");
+        expense["policyVersionId"]!.GetValue<Guid>().Should().Be(s.ExpenseV2);
+
+        var changed = RuleOf(body, s.Changed.RecordRule);
+        SameJson(changed["ruleBody"], Hours9).Should().BeTrue("a changed row's body is this record's change, the values the form starts from");
+        changed["marks"]!.AsArray().Select(m => m!["kind"]!.GetValue<string>()).Should().Equal("Changed", "Stale");
+        var mark = ChangedMarkOf(changed);
+        SameJson(mark["baseRuleBody"], Hours10).Should().BeTrue("'Start from the published values' is the base rule's version IN FORCE, not v1 the change was copied from");
+        mark["basePolicyId"]!.GetValue<Guid>().Should().Be(s.Hours);
+        host.Rig.Probe.Asked.Should().Contain(new[] { ("sprk_policyversions", s.ExpenseV2), ("sprk_policyversions", s.Changed.RuleVersion), ("sprk_policyversions", s.HoursV2) });
+    }
+
+    [Theory(DisplayName = "084c fix 1 (F1-2) must-fire: the version row a body is read from is asked; denying it alone is 503 with no list")]
+    [InlineData("expense version in force")]
+    [InlineData("record rule version")]
+    [InlineData("base version in force")]
+    public async Task TheVersionABodyIsReadFrom_DeniedAlone_Is503(string which)
+    {
+        await using var host = await Host.StartAsync();
+        var s = SeedChangePrefill(host.Rig);
+        var url = $"/api/finance/matters/{M}/rules-in-force?date=2026-03-15";
+        (await host.Client.SendAsync(Get(url))).StatusCode.Should().Be(HttpStatusCode.OK, "the control: nothing denied");
+
+        host.Rig.Probe.Denied.Add(("sprk_policyversions", which switch
+        {
+            "expense version in force" => s.ExpenseV2,
+            "record rule version" => s.Changed.RuleVersion,
+            _ => s.HoursV2,
+        }));
+
+        await AssertUnavailable(await host.Client.SendAsync(Get(url)), host);
+    }
+
+    [Fact(DisplayName = "084c fix 1 (F1-2): a rule excluded on the record carries its body in force too (the Change form starts from it after the exclusion is removed)")]
+    public async Task ExcludedRule_CarriesItsBody()
+    {
+        await using var host = await Host.StartAsync();
+        var s = SeedChangePrefill(host.Rig);
+        host.Rig.ExcludeRule(Matter, M, s.Expense, reason: "not here");
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/matters/{M}/rules-in-force?date=2026-03-15"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var expense = RuleOf(await Json(response), s.Expense);
+        expense["inForce"]!.GetValue<bool>().Should().BeFalse();
+        SameJson(expense["ruleBody"], ExpenseBody).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "084c fix 1 (F1-2) negative: a stored body that is not a JSON object gives ruleBody null (the form then refuses to start), never a guess")]
+    public async Task ABodyThatIsNotAnObject_IsNull()
+    {
+        await using var host = await Host.StartAsync();
+        var odd = host.Rig.Simple("ODD", type: Sprk.Bff.Api.Services.Signals.RuleType.DailyHoursCap, body: "[11]");
+
+        var response = await host.Client.SendAsync(Get($"/api/finance/matters/{M}/rules-in-force?date=2026-02-01"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var rule = RuleOf(await Json(response), odd.Rule);
+        rule["ruleBody"].Should().BeNull();
+        rule["ruleType"]!.GetValue<string>().Should().Be("DailyHoursCap");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

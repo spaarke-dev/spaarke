@@ -7,12 +7,20 @@
  *   - GET    /api/finance/{core}/{recordId}/overrides/{overrideId}/removal-preview                                               -> 200 RemovalPreview
  *   - DELETE /api/finance/{core}/{recordId}/overrides/{overrideId}                                                               -> 200 Removed
  *
- * One read of task 081 is added for the Pin choice: GET /api/finance/procedures/{procedureId} (the Procedure with its versions), because
- * task 084's view carries the version in force and the newer one, not the list a pin picks from. It is an existing read route, not a new one.
+ * Task 084c adds the change of a rule for the record:
  *
- * The page decides nothing about authorization: every refusal (403, 404, 409, 422, 503 ...) comes back as a {@link WriteFailure} carrying
- * the ProblemDetails `title` and `detail`, and the wizard shows them. There is NO route for "Change for this record" here (rule-overrides/change
- * is task 084c's) and no dry-run read of any kind.
+ *   - POST   /api/finance/{core}/{recordId}/rule-overrides/change          body { policyId, reason, firmId?, ruleBody }          -> 201 RuleChanged
+ *
+ * `ruleBody` is the new rule body as JSON TEXT (the route's `RuleChangeRequest.RuleBody` is a string): the type's whole body, which replaces
+ * the rule's. The server validates it (RuleBodySchemaValidator, PolicyVersionValidator) and answers a refusal 400 with `errors`
+ * (`{ policyId, rule, field, message, reason }`); {@link WriteFailure.fieldErrors} keeps them by field.
+ *
+ * One existing read is added: task 081's GET /api/finance/procedures/{procedureId} (the Pin picker's versions: task 084's view carries the
+ * version in force and the newer one, not the list a pin picks from). It is not a new route. (084c's read of Rule Review's rule set for the
+ * Change form's values was removed in its fix round 1: the rules-in-force rows now carry `ruleBody`.)
+ *
+ * The page decides nothing about authorization: every refusal (400, 403, 404, 409, 422, 503 ...) comes back as a {@link WriteFailure} carrying
+ * the ProblemDetails `title` and `detail`, and the wizard shows them. There is no dry-run read of any kind (task 084d).
  *
  * Mirrors `recordProceduresApi.ts`: `authenticatedFetch` THROWS on any non-2xx (`ApiError`) and on an exhausted 401 (`AuthError`).
  */
@@ -39,6 +47,17 @@ export interface ExcludeRuleRequest {
   policyId: string;
   reason: string;
   firmId?: string;
+}
+
+/**
+ * The body of `rule-overrides/change`: the reason is required; `firmId` limits the change to one firm's invoices (and must be the rule's own
+ * firm when the rule names one); `ruleBody` is the new body of the rule's type as JSON text.
+ */
+export interface ChangeRuleRequest {
+  policyId: string;
+  reason: string;
+  firmId?: string;
+  ruleBody: string;
 }
 
 /** What a created override row looks like (`OverrideView` on the server). */
@@ -74,12 +93,29 @@ export interface Removed {
   message: string | null;
 }
 
+/** What a change wrote (`RuleChangedView`): the Exclude row, the record rule that takes the rule's place, and what the close of the base rule's findings did. */
+export interface RuleChanged {
+  override: OverrideCreated;
+  recordRule: { ruleSetId: string; policyId: string; code: string; versionId: string; versionNumber: number; basedOnVersionId: string; scope: string; firmId: string | null };
+  closeComplete: boolean;
+  affectedText: string | null;
+  visibleOpenInvoices: number | null;
+  message: string | null;
+}
+
 /** A version of a Procedure, for the Pin picker (from task 081's read). `status` is Draft | Active | Superseded | Retired. */
 export type PinnableVersion = VersionView;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Failures
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** One problem of a 400 refusal, with the request member it names (`field`: ruleBody, firmId, reason, consequence ...). */
+export interface FieldError {
+  field: string;
+  message: string;
+  reason: string | null;
+}
 
 /** Everything the wizard shows of a refused or failed call. The server's words are kept as they came. */
 export interface WriteFailure {
@@ -92,6 +128,8 @@ export interface WriteFailure {
   detail: string | null;
   /** The field problems of a 400 (`errors`), as sentences. */
   problems: string[];
+  /** The same problems with the member each names, for a form to put them on its fields (task 084c). */
+  fieldErrors: FieldError[];
   /** True when sign-in failed (an exhausted 401 or no token). */
   signInFailed: boolean;
 }
@@ -109,6 +147,24 @@ function problemsOf(errors: unknown): string[] {
   return [];
 }
 
+/** The 400's `errors` with the request member each names: `{ field, message, reason }` items, or a `{ field: string[] }` dictionary. */
+function fieldErrorsOf(errors: unknown): FieldError[] {
+  if (Array.isArray(errors)) {
+    return errors.flatMap(e => {
+      if (typeof e !== 'object' || e === null) return [];
+      const o = e as { field?: unknown; message?: unknown; reason?: unknown };
+      const message = str(o.message);
+      return message === null ? [] : [{ field: str(o.field) ?? '', message, reason: str(o.reason) }];
+    });
+  }
+  if (typeof errors === 'object' && errors !== null) {
+    return Object.entries(errors as Record<string, unknown>).flatMap(([field, v]) =>
+      Array.isArray(v) ? v.filter((m): m is string => typeof m === 'string').map(message => ({ field, message, reason: null })) : []
+    );
+  }
+  return [];
+}
+
 /** Turn whatever `authenticatedFetch` threw into a {@link WriteFailure}. Exported for the tests. */
 export function toWriteFailure(err: unknown): WriteFailure {
   if (isApiError(err)) {
@@ -119,10 +175,11 @@ export function toWriteFailure(err: unknown): WriteFailure {
       title: str(p?.title),
       detail: str(p?.detail),
       problems: problemsOf(p?.errors),
+      fieldErrors: fieldErrorsOf(p?.errors),
       signInFailed: isAuthFailure(err),
     };
   }
-  return { status: 0, errorCode: null, title: null, detail: err instanceof Error ? err.message : null, problems: [], signInFailed: isAuthFailure(err) };
+  return { status: 0, errorCode: null, title: null, detail: err instanceof Error ? err.message : null, problems: [], fieldErrors: [], signInFailed: isAuthFailure(err) };
 }
 
 /**
@@ -143,6 +200,8 @@ export function failureText(f: WriteFailure): string {
 export interface OverridesApi {
   assignProcedure(core: CoreRoute, recordId: string, body: AssignRequest): Promise<WriteResult<OverrideCreated>>;
   excludeRule(core: CoreRoute, recordId: string, body: ExcludeRuleRequest): Promise<WriteResult<OverrideCreated>>;
+  /** Task 084c: change a rule for the record (and one firm's invoices when `firmId` is given). */
+  changeRule(core: CoreRoute, recordId: string, body: ChangeRuleRequest): Promise<WriteResult<RuleChanged>>;
   removalPreview(core: CoreRoute, recordId: string, overrideId: string): Promise<WriteResult<RemovalPreview>>;
   removeOverride(core: CoreRoute, recordId: string, overrideId: string): Promise<WriteResult<Removed>>;
   /** The versions of a Procedure, for the Pin picker (task 081's read). */
@@ -158,11 +217,12 @@ function recordBase(bffBaseUrl: string, core: CoreRoute, recordId: string): stri
 
 export const assignmentsUrl = (bff: string, core: CoreRoute, recordId: string): string => `${recordBase(bff, core, recordId)}/procedure-assignments`;
 export const excludeRuleUrl = (bff: string, core: CoreRoute, recordId: string): string => `${recordBase(bff, core, recordId)}/rule-overrides/exclude`;
-export const overrideUrl = (bff: string, core: CoreRoute, recordId: string, overrideId: string): string => `${recordBase(bff, core, recordId)}/overrides/${seg(overrideId)}`;
+export const changeRuleUrl = (bff: string, core: CoreRoute, recordId: string): string => `${recordBase(bff, core, recordId)}/rule-overrides/change`;
+export const overrideUrl =(bff: string, core: CoreRoute, recordId: string, overrideId: string): string => `${recordBase(bff, core, recordId)}/overrides/${seg(overrideId)}`;
 export const removalPreviewUrl = (bff: string, core: CoreRoute, recordId: string, overrideId: string): string => `${overrideUrl(bff, core, recordId, overrideId)}/removal-preview`;
 export const procedureUrl = (bff: string, procedureId: string): string => `${trimBase(bff)}/api/finance/procedures/${seg(procedureId)}`;
 
-const BAD_BODY: WriteFailure = { status: 200, errorCode: null, title: 'The server answered with an unexpected body.', detail: null, problems: [], signInFailed: false };
+const BAD_BODY: WriteFailure = { status: 200, errorCode: null, title: 'The server answered with an unexpected body.', detail: null, problems: [], fieldErrors: [], signInFailed: false };
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
@@ -203,6 +263,13 @@ export function createOverridesApi(fetchFn: AuthenticatedFetchFn, bffBaseUrl: st
         excludeRuleUrl(bffBaseUrl, core, recordId),
         { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ policyId: body.policyId, reason: body.reason.trim(), firmId: body.firmId })) },
         created
+      ),
+
+    changeRule: (core, recordId, body) =>
+      run(
+        changeRuleUrl(bffBaseUrl, core, recordId),
+        { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(compact({ policyId: body.policyId, reason: body.reason.trim(), firmId: body.firmId, ruleBody: body.ruleBody })) },
+        b => (isObject(b) && isObject(b.override) && typeof b.override.id === 'string' && isObject(b.recordRule) ? (b as unknown as RuleChanged) : null)
       ),
 
     removalPreview: (core, recordId, overrideId) =>

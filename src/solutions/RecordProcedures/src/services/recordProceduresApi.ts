@@ -166,6 +166,10 @@ export interface RuleMark {
   currentBase?: VersionRef | null;
   baseCode?: string | null;
   baseParameterSummary?: string | null;
+  /** 084c fix round 1: on a Changed mark, the BASE rule's policy id (the policy the change route takes). Absent on an older BFF. */
+  basePolicyId?: string | null;
+  /** 084c fix round 1: on a Changed mark, the base rule's body in force ("Start from the published values"); null when it is not in force. */
+  baseRuleBody?: Record<string, unknown> | null;
   text?: string | null;
   note?: string | null;
   by?: OutrankingRule[] | null;
@@ -195,6 +199,13 @@ export interface RuleItem {
   distance: number | null;
   firmScope: FirmRef | null;
   marks: RuleMark[];
+  /** 084c fix round 1: the shown version's consequence (Reject | Flag | SuggestAdjustment). */
+  consequence?: string | null;
+  /**
+   * 084c fix round 1: the body of the version the row shows, as an object (on a changed row, this record's change). The Change form starts
+   * from it. Null, or absent on an older BFF, when the server could not give it: the form then does not start.
+   */
+  ruleBody?: Record<string, unknown> | null;
 }
 
 export interface RecordRulesInForceView {

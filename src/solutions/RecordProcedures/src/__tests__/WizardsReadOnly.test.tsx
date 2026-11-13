@@ -70,7 +70,7 @@ describe('084g: a caller who may not write opens the wizards read-only', () => {
   });
 
   // Fix round 1 (B1): the wizards decide per choice, so one flag false is no longer read-only by itself (WizardsAllowed.test.tsx). These are
-  // the answers that allow NO kind of call: each is read-only on both wizards. `change` is 084c's and opens nothing.
+  // the answers that allow NO kind of call: each is read-only on both wizards. `change` alone allows the rule wizard's Change only.
   const readOnlyWhen: Array<[string, unknown, unknown]> = [
     ['both flags false, change true', { ...NONE, change: true }, { ...NONE, change: true }],
     ['the rules answer false, the Procedures answer true', WRITE_ALL, NONE],
@@ -99,7 +99,7 @@ describe('084g: a caller who may not write opens the wizards read-only', () => {
 describe('084g: a caller who may write gets 084b', () => {
   it.each([
     ['every flag true', WRITE_ALL],
-    ['change false (task 084c opens nothing yet)', { ...WRITE_ALL, change: false }],
+    ['change false (the Change choice is the only one that needs it)', { ...WRITE_ALL, change: false }],
   ])('%s: choices enabled, no reason, the four steps, and an Exclude reaches Confirm and saves', async (_name, permissions) => {
     const { writeCalls } = renderHarness({
       ...answers(permissions),
@@ -151,10 +151,12 @@ describe('084g: reading permissions', () => {
   });
 
   it('allowedSteps: create is assignOrExclude and remove is remove, each only when every answer says so; no answer allows nothing', () => {
-    expect(allowedSteps(WRITE_ALL, WRITE_ALL)).toEqual({ remove: true, create: true });
-    expect(allowedSteps({ ...WRITE_ALL, change: false })).toEqual({ remove: true, create: true });
-    expect(allowedSteps(WRITE_ALL, { ...WRITE_ALL, remove: false })).toEqual({ remove: false, create: true });
-    expect(allowedSteps({ ...WRITE_ALL, assignOrExclude: false })).toEqual({ remove: true, create: false });
-    expect(allowedSteps()).toEqual({ remove: false, create: false });
+    expect(allowedSteps(WRITE_ALL, WRITE_ALL)).toEqual({ remove: true, create: true, change: true });
+    expect(allowedSteps({ ...WRITE_ALL, change: false })).toEqual({ remove: true, create: true, change: false });
+    expect(allowedSteps(WRITE_ALL, { ...WRITE_ALL, remove: false })).toEqual({ remove: false, create: true, change: true });
+    expect(allowedSteps({ ...WRITE_ALL, assignOrExclude: false })).toEqual({ remove: true, create: false, change: true });
+    // 084c: the change right is its own flag; one answer saying no is no.
+    expect(allowedSteps(WRITE_ALL, { ...WRITE_ALL, change: false })).toEqual({ remove: true, create: true, change: false });
+    expect(allowedSteps()).toEqual({ remove: false, create: false, change: false });
   });
 });

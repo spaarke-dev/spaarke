@@ -6,18 +6,24 @@
  * that override first"), and there is no route that edits a row. Changing a record's existing override is therefore remove, then create.
  * {@link executePlan} stops at the first refusal and says how many calls had already succeeded.
  *
- * No "Change for this record" exists here (task 084c): no step in any plan calls `rule-overrides/change`.
+ * Task 084c adds "Change for this record" to the rule wizard: a `changeRule` step is the one call to `rule-overrides/change`. A rule that
+ * already has this record's Exclude gets it removed first (089 keeps one row per record and rule: a change of it is 409 `assignment.duplicate`).
+ * Fix round 1 (F1-1): a rule already changed on this record is changed again the same way: its change is removed, then the BASE rule (the
+ * `Changed` mark's `basePolicyId`) is changed.
  */
 
 import type { OverrideView, ProcedureItem, RuleItem, RuleMark } from '../../services/recordProceduresApi';
 import type { AssignMode, OverridesApi, WriteFailure } from '../../services/overridesApi';
 import type { CoreRoute } from '../../services/recordProceduresApi';
 import type { AllowedSteps } from '../../services/model';
+import { formFor } from './ruleForms';
 
 export type PlanStep =
   | { kind: 'remove'; overrideId: string }
   | { kind: 'assign'; procedureId: string; mode: AssignMode; pinnedVersionId?: string; reason?: string }
-  | { kind: 'excludeRule'; policyId: string; reason: string; firmId?: string };
+  | { kind: 'excludeRule'; policyId: string; reason: string; firmId?: string }
+  /** `ruleBody` is the whole new body of the rule's type, as JSON text (the route's request member). */
+  | { kind: 'changeRule'; policyId: string; reason: string; firmId?: string; ruleBody: string };
 
 export interface Plan {
   steps: PlanStep[];
@@ -137,10 +143,11 @@ export function planProcedure(p: ProcedureItem, choice: ProcedureChoice, input: 
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * `parent`: As set on the parent. `keep`: Run the published rule. `exclude`: Exclude here. `changed`: the state of a rule changed on this
- * record (what it does now); it is no choice the wizard offers, so a wizard on such a rule opens with nothing selected.
+ * `parent`: As set on the parent. `keep`: Run the published rule. `exclude`: Exclude here. `change`: Change for this record (task 084c).
+ * `changed`: the state of a rule changed on this record (what it does now); it is no choice the wizard offers, so a wizard on such a rule
+ * opens with nothing selected.
  */
-export type RuleChoice = 'parent' | 'keep' | 'exclude' | 'changed';
+export type RuleChoice = 'parent' | 'keep' | 'exclude' | 'change' | 'changed';
 
 const distanceOf = (m: RuleMark): number => m.distance ?? 0;
 const markOf = (r: RuleItem, kind: string, own: boolean): RuleMark | undefined => r.marks.find(m => m.kind === kind && (distanceOf(m) === 0) === own);
@@ -171,6 +178,8 @@ export interface RuleInput {
   reason?: string;
   /** A firm id, or '' / undefined for every firm. */
   firmId?: string;
+  /** Change only: the new body as JSON text, once the form is complete and differs from the published values. Absent: nothing to send. */
+  ruleBody?: string;
 }
 
 /**
@@ -195,7 +204,39 @@ export function excludeBlocker(r: RuleItem): string | null {
   return null;
 }
 
-/** O-20: a rule that names one firm can only be excluded for that firm. */
+/** Why a rule whose base rule is retired offers no Change (084c fix round 1, F1-7): checked before the type, which such a row does not carry. */
+export const BASE_RETIRED_NO_CHANGE = 'Not available: the published rule is no longer in force, so there is nothing to change. Remove the change instead.';
+
+/** Why a rule changed here cannot be changed again: the read did not name the published rule, or the change's own row (an older BFF). */
+export const RECHANGE_NOT_NAMED = 'This rule is already changed on this record, and the published rule it replaces is not named here. Run the published rule first, then change it again.';
+
+/**
+ * Whether "Change for this record" can be chosen, and why not (task 084c):
+ *   - a record rule whose base rule is retired has nothing published to change (084c fix round 1, F1-7: said before the type, which it lacks);
+ *   - a type this page has no form for, or whose form says it is not changed (a rate card rule: pin the Procedure version; a type with no
+ *     values), offers no Change;
+ *   - P-3: a rule a parent excluded or changed is changed on the parent;
+ *   - a rule already changed on this record (084c fix round 1, F1-1) is changed again by removing its change and changing the BASE rule, so
+ *     its `Changed` mark must name the base rule (`basePolicyId`) and its own row (`overrideRowId`).
+ */
+export function changeBlocker(r: RuleItem): string | null {
+  if (isBaseRetired(r)) return BASE_RETIRED_NO_CHANGE;
+  const form = formFor(r.ruleType);
+  if (!form) return `Not available: this page has no form for the rule type ${r.ruleType ?? '(unknown)'}.`;
+  if (form.noChange) return form.noChange;
+  const inherited = inheritedOverride(r);
+  if (inherited) return `Not available: the parent's rule ${inherited.kind === 'Excluded' ? 'exclusion' : 'change'} applies to this record. Change it on the parent.`;
+  if (ownChange(r) || r.recordRule) {
+    const own = ownChange(r);
+    if (!own?.basePolicyId || !own.overrideRowId) return RECHANGE_NOT_NAMED;
+  }
+  return null;
+}
+
+/** The policy a change names: the base rule for a rule changed here (084c fix round 1, F1-1), else the rule itself. */
+export const changeTargetPolicyId = (r: RuleItem): string => ownChange(r)?.basePolicyId ?? r.policyId;
+
+/** O-20: a rule that names one firm can only be excluded (or changed) for that firm. */
 export const fixedFirmId = (r: RuleItem): string | null => r.firmScope?.id ?? null;
 
 export function ruleInputValid(choice: RuleChoice, input: RuleInput): boolean {
@@ -213,6 +254,17 @@ export function planRule(r: RuleItem, choice: RuleChoice, input: RuleInput): Pla
       if (keepBlocker(r)) return NO_CHANGE;
       const id = ownRuleOverrideId(r);
       return id ? { steps: [{ kind: 'remove', overrideId: id }] } : NO_CHANGE;
+    }
+
+    case 'change': {
+      if (changeBlocker(r) || !reasonValid(input.reason) || !input.ruleBody) return NO_CHANGE;
+      const firmId = fixedFirmId(r) ?? (input.firmId || undefined);
+      // This record's own override of the rule (its Exclude, or its earlier change) is removed first: 089 keeps one row per record and rule,
+      // so a change over it is refused as a duplicate. An own Exclude whose row id the server did not name cannot be removed.
+      if (own && !own.overrideRowId) return NO_CHANGE;
+      const ownId = ownRuleOverrideId(r);
+      const removeOwn: PlanStep[] = ownId ? [{ kind: 'remove', overrideId: ownId }] : [];
+      return { steps: [...removeOwn, { kind: 'changeRule', policyId: changeTargetPolicyId(r), reason: input.reason!.trim(), firmId, ruleBody: input.ruleBody }] };
     }
 
     case 'exclude': {
@@ -233,7 +285,7 @@ export function planRule(r: RuleItem, choice: RuleChoice, input: RuleInput): Pla
 
 /**
  * The kinds of call a choice's plan can contain, from the row and the choice alone (never from the inputs): `remove` (the removal of this
- * record's own override, and its preview) and `create` (an assignment or a rule exclusion). Every step of every plan the choice can make is
+ * record's own override, and its preview), `create` (an assignment or a rule exclusion) and `change` (a rule's change, task 084c). Every step of every plan the choice can make is
  * one of these (`planWithin` checks it; a test runs it over every fixture row, choice and input). The panel says which kinds the lists'
  * answers allow (`AllowedSteps`); a choice that needs a kind they do not allow is disabled with the reason, and only a wizard with no
  * choice left that makes a call is read-only.
@@ -241,9 +293,10 @@ export function planRule(r: RuleItem, choice: RuleChoice, input: RuleInput): Pla
 export interface ChoiceNeeds {
   remove: boolean;
   create: boolean;
+  change: boolean;
 }
 
-const NEEDS_NOTHING: ChoiceNeeds = { remove: false, create: false };
+const NEEDS_NOTHING: ChoiceNeeds = { remove: false, create: false, change: false };
 
 /** What a Procedure choice's plans need: a removal exactly when the record has its own override row, a create when a row is saved. */
 export function procedureChoiceNeeds(p: ProcedureItem, choice: ProcedureChoice): ChoiceNeeds {
@@ -252,16 +305,16 @@ export function procedureChoiceNeeds(p: ProcedureItem, choice: ProcedureChoice):
   switch (choice) {
     case 'parent':
     case 'remove':
-      return { remove: !!own, create: false };
+      return { remove: !!own, create: false, change: false };
     case 'follow': {
       const keepsRow = (isManual(p) && !!own && parents.length === 0) || parents.some(o => o.mode !== 'FollowLatest');
-      if (!keepsRow) return { remove: !!own, create: false };
+      if (!keepsRow) return { remove: !!own, create: false, change: false };
       if (own?.mode === 'FollowLatest') return NEEDS_NOTHING;
-      return { remove: !!own, create: true };
+      return { remove: !!own, create: true, change: false };
     }
     case 'pin':
     case 'exclude':
-      return { remove: !!own, create: true };
+      return { remove: !!own, create: true, change: false };
   }
 }
 
@@ -272,18 +325,26 @@ export function ruleChoiceNeeds(r: RuleItem, choice: RuleChoice): ChoiceNeeds {
     case 'changed':
       return NEEDS_NOTHING;
     case 'keep':
-      return keepBlocker(r) ? NEEDS_NOTHING : { remove: !!ownRuleOverrideId(r), create: false };
+      return keepBlocker(r) ? NEEDS_NOTHING : { remove: !!ownRuleOverrideId(r), create: false, change: false };
     case 'exclude': {
       if (excludeBlocker(r)) return NEEDS_NOTHING;
       const own = ownExclude(r);
       if (own && !own.overrideRowId) return NEEDS_NOTHING;
-      return { remove: !!own?.overrideRowId, create: true };
+      return { remove: !!own?.overrideRowId, create: true, change: false };
+    }
+    case 'change': {
+      // A change saves no exclusion of its own: it is its own route and its own right. It removes this record's own override of the rule
+      // first, its Exclude or its earlier change (084c fix round 1).
+      if (changeBlocker(r)) return NEEDS_NOTHING;
+      const own = ownExclude(r);
+      if (own && !own.overrideRowId) return NEEDS_NOTHING;
+      return { remove: !!ownRuleOverrideId(r), create: false, change: true };
     }
   }
 }
 
 /** Whether a choice makes any call at all. */
-export const needsAny = (needs: ChoiceNeeds): boolean => needs.remove || needs.create;
+export const needsAny = (needs: ChoiceNeeds): boolean => needs.remove || needs.create || needs.change;
 
 /**
  * Whether a wizard is read-only: some offered choice makes a call, and none of those is allowed. A row none of whose choices makes a call
@@ -298,20 +359,23 @@ export function noAllowedCall<T>(offered: readonly T[], needsOf: (choice: T) => 
 export const NOT_ALLOWED_BOTH = 'You can view this, but not change it.';
 export const NOT_ALLOWED_REMOVE = "Not available to you: it removes this record's own override, which you cannot do here.";
 export const NOT_ALLOWED_CREATE = 'Not available to you: you cannot save an override on this record.';
+export const NOT_ALLOWED_CHANGE = 'Not available to you: you cannot change a rule on this record.';
 
 /** Why a choice is not available from what the answers allow, or null when it is. */
 export function allowedBlocker(needs: ChoiceNeeds, allowed: AllowedSteps): string | null {
   const noRemove = needs.remove && !allowed.remove;
   const noCreate = needs.create && !allowed.create;
-  if (noRemove && noCreate) return NOT_ALLOWED_BOTH;
+  const noChange = needs.change === true && !allowed.change;
+  if ([noRemove, noCreate, noChange].filter(Boolean).length > 1) return NOT_ALLOWED_BOTH;
   if (noRemove) return NOT_ALLOWED_REMOVE;
   if (noCreate) return NOT_ALLOWED_CREATE;
+  if (noChange) return NOT_ALLOWED_CHANGE;
   return null;
 }
 
 /** True when every step of the plan is of a kind the choice was said to need. */
 export function planWithin(plan: Plan, needs: ChoiceNeeds): boolean {
-  return plan.steps.every(s => (s.kind === 'remove' ? needs.remove : needs.create));
+  return plan.steps.every(s => (s.kind === 'remove' ? needs.remove : s.kind === 'changeRule' ? needs.change === true : needs.create));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -326,20 +390,25 @@ export interface PlanRun {
   failure?: WriteFailure;
   /** The `Removed` answers, for the success screen. */
   removed: Array<{ ruleSwitchedOff: boolean; closeComplete: boolean; affectedText: string | null; message: string | null }>;
+  /** The `RuleChanged` answers (task 084c): what the close of the base rule's findings did, for the success screen. */
+  changed: Array<{ closeComplete: boolean; affectedText: string | null; message: string | null }>;
 }
 
 /** Runs the plan's calls in order and stops at the first refusal. */
 export async function executePlan(api: OverridesApi, core: CoreRoute, recordId: string, plan: Plan): Promise<PlanRun> {
-  const run: PlanRun = { ok: true, completed: 0, removed: [] };
+  const run: PlanRun = { ok: true, completed: 0, removed: [], changed: [] };
   for (const step of plan.steps) {
     const result =
       step.kind === 'remove'
         ? await api.removeOverride(core, recordId, step.overrideId)
         : step.kind === 'assign'
           ? await api.assignProcedure(core, recordId, { procedureId: step.procedureId, mode: step.mode, pinnedVersionId: step.pinnedVersionId, reason: step.reason })
-          : await api.excludeRule(core, recordId, { policyId: step.policyId, reason: step.reason, firmId: step.firmId });
+          : step.kind === 'changeRule'
+            ? await api.changeRule(core, recordId, { policyId: step.policyId, reason: step.reason, firmId: step.firmId, ruleBody: step.ruleBody })
+            : await api.excludeRule(core, recordId, { policyId: step.policyId, reason: step.reason, firmId: step.firmId });
     if (!result.ok) return { ...run, ok: false, failure: result.failure };
     if (step.kind === 'remove') run.removed.push(result.value as PlanRun['removed'][number]);
+    if (step.kind === 'changeRule') run.changed.push(result.value as PlanRun['changed'][number]);
     run.completed += 1;
   }
   return run;
