@@ -89,9 +89,12 @@ public class InquiryEmailSender(CommunicationService communication, IHttpContext
     internal async Task<SendCommunicationRequest> PrepareAsync(BudgetInquiryRequest request, Guid serviceRequestId, CancellationToken ct)
     {
         // The commit route sets MatterId only for a matter core, so the inquiry's core record is always that matter.
+        // Task 190 (D-222): the record link is chosen on To only (a Bcc must not add an "External recipients" line that reveals a hidden
+        // recipient), but the record's NAME goes to every recipient, so the label is decided over To, Cc and Bcc.
+        var everyone = (request.To ?? []).Concat(request.Cc ?? []).Concat(request.Bcc ?? []).ToArray();
         var extras = facts is null
             ? null
-            : await facts.ResolveAsync(BudgetInquiryExecutor.MatterTable, request.MatterId, request.To ?? [], ct).ConfigureAwait(false);
+            : await facts.ResolveAsync(BudgetInquiryExecutor.MatterTable, request.MatterId, request.To ?? [], everyone, ct).ConfigureAwait(false);
         return Build(request, serviceRequestId, extras);
     }
 

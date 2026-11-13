@@ -366,6 +366,7 @@ public sealed class BudgetInquiryComposerAndLinkTests
 
         facts.Verify(f => f.ResolveAsync(
             "sprk_matter", Matter, It.Is<IReadOnlyList<string>>(r => r.SequenceEqual(new[] { "counsel@firm.example", "second@firm.example" })),
+            It.Is<IReadOnlyList<string>>(r => r.SequenceEqual(new[] { "counsel@firm.example", "second@firm.example" })),
             It.IsAny<CancellationToken>()), Times.Once);
         send.To.Should().Equal("counsel@firm.example", "second@firm.example");
         send.Body.Should().Be($"Please explain.\n\nOpen this matter in Spaarke: {link}");
@@ -377,10 +378,10 @@ public sealed class BudgetInquiryComposerAndLinkTests
     }
 
     [Fact]
-    public async Task PrepareAsync_chooses_the_link_by_the_To_recipients_only_and_carries_Cc_and_Bcc_task190()
+    public async Task PrepareAsync_chooses_the_link_on_To_only_and_the_label_over_To_Cc_and_Bcc_task190()
     {
-        // D-222: the record-link choice stays keyed on To. Cc and Bcc recipients are never asked about, so a hidden recipient
-        // cannot change the audience of the link and does not appear in the facts call.
+        // D-222: a Bcc must not change the link (an "External recipients" line would reveal a hidden recipient), but the record's name
+        // goes to every recipient, so the label is decided over To, Cc and Bcc.
         var facts = StubFacts(new InquiryEmailExtras("Acme v. Roe (MAT-000123)", ["Open this matter in Spaarke: https://org.example/m"]));
         var sender = new InquiryEmailSender(null!, new HttpContextAccessor(), facts.Object);
         var request = new BudgetInquiryRequest(Matter, ["counsel@firm.example"], "Budget inquiry: Acme", "Please explain.", true, Firm,
@@ -389,11 +390,44 @@ public sealed class BudgetInquiryComposerAndLinkTests
         var send = await sender.PrepareAsync(request, Guid.NewGuid(), CancellationToken.None);
 
         facts.Verify(f => f.ResolveAsync(
-            "sprk_matter", Matter, It.Is<IReadOnlyList<string>>(r => r.SequenceEqual(new[] { "counsel@firm.example" })),
+            "sprk_matter", Matter,
+            It.Is<IReadOnlyList<string>>(r => r.SequenceEqual(new[] { "counsel@firm.example" })),
+            It.Is<IReadOnlyList<string>>(r => r.SequenceEqual(new[] { "counsel@firm.example", "copy@firm.example", "hidden@firm.example" })),
             It.IsAny<CancellationToken>()), Times.Once);
         send.Cc.Should().Equal("copy@firm.example");
         send.Bcc.Should().Equal("hidden@firm.example");
         send.Body.Should().NotContain("hidden@firm.example");
+    }
+
+    [Theory]
+    [InlineData("cc")]
+    [InlineData("bcc")]
+    public async Task PrepareAsync_names_no_record_when_a_Cc_or_Bcc_recipient_is_not_confirmed_internal_task190(string externalLine)
+    {
+        // To is internal, so the old To-only decision would name the matter; the external Cc/Bcc receives the same footer and
+        // sprk_regardingrecordname, so it must not. The link lines are decided on To alone: no "External recipients" line appears.
+        var sender = new InquiryEmailSender(null!, new HttpContextAccessor(), Facts(internalAddresses: ["a@spaarke.example"]));
+        var request = new BudgetInquiryRequest(Matter, ["a@spaarke.example"], "Budget inquiry: Acme", "Please explain.", true, null,
+            externalLine == "cc" ? ["counsel@firm.example"] : null, externalLine == "bcc" ? ["counsel@firm.example"] : null);
+
+        var send = await sender.PrepareAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        send.Associations![0].EntityName.Should().Be("Budget inquiry: Acme", "the inquiry is named by its subject, not the matter");
+        send.Body.Should().Be($"Please explain.\n\nOpen this matter in Spaarke: {Env}/main.aspx?etn=sprk_matter&id={Matter:D}&pagetype=entityrecord");
+        send.Body.Should().NotContain("External recipients").And.NotContain("portal").And.NotContain("counsel@firm.example");
+    }
+
+    [Fact]
+    public async Task PrepareAsync_names_the_record_when_To_Cc_and_Bcc_are_all_confirmed_internal_task190()
+    {
+        var sender = new InquiryEmailSender(
+            null!, new HttpContextAccessor(), Facts(internalAddresses: ["a@spaarke.example", "b@spaarke.example", "c@spaarke.example"]));
+        var request = new BudgetInquiryRequest(Matter, ["a@spaarke.example"], "Budget inquiry: Acme", "Please explain.", true, null,
+            ["b@spaarke.example"], ["c@spaarke.example"]);
+
+        var send = await sender.PrepareAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        send.Associations![0].EntityName.Should().Be("Acme v. Roe (MAT-000123)");
     }
 
     [Fact]
@@ -683,7 +717,9 @@ public sealed class BudgetInquiryComposerAndLinkTests
         var facts = new Mock<InquiryRecordFacts>(
             Mock.Of<IFieldMappingDataverseService>(), Mock.Of<IContactIdentityStore>(), Mock.Of<ISystemUserIdentityResolver>(), customer, config,
             Options.Create(new DataverseOptions { EnvironmentUrl = Env }), NullLogger<InquiryRecordFacts>.Instance);
-        facts.Setup(f => f.ResolveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+        // The sender asks with the link recipients AND the label audience (task 190), so the five-argument overload is the one it calls.
+        facts.Setup(f => f.ResolveAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(extras);
         return facts;
     }
