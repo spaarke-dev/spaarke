@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Invoice Files section; remove invoice upload/versions (FR-13)</title>
+    <phase>2 Invoices and documents</phase>
+    <gate>after 018, 020, 023 AND ebilling's /invoices/{id}/files routes on master (hard gate, see escalation)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx code: new Files section, removal of the invoice documents path</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single section over a fixed route contract; removal is mechanical once the contract is read from master</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the Invoice record config and DocumentLibrary's root list, shared with 020, 023 and 024</parallel-reason>
+    <deps>018, 020, 023</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give the Invoice record a read-only Files section over ebilling's GET /invoices/{id}/files and .../{fileId}/content (list and download; pending scan shows "Checking file…"), and remove the SPA's invoice-document upload and version history.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React developer for the external SPA.</role>
+  <goal>The Invoice record shows Files in three states (clean, pending, failed) with no upload and no versions; no SPA code calls the old `/invoices/{id}/documents` routes.</goal>
+
+  <context>
+    <background>Spec FR-13; design §7 (Invoice files row). Verified 2026-11-10 on this branch: the files routes are NOT on master (no `/files` route under `Api/ExternalAccess`); the old invoice-document routes are `ExternalProjectDataEndpoints.cs:384` (GET list), `:393` (content), `:404` (POST upload), `:418` (versions). The SPA reaches them through DocumentLibrary with root `invoices`: `RECORD_DETAIL_ENTITIES.sprk_invoice.documentsRoot = 'invoices'` (`RecordDetailFields.tsx:149`, or the Invoice RecordTemplateConfig from task 003 if it moved), the `DocumentRoot` union (`web-api-client.ts:480`), the noun map (`DocumentLibrary.tsx:272`), and `documentVersionsPath` (`web-api-client.ts:494`). `DocumentUploadPage.tsx` has no invoice path. ebilling ships the files routes first and retires the old invoice-document routes together, so this task deploys back to back after ebilling's BFF change. Messages keep `sprk_invoice: 'invoices'` (`messages-client.ts:27`) — that is the message thread, not documents.</background>
+    <relevant-files>
+      <file role="modify">The Invoice RecordTemplateConfig (task 003) and section renderers (task 005) under src/client/external-spa/src/components/detail/</file>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailFields.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts</file>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="new">src/client/external-spa/src/components/detail/InvoiceFiles.tsx</file>
+      <file role="new">src/client/external-spa/tests/InvoiceFiles.test.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="canonical-reference">src/client/external-spa/src/auth/bff-client.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">P1 template deployed</dependency>
+      <dependency task="020" status="pending">Invoice record sections settled (Information/Review detail)</dependency>
+      <dependency task="023" status="pending">DocumentLibrary reworked; its root list is edited here</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-13">The Files section lists and downloads only. It renders no Upload control, no Version history control and no Delete for invoice files.</constraint>
+    <constraint source="spec FR-13">A file whose content answers 409 `file_scan_pending` (or whose list row says pending, per ebilling's DTO) shows "Checking file…" and no Download; a failed scan shows a failed state with no Download; a clean file shows Download.</constraint>
+    <constraint source="project">The route shapes, DTO field names and state values are read from ebilling's code on master at execution time and cited file:line in the notes; this POML does not define them.</constraint>
+    <constraint source="project">After this task no SPA source calls `/invoices/{id}/documents` or its `/versions` or `/content` children: remove `'invoices'` from the document roots (`DocumentRoot`, the noun map, the Invoice config) so the compiler enforces it.</constraint>
+    <constraint source="ADR-028 A1, ADR-007">Bytes come only through the files content route with `bffApiBlob`; no signed URL, SPE pointer or Graph.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens; reuse the download error text helpers in DocumentLibrary; state lines use `StatusBadge` or plain text, not new colours.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/design.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Authenticated binary read" location="src/client/external-spa/src/auth/bff-client.ts">bffApiBlob (:229) for the content route</pattern>
+      <pattern name="Download errors" location="src/client/external-spa/src/components/DocumentLibrary.tsx">downloadFailureMessage / downloadFailureLogText (:353, :363)</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1" name="Gate">Confirm on origin/master that ebilling's `GET /invoices/{id}/files` and `.../{fileId}/content` are mapped; read their DTO and the 409 `file_scan_pending` body; cite file:line in the notes.</step>
+    <step order="2">Add a typed client for the two routes in `web-api-client.ts`.</step>
+    <step order="3">Write `InvoiceFiles.tsx` (list, three states, Download via `bffApiBlob`, 409 pending handled as "Checking file…") and mount it as the Invoice record's Files section.</step>
+    <step order="4">Remove the invoice documents path: the Invoice config's documents root, `'invoices'` from `DocumentRoot` and the noun map, and any invoice branch in DocumentLibrary; fix compile errors.</step>
+    <step order="5">Tests: clean → Download works; pending (list state and a 409 on content) → "Checking file…", no Download; failed → failed state, no Download; empty list; no Upload/versions control on the Invoice record; a grep-style assertion that no source path builds `/invoices/{id}/documents`.</step>
+    <step order="6">Run the SPA tests and the SPA build.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations and the ebilling contract citations in projects/spaarke-SPA-external-access-platform-r4/notes/task-021-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `/invoices/{id}/files` routes are not on master, STOP: do not start the code, do not stub the routes, set the task blocked and tell the operator (P2 may deploy without FR-13; task 028 records it as deferred).</trigger>
+    <trigger>If ebilling's DTO has no way to tell pending or failed apart from clean, STOP and ask ebilling (through the operator) rather than inferring state from the file name or size.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DocumentLibrary (`DocumentLibrary.tsx`) lists record documents with upload/versions/delete; it is the current invoice path.</existing>
+    <extension>No: invoice files are a different, ebilling-owned route with scan states and no upload or versions; bending DocumentLibrary to it would add a second contract to a component this project is simplifying.</extension>
+    <cost-of-doing-nothing>Once ebilling retires the invoice-document routes, the Invoice record's Documents section answers 404, and partners cannot see or download the submitted invoice files.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Invoice Files states">
+      <url>https://{spa-dev-host}/?record=invoice:{invoice-id}</url>
+      <steps>
+        <step>Open an invoice with a clean file: download it</step>
+        <step>Open an invoice whose file scan is pending: verify "Checking file…" and no Download</step>
+        <step>Verify there is no Upload and no Version history control anywhere on the Invoice record</step>
+        <step>Check the console and network for any /invoices/{id}/documents call</step>
+      </steps>
+      <expected>Correct state per file; no call to the old routes; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Switch to dark and high-contrast</step><step>Verify the state texts and list adapt</step></steps>
+      <expected>Semantic tokens only</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run SPA tests and build</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/detail/InvoiceFiles.tsx</output>
+    <output type="code">src/client/external-spa/src/api/web-api-client.ts</output>
+    <output type="test">src/client/external-spa/tests/InvoiceFiles.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-021-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Invoice record shows a Files section listing the invoice's files from `GET /invoices/{id}/files`.</criterion>
+    <criterion testable="true">A clean file downloads through `.../{fileId}/content`.</criterion>
+    <criterion testable="true">A pending file (list state or content 409 `file_scan_pending`) shows "Checking file…" and no Download.</criterion>
+    <criterion testable="true">A failed file shows the failed state and no Download.</criterion>
+    <criterion testable="true">No Upload, Version history or Delete control appears on the Invoice record.</criterion>
+    <criterion testable="true">No SPA source builds an `/invoices/{id}/documents` path (`'invoices'` is no longer a DocumentRoot); message threads on invoices still work.</criterion>
+    <criterion testable="true">SPA build passes; all SPA tests pass.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13, SC-5. Deploys only after ebilling's files-routes BFF deploy (task 028 checks). If ebilling slips, 028 ships P2 without this task and records it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

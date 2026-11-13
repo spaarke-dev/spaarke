@@ -390,6 +390,9 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       searchMatterTypes: handleSearchMatterTypes,
       searchPracticeAreas: handleSearchPracticeAreas,
 
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
       resolveSpeContainerId,
 
       buildEmailSubject: (entityName: string) => `New Event: ${entityName}`,

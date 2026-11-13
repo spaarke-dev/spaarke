@@ -3,6 +3,7 @@
  * Save picker's own search); the submission and the firm list are the view's injected seams. The attachment marking
  * is the REAL shared `InvoiceAttachmentMarking` (ebilling 118a), through the jest alias.
  */
+import { Profiler } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
@@ -241,7 +242,20 @@ describe('InvoiceView — New invoice (task 133)', () => {
       await findRow('INV-4711.pdf');
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
       expect(submitButton()).toBeDisabled();
-      expect(screen.getByText(/Still needed: the matter, project or work assignment, the firm\./)).toBeInTheDocument();
+      // The firm is optional (EB-D-185): it is never listed as still needed.
+      expect(screen.getByText('Still needed: the matter, project or work assignment.')).toBeInTheDocument();
+    },
+    TIMEOUT
+  );
+
+  it(
+    "Still needed lists the record and the firm's invoice number, never the firm",
+    async () => {
+      renderView();
+      await findRow('INV-4711.pdf');
+      expect(
+        screen.getByText("Still needed: the matter, project or work assignment, the firm's invoice number.")
+      ).toBeInTheDocument();
     },
     TIMEOUT
   );
@@ -427,14 +441,237 @@ describe('InvoiceView — New invoice (task 133)', () => {
   );
 
   it(
-    'no firm linked to the record: the empty state, and Submit stays disabled',
+    'no firm linked to the record (EB-D-185): the warning shows, Submit is enabled and sends firmId null',
     async () => {
-      renderView({ loadFirms: jest.fn(async () => []) });
+      const { onSubmit } = renderView({ loadFirms: jest.fn(async () => []) });
       await findRow('INV-4711.pdf');
       await chooseMatter();
-      expect(await screen.findByText('No firm is linked to this record')).toBeInTheDocument();
+      expect(
+        await screen.findByText('No firm is linked to this record. The invoice will be held until a reviewer adds one.')
+      ).toBeInTheDocument();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      expect(screen.queryByText(/Still needed/)).toBeNull();
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const [input] = onSubmit.mock.calls[0] as unknown as [Record<string, unknown>];
+      expect(input).toHaveProperty('firmId', null);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'firms listed but none chosen (EB-D-185): the warning shows, Submit is enabled and sends firmId null',
+    async () => {
+      const loadFirms = jest.fn(async () => [
+        { firmId: FIRM_ID, name: 'Firm F' },
+        { firmId: '9c1d7a2f-5d3b-4a8e-8b62-3a4e2d1f0c88', name: 'Firm G' },
+      ]);
+      const { onSubmit } = renderView({ loadFirms });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      expect(
+        await screen.findByText('No firm selected. The invoice will be held until a reviewer adds one.')
+      ).toBeInTheDocument();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const [input] = onSubmit.mock.calls[0] as unknown as [Record<string, unknown>];
+      expect(input).toHaveProperty('firmId', null);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: choosing a firm clears the warning and sends that firm',
+    async () => {
+      const loadFirms = jest.fn(async () => [
+        { firmId: FIRM_ID, name: 'Firm F' },
+        { firmId: '9c1d7a2f-5d3b-4a8e-8b62-3a4e2d1f0c88', name: 'Firm G' },
+      ]);
+      const { onSubmit } = renderView({ loadFirms });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await screen.findByText(/No firm selected/);
+      await userEvent.selectOptions(screen.getByRole('combobox'), 'Firm F');
+      expect(screen.queryByText(/No firm selected/)).toBeNull();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect((onSubmit.mock.calls[0] as unknown as [{ firmId: string }])[0].firmId).toBe(FIRM_ID);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a failed firm list no longer blocks Submit; the message and Retry stay',
+    async () => {
+      const failing = jest.fn(async () => {
+        throw new Error("Spaarke couldn't list the firms for this record right now. Try again in a moment.");
+      });
+      const { onSubmit } = renderView({ loadFirms: failing });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      expect(
+        await screen.findByText(
+          "Spaarke couldn't list the firms for this record right now. Try again in a moment. The invoice will be held until a reviewer adds one."
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry loading the firms' })).toBeInTheDocument();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0]![0]).toHaveProperty('firmId', null);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'no firm loader (unavailable): the message says the invoice will be held, and Submit is enabled',
+    async () => {
+      renderView({ loadFirms: undefined });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      expect(
+        await screen.findByText("Firms can't be listed here yet. The invoice will be held until a reviewer adds one.")
+      ).toBeInTheDocument();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-not-fire: while the firm list is loading, Submit stays disabled (a record with one firm auto-selects it)',
+    async () => {
+      let release: (firms: Array<{ firmId: string; name: string }>) => void = () => undefined;
+      const pending = new Promise<Array<{ firmId: string; name: string }>>(resolve => {
+        release = resolve;
+      });
+      renderView({ loadFirms: jest.fn(() => pending) });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await screen.findByText('Loading firms…');
       await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
       expect(submitButton()).toBeDisabled();
+      release([{ firmId: FIRM_ID, name: 'Firm F' }]);
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+    },
+    TIMEOUT
+  );
+
+  it(
+    "after Done on the email's filed record, its only firm is chosen again for the next invoice",
+    async () => {
+      const { onSubmit, loadFirms } = renderView({ filedRecord: MATTER });
+      await findRow('INV-4711.pdf');
+      await waitFor(() => expect(loadFirms).toHaveBeenCalledTimes(1));
+      const box = () => screen.getByRole('textbox', { name: /Firm invoice number/ });
+      await userEvent.type(box(), 'A1');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await screen.findByText('Invoice submitted');
+      expect((onSubmit.mock.calls[0] as unknown as [{ firmId: string }])[0].firmId).toBe(FIRM_ID);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+      // The filed record is the same object, so the firm list must be asked for again: the firm was cleared.
+      await waitFor(() => expect(loadFirms).toHaveBeenCalledTimes(2));
+      await userEvent.type(box(), 'A2');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      expect(screen.queryByText(/No firm selected/)).toBeNull();
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+      expect((onSubmit.mock.calls[1] as unknown as [{ firmId: string }])[0].firmId).toBe(FIRM_ID);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: Submit is never enabled in the render where the record changed but its firms are not yet asked for',
+    async () => {
+      const PROJECT_ID = '2a7d4c1e-9b3f-4e8a-b6d2-7c5e1f0a9d33';
+      const PROJECT: EntitySearchResult = {
+        id: PROJECT_ID,
+        entityType: 'Project',
+        logicalName: 'sprk_project',
+        name: 'Project X',
+        displayInfo: 'PRJ-9',
+        canFile: true,
+      };
+      let watching = false;
+      const enabledWhileStale: boolean[] = [];
+      const loadFirms = jest.fn((target: { entityType: string; entityId: string }) => {
+        if (target.entityId === PROJECT_ID) {
+          // The firm effect has run: the transient render is over.
+          watching = false;
+          return new Promise<Array<{ firmId: string; name: string }>>(() => undefined);
+        }
+        return Promise.resolve([{ firmId: FIRM_ID, name: 'Firm F' }]);
+      });
+      const onSubmit = jest.fn(async () => ({ kind: 'success' as const, trackingNumber: 'T-1' }));
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <Profiler
+            id="invoice"
+            onRender={() => {
+              if (!watching) return;
+              const button = screen.queryByRole('button', { name: /^Submit$/ }) as HTMLButtonElement | null;
+              enabledWhileStale.push(button !== null && !button.disabled);
+            }}
+          >
+            <InvoiceView
+              hostAdapter={adapter()}
+              apiBaseUrl="https://bff"
+              getAccessToken={async () => 'token'}
+              onSubmit={onSubmit}
+              loadFirms={loadFirms}
+              filedRecord={MATTER}
+            />
+          </Profiler>
+        </FluentProvider>
+      );
+      await findRow('INV-4711.pdf');
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+
+      // Change the record: clear it, then pick another.
+      await userEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+      mockSearch.mockResolvedValue([PROJECT]);
+      await userEvent.click(screen.getByRole('radio', { name: 'Project' }));
+      await userEvent.type(screen.getByLabelText('Search Project records'), 'X');
+      await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+      const select = await screen.findByRole('button', { name: 'Select this record' });
+      watching = true;
+      await userEvent.click(select);
+      await waitFor(() => expect(loadFirms).toHaveBeenCalledWith({ entityType: 'Project', entityId: PROJECT_ID }));
+
+      expect(enabledWhileStale.length).toBeGreaterThan(0); // not vacuous: the transient render was observed
+      expect(enabledWhileStale).not.toContain(true);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'the screen-reader announcement carries the outcome sentence, so firm_missing is heard',
+    async () => {
+      const message = 'Submitted without a firm. A reviewer will add the firm before approval.';
+      const onSubmit = jest.fn(async () => ({ kind: 'success' as const, trackingNumber: 'T-1', message }));
+      renderView({ onSubmit, loadFirms: jest.fn(async () => []) });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() =>
+        expect(
+          Array.from(document.querySelectorAll('[aria-live="polite"]')).some(
+            region => region.textContent === `Invoice submitted. ${message}`
+          )
+        ).toBe(true)
+      );
     },
     TIMEOUT
   );
@@ -673,6 +910,24 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
         firmId: FIRM_ID,
         firmInvoiceNumber: 'INV-012',
       });
+    },
+    TIMEOUT
+  );
+
+  it(
+    'a correction of a no-firm invoice (EB-D-185) shows "Firm: none" and sends firmId null',
+    async () => {
+      const loadCorrectionPrefill = jest.fn(async () => ({ ...PREFILL, firm: null }));
+      const { onSubmit } = renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      const details = await screen.findByTestId('invoice-correction-details');
+      expect(within(details).getByText('Firm: none')).toBeInTheDocument();
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      await userEvent.click(submitButton());
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      const [input] = onSubmit.mock.calls[0] as unknown as [Record<string, unknown>];
+      expect(input).toMatchObject({ mode: 'Correction', invoiceId: INVOICE_ID, firmInvoiceNumber: 'INV-012' });
+      expect(input).toHaveProperty('firmId', null);
     },
     TIMEOUT
   );

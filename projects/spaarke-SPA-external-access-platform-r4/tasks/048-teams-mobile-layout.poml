@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Teams mobile layout at phone width (≤ 480px) (FR-32, #2466)</title>
+    <phase>4 Access, sign-in, carry-overs, Teams</phase>
+    <gate>after 040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts across the shell and the record template (tags frontend, fluent-ui)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Responsive styling with an explicit breakpoint and target sizes; existing @media precedents in the SPA</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the external SPA usable in the Teams tab on phones: at a viewport of 480px or less the shell, the workspace tabs and the record template collapse to one column, record toolbar actions move into an overflow, touch targets are at least 44px, and nothing scrolls horizontally.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 makeStyles responsive layout and the SPA's Teams host.</role>
+  <goal>At 375px (Teams mobile, or emulated with the Teams host adapter) every workspace tab and every record type is readable and operable in one column with no horizontal scroll; wider layouts are unchanged.</goal>
+
+  <context>
+    <background>#2466: the Teams tab on phones renders the desktop layout. Host: src/client/external-spa/src/host/TeamsHostAdapter.ts (`detectTeamsHost` :126, `mapTeamsTheme` :204, `createTeamsHostAdapter` :402; the Teams context also reports the host client type). Shell: src/client/external-spa/src/components/shell/ (PortalWorkspaceShell.tsx, TabStrip.tsx, NotificationBell.tsx, QuickStartPane.tsx, AssistantPane.tsx, WidgetLibraryModal.tsx). The record template and its sections are the files tasks 003/005 create (plan.md §4 Phase 1: a `RecordTemplate/` folder in the SPA) — read 003's and 005's outputs for the exact paths; the template already stacks its 66/34 columns below 1000px (FR-02). Record toolbars are the shared RecordCommandBar (task 001), which has an optional overflow (FR-04). Existing responsive precedent: `'@media (max-width: 600px)'` in pages/ProjectPage.tsx:102 and pages/SettingsPage.tsx:53. Spec assumption: ≤ 480px is phone.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/shell/PortalWorkspaceShell.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/shell/TabStrip.tsx</file>
+      <file role="modify">the record template files from tasks 003/005 (RecordTemplate/ folder; confirm paths from those tasks' outputs)</file>
+      <file role="canonical-reference">src/client/external-spa/src/host/TeamsHostAdapter.ts</file>
+      <file role="canonical-reference">src/client/external-spa/src/pages/ProjectPage.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md</file>
+      <file role="canonical-reference">src/client/external-spa/tests/App.teamsHost.test.tsx</file>
+      <file role="new-artifact">src/client/external-spa/tests/MobileLayout.test.tsx</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r4/notes/task-048-notes.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">040 changes which tabs a workforce contact sees; the mobile layout must cover them</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-32">At viewport width ≤ 480px: one column everywhere (shell panes, tab content, record template sections); record toolbar actions beyond the primary ones go to the RecordCommandBar overflow; every interactive control in the shell, tab strip and record template has a touch target ≥ 44 × 44px; no horizontal page scroll.</constraint>
+    <constraint source="NFR-03">Layouts at 1440, 1280 and 1000px are unchanged (visual check + no test regressions). Browser users at ≤ 480px get the same one-column layout (width-driven, not Teams-only), unless the notes record a reason to gate it on the Teams host.</constraint>
+    <constraint source="ADR-021 / NFR-01">Fluent v9 makeStyles and semantic tokens only; no hard-coded colours or pixel colours; works in light, dark, high-contrast and Teams themes; every icon-only control keeps its aria-label and tooltip.</constraint>
+    <constraint source="project">Do not change the shared RecordCommandBar's API; use its existing overflow. If the overflow cannot express the phone layout, escalate (shared-lib change belongs to task 001's owner and code-review).</constraint>
+    <constraint source="NFR-02">Focus still stays inside the modal and its child dialogs at phone width.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r4/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Responsive makeStyles" location="src/client/external-spa/src/pages/ProjectPage.tsx">The `'@media (max-width: 600px)'` block (:102) — same mechanism, 480px breakpoint, one shared constant.</pattern>
+      <pattern name="Toolbar slots and tooltip/aria rule" location="src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md">Icon-only actions keep tooltip = aria-label in the overflow.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Audit at 375px (browser emulation and the Teams host adapter): list each element that overflows, sits side by side, or has a target under 44px; record it in the notes.</step>
+    <step order="2">Add one phone breakpoint constant (480px) and apply one-column rules to the shell, tab strip and record template; move secondary record actions to the overflow at that width.</step>
+    <step order="3">Raise touch targets to ≥ 44px at that width only.</step>
+    <step order="4">Tests (vitest + jsdom where measurable): the breakpoint constant drives the styles; the template renders one column and the overflow at ≤ 480px; no regression in App.teamsHost.test.tsx.</step>
+    <step order="5">Run the external-spa test suite.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r4/notes/task-048-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the RecordCommandBar overflow cannot hold the phone toolbar without an API change, STOP and escalate rather than forking a SPA-local toolbar.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Teams mobile at 375px">
+      <url>https://{spa-dev-host}/</url>
+      <steps>
+        <step>Resize the viewport to 375×812 (mobile preset) and load the SPA in the Teams host (or the Teams mobile client)</step>
+        <step>Open each visible tab; open one record of each type</step>
+        <step>Scroll horizontally on each screen; measure button/target sizes</step>
+        <step>Check the console for errors</step>
+      </steps>
+      <expected>One column; secondary actions in the overflow; targets ≥ 44px; no horizontal scroll; no console errors.</expected>
+    </test>
+    <test name="Wide layouts unchanged">
+      <steps><step>Load at 1440, 1280 and 1000px and compare with the P3 build</step></steps>
+      <expected>No layout change at those widths.</expected>
+    </test>
+    <test name="Dark, high-contrast and Teams themes (ADR-021)">
+      <steps><step>At 375px switch to dark, high-contrast and the Teams dark theme</step></steps>
+      <expected>Semantic tokens only; overflow menu and template legible; focus outlines visible.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run the external-spa vitest suite</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/components/shell/PortalWorkspaceShell.tsx</output>
+    <output type="code">src/client/external-spa/src/components/shell/TabStrip.tsx</output>
+    <output type="code">record template files from tasks 003/005</output>
+    <output type="test">src/client/external-spa/tests/MobileLayout.test.tsx</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r4/notes/task-048-notes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">At 375px with the Teams host adapter (or in the Teams mobile client) the shell, tabs and every record type render in one column with no horizontal scroll.</criterion>
+    <criterion testable="true">At ≤ 480px secondary record actions are in the RecordCommandBar overflow, each with tooltip = aria-label.</criterion>
+    <criterion testable="true">At ≤ 480px every interactive control in the shell, tab strip and record template is at least 44 × 44px.</criterion>
+    <criterion testable="true">Negative: layouts at 1440, 1280 and 1000px are unchanged.</criterion>
+    <criterion testable="true">Light, dark, high-contrast and Teams themes use semantic tokens only; focus stays in the modal and its child dialogs at phone width.</criterion>
+    <criterion testable="true">The shared RecordCommandBar API is unchanged.</criterion>
+    <criterion testable="true">The external-spa suite passes.</criterion>
+    <criterion testable="true">Test scope: cover the breakpoint behaviour and the overflow named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-32; issue #2466; NFR-01, NFR-03. Verification evidence (screenshots or the Teams mobile check) goes in the task notes; task 058 repeats it on dev.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

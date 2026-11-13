@@ -15,6 +15,9 @@ const createOntologyAuthoringService = jest.fn((opts: unknown) => ({ authoring: 
 const searchLookupTarget = jest.fn((_target: string, _query: string) =>
   Promise.resolve([{ id: 'm-1', name: 'Acme v Beta' }])
 );
+const navigationService = { openLookup: jest.fn() };
+const createXrmNavigationService = jest.fn(() => navigationService);
+const getXrm = jest.fn((_capability?: unknown): unknown => ({ Utility: { lookupObjects: jest.fn() } }));
 let tabProps: Record<string, unknown> | undefined;
 let rulesAreaProps: Record<string, unknown> | undefined;
 let classificationAreaProps: Record<string, unknown> | undefined;
@@ -37,6 +40,8 @@ jest.mock('@spaarke/ui-components', () => ({
   createClassificationService: (opts: unknown) => createClassificationService(opts),
   createOntologyAuthoringService: (opts: unknown) => createOntologyAuthoringService(opts),
   searchLookupTarget: (target: string, query: string) => searchLookupTarget(target, query),
+  createXrmNavigationService: () => createXrmNavigationService(),
+  getXrm: (capability?: unknown) => getXrm(capability),
 }));
 jest.mock('../../../providers/useAiSession', () => ({
   __esModule: true,
@@ -50,6 +55,7 @@ const props = {} as unknown as React.ComponentProps<typeof OntologyAdminWorkspac
 describe('OntologyAdminWorkspaceWidget', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    getXrm.mockImplementation(() => ({ Utility: { lookupObjects: jest.fn() } }));
     tabProps = undefined;
     rulesAreaProps = undefined;
     classificationAreaProps = undefined;
@@ -85,6 +91,24 @@ describe('OntologyAdminWorkspaceWidget', () => {
     expect(picker.subject).toBe('sprk_matter');
     await expect(picker.search('acme')).resolves.toEqual([{ id: 'm-1', name: 'Acme v Beta' }]);
     expect(searchLookupTarget).toHaveBeenCalledWith('sprk_matter', 'acme');
+  });
+
+  it("gives the matter picker the host's navigation service when the frame can open the Dataverse lookup (D-219 Q5)", () => {
+    render(<OntologyAdminWorkspaceWidget {...props} />);
+
+    expect(getXrm).toHaveBeenCalledWith('lookupObjects');
+    expect(createXrmNavigationService).toHaveBeenCalledTimes(1);
+    expect((rulesAreaProps?.matterPicker as { navigationService?: unknown }).navigationService).toBe(navigationService);
+  });
+
+  it('offers no navigation service without Xrm, so the wizard keeps its inline matter search (no pane that cannot open)', () => {
+    getXrm.mockImplementation(() => undefined);
+    render(<OntologyAdminWorkspaceWidget {...props} />);
+
+    expect(createXrmNavigationService).not.toHaveBeenCalled();
+    const picker = rulesAreaProps?.matterPicker as { navigationService?: unknown; search: unknown };
+    expect(picker.navigationService).toBeUndefined();
+    expect(typeof picker.search).toBe('function');
   });
 
   it("fills the tab's classification slot with the area, over a service built from the session fetch and BFF base url", () => {

@@ -43,6 +43,9 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     /// <summary>Task 098: the assistant tools' (a') invoice-family seam (a test that reaches it sets one).</summary>
     private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyInvoiceFamilyHiding _hideInvoiceFamily = Sprk.Bff.Api.Tests.Api.ExternalAccess.InvoiceFamilyHidingStubs.ChildTablesShown;
 
+    /// <summary>Task 191h: THE external visibility predicate seam (a test about it sets the real predicate or a fault).</summary>
+    private Sprk.Bff.Api.Infrastructure.ExternalAccess.AppOnlyExternalVisibility _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.AllVisible;
+
     public DataverseSearchDataHandlerTests()
     {
         // Default caller: a resolved INTERNAL systemuser (sprk_isexternal not true).
@@ -56,12 +59,94 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
 
     private DataverseSearchDataHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseSearchDataHandler>(), _httpContextAccessor,
-            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily);
+            _callerResolver.Object, _identityResolver.Object, _appOnly.Narrowing, _hideInvoiceFamily, _externalVisibility);
 
     private void AsExternalCaller() =>
         _identityResolver
             .Setup(r => r.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // uac-r2 task 191h (#2189): THE external visibility predicate on every root and lineage-child hit
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The search returns exactly <paramref name="hits"/>; an analysis hit has no source document (the 188 leg passes).</summary>
+    private void ArrangeLineageHits(params (string Entity, Guid Id)[] hits)
+    {
+        CaptureSearchBodies(DataverseUserResponse.Ok(200, ParseJson("{ \"value\": [ " + string.Join(", ", hits.Select((hit, i) =>
+            "{ \"@search.score\": " + (9 - i) + ".0, \"entityname\": \"" + hit.Entity + "\", \"objectid\": \"" + hit.Id.ToString("D") + "\" }"))
+            + " ] }")));
+        var analyses = hits.Where(h => h.Entity == "sprk_analysis").Select(h => h.Id).ToList();
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_analysises?")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("{ \"value\": [ "
+                + string.Join(", ", analyses.Select(id => "{ \"sprk_analysisid\": \"" + id.ToString("D")
+                    + "\", \"_sprk_documentid_value\": null, \"_sprk_outputfileid_value\": null, \"_sprk_regardingdocument_value\": null }")) + " ] }")));
+    }
+
+    private static (string, Guid)[] LeakHits(Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld leak) => new[]
+    {
+        ("sprk_analysis", leak.AnalysisAboutTheEmail), ("sprk_analysis", leak.PlainAnalysis),
+        ("sprk_analysis", leak.AnalysisUnderTheRestrictedMatter), ("sprk_matter", leak.Matter), ("sprk_matter", leak.RestrictedMatter),
+    };
+
+    [Fact(DisplayName = "191h search_data must fire (#2189): an analysis filed only to an internal-only email, an analysis under a Restricted matter and the Restricted matter are hidden from an external caller; the 188 legs alone leave them")]
+    public async Task ExecuteChatAsync_191h_TheVisibilityPredicate_HidesLineageHits_TheControlKeepsThem()
+    {
+        AsExternalCaller();
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+        ArrangeLineageHits(LeakHits(leak));
+
+        // Control (perturbation): without THE predicate, the 188 legs alone return every hit (#2189).
+        var before = await SearchAsync();
+        before.Success.Should().BeTrue(before.ErrorMessage);
+        ResultIds(before).Should().HaveCount(5);
+
+        var asked = new List<IReadOnlyCollection<(string Table, Guid Id)>>();
+        _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Recording(asked, leak.Seam);
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().Equal(new[] { leak.PlainAnalysis.ToString("D"), leak.Matter.ToString("D") },
+            "the analysis about the internal-only email (taint through sprk_regardingcommunication), the analysis under the " +
+            "Restricted matter and the Restricted matter itself are not shown; the plain analysis and the open matter are");
+        asked.Should().ContainSingle("ONE predicate call for the page").Which.Should().HaveCount(5);
+        CapturedLogMessages.Should().Contain(m =>
+            m.FormattedMessage.Contains(ExternalCallerCommunicationGuard.LogEvent) &&
+            m.FormattedMessage.Contains("external_visibility_hidden=3"));
+        AssertTelemetryRespectsAdr015(leak.AnalysisAboutTheEmail.ToString("D"), leak.RestrictedMatter.ToString("D"));
+    }
+
+    [Fact(DisplayName = "191h search_data must not fire: an internal systemuser's hits are unchanged and the predicate is never asked")]
+    public async Task ExecuteChatAsync_191h_AnInternalCaller_IsUnchanged_AndThePredicateIsNotAsked()
+    {
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+        ArrangeLineageHits(LeakHits(leak));
+        _externalVisibility = Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ResultIds(result).Should().HaveCount(5, "an internal caller is not narrowed (a predicate call would fail the tool)");
+    }
+
+    [Theory(DisplayName = "191h search_data must fire: a predicate that faults or throws fails the tool call with no data (fail closed)")]
+    [InlineData("faulted")]
+    [InlineData("throws")]
+    public async Task ExecuteChatAsync_191h_APredicateFault_FailsTheCall(string fault)
+    {
+        AsExternalCaller();
+        var leak = new Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilityLeakWorld();
+        ArrangeLineageHits(LeakHits(leak));
+        _externalVisibility = fault == "faulted"
+            ? Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Faulted
+            : Sprk.Bff.Api.Tests.TestInfrastructure.ExternalVisibilitySeams.Throws;
+
+        var result = await SearchAsync();
+
+        result.Success.Should().BeFalse();
+        result.Data.Should().BeNull();
+    }
 
     private static AnalysisTool BuildSearchTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseSearchDataHandler), name: "SYS-Dataverse Search Data");

@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import { SendEmailDialog } from '@spaarke/ui-components';
+import { SendEmailDialog, createXrmEmailComposeHandlers } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
 import { createXrmNavigationService, getXrm } from '@spaarke/ui-components';
@@ -151,6 +151,14 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     return searchUsersAsLookup(xrm.WebApi, query);
   }, []);
 
+  // D-219 Q3 (task 186): EmailComposer shows the template picker and the AI-draft sparkle only when
+  // the host passes these handlers. One Xrm/BFF-backed instance for this dialog.
+  const bffBaseUrl = getBffBaseUrl();
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [bffBaseUrl]
+  );
+
   return (
     <>
       <RichFilePreviewDialog
@@ -175,7 +183,11 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
         associations={[{ entityType: 'sprk_document', entityId: documentId }]}
         onSearchRecipients={handleSearchUsers}
         authenticatedFetch={authenticatedFetch}
-        bffBaseUrl={getBffBaseUrl()}
+        bffBaseUrl={bffBaseUrl}
+        onListEmailTemplates={emailComposeHandlers.onListEmailTemplates}
+        onRenderEmailTemplate={emailComposeHandlers.onRenderEmailTemplate}
+        onDraftWithAi={emailComposeHandlers.onDraftWithAi}
+        onUploadLocalAttachment={emailComposeHandlers.onUploadLocalAttachment}
         onError={err => console.error('[FilePreviewDialog] Send failed:', err.detail)}
       />
     </>
