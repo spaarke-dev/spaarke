@@ -65,5 +65,6 @@ Paths that can write a family row's pair: the create (`RecordCreationService`), 
     <criterion testable="true">AC5 (fail closed): a fault reading the stored row or the catalog writes nothing; cancellation is rethrown; every existing invoice-family, Finance and push test passes.</criterion>
   </acceptance-criteria>
 
-  <notes>Added 2026-11-13 from the owner's decision on #2772 (DI-029), in the main session.</notes>
+  <notes>Added 2026-11-13 from the owner's decision on #2772 (DI-029), in the main session.
+NOT in scope (ebilling-r1, 2026-11-13, held): a rule that an approval, external identifier, correction or submission's core lookup equals its invoice's core. It waits on an open owner decision on how a wrongly filed invoice is corrected (return-and-resubmit, or one server action that moves the whole family). Do not add it here.</notes>
 </task>
