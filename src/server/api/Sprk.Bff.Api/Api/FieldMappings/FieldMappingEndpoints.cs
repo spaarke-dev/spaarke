@@ -1350,6 +1350,22 @@ public static class FieldMappingEndpoints
 
                 foreach (var rule in rules.OrderBy(r => r.Priority))
                 {
+                    // Task 022c (unified-access-control-r2, 2026-11-12): an access column is never a mapping target, on any table
+                    // and from any source (RecordCreationService.AccessColumnsNeverMapped, the list Repair uses). A stored rule
+                    // aimed at one is skipped, with its one code, and the rest of the push applies. Asked first, so a document's
+                    // access columns carry this code too.
+                    if (IsAccessColumnNeverMapped(rule.TargetField))
+                    {
+                        recordFieldResults.Add(new FieldMappingResultDto
+                        {
+                            SourceField = rule.SourceField,
+                            TargetField = rule.TargetField,
+                            Status = FieldMappingStatus.Skipped,
+                            ErrorMessage = AccessColumnNotMappedMessage,
+                        });
+                        continue;
+                    }
+
                     // Task 189 (D7 T7a, security pass 2): a document's Access Permission and its own-narrowing record are
                     // set by Spaarke (max(own, inherited)). A rule targeting either on a document is skipped, and the rest
                     // of the push applies: one push from a Standard matter would otherwise clear the own narrowing of every
@@ -1358,7 +1374,7 @@ public static class FieldMappingEndpoints
                     // #2247: on every table, the owner and the creator. #2253 fix round 1 (K2): the push runs AS its caller,
                     // so it asks as WriteIdentity.Caller: these refusals and the table-name check only. Access tables and a
                     // secure root's columns are left to the caller's own Dataverse privileges and field security. The access
-                    // columns themselves are never a push's target (task 022c, the next check).
+                    // columns themselves are never a push's target (task 022c, the check above).
                     if (Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.RefuseAppOnlyWrite(
                             targetEntity, [rule.TargetField],
                             Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.WriteIdentity.Caller) is { } setBySpaarke)
@@ -1373,21 +1389,6 @@ public static class FieldMappingEndpoints
                             ErrorMessage = setBySpaarke.RefusalCode == Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.ChangedOnlyByItsWriterColumnReasonCode
                                 ? $"{setBySpaarke.Reason} ({setBySpaarke.RefusalCode}); the rule was skipped and nothing was written for it."
                                 : setBySpaarke.Reason,
-                        });
-                        continue;
-                    }
-
-                    // Task 022c (unified-access-control-r2, 2026-11-12): an access column is never a mapping target, on any table
-                    // and from any source (RecordCreationService.AccessColumnsNeverMapped, the list Repair uses). A stored rule
-                    // aimed at one is skipped, with its code, and the rest of the push applies.
-                    if (IsAccessColumnNeverMapped(rule.TargetField))
-                    {
-                        recordFieldResults.Add(new FieldMappingResultDto
-                        {
-                            SourceField = rule.SourceField,
-                            TargetField = rule.TargetField,
-                            Status = FieldMappingStatus.Skipped,
-                            ErrorMessage = AccessColumnNotMappedMessage,
                         });
                         continue;
                     }
@@ -1440,6 +1441,10 @@ public static class FieldMappingEndpoints
                 Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.DropSearchIndexFromUpdate(
                     targetEntity, childRecordId, updatePayload,
                     Sprk.Bff.Api.Services.RecordCreation.RecordTableRules.SearchIndexOriginMapping, logger);
+
+                // Task 022c: the same safety net for the access columns. A bind plan can name an access column's key under a rule
+                // whose TargetField does not (an alias), so whatever sits under one is removed from the final payload, and logged.
+                DropAccessColumns(targetEntity, childRecordId, updatePayload, logger);
 
                 if (updatePayload.Count > 0)
                 {
@@ -1965,6 +1970,27 @@ public static class FieldMappingEndpoints
         !string.IsNullOrWhiteSpace(targetField)
         && Sprk.Bff.Api.Services.RecordCreation.RecordCreationService.AccessColumnsNeverMapped.Contains(
             Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(targetField));
+
+    /// <summary>
+    /// Task 022c: removes from a push's final <paramref name="payload"/> every key whose column is an access column
+    /// (<see cref="IsAccessColumnNeverMapped"/>, any key form: a bind key, a <c>_x_value</c> key, any case), and logs each by
+    /// table, record and column (never its value). Returns how many keys were removed.
+    /// </summary>
+    internal static int DropAccessColumns(string targetEntity, Guid recordId, IDictionary<string, object?> payload, ILogger logger)
+    {
+        var dropped = payload.Keys.Where(IsAccessColumnNeverMapped).ToList();
+        foreach (var key in dropped)
+        {
+            payload.Remove(key);
+            logger.LogWarning(
+                "[FIELD-MAPPING-PUSH] {Table} {RecordId}: the access column {Column} is never a mapping target; it was removed "
+                + "from the push's payload ({Code})",
+                targetEntity, recordId, Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key),
+                AccessColumnNotMappedReasonCode);
+        }
+
+        return dropped.Count;
+    }
 
     /// <summary>The fixed text of a rule that is not a Copy rule (task 040: a push applies Copy rules only).</summary>
     internal const string NotACopyRuleMessage = "Only Copy rules are applied by a push; this rule was not applied.";

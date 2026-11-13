@@ -100,6 +100,78 @@ public class AccessColumnPushTargetTests
     public void TheCode_IsStable()
         => FieldMappingEndpoints.AccessColumnNotMappedReasonCode.Should().Be("field_mapping.push.access_column_not_mapped");
 
+    /// <summary>Every access column carries the one code, a document's included (the access-column check is asked before the
+    /// document's own refusal).</summary>
+    [Theory]
+    [InlineData("sprk_accesspermission")]
+    [InlineData("sprk_accessinheritance")]
+    public async Task ADocumentsAccessColumn_CarriesTheOneAccessColumnCode(string column)
+    {
+        var (_, _, _, _, results) = await Push("sprk_document", Rule(column, column, "Text"));
+
+        results.Should().ContainSingle().Which.ErrorMessage.Should().Be(FieldMappingEndpoints.AccessColumnNotMappedMessage);
+    }
+
+    /// <summary>
+    /// The payload safety net: a bind plan that names an access column's key under a rule whose target is an alias reaches the
+    /// payload past the per-rule check; it is removed before the write, and the other column is still written.
+    /// </summary>
+    [Fact]
+    public async Task ABindKeyForAnAccessColumn_UnderAnAliasedRule_IsRemovedBeforeTheWrite()
+    {
+        var record = Guid.Parse("022c0000-0000-0000-0000-0000000000a1");
+        var aliased = new FieldMappingRuleDto
+        {
+            SourceField = "sprk_inheritancesource",
+            TargetField = "sprk_inheritancealias",
+            SourceFieldType = "Lookup",
+            TargetFieldType = "Lookup",
+        };
+        var binds = new Dictionary<FieldMappingRuleDto, LookupBindPlan>
+        {
+            [aliased] = new LookupBindPlan("sprk_AccessInheritance@odata.bind", $"/sprk_accessinheritances({record:D})", null),
+        };
+
+        await FieldMappingEndpoints.ApplyMappingsToChildRecordsAsync(
+            Sprk.Bff.Api.Tests.Domain.Dataverse.FieldMapping.PermissivePushSourceGate.AllowingEveryChild(),
+            _writes.Object,
+            new StampWorld().Restamper,
+            [Rule("sprk_name", "sprk_description", "Text"), aliased],
+            new Dictionary<string, object?>
+            {
+                ["sprk_name"] = "Matter 022c",
+                ["sprk_inheritancesource"] = new SourceLookupValue(record, "sprk_accessinheritance", "Inherit"),
+            },
+            "sprk_matter",
+            new[] { Child },
+            Caller,
+            NullLogger.Instance,
+            CancellationToken.None,
+            lookupBinds: binds);
+
+        _writes.Verify(w => w.UpdateExistingRecordFieldsAsync(
+            "sprk_matter", Child,
+            It.Is<Dictionary<string, object?>>(f => f.Count == 1 && f.ContainsKey("sprk_description")),
+            Caller, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void ThePayloadSafetyNet_RemovesEveryKeyForm_AndKeepsTheOtherColumns()
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_AccessInheritance@odata.bind"] = "/sprk_accessinheritances(00000000-0000-0000-0000-000000000001)",
+            ["_sprk_accesspermission_value"] = 1,
+            ["SPRK_IsSecure"] = true,
+            ["sprk_description"] = "kept",
+            [SecureRootInheritance.PairIdColumn] = "kept",
+        };
+
+        FieldMappingEndpoints.DropAccessColumns("sprk_matter", Child, payload, NullLogger.Instance).Should().Be(3);
+
+        payload.Keys.Should().BeEquivalentTo(new[] { "sprk_description", SecureRootInheritance.PairIdColumn });
+    }
+
     // ── must not fire ──
 
     [Theory]
