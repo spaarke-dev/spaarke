@@ -66,7 +66,8 @@ export function invoiceFiledRecord(identity: DocumentIdentityState | undefined):
   };
 }
 
-const LOGICAL_NAME_BY_CORE_TYPE: Readonly<Record<InvoiceCoreRecordType, string>> = {
+/** The Dataverse logical name of each core record type (the view's "Open in Spaarke" for a record whose result carries none). */
+export const LOGICAL_NAME_BY_CORE_TYPE: Readonly<Record<InvoiceCoreRecordType, string>> = {
   Matter: 'sprk_matter',
   Project: 'sprk_project',
   WorkAssignment: 'sprk_workassignment',

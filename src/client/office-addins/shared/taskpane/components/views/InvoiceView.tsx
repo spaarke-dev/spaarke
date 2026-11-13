@@ -34,6 +34,8 @@ import {
   describeSubmittedLine,
   previousSubmissionTitle,
   FIRM_INVOICE_NUMBER_MAX,
+  LOGICAL_NAME_BY_CORE_TYPE,
+  NO_FIRM_REFUSAL,
   PO_NUMBER_MAX,
   type InvoiceCoreRecordType,
   type InvoiceCorrectionPrefill,
@@ -50,6 +52,7 @@ import {
   type LoadPreviousSubmission,
 } from '../../services/invoiceSubmissionSeam';
 import { canOpenSpaarkeRecords, openRecord } from '../../services/openRecordLauncher';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import {
   CORRECTION_NO_FIRM_MESSAGE,
   NO_FIRM_LINKED_MESSAGE,
@@ -192,12 +195,9 @@ const CORE_TYPE_LABEL: Record<InvoiceCoreRecordType, string> = {
   WorkAssignment: 'Work assignment',
 };
 
-/** The Dataverse logical name for an "Open in Spaarke" link to a core record whose search result carries none. */
-const CORE_LOGICAL_NAME: Record<InvoiceCoreRecordType, string> = {
-  Matter: 'sprk_matter',
-  Project: 'sprk_project',
-  WorkAssignment: 'sprk_workassignment',
-};
+/** Why a firm the server named cannot be used (its id is not a valid GUID, so the builder refuses it). */
+const INVALID_FIRM_MESSAGE =
+  "The firm's id isn't valid, so the invoice can't be submitted. Choose another firm, or fix the firm in Spaarke.";
 
 type InvoiceMode = 'new' | 'existing';
 
@@ -561,14 +561,18 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   // The submission form applies to a new invoice, or to a correction the server says can be made.
   const formActive = mode === 'new' || correction !== null;
 
+  // A firm counts only by its CANONICAL id (what is sent): an id that cleans to nothing (e.g. "{}" from a malformed
+  // server answer) is no firm, so Submit stays disabled instead of the builder throwing in the click handler.
+  const firmReady = cleanGuid(firmId).length > 0;
+
   const missing = useMemo(() => {
     const list: string[] = [];
     if (mode !== 'new') return list;
     if (!coreRecord) list.push('the matter, project or work assignment');
-    if (!firmId) list.push('the firm');
+    if (!firmReady) list.push('the firm');
     if (!normalizedNumber) list.push("the firm's invoice number");
     return list;
-  }, [mode, coreRecord, firmId, normalizedNumber]);
+  }, [mode, coreRecord, firmReady, normalizedNumber]);
 
   const detailsReady =
     mode === 'new'
@@ -578,11 +582,12 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         isCoreRecordType(coreRecord.entityType) &&
         firms.status === 'ready' &&
         firmsFor === firmsKey &&
-        firmId.length > 0 &&
+        firmReady &&
         normalizedNumber !== null
       : // A correction keeps the invoice's own firm; an invoice with no firm cannot be corrected from the pane.
         correction !== null &&
         correction.firm !== null &&
+        cleanGuid(correction.firm.id).length > 0 &&
         normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
 
   const canSubmit =
@@ -647,31 +652,41 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const handleSubmit = (): void => {
     if (!canSubmit) return;
     let input: InvoiceSubmissionInput;
-    if (correction) {
-      // Never a correction without a firm (canSubmit already holds it back; this is the same rule at the point of use).
-      if (!correction.firm) return;
-      input = buildInvoiceSubmissionInput({
-        target: { entityType: correction.coreRecord.entityType, entityId: correction.coreRecord.entityId },
-        attachments,
-        marking,
-        firmId: correction.firm.id,
-        firmInvoiceNumber: correction.firmInvoiceNumber,
-        poNumber,
-        mode: 'Correction',
-        invoiceId: correction.invoiceId,
-      });
-    } else {
-      if (!coreRecord || !isCoreRecordType(coreRecord.entityType) || firmId.trim().length === 0) return;
-      input = buildInvoiceSubmissionInput({
-        target: { entityType: coreRecord.entityType, entityId: coreRecord.id },
-        attachments,
-        marking,
-        firmId,
-        firmInvoiceNumber,
-        poNumber,
-        mode: 'New',
-        invoiceId: null,
-      });
+    try {
+      if (correction) {
+        // Never a correction without a firm (canSubmit already holds it back; this is the same rule at the point of use).
+        if (!correction.firm) return;
+        input = buildInvoiceSubmissionInput({
+          target: { entityType: correction.coreRecord.entityType, entityId: correction.coreRecord.entityId },
+          attachments,
+          marking,
+          firmId: correction.firm.id,
+          firmInvoiceNumber: correction.firmInvoiceNumber,
+          poNumber,
+          mode: 'Correction',
+          invoiceId: correction.invoiceId,
+        });
+      } else {
+        if (!coreRecord || !isCoreRecordType(coreRecord.entityType) || !firmReady) return;
+        input = buildInvoiceSubmissionInput({
+          target: { entityType: coreRecord.entityType, entityId: coreRecord.id },
+          attachments,
+          marking,
+          firmId,
+          firmInvoiceNumber,
+          poNumber,
+          mode: 'New',
+          invoiceId: null,
+        });
+      }
+    } catch (err) {
+      // The builder refuses what the gates should already have held back (a firm id that is no valid GUID): say so,
+      // visibly, and send nothing.
+      const message =
+        err instanceof Error && err.message && err.message !== NO_FIRM_REFUSAL ? err.message : INVALID_FIRM_MESSAGE;
+      setOutcome({ kind: 'refused', message });
+      announce(message, 'assertive');
+      return;
     }
     void runAttempt(input, newActionId());
   };
@@ -720,9 +735,18 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   // on Office on the web) and its one opener (`openRecord`, which builds the link and falls back to `window.open` from
   // this click). ORG_URL unset: no link at all, never a dead one.
   const openRecordAvailable = canOpenSpaarkeRecords(hostAdapter.getCapabilities());
-  const handleOpenRecord = (entityType: string, recordId: string): void => {
+  // A failed open (a blocked pop-up) is shown beside the link that was clicked, not only said to the live region:
+  // a sighted user never sees an sr-only announcement. The next click on it, or a successful open, clears it.
+  const [openFailure, setOpenFailure] = useState<{ testId: string; reason: string } | null>(null);
+  const handleOpenRecord = (entityType: string, recordId: string, testId: string): void => {
     const result = openRecord({ orgUrl: process.env.ORG_URL, entityType, recordId });
-    if (!result.opened && result.reason) announce(result.reason, 'assertive');
+    if (result.opened) {
+      setOpenFailure(null);
+      return;
+    }
+    const reason = result.reason ?? "Couldn't open the record.";
+    setOpenFailure({ testId, reason });
+    announce(reason, 'assertive');
   };
   const renderOpenInSpaarke = (entityType: string, recordId: string, testId: string) =>
     openRecordAvailable ? (
@@ -731,11 +755,16 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           appearance="transparent"
           size="small"
           icon={<OpenRegular />}
-          onClick={() => handleOpenRecord(entityType, recordId)}
+          onClick={() => handleOpenRecord(entityType, recordId, testId)}
           data-testid={testId}
         >
           Open in Spaarke
         </Button>
+        {openFailure?.testId === testId && (
+          <Text size={200} className={styles.note} data-testid={`${testId}-error`}>
+            {openFailure.reason}
+          </Text>
+        )}
       </div>
     ) : null;
 
@@ -1008,7 +1037,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           {coreRecord &&
             isCoreRecordType(coreRecord.entityType) &&
             renderOpenInSpaarke(
-              coreRecord.logicalName || CORE_LOGICAL_NAME[coreRecord.entityType],
+              coreRecord.logicalName || LOGICAL_NAME_BY_CORE_TYPE[coreRecord.entityType],
               coreRecord.id,
               'invoice-no-firm-open'
             )}
@@ -1150,7 +1179,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           isCoreRecordType(coreRecord.entityType) &&
           !(firms.status === 'ready' && firms.firms.length === 0 && firmsFor === firmsKey) &&
           renderOpenInSpaarke(
-            coreRecord.logicalName || CORE_LOGICAL_NAME[coreRecord.entityType],
+            coreRecord.logicalName || LOGICAL_NAME_BY_CORE_TYPE[coreRecord.entityType],
             coreRecord.id,
             'invoice-core-record-open'
           )}
@@ -1282,7 +1311,10 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
                 defaultType="Invoice"
                 disabled={choicesLocked}
               />
-              {invoice && renderOpenInSpaarke('sprk_invoice', invoice.id, 'invoice-existing-open')}
+              {/* Not while the correction's "no firm" message is showing: its link opens this same invoice. */}
+              {invoice &&
+                !(correction !== null && correction.firm === null) &&
+                renderOpenInSpaarke('sprk_invoice', invoice.id, 'invoice-existing-open')}
               {/* Both choices are shown disabled with their reason until the server can take them. A correction is
                   offered once the server accepts one (ebilling 097). Adding supporting files is ebilling 123
                   (POST /api/finance/invoices/{invoiceId}/files; contract 123-upload-contract.md, agreed) — the

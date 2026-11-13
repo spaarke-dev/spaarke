@@ -31,7 +31,7 @@ import { AttachmentSelector } from './AttachmentSelector';
 import { DocumentProfileSection } from './DocumentProfileSection';
 import { SaveModeSection, resolveSaveMode, type SaveModeChoice } from './SaveModeSection';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
-import { useRelatedRecord, type RelatedRecordView } from '../hooks/useRelatedRecord';
+import { useRelatedRecord, type RelatedRecordOutcome, type RelatedRecordView } from '../hooks/useRelatedRecord';
 import {
   useSaveFlow,
   type SaveFlowContext,
@@ -415,6 +415,15 @@ export const DEFAULT_SAVED_DOCUMENT_PANE_STATE: SavedDocumentPaneState = {
 /** Task 088: the confirmation bar's name for the record a resolved document is filed to. */
 function relatedRecordLabel(view: RelatedRecordView): string {
   return view.displayName || view.number || view.type;
+}
+
+/**
+ * The record a resolved document is filed to, as the confirmation bar's "Open in Spaarke" needs it (logical name + id).
+ * `null` when the document is not known to be filed to a record. One rule for the save path (`filingRecordOf`) and the
+ * Refresh path, so the link cannot name a different record than the "Filed to" text beside it.
+ */
+function relatedRecordRef(view: RelatedRecordOutcome): FiledRecordRef | null {
+  return view.kind === 'associated' ? { entityType: view.entityType, id: view.id } : null;
 }
 
 /**
@@ -977,14 +986,24 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // The confirmation bar's "Open in Spaarke" for the record the save was filed to: the same opener as every other
   // open-record affordance (`openRecord`, which falls back to `window.open` from the click on Office on the web).
+  // A failed open (a blocked pop-up) is said where a sighted user looks, beside the link, as well as to the live region.
+  // It describes one attempt at one record: a different saved document or filed record clears it.
+  const [filedRecordOpenFailure, setFiledRecordOpenFailure] = useState<string | null>(null);
+  const filedRecordKey = `${savedDocument?.documentId ?? ''}|${savedDocument?.filedRecord?.id ?? ''}`;
+  useEffect(() => {
+    setFiledRecordOpenFailure(null);
+  }, [filedRecordKey]);
   const handleOpenFiledRecord = useCallback(
     (record: FiledRecordRef | null | undefined) => {
       if (!record) return;
       const result = openRecord({ orgUrl: process.env.ORG_URL, entityType: record.entityType, recordId: record.id });
       if (result.opened) {
         hasOpenedExternalRecordRef.current = true;
-      } else if (result.reason) {
-        announce(result.reason, 'assertive');
+        setFiledRecordOpenFailure(null);
+      } else {
+        const reason = result.reason ?? "Couldn't open the record.";
+        setFiledRecordOpenFailure(reason);
+        announce(reason, 'assertive');
       }
     },
     [announce]
@@ -1160,9 +1179,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       if (savedDocument && cleanGuid(target.existingDocumentId) === savedDocument.documentId) {
         return savedDocument.filedRecord ?? null;
       }
-      return resolvedRelatedRecord.kind === 'associated'
-        ? { entityType: resolvedRelatedRecord.entityType, id: resolvedRelatedRecord.id }
-        : null;
+      return relatedRecordRef(resolvedRelatedRecord);
     },
     [selectedEntity, savedDocument, resolvedRelatedRecord]
   );
@@ -1276,7 +1293,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             savedDocument: {
               ...prev.savedDocument,
               ...(refreshedName ? { savedName: refreshedName } : {}),
-              ...(refreshedFiledTo !== undefined ? { filedTo: refreshedFiledTo } : {}),
+              // filedTo and the record its "Open in Spaarke" opens move together: the link never names a record the
+              // "Filed to" text no longer does (an unknown filing changes neither).
+              ...(refreshedFiledTo !== undefined
+                ? { filedTo: refreshedFiledTo, filedRecord: relatedRecordRef(resolvedRelatedRecord) }
+                : {}),
             },
           }
         : prev
@@ -1713,6 +1734,15 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                       >
                         Open in Spaarke
                       </Button>
+                    )}
+                    {openRecordAvailable && bar.filedRecord && filedRecordOpenFailure && (
+                      <Text
+                        size={200}
+                        className={styles.savedBarDetail}
+                        data-testid="saved-bar-open-filed-record-error"
+                      >
+                        {filedRecordOpenFailure}
+                      </Text>
                     )}
                   </>
                 )}

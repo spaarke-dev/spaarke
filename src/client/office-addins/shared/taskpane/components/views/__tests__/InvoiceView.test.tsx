@@ -8,7 +8,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { InvoiceView, INVOICE_UPLOAD_HINT, type InvoiceViewProps } from '../InvoiceView';
-import { filedUnderRecord, invoiceFiledRecord } from '../../../services/invoiceSubmissionSeam';
+import { NO_FIRM_REFUSAL, filedUnderRecord, invoiceFiledRecord } from '../../../services/invoiceSubmissionSeam';
 import { buildOpenRecordUrl, configuredSpaarkeAppName } from '../../../services/openRecordLauncher';
 import { fetchRelatedCandidates } from '../../../services/communicationSuggestionsService';
 import { searchOfficeEntities } from '../../../services/officeEntitySearch';
@@ -25,6 +25,20 @@ jest.mock('../../../services/officeEntitySearch', () => ({ searchOfficeEntities:
 const mockSearch = searchOfficeEntities as jest.MockedFunction<typeof searchOfficeEntities>;
 jest.mock('../../../services/communicationSuggestionsService', () => ({ fetchRelatedCandidates: jest.fn() }));
 const mockCandidates = fetchRelatedCandidates as jest.MockedFunction<typeof fetchRelatedCandidates>;
+
+// A seam double that can be told to throw from the builder: the view's catch for a builder that refuses. Plain
+// functions (not jest.fn), so the file's restoreMocks does not touch them.
+let mockBuilderError: Error | null = null;
+jest.mock('../../../services/invoiceSubmissionSeam', () => {
+  const actual = jest.requireActual('../../../services/invoiceSubmissionSeam');
+  return {
+    ...actual,
+    buildInvoiceSubmissionInput: (...args: unknown[]) => {
+      if (mockBuilderError) throw mockBuilderError;
+      return actual.buildInvoiceSubmissionInput(...args);
+    },
+  };
+});
 
 const TIMEOUT = 30000;
 const MATTER_ID = '6f1c0e8a-2b1d-4c7e-9a52-0d3f1b7e9c41';
@@ -115,6 +129,7 @@ function withOrgUrl(value: string | undefined): void {
 beforeEach(() => {
   mockSearch.mockReset();
   mockCandidates.mockReset();
+  mockBuilderError = null;
   // Default for every test but the ones that set it: no ORG_URL, so no "Open in Spaarke" anywhere.
   delete process.env.ORG_URL;
   // Office on the web: no OpenBrowserWindowApi, so a record link opens through window.open from the click.
@@ -533,6 +548,41 @@ describe('InvoiceView — New invoice (task 133)', () => {
       await userEvent.click(submitButton());
       await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
       expect((onSubmit.mock.calls[0] as unknown as [{ firmId: string }])[0].firmId).toBe(FIRM_ID);
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: a malformed firm id ("{}") is no firm: Submit stays disabled, the firm is still needed, nothing is sent',
+    async () => {
+      const loadFirms = jest.fn(async () => [{ firmId: '{}', name: 'Broken Firm' }]);
+      const { onSubmit } = renderView({ loadFirms });
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await screen.findByRole('combobox');
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      expect(submitButton()).toBeDisabled();
+      expect(screen.getByText('Still needed: the firm.')).toBeInTheDocument();
+      await userEvent.click(submitButton());
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+    TIMEOUT
+  );
+
+  it(
+    'must-fire: a builder that refuses at click time shows a visible message and sends nothing (no unhandled error)',
+    async () => {
+      const { onSubmit } = renderView();
+      await findRow('INV-4711.pdf');
+      await chooseMatter();
+      await userEvent.type(screen.getByRole('textbox', { name: /Firm invoice number/ }), 'INV-4711');
+      await waitFor(() => expect(submitButton()).toBeEnabled());
+      mockBuilderError = new Error(NO_FIRM_REFUSAL);
+      await userEvent.click(submitButton());
+      const alert = await screen.findByText(/firm's id isn't valid/);
+      expect(alert.closest('.sr-only')).toBeNull();
+      expect(screen.getByText('The invoice was not submitted')).toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
     },
     TIMEOUT
   );
@@ -963,6 +1013,36 @@ describe('InvoiceView — Correction from the prefill (ebilling 097e)', () => {
       // The link in the message opens the INVOICE record.
       await userEvent.click(within(details).getByRole('button', { name: 'Open in Spaarke' }));
       expect(openSpy).toHaveBeenCalledWith(recordUrl('sprk_invoice', INVOICE_ID), '_blank');
+    },
+    TIMEOUT
+  );
+
+  it(
+    "must-fire: the no-firm correction shows exactly ONE Open in Spaarke link (the message's), not also the invoice card's",
+    async () => {
+      withOrgUrl(ORG_URL);
+      const loadCorrectionPrefill = jest.fn(async () => ({ ...PREFILL, firm: null }));
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      await screen.findByTestId('invoice-correction-no-firm');
+      const links = screen.getAllByRole('button', { name: 'Open in Spaarke' });
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAttribute('data-testid', 'invoice-correction-no-firm-open');
+    },
+    TIMEOUT
+  );
+
+  it(
+    "must-not-fire: a correction WITH a firm keeps the invoice card's one link",
+    async () => {
+      withOrgUrl(ORG_URL);
+      const loadCorrectionPrefill = jest.fn(async () => PREFILL);
+      renderView({ correctionAvailable: true, loadCorrectionPrefill });
+      await chooseCorrection();
+      await screen.findByTestId('invoice-correction-details');
+      const links = screen.getAllByRole('button', { name: 'Open in Spaarke' });
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAttribute('data-testid', 'invoice-existing-open');
     },
     TIMEOUT
   );
@@ -1822,22 +1902,29 @@ describe('InvoiceView — "Open in Spaarke" on the selected record (task 134, sl
   );
 
   it(
-    'a blocked pop-up is said, not swallowed',
+    'a blocked pop-up is said, not swallowed: visibly beside the link, and to the live region',
     async () => {
       withOrgUrl(ORG_URL);
-      jest.spyOn(window, 'open').mockReturnValue(null);
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue(null);
       jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       renderView();
       await findRow('INV-4711.pdf');
       await chooseMatter();
       await userEvent.click(await screen.findByRole('button', { name: 'Open in Spaarke' }));
-      await waitFor(() =>
-        expect(
-          Array.from(document.querySelectorAll('[aria-live="assertive"]')).some(r =>
-            /blocked the new window/.test(r.textContent ?? '')
-          )
-        ).toBe(true)
-      );
+      // The VISIBLE reason: the live region is sr-only, so it does not count.
+      const visible = (await screen.findAllByText(/blocked the new window/)).filter(el => !el.closest('.sr-only'));
+      expect(visible).toHaveLength(1);
+      expect(visible[0]).toBe(screen.getByTestId('invoice-core-record-open-error'));
+      // ...and still announced.
+      expect(
+        Array.from(document.querySelectorAll('[aria-live="assertive"]')).some(r =>
+          /blocked the new window/.test(r.textContent ?? '')
+        )
+      ).toBe(true);
+      // A later successful open clears it.
+      openSpy.mockReturnValue({} as Window);
+      await userEvent.click(screen.getByRole('button', { name: 'Open in Spaarke' }));
+      expect(screen.queryByTestId('invoice-core-record-open-error')).toBeNull();
     },
     TIMEOUT
   );
