@@ -1295,8 +1295,10 @@ internal static class OwnedChildWrite
     /// answers its own not-found); any other failed read refuses, nothing written (fail closed).
     /// </summary>
     /// <remarks>Task 045f: then a record URL the payload sends is decided (<see cref="KeepRegardingRecordUrlAppOnlyAsync"/>): it
-    /// must name the record the pair names after the write, so with a URL sent, a row that does not exist (or, on a write run
-    /// as a person, one they cannot read) is refused and nothing is written. A URL the planner derives is not decided again.</remarks>
+    /// must name the record the pair names after the write. When the write does not send both pair halves (on the thread, does
+    /// not set the deciding lookup), the stored row is read: a row that does not exist (or, on a write run as a person, one they
+    /// cannot read) is then refused and nothing is written. When both halves are sent, nothing is read. A URL the planner
+    /// derives is not decided again.</remarks>
     /// <returns>The payload to write: <paramref name="payload"/> itself when nothing applies, otherwise a copy.</returns>
     /// <exception cref="RecordOwnerUnresolvedException">A read the planner needs failed, or a sent record URL does not name the
     /// row's regarding record; nothing was written.</exception>
@@ -1433,8 +1435,9 @@ internal static class OwnedChildWrite
     /// Task 045f, the ONE decision every BFF write path asks (the child-record PATCH, the chat update tool, the playbook Update
     /// Record node, the output orchestrator, the create): on a table the rule decides (<see cref="RegardingRecordUrlRuleApplies"/>),
     /// a record URL the write sends names the record the row is filed under after the write — on a pair table the pair the same
-    /// write sends, else the stored one; on the thread the first typed regarding lookup the write sets, else the stored one —
-    /// read with the path's own reader.
+    /// write sends, else the stored one; on the thread the first typed regarding lookup, in priority order, that the row holds
+    /// after the write (a lookup the write sets or clears replaces the stored value of that column only, so a stored
+    /// higher-priority lookup still beats a lower one the write sets) — read with the path's own reader.
     /// <list type="bullet">
     /// <item>No URL sent, or a clear (null or blank): unchanged, nothing read.</item>
     /// <item>A URL that names no record (<see cref="RegardingPairWrite.TryReadRecordUrl"/>), a row that names none after the

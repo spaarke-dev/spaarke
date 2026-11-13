@@ -327,6 +327,29 @@ public class ReplyRegardingCopyTests
             .GetAttributeValue<string>("sprk_regardingrecordurl").Should().Be(CanonicalUrlOf(MatterId));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Reply_ToASourceWithNoTypedLookupForItsPair_CopiesTheUrlOnlyWhenItNamesTheCopiedId_InCanonicalForm(bool namesTheCopiedId)
+    {
+        // Fix round 2: with no typed lookup naming the copied id, the url's own table is kept and only its id is checked.
+        var source = WholeSource();
+        source.Attributes.Remove("sprk_regardingmatter");
+        source["sprk_regardingrecordurl"] = "https://other.example/main.aspx?etn=SPRK_MATTER&id="
+                                            + (namesTheCopiedId ? MatterId : OtherMatterId).ToString("B");
+        var harness = new Harness(source);
+
+        await harness.Service.SendAsync(Reply(), harness.SignedInUser());
+
+        var row = harness.Created.Should().ContainSingle(e => e.LogicalName == "sprk_communication").Subject;
+        row.Contains("sprk_regardingmatter").Should().BeFalse("the source carried no typed lookup to copy");
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(MatterId.ToString("D"));
+        if (namesTheCopiedId)
+            row.GetAttributeValue<string>("sprk_regardingrecordurl").Should().Be(CanonicalUrlOf(MatterId));
+        else
+            row.Contains("sprk_regardingrecordurl").Should().BeFalse("the source's url named another record than the copied id");
+    }
+
     [Fact]
     public async Task Send_WithAnAssociationWhoseUrlNamesAnotherRecord_WritesTheUrlOfTheAssociatedRecord()
     {

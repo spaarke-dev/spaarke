@@ -193,7 +193,8 @@ No other table carries the column, so no "writable with no pair" refusal was nee
 | `CommunicationService.ApplyTargetThreadAsync` | the thread's stored URL | canonical URL of the thread's anchor |
 | `CommunicationService` reply copy | the source's stored URL | admitted only when it names the copied record, canonical |
 | `CommunicationService.MapAssociationFieldsAsync` | the request's `EntityUrl` text | canonical URL of the associated record; none for an unknown table |
-| `ThreadResolver` email anchor and thread-to-thread anchor (feed thread create, re-anchor, default thread) | the source row's stored URL | canonical URL of the anchor record |
+| `ThreadResolver` email anchor (`MessageRegardingAnchorOf`; feeds thread create, the filing re-anchor and the default thread) | the email's stored URL | canonical URL of the anchor record |
+| `ThreadResolver` thread anchor (`ReadTypedRegardingAnchorFromThread`) | the thread's stored URL | canonical URL of the anchor record; no write reads this anchor's URL today (its callers use the type, id and name), so the change has no observable effect yet |
 | `InvoiceSubmissionEndpoints` re-file body | built by `DeriveResolverFieldsAsync` | unchanged (built, not copied; family) |
 | `ExternalDataService`, `IncomingAssociationResolver`, `TodoRegardingBuilder`, `EventEndpoints` | built from their own pair | unchanged |
 
@@ -209,6 +210,24 @@ The PATCH comment states that, with a URL sent, a missing row is refused.
 - **K2.** On an id-only pair (rule 5), any `etn` is kept when the id matches.
 - **K4.** A re-file that sends only the id over a stale stored type now gets 400 when the URL names the new table. This
   depends on the live catalog.
+- **Unknown association table.** A communication sent with an explicit association of a table the regarding map does not
+  know stores the id and name, but no URL.
+
+#### Deployment order
+
+The server now writes the relative canonical form (`/main.aspx?pagetype=entityrecord&etn=…&id=…`) for communication
+associations, thread inheritance and reply copies. The CommunicationConnections reader on master parses the URL with
+`new URL()`, which needs an absolute URL, so deploy part B (`task/fm-045f-client`) with or before this BFF.
+
+#### Fix round 2
+
+- Comments: the decision's summary states that on the thread the first typed regarding lookup in priority order that the row
+  holds after the write decides, so a stored higher-priority lookup beats a lower one the write sets. The app-only wrapper's
+  remark states that the stored row is read (and a missing row refused) only when the write does not send both pair halves.
+- `ReplyRegardingCopyTests.Reply_ToASourceWithNoTypedLookupForItsPair_CopiesTheUrlOnlyWhenItNamesTheCopiedId_InCanonicalForm`
+  (2 cases): with no typed lookup naming the copied id, a URL naming that id is copied in canonical form and a URL naming
+  another id is not copied. Both cases fail with the reply copy reverted to the plain string copy.
+- The thread-anchor builder has no test: no write consumes its URL (see the grep table), so no behaviour shows it.
 
 #### Evidence
 
