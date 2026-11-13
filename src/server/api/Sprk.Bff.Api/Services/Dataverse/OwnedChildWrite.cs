@@ -1583,7 +1583,7 @@ internal static class OwnedChildWrite
                     CallerObjectId = callerObjectId,
                     CallerSystemUserId = me.SystemUserId,
                     // fm task 054 piece 3b: the one unfile rule every re-file writer takes (an eligible Direct message returns
-                    // to the Direct team; any other communication is Unchanged pending #2722).
+                    // to the Direct team; any other communication linked to nothing goes to its creator's team or keeps its owner, #2722).
                     WhenUnfiled = Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.UnfiledOwnershipFor(
                         table, actsForAPerson: true, directOwner),
                     // Piece 3b: the typed regarding lookups the update sets that file nothing (a contact, an account): a message
