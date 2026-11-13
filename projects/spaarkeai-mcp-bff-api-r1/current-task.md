@@ -27,7 +27,7 @@
 | **Next** | When Copilot is back: run batches A–C with the owner + licensed non-admin test user; record results; acclerator-r1 sends WP-3/T1-Word results. |
 
 ## Active Lanes
-- **Dev BFF live `0c06f464e3`** (uac-r2, since 2026-11-13 13:26Z): master `92d0ca09f7` (includes #2757) + spike `d7369fecf1`, ledger conflict resolved in the build merge (census 153, ArchTests 2544/0); anon /mcp 401; uac-r2's 30-min gate to ~13:56Z watches `inbound-polling-backup` runs (#1561 open → the backup poll is the only inbound path). Rule: every uac-r2 dev deploy includes the spike tip until Phase 0 is done; never this branch.
+- **Dev BFF live `b100effac3`** (uac-r2, since 2026-11-13 20:39Z): master `c2f366bf52` (includes #2757) + spike `d7369fecf1`, ledger conflict resolved in the build merge (census 153); healthz/dataverse 200, anon /mcp 401; 30-min gate to ~21:09Z. Previous: `0c06f464e3` (13:26Z). #1561 open → the backup poll is the only inbound path. uac-r2 pings before each swap so live Copilot tests pause. Rule: every uac-r2 dev deploy includes the spike tip until Phase 0 is done; never this branch.
 - **Side PRs merged 2026-11-13:** #2759 (#2756 rate-limit log, `0d676cc66a`), #2763 (#2762 CopilotAuth failure log, `2da422bb9c`, uac-r2 gate PASS). ISS-005/006 Done in `notes/defer-issues.md`.
 - Filed today: #2758 (JobSubmissionService sender per job); comments on #2134 (processor logs Subject/From; IP in two logs).
 
