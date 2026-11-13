@@ -36,3 +36,5 @@ Status: design not started. Order: after 095e and 095f. A design note goes to ua
 | Clear a slot | Pure revoke | Write on the record, checked as the user |
 
 (uac-r2, 2026-11-13)
+
+- 2026-11-13 (from 045f review K2): a work assignment is a non-family pair table; field-mapping 045f refuses a generic-path write whose sprk_regardingrecordurl names another record (`regarding_record_url_mismatch`). If 095g writes the firm slots through a generic path, send no URL or the canonical one.

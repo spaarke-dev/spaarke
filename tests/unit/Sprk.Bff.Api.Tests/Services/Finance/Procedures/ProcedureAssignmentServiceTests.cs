@@ -823,6 +823,15 @@ public sealed class ProcedureAssignmentServiceTests
         // Stage 3 is one transaction: the Exclude row, the version and the conditional switch-on.
         w.H.Transactions.Should().HaveCount(3);
         w.H.Transactions[2].Select(r => r.GetType()).Should().Equal(typeof(CreateRequest), typeof(CreateRequest), typeof(UpdateRequest));
+        // The ORDER is the contract (ontology-r1, 084d-3 K-2): Dataverse stamps createdon per statement, so the Exclude row must be
+        // created before the version for the resolver's createdon >= episode-start test to admit the version. A reorder to
+        // [version, Exclude] would make the real read fault while the dry run (one rig stamp per write) still showed the change.
+        w.H.Transactions[2].Select(r => r switch
+        {
+            CreateRequest c => c.Target.LogicalName,
+            UpdateRequest u => u.Target.LogicalName,
+            _ => r.GetType().Name,
+        }).Should().Equal(Assignment, "sprk_policyversion", "sprk_policy");
         ((UpdateRequest)w.H.Transactions[2][2]).ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
 
         // The base rule is untouched.
