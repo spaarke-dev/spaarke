@@ -1,33 +1,27 @@
 /**
- * R4 task 004, fix round 1 (F4) - the Tasks & events section holds the record per list, not per section.
+ * R4 task 004 fix round 1 (F4), revised by task 009 - the Tasks & events section holds the record while its list is busy.
  *
- * `EventsCalendar` and `SmartTodo` each report a create in flight through `onBusyChange`, and the template keeps ONE busy
- * flag per section. If both lists passed it straight through, one list going idle (its create dialog unmounting, a list
- * remounting) would clear the flag while the other list's post was still in flight, releasing paging, Close and Refresh
- * early. The section therefore reports "busy" while EITHER list is busy.
+ * Task 009 (owner 2026-11-12): the section lists events only, so it has one list and hands the template's `onBusyChange`
+ * to it unchanged: a create in flight holds paging, Close and Refresh until it settles. Task 011 adds the Task-typed
+ * event list here and must hold per list again (one list going idle must not release the other's in-flight hold).
  *
- * What runs for real: `TasksEventsSection`. Substituted: the two lists, by stand-ins that expose the `onBusyChange` prop the
- * section hands them (the lists' own reporting is covered in `RecordTemplateChildDialogs`).
+ * What runs for real: `TasksEventsSection`. Substituted: `EventsCalendar`, by a stand-in that exposes the props the
+ * section hands it (the list's own reporting is covered in `RecordTemplateChildDialogs`).
  */
 import * as React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 
 const lists = vi.hoisted(() => ({
   events: undefined as undefined | ((busy: boolean) => void),
-  todos: undefined as undefined | ((busy: boolean) => void),
+  mounted: 0,
 }));
 
 vi.mock('../src/components/EventsCalendar', () => ({
   EventsCalendar: (props: { onBusyChange?: (busy: boolean) => void }) => {
     lists.events = props.onBusyChange;
-    return null;
-  },
-}));
-vi.mock('../src/components/SmartTodo', () => ({
-  SmartTodo: (props: { onBusyChange?: (busy: boolean) => void }) => {
-    lists.todos = props.onBusyChange;
-    return null;
+    lists.mounted += 1;
+    return <div data-testid="events-list-stand-in" />;
   },
 }));
 
@@ -39,62 +33,33 @@ function renderSection(onBusyChange: (busy: boolean) => void): ReturnType<typeof
     detail: { entity: 'sprk_matter' },
     recordId: '00000000-0000-4000-8000-000000000001',
     caller: null,
+    callerContext: null,
     refreshSignal: 0,
     onBusyChange,
     offerAction: () => undefined,
+    headerActions: [],
   } as unknown as RecordSectionContext;
   return render(<TasksEventsSection {...context} />);
 }
 
-describe('Tasks & events: one hold per list', () => {
-  it("one list going idle does not release the other list's in-flight hold", () => {
+describe('Tasks & events: the events list holds the record', () => {
+  it("the events list's create in flight holds the record until it settles", () => {
     const onBusyChange = vi.fn();
     renderSection(onBusyChange);
     expect(lists.events).toBeTypeOf('function');
-    expect(lists.todos).toBeTypeOf('function');
-
-    act(() => lists.todos!(true));
-    expect(onBusyChange).toHaveBeenLastCalledWith(true);
-
-    // The events list reports idle (its create dialog unmounting): the to-do post is still in flight.
-    act(() => lists.events!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(true);
-    expect(onBusyChange).not.toHaveBeenCalledWith(false);
-
-    act(() => lists.todos!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it('is symmetric: the to-do list going idle does not release an events post', () => {
-    const onBusyChange = vi.fn();
-    renderSection(onBusyChange);
 
     act(() => lists.events!(true));
-    act(() => lists.todos!(false));
     expect(onBusyChange).toHaveBeenLastCalledWith(true);
-    expect(onBusyChange).not.toHaveBeenCalledWith(false);
 
     act(() => lists.events!(false));
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
 
-  it('both lists busy: the hold lasts until the last one settles', () => {
-    const onBusyChange = vi.fn();
-    renderSection(onBusyChange);
-
-    act(() => lists.events!(true));
-    act(() => lists.todos!(true));
-    act(() => lists.events!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(true);
-    act(() => lists.todos!(false));
-    expect(onBusyChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it('control: with no list busy the section reports idle, never busy', () => {
-    const onBusyChange = vi.fn();
-    renderSection(onBusyChange);
-    act(() => lists.events!(false));
-    act(() => lists.todos!(false));
-    expect(onBusyChange).not.toHaveBeenCalledWith(true);
+  it('renders the events list only, inside the Tasks & events card', () => {
+    lists.mounted = 0;
+    renderSection(vi.fn());
+    const card = screen.getByTestId('record-section-tasksEvents');
+    expect(card.querySelector('[data-testid="record-detail-events"]')).not.toBeNull();
+    expect(screen.getAllByTestId('events-list-stand-in')).toHaveLength(1);
   });
 });

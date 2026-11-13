@@ -3,8 +3,10 @@
  * task 005, FR-01 / design §6).
  *
  * The card header is the shared `HeaderToolbar` (the record-header toolbar of the model-driven form, as the accepted
- * prototype's `RecordSection`): the section title on the left and the section's icon actions on the right. No section has
- * header actions yet (the record's create actions are toolbar actions, task 004), so `actions` defaults to none.
+ * prototype's `RecordSection`): the section title on the left and the section's icon actions on the right. Since task 009
+ * the record's create actions live here (Upload in Documents, New message in Messages, Add event in Tasks & events): the
+ * template builds them (`headerActions` in the section's context, only the offered ones) and the section passes them as
+ * `actions`. A section with none passes nothing.
  *
  * The card is the section's region (`<section aria-label>`); the content inside keeps R3's test ids
  * (`record-detail-documents`, `record-detail-events`, ...), so the R3 tests ported to the template find the same blocks.

@@ -36,7 +36,6 @@ import {
   ContactsOrganizations,
   DocumentLibrary,
   EventsCalendar,
-  SmartTodo,
   InviteUserDialog,
   IssuedGrantsList,
 } from '../components';
@@ -256,7 +255,7 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
 };
 
 // ---------------------------------------------------------------------------
-// Calendar tab — EventsCalendar + SmartTodo
+// Calendar tab — EventsCalendar (external users work only with events; R4 task 009)
 // ---------------------------------------------------------------------------
 
 interface CalendarTabContentProps {
@@ -272,7 +271,6 @@ const CalendarTabContent: React.FC<CalendarTabContentProps> = ({ projectId, acce
   return (
     <div className={styles.calendarTab}>
       <EventsCalendar projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
-      <SmartTodo projectId={projectId} accessLevel={accessLevel} writeAccessPerRecord={writeAccessPerRecord} />
     </div>
   );
 };
@@ -344,7 +342,7 @@ const ContactsTabContent: React.FC<ContactsTabContentProps> = ({ projectId, acce
  * │ OVERVIEW   CALENDAR   CONTACTS                               │
  * ├──────────────────────────────────────────────────────────────┤
  * │ Overview: Project Information (form) + Documents section     │
- * │ Calendar: EventsCalendar + SmartTodo                         │
+ * │ Calendar: EventsCalendar                                     │
  * │ Contacts: ContactsOrganizations + InviteUserDialog           │
  * └──────────────────────────────────────────────────────────────┘
  *

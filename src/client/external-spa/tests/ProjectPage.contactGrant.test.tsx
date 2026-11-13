@@ -60,7 +60,6 @@ vi.mock('../src/hooks/useExternalContext', () => ({
 // Tabs this test is not about.
 vi.mock('../src/components/DocumentLibrary', () => ({ DocumentLibrary: () => null }));
 vi.mock('../src/components/EventsCalendar', () => ({ EventsCalendar: () => null }));
-vi.mock('../src/components/SmartTodo', () => ({ SmartTodo: () => null }));
 
 import { ProjectPage } from '../src/pages/ProjectPage';
 import { canInvite, grantableLevels } from '../src/hooks/useAccessLevel';

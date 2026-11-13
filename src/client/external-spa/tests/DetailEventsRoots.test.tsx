@@ -1,12 +1,13 @@
 /**
- * R3 task 057 (FR-03 client) - events and to-dos on the Matter and Work Assignment detail views, generalised from the
- * Project section by root kind.
+ * R3 task 057 (FR-03 client) - events on the Matter and Work Assignment detail views, generalised from the Project
+ * section by root kind. R4 task 009 (owner 2026-11-12): external users work only with `sprk_event`, so the section lists
+ * events only and the SPA makes no to-do read, write or delete (was DetailEventsTodosRoots.test.tsx).
  *
  * What runs for real: `RecordTemplateModal` (R4 task 005; was R3's `RecordDetailModal`) with every section (fields,
- * documents, events and tasks, messages), `EventsCalendar`,
- * `SmartTodo`, `DocumentLibrary`, `RecordMessages`, the shared `SprkModal` / `ConfirmModal`, `BffAccessState`, `delete-own`,
- * `web-api-client` (the routes) and Fluent v9. What is substituted: the network seam (`bffApiCall`, answering the external
- * routes and throwing `ApiError` exactly as bff-client builds it) and MSAL's `useMsal` (BffAccessState reads it).
+ * documents, tasks & events, messages), `EventsCalendar`, `DocumentLibrary`, `RecordMessages`, the shared `SprkModal` /
+ * `ConfirmModal`, `BffAccessState`, `delete-own`, `web-api-client` (the routes) and Fluent v9. What is substituted: the
+ * network seam (`bffApiCall`, answering the external routes and throwing `ApiError` exactly as bff-client builds it; a
+ * to-do route is not answered, so any call to one fails the test) and MSAL's `useMsal` (BffAccessState reads it).
  *
  * The SERVER is the authority (task 039: the record's own rights plus the every-root rule, which withholds a row filed to
  * a root the caller cannot read). These tests prove the SPA reads the record's own routes, shows what comes back without
@@ -33,10 +34,9 @@ vi.mock('@azure/msal-react', () => ({
 
 import { AccessLevel, ApiError } from '../src/types';
 import { EventsCalendar } from '../src/components/EventsCalendar';
-import { SmartTodo } from '../src/components/SmartTodo';
 import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
 import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
-import { getRootEvents, getRootTodos, getEvents, getProjectTodos } from '../src/api/web-api-client';
+import { getRootEvents, getEvents } from '../src/api/web-api-client';
 import type { CallerIdentity } from '../src/api/delete-own';
 
 // ---------------------------------------------------------------------------
@@ -85,13 +85,6 @@ const ENTITY = {
 } as const;
 type Key = keyof typeof ENTITY;
 
-/** The URL segment each events/to-dos-bearing record kind reads from. */
-const ROOT_OF: Record<'project' | 'matter' | 'wa', string> = {
-  project: 'projects',
-  matter: 'matters',
-  wa: 'workassignments',
-};
-
 const event = (n: number, name: string, stamps: Record<string, string> = {}) => ({
   sprk_eventid: guid(800 + n),
   sprk_name: name,
@@ -100,22 +93,13 @@ const event = (n: number, name: string, stamps: Record<string, string> = {}) => 
   ...stamps,
 });
 
-const todo = (n: number, name: string, stamps: Record<string, string> = {}) => ({
-  sprk_todoid: guid(700 + n),
-  sprk_name: name,
-  statuscode: 1,
-  ...stamps,
-});
-
-/** What the network answers for the events and to-do lists: rows, or a refusal / failure to throw. */
+/** What the network answers for the events list: rows, or a refusal / failure to throw. */
 type ListAnswer = { value: Array<Record<string, unknown>>; truncated?: boolean } | { throws: ApiError };
 
 interface Net {
   events: ListAnswer;
-  todos: ListAnswer;
-  /** Answers for a retry: the first read of a list is `events` / `todos`, later reads are these (when set). */
+  /** The answer for a retry: the first read of the list is `events`, later reads are this (when set). */
   eventsNext?: ListAnswer;
-  todosNext?: ListAnswer;
   onDelete?: (path: string) => unknown;
 }
 
@@ -127,10 +111,10 @@ const answer = (a: ListAnswer): unknown => {
 const listCalls = (suffix: 'events' | 'todos'): string[] =>
   bffApiCall.mock.calls.map(c => String(c[0])).filter(p => new RegExp(`/${suffix}$`).test(p));
 
-/** The reads every detail view makes besides the lists: the record, who the caller is, its documents and its thread. */
+/** The reads every detail view makes besides the list: the record, who the caller is, its documents and its thread. */
 function installNet(key: Key, net: Net): void {
   const e = ENTITY[key];
-  const reads = { events: 0, todos: 0 };
+  let eventReads = 0;
   bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
     if (options?.method === 'DELETE') return net.onDelete ? net.onDelete(path) : undefined;
     if (path === '/api/v1/external/me') return { contactId: ME, email: 'me@example.test', projects: [] };
@@ -143,12 +127,8 @@ function installNet(key: Key, net: Net): void {
     if (/\/documents$/.test(path)) return { value: [], canCreate: false };
     if (/\/messages$/.test(path)) return { value: [] };
     if (/\/events$/.test(path)) {
-      reads.events += 1;
-      return answer(reads.events > 1 && net.eventsNext ? net.eventsNext : net.events);
-    }
-    if (/\/todos$/.test(path)) {
-      reads.todos += 1;
-      return answer(reads.todos > 1 && net.todosNext ? net.todosNext : net.todos);
+      eventReads += 1;
+      return answer(eventReads > 1 && net.eventsNext ? net.eventsNext : net.events);
     }
     throw new Error(`unexpected BFF call ${options?.method ?? 'GET'} ${path}`);
   });
@@ -216,11 +196,18 @@ afterEach(() => {
 
 const STATIC_EMPTY = 'No events or tasks to show for this record yet.';
 
+/** Task 009: no task list and no to-do control or read anywhere on the record. */
+function expectNoTaskList(dialog: HTMLElement): void {
+  expect(within(dialog).queryByText('No tasks yet')).toBeNull();
+  expect(within(dialog).queryByRole('button', { name: /add to-do|create new task|add task/i })).toBeNull();
+  expect(listCalls('todos')).toEqual([]);
+}
+
 // ---------------------------------------------------------------------------
 // The client's routes
 // ---------------------------------------------------------------------------
 
-describe('the events and to-do reads, by root kind', () => {
+describe('the events read, by root kind', () => {
   beforeEach(() => {
     bffApiCall.mockImplementation(async () => ({ value: [], truncated: true }));
   });
@@ -229,27 +216,15 @@ describe('the events and to-do reads, by root kind', () => {
     ['projects', PROJECT],
     ['matters', MATTER],
     ['workassignments', WORK_ASSIGNMENT],
-  ] as const)(
-    '%s: getRootEvents / getRootTodos call /api/v1/external/%s/{id}/events and /todos and carry `truncated`',
-    async (root, id) => {
-      const events = await getRootEvents(root, id);
-      const todos = await getRootTodos(root, id);
-      expect(bffApiCall.mock.calls.map(c => c[0])).toEqual([
-        `/api/v1/external/${root}/${id}/events`,
-        `/api/v1/external/${root}/${id}/todos`,
-      ]);
-      expect(events).toEqual({ items: [], truncated: true });
-      expect(todos).toEqual({ items: [], truncated: true });
-    }
-  );
+  ] as const)('%s: getRootEvents calls /api/v1/external/%s/{id}/events and carries `truncated`', async (root, id) => {
+    const events = await getRootEvents(root, id);
+    expect(bffApiCall.mock.calls.map(c => c[0])).toEqual([`/api/v1/external/${root}/${id}/events`]);
+    expect(events).toEqual({ items: [], truncated: true });
+  });
 
-  it('the project functions keep their URLs byte for byte', async () => {
+  it('the project function keeps its URL byte for byte', async () => {
     await getEvents(PROJECT);
-    await getProjectTodos(PROJECT);
-    expect(bffApiCall.mock.calls.map(c => c[0])).toEqual([
-      `/api/v1/external/projects/${PROJECT}/events`,
-      `/api/v1/external/projects/${PROJECT}/todos`,
-    ]);
+    expect(bffApiCall.mock.calls.map(c => c[0])).toEqual([`/api/v1/external/projects/${PROJECT}/events`]);
   });
 });
 
@@ -262,7 +237,7 @@ describe.each([
   ['wa', 'workassignments', WORK_ASSIGNMENT],
 ] as const)('%s detail view', (key, root, id) => {
   it(
-    `reads /${root}/{id}/events and /todos, renders the rows, and no longer shows the static empty state`,
+    `reads /${root}/{id}/events, renders the rows, and no longer shows the static empty state`,
     async () => {
       installNet(key, {
         events: {
@@ -272,44 +247,37 @@ describe.each([
             { ...event(2, 'Filing deadline'), _sprk_regardingproject_value: guid(999) },
           ],
         },
-        todos: { value: [todo(1, 'Draft the response'), todo(2, 'Collect exhibits')] },
       });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
       await within(section).findByText('Hearing');
       await within(section).findByText('Filing deadline');
-      await within(section).findByText('Draft the response');
-      await within(section).findByText('Collect exhibits');
 
       expect(within(dialog).queryByText(STATIC_EMPTY)).toBeNull();
       expect(within(dialog).queryByTestId('record-detail-events-unavailable')).toBeNull();
       expect(listCalls('events')).toEqual([`/api/v1/external/${root}/${id}/events`]);
-      expect(listCalls('todos')).toEqual([`/api/v1/external/${root}/${id}/todos`]);
+      expectNoTaskList(dialog);
       // Never the project's routes for these records.
       expect(bffApiCall.mock.calls.some(c => String(c[0]).includes('/projects/'))).toBe(false);
     },
     SLOW
   );
 
-  // R4 task 006: these lists send no `canCreate`, so nothing may be offered (fail closed); a list that answers `canCreate`
-  // is covered in RecordTemplateAccess.test.tsx. The status toggle is never offered on these roots (no PATCH answer).
+  // R4 task 006: this list sends no `canCreate`, so nothing may be offered (fail closed); a list that answers `canCreate`
+  // is covered in RecordTemplateAccess.test.tsx.
   it(
-    'lists that send no canCreate: no create or status toggle is offered, whatever the rows are',
+    'a list that sends no canCreate: no create is offered, whatever the rows are',
     async () => {
-      installNet(key, { events: { value: [event(1, 'Hearing')] }, todos: { value: [todo(1, 'Draft the response')] } });
+      installNet(key, { events: { value: [event(1, 'Hearing')] } });
       const dialog = await openDetail(key);
       await within(dialog).findByText('Hearing');
-      await within(dialog).findByText('Draft the response');
 
-      // The record template's entry points (the toolbar) and the lists' own buttons.
+      // The record template's entry point (the section header) and the list's own button.
       expect(within(dialog).queryByRole('button', { name: 'Add event' })).toBeNull();
-      expect(within(dialog).queryByRole('button', { name: 'Add to-do' })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
-      expect(within(dialog).queryByRole('button', { name: /create new task|add task/i })).toBeNull();
-      // The status toggle is the same gate: a read-only list has no checkbox-style control on its rows.
-      expect(within(dialog).queryByRole('button', { name: /mark .* (complete|open)/i })).toBeNull();
-      // Nothing is written to the lists (the id-filtered record fetch is also a POST, so only the list routes count).
+      expectNoTaskList(dialog);
+      // Nothing is written to the list (the id-filtered record fetch is also a POST, so only the list routes count).
       const writes = bffApiCall.mock.calls.filter(
         c => (c[1] as RequestInit | undefined)?.method === 'POST' && /\/(events|todos)$/.test(String(c[0]))
       );
@@ -319,17 +287,17 @@ describe.each([
   );
 
   it(
-    'empty lists show the same empty states as the project section, naming the record',
+    'an empty list shows the same empty state as the project section, naming the record',
     async () => {
-      installNet(key, { events: empty, todos: empty });
+      installNet(key, { events: empty });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
       await within(section).findByText('No events yet');
-      await within(section).findByText('No tasks yet');
       const noun = key === 'matter' ? 'matter' : 'work assignment';
       expect(within(section).getByText(`No events have been added to this ${noun} yet.`)).toBeTruthy();
       expect(within(dialog).queryByText(STATIC_EMPTY)).toBeNull();
+      expectNoTaskList(dialog);
     },
     SLOW
   );
@@ -337,28 +305,25 @@ describe.each([
   it(
     'a cut-short empty read says it could not be read, not "no events" (task 105)',
     async () => {
-      installNet(key, { events: { value: [], truncated: true }, todos: { value: [], truncated: true } });
+      installNet(key, { events: { value: [], truncated: true } });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
-      await waitFor(() => expect(within(section).getAllByTestId('truncated-list-notice')).toHaveLength(2));
+      await waitFor(() => expect(within(section).getAllByTestId('truncated-list-notice')).toHaveLength(1));
       expect(within(section).queryByText('No events yet')).toBeNull();
-      expect(within(section).queryByText('No tasks yet')).toBeNull();
     },
     SLOW
   );
 
   it(
-    'a 403 on the lists shows the denied state in the section only; the rest of the detail view is intact',
+    'a 403 on the list shows the denied state in the section only; the rest of the detail view is intact',
     async () => {
-      const refused = { throws: new ApiError(403, problem(403, { title: 'Forbidden' })) };
-      installNet(key, { events: refused, todos: refused });
+      installNet(key, { events: { throws: new ApiError(403, problem(403, { title: 'Forbidden' })) } });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
-      await waitFor(() => expect(within(section).getAllByTestId('bff-access-denied')).toHaveLength(2));
+      await waitFor(() => expect(within(section).getAllByTestId('bff-access-denied')).toHaveLength(1));
       expect(section.textContent).toContain(`permission to view events on this`);
-      expect(section.textContent).toContain(`permission to view tasks on this`);
       // None of the rest is affected: fields, documents and messages are all still there.
       expect(within(dialog).getByTestId('record-detail-fields')).toBeTruthy();
       expect(within(dialog).getByTestId('record-detail-documents')).toBeTruthy();
@@ -372,33 +337,25 @@ describe.each([
   it(
     'a 5xx shows a retryable error in the section only; Try again re-reads the same route and lists the rows',
     async () => {
-      const failed = { throws: new ApiError(503, problem(503)) };
       installNet(key, {
-        events: failed,
-        todos: failed,
+        events: { throws: new ApiError(503, problem(503)) },
         eventsNext: { value: [event(1, 'Hearing')] },
-        todosNext: { value: [todo(1, 'Draft the response')] },
       });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
       const retries = await within(section).findAllByRole('button', { name: /try again/i });
-      expect(retries).toHaveLength(2);
+      expect(retries).toHaveLength(1);
       expect(within(section).queryByText(STATIC_EMPTY)).toBeNull();
       expect(within(dialog).getByTestId('record-detail-fields')).toBeTruthy();
       expect(within(dialog).getByTestId('record-detail-documents')).toBeTruthy();
       expect(within(dialog).queryByTestId('record-detail-error')).toBeNull();
 
-      for (const button of retries) fireEvent.click(button);
+      fireEvent.click(retries[0]);
       await within(section).findByText('Hearing');
-      await within(section).findByText('Draft the response');
       expect(listCalls('events')).toEqual([
         `/api/v1/external/${root}/${id}/events`,
         `/api/v1/external/${root}/${id}/events`,
-      ]);
-      expect(listCalls('todos')).toEqual([
-        `/api/v1/external/${root}/${id}/todos`,
-        `/api/v1/external/${root}/${id}/todos`,
       ]);
     },
     SLOW
@@ -407,13 +364,13 @@ describe.each([
   it(
     'a 5xx with a non-problem body (an HTML 503 page) shows a plain message, never the raw body',
     async () => {
-      const html = { throws: new ApiError(503, '<!DOCTYPE html><html><body>Service Unavailable</body></html>') };
-      installNet(key, { events: html, todos: html });
+      installNet(key, {
+        events: { throws: new ApiError(503, '<!DOCTYPE html><html><body>Service Unavailable</body></html>') },
+      });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
       await within(section).findByText('Events could not be loaded just now.');
-      await within(section).findByText('Tasks could not be loaded just now.');
       expect(section.textContent).not.toMatch(/DOCTYPE|<html|Service Unavailable/);
     },
     SLOW
@@ -422,8 +379,9 @@ describe.each([
   it(
     'a 5xx ProblemDetails body shows its detail, not the JSON document',
     async () => {
-      const failed = { throws: new ApiError(500, problem(500, { detail: 'The record context is missing.' })) };
-      installNet(key, { events: failed, todos: { value: [] } });
+      installNet(key, {
+        events: { throws: new ApiError(500, problem(500, { detail: 'The record context is missing.' })) },
+      });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
@@ -434,43 +392,13 @@ describe.each([
   );
 
   it(
-    'delete-own on a to-do removes the row on a 204',
+    'a 401 on the list is the shared sign-in state, not an error message',
     async () => {
-      installNet(key, {
-        events: empty,
-        todos: {
-          value: [
-            todo(1, 'My task', { _sprk_createdbycontact_value: ME }),
-            todo(2, 'Their task', { _sprk_createdbycontact_value: SOMEONE }),
-          ],
-        },
-      });
-      const dialog = await openDetail(key);
-      const section = within(dialog).getByTestId('record-detail-events');
-      fireEvent.click(await within(section).findByRole('button', { name: 'Delete task My task' }));
-      const heading = await screen.findByText('Delete task');
-      const confirm = heading.closest('[role="dialog"], [role="alertdialog"]') as HTMLElement;
-      await new Promise(resolve => setTimeout(resolve, 350));
-      fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));
-
-      await waitFor(() => expect(within(section).queryByText('My task')).toBeNull());
-      const deletes = bffApiCall.mock.calls.filter(c => (c[1] as RequestInit | undefined)?.method === 'DELETE');
-      expect(deletes).toHaveLength(1);
-      expect(deletes[0][0]).toMatch(/^\/api\/v1\/external\/todos\//);
-      expect(within(section).getByText('Their task')).toBeTruthy();
-    },
-    SLOW
-  );
-
-  it(
-    'a 401 on the lists is the shared sign-in state, not an error message',
-    async () => {
-      const expired = { throws: new ApiError(401, '') };
-      installNet(key, { events: expired, todos: expired });
+      installNet(key, { events: { throws: new ApiError(401, '') } });
       const dialog = await openDetail(key);
 
       const section = within(dialog).getByTestId('record-detail-events');
-      await waitFor(() => expect(within(section).getAllByTestId('bff-access-signin')).toHaveLength(2));
+      await waitFor(() => expect(within(section).getAllByTestId('bff-access-signin')).toHaveLength(1));
       expect(within(dialog).getByTestId('record-detail-fields')).toBeTruthy();
     },
     SLOW
@@ -487,24 +415,14 @@ describe.each([
             event(3, 'Unstamped hearing'),
           ],
         },
-        todos: {
-          value: [
-            todo(1, 'My task', { _sprk_createdbycontact_value: ME }),
-            todo(2, 'Their task', { _sprk_createdbycontact_value: SOMEONE }),
-          ],
-        },
       });
       const dialog = await openDetail(key);
       const section = within(dialog).getByTestId('record-detail-events');
       await within(section).findByText('My hearing');
-      await within(section).findByText('My task');
 
       // Once /me has answered, exactly the caller's own rows offer Delete.
-      await waitFor(() =>
-        expect(within(section).queryAllByRole('button', { name: /^Delete (task |event )/ })).toHaveLength(2)
-      );
+      await waitFor(() => expect(within(section).queryAllByRole('button', { name: /^Delete event / })).toHaveLength(1));
       expect(within(section).getByRole('button', { name: 'Delete event My hearing' })).toBeTruthy();
-      expect(within(section).getByRole('button', { name: 'Delete task My task' })).toBeTruthy();
       expect(within(section).queryByRole('button', { name: /Their|Unstamped/ })).toBeNull();
 
       // The server decides: a 204 removes the event; the other rows stay.
@@ -527,7 +445,6 @@ describe.each([
     async () => {
       installNet(key, {
         events: { value: [event(1, 'My hearing', { _sprk_createdbycontact_value: ME })] },
-        todos: empty,
         onDelete: () => {
           throw new ApiError(403, problem(403, { reasonCode: 'sdap.access.deny.delete_own' }));
         },
@@ -548,49 +465,43 @@ describe.each([
 });
 
 // ---------------------------------------------------------------------------
-// Negative: Project unchanged; Invoice and Service Request make no events/to-dos calls
+// Negative: Project unchanged; Invoice and Service Request make no events calls
 // ---------------------------------------------------------------------------
 
 describe('the other detail views', () => {
   it(
-    'Project still calls /projects/{id}/events and /todos, and nothing on a matter or work assignment route',
+    'Project still calls /projects/{id}/events, and nothing on a matter or work assignment route',
     async () => {
-      installNet('project', {
-        events: { value: [event(1, 'Signing call')] },
-        todos: { value: [todo(1, 'Review draft')] },
-      });
+      installNet('project', { events: { value: [event(1, 'Signing call')] } });
       const dialog = await openDetail('project');
       const section = within(dialog).getByTestId('record-detail-events');
       await within(section).findByText('Signing call');
-      await within(section).findByText('Review draft');
 
       expect(listCalls('events')).toEqual([`/api/v1/external/projects/${PROJECT}/events`]);
-      expect(listCalls('todos')).toEqual([`/api/v1/external/projects/${PROJECT}/todos`]);
       expect(bffApiCall.mock.calls.some(c => /\/(matters|workassignments)\//.test(String(c[0])))).toBe(false);
-      // Nothing offered here: /me has no level for this project and its lists send no canCreate (task 006, fail closed).
+      // Nothing offered here: /me has no level for this project and its list sends no canCreate (task 006, fail closed).
       expect(within(dialog).queryByRole('button', { name: /add event/i })).toBeNull();
-      expect(within(dialog).queryByRole('button', { name: /add to-do/i })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
-      expect(within(dialog).queryByRole('button', { name: /create new task|add task/i })).toBeNull();
+      expectNoTaskList(dialog);
     },
     SLOW
   );
 
   it(
-    'Project: the empty states still name the project',
+    'Project: the empty state still names the project',
     async () => {
-      installNet('project', { events: empty, todos: empty });
+      installNet('project', { events: empty });
       const dialog = await openDetail('project');
       await within(dialog).findByText('No events have been added to this project yet.');
-      await within(dialog).findByText('No tasks yet');
+      expectNoTaskList(dialog);
     },
     SLOW
   );
 
   it.each(['invoice', 'sr'] as const)(
-    '%s: no events section and no events or to-do call at all',
+    '%s: no events section and no events call at all',
     async key => {
-      installNet(key, { events: empty, todos: empty });
+      installNet(key, { events: empty });
       const dialog = await openDetail(key);
       await within(dialog).findByTestId('record-detail-messages');
       await within(dialog).findByTestId('record-detail-documents');
@@ -605,12 +516,12 @@ describe('the other detail views', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The shared components on a non-project root
+// The shared component on a non-project root
 // ---------------------------------------------------------------------------
 
-describe('root-aware EventsCalendar and SmartTodo', () => {
+describe('root-aware EventsCalendar', () => {
   // R4 task 006 (FR-06): a matter or work assignment has no `/me` level, so no level is passed and the list's `canCreate`
-  // decides (the old rule kept these lists read-only whatever the server said). A list that says nothing is "cannot".
+  // decides (the old rule kept the list read-only whatever the server said). A list that says nothing is "cannot".
   it(
     'a matter or work assignment list follows its canCreate (absent = cannot); a project at Collaborate can still create',
     async () => {
@@ -618,26 +529,21 @@ describe('root-aware EventsCalendar and SmartTodo', () => {
       const matter = render(
         <FluentProvider theme={webLightTheme}>
           <EventsCalendar projectId={MATTER} root="matters" caller={asContact} />
-          <SmartTodo projectId={MATTER} root="matters" caller={asContact} />
         </FluentProvider>
       );
       await screen.findByText('No events yet');
-      await screen.findByText('No tasks yet');
       expect(screen.queryByRole('button', { name: /create event/i })).toBeNull();
-      expect(screen.queryByRole('button', { name: /create new task/i })).toBeNull();
       expect(screen.queryByText(/Use the Create Event button/)).toBeNull();
       matter.unmount();
 
-      // The same lists, when the server says the caller may create on this work assignment: offered.
+      // The same list, when the server says the caller may create on this work assignment: offered.
       bffApiCall.mockImplementation(async () => ({ value: [], canCreate: true }));
       const wa = render(
         <FluentProvider theme={webLightTheme}>
           <EventsCalendar projectId={WORK_ASSIGNMENT} root="workassignments" caller={asContact} />
-          <SmartTodo projectId={WORK_ASSIGNMENT} root="workassignments" caller={asContact} />
         </FluentProvider>
       );
       await screen.findByRole('button', { name: /create event/i });
-      await screen.findByRole('button', { name: /create new task/i });
       wa.unmount();
 
       // A project keeps its level rule (the project page's, unchanged): Collaborate creates whatever the list says.
@@ -645,11 +551,9 @@ describe('root-aware EventsCalendar and SmartTodo', () => {
       render(
         <FluentProvider theme={webLightTheme}>
           <EventsCalendar projectId={PROJECT} accessLevel={AccessLevel.Collaborate} caller={asContact} />
-          <SmartTodo projectId={PROJECT} accessLevel={AccessLevel.Collaborate} caller={asContact} />
         </FluentProvider>
       );
       await screen.findByRole('button', { name: /create event/i });
-      await screen.findByRole('button', { name: /create new task/i });
     },
     SLOW
   );

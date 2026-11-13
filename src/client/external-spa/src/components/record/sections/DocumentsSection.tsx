@@ -7,10 +7,11 @@
  *
  * Refresh (or Try again) remounts the library, which re-reads the list.
  *
- * UPLOAD (task 004, FR-03). When the record's toolbar lists Upload, the toolbar button is the entry point: the library
- * offers it through `offerAction('upload')` (shown under the same rule as its own button, which it then does not draw) and
- * renders the upload dialog (a `FormModal`) itself, inside this section, so the dialog is a descendant of the record
- * modal. An upload in flight holds browsing, Close and Refresh (`onBusyChange`).
+ * UPLOAD (task 004, FR-03; task 009). When the record's config lists Upload, the button in this card's header is the entry
+ * point: the library offers it through `offerAction('upload')` (shown under the same rule as its own button, which it then
+ * does not draw), the template hands it back as `headerActions`, and the library renders the upload dialog (a
+ * `FormModal`) itself, inside this section, so the dialog is a descendant of the record modal. An upload in flight holds
+ * browsing, Close and Refresh (`onBusyChange`).
  *
  * WHO MAY UPLOAD (task 006, FR-06 / FR-07). Inside the template the library offers Upload only when `createRightOf`
  * (recordAccess.ts) says `true`: the list's `canCreate`, and for a level-decided project caller the `/me` level
@@ -39,7 +40,7 @@ export function uploadOverride(
   context: ExternalUserContextResponse | null
 ): boolean | undefined {
   // Task 036 fix round 1: a per-record caller's level says only what they may see; the list's `canCreate` decides. Task
-  // 006: the level is the one `decidingLevelOf` finds (shared with the to-do and event lists; unchanged rule: an unknown
+  // 006: the level is the one `decidingLevelOf` finds (shared with the event list; unchanged rule: an unknown
   // `/me` or a missing entry is View Only); with none (not a project, a per-record caller) the list decides.
   const level = decidingLevelOf(root, id, context);
   return level === undefined ? undefined : levelCanUpload(level);
@@ -51,7 +52,7 @@ export interface RecordDocumentListProps {
   callerContext: ExternalUserContextResponse | null;
   caller: CallerIdentity | null;
   refreshSignal: number;
-  /** Offer the toolbar's Upload instead of drawing the library's own button (the record template, task 004). */
+  /** Offer the template's Upload instead of drawing the library's own button (the record template, task 004 / 009). */
   onCreateActionChange?: CreateActionReporter;
   /** Report an upload in flight, so the record modal holds. */
   onBusyChange?: (busy: boolean) => void;
@@ -94,12 +95,13 @@ export const DocumentsSection: React.FC<RecordSectionContext> = ({
   refreshSignal,
   onBusyChange,
   offerAction,
+  headerActions,
   readOnlyNote,
 }) => {
   // A record with no documents route has no Documents section (no config lists one; this keeps a wrong config inert).
   if (!detail.documentsRoot) return null;
   return (
-    <RecordSectionCard id="documents" note={readOnlyNote}>
+    <RecordSectionCard id="documents" actions={headerActions} note={readOnlyNote}>
       <RecordDocumentList
         root={detail.documentsRoot}
         recordId={recordId}

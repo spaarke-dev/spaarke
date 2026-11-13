@@ -176,3 +176,16 @@ Still not committed. No SPA files, nothing under `.claude/`.
 - Wider run (`category=external-access` | `ExternalAccess` | `UnifiedAccessControl`): 6655/6655. The first pass found the 2 `Fr20_RootEventList_CanCreate…` cases described above; fixed.
 - ArchTests (`ExternalLookupAbsentReadGuard`, `RouteAuthorizationGuard` incl. ledger, `ExternalPlaneNoObo`, `ProblemDetails`): 199/199.
 - Publish size: not re-measured. This round adds source only (about 60 lines in two BFF files) and no package, so it is unchanged within noise vs round 0's +4,861 bytes.
+
+## UAC diff review (uac-r2, 2026-11-13): PASS on c9b9492c86
+
+uac-r2 checked each of these and passed it:
+- `/me` records: their source, the read filter on them, and the parity test.
+- Create: the order of checks (root rights → validation → closed-set 400 → B1 → owner → write).
+- One shared helper (`TaskTypeAppendToAsync`) backs both `canCreateTask` and the create, and the unanswered case is logged.
+- One constant for the Task type id (`EventTypeRef`).
+- Only the `isTask` boolean leaves the server.
+- The edit to `ExternalTodoScopeTests` is confirmed.
+- Publish size (+4.9 KB) and the CVE check (none) are accepted.
+
+**Next.** Merge on our gates. The change reaches dev in uac-r2's next master + spike deploy, after the owner approves the exact SHA.

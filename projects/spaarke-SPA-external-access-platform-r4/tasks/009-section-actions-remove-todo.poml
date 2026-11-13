@@ -4,7 +4,7 @@
     <title>Record view: create actions in their sections; remove To Do from the SPA; empty states; Documents columns (owner E2E rework, D-12)</title>
     <phase>1 Record template and actions (post-E2E rework)</phase>
     <gate>none (SPA only)</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx files and many tests</rigor-reason>
     <model-tier>opus</model-tier>
@@ -50,6 +50,8 @@
     <criterion testable="true">Child dialog focus/Esc tests pass from section actions; the full SPA suite passes.</criterion>
   </acceptance-criteria>
 
+  <notes>Section actions via template sectionActions + RecordSectionCard actions (Upload/Documents, New message/Messages, Add event/Tasks and events); header keeps record-level actions (Submit invoice until 010). To Do removed from the SPA (source-scan guard). Empty states point at section actions (tested). D-12 Documents column sizing + name/type tooltips. Review: 1 adversarial pass, round 1 fixed F2 (name tooltip), F4 (empty-state test), K1 hardening. Filed: D-15 #2810. Detail: notes/task-009-notes.md.
+rework: fix-round-1 task 009</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>

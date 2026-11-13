@@ -5,12 +5,19 @@
  * three through `RecordOpener`). It replaced R3's stacked record-detail modal (retired in task 005).
  *
  * CONFIG ONLY (FR-01). Everything type-specific comes from the `RecordTemplateConfig` (`recordTemplates.ts`): title,
- * header facts, tabs, the left / right sections and the toolbar actions. Nothing here branches on the entity name. Each
- * section id renders through `sections/` (`renderRecordSection`); a toolbar action whose flow has its own dialogs or
- * notices (Download, Delete request) is an action host in `actions/`, mounted in the record's content for every action
- * id the config lists, which offers or withdraws its action. The four create actions (Upload, New message, Add to-do, Add
- * event) are offered by the section that owns the list and its dialog (`offerAction`); that section renders the dialog (a
- * `FormModal`) itself, so the dialog is a React descendant of this modal (FR-03, task 004).
+ * header facts, tabs, the left / right sections, the toolbar actions and the section actions. Nothing here branches on the
+ * entity name. Each section id renders through `sections/` (`renderRecordSection`); an action whose flow has its own
+ * dialogs or notices (Download, Delete request, Submit invoice) is an action host in `actions/`, mounted in the record's
+ * content for every action id the config lists (toolbar or section), which offers or withdraws its action. The create
+ * actions (Upload, New message, Add event) are offered by the section that owns the list and its dialog (`offerAction`);
+ * that section renders the dialog (a `FormModal`) itself, so the dialog is a React descendant of this modal (FR-03, task
+ * 004).
+ *
+ * WHERE AN ACTION SHOWS (task 009, owner 2026-11-12). An action the config lists in `toolbar` is a `RecordCommandBar`
+ * button (the record-level actions: Refresh, Copy link, Download, Delete request, Submit invoice); one it lists in
+ * `sectionActions[section]` is an icon slot in that section card's `HeaderToolbar` (`headerActions` in the section's
+ * context). Both are built by one function from the same offers, so the hide-don't-disable rules are the same in both
+ * places, and a child dialog's focus returns to whichever button opened it (`useChildDialog`).
  *
  * ENVELOPE (ADR-050). A thin config of the canonical `SprkModal`, size `lg`: its own header carries "‹ N of M ›", the
  * title, the window controls and ×; its footer carries Close only. No nested `RecordNavigationModalShell`.
@@ -55,6 +62,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { DismissRegular, LockClosedRegular } from '@fluentui/react-icons';
+import type { IHeaderToolbarSlot } from '@spaarke/ui-components/components/HeaderToolbar';
 import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import {
   RECORD_ACTION_ICONS,
@@ -78,7 +86,7 @@ import {
   type RecordSectionRightId,
 } from './recordAccess';
 import { useRecord, type RecordState } from './recordReads';
-import { RECORD_ACTION_TEXT, recordTemplateTitle, recordText } from './recordTemplates';
+import { RECORD_ACTION_TEXT, recordActionIdsOf, recordTemplateTitle, recordText } from './recordTemplates';
 import type {
   RecordActionHostContext,
   RecordHostAction,
@@ -261,7 +269,8 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   const [busyKeys, setBusyKeys] = React.useState<ReadonlySet<string>>(() => new Set());
   // One stable callback per key, so a section or host can list it as an effect dependency.
   const [busyCallbacks] = React.useState(() => new Map<string, (busy: boolean) => void>());
-  // The toolbar actions the action hosts offer for the shown record, and one stable reporter per action id.
+  // The actions the action hosts and the sections' lists offer for the shown record (toolbar and section actions alike),
+  // and one stable reporter per action id.
   const [hostActions, setHostActions] = React.useState<Partial<Record<RecordToolbarActionId, RecordHostAction>>>({});
   const [hostActionCallbacks] = React.useState(
     () => new Map<RecordToolbarActionId, (action: RecordHostAction | null) => void>()
@@ -420,23 +429,26 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   };
 
   // The modal's own actions: Refresh (hidden while an operation holds the view, so its result is never replaced) and Copy
-  // link. An action with a host, or one a section offers (Upload, New message, Add to-do, Add event: task 004), is shown
-  // while its owner offers it; the rest are hidden, not disabled.
+  // link. An action with a host, or one a section offers (Upload, New message, Add event: task 004), is shown while its
+  // owner offers it; the rest are hidden, not disabled.
   const handlers: Partial<Record<RecordToolbarActionId, () => void | Promise<void>>> = {
     ...(holdNavigation ? {} : { refresh: handleRefresh }),
     copyLink: handleCopyLink,
   };
+  // Every action this record's config lists, in the toolbar or in a section's header (task 009).
+  const actionIds = recordActionIdsOf(config);
   // Task 006 (FR-06 / FR-07): the rights the record's lists reported with their create offers. A create action is shown
   // only when its list offers it AND reported its right as `true` (`isCreateActionOffered`); the header's "Your access"
   // and the sections' read-only lines are derived from the same answers (recordAccess.ts), never from the entity type.
-  // A section's right without a toolbar action (the invoice Files list's Upload) counts for "Your access" and its own
-  // section's line, and adds nothing to the toolbar.
-  const createRights = createRightsOf(config.toolbar, hostActions, sectionRights);
+  // A section's right without an action of the template's (the invoice Files list's Upload) counts for "Your access" and
+  // its own section's line, and adds no action.
+  const createRights = createRightsOf(actionIds, hostActions, sectionRights);
   // The record's route root (its read description's documents root) tells `recordAccessFactsOf` whether `/me` has a level
   // for it, and whether that level is an answer or only the fail-safe guess (no entry for the project).
   const accessFacts = recordAccessFactsOf(detail.documentsRoot, id ?? '', callerContext);
   const yourAccess = yourAccessOf(accessFacts, createRights);
-  const actions: RecordCommandBarAction[] = config.toolbar.map(actionId => {
+  // One descriptor per action, wherever it shows (the toolbar or a section's header): the same visibility rule for both.
+  const actionOf = (actionId: RecordToolbarActionId): RecordCommandBarAction => {
     const Icon = RECORD_ACTION_ICONS[actionId];
     const handler = handlers[actionId];
     const hosted = hostActions[actionId];
@@ -451,7 +463,14 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
       visible: offered,
       onClick: handler ?? (hosted?.visible ? hosted.onClick : noop),
     };
-  });
+  };
+  const actions: RecordCommandBarAction[] = config.toolbar.map(actionOf);
+  // A section's header actions (task 009): its offered ones only, as `HeaderToolbar` icon slots (hide, don't disable).
+  const headerActionsOf = (section: RecordSectionId): IHeaderToolbarSlot[] =>
+    (config.sectionActions?.[section] ?? [])
+      .map(actionOf)
+      .filter(action => action.visible === true)
+      .map(action => ({ key: action.id, icon: action.icon, tooltip: action.tooltip, onClick: action.onClick }));
 
   const viewContext = (row: DetailRecord, rowId: string): RecordViewContext => ({
     config,
@@ -476,8 +495,10 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     full,
     refreshSignal: attempt + (sectionSignals[section] ?? 0),
     onBusyChange: busyCallbackFor(`section:${section}`),
-    // A section that owns a create dialog offers its toolbar action here, only if this record's toolbar lists it (FR-03).
-    offerAction: actionId => (config.toolbar.includes(actionId) ? hostActionCallbackFor(actionId) : undefined),
+    // A section that owns a create dialog offers its action here, only if this record's config lists it (FR-03): in the
+    // toolbar or in a section's header (task 009).
+    offerAction: actionId => (actionIds.includes(actionId) ? hostActionCallbackFor(actionId) : undefined),
+    headerActions: headerActionsOf(section),
     // Task 006 (FR-07): why this section is read-only, from the rights its lists reported (none while unknown).
     readOnlyNote: readOnlyNoteOf(section, createRights, accessFacts),
     reportRight: sectionRightCallbackFor,
@@ -496,10 +517,11 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
     },
   });
 
-  // The action hosts the record's toolbar lists, mounted with the record (their dialogs and notices live here).
+  // The action hosts the record's config lists (toolbar or section), mounted with the record (their dialogs and notices
+  // live here).
   const renderActionHosts = (row: DetailRecord, rowId: string): React.ReactNode => (
     <div className={styles.actionHosts} data-testid="record-template-action-hosts">
-      {config.toolbar.map(actionId => {
+      {actionIds.map(actionId => {
         const Host = RECORD_ACTION_HOSTS[actionId];
         return Host ? <Host key={actionId} {...hostContext(actionId, row, rowId)} /> : null;
       })}

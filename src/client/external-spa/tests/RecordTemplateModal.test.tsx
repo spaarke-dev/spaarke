@@ -35,7 +35,7 @@ import {
   parseRecordLink,
   recordLinkFor,
 } from '../src/components/detail/record-targets';
-import { RECORD_TEMPLATES, getRecordTemplate } from '../src/components/record/recordTemplates';
+import { RECORD_TEMPLATES, getRecordTemplate, recordActionIdsOf } from '../src/components/record/recordTemplates';
 import {
   RECORD_SECTION_LABELS,
   type RecordSectionId,
@@ -163,12 +163,23 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('RECORD_TEMPLATES', () => {
-  it('has exactly the six types, with the left, right and toolbar lists of the spec FR-01 table', () => {
-    const root = ['refresh', 'upload', 'newMessage', 'addTodo', 'addEvent', 'submitInvoice', 'copyLink'];
+  it('has exactly the six types, with the left, right, toolbar and section-action lists (FR-01; task 009)', () => {
+    // Task 009: a create action sits in the header of its own section; the record header keeps Refresh, Copy link and
+    // the type's own actions. Submit invoice stays in the header until task 010 moves it to Invoices.
+    const root = ['refresh', 'submitInvoice', 'copyLink'];
+    const rootSections = { documents: ['upload'], messages: ['newMessage'], tasksEvents: ['addEvent'] };
     const shape = Object.fromEntries(
       Object.entries(RECORD_TEMPLATES).map(([entity, c]) => [
         entity,
-        { label: c.label, left: [...c.left], right: [...c.right], toolbar: [...c.toolbar] },
+        {
+          label: c.label,
+          left: [...c.left],
+          right: [...c.right],
+          toolbar: [...c.toolbar],
+          sectionActions: Object.fromEntries(
+            Object.entries(c.sectionActions ?? {}).map(([s, ids]) => [s, [...(ids ?? [])]])
+          ),
+        },
       ])
     );
     expect(shape).toEqual({
@@ -177,40 +188,63 @@ describe('RECORD_TEMPLATES', () => {
         left: ['information', 'documents', 'invoices'],
         right: ['messages', 'tasksEvents'],
         toolbar: root,
+        sectionActions: rootSections,
       },
       sprk_matter: {
         label: 'Matter',
         left: ['information', 'documents', 'invoices'],
         right: ['messages', 'tasksEvents'],
         toolbar: root,
+        sectionActions: rootSections,
       },
       sprk_workassignment: {
         label: 'Work assignment',
         left: ['information', 'documents'],
         right: ['messages', 'tasksEvents'],
         toolbar: root,
+        sectionActions: rootSections,
       },
       sprk_invoice: {
         label: 'Invoice',
         left: ['information', 'files'],
         right: ['messages'],
-        toolbar: ['refresh', 'newMessage', 'copyLink'],
+        toolbar: ['refresh', 'copyLink'],
+        sectionActions: { messages: ['newMessage'] },
       },
       sprk_servicerequest: {
         label: 'Service request',
         left: ['information', 'documents'],
         right: ['messages'],
-        toolbar: ['refresh', 'upload', 'newMessage', 'copyLink', 'delete'],
+        toolbar: ['refresh', 'copyLink', 'delete'],
+        sectionActions: { documents: ['upload'], messages: ['newMessage'] },
       },
       sprk_document: {
         label: 'Document',
         left: ['information', 'preview'],
         right: [],
         toolbar: ['refresh', 'download', 'copyLink'],
+        sectionActions: {},
       },
     });
+    // No create action is left in any record header, and no section action names a section the record does not show.
+    for (const c of Object.values(RECORD_TEMPLATES)) {
+      for (const id of ['upload', 'newMessage', 'addEvent']) expect(c.toolbar).not.toContain(id);
+      for (const section of Object.keys(c.sectionActions ?? {})) expect([...c.left, ...c.right]).toContain(section);
+    }
     // Tabs are off by default for every type (owner 2026-11-08).
     for (const c of Object.values(RECORD_TEMPLATES)) expect(c.tabs).toBeUndefined();
+  });
+
+  it('lists each action once per record: never in the header and a section, nor in two sections (task 009 review)', () => {
+    // One host per action id: an id listed twice would mount two hosts and show two buttons for one action.
+    const repeatedIn = (ids: readonly string[]): string[] => ids.filter((id, i) => ids.indexOf(id) !== i);
+    // Control: the check sees a repeat when there is one.
+    expect(
+      repeatedIn(recordActionIdsOf({ ...RECORD_TEMPLATES.sprk_matter, toolbar: ['refresh', 'upload', 'copyLink'] }))
+    ).toEqual(['upload']);
+    for (const [entity, c] of Object.entries(RECORD_TEMPLATES)) {
+      expect({ entity, repeated: repeatedIn(recordActionIdsOf(c)) }).toEqual({ entity, repeated: [] });
+    }
   });
 
   it('gives every deep-link token and every notification record type a template', () => {

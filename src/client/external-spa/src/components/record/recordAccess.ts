@@ -3,9 +3,9 @@
  * (spaarke-SPA-external-access-platform-r4 task 006, FR-06 / FR-07 / NFR-04).
  *
  * ONE PLACE FOR:
- *   (a) the right behind each of the record's four create actions (Upload, New message, Add to-do, Add event):
- *       `createRightOf`, used by every list inside the record template, so the four follow one rule; and the list-host
- *       rule of SmartTodo, EventsCalendar and a project's DocumentLibrary, the same in and out of the template
+ *   (a) the right behind each of the record's create actions (Upload, New message, Add event; each in its own section's
+ *       header since task 009): `createRightOf`, used by every list inside the record template, so they follow one rule;
+ *       and the list-host rule of EventsCalendar and a project's DocumentLibrary, the same in and out of the template
  *       (`levelVerdictOf`, `listCreateRightOf`; D-9: the project page follows it too);
  *   (a2) whether "Submit invoice" is offered (task 007, FR-10): `submitInvoiceRightOf`, from `/me` `firms` and the
  *       firm-records answers (read by `actions/SubmitInvoiceAction.tsx`);
@@ -15,7 +15,7 @@
  *
  * WHERE THE ANSWERS COME FROM (never a guess, ADR-003 fail closed):
  *   - each list's `canCreate`: the BFF's answer of the matching POST for this caller on this record (task 002: the
- *     documents, to-do, event and message lists of projects, matters and work assignments; the message thread of every
+ *     documents, event and message lists of projects, matters and work assignments; the message thread of every
  *     record). It is the ONLY source for a matter, a work assignment, an invoice and a service request.
  *   - a project's `/me` level, for a caller WITHOUT `writeAccessPerRecord` (the one exception): `/me` carries levels for
  *     projects only. When the project's list also answered, both must allow (on the project page too, D-9).
@@ -31,10 +31,10 @@ import { canCreate as levelCanCreate, mapAccessLevelString } from '../../hooks/u
 import { AccessLevel } from '../../types';
 import type { RecordHostAction, RecordSectionId, RecordToolbarActionId } from './recordTemplate.types';
 
-/** The four create actions a record's lists offer to the toolbar (task 004). */
-export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addTodo' | 'addEvent'>;
+/** The create actions a record's lists offer to the template (task 004; in their sections' headers since task 009). */
+export type RecordCreateActionId = Extract<RecordToolbarActionId, 'upload' | 'newMessage' | 'addEvent'>;
 
-export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addTodo', 'addEvent'];
+export const RECORD_CREATE_ACTIONS: readonly RecordCreateActionId[] = ['upload', 'newMessage', 'addEvent'];
 
 /**
  * A right a section reports WITHOUT a toolbar action (task 006 fix round 1): the invoice Files list's own Upload, which
@@ -56,11 +56,7 @@ interface ReadOnlyLines {
   /** The invoice's Files card. */
   files: string;
   messages: string;
-  /** Tasks & events, both lists read-only. */
-  tasksEvents: string;
-  /** Tasks & events, only the to-do list read-only. */
-  todos: string;
-  /** Tasks & events, only the event list read-only. */
+  /** Tasks & events: its event list is read-only. */
   events: string;
 }
 
@@ -99,16 +95,12 @@ export const RECORD_ACCESS_TEXT: {
     documents: 'You can view these documents. Uploading needs Collaborate access.',
     files: 'You can view these files. Uploading needs Collaborate access.',
     messages: 'You can read this thread. Posting needs Collaborate access.',
-    tasksEvents: 'You can view these tasks and events. Adding them needs Collaborate access.',
-    todos: 'You can view these tasks. Adding one needs Collaborate access.',
     events: 'You can view these events. Adding one needs Collaborate access.',
   },
   neutralLines: {
     documents: 'You can view these documents, but not upload to this record.',
     files: 'You can view these files, but not upload to this record.',
     messages: 'You can read this thread, but not post to it.',
-    tasksEvents: 'You can view these tasks and events, but not add to them.',
-    todos: 'You can view these tasks, but not add one.',
     events: 'You can view these events, but not add one.',
   },
 };
@@ -152,9 +144,9 @@ export function levelVerdictOf(
 }
 
 /**
- * The create rule of a list that owns a create dialog (SmartTodo, EventsCalendar, DocumentLibrary's Upload on a project),
+ * The create rule of a list that owns a create dialog (EventsCalendar, DocumentLibrary's Upload on a project),
  * in one place and the same in and out of the record template:
- *   - `right`: the shared rule (`createRightOf`), reported with the toolbar offer;
+ *   - `right`: the shared rule (`createRightOf`), reported with the action offer;
  *   - `allowed`: whether the list offers its create at all: only a known `true`.
  * D-9 (#2716): the project page used to offer on the `/me` level alone (`levelAllows ?? …`), so a level-decided caller
  * whose list answered `canCreate: false` (a workforce role ceiling the level does not show) was offered a create the POST
@@ -217,7 +209,7 @@ export interface RecordAccessFacts {
   /** The caller's `/me` level for this record as an answer (`recordLevelOf`); undefined when there is none. */
   level: AccessLevel | undefined;
   /**
-   * The level that gates Upload, Add to-do and Add event is a fail-safe GUESS, not an answer: a level-decided project
+   * The level that gates Upload and Add event is a fail-safe GUESS, not an answer: a level-decided project
    * caller whose `/me` has no (recognisable) entry for the project. `decidingLevelOf` then hides those actions as View
    * Only, but what the caller may do there is unknown, so nothing is said about it (FR-07: unknown shows nothing).
    */
@@ -236,7 +228,7 @@ export function recordAccessFactsOf(
 }
 
 /** The rights a project caller's `/me` level gates (the message thread is not one: it follows the thread alone). */
-const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addTodo', 'addEvent'];
+const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)[] = ['upload', 'addEvent'];
 
 // ---------------------------------------------------------------------------
 // What the template knows: the rights the record's lists reported
@@ -245,23 +237,23 @@ const LEVEL_GATED_RIGHTS: readonly (RecordCreateActionId | RecordSectionRightId)
 export type RecordCreateRights = Readonly<Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>>>;
 
 /**
- * The rights the record's lists reported: with their toolbar offers (only the create actions this record's toolbar
- * lists; a list that has not reported yet is unknown), plus the rights sections reported without a toolbar action
- * (`sectionRights`, e.g. the invoice Files list's Upload).
+ * The rights the record's lists reported: with their action offers (only the create actions this record's config lists,
+ * in its toolbar or a section's header; a list that has not reported yet is unknown), plus the rights sections reported
+ * without an action of the template's (`sectionRights`, e.g. the invoice Files list's Upload).
  */
 export function createRightsOf(
-  toolbar: readonly RecordToolbarActionId[],
+  actionIds: readonly RecordToolbarActionId[],
   offers: Partial<Record<RecordToolbarActionId, RecordHostAction>>,
   sectionRights: Partial<Record<RecordSectionRightId, CreateRight>> = {}
 ): RecordCreateRights {
   const rights: Partial<Record<RecordCreateActionId | RecordSectionRightId, CreateRight>> = { ...sectionRights };
   for (const id of RECORD_CREATE_ACTIONS) {
-    if (toolbar.includes(id)) rights[id] = offers[id]?.right ?? null;
+    if (actionIds.includes(id)) rights[id] = offers[id]?.right ?? null;
   }
   return rights;
 }
 
-/** Whether the toolbar shows a create action: its list offers it AND reported the right as `true` (never a guess). */
+/** Whether a create action is shown: its list offers it AND reported the right as `true` (never a guess). */
 export function isCreateActionOffered(offer: RecordHostAction | undefined): boolean {
   return offer?.visible === true && offer.right === true;
 }
@@ -382,14 +374,8 @@ export function readOnlyNoteOf(
       return known.filesUpload === false ? lines.files : null;
     case 'messages':
       return known.newMessage === false ? lines.messages : null;
-    case 'tasksEvents': {
-      const todos = known.addTodo === false;
-      const events = known.addEvent === false;
-      if (todos && events) return lines.tasksEvents;
-      if (todos) return lines.todos;
-      if (events) return lines.events;
-      return null;
-    }
+    case 'tasksEvents':
+      return known.addEvent === false ? lines.events : null;
     default:
       return null;
   }

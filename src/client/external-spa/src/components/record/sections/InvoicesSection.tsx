@@ -132,11 +132,13 @@ const InvoiceList: React.FC<{ parentAttribute: string; parentId: string }> = ({ 
   );
 };
 
-export const InvoicesSection: React.FC<RecordSectionContext> = ({ detail, recordId, refreshSignal }) => {
+export const InvoicesSection: React.FC<RecordSectionContext> = ({ detail, recordId, refreshSignal, headerActions }) => {
   // No invoice lookup to this record type (a work assignment): no section and no read.
   if (!detail.invoicesBy) return null;
+  // `headerActions`: whatever the config lists under `sectionActions.invoices` (none yet; task 010 moves Submit invoice
+  // here), offered by its action host exactly as in the toolbar.
   return (
-    <RecordSectionCard id="invoices">
+    <RecordSectionCard id="invoices" actions={headerActions}>
       <InvoiceList key={refreshSignal} parentAttribute={detail.invoicesBy} parentId={recordId} />
     </RecordSectionCard>
   );

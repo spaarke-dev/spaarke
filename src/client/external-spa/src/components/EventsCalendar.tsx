@@ -51,8 +51,8 @@ import {
   deleteOwnEvent,
   ODataEvent,
   CreateEventPayload,
-  EVENTS_TODOS_ROOT_NOUN,
-  type EventsTodosRoot,
+  EVENTS_ROOT_NOUN,
+  type EventsRoot,
 } from '../api/web-api-client';
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
@@ -325,11 +325,6 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast, canDelete, onDelete 
             <Badge appearance="tint" color={getEventStatusColor(event.sprk_status)} size="small">
               {getEventStatusLabel(event.sprk_status)}
             </Badge>
-            {/*
-             * To-Do badge removed (R3 task 008): events no longer carry a
-             * to-do boolean toggle. To-dos are first-class `sprk_todo` records
-             * surfaced by the SmartTodo component / `getProjectTodos` route.
-             */}
           </div>
 
           {/* Created on meta */}
@@ -361,7 +356,7 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast, canDelete, onDelete 
 
 interface CreateEventDialogProps {
   /** Which kind of record the event is created under, and its id (POST /api/v1/external/{root}/{id}/events). */
-  root: EventsTodosRoot;
+  root: EventsRoot;
   recordId: string;
   open: boolean;
   onClose: () => void;
@@ -443,7 +438,6 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
         // (the former toISOString() also turned the picked day into a UTC instant).
         ...(dueDate ? { sprk_duedate: dueDate } : {}),
         // sprk_status omitted: the BFF creates the event Open (statuscode 659490001) — task 097 review F9.
-        // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
         // The parent comes from the route (task 006); `createRootEvent` keeps the project route's body as it was.
       };
 
@@ -545,7 +539,7 @@ export interface EventsCalendarProps {
   /** Dataverse GUID of the record whose events to list (a sprk_project unless `root` says otherwise). */
   projectId: string;
   /** Which kind of record `projectId` is (task 057). Defaults to a project. */
-  root?: EventsTodosRoot;
+  root?: EventsRoot;
   /**
    * The caller's `/me` level for this record. Pass it only for a record `/me` carries a level for (a project); omit it for
    * a matter or work assignment, whose create follows the list's `canCreate` (task 006).
@@ -559,9 +553,9 @@ export interface EventsCalendarProps {
   /** The signed-in principal. With it, events the caller created show Delete (task 054); without it, none do. */
   caller?: CallerIdentity | null;
   /**
-   * Record template only (task 004, FR-03). When given, the toolbar's Add event is the entry point: this list shows no
-   * "Create Event" button of its own, offers its action through this callback (shown exactly when its own button would
-   * have been) and renders the create dialog itself, so the dialog is a descendant of the host that owns the toolbar.
+   * Record template only (task 004, FR-03; task 009). When given, the Add event in the section's header is the entry
+   * point: this list shows no "Create Event" button of its own, offers its action through this callback (shown exactly
+   * when its own button would have been) and renders the create dialog itself, so the dialog is a descendant of the host.
    * Omit it everywhere else (the project page keeps its button).
    */
   onCreateActionChange?: CreateActionReporter;
@@ -605,14 +599,14 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // A 401/403 on the list is the shared sign-in / denied state; "Try again" re-runs the read (task 057).
   const [accessFailure, setAccessFailure] = React.useState<BffAccessFailure | null>(null);
   const [attempt, setAttempt] = React.useState<number>(0);
-  const noun = EVENTS_TODOS_ROOT_NOUN[root];
+  const noun = EVENTS_ROOT_NOUN[root];
 
   // -------------------------------------------------------------------------
   // Access level check
   // -------------------------------------------------------------------------
 
   // Every root has an event create route (task 002). Task 006 (FR-06): the create rule lives in recordAccess.ts
-  // (`listCreateRightOf`, shared with SmartTodo and DocumentLibrary). Offered only when the right is known `true`: the
+  // (`listCreateRightOf`, shared with DocumentLibrary). Offered only when the right is known `true`: the
   // list has answered, its `canCreate` allows (task 036 fix round 1), and a `/me` level that decides (a level the host has
   // - a project - for a caller whose write access is not per record) allows too. The same rule in the record template and
   // on the project page (D-9 #2716: the page used to offer on the level alone, which a role ceiling refuses with 403).
@@ -623,8 +617,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
     listCanCreate,
     levelAllows: levelVerdictOf(accessLevel, writeAccessPerRecord),
   });
-  // In the record template the toolbar's Add event replaces this list's button (task 004): offered exactly when the right
-  // is known to be `true` (the main view is showing), and the dialog stays here. The right goes with the offer.
+  // In the record template the section's Add event replaces this list's button (task 004 / 009): offered exactly when
+  // the right is known to be `true` (the main view is showing), and the dialog stays here. The right goes with the offer.
   const ownCreateButton = !inRecordTemplate;
   useOfferCreateAction(
     onCreateActionChange,
@@ -782,7 +776,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
               {canCreate
                 ? ownCreateButton
                   ? `No events have been added to this ${noun}. Use the Create Event button to add the first event.`
-                  : `No events have been added to this ${noun}. Use Add event in the toolbar to add the first event.`
+                  : `No events have been added to this ${noun}. Use Add event above to add the first event.`
                 : `No events have been added to this ${noun} yet.`}
             </Text>
           </div>

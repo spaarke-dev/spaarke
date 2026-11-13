@@ -23,9 +23,6 @@ export type { EventsCalendarProps } from './EventsCalendar';
 export { ContactsOrganizations } from './ContactsOrganizations';
 export type { ContactsOrganizationsProps } from './ContactsOrganizations';
 
-export { SmartTodo } from './SmartTodo';
-export type { SmartTodoProps } from './SmartTodo';
-
 export { DocumentLibrary } from './DocumentLibrary';
 export type { DocumentLibraryProps } from './DocumentLibrary';
 

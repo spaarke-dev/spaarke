@@ -12,6 +12,7 @@
  * attribute a config names (title number, name, header facts) is one of those fields, so the template adds no column
  * and no read (asserted in `tests/RecordTemplateModal.test.tsx`).
  */
+import type { IHeaderToolbarSlot } from '@spaarke/ui-components/components/HeaderToolbar';
 import type { RecordActionIconId } from '@spaarke/ui-components/components/RecordCommandBar';
 import type { CallerIdentity } from '../../api/delete-own';
 import type { ExternalUserContextResponse } from '../../auth/bff-client';
@@ -39,10 +40,25 @@ export const RECORD_SECTION_LABELS: Readonly<Record<RecordSectionId, string>> = 
 };
 
 /**
- * A toolbar action. Ids are keys of the shared icon map (`RECORD_ACTION_ICONS`, FR-05), so an action can only use an
- * icon from the map. Order in a config is the order on screen.
+ * A record action: in the header toolbar (`toolbar`) or in a section's header (`sectionActions`). Ids are keys of the
+ * shared icon map (`RECORD_ACTION_ICONS`, FR-05), so an action can only use an icon from the map. Order in a config is the
+ * order on screen. The SPA offers only the ids listed here (task 009: the shared map's retired create id is not one, so no
+ * config can list it).
  */
-export type RecordToolbarActionId = RecordActionIconId;
+export type RecordToolbarActionId = Extract<
+  RecordActionIconId,
+  | 'refresh'
+  | 'upload'
+  | 'newMessage'
+  | 'addEvent'
+  | 'submitInvoice'
+  | 'copyLink'
+  | 'expandSection'
+  | 'download'
+  | 'delete'
+  | 'history'
+  | 'send'
+>;
 
 /**
  * A tab. `overview` shows the two-column layout (`left` / `right`); a section id shows that one section full width.
@@ -76,8 +92,19 @@ export interface RecordTemplateConfig {
   left: readonly RecordSectionId[];
   /** Sections in the right (34%) column, top to bottom. Empty = one full-width column. */
   right: readonly RecordSectionId[];
-  /** Toolbar actions this type can offer, in order. Each is still shown only when the caller may use it. */
+  /**
+   * Record-level actions in the header toolbar (`RecordCommandBar`), in order: Refresh, Copy link and the type's own
+   * (Download, Delete request, Submit invoice). Each is still shown only when the caller may use it.
+   */
   toolbar: readonly RecordToolbarActionId[];
+  /**
+   * Task 009 (owner 2026-11-12): actions that live in a section's header instead of the toolbar, per section, in order
+   * (Upload in Documents, New message in Messages, Add event in Tasks & events). They are offered exactly as toolbar
+   * actions are (by the section's list, or by an action host in `actions/`) and follow the same hide-don't-disable rules;
+   * the template renders them as the section card's `HeaderToolbar` icon slots. An action id appears in `toolbar` or in
+   * one section here, never both. Absent = no section actions.
+   */
+  sectionActions?: Readonly<Partial<Record<RecordSectionId, readonly RecordToolbarActionId[]>>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,13 +145,19 @@ export interface RecordSectionContext extends RecordViewContext {
    */
   refreshSignal: number;
   /**
-   * Task 004 (FR-03). For a section that owns a create dialog (Documents: `upload`; Messages: `newMessage`; Tasks & events:
-   * `addTodo` / `addEvent`): the reporter through which it offers that toolbar action, or `undefined` when this record's
-   * toolbar does not list the action. A section that receives a reporter shows no create button of its own and renders its
-   * dialog itself (so the dialog is a React descendant of the record modal); one that receives `undefined` keeps its own
-   * button. The stable reporter per action id is the action hosts' one (`onActionChange`).
+   * Task 004 (FR-03), task 009. For a section that owns a create dialog (Documents: `upload`; Messages: `newMessage`; Tasks
+   * & events: `addEvent`): the reporter through which it offers that action, or `undefined` when this record's config lists
+   * the action nowhere (neither `toolbar` nor `sectionActions`). A section that receives a reporter shows no create button
+   * of its own and renders its dialog itself (so the dialog is a React descendant of the record modal); one that receives
+   * `undefined` keeps its own button. The stable reporter per action id is the action hosts' one (`onActionChange`).
    */
   offerAction: (actionId: RecordToolbarActionId) => ((action: RecordHostAction | null) => void) | undefined;
+  /**
+   * Task 009. The section's own header actions, ready for `RecordSectionCard`'s `actions`: the config's `sectionActions`
+   * for this section that are offered right now (hidden ones are left out: hide, don't disable), with their icons from
+   * `RECORD_ACTION_ICONS`. Empty when the section has none.
+   */
+  headerActions: IHeaderToolbarSlot[];
   /**
    * Task 006 (FR-07). The one short line saying why this section is read-only for the caller (`readOnlyNoteOf` in
    * `recordAccess.ts`), or null/absent when it is not read-only or that is not known yet.
@@ -146,8 +179,8 @@ export interface RecordHostAction {
   /** Overrides the action's default tooltip (= accessible name); must contain the action's label (WCAG 2.5.3). */
   tooltip?: string;
   /**
-   * Task 006 (FR-06). A create action (Upload, New message, Add to-do, Add event) reports the right behind it from the
-   * BFF's answers: `true` / `false`, or `null` while unknown. The toolbar shows a create action only when it is `true`.
+   * Task 006 (FR-06). A create action (Upload, New message, Add event) reports the right behind it from the BFF's
+   * answers: `true` / `false`, or `null` while unknown. A create action is shown only when it is `true`.
    */
   right?: boolean | null;
 }
