@@ -23,6 +23,8 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Procedures;
+using Sprk.Bff.Api.Services.Finance.Resolution;
+using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 using FinAuth = Sprk.Bff.Api.Tests.Api.Finance.FinanceEndpointsAuthorizationContractTests;
 using static Sprk.Bff.Api.Tests.Api.Finance.RecordProcedureRig;
@@ -60,6 +62,16 @@ public sealed class RecordProcedureDryRunContractTests
         public readonly RecordProcedureRig Rig = new();
         public readonly FinAuth.RecordingAccessDataSource Access = new();
         public readonly List<IReadOnlyCollection<(string Set, Guid Id)>> Exempted = new();
+
+        /// <summary>084d-2b: the open billing findings per policy that the closure's two SELECT methods return (the only members set up).</summary>
+        public readonly Dictionary<Guid, List<OpenPolicySignal>> Findings = new();
+
+        /// <summary>084d-2b: policies whose selection faults.</summary>
+        public readonly HashSet<Guid> SelectionFaults = new();
+
+        /// <summary>084d-2b: a STRICT closure mock: only the selections are set up, so any close throws.</summary>
+        public Mock<SignalClosureService> Closure = null!;
+
         public StatedCaller StepZero { get; private set; } = null!;
         public HttpClient Client = null!;
         private WebApplication _app = null!;
@@ -88,7 +100,7 @@ public sealed class RecordProcedureDryRunContractTests
             builder.Services.AddScoped<AuthorizationService>();
             builder.Services.AddSingleton<CallerRecordAccessProbe>(host.Rig.Probe);
             builder.Services.AddSingleton(host.Rig.Service);
-            builder.Services.AddSingleton(Planner(host.Rig));
+            builder.Services.AddSingleton(Planner(host));
             foreach (var core in Cores)
             {
                 host.Access.Grant(core.Set, core.Id, recordRights);
@@ -121,13 +133,56 @@ public sealed class RecordProcedureDryRunContractTests
         }
     }
 
-    /// <summary>A REAL planner over the rig's world, with the rig's REAL rule-set service (a change is validated by it: 084d-2a fix round 1, F-1). Planning asks no owner, closes nothing and counts nothing (084d-1), so those are stubs that throw if reached.</summary>
-    private static ProcedureAssignmentService Planner(RecordProcedureRig rig) => new(
-        rig.Entities.Object, new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object,
-        rig.RuleSets,
-        (Sprk.Bff.Api.Services.Signals.SignalClosureService)RuntimeHelpers.GetUninitializedObject(typeof(Sprk.Bff.Api.Services.Signals.SignalClosureService)),
-        (AffectedInvoiceCounter)RuntimeHelpers.GetUninitializedObject(typeof(AffectedInvoiceCounter)),
-        NullLogger<ProcedureAssignmentService>.Instance);
+    /// <summary>
+    /// A REAL planner over the rig's world, with the rig's REAL rule-set service (a change is validated by it: 084d-2a fix round 1, F-1). Planning
+    /// asks no owner (a strict resolver). 084d-2b: the count is the REAL <see cref="AffectedInvoiceCounter"/> over the rig's world and probe; the
+    /// closure is a STRICT mock with only its two selections set up (from <see cref="Host.Findings"/>), so a close would throw.
+    /// </summary>
+    private static ProcedureAssignmentService Planner(Host host)
+    {
+        var rig = host.Rig;
+        var writer = (SignalWriter)RuntimeHelpers.GetUninitializedObject(typeof(SignalWriter));
+        host.Closure = new Mock<SignalClosureService>(MockBehavior.Strict, writer, rig.Entities.Object, TimeProvider.System, NullLogger<SignalClosureService>.Instance);
+        host.Closure.Setup(c => c.SelectOpenSignalsOfPolicyAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid policy, bool _, CancellationToken _) => host.SelectionFaults.Contains(policy)
+                ? throw new InvalidOperationException("simulated selection fault")
+                : Task.FromResult<IReadOnlyList<OpenPolicySignal>>(host.Findings.GetValueOrDefault(policy, []).ToList()));
+        host.Closure.Setup(c => c.SelectOpenSignalsOfPolicyOnSubjectsAsync(
+                It.IsAny<Guid>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid policy, IReadOnlyCollection<Guid> invoices, IReadOnlyCollection<Guid> _, CancellationToken _) => host.SelectionFaults.Contains(policy)
+                ? throw new InvalidOperationException("simulated selection fault")
+                : Task.FromResult<IReadOnlyList<OpenPolicySignal>>(
+                    host.Findings.GetValueOrDefault(policy, []).Where(s => invoices.Contains(s.RegardingInvoiceId!.Value)).ToList()));
+        return new ProcedureAssignmentService(
+            rig.Entities.Object, new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object,
+            rig.RuleSets,
+            host.Closure.Object,
+            new AffectedInvoiceCounter(rig.Entities.Object, rig.Probe, NullLogger<AffectedInvoiceCounter>.Instance),
+            NullLogger<ProcedureAssignmentService>.Instance);
+    }
+
+    /// <summary>084d-2b: an invoice in the world: filed on <paramref name="table"/>(<paramref name="record"/>), of <paramref name="firm"/>, In Review unless stated.</summary>
+    private static Guid Invoice(Host host, string table, Guid record, Guid firm, DateOnly dated, bool inReview = true)
+    {
+        var id = Guid.NewGuid();
+        var column = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].Single(l => l.CoreEntity == table).Column;
+        host.Rig.World.Add("sprk_invoice", id,
+            (column, Ref(table, record)), ("sprk_vendororg", Ref("sprk_organization", firm)),
+            (InvoiceAdjustmentService.InvoiceDateColumn, dated.ToDateTime(TimeOnly.MinValue)),
+            ("statecode", Option(InvoiceStatusCodes.StateActive)),
+            ("statuscode", Option(inReview ? InvoiceStatusCodes.InReview : InvoiceStatusCodes.InReview + 1)));
+        return id;
+    }
+
+    /// <summary>084d-2b: an open billing finding of <paramref name="policy"/> on <paramref name="invoice"/>, returned by the closure's selections.</summary>
+    private static void Finding(Host host, Guid policy, Guid invoice)
+    {
+        var signal = new ExistingSignal(Guid.NewGuid(), null, "sprk_invoice", invoice, 1, null, null, null, null, null, null, null, null);
+        if (!host.Findings.TryGetValue(policy, out var list)) host.Findings[policy] = list = new();
+        list.Add(new OpenPolicySignal(signal, invoice, null));
+    }
+
+    private const string InvoiceSet = "sprk_invoices";
 
     private static HttpRequestMessage Post(string segment, Guid record, object body, string query = "?date=2026-02-01") =>
         RateCardImportEndpointsTests.Req("POST", $"/api/finance/{segment}/{record}/procedures/dry-run{query}", true, JsonContent.Create(body));
@@ -236,8 +291,14 @@ public sealed class RecordProcedureDryRunContractTests
         disclosure["notes"]!.AsArray().Select(n => n!.GetValue<string>()).Should().Equal(
             RecordProcedureReadService.NotAPromiseNote, RecordProcedureReadService.OwnerNote, RecordProcedureReadService.SeparateReadsNote);
         body.Select(kv => kv.Key).Should().BeEquivalentTo(
-            new[] { "record", "date", "firm", "firmSource", "proposal", "now", "after", "afterLabel", "disclosure" },
-            "2a's shape: closes, affectedOpenInvoices and reach are 084d-2b's, left out (not stubbed)");
+            new[] { "record", "date", "firm", "firmSource", "proposal", "now", "after", "afterLabel", "disclosure", "closes", "affectedOpenInvoices" },
+            "2b's shape: closes and affectedOpenInvoices added; reach is not built (left out, not stubbed)");
+        body["closes"]!.AsObject().Select(kv => kv.Key).Should().BeEquivalentTo(new[] { "d170", "kinds", "warning", "message" });
+        body["closes"]!["d170"]!.GetValue<bool>().Should().BeFalse("an assignment closes nothing");
+        body["closes"]!["kinds"]!.AsArray().Should().BeEmpty();
+        body["affectedOpenInvoices"]!.AsObject().Select(kv => kv.Key).Should().BeEquivalentTo(new[] { "count", "text", "basis" });
+        body["affectedOpenInvoices"]!["count"]!.GetValue<int>().Should().Be(0, "no invoice is filed in the reach");
+        body["affectedOpenInvoices"]!["basis"]!.GetValue<string>().Should().Be("ResolutionChanged");
         var withoutDisclosure = body.DeepClone().AsObject();
         withoutDisclosure.Remove("disclosure");
         withoutDisclosure.ToJsonString().Should().NotContainAny(new[] { "succeed", "Succeed" }, "nothing but the disclaimer speaks of success; After is never presented as a promise");
@@ -554,12 +615,200 @@ public sealed class RecordProcedureDryRunContractTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // 084d-2b: closes and affectedOpenInvoices
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private static JsonObject Closes(JsonObject body) => body["closes"]!.AsObject();
+
+    private static JsonObject Affected(JsonObject body) => body["affectedOpenInvoices"]!.AsObject();
+
+    private static int? CountOf(JsonObject body) => Affected(body)["count"]?.GetValue<int>();
+
+    [Fact(DisplayName = "084d-2b: an assignment closes nothing; it counts the In Review invoices the caller can Read, on the record and directly under it, whose resolution changes; not a parent's, not a decided one, not an unreadable one; the rows compared are asked in the ONE check; nothing selected or closed")]
+    public async Task Assign_ClosesNothing_CountsTheVisibleInvoicesWhoseResolutionChanges()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
+        Invoice(host, Project, P, F, Feb1);                              // the record's own: changes
+        Invoice(host, WorkAssignment, W, F, Feb1);                       // directly under it (W's chain reaches P): changes
+        Invoice(host, Matter, M, F, Feb1);                               // a parent's: out of reach
+        var unreadable = Invoice(host, WorkAssignment, W, G, Feb1);      // changes, but the caller cannot Read it
+        host.Rig.Probe.Denied.Add((InvoiceSet, unreadable));
+
+        var response = await host.Client.SendAsync(Post("projects", P, AssignBody(s.Procedure)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        Closes(body)["d170"]!.GetValue<bool>().Should().BeFalse();
+        Closes(body)["kinds"]!.AsArray().Should().BeEmpty();
+        Closes(body)["warning"].Should().BeNull();
+        Closes(body)["message"].Should().BeNull();
+        CountOf(body).Should().Be(2, "the record's and the child's In Review invoices the caller can Read; not M's, not the unreadable one");
+        Affected(body)["text"]!.GetValue<string>().Should().Be(ProcedureService.AffectedText(2));
+        Affected(body)["basis"]!.GetValue<string>().Should().Be(RecordProcedureReadService.AffectedBasisResolutionChanged);
+
+        var check = host.Rig.Probe.Batches.Last();
+        check.Should().Contain(("sprk_workassignments", W), "the child's resolution was compared, so its chain record is asked in the ONE check");
+        check.Should().NotContain(a => a.EntitySet == InvoiceSet, "the invoices are the counter's own question, asked before anything is judged");
+        host.Rig.Probe.Batches.Count.Should().Be(2, "the counter's invoice question, then the ONE combined check");
+        host.Closure.Verify(c => c.SelectOpenSignalsOfPolicyAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Closure.VerifyNoOtherCalls();
+        host.Rig.NoWrites();
+
+        // Must-fire (EB-D-218: a row the count read is asked): denying the child record alone is 503.
+        host.Rig.Probe.Denied.Add(("sprk_workassignments", W));
+        await AssertUnavailable(await host.Client.SendAsync(Post("projects", P, AssignBody(s.Procedure))), host);
+    }
+
+    [Fact(DisplayName = "084d-2b (bounds): more resolutions to compare than the bound, or an invoice the counter cannot answer for, is a null count, never a guess; the 200 still stands")]
+    public async Task ResolutionCount_PastTheBound_OrUnanswered_IsNull()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
+        for (var i = 0; i <= RecordProcedureReadService.MaxComparedResolutions; i++)
+        {
+            var firm = Guid.NewGuid();
+            host.Rig.World.Add("sprk_organization", firm, ("sprk_organizationname", $"Firm {i}"));
+            Invoice(host, Project, P, firm, Feb1);
+        }
+
+        var past = await Json(await host.Client.SendAsync(Post("projects", P, AssignBody(s.Procedure))));
+        CountOf(past).Should().BeNull("one resolution per firm, past the bound");
+        Affected(past)["text"].Should().BeNull();
+
+        await using var host2 = await Host.StartAsync();
+        var s2 = host2.Rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+        host2.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s2.Procedure);
+        host2.Rig.Probe.Unknown.Add((InvoiceSet, Invoice(host2, Project, P, F, Feb1)));
+        var unanswered = await host2.Client.SendAsync(Post("projects", P, AssignBody(s2.Procedure)));
+        unanswered.StatusCode.Should().Be(HttpStatusCode.OK);
+        CountOf(await Json(unanswered)).Should().BeNull("an unanswered rights question is no count");
+    }
+
+    [Fact(DisplayName = "084d-2b (D-170, R1): a plain rule Exclude closes nothing, even with open findings on the rule; its count is the resolution count")]
+    public async Task PlainExclude_ClosesNothing_EvenWithOpenFindings()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Simple("GENERAL");
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+        Finding(host, s.Rule, Invoice(host, Project, P, F, Feb1));
+
+        var response = await host.Client.SendAsync(Post("projects", P, ExcludeBody(s.Rule)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        Closes(body)["d170"]!.GetValue<bool>().Should().BeFalse("D-170 applies only when a rule is switched Off");
+        Closes(body)["kinds"]!.AsArray().Should().BeEmpty();
+        Closes(body)["warning"].Should().BeNull();
+        Affected(body)["basis"]!.GetValue<string>().Should().Be(RecordProcedureReadService.AffectedBasisResolutionChanged);
+        CountOf(body).Should().Be(1, "the rule stops running on the record's invoice");
+        host.Closure.VerifyNoOtherCalls();
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-2b (D-170, section 15): removing a changed rule shows the removal warning and counts the invoices whose findings of the record rule close (the removal preview's selection); a plain removal closes nothing; a selection fault keeps the warning with no count")]
+    public async Task RemoveChangedRule_ShowsTheRemovalWarning_AndCountsTheFindingsThatClose()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Changeable("GENERAL");
+        var recordRule = ProcedureAssignmentService.RecordRulePolicyIdFor(ProcedureAssignmentService.RecordRuleSetIdFor(Project, P, null), s.Rule);
+        var changed = host.Rig.ChangeRuleRows(Project, P, s.Rule, s.RuleVersion, Jan15, code: ProcedureAssignmentService.RecordRuleCode(recordRule), rowVersion: true);
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+        Finding(host, changed.RecordRule, Invoice(host, Project, P, F, Feb1));
+        Finding(host, changed.RecordRule, Invoice(host, WorkAssignment, W, F, Feb1));
+        Finding(host, s.Rule, Invoice(host, Project, P, F, Feb1));          // the BASE rule's finding: not this close's
+        var other = host.Rig.Simple("OTHER").Rule;
+        var plain = host.Rig.ExcludeRule(Project, P, other, reason: "waived");
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, other);
+
+        var response = await host.Client.SendAsync(Post("projects", P, new { kind = "Remove", overrideId = changed.Exclude }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        Closes(body)["d170"]!.GetValue<bool>().Should().BeTrue();
+        Closes(body)["kinds"]!.AsArray().Select(k => k!.GetValue<string>()).Should().Equal(PlannedCloses.ChangedRuleRemoved);
+        Closes(body)["warning"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.RemoveChangedWarning, "the existing removal warning, no new text");
+        Closes(body)["message"].Should().BeNull();
+        CountOf(body).Should().Be(2);
+        Affected(body)["basis"]!.GetValue<string>().Should().Be(RecordProcedureReadService.AffectedBasisFindingsClosed);
+        host.Closure.Verify(c => c.SelectOpenSignalsOfPolicyAsync(changed.RecordRule, true, It.IsAny<CancellationToken>()), Times.Once);
+        host.Closure.VerifyNoOtherCalls();
+        host.Rig.NoWrites();
+
+        var plainBody = await Json(await host.Client.SendAsync(Post("projects", P, new { kind = "Remove", overrideId = plain })));
+        Closes(plainBody)["d170"]!.GetValue<bool>().Should().BeFalse("a plain removal switches nothing Off");
+        Closes(plainBody)["kinds"]!.AsArray().Should().BeEmpty();
+
+        host.SelectionFaults.Add(changed.RecordRule);
+        var faulted = await Json(await host.Client.SendAsync(Post("projects", P, new { kind = "Remove", overrideId = changed.Exclude })));
+        Closes(faulted)["warning"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.RemoveChangedWarning);
+        CountOf(faulted).Should().BeNull("a selection that faults is no count");
+    }
+
+    [Fact(DisplayName = "084d-2b (089e, F2): a change says what would close with the write's own message and the write's own selection: the base rule's findings on the record's and its direct children's invoices dated on or after the change; not an earlier-dated one; nothing closed")]
+    public async Task Change_SaysWhatWouldClose_WithTheWritesOwnMessageAndSelection()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Changeable("CHANGE-ME");
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+        var later = new DateOnly(2026, 2, 12);                             // the rig clock is 2026-02-10: "if saved now"
+        Finding(host, s.Rule, Invoice(host, Project, P, F, later));
+        Finding(host, s.Rule, Invoice(host, WorkAssignment, W, F, later)); // the child's: P's change decides it once the Exclude row exists
+        Finding(host, s.Rule, Invoice(host, Project, P, F, Feb1));         // dated before the change: held back
+
+        var response = await host.Client.SendAsync(Post("projects", P, ChangeBody(s.Rule)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        Closes(body)["d170"]!.GetValue<bool>().Should().BeFalse("a change closes Superseded, not the D-170 close");
+        Closes(body)["kinds"]!.AsArray().Select(k => k!.GetValue<string>()).Should().Equal(PlannedCloses.BaseRuleSuperseded);
+        Closes(body)["warning"].Should().BeNull();
+        Closes(body)["message"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.ChangeCloseCompleteMessage, "F2: the write's own text");
+        CountOf(body).Should().Be(2, "the record's later invoice and the child's; not the earlier-dated one");
+        Affected(body)["basis"]!.GetValue<string>().Should().Be(RecordProcedureReadService.AffectedBasisFindingsClosed);
+        host.Closure.Verify(c => c.SelectOpenSignalsOfPolicyOnSubjectsAsync(
+            s.Rule, It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()), Times.Once);
+        host.Closure.VerifyNoOtherCalls();
+        host.Rig.NoWrites();
+    }
+
+    [Fact(DisplayName = "084d-2b: a re-change (a Change replacing this record's changed rule) closes both: the removal's switch-off of the old record rule (D-170, the removal warning) and the change's supersede (its own message); the findings are counted once each")]
+    public async Task ReChange_ClosesTheRemovedRecordRulesFindings_AndSupersedesTheBase()
+    {
+        await using var host = await Host.StartAsync();
+        var s = host.Rig.Changeable("RE-CHANGE");
+        var recordRule = ProcedureAssignmentService.RecordRulePolicyIdFor(ProcedureAssignmentService.RecordRuleSetIdFor(Project, P, null), s.Rule);
+        var changed = host.Rig.ChangeRuleRows(Project, P, s.Rule, s.RuleVersion, Jan15, code: ProcedureAssignmentService.RecordRuleCode(recordRule), rowVersion: true);
+        host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+        var invoice = Invoice(host, Project, P, F, Feb1);
+        Finding(host, changed.RecordRule, invoice);
+
+        var response = await host.Client.SendAsync(Post("projects", P, ChangeBody(s.Rule, replaces: changed.Exclude)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await Json(response);
+        Closes(body)["d170"]!.GetValue<bool>().Should().BeTrue("the replaced override's removal switches its record rule Off first");
+        Closes(body)["kinds"]!.AsArray().Select(k => k!.GetValue<string>()).Should().Equal(PlannedCloses.ChangedRuleRemoved, PlannedCloses.BaseRuleSuperseded);
+        Closes(body)["warning"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.RemoveChangedWarning);
+        Closes(body)["message"]!.GetValue<string>().Should().Be(ProcedureAssignmentService.ChangeCloseCompleteMessage);
+        CountOf(body).Should().Be(1, "the old record rule's finding on the record's invoice");
+        host.Closure.Verify(c => c.SelectOpenSignalsOfPolicyAsync(changed.RecordRule, true, It.IsAny<CancellationToken>()), Times.Once);
+        host.Rig.NoWrites();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // EB-D-218 guards over the dry-run routes
     // ═══════════════════════════════════════════════════════════════════════════
 
     private sealed record DryRunSeed(string Segment, Guid RecordId, object Body, Guid[] AlsoAsked);
 
-    public static TheoryData<string> DryRunSeeds => new() { "assign", "exclude with firm", "switch", "remove", "change", "re-change" };
+    public static TheoryData<string> DryRunSeeds => new()
+    {
+        "assign", "exclude with firm", "switch", "remove", "change", "re-change",
+        "assign with invoices", "exclude for a firm with an invoice", "remove changed with findings", "change with findings",
+    };
 
     private static DryRunSeed SeedFor(string name, Host host)
     {
@@ -616,6 +865,46 @@ public sealed class RecordProcedureDryRunContractTests
                         Project, P, s.Rule, s.RuleVersion, Jan15, code: ProcedureAssignmentService.RecordRuleCode(recordRule), rowVersion: true);
                     host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
                     return new DryRunSeed("projects", P, ChangeBody(s.Rule, replaces: changed.Exclude), [changed.Exclude]);
+                }
+
+            // 084d-2b: seeds whose 200 carries a non-zero closes / affectedOpenInvoices.
+            case "assign with invoices":
+                {
+                    rig.Simple("GENERAL");
+                    var s = rig.Simple("ASSIGN-ME", ProcedureAppliesTo.AssignedRecordsOnly);
+                    host.CanRead(BillingAdminAuthorization.ProcedureEntitySet, s.Procedure);
+                    Invoice(host, Project, P, F, Feb1);
+                    Invoice(host, WorkAssignment, W, F, Feb1);
+                    return new DryRunSeed("projects", P, AssignBody(s.Procedure), [W]);
+                }
+
+            case "exclude for a firm with an invoice":
+                {
+                    // The excluded rule is firm G's: the list (no firm) does not show it, so its version is read only by the count's (P, G)
+                    // resolution. The count depends on that version, so it must be asked (the version-row guard's must-fire seed).
+                    rig.Simple("GENERAL");
+                    var g = rig.Simple("FIRM-G", firm: G);
+                    host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, g.Rule);
+                    Invoice(host, Project, P, G, Feb1);
+                    return new DryRunSeed("projects", P, ExcludeBody(g.Rule, G), [g.RuleVersion]);
+                }
+
+            case "remove changed with findings":
+                {
+                    var s = rig.Changeable("GENERAL");
+                    var recordRule = ProcedureAssignmentService.RecordRulePolicyIdFor(ProcedureAssignmentService.RecordRuleSetIdFor(Project, P, null), s.Rule);
+                    var changed = rig.ChangeRuleRows(Project, P, s.Rule, s.RuleVersion, Jan15, code: ProcedureAssignmentService.RecordRuleCode(recordRule), rowVersion: true);
+                    host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+                    Finding(host, changed.RecordRule, Invoice(host, Project, P, F, Feb1));
+                    return new DryRunSeed("projects", P, new { kind = "Remove", overrideId = changed.Exclude }, [changed.Exclude]);
+                }
+
+            case "change with findings":
+                {
+                    var s = rig.Changeable("CHANGE-ME");
+                    host.CanRead(ProcedureAssignmentEndpoints.PolicyEntitySet, s.Rule);
+                    Finding(host, s.Rule, Invoice(host, Project, P, F, new DateOnly(2026, 2, 12)));
+                    return new DryRunSeed("projects", P, ChangeBody(s.Rule), []);
                 }
 
             default: throw new ArgumentOutOfRangeException(nameof(name), name, null);
@@ -726,6 +1015,14 @@ public sealed class RecordProcedureDryRunContractTests
         // seed's base policy version, which every seed holds) is reported; a synthetic row left unexempted is reported.
         var planted = Guid.Parse("084d2a00-0000-4000-8000-00000000beef");
         Unasked(guids.Append(planted), asked, exempt).Should().Equal(planted);
+
+        // 084d-2b: the walk covers the new fields: a GUID planted in closes or in affectedOpenInvoices is reported.
+        foreach (var field in new[] { "closes", "affectedOpenInvoices" })
+        {
+            var mutated = body.DeepClone().AsObject();
+            mutated[field]!.AsObject()["planted"] = planted.ToString();
+            Unasked(GuidsIn(mutated).Distinct(), asked, exempt).Should().Equal(new[] { planted }, $"a GUID in {field} is walked");
+        }
         var baseVersion = host.Rig.VersionRows.First(v => v.Set == "sprk_policyversions");
         ExemptionViolations(reported.Append((baseVersion.Set, baseVersion.Id)), body, host.Rig).Should().NotBeEmpty("a real row exempt must fail the guard");
         if (reported.Count > 0)

@@ -76,9 +76,28 @@ public sealed record ProcedureDryRunRequest(
 /// with the proposed rows in place, labelled <see cref="AfterLabel"/> ("If saved now"). After is never a promise that the save will succeed:
 /// <see cref="Disclosure"/> says what the preview cannot know.
 /// </summary>
+/// <remarks>Task 084d-2b: <see cref="Closes"/> says what the write would close, and <see cref="AffectedOpenInvoices"/> how many open invoices the
+/// caller can see it affects.</remarks>
 public sealed record ProcedureDryRunView(
     ChainRecordView Record, DateOnly Date, FirmView? Firm, string FirmSource, ProcedureDryRunProposalView Proposal,
-    ProcedureDryRunSideView Now, ProcedureDryRunSideView After, string AfterLabel, ProcedureDryRunDisclosureView Disclosure);
+    ProcedureDryRunSideView Now, ProcedureDryRunSideView After, string AfterLabel, ProcedureDryRunDisclosureView Disclosure,
+    ProcedureDryRunClosesView Closes, ProcedureDryRunAffectedView AffectedOpenInvoices);
+
+/// <summary>
+/// Task 084d-2b: what the write would close. <see cref="Kinds"/>: <c>ChangedRuleRemoved</c> (removing a changed rule switches its record rule
+/// Off and closes its open findings: <see cref="D170"/> true, <see cref="Warning"/> the removal warning) and <c>BaseRuleSuperseded</c> (a change
+/// closes its base rule's open findings Superseded: <see cref="Message"/> is the change's own close message, which states its limits). Empty when
+/// nothing closes: a plain Exclude, an assignment and a plain removal close nothing.
+/// </summary>
+public sealed record ProcedureDryRunClosesView(bool D170, IReadOnlyList<string> Kinds, string? Warning, string? Message);
+
+/// <summary>
+/// Task 084d-2b: how many open (In Review) invoices the caller can Read the proposal affects. <see cref="Basis"/> <c>FindingsClosed</c>: the
+/// invoices whose open findings would close (the write's own selection). <c>ResolutionChanged</c>: the invoices filed on the record or directly
+/// under it whose Procedure resolution differs between Now and After (model 8.2's comparison). <see cref="Count"/> is null when it cannot be
+/// told (a fault, a bound, an unanswered rights question): never a guess.
+/// </summary>
+public sealed record ProcedureDryRunAffectedView(int? Count, string? Text, string Basis);
 
 /// <summary>
 /// The proposal as planned: the write (<see cref="Kind"/>), the kind of override row it writes or removes (<see cref="OverrideKind"/>), the
@@ -461,9 +480,10 @@ public class RecordProcedureReadService
             }
 
             var proposed = plan.Created.Select(c => c.Id).ToList();
+            var overlay = new ProcedureRowOverlay(_entities, plan, now);
             var afterReading = await ReadAsync(
                 coreTable, recordId, firmId, date, probeFutureDate: true, readLegacyRules: true, ct,
-                rowSource: new ProcedureRowOverlay(_entities, plan, now), legacyRules: nowReading.LegacyRules, proposedRowIds: proposed).ConfigureAwait(false);
+                rowSource: overlay, legacyRules: nowReading.LegacyRules, proposedRowIds: proposed).ConfigureAwait(false);
             if (afterReading is null)
             {
                 return new RecordProcedureDryRunResult(RecordProcedureReadStatus.RecordNotFound, null);
@@ -496,7 +516,25 @@ public class RecordProcedureReadService
                 nowReading.Expose(ProcedureAssignmentEntity.EntitySet, overrideRow);
             }
 
+            // 084d-2b: what the write would close (selection only), and the affected count. A closing write counts the invoices whose findings
+            // close (the write's own selection, counted by AffectedInvoiceCounter); any other counts the invoices whose resolution changes, and
+            // every row that comparison read is asked in the ONE check below (EB-D-218), except the synthetic rows.
+            var closes = await planner.PlanClosesAsync(overlay, coreTable, recordId, plan, callerBearerToken, ct).ConfigureAwait(false);
+            ProcedureDryRunAffectedView affected;
             var exposed = nowReading.Exposed.Concat(afterReading.Exposed).ToHashSet();
+            if (closes.Kinds.Count > 0)
+            {
+                affected = new ProcedureDryRunAffectedView(
+                    closes.VisibleOpenInvoices, ProcedureService.AffectedText(closes.VisibleOpenInvoices), AffectedBasisFindingsClosed);
+            }
+            else
+            {
+                var (count, compared) = await ResolutionChangedAsync(planner, overlay, coreTable, recordId, callerBearerToken, ct).ConfigureAwait(false);
+                compared.ExceptWith(synthetic);
+                exposed.UnionWith(compared);
+                affected = new ProcedureDryRunAffectedView(count, ProcedureService.AffectedText(count), AffectedBasisResolutionChanged);
+            }
+
             if (!await CallerCanReadAllAsync(exposed, callerBearerToken, ct).ConfigureAwait(false))
             {
                 return new RecordProcedureDryRunResult(RecordProcedureReadStatus.Unavailable, null);
@@ -509,7 +547,10 @@ public class RecordProcedureReadService
                 nowSide, afterSide, AfterLabel,
                 new ProcedureDryRunDisclosureView(
                     PredictsOwnerRefusal: false, ReadAtOneInstant: false, RequestFirmAsked: requestFirm is not null,
-                    [NotAPromiseNote, OwnerNote, SeparateReadsNote]));
+                    [NotAPromiseNote, OwnerNote, SeparateReadsNote]),
+                new ProcedureDryRunClosesView(
+                    closes.Kinds.Contains(PlannedCloses.ChangedRuleRemoved), closes.Kinds, closes.Warning, closes.Message),
+                affected);
             return new RecordProcedureDryRunResult(RecordProcedureReadStatus.Done, view);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -561,7 +602,9 @@ public class RecordProcedureReadService
             images[(image.LogicalName, image.Id)] = image;
         }
 
-        return RuleSetOutcome<ProcedureOverridePlan>.Done(plan with { AfterImages = images.Values.ToList(), Deleted = removal.Deleted });
+        // 084d-2b: the removal's switch-off closes the removed changed rule's findings (the two-call plan's first call), whatever the create does.
+        return RuleSetOutcome<ProcedureOverridePlan>.Done(
+            plan with { AfterImages = images.Values.ToList(), Deleted = removal.Deleted, SwitchedOffRuleId = removal.SwitchedOffRuleId });
     }
 
     /// <summary>
@@ -583,6 +626,114 @@ public class RecordProcedureReadService
         }
 
         return synthetic;
+    }
+
+    /// <summary>084d-2b: the affected count's basis when the write closes findings.</summary>
+    internal const string AffectedBasisFindingsClosed = "FindingsClosed";
+
+    /// <summary>084d-2b: the affected count's basis when the write closes nothing.</summary>
+    internal const string AffectedBasisResolutionChanged = "ResolutionChanged";
+
+    /// <summary>
+    /// 084d-2b: the most resolutions (core record and firm pairs, each read twice: Now and After) the affected count compares. Past it the count
+    /// is null. The records under the record are bounded separately (<see cref="ProcedureAssignmentService.MaxChildRecords"/>).
+    /// </summary>
+    internal const int MaxComparedResolutions = 10;
+
+    /// <summary>
+    /// Task 084d-2b: for a write that closes nothing, how many open invoices the caller can Read whose Procedure resolution differs between Now
+    /// and After, and the rows that comparison read (the caller must be able to Read each: they join the ONE check). Model 8.2's comparison: an
+    /// invoice differs when, on any date it is judged on, the Procedures applied and their versions, the rules in force and their versions, the
+    /// exclusions, the gaps, or the override rows that decided them differ.
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item>The In Review invoices filed on the record or directly under it (<see cref="ProcedureAssignmentService.InReviewInvoicesInReachAsync"/>;
+    /// a grandchild's chain does not reach the record, D-172).</item>
+    /// <item>Narrowed FIRST to the ones the caller can Read (<see cref="AffectedInvoiceCounter.VisibleOpenInvoicesAsync"/>): an invoice the caller
+    /// cannot Read is never judged, so nothing about it (or the record it is filed on) reaches the count or the check.</item>
+    /// <item>One resolution per (core record, firm) on each side, at most <see cref="MaxComparedResolutions"/>; the After side reads through the
+    /// request's overlay.</item>
+    /// </list>
+    /// Null, with no rows, when the reach cannot be read, a bound is passed, a visible invoice has no firm, or a resolution faults.
+    /// </remarks>
+    private async Task<(int? Count, HashSet<(string Set, Guid Id)> Compared)> ResolutionChangedAsync(
+        ProcedureAssignmentService planner, ProcedureRowOverlay after, string coreTable, Guid recordId, string? callerBearerToken, CancellationToken ct)
+    {
+        var compared = new HashSet<(string Set, Guid Id)>();
+        try
+        {
+            var reach = await planner.InReviewInvoicesInReachAsync(new WriteRefusingEntityService(_entities), coreTable, recordId, ct).ConfigureAwait(false);
+            if (reach.Count == 0)
+            {
+                return (0, compared);
+            }
+
+            if (await planner.VisibleOpenInvoicesAsync(reach.Select(i => i.InvoiceId).ToList(), callerBearerToken, ct).ConfigureAwait(false) is not { } visible)
+            {
+                return (null, compared);
+            }
+
+            var judged = reach.Where(i => visible.Contains(i.InvoiceId)).ToList();
+            var groups = judged.GroupBy(i => (i.CoreTable, i.CoreId, i.FirmId)).ToList();
+            if (judged.Any(i => i.FirmId is null || i.FirmId == Guid.Empty) || groups.Count > MaxComparedResolutions)
+            {
+                _logger.LogInformation("Dry run: {Groups} resolution(s) to compare (bound {Bound}), or an invoice with no firm; no count is shown",
+                    groups.Count, MaxComparedResolutions);
+                return (null, compared);
+            }
+
+            var differs = 0;
+            foreach (var group in groups)
+            {
+                var core = new CoreRecordReference(KindOf(group.Key.CoreTable), group.Key.CoreId);
+                var before = await ProcedureResolver.ReadRowsAsync(_entities, _logger, core, group.Key.FirmId!.Value, ct).ConfigureAwait(false);
+                var afterRows = await ProcedureResolver.ReadRowsAsync(after, _logger, core, group.Key.FirmId!.Value, ct).ConfigureAwait(false);
+                AddRowsOf(compared, before);
+                AddRowsOf(compared, afterRows);
+                var now = new ProcedureResolution(before);
+                var then = new ProcedureResolution(afterRows);
+                differs += group.Count(i => i.JudgedOn.Any(d => OutcomeOf(now.RulesOn(d)) != OutcomeOf(then.RulesOn(d))));
+            }
+
+            return (differs, compared);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Dry run: the invoices whose resolution changes could not be told ({ExceptionType}); no count is shown", ex.GetType().Name);
+            return (null, new HashSet<(string Set, Guid Id)>());
+        }
+    }
+
+    /// <summary>Every row a resolution was built from, as (entity set, id): what the caller must be able to Read for the count to show.</summary>
+    private static void AddRowsOf(HashSet<(string Set, Guid Id)> rows, ProcedureRows read)
+    {
+        rows.UnionWith(read.Chain.Select(l => (SetOf(l.Table), l.Id)));
+        rows.UnionWith(read.Overrides.Select(o => (ProcedureAssignmentEntity.EntitySet, o.RowId)));
+        rows.UnionWith(read.Procedures.Select(p => (ProcedureEntity.EntitySet, p.Id)));
+        rows.UnionWith(read.Versions.Select(v => (ProcedureEntity.VersionEntitySet, v.Id)));
+        rows.UnionWith(read.Sets.Select(s => (RuleSetSet, s.Id)));
+        rows.UnionWith(read.Policies.Select(p => (PolicySet, p.Id)));
+        rows.UnionWith(read.PolicyVersions.Select(v => (PolicyVersionSet, v.PolicyVersionId)));
+    }
+
+    /// <summary>
+    /// Model 8.2's comparison of one judged date, as one text: the Procedures applied (version, pin), the rules in force (policy version, the
+    /// record rule's Exclude row), the excluded rules and Procedures, the gaps, and the override rows that decided each (row, mode, subject, pin,
+    /// firm). Ordered, so equal outcomes give equal text.
+    /// </summary>
+    private static string OutcomeOf(ProcedureRulesOnDate d)
+    {
+        static string Rows(IEnumerable<ProcedureOverrideRow> rows) =>
+            string.Join(",", rows.Select(o => $"{o.RowId}/{o.Mode}/{o.ChainRecord.Id}/{o.ProcedureId}/{o.PinnedVersionId}/{o.PolicyId}/{o.FirmId}").Order(StringComparer.Ordinal));
+
+        return string.Join("|",
+            d.Procedures.Select(p => $"P{p.ProcedureId}:{p.ProcedureVersionId}:{p.Pinned}:{Rows(p.Overrides)}")
+                .Concat(d.Rules.Select(r => $"R{r.Version.PolicyVersionId}:{r.RecordRule?.BasePolicyVersionId}:{(r.RecordRule?.Exclude is { } x ? Rows([x]) : "")}"))
+                .Concat(d.ExcludedRules.Select(e => $"X{e.Version.PolicyVersionId}:{e.ReplacedByRecordRule}:{Rows(e.Overrides)}"))
+                .Concat(d.ExcludedProcedures.Select(e => $"E{e.ProcedureId}:{Rows(e.Overrides)}"))
+                .Concat(d.Gaps.Select(g => $"G{g.ProcedureId}:{g.Kind}:{Rows(g.Overrides)}"))
+                .Order(StringComparer.Ordinal));
     }
 
     /// <summary>The firm the request body names (a rule Exclude's or a change's <c>firmId</c>), for the kind it names.</summary>
