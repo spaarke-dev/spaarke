@@ -369,10 +369,20 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
     /// a table outside the registry is refused post-confirm as <c>table_unsupported</c> only if it is team- or user-owned, which
     /// is table metadata and not known here, so it is NOT pre-refused (an organisation-owned table is a valid run-as-user
     /// create). A per-user table and a communication or thread (unfiled, it keeps its creator) may take the run-as-user path
-    /// (<see cref="OwnedChildWrite.PathFor"/>), where the service is not asked, so they are not pre-refused either.</para>
+    /// (<see cref="OwnedChildWrite.PathFor"/>), where the service is not asked, so they are not pre-refused either — except
+    /// for a BFF-owned communication column (fm task 054b), which every create path refuses.</para>
     /// </remarks>
     internal static string? BlockedColumnBeforeSuspend(string tablename, JsonElement item)
     {
+        // fm task 054b: a BFF-owned column of a communication or its thread is refused on every create path (the run-as-user
+        // POST and the one server create alike), so it is proven here — before the per-user / keeps-its-creator exit below.
+        if (item.ValueKind == JsonValueKind.Object
+            && InheritedAccessPermission.BffOwnedCommunicationColumnIn(tablename, item.EnumerateObject().Select(p => p.Name))
+                is { } bffColumn)
+        {
+            return RefusalText(BffOwnedColumnRefusal(bffColumn), tablename, correlationId: string.Empty);
+        }
+
         if (item.ValueKind != JsonValueKind.Object
             || RecordTableRules.Find(tablename) is not { } rule
             || OwnedChildWrite.PerUserTables.Contains(tablename)
@@ -387,6 +397,16 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
             ? RefusalText(refusal, tablename, correlationId: string.Empty)
             : null;
     }
+
+    /// <summary>
+    /// fm task 054b: the refusal for a model item naming a BFF-owned column of a communication or its thread
+    /// (<see cref="InheritedAccessPermission.BffOwnedCommunicationColumns"/>), in the words of the service's step-2 refusal
+    /// (<see cref="RecordCreationService.CallerBlockedColumnRefusal"/>). Asked before the confirm dialog and again before the
+    /// run-as-user POST.
+    /// </summary>
+    private static RecordCreationRefusal BffOwnedColumnRefusal(string column) =>
+        new(RecordCreationRefusalKind.BlockedColumn, RecordCreationRefusal.BlockedColumnCode,
+            $"Column '{column}' is set by the server on a record the application creates for you — omit it.");
 
     /// <inheritdoc />
     public async Task<ToolResult> ExecuteChatAsync(
@@ -522,6 +542,17 @@ internal sealed partial class DataverseCreateRecordHandler : IToolHandler
 
                 return LogOutcome(context, tablename,
                     OwnedCreateResult(tool, tablename, forMapped, outcome, startedAt), stopwatch);
+            }
+
+            // fm task 054b: a communication's participants and thread lookup, and a thread's type and default flag, are the BFF's
+            // own (InheritedAccessPermission.BffOwnedCommunicationColumns): the run-as-user create below never takes one from the
+            // model's item. The same words as the service's step-2 refusal (RecordCreationService.CallerBlockedColumnRefusal).
+            if (InheritedAccessPermission.BffOwnedCommunicationColumnIn(tablename, mapped.Item!.Columns) is { } bffColumn)
+            {
+                var blocked = BffOwnedColumnRefusal(bffColumn);
+                return LogOutcome(context, tablename,
+                    Error(tool, RefusalText(blocked, tablename, context.DecisionId.ToString("N")), RefusalErrorCode(blocked), startedAt),
+                    stopwatch);
             }
 
             // A create that keeps its creator (per-user / unfiled communication / no user-team ownership) filed under a

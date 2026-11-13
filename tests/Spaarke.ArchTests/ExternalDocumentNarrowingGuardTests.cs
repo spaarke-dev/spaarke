@@ -440,6 +440,19 @@ public class ExternalDocumentNarrowingGuardTests
             "uac-r2 191g: asks the visibility seam whether the documents of recorded item grants are still externally visible, " +
             "to REMOVE a grant (Hidden or structurally undecidable) or keep it (Visible, or not decidable for now); no rows, " +
             "nothing returned to any caller.",
+        ["Sprk.Bff.Api.Services.Access.DirectMessageParticipantShares"] =
+            "uac-r2 197b: asks the visibility seam, for a Direct message's participants flagged external only, whether " +
+            "each row may be granted (Visible, or undecided only for no root), hidden (revoke) or deferred; no rows, nothing " +
+            "returned to any caller.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectThreadAccessService"] =
+            "uac-r2 197b: resolves the visibility seam in a scope of its own for the live Direct grant's participants flagged " +
+            "external (DirectMessageParticipantShares.DecideForDirectParticipantsAsync), on the Direct-team branch and the other Direct " +
+            "branch (the no-root exemption only for the stamped pair of a recognized unfiled Direct message); a grant decision only.",
+        ["Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob"] =
+            "uac-r2 197b: resolves the visibility seam from its run scope and hands it to DirectMessageParticipantShares.",
+        ["Sprk.Bff.Api.Services.Access.SecureChildReconciler"] =
+            "uac-r2 197b: constructs DirectMessageParticipantShares on the refile path WITHOUT the visibility seam (the optional " +
+            "parameter stays null), so participants flagged external are deferred there and the share job grants them.",
         ["Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalVisibility"] =
             "uac-r2 191b: THE external visibility predicate asks the seam for a document's hide decision only (its verdict, " +
             "never a row) and returns Visible / Hidden / Undecided; every reader it takes is app-only.",
@@ -1267,6 +1280,9 @@ public class ExternalDocumentNarrowingGuardTests
             "Writes only ownerid (the team the row's parents resolve to), conditioned on the row version.",
         ["Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver::ReleaseOwnSecureWriteAsync"] =
             "Writes only ownerid (the ordinary team the fresh parents give), conditioned on the row version.",
+        ["Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep::WriteDirectTeamOwnerAsync"] =
+            "fm 054 piece 3a: writes only ownerid (a typed reference to the resolved Direct message owner team), built in this " +
+            "member, conditioned on the row version; never a link value.",
         ["Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer::ReownAsync"] =
             "uac-r2 task 191c: writes only ownerid (the team a flagged owner's row's own I-6 question gives), conditioned on the " +
             "row version read with the owner check; never a link column.",

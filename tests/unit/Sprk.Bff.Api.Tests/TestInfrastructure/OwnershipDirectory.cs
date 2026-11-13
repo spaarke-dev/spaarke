@@ -133,9 +133,12 @@ internal sealed class OwnershipDirectory
 
     /// <summary>
     /// The REAL resolver over this directory, with the Secure Record names configured explicitly. A <paramref
-    /// name="fault"/> makes every directory read throw it — a Dataverse fault, which must propagate.
+    /// name="fault"/> makes every directory read throw it — a Dataverse fault, which must propagate. fm task 054 (F1):
+    /// <paramref name="directMessageOwnerTeam"/> is the Direct message owner team lookup the resolver composes (none by default).
     /// </summary>
-    public RecordOwnershipResolver Resolver(Exception? fault = null, ILogger<RecordOwnershipResolver>? logger = null)
+    public RecordOwnershipResolver Resolver(
+        Exception? fault = null, ILogger<RecordOwnershipResolver>? logger = null,
+        Sprk.Bff.Api.Infrastructure.Dataverse.DirectMessageOwnerTeam? directMessageOwnerTeam = null)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
@@ -176,7 +179,8 @@ internal sealed class OwnershipDirectory
             ["ExternalAccess:CustomerBusinessUnitId"] = CustomerBusinessUnitSetting,
         }).Build();
 
-        return new RecordOwnershipResolver(entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance);
+        return new RecordOwnershipResolver(
+            entities.Object, configuration, logger ?? NullLogger<RecordOwnershipResolver>.Instance, directMessageOwnerTeam);
     }
 
     /// <summary>
@@ -271,8 +275,15 @@ internal sealed class OwnershipDirectory
 
         var payload = fields.ToList();
         var changes = RecordReparent.WithLineageLookupsIn(
-            entity, RecordReparent.ParentChangesWithClearsIn(entity, payload), payload);
-        Write(entity, id, changes.ToDictionary(change => change.Key, change => (object?)change.Value));
+            entity, RecordReparent.ParentChangesWithClearsIn(entity, payload), payload)
+            .ToDictionary(change => change.Key, change => (object?)change.Value);
+        // fm task 054 piece 3b: a communication's typed regarding lookups that file nothing (a contact, an account) land too.
+        foreach (var (column, link) in RecordReparent.RegardingLinksSetIn(entity, payload))
+            changes[column] = link;
+        // Pass 2 (K2): and its type and stamped pair, read the way the writers read them.
+        foreach (var (column, value) in RecordReparent.UnfileRuleColumnsWrittenIn(entity, payload))
+            changes[column] = value;
+        Write(entity, id, changes);
     }
 
     /// <summary>#2143: <see cref="ApplyPatch{TValue}"/> for a Web API PATCH addressed as <c>&lt;entity set&gt;(&lt;id&gt;)</c> with a
@@ -533,9 +544,14 @@ internal sealed class OwnershipDirectory
                         && _businessUnits.Any(b => b.BusinessUnitId == t.BusinessUnit
                                                    && string.Equals(b.Name, SecureBuName, StringComparison.OrdinalIgnoreCase)));
 
+    /// <summary>fm task 054 piece 3b: called with every query before it is answered, so a test can change the directory between
+    /// two reads.</summary>
+    public Action<QueryExpression>? BeforeAnswer { get; set; }
+
     public EntityCollection Answer(QueryExpression query)
     {
         QueriedEntities.Add(query.EntityName);
+        BeforeAnswer?.Invoke(query);
         if (!query.ColumnSet.AllColumns
             && query.ColumnSet.Columns.FirstOrDefault(c => _absentColumns.Contains((query.EntityName, c))) is { } absent)
         {
@@ -570,6 +586,9 @@ internal sealed class OwnershipDirectory
                 {
                     // Task 148 r2: a planned owner's business unit is read from its team row.
                     ["businessunitid"] = new EntityReference("businessunit", t.BusinessUnit),
+                    // fm task 054 (F1): the shared Direct-team check reads a team's own kind first.
+                    ["isdefault"] = t.IsDefault,
+                    ["teamtype"] = new OptionSetValue(t.TeamType),
                 }),
             // R4b-2c: by id too (the walk to the customer's top unit), with its parent.
             "businessunit" => _businessUnits

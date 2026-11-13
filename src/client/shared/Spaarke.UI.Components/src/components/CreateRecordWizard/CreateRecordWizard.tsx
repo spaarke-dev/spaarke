@@ -463,6 +463,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
               outsideCounselValue={ocVal}
               onOutsideCounselChange={handleOutsideCounselChange}
               onSearchOutsideCounsel={searchOrganizations}
+              navigationService={config.navigationService}
             />
           );
         },

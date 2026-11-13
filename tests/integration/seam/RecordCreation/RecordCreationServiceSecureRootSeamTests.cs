@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -8,9 +9,11 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse.FieldMapping;
 using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -296,6 +299,62 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         fields.Should().NotContainKey("sprk_searchindexname").And.NotContainKey("sprk_AI_Search_Index@odata.bind");
     }
 
+    // ── Task 022b (UAC-r2 Q2): the Access Permission floor of a create planned INTO isolation ─────────────────────────────
+
+    /// <summary>
+    /// Task 022b (must fire): a project filed under a secure matter that is Restricted is created into isolation, and the plan
+    /// that decided so read the matter's Access Permission in the same read — its floor is Restricted, so the values mapped
+    /// from that matter are written. The ordinary plan's floor is pinned in the mapping seam; this is the isolated plan's.
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_AProjectUnderASecureRestrictedMatter_IsCreatedIntoIsolation_AndItsMappedValuesMap()
+    {
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        World.Set("sprk_matter", secure, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+        var entities = MappingSourceReads(secure);
+
+        var outcome = await Service(entities.Object, MatterProfile("sprk_project")).CreateAsync(
+            await ProjectUnder(secure) with { Mapping = MappedFrom(secure) }, AsMappingCaller(entities), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        outcome.Isolated.Should().BeTrue();
+        outcome.OwningTeamId.Should().Be(SecureTeam);
+        var (table, _, fields) = _writes.Should().ContainSingle().Subject;
+        table.Should().Be("sprk_project");
+        TextOf(fields, "sprk_description").Should().Be(FromTheSecureMatter, "the isolated plan's floor is Restricted");
+        fields.Should().NotContainKey(InheritedAccessPermission.Column, "the project's stored value is the cascade's, after the create");
+        outcome.MappingWarnings.Should().NotContain(w => w.Code == RecordCreationWarning.MappingSourceRestrictedCode);
+    }
+
+    /// <summary>
+    /// Task 022b (must not fire), at the plan: a work assignment filed under the same secure Restricted matter by its typed
+    /// lookup, whose pair also names a matter no typed lookup repeats. The real plan still creates it into isolation (the only
+    /// gap is that unrepeated pair, beside a readably secure parent), but its floor is undecided, and the service's answer for
+    /// that floor removes the mapped values. Asked of the plan directly: the unified create refuses such a pair at its caller
+    /// check (step 5) before the plan is asked, so the plan's branch is pinned here and the strip on the service's answer.
+    /// </summary>
+    [Fact]
+    public async Task PlanCreateAsync_AnIsolatedPlanWhoseOnlyGapIsAnUnrepeatedPair_HasAnUndecidedFloor_AndItsMappedValuesAreRemoved()
+    {
+        var secure = Guid.NewGuid();
+        SecureMatter(_fixture, secure);
+        World.Set("sprk_matter", secure, InheritedAccessPermission.Column, new OptionSetValue(InheritedAccessPermission.Restricted));
+        var request = await WorkAssignmentUnderWithAnUnrepeatedPair(secure, Guid.NewGuid());
+        var item = ((RecordCreationPayload.Mapped)request.Payload).Item;
+
+        var plan = await _fixture.Services.GetRequiredService<SecureRootFilingGate>().PlanCreateAsync(
+            "sprk_workassignment", OwnedChildWrite.WritesOf(item), Creator, CancellationToken.None);
+
+        plan.Refusal.Should().BeNull(plan.Refusal?.Reason);
+        plan.Isolated.Should().BeTrue("the precondition: the plan proceeds into isolation with only the unrepeated pair unread");
+        plan.SecureOwnerTeamId.Should().Be(SecureTeam);
+        plan.AccessPermissionFloor.Should().Be(AccessPermissionFloor.Undecided);
+        var access = RecordCreationService.RootAccessPermission(ownReadable: true, ownRestricted: false, plan.AccessPermissionFloor);
+        access.EndsRestricted.Should().BeFalse("an undecided floor does not make the row Restricted");
+        access.Undetermined.Should().BeTrue("so the values mapped from a Restricted source are removed, as undetermined");
+    }
+
     // ── Task 049 fix round 1 (UAC-r2 ruling, item 4): the create-time pass waits for secure provisioning, so eligibility is
     // decided on the final record ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -361,13 +420,13 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
 
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    private RecordCreationService Service(IGenericEntityService? entities = null)
+    private RecordCreationService Service(IGenericEntityService? entities = null, FieldMappingProfileEntity? profile = null)
     {
         var stamps = new StampWorld();
         var restamper = new CoreAncestorRestamper(stamps.Service, stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance);
         return new RecordCreationService(
             new Mock<IRecordOwnershipResolver>(MockBehavior.Strict).Object,
-            AppCreatesIntoTheWorld(),
+            AppCreatesIntoTheWorld(profile),
             entities ?? new Mock<IGenericEntityService>(MockBehavior.Strict).Object,
             _fixture.Services.GetRequiredService<SecureRootFilingGate>(),
             restamper,
@@ -430,13 +489,116 @@ public sealed class RecordCreationServiceSecureRootSeamTests : IClassFixture<Pro
         };
     }
 
+    // ── Task 022b: field mapping from the secure matter ─────────────────────────────────────────────────────────────────
+
+    private const string FromTheSecureMatter = "From the secure matter";
+
+    /// <summary>The matter → <paramref name="target"/> profile: one Copy rule into the description.</summary>
+    private static FieldMappingProfileEntity MatterProfile(string target) => new()
+    {
+        Name = $"sprk_matter to {target}",
+        SourceEntity = "sprk_matter",
+        TargetEntity = target,
+        IsActive = true,
+        Rules =
+        [
+            new FieldMappingRuleEntity
+            {
+                Name = "description",
+                SourceField = "sprk_matterdescription",
+                TargetField = "sprk_description",
+                TargetFieldType = CreateTimeFieldMapping.FieldTypeText,
+                MappingType = CreateTimeFieldMapping.MappingTypeCopy,
+                IsActive = true,
+                ExecutionOrder = 0,
+            },
+        ],
+    };
+
+    /// <summary>
+    /// The service's app-only reads: the mapping source (the secure matter as the application reads it: owned by the named
+    /// team, flagged, Restricted) and step 8's owning-team unit.
+    /// </summary>
+    private static Mock<IGenericEntityService> MappingSourceReads(Guid matter)
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_matter", matter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matter)
+            {
+                ["sprk_matterdescription"] = FromTheSecureMatter,
+                ["ownerid"] = new EntityReference("team", SecureTeam),
+                [AccessFollowsParent.SecureFlagColumn] = true,
+                [InheritedAccessPermission.Column] = new OptionSetValue(InheritedAccessPermission.Restricted),
+            });
+        entities
+            .Setup(e => e.RetrieveAsync("team", SecureTeam, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("team", SecureTeam)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", ProvisionProjectTestFixture.SecureBuId),
+            });
+        entities
+            .Setup(e => e.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("businessunit", ProvisionProjectTestFixture.SecureBuId));
+        return entities;
+    }
+
+    /// <summary>Field mapping read as the caller, from <paramref name="matter"/> named as the source.</summary>
+    private static RecordCreationMapping MappedFrom(Guid matter) =>
+        RecordCreationMapping.ForCaller(new ReadsAndWritesEverything(), "caller-bearer-token", "sprk_matter", matter);
+
+    /// <summary>The caller, who reads the mapping source as the application read it.</summary>
+    private RecordCreationPrincipal AsMappingCaller(Mock<IGenericEntityService> entities) =>
+        RecordCreationPrincipal.ForCaller(MappingSourceCallerReadDouble.MirroringAppReads(entities).RoutedOver(_caller), Guid.NewGuid());
+
+    /// <summary>A work assignment filed under <paramref name="matter"/> by its typed lookup, whose pair names
+    /// <paramref name="pairMatter"/>, which no typed lookup repeats.</summary>
+    private async Task<RecordCreationRequest> WorkAssignmentUnderWithAnUnrepeatedPair(Guid matter, Guid pairMatter)
+    {
+        var mapped = await DataverseWriteItemMapper.MapAsync(_caller, "sprk_workassignment", JsonSerializer.SerializeToElement(new
+        {
+            sprk_name = "Review the lease",
+            sprk_regardingmatter = new { relatedTable = "sprk_matter", recordId = matter },
+            sprk_regardingrecordid = pairMatter.ToString("D"),
+            sprk_regardingrecordtype = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+        }), CancellationToken.None);
+        mapped.Item.Should().NotBeNull(mapped.ValidationError);
+        return new RecordCreationRequest("sprk_workassignment", new RecordCreationPayload.Mapped(mapped.Item!))
+        {
+            CorrelationId = FixedCorrelation,
+        };
+    }
+
+    private static string? TextOf(IReadOnlyDictionary<string, object?> fields, string key) =>
+        fields.TryGetValue(key, out var value)
+            ? value is JsonElement { ValueKind: JsonValueKind.String } text ? text.GetString() : value as string
+            : null;
+
+    /// <summary>The caller-rights probe with only its answer substituted: Read and Write on every record.</summary>
+    private sealed class ReadsAndWritesEverything()
+        : CallerRecordAccessProbe(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+    {
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default) =>
+            Task.FromResult(AccessRights.Read | AccessRights.Write);
+    }
+
     private static Microsoft.AspNetCore.Mvc.ProblemDetails Problem(RecordCreationOutcome outcome) =>
         RecordCreationProblemMap.ToProblemDetails(outcome.Refusal!, "sprk_workassignment", outcome.CorrelationId);
 
-    /// <summary>The app-only create: the row lands in the fixture as the application created it (createdby = app).</summary>
-    private IFieldMappingDataverseService AppCreatesIntoTheWorld()
+    /// <summary>The app-only create: the row lands in the fixture as the application created it (createdby = app). Task 022b:
+    /// <paramref name="profile"/>, when set, is the one field-mapping profile the app-only reader holds.</summary>
+    private IFieldMappingDataverseService AppCreatesIntoTheWorld(FieldMappingProfileEntity? profile = null)
     {
         var service = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        if (profile is not null)
+        {
+            service
+                .Setup(s => s.GetFieldMappingProfileWithRulesAsync(It.IsAny<string>(), It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string source, string target, bool _, CancellationToken _) =>
+                    source == profile.SourceEntity && target == profile.TargetEntity ? profile : null);
+        }
+
         service
             .Setup(s => s.UpdateRecordFieldsAsync(
                 It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), null))

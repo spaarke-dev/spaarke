@@ -65,6 +65,11 @@ public class DocumentAccessPermissionWriterGuardTests
             "without its record (DocumentCommunicationFieldsStagingTests). ebilling-r1 task 095: the same method's " +
             "submissionNarrowing branch sets Restricted with the NON-provisional AccessInheritance.OwnNarrowing(Restricted) and " +
             "the submission marker, for the from-email submission's .eml only (SubmissionMarkerWriterGuardTests)."),
+        new Writer("src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs", "BindInCreateAccessPermission",
+            "field-mapping-server-write-path-r1 task 022b: step 10 of the unified create. A document's value comes only from " +
+            "CoreAncestorResolver.DecideNewDocumentAccessPermissionAsync, which decides it through " +
+            "InheritedAccessPermission.DecideDocument (or DecideDocumentRaiseOnly where documents lack the record column), and " +
+            "is written with its record in the same create. The other three tables take their parents' value, as before."),
         new Writer("src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs", "StageEmbeddedAttachmentNarrowing",
             "Ontology task 177 review F1b (uac-r2 binding addition): a sent .eml embeds its attachments' bytes, so it is created " +
             "with the most restrictive OWN value of their source documents (unreadable = Restricted), only Limited or " +

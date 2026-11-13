@@ -87,6 +87,8 @@ internal static class RouteRecordCreation
                         row["ownerid"] = new EntityReference("systemuser", OrdinarySourceOwner);
                     if (row.Contains(AccessFollowsParent.SecureFlagColumn))
                         row[AccessFollowsParent.SecureFlagColumn] = false;
+                    // Task 022b: and its Access Permission (the Restricted-source rule's column) holds no value: Standard.
+                    row.Attributes.Remove(Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Column);
                 }
 
                 return row;

@@ -668,6 +668,56 @@ public sealed class SecureRecordSetupProcedureTests
                 },
                 SecureRecordSetupRejectionCodes.IdentityLinkLockOtherWriter, FailureClass.QuarantineRequired },
 
+            // ---- S26: the invoice amounts and firm (task 268; ebilling task 166, EB-D-200) ----
+            { "sprk_invoice.sprk_totalamount not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("sprk_invoice", "sprk_totalamount")] = false,
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "sprk_invoice.sprk_vendororg absent (package before task 166)", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("sprk_invoice", "sprk_vendororg")),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Readers cannot read sprk_invoice.sprk_approvedtotal", dv =>
+                    dv.ColumnPermissions("sprk_approvedtotal").RemoveAll(p => p.ProfileId == dv.ReaderProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Readers read 0 on sprk_invoice.sprk_feestotal", dv =>
+                    Replace(dv, "sprk_feestotal", dv.ReaderProfileId, 0, 0, 0),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers grant nothing on sprk_invoice.sprk_expensestotal", dv =>
+                    dv.ColumnPermissions("sprk_expensestotal").RemoveAll(p => p.ProfileId == dv.WriterProfileId),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot read sprk_invoice.sprk_lineadjustmentstotal (0/4/4)", dv =>
+                    Replace(dv, "sprk_lineadjustmentstotal", dv.WriterProfileId, 0, 4, 4),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot create sprk_invoice.sprk_invoiceadjustmentstotal (4/0/4)", dv =>
+                    Replace(dv, "sprk_invoiceadjustmentstotal", dv.WriterProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers cannot update sprk_invoice.sprk_totalamount (4/4/0)", dv =>
+                    Replace(dv, "sprk_totalamount", dv.WriterProfileId, 4, 4, 0),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "Writers grant sprk_totalamount on another table only", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_totalamount");
+                    permissions.RemoveAll(p => p.ProfileId == dv.WriterProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, "sprk_invoicecorrection", 4, 4, 4));
+                },
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable },
+            { "the Readers profile may update sprk_invoice.sprk_approvedtotal (4/0/4)", dv =>
+                    Replace(dv, "sprk_approvedtotal", dv.ReaderProfileId, 4, 0, 4),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_invoice.sprk_totalamount", dv =>
+                    dv.ColumnPermissions("sprk_totalamount").Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_invoice", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+            // S14's path (row above: S26). The fake's name lookup ignores case only, so the look-alike carries the exact name: the
+            // old by-name exemption returned both ids and excused it.
+            { "a look-alike 'System Administrator' profile (another id) may update sprk_matter.sprk_issecure", dv =>
+                    dv.FieldPermissions.Add(new SecureSetupFieldPermission(
+                        dv.AddProfile(SecureRecordSetupProcedure.SystemAdministratorProfileName), "sprk_matter", 4, 0, 4)),
+                SecureRecordSetupRejectionCodes.FieldLockOtherWriter, FailureClass.QuarantineRequired },
+            { "another profile may create sprk_invoice.sprk_vendororg", dv =>
+                    dv.ColumnPermissions("sprk_vendororg")
+                        .Add(new SecureSetupFieldPermission(dv.AddProfile("Billing Admins"), "sprk_invoice", 4, 4, 0)),
+                SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter, FailureClass.QuarantineRequired },
+
             // ---- S19–S21: the standing-grant environment (ISS-020 / #1565) ----
             { "standing-grant profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.StandingGrantProfileName),
                 SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
@@ -1067,6 +1117,54 @@ public sealed class SecureRecordSetupProcedureTests
 
         refused.Diagnostic.Should().Contain(admins.ToString()).And.Contain("contact.sprk_standinggrant")
             .And.Contain("Only Standing Grant Administrators and System Administrator may create or update the standing grant");
+    }
+
+    // ------------------------------------------------------------ S26: the invoice amounts and firm (task 268)
+
+    [Fact]
+    public async Task InvoiceMoneyLock_OnAPackageBeforeTask166_IsRefusedResumable_NamingTheColumnAndTheRemedy()
+    {
+        // Must fire: a stamp whose SpaarkeMaster predates ebilling task 166 — the seven columns exist unsecured with no
+        // profile rows. A BFF from master would run there while any user could set an invoice's total or firm.
+        var dv = NewEnv();
+        foreach (var column in SecureRecordSetupProcedure.InvoiceMoneyColumns)
+        {
+            dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey(SecureRecordSetupProcedure.InvoiceMoneyTable, column)] = false;
+            dv.ColumnPermissions(column).Clear();
+        }
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceMoneyLockIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("sprk_invoice.sprk_totalamount").And.Contain("IsSecured=False")
+            .And.Contain("scripts/ebilling/Set-EbillingInvoiceMoneyFieldSecurity.ps1").And.Contain("Nothing was written");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceMoneyLock_OtherWriter_IsQuarantined_NamingTheProfile()
+    {
+        var dv = NewEnv();
+        var billingAdmins = dv.AddProfile("Billing Admins");
+        dv.ColumnPermissions("sprk_approvedtotal")
+            .Add(new SecureSetupFieldPermission(billingAdmins, SecureRecordSetupProcedure.InvoiceMoneyTable, 4, 0, 4));
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.InvoiceMoneyLockOtherWriter,
+            FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain(billingAdmins.ToString()).And.Contain("sprk_invoice.sprk_approvedtotal");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InvoiceMoneyLock_SystemAdministratorAndAWriterOnAnotherTable_DoNotRefuse()
+    {
+        // Must not fire: the platform's System Administrator profile writes every secured column (owner decision F4, seeded
+        // by NewEnvironment), and a profile writing a column of the SAME NAME on another table is no invoice writer.
+        var dv = NewEnv();
+        dv.ColumnPermissions("sprk_totalamount")
+            .Add(new SecureSetupFieldPermission(dv.AddProfile("Correction Admins"), "sprk_invoicecorrection", 4, 4, 4));
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
     }
 
     // ------------------------------------------------------------ S18/S19: an environment on SpaarkeMaster 1.2.3.1

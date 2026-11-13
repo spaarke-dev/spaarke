@@ -16,14 +16,20 @@ public class StartupValidationService : IHostedService
     private readonly IOptions<RedisOptions> _redisOptions;
     private readonly IOptions<CommunicationOptions> _communicationOptions;
 
+    private readonly IConfiguration? _configuration;
+
+    /// <param name="configuration">uac-r2 task 197b: the raw settings, read only to report a retired key that still carries a
+    /// value (<c>ExternalTeamShareSynchronizer.ReportRetiredSettings</c>). Optional; the container always supplies it.</param>
     public StartupValidationService(
         ILogger<StartupValidationService> logger,
         IOptions<GraphOptions> graphOptions,
         IOptions<DataverseOptions> dataverseOptions,
         IOptions<ServiceBusOptions> serviceBusOptions,
         IOptions<RedisOptions> redisOptions,
-        IOptions<CommunicationOptions> communicationOptions)
+        IOptions<CommunicationOptions> communicationOptions,
+        IConfiguration? configuration = null)
     {
+        _configuration = configuration;
         _communicationOptions = communicationOptions;
         _logger = logger;
         _graphOptions = graphOptions;
@@ -49,6 +55,10 @@ public class StartupValidationService : IHostedService
 
             _logger.LogInformation("✅ Configuration validation successful");
             LogConfigurationSummary();
+
+            // uac-r2 task 197b: a retired setting that still has a value is reported (key only), never silently ignored.
+            if (_configuration is not null)
+                Sprk.Bff.Api.Services.Access.ExternalTeamShareSynchronizer.ReportRetiredSettings(_configuration, _logger);
 
             return Task.CompletedTask;
         }

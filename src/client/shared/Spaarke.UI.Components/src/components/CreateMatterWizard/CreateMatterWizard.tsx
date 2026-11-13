@@ -495,6 +495,9 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
       searchMatterTypes: handleSearchMatterTypes,
       searchPracticeAreas: handleSearchPracticeAreas,
 
+      // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
+      navigationService,
+
       getAssignWorkDefaults: () => ({
         assignWorkMatterTypeId: step2FormValuesRef.current.matterTypeId,
         assignWorkMatterTypeName: step2FormValuesRef.current.matterTypeName,

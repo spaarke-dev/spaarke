@@ -4,7 +4,7 @@
     <title>Create path within NFR-02 (round 2): cut the pre-create steps without changing what a create guarantees (owner 2026-11-07)</title>
     <phase>2 W2 Unified RecordCreationService (follow-up)</phase>
     <gate>049b (with UAC-r2 ruling b) merged into the work branch first: both edit RecordCreationService. The live re-measure waits on a dev deploy (owner's go, UAC-r2 runs it).</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes step order, concurrency and caching on every create through RecordCreationService (.cs, bff-api); caller checks and owner resolution are authorization-adjacent.</rigor-reason>
     <model-tier>opus</model-tier>
