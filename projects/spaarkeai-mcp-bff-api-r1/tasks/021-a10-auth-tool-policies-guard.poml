@@ -4,7 +4,7 @@
     <title>A10 auth on /mcp, tool policies and route guard</title>
     <phase>B MCP host and tools</phase>
     <gate>after 020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include auth and bff-api; modifies auth configuration, endpoints and ArchTests (.cs)</rigor-reason>
     <model-tier>opus</model-tier>
@@ -139,7 +139,22 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>uac-r2's four checks (naming note §2): FallbackPolicy covers /mcp/*; must-fire guard test on an unauthenticated /mcp/{area}; CIAM and A9 refused server-side before any tool runs, tested; no app-only fallback on failed OBO.</notes>
+  <notes>uac-r2's four checks (naming note §2): FallbackPolicy covers /mcp/*; must-fire guard test on an unauthenticated /mcp/{area}; CIAM and A9 refused server-side before any tool runs, tested; no app-only fallback on failed OBO.
+
+Completed 2026-11-12 (early start with the owner's go while 003's live tests wait on a Copilot outage).
+Commits: 6b8f74a346 (A10 filter, per-tool policies, MCP route credit), 871b94d53e (decisions), d9169b43b6 / d372711ffa / a0f360e06d (fix round 1).
+- A10: McpConnectorTokenFilter after .RequireAuthorization() on the MCP route applies A10DenyReason (Spaarke tid, exact v2 iss, BFF aud bare or api://, idtyp user, scp user_impersonation, GUID oid, no WorkforceHome identity). 401 + Bearer error="invalid_token"; logs the deny reason only. AuthorizationModule.cs and every shared scheme and policy unchanged.
+- Per-tool rule: ValidateTool requires the SDK-enforced [Authorize] set to equal the tool class's own, an allow-listed policy ("" or SystemAdmin), no anonymity metadata, explicit ReadOnly and title; the catalog refuses an unregistered policy; with Mcp:Enabled true the catalog is built at startup, so a bad tool stops startup.
+- Route guard: the interim Pending waiver and "021" in PendingOwners are gone; MCP route credit (McpRoutes + McpTools ledgers) with a seeding proof on the real source; tool rule by text and reflection; bypass-route guard; every .MapMcp( route must be in McpRoutes. Census stays 153.
+- Tests: MCP filter 72/72 (auth cases in tests/integration/auth/Mcp/McpAuthTests.cs; mutation checks on the tid, iss, oid and WorkforceHome checks); full ArchTests 2538/2538; build 0 warnings; format clean.
+- Reviews: two adversarial passes (Opus). Pass 1: no bypass; the real T5 connector token passes; test gaps, a dead Ciam-by-type check, the lazy-startup claim, reason-code wording. Pass 2: per-tool guard holes (a helper-class handler let a non-admin see an admin tool; McpAreaAttribute spelling; non-literal policy; deny-list). All fixed in fix round 1. uac-r2 passed the four checks and re-checked the fix round: PASS (2026-11-12).
+- Publish size (fresh worktrees, Compress-Archive): master e9208abc5e 40.088 MB (191 files), 871b94d53e 40.954 MB (194 files); the +0.87 MB is task 020's MCP DLLs, 021's own delta is about 0. No vulnerable packages.
+- Deviations: no-systemuser returns sdap.access.deny.caller_unresolved (the REST route's code), not UserContextRequired; registered-policy check via IOptions&lt;AuthorizationOptions&gt; (naming IAuthorizationPolicyProvider is banned in BFF source); anonymity refused at runtime by interface name only.
+- Open (owner): FR-02's RFC 9728 challenge needs an anonymous /.well-known route; 021 kept the plain Bearer challenge. Recommended, and uac-r2 agrees: amend FR-02, with the reason-code wording in the same edit.
+- Known limits (uac-r2 accepted): azp not pinned to the connector; only AzureAd:ClientId accepted as audience (two dev app ids; fails closed).
+- Filed from the reviews: #2762 (ISS-006, CopilotAuth failure log writes aud/iss/appid; fix PR #2763 passed uac-r2's gate).
+
+rework: fix-round-1 task 021</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
