@@ -283,3 +283,12 @@ Two-write rule: every entry here has a GitHub issue, and every issue has an entr
 | **Class** | K, deployment dependency (customer-provisioning-orchestration-r1 and the deployment guide) |
 | **Failure** | Rule: a chat-created contact, and a contact the repair pass re-owns, is owned by the default team of the unit in `ExternalAccess:CustomerBusinessUnitId`. The setting is required where those run (unset: the chat create is refused with `record_owner_customer_contact_team_unresolved`, and the pass skips the contact table) and names the customer's business unit, never the Secure Record unit. Add it to the deployment guide and the provisioning flow. |
 | **Status** | Open |
+## DI-029 — Invoice family: the regarding pair agrees with the row's core lookup on every update path
+
+| Field | Value |
+|---|---|
+| **Found** | 2026-11-13, task 045d adversarial review (outside the task's scope) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2772 |
+| **Class** | Follow-up; owner decision (touches FR-23); ebilling-r1 and this project |
+| **Failure** | Rule: on every invoice-family table, a row's regarding pair and its five resolver fields agree with its core lookup, and a write's pair agrees with the stored or written core lookup. Options: (a) refuse a disagreeing pair (ebilling-r1's view), (b) always derive the pair from the core lookup. Scope once decided: six tables × child-record update, chat tool, `UpdateRecordActionCore`, `DataverseUpdateHandler`, push. |
+| **Status** | Open; owner decision pending |
