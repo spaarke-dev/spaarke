@@ -338,10 +338,10 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
     approval and correction creates with no invoice are now invoice_required (still not read); submission and external
     identifier unchanged.
   - `RecordTableRulesInvoiceFamilyDeriveTests.FamilyRows` and `InvoiceFamilyRegardingPairAgreementTests.EveryFamilyTable`
-    no longer list the approval and the correction: their creates name a core record only, which is now refused before the
-    derive and the pair are asked. The derive and the pair are the same for the submission (the same lookups), still listed.
-  - `ARecordWithABlankNameOrNumber_IsAdmitted…`: the project-with-no-name cell uses the submission instead of the approval,
-    for the same reason.
+    still list the approval and the correction; their create rows now also name an invoice of the same core record, which
+    the fixture's caller reads (as rule 2's other invoice), so 045d's derive and 045e's pair agreement are exercised on both
+    tables. The same in `ARecordWithABlankNameOrNumber_IsAdmitted…`'s approval cell. Checked: with that invoice under
+    another core record, those cells fail (15).
   - No Finance or e-billing fixture changed: they do not create these rows through this path.
 - **Each new must-fire, run once with its change off** (temporary local edits, restored byte-identical):
   - create rule off: **16 of 16 fail** (seam 4, derive 6, unit 6 incl. the two changed expectations); every must-not-fire
@@ -350,9 +350,11 @@ All of the following are rule 1 unless stated: an invoice's core record no longe
     (`CheckWriteAgainstOtherInvoiceAsync`) already answered that fault `invoice_family_read_failed` and wrote nothing (its
     reason then named the exception type). The wrap makes the answer local with fixed text; the cell pins the outcome.
 - **Gates.** Solution build 0 warnings, 0 errors; ArchTests 2544 passed; filtered suite 11893 passed, 4 skipped; ebilling
-  filters 8437 passed, 4 skipped (3 fewer than round 3: 8 approval and correction create cells leave the pair-agreement
-  theory, 2 unit and 3 fault cells are added; the 6 derive cells are replaced one for one); `dotnet format
-  --verify-no-changes` clean on the six changed .cs files.
+  filters 8437 passed, 4 skipped; `dotnet format --verify-no-changes` clean on the six changed .cs files.
+- **Follow-up (coverage kept).** The approval and the correction are back in the derive and pair-agreement theories, each
+  create row naming an invoice of its own core record; the 6 invoice_required cells stay. Touched classes
+  (`RecordTableRulesInvoiceFamilyDeriveTests`, `InvoiceFamilyRegardingPairAgreementTests`) 349 passed; ebilling filters
+  8451 passed, 4 skipped (round 3's 8440, plus 6 invoice_required derive cells, 2 unit cells and 3 fault cells).
 
 ## Known limits
 
