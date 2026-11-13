@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="269" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Set-CustomerOwnerTeams: the "Spaarke Ontology Writer" unit is never a customer top unit</title>
+    <phase>Model 1 dedicated-stamp remediation — ebilling coordination (owner go 2026-11-13: "Writer-unit fix")</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes an operator script that decides which business units are customer units for role/team isolation checks, and modifies tests/scripts/** (Step 9.5 binding).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant/unit isolation logic in an operator script whose false pass would let a role copy or team in the writer's unit go unreported.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>One script and its Pester file; sequential with H7c (#2429), which also edits Set-CustomerOwnerTeams.ps1.</parallel-reason>
+    <deps>267, 268</deps>
+    <tags>provisioning, dataverse, security, operator-script, testing</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Task 267 (#2618) put the ontology writer's application user alone in its own business unit "Spaarke Ontology Writer", a direct child of the root that H7b creates. scripts/Set-CustomerOwnerTeams.ps1 treats every direct child of the root except Secure Record (and, since uac-r2 198, the Direct-message unit) as a customer top unit, so it counts the writer unit as one. Exclude it, decided by id, as the Direct unit is.</prompt>
+
+  <role>SPAARKE platform developer (operator scripts). Read-only decision logic; no new write.</role>
+
+  <goal>
+    In every mode, Set-CustomerOwnerTeams.ps1 (1) refuses the writer unit as the customer unit (by name or by id), nothing written;
+    (2) never lists the writer unit as another customer top unit (no INFO line, no "allowed" team place, no 'othertop' copy place);
+    (3) reports a declared team or a holder of a declared role's copy in the writer unit as drift, like Secure Record;
+    (4) refuses two units with the writer unit's name (which one is the writer's is not guessable).
+    No writer unit (H7b not yet run) changes nothing.
+  </goal>
+
+  <context>
+    <background>
+      The unit is found through scripts/common/OntologyWriterUnit.ps1 Get-DvOntologyWriterBusinessUnitId (Dataverse `name eq` filter, ids
+      only; throws on two; $null when absent) — the helper OntologyWriterUnitScriptGuardTests pins to H7b's
+      SecureRecordSetupProcedure.OntologyWriterBusinessUnitName. The script already has $Api and $headers in the helper's shape.
+      Copy the Direct-unit exclusion (customer mode, ~line 507–515) and the Secure Record handling via $forbiddenUnits (~line 453).
+    </background>
+    <relevant-files>
+      <file role="modify">scripts/Set-CustomerOwnerTeams.ps1</file>
+      <file role="modify">tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 — must-fire and must-not-fire rows (copy the Direct-unit rows ~233–262)</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md — where Set-CustomerOwnerTeams' customer-unit rule is described, if it is</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="R6">No unit name is compared in code; the unit is found by Dataverse's own name filter and decided by id.</constraint>
+    <constraint source="owner">No live Azure/Dataverse change and no deploy in this task.</constraint>
+    <constraint source="tests">The Pester run is read-only (every write is a test failure, as the file's mock does today).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Must fire: -CustomerBusinessUnitName 'Spaarke Ontology Writer' and -CustomerBusinessUnitId of the writer unit are refused, nothing written.</criterion>
+    <criterion testable="true">Must fire: a declared team named as the config in the writer unit is TEAM PLACE drift; a user holding the writer unit's copy of the directly assigned role is ROLE ASSIGNED ELSEWHERE drift.</criterion>
+    <criterion testable="true">Must fire: two units named 'Spaarke Ontology Writer' refuse.</criterion>
+    <criterion testable="true">Must not fire: an ordinary customer unit plans and verifies as before, and the writer unit is not listed as a customer top unit; with no writer unit nothing changes.</criterion>
+    <criterion testable="true">All tests/scripts/Set-CustomerOwnerTeams.Tests.ps1 pass under Pester 5.7.1; ArchTests (OntologyWriterUnitScriptGuardTests) pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-11-13">Created on the owner's go ("Writer-unit fix"). Follow-up unblocked by ebilling PR #2689; master merged into the branch first (04e5cf5997).</note>
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist.</protocol>
+  </execution>
+</task>

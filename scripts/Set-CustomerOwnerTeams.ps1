@@ -223,6 +223,8 @@ if ($Verify -and $AssignBillingRuleReader) {
 $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 $Api = "$EnvironmentUrl/api/data/v9.2"
+# Task 269: the ontology writer's business unit (task 267), found by the shared helper H7b's name is pinned to.
+. (Join-Path $PSScriptRoot 'common/OntologyWriterUnit.ps1')
 $IsDirectMode = $PSCmdlet.ParameterSetName -eq 'Direct'
 if ($IsDirectMode -and (-not $ConfigPaths -or $ConfigPaths.Count -eq 0)) {
     $ConfigPaths = @($DirectMessageRoleFiles | ForEach-Object { Join-Path $PSScriptRoot '..' 'config' $_ })
@@ -419,6 +421,13 @@ try {
     if (-not $secureId) { throw "The business unit named '$SecureBusinessUnitName' has no id." }
     Write-Host "Secure BU   : $SecureBusinessUnitName ($secureId)"
 
+    # Task 269: the ontology writer's business unit (task 267: H7b creates it, a direct child of the root holding the writer's
+    # application user alone) is never a customer unit, as Secure Record is not. Found by Dataverse's own `name eq` filter
+    # through the shared helper (ids only; two units of that name throw, since which one is the writer's is not guessable);
+    # none (H7b not run yet) refuses nothing.
+    $writerUnitId = Get-DvOntologyWriterBusinessUnitId -Api $Api -Headers $headers
+    if ($writerUnitId) { Write-Host "Writer BU   : $OntologyWriterBusinessUnitName ($writerUnitId)" }
+
     # R6: the Direct unit and the customer unit named by -CustomerBusinessUnitName are found by Dataverse's own `name eq`
     # filter and decided by the ids that come back. Dataverse ignores case and accents in that match; PowerShell's -eq ignores
     # only case, so a name compared in code could pass -Verify while the BFF (which asks Dataverse) refuses the same name as
@@ -441,23 +450,35 @@ try {
     $customerId = $customer.businessunitid
     if ($customerId -eq $rootId) { throw "Refused: $named is the ROOT business unit. The root holds only Spaarke product data; customer records go to the customer's own top unit (owner round 136)." }
     if ($customerId -eq $secureId) { throw "Refused: $named is the Secure Record business unit, never a customer unit." }
+    if ($writerUnitId -and $customerId -eq $writerUnitId) {
+        throw "Refused: $named is the ontology writer's business unit ('$OntologyWriterBusinessUnitName', task 267), never a customer unit. Nothing was written."
+    }
     if ($customer._parentbusinessunitid_value -ne $rootId) {
         throw "Refused: $named is not a direct child of the root (its parent is $($customer._parentbusinessunitid_value)). The teams live in the customer's TOP unit; the BFF walks up to it from any unit below."
     }
     Write-Host "Customer BU : $($customer.name) ($customerId)"
 
-    # Every customer top unit: a direct child of the root that is not the Secure Record unit.
-    $customerTops = @($units | Where-Object { $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId })
+    # Every customer top unit: a direct child of the root that is neither the Secure Record unit nor the ontology writer's.
+    $customerTops = @($units | Where-Object {
+            $_._parentbusinessunitid_value -eq $rootId -and $_.businessunitid -ne $secureId -and -not ($writerUnitId -and $_.businessunitid -eq $writerUnitId)
+        })
 
-    # 089d: the units no declared team may sit in: the root, Secure Record and every unit below Secure Record.
+    # 089d: the units no declared team may sit in: the root, Secure Record and every unit below it, and (task 269) the
+    # ontology writer's unit and every unit below it. $forbiddenBelow carries which of the two a lower unit sits under.
     $forbiddenUnits = @{ $rootId = 'the ROOT business unit'; $secureId = 'the Secure Record business unit' }
+    $forbiddenBelow = @{ $secureId = 'the Secure Record business unit' }
+    if ($writerUnitId) {
+        $forbiddenUnits[$writerUnitId] = "the ontology writer's business unit '$OntologyWriterBusinessUnitName'"
+        $forbiddenBelow[$writerUnitId] = $forbiddenUnits[$writerUnitId]
+    }
     $grew = $true
     while ($grew) {
         $grew = $false
         foreach ($u in $units) {
             if (-not $forbiddenUnits.ContainsKey($u.businessunitid) -and $u._parentbusinessunitid_value -and
-                $u._parentbusinessunitid_value -ne $rootId -and $forbiddenUnits.ContainsKey($u._parentbusinessunitid_value)) {
-                $forbiddenUnits[$u.businessunitid] = "'$($u.name)', below the Secure Record business unit"
+                $forbiddenBelow.ContainsKey($u._parentbusinessunitid_value)) {
+                $forbiddenBelow[$u.businessunitid] = $forbiddenBelow[$u._parentbusinessunitid_value]
+                $forbiddenUnits[$u.businessunitid] = "'$($u.name)', below $($forbiddenBelow[$u._parentbusinessunitid_value])"
                 $grew = $true
             }
         }
@@ -484,7 +505,7 @@ try {
     # every customer subtree (D-123); the root is never inside one. Runs in every mode, before any write.
     $misplaced = @($customerSubtree.Keys | Where-Object { $forbiddenUnits.ContainsKey($_) })
     if ($misplaced.Count -gt 0) {
-        throw "The business-unit tree is not the expected shape: $(($misplaced | ForEach-Object { $forbiddenUnits[$_] }) -join '; ') sits inside the subtree of $($customer.name) ($customerId). Secure Record must be a direct child of the root and outside every customer subtree (D-123). Nothing was written."
+        throw "The business-unit tree is not the expected shape: $(($misplaced | ForEach-Object { $forbiddenUnits[$_] }) -join '; ') sits inside the subtree of $($customer.name) ($customerId). Secure Record must be a direct child of the root and outside every customer subtree (D-123), as must the ontology writer's unit (task 267). Nothing was written."
     }
     $unitName = @{}
     foreach ($u in $units) { $unitName[$u.businessunitid] = $u.name }
@@ -783,6 +804,7 @@ try {
     function Get-CopyPlace([string]$UnitId) {
         if ($UnitId -eq $customerId) { return 'this' }
         if ($UnitId -eq $rootId) { return 'root' }
+        if ($writerUnitId -and $forbiddenBelow.ContainsKey($UnitId) -and $forbiddenBelow[$UnitId] -eq $forbiddenUnits[$writerUnitId]) { return 'writer' }
         if ($forbiddenUnits.ContainsKey($UnitId)) { return 'secure' }
         if ($customerTopIds -contains $UnitId) { return 'othertop' }
         return 'below'
@@ -857,6 +879,7 @@ try {
             switch (Get-CopyPlace $u.CopyUnit) {
                 'root' { $r.Add("ROLE ASSIGNED ELSEWHERE: user '$($u.Name)' ($($u.Id)) holds the ROOT copy of '$($config.roleName)' ($($u.RoleId)); Deep from the root reaches Secure Record. The root copy is assigned to nobody.") }
                 'secure' { $r.Add("ROLE ASSIGNED ELSEWHERE: user '$($u.Name)' ($($u.Id)) holds the '$($unitName[[string]$u.CopyUnit])' copy of '$($config.roleName)' ($($u.RoleId)), in or below Secure Record.") }
+                'writer' { $r.Add("ROLE ASSIGNED ELSEWHERE: user '$($u.Name)' ($($u.Id)) holds the '$($unitName[[string]$u.CopyUnit])' copy of '$($config.roleName)' ($($u.RoleId)), in or below the ontology writer's business unit (task 267), never a customer unit.") }
                 'below' { $r.Add("ROLE ASSIGNED ELSEWHERE: user '$($u.Name)' ($($u.Id)) holds the '$($unitName[[string]$u.CopyUnit])' copy of '$($config.roleName)' ($($u.RoleId)), a unit below a customer top unit; it reaches nothing above that unit. Assign the customer top unit's copy (-AssignBillingRuleReader).") }
                 'othertop' {
                     # Another customer's copy is that customer's to check, but a holder homed outside THAT unit's subtree
