@@ -734,9 +734,32 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <param name="decided">The result of <see cref="Check(Entity)"/>; a refusal is returned unchanged.</param>
     /// <param name="records">Reads the regarded record's name and number.</param>
     /// <param name="recordTypes">Reads the record-type row (pass <c>ICommunicationDataverseService.QueryRecordTypeRefAsync</c>).</param>
-    public static async Task<InvoiceFamilyCoreRecord> DeriveResolverFieldsAsync(
+    public static Task<InvoiceFamilyCoreRecord> DeriveResolverFieldsAsync(
         InvoiceFamilyCoreRecord decided,
         IGenericEntityService records,
+        RecordTypeLookup recordTypes,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        return DeriveResolverFieldsAsync(
+            decided, async (table, id, columns, token) => await records.RetrieveAsync(table, id, columns, token).ConfigureAwait(false),
+            recordTypes, ct);
+    }
+
+    /// <summary>
+    /// Reads the regarded record's <paramref name="columns"/> (task 045d: the generic writers pass their own reader — app-only on
+    /// the create, the caller's on a caller update). <c>null</c>, or a fault that is a record-not-found, is
+    /// <see cref="RecordNotFoundCode"/>; any other fault is <see cref="ReadFailedCode"/>.
+    /// </summary>
+    public delegate Task<Entity?> RecordLookup(string entityLogicalName, Guid id, string[] columns, CancellationToken ct);
+
+    /// <summary>
+    /// <see cref="DeriveResolverFieldsAsync(InvoiceFamilyCoreRecord, IGenericEntityService, RecordTypeLookup, CancellationToken)"/>
+    /// over any record reader (task 045d). The same rule and the same answers.
+    /// </summary>
+    public static async Task<InvoiceFamilyCoreRecord> DeriveResolverFieldsAsync(
+        InvoiceFamilyCoreRecord decided,
+        RecordLookup records,
         RecordTypeLookup recordTypes,
         CancellationToken ct = default)
     {
@@ -774,8 +797,7 @@ public static class InvoiceFamilyCoreRecordGuard
         Entity? row;
         try
         {
-            row = await records.RetrieveAsync(regarding.LogicalName, regarding.Id, [nameField, numberField], ct)
-                .ConfigureAwait(false);
+            row = await records(regarding.LogicalName, regarding.Id, [nameField, numberField], ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

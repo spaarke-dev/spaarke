@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -223,6 +224,127 @@ public sealed partial class RecordCreationServicePipelineSeamTests
         problem.Status.Should().Be(StatusCodes.Status400BadRequest);
         problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.SupersedesCoreRecordMismatchCode);
         problem.Detail.Should().Be(guardSaid.Reason);
+        AssertNothingWritten();
+    }
+
+    // =====================================================================================
+    // Task 045d (owner ruling Q8 (a)): the row is created with the five resolver fields of its core record
+    // =====================================================================================
+
+    private static string MatterId => OrdinaryMatter.ToString("D").ToLowerInvariant();
+
+    [Fact]
+    public async Task CreateAsync_AnInvoiceUnderOneMatter_IsCreatedWithTheMattersFiveResolverFields_OverTheCallersOwn()
+    {
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "One core record",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+            sprk_regardingrecordname = "Sent by the caller",
+            sprk_regardingrecordnumber = "SENT-1",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Succeeded.Should().BeTrue(outcome.Refusal?.Detail);
+        var fields = _creates.Should().ContainSingle().Subject.Fields;
+        Describe(fields["sprk_regardingrecordtype@odata.bind"]).Should().Be($"/sprk_recordtype_refs({CatalogRowOf("sprk_matter"):D})");
+        Describe(fields["sprk_regardingrecordid"]).Should().Be(MatterId);
+        Describe(fields["sprk_regardingrecordname"]).Should().Be("Acme v Beta", "the server's value, never the caller's");
+        Describe(fields["sprk_regardingrecordurl"]).Should().Be($"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={MatterId}");
+        Describe(fields["sprk_regardingrecordnumber"]).Should().Be("MAT-000013", "the number column the catalog row names");
+        outcome.Steps.Single(s => s.Step == RecordCreationStep.PreWriteRules).Note.Should().Contain("5 column(s) derived");
+    }
+
+    [Fact]
+    public async Task CreateAsync_TheDeriveRunsAfterStep5_SoACallerWithoutAppendToTheMatter_CausesNoCatalogOrRecordRead()
+    {
+        _scripted.NoAppendTo.Add(OrdinaryMatter);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Denied at step 5",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        outcome.Refusal.PreWrite.Should().BeNull("step 5 refused it, before the rule");
+        _recordTypes.Invocations.Should().BeEmpty("nothing is derived for a row step 5 refuses");
+        _journal.Should().NotContain(["catalog", "readback"]);
+        AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheCatalogReadFaults_IsUndecided500ReadFailed_AndWritesNothing()
+    {
+        _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("catalog timed out"));
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Catalog down",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Undecided, "never written without its five fields");
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheCoreTableHasNoCatalogRow_Is400ResolverFieldsIncomplete_AndWritesNothing()
+    {
+        _recordTypes.Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity?)null);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "No catalog row",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.Invalid);
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status400BadRequest);
+        problem.Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
+        AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheMatterHasNoNumber_Is400ResolverFieldsIncomplete_AndWritesNothing()
+    {
+        _readBack
+            .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, Guid id, string[] _, CancellationToken _) => new Entity(table, id) { ["sprk_mattername"] = "Acme v Beta" });
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Matter without a number",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        Problem(outcome, "sprk_invoice").Extensions["errorCode"].Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
+        AssertNothingWritten();
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenTheMatterIsGoneByTheDerive_IsTheUniformNotFound_AndWritesNothing()
+    {
+        _readBack
+            .Setup(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+
+        var outcome = await Service().CreateAsync(InvoiceRequest(new
+        {
+            sprk_name = "Matter deleted meanwhile",
+            sprk_Matter_bind = $"/sprk_matters({OrdinaryMatter:D})",
+        }), AsCaller(), CancellationToken.None);
+
+        outcome.Refusal!.Kind.Should().Be(RecordCreationRefusalKind.NotFoundOrDenied);
+        outcome.Refusal.PreWrite!.ParentUnavailable.Should().BeTrue();
+        var problem = Problem(outcome, "sprk_invoice");
+        problem.Status.Should().Be(StatusCodes.Status404NotFound);
+        problem.Extensions["errorCode"].Should().Be(RecordCreationRefusal.NotFoundCode);
         AssertNothingWritten();
     }
 }

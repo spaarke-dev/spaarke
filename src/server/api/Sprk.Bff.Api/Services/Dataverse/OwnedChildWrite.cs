@@ -1024,8 +1024,148 @@ internal static class OwnedChildWrite
     /// the browser re-file routes), before anything is checked or written, so every check sees the pair as it will be written.
     /// The planned columns replace the item's own (its type-only pair, a display column) and are mapped as the caller.
     /// </summary>
+    /// <remarks>Task 045d (owner ruling Q8 (a)): then an invoice-family row's five resolver fields, when the update sets or
+    /// clears one of its own core lookups (<see cref="KeepInvoiceFamilyResolverFieldsAsync"/>).</remarks>
     /// <returns>The item to check and write (unchanged when nothing applies), or the caller's own failure — nothing written.</returns>
     internal static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> KeepRegardingPairWholeAsync(
+        IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
+        ILogger? logger, CancellationToken ct)
+    {
+        var kept = await KeepRegardingPairWholeCoreAsync(user, table, entitySetName, recordId, item, logger, ct).ConfigureAwait(false);
+        return kept.Refusal is not null
+            ? kept
+            : await KeepInvoiceFamilyResolverFieldsAsync(user, table, entitySetName, recordId, kept.Item, logger, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 045d (owner ruling Q8 (a)), the update half on the caller paths (the child-record PATCH, the chat update tool): an
+    /// update that sets or clears one of an invoice-family row's own core lookups (<see cref="InvoiceFamilyCoreRecordGuard.ColumnsToRead"/>)
+    /// writes, in the same PATCH, the five resolver fields of the core record the row will name
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync"/>, all five or none), over any the update or the planner
+    /// set. Everything is read AS THE CALLER (the row's stored core lookups, the catalog row, the record), so Dataverse decides
+    /// what the caller may read. A row the guard's Check refuses is left to the re-file core, which refuses it with its code, in
+    /// its own order (NFR-07).
+    /// Fail closed: a read that fails, or a derive that cannot complete, writes nothing — the caller's own failure, the guard's
+    /// code through the route's invoice-family mapping, and a record the caller cannot read the uniform not-found.
+    /// </summary>
+    internal static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> KeepInvoiceFamilyResolverFieldsAsync(
+        IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
+        ILogger? logger, CancellationToken ct)
+    {
+        if (InvoiceFamilyCoreRecordGuard.ColumnsToRead(table) is not { } coreColumns
+            || !item.Lookups.Select(l => l.Column).Concat(item.ClearedColumns).Any(c => coreColumns.Contains(c, StringComparer.OrdinalIgnoreCase)))
+        {
+            return (item, null);
+        }
+
+        // The record the row will name: the guard's own Check over the stored core lookups (read as the caller) overlaid with the
+        // change, the first question the re-file core's guard asks. A row it refuses is left to the re-file core, which refuses it
+        // with its code in its own order (NFR-07); the guard's other questions (supersedes, lines, cycle) stay there, asked once.
+        var guarded = InvoiceFamilyCoreRecordGuard.GuardedLookups(table)!
+            .Where(g => coreColumns.Contains(g.Column, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        StoredLookups read;
+        try
+        {
+            read = await ReadLookupsAsCallerAsync(user, entitySetName, recordId, guarded, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            read = new StoredLookups(null, null, ex.GetType().Name);
+        }
+
+        if (read.Failure is { } failure)
+            return (item, new RefileOutcome { ClientFailure = failure });
+        if (read.Values is not { } stored)
+            return (item, new RefileOutcome { InvoiceFamilyRefusal = FiledUnderUnreadable(table, read.Problem) });
+
+        var effective = EffectiveLookups(stored, item);
+        var decided = InvoiceFamilyCoreRecordGuard.Check(table, column => effective.TryGetValue(column, out var value) ? value : null);
+        if (decided.IsRefused)
+            return (item, null);
+
+        var derived = await InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync(
+            decided, CallerRecordReader(user, table, entitySetName, recordId), CallerRecordTypeReader(user), ct).ConfigureAwait(false);
+        if (derived is not { IsRefused: false, ResolverFields: { } fields })
+        {
+            return (item, derived.RefusalCode == InvoiceFamilyCoreRecordGuard.RecordNotFoundCode
+                ? new RefileOutcome { Denied = NotAvailableToFileUnder, ParentUnavailable = true }
+                : new RefileOutcome
+                {
+                    InvoiceFamilyRefusal = derived.IsRefused
+                        ? derived
+                        : InvoiceFamilyCoreRecord.Refused(table, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+                            "The invoice-family check gave no answer; nothing was written."),
+                });
+        }
+
+        logger?.LogInformation(
+            "[UPDATE] the resolver fields of {Table} {RecordId} were derived from the core record it will name", table, recordId);
+        return (WithColumnsSet(table, item, fields.ToFields()), null);
+    }
+
+    /// <summary>The derive's record read AS THE CALLER (the planner's own, <see cref="CallerReaders"/>): a record they may not
+    /// read, or that is missing, is not found; any other failure is a fault (the guard's <see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/>).</summary>
+    private static InvoiceFamilyCoreRecordGuard.RecordLookup CallerRecordReader(
+        IDataverseUserClient user, string table, string entitySetName, Guid recordId)
+    {
+        var record = CallerReaders(user, table, entitySetName, recordId).Record;
+        return async (recordTable, id, columns, ct) =>
+        {
+            var read = await record(recordTable, id, columns, ct).ConfigureAwait(false);
+            if (read.Value is not { } values)
+            {
+                return read.Status is 403 or 404
+                    ? null
+                    : throw new InvalidOperationException($"the record read answered {read.Status}");
+            }
+
+            var row = new Microsoft.Xrm.Sdk.Entity(recordTable, id);
+            foreach (var (column, value) in values)
+            {
+                if (value is not null)
+                    row[column] = value;
+            }
+
+            return row;
+        };
+    }
+
+    /// <summary>The derive's catalog read AS THE CALLER: the table's active <c>sprk_recordtype_ref</c> row (its id and number
+    /// column), <c>null</c> when there is none; a failed read is a fault. The table is a core table the guard names.</summary>
+    private static InvoiceFamilyCoreRecordGuard.RecordTypeLookup CallerRecordTypeReader(IDataverseUserClient user) =>
+        async (recordTable, ct) =>
+        {
+            var response = await user.GetAsync(
+                $"{RecordTypeEntitySet}?$select={RecordTypeTable}id,{RegardingRecordType.RecordNumberFieldColumn}" +
+                $"&$filter={RecordTypeLogicalNameColumn} eq '{recordTable}' and statecode eq 0&$top=1", ct).ConfigureAwait(false);
+            if (!response.IsSuccess)
+                throw new InvalidOperationException($"the catalog read answered {response.StatusCode}");
+            if (response.Body is not { ValueKind: JsonValueKind.Object } body
+                || !body.TryGetProperty("value", out var rows) || rows.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("the catalog read gave no list");
+            }
+
+            foreach (var found in rows.EnumerateArray())
+            {
+                if (!found.TryGetProperty($"{RecordTypeTable}id", out var idValue) || idValue.ValueKind != JsonValueKind.String
+                    || !Guid.TryParse(idValue.GetString(), out var typeId))
+                {
+                    throw new InvalidOperationException("the catalog row has no id");
+                }
+
+                var row = new Microsoft.Xrm.Sdk.Entity(RecordTypeTable, typeId);
+                if (found.TryGetProperty(RegardingRecordType.RecordNumberFieldColumn, out var number) && number.ValueKind == JsonValueKind.String)
+                    row[RegardingRecordType.RecordNumberFieldColumn] = number.GetString();
+                return row;
+            }
+
+            return null;
+        };
+
+    /// <summary>The 045b planner on a caller path's mapped item (see <see cref="KeepRegardingPairWholeAsync"/>).</summary>
+    private static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> KeepRegardingPairWholeCoreAsync(
         IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
         ILogger? logger, CancellationToken ct)
     {
@@ -1172,6 +1312,57 @@ internal static class OwnedChildWrite
             Columns = item.Columns.Where(c => !drop.Contains(SecureRootInheritance.NormalizeColumn(c))).ToArray(),
             Lookups = item.Lookups.Where(l => !drop.Contains(l.Column)).ToArray(),
             ClearedColumns = item.ClearedColumns.Where(c => !drop.Contains(c)).ToArray(),
+        };
+    }
+
+    /// <summary>
+    /// Task 045d: <paramref name="item"/> with <paramref name="columns"/> set over its own (the invoice family's five resolver
+    /// fields, <see cref="InvoiceFamilyResolverFields.ToFields"/>): each column the item already writes, binds or clears is
+    /// replaced. A text value is written as is; the pair type (an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> to its catalog
+    /// row) is bound on the table's own navigation property (<see cref="RegardingRecordTypeNavigationPropertyOf"/>, pinned
+    /// against the solution) and listed as a lookup, as the mapper lists one. Pure: no read.
+    /// </summary>
+    /// <exception cref="ArgumentException">A lookup other than the pair type, or a value that is neither text nor a reference.</exception>
+    internal static DataverseWriteItemMapper.MappedItem WithColumnsSet(
+        string table, DataverseWriteItemMapper.MappedItem item, IReadOnlyDictionary<string, object> columns)
+    {
+        if (columns.Count == 0)
+            return item;
+
+        var kept = WithoutColumns(item, columns.Keys);
+        var body = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        using (var doc = JsonDocument.Parse(kept.JsonBody))
+        {
+            foreach (var property in doc.RootElement.EnumerateObject())
+                body[property.Name] = property.Value.Clone();
+        }
+
+        var lookups = kept.Lookups.ToList();
+        foreach (var (key, value) in columns)
+        {
+            var column = key.Trim().ToLowerInvariant();
+            switch (value)
+            {
+                case Microsoft.Xrm.Sdk.EntityReference type when IsPairType(column)
+                                                                && string.Equals(type.LogicalName, RecordTypeTable, StringComparison.OrdinalIgnoreCase):
+                    body[$"{RegardingRecordTypeNavigationPropertyOf(table)}@odata.bind"] =
+                        JsonSerializer.SerializeToElement($"/{RecordTypeEntitySet}({type.Id:D})");
+                    lookups.Add(new DataverseWriteItemMapper.MappedLookup(column, RecordTypeTable, RecordTypeEntitySet, type.Id));
+                    break;
+                case string text:
+                    body[column] = JsonSerializer.SerializeToElement(text);
+                    break;
+                default:
+                    throw new ArgumentException($"'{column}' cannot be set here: only text and the pair type are.", nameof(columns));
+            }
+        }
+
+        return new DataverseWriteItemMapper.MappedItem(
+            JsonSerializer.Serialize(body),
+            kept.Columns.Concat(columns.Keys.Select(k => k.Trim().ToLowerInvariant())).Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+        {
+            Lookups = lookups,
+            ClearedColumns = kept.ClearedColumns,
         };
     }
 
@@ -1708,27 +1899,46 @@ internal static class OwnedChildWrite
     /// <returns><c>null</c> when the write may proceed (or the table is not in the family); otherwise the refusal.</returns>
     internal static async Task<InvoiceFamilyStep?> CheckInvoiceFamilyAsync(
         IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item,
+        (string EntitySetName, Guid RecordId)? stored, CancellationToken ct, IGenericEntityService? appOnlyEntities = null) =>
+        (await DecideInvoiceFamilyAsync(user, table, item, stored, ct, appOnlyEntities).ConfigureAwait(false)).Refusal;
+
+    /// <summary>
+    /// <see cref="CheckInvoiceFamilyAsync"/>'s answer with the record the guard decided when it admits the row (task 045d: the
+    /// create derives the five resolver fields from it). <see cref="InvoiceFamilyDecision.Admitted"/> is set only when the guard
+    /// ran and admitted; both are <c>null</c> when it had nothing to decide (a table outside the family, an update that leaves
+    /// every guarded lookup as stored).
+    /// </summary>
+    internal readonly record struct InvoiceFamilyDecision(InvoiceFamilyStep? Refusal, InvoiceFamilyCoreRecord? Admitted)
+    {
+        public static InvoiceFamilyDecision Proceed => default;
+
+        public static InvoiceFamilyDecision Refused(InvoiceFamilyStep refusal) => new(refusal, null);
+    }
+
+    /// <summary>See <see cref="CheckInvoiceFamilyAsync"/>; also returns the admitted decision (task 045d).</summary>
+    internal static async Task<InvoiceFamilyDecision> DecideInvoiceFamilyAsync(
+        IDataverseUserClient user, string table, DataverseWriteItemMapper.MappedItem item,
         (string EntitySetName, Guid RecordId)? stored, CancellationToken ct, IGenericEntityService? appOnlyEntities = null)
     {
         var guarded = InvoiceFamilyCoreRecordGuard.GuardedLookups(table);
         if (guarded is null)
-            return null;
+            return InvoiceFamilyDecision.Proceed;
 
         var guardedColumns = guarded.Select(g => g.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var written = item.Columns.Concat(item.ClearedColumns).Concat(item.Lookups.Select(l => l.Column))
             .Where(guardedColumns.Contains)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (stored is not null && written.Count == 0)
-            return null; // an update that leaves every guarded lookup as stored
+            return InvoiceFamilyDecision.Proceed; // an update that leaves every guarded lookup as stored
 
         var notALookup = written.FirstOrDefault(c =>
             !item.Lookups.Any(l => string.Equals(l.Column, c, StringComparison.OrdinalIgnoreCase))
             && !item.ClearedColumns.Contains(c, StringComparer.OrdinalIgnoreCase));
         if (notALookup is not null)
         {
-            return new InvoiceFamilyStep(InvoiceFamilyCoreRecord.Refused(table, InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode,
+            return InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(InvoiceFamilyCoreRecord.Refused(table, InvoiceFamilyCoreRecordGuard.LookupNotACoreRecordCode,
                 $"{table}.{notALookup} is a lookup; it is set by a bind or cleared, never written as a value. Nothing was written."),
-                null, false);
+                null, false));
         }
 
         IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> before =
@@ -1747,12 +1957,9 @@ internal static class OwnedChildWrite
             }
 
             if (read.Failure is { } failure)
-                return new InvoiceFamilyStep(null, failure, false);
+                return InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(null, failure, false));
             if (read.Values is not { } values)
-            {
-                return new InvoiceFamilyStep(InvoiceFamilyCoreRecord.Refused(table, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
-                    $"What this {table} is filed under could not be read ({read.Problem}); nothing was written."), null, false);
-            }
+                return InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(FiledUnderUnreadable(table, read.Problem), null, false));
 
             before = values;
         }
@@ -1813,11 +2020,18 @@ internal static class OwnedChildWrite
                 : null).ConfigureAwait(false);
 
         if (supersededUnavailable)
-            return new InvoiceFamilyStep(null, null, true);
+            return InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(null, null, true));
         if (supersededFailure is { } readFailure)
-            return new InvoiceFamilyStep(null, readFailure, false);
-        return decided.IsRefused ? new InvoiceFamilyStep(decided, null, false) : null;
+            return InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(null, readFailure, false));
+        return decided.IsRefused
+            ? InvoiceFamilyDecision.Refused(new InvoiceFamilyStep(decided, null, false))
+            : new InvoiceFamilyDecision(null, decided);
     }
+
+    /// <summary>The guard's refusal when a family row's stored lookups, read as the caller, could not be used.</summary>
+    private static InvoiceFamilyCoreRecord FiledUnderUnreadable(string table, string? problem) =>
+        InvoiceFamilyCoreRecord.Refused(table, InvoiceFamilyCoreRecordGuard.ReadFailedCode,
+            $"What this {table} is filed under could not be read ({problem}); nothing was written.");
 
     /// <summary>
     /// The lookups a row will hold after a write (unified-access-control-r2's merge for ISS-010): the stored row's lookups
