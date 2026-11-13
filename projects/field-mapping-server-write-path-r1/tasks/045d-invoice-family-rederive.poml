@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045d" project="field-mapping-server-write-path-r1">
+  <metadata>
+    <title>Invoice-family rows re-derive their five resolver fields on a generic create and on an update that sets or changes their core lookup (Q8 (a))</title>
+    <phase>2 W2 Unified RecordCreationService (follow-up to 045, 045b, 045c)</phase>
+    <gate>045a, 045b and 045c merged into the work branch (c1afee6e02 or later). Owner go 2026-11-12. UAC-r2 reviews the diff before merge.</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what the generic create and the generic update paths write on six tables (.cs, bff-api); changes the pre-write rule contract; access-rule adjacent; modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Fail-closed reasoning on the create's step order and on two update path families with different readers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordTableRules, RecordCreationService and OwnedChildWrite, which 045b and 045c just changed.</parallel-reason>
+    <deps>045a, 045b, 045c</deps>
+    <tags>bff-api, security, field-mapping, testing</tags>
+    <estimated-effort>1 session</estimated-effort>
+  </metadata>
+
+  <prompt>Rule (owner ruling Q8 (a), 2026-11-07; owner go 2026-11-12): an invoice-family row (sprk_invoice, sprk_billingevent, sprk_invoicesubmission, sprk_invoiceapproval, sprk_externalidentifier, sprk_invoicecorrection) written through a generic path carries the five resolver fields (record type, id, name, url, number) of the core record it names, derived by the server from that record. On a create the fields are derived whenever the row is admitted. On an update they are derived when the update sets or clears one of the row's own core lookups. The derive is the one the dedicated writers already use (`InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync`). Design: `notes/task-045c-notes.md`, section "Q8 (a): invoice-family re-derivation on a generic write. Deferred to 045d".</prompt>
+  <role>SPAARKE platform developer, BFF write path. Security fails closed. Follow ADRs strictly.</role>
+  <goal>No generic create of a family row, and no generic caller update that moves a family row's core lookup, writes the row without the five fields describing the core record it names. A failed derive writes nothing.</goal>
+
+  <context>
+    <background>
+Shape (045c notes, "Proposed shape"):
+1. The pre-write delegate returns a result: `PreWriteCheck: Task&lt;PreWriteResult&gt;`, where `PreWriteResult` is a `PreWriteRefusal` or additional columns. The refusal factories (`Refused`, `Failed`, `NotFound`, `Undecided`) are unchanged.
+2. `RecordTableRules.InvoiceFamilyRule` builds the columns from the decision the guard already makes (`InvoiceFamilyCoreRecordGuard.Check`), then `DeriveResolverFieldsAsync` and `InvoiceFamilyResolverFields.ToFields()` (all five whole, or none).
+3. Create step 5½ (`RecordCreationService.RunPreWriteRulesAsync`) returns the merged columns; step 5½ applies them to `item` before step 6. Columns the caller set are overwritten: the pair must describe the core lookup the row names.
+4. Update: when the body sets or changes the row's own core lookup, the same derive runs and the five columns join the PATCH body. The reader is the one the path already has.
+
+Order (045c notes, "Evidence"): on the create, the derive reads the regarded record app-only, as the dedicated writers do, so it runs only AFTER step 5's caller AppendTo on every record the row names. On the caller update paths the derive reads as the caller, so Dataverse decides what the caller may read.
+
+Decision (main session, 2026-11-12; the proposal's open point 2): a derive failure (`ReadFailedCode`, `ResolverFieldsIncompleteCode`, `RecordNotFoundCode`) maps through the EXISTING invoice-family refusal mapping: `RecordTableRules.InvoiceFamilyPreWrite` on the create, the route's existing invoice-family mapping on an update (`ChildRecordEndpoints.InvoiceFamilyRefused`, the chat tool's `RefileRefusal`). The write is refused (fail closed). A row whose core lookup changed is never written without its five fields. The refusal contract (NFR-07) is unchanged byte for byte: the same codes, statuses and texts.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordTableRules.cs (PreWriteCheck, PreWriteRow, PreWriteRule, InvoiceFamilyRule; new PreWriteResult)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/RecordCreation/RecordCreationService.cs (step 5½, RunPreWriteRulesAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/OwnedChildWrite.cs (CheckInvoiceFamilyAsync's admitted decision; KeepRegardingPairWholeAsync, the caller update planner)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/InvoiceFamilyCoreRecordGuard.cs (DeriveResolverFieldsAsync over a record reader)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ChildRecordEndpoints.cs (the planner refusal maps an invoice-family refusal through InvoiceFamilyRefused)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/Submission/InvoiceSubmissionPersister.cs (~:463, the dedicated writer's derive)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/task-045c-notes.md (Q8 (a) section)</file>
+      <file role="canonical-reference">projects/field-mapping-server-write-path-r1/notes/task-045b-notes.md ("Q8 (update side)")</file>
+      <file role="test">tests/integration/seam/RecordCreation/ (create, step order)</file>
+      <file role="test">tests/integration/data-mutation/RecordOwnership/ (caller update paths)</file>
+      <file role="test">tests/unit/domain/Dataverse/RecordCreation/RecordTableRulesInvoiceFamilyRuleTests.cs (the rule's result)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="branching">`git switch -c task/fm-045d origin/work/field-mapping-server-write-path-r1` (tip c1afee6e02 or later). Then commit this POML first.</constraint>
+    <constraint source="order">On the create the derive runs inside step 5½, after step 5's AppendTo (the app-only reads stand on it). It never runs for a system principal (step 5½ already refuses a table with rules).</constraint>
+    <constraint source="decision 2026-11-12">A derive failure is a refusal through the existing invoice-family mapping, never "add nothing". `ReadFailedCode` and `ResolverFieldsIncompleteCode` answer as today's undecided or invalid outcome for that code; `RecordNotFoundCode` answers the uniform not-found. No new refusal kind, code, status or text (NFR-07).</constraint>
+    <constraint source="whole or none">The five fields are written all together (`ToFields`), overwriting any of them the caller or the planner set, or not at all.</constraint>
+    <constraint source="readers">Create: the regarded record app-only (`IGenericEntityService`), the catalog row by table name app-only (`ICommunicationDataverseService.QueryRecordTypeRefAsync`), as the dedicated writers. Caller update paths: both as the caller. No path gains an app-only reader it does not already hold.</constraint>
+    <constraint source="no other change">The guard's admit and refuse decisions are unchanged. Do not edit `SecureRootInheritance.cs` or UAC-r2's files (`DirectThreadAccessService.cs`, `DirectMessageParticipantShares.cs`, `SecureChildShareReconciliationJob.cs`, `SecureChildReconciler.cs`). No change under `.claude/`.</constraint>
+    <constraint source="public repo">Commit messages, code comments, test names and notes state the rules only.</constraint>
+    <constraint source="ADR-038 / §10 / §11">New tests go under KEEP paths only (`tests/integration/**`, `tests/unit/domain/**`). Never run Sprk.Bff.Api.Tests unfiltered; add `&amp;FullyQualifiedName!~Api.Office.`. §11 answers for `PreWriteResult` and any new member. The publish delta is the main session's.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Branch; FULL rigor; re-grep every file:line in the proposal.</step>
+    <step order="1">`PreWriteResult` and the delegate change; existing rules and fixtures return it with no assertion change.</step>
+    <step order="2">`InvoiceFamilyRule`: on admit, derive and return the five columns; a derive failure through `InvoiceFamilyPreWrite`.</step>
+    <step order="3">Step 5½ merges the columns into `item` before step 6.</step>
+    <step order="4">Caller update planner: derive as the caller when the update sets or clears a core lookup; the route maps a derive failure through its invoice-family mapping.</step>
+    <step order="5">Tests (AC1-AC6), each must-fire run once with the change switched off to show it fails. Build (0 warnings), ArchTests, filtered suites, `dotnet format whitespace --verify-no-changes` on touched files, `notes/task-045d-notes.md`. Commit on `task/fm-045d`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The app-only update paths (playbook Update Record, output mapping, field-mapping push) hold only `IGenericEntityService`, which cannot read the catalog row by table name. Deriving there needs a reader those paths do not hold (045b notes, "Q8 (update side)"; design §2.2 item 4). STOP and report that half; do not add a reader on an assumed approval.</trigger>
+    <trigger>If any existing refusal would change its code, status or text, STOP (NFR-07).</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">AC1 (create must fire): a generic create of each of the six family tables that names one core record writes all five resolver fields of that record (type reference to its catalog row, id lower-case "D", name, url, number), overwriting any of the five the caller sent.</criterion>
+    <criterion testable="true">AC2 (create fail closed): a derive failure refuses the create and writes nothing, through the existing mapping: a catalog read that faults, or no catalog reader, gives `invoice_family_read_failed` (undecided, 500); no catalog row, or a blank name or number, gives `invoice_family_resolver_fields_incomplete` (400); the regarded record missing gives the uniform not-found.</criterion>
+    <criterion testable="true">AC3 (create order): the derive runs only after step 5's AppendTo: a caller refused at step 5 causes no derive read.</criterion>
+    <criterion testable="true">AC4 (update must fire, caller paths): a child-record PATCH that moves a family row's core lookup (same core table, and a switch from one core table to another) writes all five fields of the new record in the same PATCH. A derive failure refuses and writes nothing, mapped through `InvoiceFamilyRefused` (the not-found case is the uniform not-found).</criterion>
+    <criterion testable="true">AC5 (update must not fire): an update that sets or clears no core lookup reads nothing for the derive and writes none of the five fields; a non-family table is unchanged.</criterion>
+    <criterion testable="true">AC6 (NFR-07): every existing refusal suite passes with unchanged assertions (`RecordTableRulesInvoiceFamilyRuleTests`, `ChildRecordCreateRefusalContractTests`, `RecordCreationServicePreWriteRuleSeamTests`, `RecordCreationServicePipelineSeamTests`, the invoice-family guard suites).</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>`PreWriteRefusal` (refusal only); `InvoiceFamilyCoreRecordGuard.DeriveResolverFieldsAsync` (dedicated writers); the 045b planner (`KeepRegardingPairWholeAsync`).</existing>
+    <extension>Yes: the delegate's return type is widened; the derive and the planner are reused, not forked.</extension>
+    <cost-of-doing-nothing>A generic create or a core-lookup move writes a family row whose resolver fields are missing or describe another record; the D-68 key column and every reader of the pair see the wrong record.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">The files in relevant-files.</output>
+    <output type="test">Tests under tests/integration/** and tests/unit/domain/**.</output>
+    <output type="notes">projects/field-mapping-server-write-path-r1/notes/task-045d-notes.md</output>
+  </outputs>
+
+  <notes>Added 2026-11-12 from the owner's go on Q8 (a). Create half from 045c's notes, update half from 045b's notes.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
