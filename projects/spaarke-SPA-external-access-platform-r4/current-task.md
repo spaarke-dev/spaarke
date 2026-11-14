@@ -8,7 +8,7 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 018: redeploy plus owner E2E retest of the rework (008–011 ✅, merged) |
-| **Step** | BFF and SPA are live on dev. Waiting on the owner E2E retest (list below) |
+| **Step** | Dev BFF `5a9b687a0b` (master `2747977f47` + mcp spike, incl. #2822 invoice names) live ~15:19Z; uac-r2 gate is a passive watch. Owner E2E retest in progress |
 | **Status** | Dev BFF `0173e1486e` (master `bd43110169` + mcp spike, live ~12:44Z, uac-r2 gate passed). Dev SPA from run 43598875136 (master `2747977f47`, the same SPA inputs as `bd43110169`), live 13:19Z. The live bundle has the new strings and no "Can contribute" or "To Do". |
 | **Next Action** | Collect the owner retest results and fix anything found. Record them in `notes/task-018-notes.md`, then complete task 018. Tell uac-r2 when the E2E is done. SPA rollback: the previous dev build `2ef4a17915`, dispatched from a temporary tag. |
 
@@ -25,11 +25,11 @@
 - Tasks / Events split, Add task, and Add event without the type select.
 - Documents columns and tooltips.
 - Unfinished E2E items in `notes/task-018-notes.md`, plus the CMRCL-788888 Submit invoice icon.
-- ebilling 095e: invoice names become "{firm} - {number}". Merged as #2822 (`7da54c00a3`), AFTER the current BFF build `bd43110169`, so it is not in this deploy; it reaches dev with uac-r2's next BFF deploy. Old invoice names this round are expected.
+- ebilling 095e: invoice names should now read "{firm} - {number}" (#2822 is in BFF `5a9b687a0b`).
 - SPA inputs: master `7da54c00a3` vs `bd43110169` show no diff under `src/client/external-spa` or `src/client/shared`, so a master SPA build equals the reviewed rework.
 
 ## Live state
-- **Dev BFF:** `0173e1486e` = master `bd43110169` + mcp spike (uac-r2).
+- **Dev BFF:** `5a9b687a0b` = master `2747977f47` + mcp spike (uac-r2, live ~15:19Z). BFF rollback `0173e1486e`.
 - **Dev SPA:** master `2747977f47` build (run 43598875136, 2026-11-14 13:19Z). Previous build: `2ef4a17915`.
 - **Never deploy the BFF directly.** uac-r2 orchestrates the BFF deploy, and the owner gives the go per SHA.
 
