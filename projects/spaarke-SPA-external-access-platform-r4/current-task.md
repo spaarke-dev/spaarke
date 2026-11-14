@@ -9,7 +9,7 @@
 |-------|-------|
 | **Task** | 018: redeploy plus owner E2E retest of the rework (008–011 ✅, merged) |
 | **Step** | Dev BFF `5a9b687a0b` (master `2747977f47` + mcp spike, incl. #2822 invoice names) live ~15:19Z; uac-r2 gate is a passive watch. Owner E2E retest in progress |
-| **Status** | Dev BFF `0173e1486e` (master `bd43110169` + mcp spike, live ~12:44Z, uac-r2 gate passed). Dev SPA from run 43598875136 (master `2747977f47`, the same SPA inputs as `bd43110169`), live 13:19Z. The live bundle has the new strings and no "Can contribute" or "To Do". |
+| **Status** | Dev BFF `5a9b687a0b` (see Live state). Dev SPA from run 43598875136 (master `2747977f47`), live 13:19Z; bundle has the new strings, no "Can contribute" or "To Do". |
 | **Next Action** | Collect the owner retest results and fix anything found. Record them in `notes/task-018-notes.md`, then complete task 018. Tell uac-r2 when the E2E is done. SPA rollback: the previous dev build `2ef4a17915`, dispatched from a temporary tag. |
 
 ## Done after merge
