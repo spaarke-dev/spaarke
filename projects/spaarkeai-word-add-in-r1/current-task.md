@@ -9,7 +9,14 @@
 | Field | Value |
 |---|---|
 | **Active task** | **134 🔄** Invoice tab: firm required, "Open in Spaarke", firm on the banner, Correction Note, inline firm assign (FULL, sonnet/high; POML `tasks/134-…poml`; owner go 2026-11-13: "yes proceed with all recommendations"). **Slices A+B1 merged in #2789** (c534bc0b82). The SWA deploy (run 43478586797) succeeded. The post-merge gate (43478586552) shows "cancelled" only because its server-test jobs were cancelled; the jest, typecheck and ESLint jobs passed. **B2** (Correction Note) waits for ebilling 095f's contract. **C** (inline firm assign) waits for ebilling 095g's contract, after uac-r2 agrees the design. |
-| **Open PR** | **#2815** (branch `fix/invoice-095e-firmname`, worktree C:\wt134c, commit a67bc60367): the Invoice tab follows ebilling's 095e contract. (1) The banner firm name is read from the top-level `firmName` string, tolerantly; the nested `firm {id,name}` was never shipped. (2) `ebilling.submission.firm_name_unreadable` is a transient outcome ("Submit it again."). (3) New `firm_invalid` wording. Client-only. Merge order relative to ebilling's 095e PR doesn't matter. CI pending; needs the owner's merge go. After the merge: confirm the SWA deploy, then Remove-WorktreeSafe C:\wt134c. Earlier: **#2793** ("Check again" after a firm is added in Spaarke; answers the Codex review comment on #2789) merged 2026-11-13 as **c2f366bf52** on the owner's go. Router, Gated jest, Production typecheck and ESLint passed; the server-test jobs were still pending and cannot be affected by a 2-file `.tsx` change. C:\wt134b removed. SWA deploy run 43482244492. |
+| **Open PR** | **#2820** (slice B2 Correction Note, branch `fix/invoice-correction-note`, worktree C:\wt134d, 6819b33d90 + 60fe238fad gating; STACKED on #2815, so merge #2815 first). Implements ebilling 095f (bb28870b76):
+- a required "Correction note" (trimmed, at most 2000 characters, no control characters other than \n, \r and \t), sent on Correction only, resent on Retry;
+- `correction_note_required` has its own message;
+- 4 new suites are gated; 383/383 pass.
+
+**ORDER (agreed with ebilling):** the pane goes first, because a pre-095f BFF ignores the unknown field. ebilling holds 095f out of dev BFF deploys until we message them the live pane SHA. After the merge, send that SHA to ebilling-r1.
+
+**#2815** (branch `fix/invoice-095e-firmname`, worktree C:\wt134c, commit a67bc60367): the Invoice tab follows ebilling's 095e contract. (1) The banner firm name is read from the top-level `firmName` string, tolerantly; the nested `firm {id,name}` was never shipped. (2) `ebilling.submission.firm_name_unreadable` is a transient outcome ("Submit it again."). (3) New `firm_invalid` wording. Client-only. Merge order relative to ebilling's 095e PR doesn't matter. CI pending; needs the owner's merge go. After the merge: confirm the SWA deploy, then Remove-WorktreeSafe C:\wt134c. Earlier: **#2793** ("Check again" after a firm is added in Spaarke; answers the Codex review comment on #2789) merged 2026-11-13 as **c2f366bf52** on the owner's go. Router, Gated jest, Production typecheck and ESLint passed; the server-test jobs were still pending and cannot be affected by a 2-file `.tsx` change. C:\wt134b removed. SWA deploy run 43482244492. |
 | **Next Action** | (1) Confirm the SWA deploy run 43482244492. (2) Owner check on dev after the deploys: a record with no firm shows the message, the link and Check again; "Open in Spaarke" works from the Invoice tab and the Save bar; a blocked pop-up shows its reason. (3) Wait for ebilling's 095e/095f/095g SHAs and contracts (B1 is already tolerant of 095e), uac-r2 deploy notices (range check, reply), and ontology's task 189 SHA + contract (Word Email tab). |
 | **Uncommitted** | Nothing in this worktree after this checkpoint commit. C:\wt134b is clean (pushed). |
 | **Live dev BFF** | **b100effac3** (live since 2026-11-13T20:39Z): master **c2f366bf52** + mcp-r1 spike **d7369fecf1**. Before it: 0c06f464e3. Every later dev deploy must include the spike. After-notice check: no add-in concern. `FlaggedOfficeEdit` is still unset; uac-r2 will say when it is on. |
@@ -28,7 +35,12 @@
   - D-226 naming: "{firm name} - {invoice number}";
   - a new transient Failed code, `firm_name_unreadable`;
   - `firm_invalid` now also means "a firm is required".
-- **D-225:** `correctionNote` in 095f, on from-email Correction and in the review flow. It is written to `sprk_correctionnote` on the new invoice. The contract (max length, missing-note rule) comes later.
+- **D-225 / 095f** (ebilling bb28870b76, not on master yet):
+  - `correctionNote` is required on Correction: trimmed, at most 2000 characters, \n \r \t allowed; blank gives 400 `correction_note_required`.
+  - It is refused on New.
+  - A retry of a still-Received Correction must resend it.
+  - It is saved on the NEW invoice's `sprk_correctionnote`.
+  - Pane: #2820.
 - **ebilling's order:** 084d, then 095e, 095f, 095g.
 - **Known limits in #2789:**
   - K4: a one-render double link after a record change.
