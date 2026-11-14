@@ -235,7 +235,7 @@ internal static class InvoiceFamilyLockedWrite
     /// </list>
     /// A row gone at either write answers as the guard's write does (<paramref name="notFoundAsReadFailed"/>).
     /// </summary>
-    internal static async Task<string?> UpdateExistingAsync(
+    internal static async Task<string?> UpdateExistingSplitAsync(
         IFieldMappingDataverseService records,
         string entityLogicalName,
         Guid recordId,

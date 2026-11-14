@@ -66,7 +66,7 @@ public class InvoiceFamilyLockedWriteTests
 
     private static Task<string?> Write(
         Mock<IFieldMappingDataverseService> records, string table, Guid id, Dictionary<string, object?> fields, Guid? asPerson, Rights rights) =>
-        InvoiceFamilyLockedWrite.UpdateExistingAsync(
+        InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
             records.Object, table, id, fields, asPerson, notFoundAsReadFailed: asPerson is not null, rights.Question, CancellationToken.None);
 
     // ── The locked set ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -220,7 +220,7 @@ public class InvoiceFamilyLockedWriteTests
     {
         var (records, writes) = Records();
 
-        var code = await InvoiceFamilyLockedWrite.UpdateExistingAsync(
+        var code = await InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
             records.Object, "sprk_invoice", InvoiceId, new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) },
             Person, notFoundAsReadFailed: true, RightsOfPrincipal(probe: null, Person), CancellationToken.None);
 

@@ -110,7 +110,7 @@ exemption #1616 made for the project pair applies in the same way: chunk 3 must 
   an OBO path may pass its own). Write on the row (plus Append when a lookup is set to a record), then AppendTo on every
   record a locked lookup now names. Any unanswered question → `Unavailable`; a refusal, a missing row or target, or an
   unreadable value → `Denied` (one answer: an unknown id and an unappendable one are alike). Nothing is written by it.
-- `UpdateExistingAsync(records, table, recordId, fields, impersonateSystemUserId, notFoundAsReadFailed, rightsOf, ct)`: the
+- `UpdateExistingSplitAsync(records, table, recordId, fields, impersonateSystemUserId, notFoundAsReadFailed, rightsOf, ct)`: the
   drop-in for the guard's `UpdateExistingAsync` on C1-C3. No locked column, or an app-only run → exactly the old single
   write. Otherwise: check; `Unavailable` → `ReadFailedCode`, `Denied` → `LockedWriteDeniedCode`, nothing written; allowed →
   the other columns as the person (their own field security and privileges still apply), then the locked columns as the app.
