@@ -293,20 +293,27 @@ describe('loadPreviousSubmission — the firm on the banner (task 134, slice B1)
     return loadPreviousSubmission(MESSAGE_ID, config);
   };
 
-  it('must-fire: a firm { id, name } on the body is read as the firm name', async () => {
+  it('must-fire: the top-level firmName (095e) is read as the firm name, trimmed', async () => {
     const previous = await load({
-      firm: { id: '8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77', name: ' Ravenscroft and Vance LLP ' },
+      firmId: '8b0c6f1e-4c2a-4f7e-9a51-2f3d1c0e9b77',
+      firmName: ' Ravenscroft and Vance LLP ',
     });
     expect(previous).toMatchObject({ trackingNumber: 'INV-0012.1', firmName: 'Ravenscroft and Vance LLP' });
   });
 
+  it('must-not-fire: the old nested firm { id, name } shape (never shipped) is not read', async () => {
+    const previous = await load({ firm: { id: 'x', name: 'Ravenscroft and Vance LLP' } });
+    expect(previous).toMatchObject({ trackingNumber: 'INV-0012.1', status: 'Accepted' });
+    expect(previous).not.toHaveProperty('firmName');
+  });
+
   it.each([
     ['absent', {}],
-    ['null', { firm: null }],
-    ['a blank name', { firm: { id: 'x', name: '   ' } }],
-    ['no name', { firm: { id: 'x' } }],
-    ['not an object', { firm: 'Ravenscroft' }],
-  ])('must-not-fire: a firm that is %s adds no firm name and the body is still read', async (_label, over) => {
+    ['null', { firmName: null }],
+    ['blank', { firmName: '   ' }],
+    ['a number', { firmName: 42 }],
+    ['an object', { firmName: { name: 'Ravenscroft' } }],
+  ])('must-not-fire: a firmName that is %s adds no firm name and the body is still read', async (_label, over) => {
     const previous = await load(over);
     expect(previous).not.toBeNull();
     expect(previous).toMatchObject({ trackingNumber: 'INV-0012.1', status: 'Accepted' });
