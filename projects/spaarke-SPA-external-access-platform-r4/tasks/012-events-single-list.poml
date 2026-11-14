@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-SPA-external-access-platform-r4">
+  <metadata>
+    <title>Record "Events" section: one list of events (Task shown as the event type), one "Add event" with a type choice; drop the separate Tasks list and Add task (owner retest 2026-11-14)</title>
+    <phase>1 Record template and actions (post-E2E rework, round 2)</phase>
+    <gate>none (SPA only; BFF contract from 008 unchanged)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>.tsx in the SPA and the shared icon map</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Folds two existing lists into one and reuses the existing create dialog; fixed BFF contract</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches recordTemplates.ts, also edited by 013</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Owner, 2026-11-14 retest: "we only want Events (which allow for an event type of 'Task')". Today the record's "Tasks &amp; events" section shows two groups (Tasks = `isTask` events, Events = the rest) and two header actions (Add task, Add event). Both groups are already `sprk_event` records (task 009 removed `sprk_todo`), but the owner reads the split as To Do still being there.</prompt>
+  <goal>The section is titled "Events". It shows one date-ordered list of all the record's events; an event whose `isTask` is true carries a "Task" badge. One header action, "Add event", opens one dialog with a Type choice: "Event" (default) or "Task". "Task" is offered only when the list's `canCreateTask` is true; choosing it sends `eventType: "task"`. No "Tasks" heading, "Add task" action or task-specific empty state remains.</goal>
+
+  <context>
+    <background>Wiring (code map 2026-11-14): `EventsCalendar.tsx:832-833` splits `isTask`; `:906-907` renders two groups; `:700-701` offer two create actions; `:914-934` mount two `CreateEventDialog` kinds; `createBusyReporters` `:213-223` keeps one busy flag per kind. `TasksEventsSection.tsx:67-68` wires `offerAction('addEvent')` and `offerAction('addTask')`; `recordTemplates.ts:36` has `tasksEvents: ['addTask','addEvent']`, text `:147-148`; icons `recordActionIcons.ts:38-39` (shared lib 3.0.0). The dialog (`:531-570`) collects a Description that the payload (`:488-497`) never sends, and `CreateExternalEventRequest` has no description field — the same "collected but never sent" defect as D-6.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-11-14">One list, one create action, Type choice inside the dialog. The section title is "Events".</constraint>
+    <constraint source="task 008 F2-1">The Task type option shows only when `canCreateTask` is true; "Add event" itself follows `canCreate`. Unknown = hidden. A caller with `canCreateTask` true and `canCreate` false still gets "Add event" with Task as the only (preselected) type.</constraint>
+    <constraint source="D-6 lesson">No field the request cannot carry: remove the Description field (the BFF has no description column on this route). Record it in the notes.</constraint>
+    <constraint source="ADR-012 / shared lib">Do not delete `addTask` from the shared icon map (3.0.0 is published to other consumers); stop using it in the SPA only. No shared-lib version bump.</constraint>
+    <constraint source="task 011">Keep the busy hold: the record modal stays open while a create is in flight (one dialog now, so one flag).</constraint>
+    <constraint source="FR-17">Empty state: "No events yet" with the existing EmptyState; a truncated list never hides the create action (011 F1).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">EventsCalendar: one sorted list; "Task" badge from `isTask`; one dialog with a Type RadioGroup/Dropdown gated as above; payload adds `eventType: 'task'` only for Task; Description removed.</step>
+    <step order="2">TasksEventsSection + recordTemplates: section title "Events", `tasksEvents: ['addEvent']`; remove the task create-action plumbing that is now unused.</step>
+    <step order="3">Tests (must-fire / must-not-fire): one list with a Task badge; Task option absent when `canCreateTask` false/unknown; Task-only caller; payloads for both types; busy hold; no "Tasks"/"Add task" text in the SPA (extend NoTodoSurface scan).</step>
+    <step order="4">typecheck, lint, vitest; TASK-INDEX, POML status, drift check, notes.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A record with one task-typed and one plain event shows one "Events" list of two rows; only the task row has a "Task" badge.</criterion>
+    <criterion testable="true">Add event with Type "Task" posts `eventType: "task"`; with Type "Event" posts no eventType. Neither posts a description.</criterion>
+    <criterion testable="true">`canCreateTask` false or absent: the dialog offers no Task type. `canCreate` false and `canCreateTask` true: Add event shows with Task only. Both false: no Add event.</criterion>
+    <criterion testable="true">No "Tasks" group heading, "Add task" label or "Create Task" title renders anywhere in the SPA.</criterion>
+  </acceptance-criteria>
+
+  <notes></notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
