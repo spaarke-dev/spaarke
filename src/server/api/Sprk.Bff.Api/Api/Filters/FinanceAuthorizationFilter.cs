@@ -192,7 +192,8 @@ public enum FinanceDenial
     /// The uniform 404 for a GENUINE denial only (no table privilege, a step-0 refusal of an external caller or of a caller with no
     /// systemuser row, no Read), and the route's 503 (<c>ebilling.submission.record_unavailable</c>, the submission read fault) for
     /// EVERY system-failure outcome: a step-0 flag or lookup read fault, a table-privilege read that has no complete answer
-    /// (<see cref="CallerPrivilegeAnswer.Faulted"/>), a target declaration or check that threw, a missing probe or caller resolver.
+    /// (<see cref="CallerPrivilegeAnswer.Faulted"/>), a record-rights answer Dataverse did not complete (<see cref="AccessSnapshot.Faulted"/>,
+    /// task 095g), a target declaration or check that threw, a missing probe or caller resolver.
     /// For a route whose 404 means "no match" (<c>GET /api/finance/invoice-submissions?internetMessageId=</c>, ebilling-r1 task 095a
     /// review F1, uac-r2 binding): it must NEVER answer the no-match 404 when it could not decide. Opt-in: every other route keeps
     /// <see cref="UniformNotFound"/> or <see cref="Forbidden"/>, where a fault is denied as before.
@@ -726,6 +727,22 @@ public class FinanceAuthorizationFilter : IEndpointFilter
 
             case FinanceCheckPath.Record:
                 {
+                    if (_denial == FinanceDenial.UniformNotFoundFailClosed)
+                    {
+                        // ebilling-r1 task 095g (design 3e): in the fail-closed mode a record-rights answer Dataverse did not complete is the
+                        // route's 503, never the uniform 404. The question and the allow rule are CallerHoldsRightsAsync's own.
+                        var snapshot = await _authorizationService.GetCallerRecordAccessAsync(
+                            userId, check.EntitySetName, check.RecordId, callerToken, ct);
+                        if (snapshot.Faulted)
+                        {
+                            return SystemFailureReasonCode;
+                        }
+
+                        return OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, check.Operation)
+                            ? null
+                            : InsufficientRightsReasonCode;
+                    }
+
                     return await CallerHoldsRightsAsync(
                         _authorizationService, userId, check.EntitySetName, check.RecordId, check.Operation, callerToken, ct)
                         ? null
