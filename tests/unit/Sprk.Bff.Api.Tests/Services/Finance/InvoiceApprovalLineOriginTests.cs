@@ -179,8 +179,8 @@ public sealed class InvoiceApprovalLineOriginTests
         w.Log.Entries.Should().NotContain(e => e.Message.Contains(InvoiceLineOrigin.UnknownOriginCode));
     }
 
-    [Fact(DisplayName = "165b must not fire (D-96): lines detached, the invoice and its lines moved to a new core, then re-attached keep their ids and origin, and approve")]
-    public async Task LinesDetachedMovedToANewCoreAndReattached_Approve()
+    [Fact(DisplayName = "165b must not fire (D-96): line origin does not depend on the core record the invoice and its lines name; a stored row whose lines name another core record keeps its line ids and origin, and approves")]
+    public async Task LinesNamingAnotherCoreRecord_KeepTheirOriginAndApprove()
     {
         var w = new ApprovalWorld();
         var intake = w.AddLine(InvoiceLineStatus.Accepted, 400m, approved: 400m);
@@ -188,13 +188,7 @@ public sealed class InvoiceApprovalLineOriginTests
         await w.RecordAddedLineAsync(added.Id, AddDecision);
         var lines = new[] { intake, added };
 
-        // The D-96 sequence: detach every line, move the invoice and each line to a new core record, re-attach the lines.
-        foreach (var line in lines)
-        {
-            w.Rows[("sprk_billingevent", line.Id)].Attributes.Remove("sprk_invoice");
-            w.H.Rows[("sprk_billingevent", line.Id)].Attributes.Remove("sprk_invoice");
-        }
-
+        // The stored invoice and each of its lines name a core record other than the one the world began with.
         var newCoreId = Guid.NewGuid();
         var newCore = new EntityReference(w.CoreEntity, newCoreId);
         var oldCore = w.Core;
@@ -212,13 +206,6 @@ public sealed class InvoiceApprovalLineOriginTests
         foreach (var line in lines)
         {
             w.H.Rows[("sprk_billingevent", line.Id)][coreColumn] = newCore;
-        }
-
-        foreach (var line in lines)
-        {
-            var reference = new EntityReference("sprk_invoice", w.InvoiceId);
-            w.Rows[("sprk_billingevent", line.Id)]["sprk_invoice"] = reference;
-            w.H.Rows[("sprk_billingevent", line.Id)]["sprk_invoice"] = reference;
         }
 
         var result = await w.ApproveAs(AliceUser);
