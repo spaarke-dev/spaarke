@@ -51,3 +51,18 @@ Invoice 0d9178d3:
   - For the other 4 (L520 and L190) it proposed codes outside the set. Those were refused (`OutsideCodeSet`) at confidence 0.0.
   - This is the intended behaviour for a litigation-coded invoice on a patent matter. "L 120" (with a space) is read as billed.
 - **Not checked here:** the review UI, which is WP4 (110, 111, 112).
+
+## 2026-11-14: `sprk_createinvoicewizard` redeployed to dev (task 052's build)
+
+- **Why:** dev still ran the 2026-10-11 build, which created invoices from the client. uac-r2's #2799 field lock cannot apply while a deployed web resource does that. The owner's go was typed in session `ebilling-r1`. uac-r2 got a notice before and after.
+- **Source:** origin/master `cfa97d718b`. Built in a clean detached worktree with the Vite cache cleared (`dist/index.html`, 949 KB).
+- **Change:** a PATCH of web resource `1adbb226-427d-f111-ab0e-7ced8ddc4cc6`, then PublishXml for that one resource only.
+  - The first publish attempt hit 0x80071151 (another publish running). The retry succeeded.
+  - `Deploy-WizardCodePages.ps1` was not used, because it deploys every wizard that has a build.
+- **Check:** the published content was read back.
+  - It matches the build byte for byte.
+  - There is no quoted `sprk_invoice` in it.
+  - The `invoice-submissions` route is present.
+  - Two `createRecord` tokens remain, both inside the shared generic Xrm WebApi adapter.
+  - modifiedon is 2026-11-14 03:45:05Z.
+- **Server side:** the routes it calls (internal submission, core-record firms, blocked/override/return) are in dev BFF master `c2f366bf52`.

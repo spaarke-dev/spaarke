@@ -1570,3 +1570,26 @@ Each item: finding, then change, then test.
 - **Behaviour change.** An own-row Procedure no longer counts toward `tooMany`: 51 readable candidates, one of them an own-row Procedure, give a list of 50.
 - **Tests** (`RecordAssignableProceduresContractTests`): `T1_OwnRowProcedure_DoesNotCountTowardTheBound`, `T1_52ReadableCandidates_AreTooMany`, `T1_StopsAskingOnceBoundPlusOneAreFound`, `T1_NoCandidates_StillResolvesTheCaller`, `T1_DeniedOwnRowProcedure_IsNotListed_AndNeverCounts`.
 - **Known limit K6.** Response time varies with the number of matching rows the caller cannot Read (accepted by uac-r2, 2026-11-13).
+
+### 084d-5a close (2026-11-13)
+
+- Re-check of round 2 (Sonnet): F1 own-row read unpaged → fails closed past one page (503); F3 second rights page untested → two tests. Fixed in 5324c5ef1e with seed proofs.
+- Merged into work at 8f5ff019fa (`task/084d-5a-r2`). uac-r2: merge OK on (2)+(3)+T1, full gates, scoped re-check. ontology-r1: OK, Signals untouched.
+- EB-D-232 (owner) merged on top: assign, pin and Procedure exclude refuse a statecode != 0 Procedure (409 `assignment.procedure_inactive`); rule change treats it as not in force, as Retired; rule exclude and remove stay allowed.
+- Known limits from ontology-r1's review:
+  - K4: the planner's candidate query uses the literal `"statecode", 0`; reuse the named StateActive once #2798 is on this branch.
+  - K4: the firm-condition pin test cannot detect the resolver no longer calling `FirmConditionHolds`.
+  - K2: the bound counts candidates before the resolver, so unpublished rows can give `tooMany` when fewer than 50 would be offered.
+  - K2: one unreadable exposed version, firm or own row makes the whole list 503 (fails closed, agreed with uac-r2), while assign checks only the Procedure's Read.
+  - K3: a Draft-only Procedure is assignable but never listed; the 5b wizard says so.
+
+### 084d-5b close (2026-11-13)
+
+- Built on `task/084d-5b` (935894324a): Assign Procedure wizard, `ProceduresPanel` entry gated by the 084g permissions (absent, never greyed), `planAssign`, `readAssignable` with debounced `q`, WizardFrame `reviewCanAdvance`.
+- Opus review: FIX. F1 a debounced re-read after Choose emptied the plan and Finish showed success with no POST (also reset a Pin to Follow); F3 the narrowed READ-module scan missed an import of the write client; F1 a11y live region around the whole list, Gap warning not tied to its radio; F3 (pre-existing) `g`-flag regex in the "only writes" scan; K1 fallback Gap text unpinned.
+- Fixed in 9b3b45e0e0 (`task/084d-5b-fix`): chosen item kept as a snapshot; search timer and read cancelled when Choose unmounts; WizardFrame Confirm needs a non-empty plan for all three wizards (onFinish throws as a backstop); race helpers moved to `services/readRace.ts` and the `\/overrides` scan restored with controls; live region narrowed to status lines; `aria-describedby` on each Gap radio; `g` flag dropped; Gap text pinned to the server constant. Jest 420/420.
+- Sonnet re-check: PASS (3 mutations killed). Merged into work at f86871820a.
+- Known limits:
+  - K2: a chosen Procedure that a later search hides stays selected with no "Selected" line on Choose; its snapshot (status, version in force) is not refreshed. The 089 write and its 409 decide.
+  - K3: the WizardFrame `onFinish` empty-plan throw has no test of its own (the Confirm guard is pinned; the Finish button cannot be reached).
+  - K4: the test "Back to Choose after a read was cut short ... pick is still checked" asserts only the re-ask.

@@ -416,7 +416,7 @@ The overlay is 084d-1's, unchanged, so it keeps ontology-r1's F1-F4. Many assign
 - **K3.** No owner prediction (R5): a 409 owner refusal can still come at Confirm.
 - **K4. Absent without a reason.** Draft-only, other-area and other-firm Procedures are absent with no reason given. The fixes are: publish a version (081), or switch the panel's firm.
 - **K5.** One corrupt candidate (an unknown AppliesTo) gives 503 for the whole assignable list, failing closed as the resolver does. `q` can narrow around it. The Procedure's admin route fixes it.
-- **K6.** One candidate Procedure or version the caller cannot Read gives 503 (EB-D-218). Billing admins read Procedures at Deep from the top unit (084f, 089e), so this needs a Procedure owned outside that subtree (Q2).
+- **K6.** (Superseded for candidates by the 2026-11-13 ruling below: an unreadable candidate is dropped; an unreadable exposed version still gives 503, EB-D-218.) Billing admins read Procedures at Deep from the top unit (084f, 089e), so this needs a Procedure owned outside that subtree (Q2).
 - **R1.** 089's write accepts Procedures that can never apply here: other area, or Draft-only, which may be legitimate ahead of publication. The list hides them. Filed as Q5, not changed here.
 - **R2.** A pre-filter that drops more than the resolver would can only under-offer. The parity test's other-firm, other-area and AppliesTo seeds catch it.
 
@@ -452,6 +452,6 @@ The overlay is 084d-1's, unchanged, so it keeps ontology-r1's F1-F4. Many assign
 2. A fault of that check, or a refusal of the whole check, is 503, never an empty 200.
 3. No pre-filter cap: fetch up to a hard ceiling of 1000 (`MaxCandidateRows`), filter, then bound; past the ceiling the answer is `tooMany`. **K5:** the ceiling counts the record's own Procedures before they are removed, so `tooMany` can come at 1000 − N real candidates; no leak, since those rows are exposed and checked under Now.
 4. Own row: a denied own-row **Procedure** is dropped (200, not listed); a denied own **row** of a readable Procedure is still 503.
-5. **K6:** the cost of the candidate Read batch. How its timing is handled is with uac-r2 (sent privately, 2026-11-13).
+5. **K6:** response time varies with the number of matching rows the caller cannot Read (accepted by uac-r2, 2026-11-13).
 
 Reviews: one Opus pass here, then uac-r2's; ontology-r1 sees the code.
