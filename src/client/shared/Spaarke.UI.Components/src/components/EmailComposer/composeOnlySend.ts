@@ -147,6 +147,14 @@ export interface ISendComposedEmailOptions {
    * a send filed to a record is archived either way. Summarize Files passes `false`: its email has no record.
    */
   archiveToSpe?: boolean;
+  /**
+   * Set when the composer is still open after a failed send: the wizard shows the warning and the user can fix the
+   * problem and send again. The value is the label of the button that sends it ("Finish", "Send"), so a sign-in failure
+   * can say what to select. Leave unset when the wizard closes after Finish (the create wizards, Summarize Files): the
+   * composer is gone and the user has to send it again from the record, or compose it again when there is no record.
+   * Whether there is a record follows `associations` (none: the email is filed under no record).
+   */
+  retryLabel?: string;
 }
 
 export interface ISendComposedEmailResult {
@@ -157,25 +165,42 @@ export interface ISendComposedEmailResult {
   warning?: string;
 }
 
+/** Where the user is when a Finish send fails: decides which next step the warning can truthfully name. */
+interface IFailureContext {
+  /** The email is filed under a record, so the record's Messages and "send it from the record" exist. */
+  hasRecord: boolean;
+  /** Label of the button that sends again while the composer is still open; unset once the wizard has closed. */
+  retryLabel?: string;
+}
+
 /**
- * Why a Finish send failed, for the success screen's warnings. Normalised the way the composer's own send failure is
+ * Why a Finish send failed, for the warning the wizard shows. Normalised the way the composer's own send failure is
  * (`toSendCommunicationError`, `meaningfulDetail`), so "HTTP 500" and developer strings never show. A send the server
- * accepted without confirming it may have gone out: say so, so the user checks before sending it again. The composer
- * is gone after Finish, so nothing here says the draft is still there.
+ * accepted without confirming it may have gone out: say so, so the user checks before sending it again. The next step
+ * named depends on where the user is: with the composer still open (`retryLabel`) they select that button again; once
+ * the wizard has closed the email can only be sent again from the record, and "the record's Messages" is named only
+ * when the email is filed under one.
  */
-function failureWarning(err: unknown): string {
+function failureWarning(err: unknown, context: IFailureContext): string {
   const e = toSendCommunicationError(err);
   const reference = e.correlationId && e.correlationId.trim() ? ` (reference ${e.correlationId.trim()})` : '';
-  const checkFirst = "Check your Sent Items or the record's Messages before sending it again.";
+  const checkFirst = context.hasRecord
+    ? "Check your Sent Items or the record's Messages before sending it again."
+    : 'Check your Sent Items before sending it again.';
   if (e.code === SEND_FAILURE_UNCONFIRMED_CODE) {
-    return `The email may have been sent: Spaarke accepted it but did not confirm it, so it may not appear on the record. ${checkFirst}${reference}`;
+    const onRecord = context.hasRecord ? ', so it may not appear on the record' : '';
+    return `The email may have been sent: Spaarke accepted it but did not confirm it${onRecord}. ${checkFirst}${reference}`;
   }
   if (e.code === SEND_FAILURE_NETWORK_CODE) {
     return `The email may not have been sent: no response came from the Spaarke server. ${checkFirst}${reference}`;
   }
   if (e.status === 401) {
-    // The composer is gone after Finish, so "resend" has nowhere to happen: send it from the record.
-    return `The email was not sent. Your sign-in had expired. Sign in again, then send it from the record.${reference}`;
+    const next = context.retryLabel
+      ? `select ${context.retryLabel} to send it`
+      : context.hasRecord
+        ? 'send it from the record'
+        : 'send the email again';
+    return `The email was not sent. Your sign-in had expired. Sign in again, then ${next}.${reference}`;
   }
   const detail = e.status === 0 ? undefined : meaningfulDetail(e.detail);
   const reason =
@@ -242,6 +267,13 @@ export async function sendComposedEmail(
     });
     return { success: true, communicationId: result.communicationId };
   } catch (err) {
-    return { success: false, warning: failureWarning(err) };
+    return {
+      success: false,
+      warning: failureWarning(err, {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- typed as an array, but a JS host or an older caller can pass none; the send must never throw
+        hasRecord: (options.associations?.length ?? 0) > 0,
+        retryLabel: options.retryLabel,
+      }),
+    };
   }
 }
