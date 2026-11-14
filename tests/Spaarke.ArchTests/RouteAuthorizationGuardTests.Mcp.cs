@@ -62,7 +62,15 @@ public partial class RouteAuthorizationGuardTests
 
     // No production tool yet: tasks 022-024 add spaarke_show_decisions, spaarke_get_decision_plan, spaarke_search_decision_lookup and
     // spaarke_complete_decision, each with its entry here, in the diff that adds the tool.
-    private static readonly IReadOnlyList<McpTool> McpTools = Array.Empty<McpTool>();
+    private static readonly IReadOnlyList<McpTool> McpTools = new[]
+    {
+        // --- task 024 (spaarke_complete_decision) ---
+        new McpTool("CompleteDecisionTool", "", "IDecisionCapability",
+            "The one write tool, app-only (task 024, FR-08): a thin adapter that calls IDecisionCapability.CommitAsync with exactly "
+            + "IHttpContextAccessor.HttpContext and returns the commit result; DecisionCommitService stays the single owner of Confirm, "
+            + "idempotency, the invoice-review refusal and the caller's rights, so the tool adds no check of its own."),
+        // --- end task 024 ---
+    };
 
     private static readonly Regex McpToolClass = new(
         @"(?<attrs>(?:\[[^\[\]]*\]\s*)+)(?:(?:public|internal|private|protected|sealed|static|partial|file)\s+)*class\s+(?<name>[A-Za-z_]\w*)",
