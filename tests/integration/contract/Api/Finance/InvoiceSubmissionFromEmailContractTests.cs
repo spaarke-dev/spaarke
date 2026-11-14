@@ -120,10 +120,14 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
 
     // ── Helpers ──
 
+    /// <summary>Task 095f: the note every Correction request carries unless a test says otherwise (a Correction without one is refused).</summary>
+    private const string CorrectionNoteText = "The firm re-issued the invoice with the corrected rate.";
+
     private static FromEmailSubmissionRequest Request(
         EmailMetadata? email = null, List<FromEmailMark>? marks = null, Guid? firm = null, string? number = "1001",
-        string mode = "New", Guid? invoiceId = null) => new()
+        string mode = "New", Guid? invoiceId = null, string? correctionNote = null) => new()
         {
+            CorrectionNote = correctionNote ?? (mode == "Correction" ? CorrectionNoteText : null),
             TargetEntity = new FromEmailTargetEntity { EntityType = "Matter", EntityId = W.MatterId },
             Email = email ?? W.Email(),
             Marks = marks ?? new List<FromEmailMark> { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting") },
@@ -342,6 +346,12 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         { Mutate(r => r with { Mode = "new" }), "mode" },
         { Mutate(r => r with { InvoiceId = Guid.NewGuid() }), "invoiceId" },
         { Mutate(r => r with { Mode = "Correction" }), "invoiceId" },
+        // 095f (EB-D-225): a New submission carries no note; a Correction's note is at most 2000 characters and has no control character.
+        { Mutate(r => r with { CorrectionNote = "why" }), "correctionNote" },
+        { Mutate(r => r with { CorrectionNote = "" }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = new string('n', 2001) }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = "bell\u0007here" }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = "nul\u0000here" }), "correctionNote" },
         // 095 review F4: a null attachment entry is the body-shape 400, never a 500.
         { Mutate(r => r with { Email = r.Email! with { Attachments = new List<AttachmentReference> { W.Invoice, null!, W.Timesheet } } }), "email.attachments[1]" },
         // 095 review F1: an attached email (message/*) marked to be saved cannot be kept byte-for-byte in the .eml.
@@ -663,6 +673,65 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
         body.GetProperty("reason").GetString().Should().Be("different_firm");
         NothingWritten();
+    }
+
+    // ── the correction note (task 095f, EB-D-225; contract section 2) ──
+
+    private string CorrectionJson(string? note, bool omit = false)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(
+            Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId) with { CorrectionNote = note }, Json))!.AsObject();
+        if (omit)
+        {
+            node.Remove("correctionNote");
+        }
+
+        return node.ToJsonString();
+    }
+
+    [Theory(DisplayName = "095f (EB-D-225, seed-proof): a Correction with no note (absent, null, empty or blank) is 400 ebilling.submission.correction_note_required; nothing is written")]
+    [InlineData(null, true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("  \t\r\n ", false)]
+    public async Task Correction_WithoutANote_Is400CorrectionNoteRequired(string? note, bool omit)
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var response = await PostAsync(CorrectionJson(note, omit));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_note_required");
+        body.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095f (must-not-fire): a Correction with a note is 202 and the operation is handed the trimmed note")]
+    public async Task Correction_WithANote_Is202_AndTheOperationGetsTheTrimmedNote()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        await Accepted(await PostAsync(CorrectionJson("  Rate corrected after the firm's credit note.\r\nSee email.  ")));
+
+        _world.Operation.Submits.Should().ContainSingle().Which.CorrectionNote.Should().Be("Rate corrected after the firm's credit note.\r\nSee email.");
+    }
+
+    [Fact(DisplayName = "095f (idempotency): an X-Idempotency-Key reused with another note is not answered from the first request's cached 202")]
+    public async Task Correction_SameKeyAnotherNote_ReachesTheHandler()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var first = await PostAsync(CorrectionJson("first note"), idempotencyKey: "note-1");
+        var second = await PostAsync(CorrectionJson("second note"), idempotencyKey: "note-1");
+
+        first.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        second.StatusCode.Should().Be(HttpStatusCode.Accepted, "the handler answers it from the attempt of K (the note is not compared)");
+        second.Headers.GetValues("X-Idempotency-Status").Should().NotContain("cached", "the binding differs, so the cached answer is not used");
+        _world.Operation.Submits.Should().ContainSingle("the second request is a replay of K, never a second attempt");
     }
 
     // ── a Correction (task 097b, EB-D-179; contract section 6, changed 2026-10-30) ──

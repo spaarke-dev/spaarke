@@ -602,6 +602,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         var correlation = Cap(correlationId ?? current.GetAttributeValue<string>(SubmissionCorrelationId));
         var lines = BuildLines(outcome, invoiceId, core, resolverFields, owner, correlation);
         FillInvoice(invoice, outcome, resolverFields, owner, correlation);
+        if (outcome.Submission.ResubmissionOfSubmissionId is not null && InvoiceCorrectionNote.Check(outcome.CorrectionNote).Value is null)
+        {
+            // Task 095f review F2: a Correction with no usable note (a payload queued before the note existed). It still persists.
+            _logger.LogWarning("Invoice submission {SubmissionId}: a Correction (it replaces another submission) carries no correction note; the invoice is saved without one",
+                submissionId);
+        }
+
         if (submitter is { } creator)
         {
             RecordCreatorPerson.Stamp(invoice, creator);
@@ -1673,6 +1680,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         invoice[InvoiceReviewService.InvName] = InvoiceNameFor(outcome);
         invoice[InvoiceReviewService.InvInvoiceNumber] = snapshot.FirmInvoiceNumber;
         invoice[InvoiceReviewService.InvTrackingNumber] = snapshot.TrackingNumber;
+
+        // Task 095f (EB-D-225): a from-email Correction's note, in this same create. Only a submission that names the one it replaces carries
+        // one, and only a note that passes the column's rule is written (never truncated). A New invoice and every other channel never name the
+        // column, so an environment that has not added it yet still persists them (a Correction there fails closed in this create).
+        if (snapshot.ResubmissionOfSubmissionId is not null && InvoiceCorrectionNote.Check(outcome.CorrectionNote).Value is { } correctionNote)
+        {
+            invoice[InvoiceCorrectionNote.Column] = correctionNote;
+        }
 
         // Task 095c-3: no firm, no lookup (never the empty id, never a placeholder): the invoice is created with no firm and held FirmMissing.
         if (snapshot.FirmId is { } firmId)

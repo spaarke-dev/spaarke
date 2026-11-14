@@ -177,7 +177,10 @@ public class FromEmailSubmissionServiceTests
     }
 
     private static FromEmailSubmissionInput Correction(Guid? invoiceId = null, string number = CorrectionSeed.Number) =>
-        W.Input(number: number, mode: "Correction") with { InvoiceId = invoiceId ?? CorrectionSeed.OldInvoiceId };
+        W.Input(number: number, mode: "Correction") with { InvoiceId = invoiceId ?? CorrectionSeed.OldInvoiceId, CorrectionNote = CorrectionNoteText };
+
+    /// <summary>Task 095f: the note every Correction input carries unless a test says otherwise (a Correction without one is refused).</summary>
+    private const string CorrectionNoteText = "The firm re-issued the invoice with the corrected rate.";
 
     private static (W World, Sprk.Bff.Api.Tests.Finance.Files.RecordingRightsProbe Probe) CorrectionWorld(Entity? invoice = null)
     {
@@ -379,6 +382,104 @@ public class FromEmailSubmissionServiceTests
 
         (await Run(world)).Should().Match<FromEmailSubmissionOutcome>(o => o.Status == 503 && o.ErrorCode == "ebilling.submission.record_unavailable");
         RefusedBeforeAnyWrite(world);
+    }
+
+    // ── task 095f (EB-D-225): a Correction carries a note ─────────────────────────────────────────────────────────────────
+
+    [Theory(DisplayName = "095f (EB-D-225, seed-proof): a Correction with no note, or a blank one, is 400 correction_note_required; nothing is saved or submitted")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   \t \n ")]
+    public async Task Correction_WithNoNote_Is400CorrectionNoteRequired_BeforeAnyWrite(string? note)
+    {
+        var (world, probe) = CorrectionWorld();
+
+        var outcome = await RunCorrection(world, probe, Correction() with { CorrectionNote = note });
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((400, "ebilling.submission.correction_note_required"));
+        outcome.Detail.Should().NotBeNullOrWhiteSpace();
+        RefusedBeforeAnyWrite(world);
+        world.Communications.Verify(c => c.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never(), "the refusal comes before the email's communication is read");
+    }
+
+    [Fact(DisplayName = "095f (must-not-fire): a Correction with a note is submitted, and the operation is handed the note")]
+    public async Task Correction_WithANote_IsSubmitted_AndTheOperationGetsTheNote()
+    {
+        var (world, probe) = CorrectionWorld();
+
+        var outcome = await RunCorrection(world, probe);
+
+        outcome.Receipt.Should().NotBeNull();
+        world.Operation.Submits.Should().ContainSingle().Which.CorrectionNote.Should().Be(CorrectionNoteText);
+    }
+
+    [Fact(DisplayName = "095f: a New submission is handed no note, even when the input carries one (the route refuses one; the service never forwards it)")]
+    public async Task New_IsHandedNoNote()
+    {
+        var world = new W();
+
+        await Run(world, W.Input() with { CorrectionNote = "left over" });
+
+        world.Operation.Submits.Should().ContainSingle().Which.CorrectionNote.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "095f (replay, review F2, must-not-fire): a retry of a still-Received Correction with a note is answered from the attempt and re-queued with its own note")]
+    public async Task Correction_Replay_OfReceived_WithANote_RequeuesWithThatNote()
+    {
+        var (world, probe) = CorrectionWorld();
+        var row = world.AddAttempt(W.K(Correction()), 1, InvoiceSubmissionStatus.Received, number: CorrectionSeed.Number);
+
+        var outcome = await RunCorrection(world, probe);
+
+        outcome.Receipt.Should().NotBeNull();
+        outcome.Receipt!.SubmissionId.Should().Be(row.Id);
+        world.Operation.Submits.Should().BeEmpty("a replay creates no attempt");
+        world.Operation.Requeues.Should().ContainSingle();
+        world.Operation.RequeueNotes.Should().Equal(CorrectionNoteText);
+    }
+
+    [Theory(DisplayName = "095f (replay, review F2, seed-proof): a retry of a still-Received Correction with no note, or a blank one, is 400 correction_note_required; nothing is re-queued or written")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  \t ")]
+    public async Task Correction_Replay_OfReceived_WithNoNote_Is400_AndIsNotRequeued(string? note)
+    {
+        var (world, probe) = CorrectionWorld();
+        world.AddAttempt(W.K(Correction()), 1, InvoiceSubmissionStatus.Received, number: CorrectionSeed.Number);
+
+        var outcome = await RunCorrection(world, probe, Correction() with { CorrectionNote = note });
+
+        (outcome.Status, outcome.ErrorCode).Should().Be((400, "ebilling.submission.correction_note_required"));
+        outcome.Receipt.Should().BeNull();
+        RefusedBeforeAnyWrite(world);
+    }
+
+    [Theory(DisplayName = "095f (replay, review F2, must-not-fire): a retry with no note of a Correction that is no longer Received is answered from the attempt as before, with no re-queue")]
+    [InlineData(InvoiceSubmissionStatus.Processing)]
+    [InlineData(InvoiceSubmissionStatus.Accepted)]
+    public async Task Correction_Replay_OfNonReceived_WithNoNote_IsAnsweredAsBefore(InvoiceSubmissionStatus status)
+    {
+        var (world, probe) = CorrectionWorld();
+        var row = world.AddAttempt(W.K(Correction()), 1, status, number: CorrectionSeed.Number);
+
+        var outcome = await RunCorrection(world, probe, Correction() with { CorrectionNote = null });
+
+        outcome.Receipt.Should().NotBeNull("the replay is answered from the attempt");
+        outcome.Receipt!.SubmissionId.Should().Be(row.Id);
+        world.Operation.Submits.Should().BeEmpty();
+        world.Operation.Requeues.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "095f: the note is not part of K, so the same email with another note is the same submission")]
+    public void TheNote_IsNotPartOfK_ButIsPartOfTheCacheBinding()
+    {
+        var one = Correction() with { CorrectionNote = "one" };
+        var other = Correction() with { CorrectionNote = "other" };
+
+        FromEmailSubmissionKey.Of(one).Should().Be(FromEmailSubmissionKey.Of(other));
+        FromEmailSubmissionKey.CacheBinding(one).Should().NotBe(FromEmailSubmissionKey.CacheBinding(other),
+            "an X-Idempotency-Key reused with another note is not answered with the first request's cached 202");
     }
 
     // ── task 095e (EB-D-223): a submission that names no firm is refused, in every tracking-scope phase ─────────────────

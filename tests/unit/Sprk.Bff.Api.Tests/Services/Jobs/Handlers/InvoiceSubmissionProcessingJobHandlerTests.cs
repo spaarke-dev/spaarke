@@ -46,9 +46,10 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
     // ── builders ──
 
-    internal static JobContract Job(int attempt = 1, int deliveryCount = 0, Guid? submissionId = null, string? correlation = "corr-1")
+    internal static JobContract Job(
+        int attempt = 1, int deliveryCount = 0, Guid? submissionId = null, string? correlation = "corr-1", string? correctionNote = null)
     {
-        var job = InvoiceSubmissionService.BuildJob(Guid.NewGuid(), submissionId ?? SubmissionId, correlation);
+        var job = InvoiceSubmissionService.BuildJob(Guid.NewGuid(), submissionId ?? SubmissionId, correlation, correctionNote);
         job.Attempt = attempt;
         job.DeliveryCount = deliveryCount;
         return job;
@@ -1077,6 +1078,43 @@ public sealed class InvoiceSubmissionProcessingJobHandlerTests
 
         rig.Persister.Calls.Single().Correlation.Should().BeNull();
         rig.After.RunCalls.Single().Correlation.Should().BeNull();
+    }
+
+    // ── task 095f (EB-D-225): a from-email Correction's note rides the job payload to the persister ──
+
+    [Fact(DisplayName = "095f (seed-proof): the job's correction note reaches the persister on the outcome it persists")]
+    public async Task CorrectionNote_InThePayload_ReachesThePersister()
+    {
+        var rig = new Rig().HappyPath();
+
+        await rig.Build().ProcessAsync(Job(correctionNote: "  The firm re-issued the invoice.  "), CancellationToken.None);
+
+        rig.Persister.Calls.Single().Outcome.CorrectionNote.Should().Be("The firm re-issued the invoice.", "trimmed, as the column stores it");
+    }
+
+    [Theory(DisplayName = "095f (must-not-fire): no note in the payload, or one the column's rule refuses, is no note on the outcome")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    [InlineData("bell\u0007char")]
+    public async Task CorrectionNote_Absent_OrRefusedByTheColumnRule_IsNull(string? note)
+    {
+        var rig = new Rig().HappyPath();
+
+        await rig.Build().ProcessAsync(Job(correctionNote: note), CancellationToken.None);
+
+        rig.Persister.Calls.Single().Outcome.CorrectionNote.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "095f: BuildJob adds the note to the payload only when there is one; every other job's payload is exactly what it was")]
+    public void BuildJob_PayloadCarriesTheNoteOnlyWhenThereIsOne()
+    {
+        var withoutNote = InvoiceSubmissionService.BuildJob(Guid.NewGuid(), SubmissionId, null);
+        var withNote = InvoiceSubmissionService.BuildJob(Guid.NewGuid(), SubmissionId, null, "why");
+        var blank = InvoiceSubmissionService.BuildJob(Guid.NewGuid(), SubmissionId, null, "  ");
+
+        withoutNote.Payload!.RootElement.GetRawText().Should().Be($"{{\"submissionId\":\"{SubmissionId}\"}}");
+        blank.Payload!.RootElement.GetRawText().Should().Be(withoutNote.Payload.RootElement.GetRawText());
+        withNote.Payload!.RootElement.GetProperty("correctionNote").GetString().Should().Be("why");
     }
 
     // ── 1a: the document ──
