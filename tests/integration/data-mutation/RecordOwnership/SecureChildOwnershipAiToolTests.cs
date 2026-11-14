@@ -938,6 +938,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_invoice", "sprk_invoice", "sprk_Invoice"), // task 045g rule 2: the invoice it is filed with
             },
             ["sprk_externalidentifier"] = new[]
             {
@@ -953,6 +954,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_invoice", "sprk_invoice", "sprk_Invoice"), // task 045g rule 2
             },
             // Field mapping task 017 (item 8): the invoice submission's core lookups are the regarding trio
             // (InvoiceFamilyCoreRecordGuard.CoreRecordLookups).
@@ -963,6 +965,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_regardingworkassignment", "sprk_workassignment", "sprk_RegardingWorkAssignment"),
                 // Task 045d: the pair type (SpaarkeMaster sprk_RecordType_Ref.xml).
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                ("sprk_invoice", "sprk_invoice", "sprk_Invoice"), // task 045g rule 2
             },
             // Field mapping task 017 (item 9): the budget inquiry's service request (BudgetInquiryExecutor.BuildBody's binds).
             ["sprk_servicerequest"] = new[]

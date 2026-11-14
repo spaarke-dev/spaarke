@@ -4,7 +4,7 @@
     <title>Invoice family: a filed invoice is never moved; approval, submission, correction and external-identifier rows name their invoice's core record; a line's invoice is not cleared (EB-D-231, #2794)</title>
     <phase>3 W3 (follow-up to 045e)</phase>
     <gate>045f merged into the work branch (40c5e85d48 or later). Owner confirmation 2026-11-13 in this session (notes/decisions.md). Merge into the work branch only after PR #2790 merges, so #2790 is not changed under review. ebilling-r1 and unified-access-control-r2 review the diff before merge.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what every write path admits on the six invoice-family tables (.cs, bff-api); refusal behaviour; modifies tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -63,7 +63,9 @@
     <criterion testable="true">AC5 (fail closed): a fault reading the stored row or the invoice writes nothing; cancellation is rethrown; on a person run no refusal depends on a row the person cannot read.</criterion>
   </acceptance-criteria>
 
-  <notes>Added 2026-11-13 in the main session from EB-D-231 (#2794), relayed by ebilling-r1 and confirmed by the owner in this session (builder: this project; line detach: refused). Releases the "child core equals invoice core" rule held out of 045e.</notes>
+  <notes>Added 2026-11-13 in the main session from EB-D-231 (#2794), relayed by ebilling-r1 and confirmed by the owner in this session (builder: this project; line detach: refused). Releases the "child core equals invoice core" rule held out of 045e.
+Completed 2026-11-13, merged into the work branch at 442ee6d0b3 (task/fm-045g da917c4061) after PR #2790 merged (4f9e77e9c0). Rules in InvoiceFamilyCoreRecordGuard on every BFF write path: (1) an invoice's core record never changes after create (invoice_family_invoice_core_record_fixed, return-and-resubmit text; swap, clear and second core); (2) an approval, submission, correction or external identifier with an invoice names its invoice's core record (D-96 code); (3) a line's invoice is never cleared, nor an approval's or correction's (owner: "but not blank"); approvals and corrections are created with their invoice (invoice_family_invoice_required, owner). On a run as a person, the other invoice a rule compares is read as that person first, and rules 1-3 are re-decided on rows the person reads. The Create Matter wizard no longer offers Invoice under Associate To (owner). Opus adversarial pass, Sonnet re-check, four fix rounds; ebilling-r1 PASS and unified-access-control-r2 PASS on every round. Notes: notes/task-045g-notes.md.
+rework: fix-round-4 task 045g</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

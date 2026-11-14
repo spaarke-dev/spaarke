@@ -14,7 +14,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// caller, all five or none. A derive that cannot complete them refuses through the route's existing invoice-family mapping
 /// (<c>ChildRecordEndpoints.InvoiceFamilyRefused</c>), so the row is never re-filed without them. An update that touches no
 /// core lookup reads nothing more and writes none of the five. Driven through the REAL handlers and core over the scripted
-/// caller's Dataverse.
+/// caller's Dataverse. Task 045g (owner, EB-D-231): an invoice's core record is fixed at create, so the derive is driven on an
+/// approval through the chat tool; an invoice move is refused on both caller paths and derives nothing.
 /// </summary>
 public sealed partial class SecureChildOwnershipAiToolTests
 {
@@ -45,110 +46,118 @@ public sealed partial class SecureChildOwnershipAiToolTests
         AppLine(GuardInvoice, "sprk_project", "sprk_project", OrdinaryProject);
     }
 
-    // ── Must fire: the core lookup changes, the five follow it in the same PATCH ────────────────────────────────────
-
-    [Fact]
-    public async Task ChildRefile_AnInvoiceMovedFromItsMatterToAProject_IsPatchedWithTheProjectsFiveResolverFields()
+    /// <summary>Task 045g: the derive's subject on the chat tool — an approval under the ordinary matter with no invoice.</summary>
+    private void ApprovalOnTheMatter_MovingToTheProject()
     {
-        InvoiceOnTheMatter_MovingToTheProject();
-
-        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
-
-        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
-        var body = BodyOf(_user.Patches.Should().ContainSingle().Subject.Body);
-        ShouldCarryTheFiveOf(body, "sprk_project", OrdinaryProject, "sprk_regardingrecordtype");
-        body.Should().ContainKey("sprk_Project@odata.bind", "the caller's own change is kept");
+        StoredFamilyRowUnderTheMatter("sprk_invoiceapproval", "sprk_regardingmatter", PairFamilyRow);
+        _user.RecordTypes.Remove(PairProjectType); // the catalog's own project row, as the invoice tests read it
+        _world.WithRecord("sprk_project", OrdinaryProject, Directory.ChildBu, owningTeam: Directory.ChildTeam);
     }
 
-    [Fact]
-    public async Task ChildRefile_AnInvoiceMovedToAnotherMatter_IsPatchedWithThatMattersFiveResolverFields()
+    private Task<Sprk.Bff.Api.Services.Ai.ToolResult> MoveTheApprovalToTheProject() =>
+        UpdateRecord("sprk_invoiceapproval", PairFamilyRow,
+            ("sprk_regardingmatter", JsonSerializer.SerializeToElement<object?>(null)),
+            Lookup("sprk_regardingproject", "sprk_project", OrdinaryProject));
+
+    // ── Task 045g rule 1: an invoice's core record never moves, so nothing is derived for it on either caller path ──────
+
+    [Theory]
+    [InlineData("to a project")]
+    [InlineData("to another matter")]
+    public async Task ChildRefile_AnInvoiceMoved_Is400CoreRecordFixed_ReadsNoCatalog_AndNothingIsPatched(string move)
     {
-        StoredInvoice(GuardInvoice, "sprk_matter", OrdinaryMatter);
+        InvoiceOnTheMatter_MovingToTheProject();
         _world.WithRecord("sprk_matter", RederiveMatter, Directory.ChildBu, owningTeam: Directory.ChildTeam);
-        ShareWorld.OrdinaryChild("sprk_invoice", GuardInvoice, ("sprk_matter", "sprk_matter", OrdinaryMatter));
-        AppLine(GuardInvoice, "sprk_matter", "sprk_matter", RederiveMatter);
+        var reads = new List<string>();
+        _user.GetOverride = path =>
+        {
+            reads.Add(path);
+            return null;
+        };
 
-        var result = await RefileChild("sprk_invoice", GuardInvoice,
-            new() { ["sprk_Matter@odata.bind"] = $"/sprk_matters({RederiveMatter:D})" });
-
-        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
-        ShouldCarryTheFiveOf(BodyOf(_user.Patches.Should().ContainSingle().Subject.Body), "sprk_matter", RederiveMatter, "sprk_regardingrecordtype");
-    }
-
-    [Fact]
-    public async Task UpdateRecordTool_AnInvoiceMovedToAProject_IsPatchedWithTheProjectsFiveResolverFields()
-    {
-        InvoiceOnTheMatter_MovingToTheProject();
-
-        var result = await UpdateRecord("sprk_invoice", GuardInvoice,
-            ("sprk_matter", JsonSerializer.SerializeToElement<object?>(null)), Lookup("sprk_project", "sprk_project", OrdinaryProject));
-
-        result.Success.Should().BeTrue(result.ErrorMessage);
-        ShouldCarryTheFiveOf(BodyOf(_user.Patches.Should().ContainSingle().Subject.Body), "sprk_project", OrdinaryProject, "sprk_regardingrecordtype");
-    }
-
-    // ── Fail closed: a derive that cannot complete the five refuses through the existing mapping ───────────────────
-
-    [Fact]
-    public async Task ChildRefile_WhenTheProjectHasNoCatalogRow_Is400ResolverFieldsIncomplete_AndNothingIsPatched()
-    {
-        InvoiceOnTheMatter_MovingToTheProject();
-        _user.GetOverride = path => path.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal)
-            ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = Array.Empty<object>() }))
-            : null;
-
-        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
+        var result = await RefileChild("sprk_invoice", GuardInvoice, move == "to a project"
+            ? MoveGuardInvoiceToTheProject()
+            : new() { ["sprk_Matter@odata.bind"] = $"/sprk_matters({RederiveMatter:D})" });
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
-        _user.Patches.Should().BeEmpty("never re-filed without its five fields");
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        Detail(result).Should().Contain(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint).And.NotContain(OrdinaryMatter.ToString("D"));
+        reads.Should().NotContain(p => p.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal), "nothing is derived for an invoice");
+        _user.Patches.Should().BeEmpty();
         _world.Assignments.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task ChildRefile_WhenTheCatalogReadFails_Is500ReadFailed_AndNothingIsPatched()
+    public async Task UpdateRecordTool_AnInvoiceMovedToAProject_IsRefusedCoreRecordFixed_AndNothingIsPatched()
     {
         InvoiceOnTheMatter_MovingToTheProject();
-        _user.GetOverride = path => path.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal)
-            ? DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.BadRequest, "Service unavailable.")
-            : null;
-
-        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
-
-        Status(result).Should().Be(StatusCodes.Status500InternalServerError, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
-        _user.Patches.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task ChildRefile_WhenTheProjectCannotBeReadForItsName_IsTheUniformNotFound_AndNothingIsPatched()
-    {
-        InvoiceOnTheMatter_MovingToTheProject();
-        _user.GetOverride = path => path.StartsWith($"sprk_projects({OrdinaryProject:D})?$select=", StringComparison.Ordinal)
-                                    && path.Contains("sprk_projectname", StringComparison.Ordinal)
-            ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.BadRequest, "Not found.")
-            : null;
-
-        var result = await RefileChild("sprk_invoice", GuardInvoice, MoveGuardInvoiceToTheProject());
-
-        Status(result).Should().Be(StatusCodes.Status404NotFound, Detail(result));
-        Detail(result).Should().NotContain(OrdinaryProject.ToString("D"));
-        _user.Patches.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task UpdateRecordTool_WhenTheProjectHasNoCatalogRow_IsRefusedResolverFieldsIncomplete()
-    {
-        InvoiceOnTheMatter_MovingToTheProject();
-        _user.GetOverride = path => path.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal)
-            ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = Array.Empty<object>() }))
-            : null;
 
         var result = await UpdateRecord("sprk_invoice", GuardInvoice,
             ("sprk_matter", JsonSerializer.SerializeToElement<object?>(null)), Lookup("sprk_project", "sprk_project", OrdinaryProject));
 
         result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode, result.ErrorMessage);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    // ── Must fire: the core lookup changes, the five follow it in the same PATCH ────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateRecordTool_AnApprovalMovedToAProject_IsPatchedWithTheProjectsFiveResolverFields()
+    {
+        ApprovalOnTheMatter_MovingToTheProject();
+
+        var result = await MoveTheApprovalToTheProject();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ShouldCarryTheFiveOf(BodyOf(_user.Patches.Should().ContainSingle().Subject.Body), "sprk_project", OrdinaryProject, "sprk_RegardingRecordType");
+    }
+
+    // ── Fail closed: a derive that cannot complete the five refuses through the existing mapping ───────────────────
+
+    [Fact]
+    public async Task UpdateRecordTool_WhenTheProjectHasNoCatalogRow_IsRefusedResolverFieldsIncomplete()
+    {
+        ApprovalOnTheMatter_MovingToTheProject();
+        _user.GetOverride = path => path.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal)
+            ? DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(new { value = Array.Empty<object>() }))
+            : null;
+
+        var result = await MoveTheApprovalToTheProject();
+
+        result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.ResolverFieldsIncompleteCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateRecordTool_WhenTheCatalogReadFails_IsRefusedReadFailed_AndNothingIsPatched()
+    {
+        ApprovalOnTheMatter_MovingToTheProject();
+        _user.GetOverride = path => path.StartsWith("sprk_recordtype_refs?", StringComparison.Ordinal)
+            ? DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.BadRequest, "Service unavailable.")
+            : null;
+
+        var result = await MoveTheApprovalToTheProject();
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
+        _user.Patches.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateRecordTool_WhenTheProjectCannotBeReadForItsName_IsRefused_AndNothingIsPatched()
+    {
+        ApprovalOnTheMatter_MovingToTheProject();
+        _user.GetOverride = path => path.StartsWith($"sprk_projects({OrdinaryProject:D})?$select=", StringComparison.Ordinal)
+                                    && path.Contains("sprk_projectname", StringComparison.Ordinal)
+            ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.BadRequest, "Not found.")
+            : null;
+
+        var result = await MoveTheApprovalToTheProject();
+
+        result.Success.Should().BeFalse();
+        (result.ErrorMessage ?? string.Empty).Should().NotContain(OrdinaryProject.ToString("D"));
         _user.Patches.Should().BeEmpty();
     }
 

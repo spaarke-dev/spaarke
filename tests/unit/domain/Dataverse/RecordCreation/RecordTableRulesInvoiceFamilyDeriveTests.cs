@@ -27,8 +27,50 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
 
     private readonly List<string> _reads = [];
 
-    /// <summary>The caller: the rule asks it nothing for a create that names one core record and no other invoice.</summary>
-    private static IDataverseUserClient Caller() => new Mock<IDataverseUserClient>(MockBehavior.Strict).Object;
+    /// <summary>The invoice an approval or a correction is created with (task 045g rule 3b at create).</summary>
+    private static readonly Guid FiledInvoice = Guid.Parse("a045d000-0000-4000-8000-0000000000B1");
+
+    /// <summary>
+    /// The caller: the rule asks it nothing for a create that names one core record and no other invoice. With
+    /// <paramref name="invoiceCore"/>, it reads <see cref="FiledInvoice"/> as filed under that core table's <see cref="Core"/>
+    /// (the invoice an approval or a correction is compared with, task 045g rule 2).
+    /// </summary>
+    private static IDataverseUserClient Caller(string? invoiceCore = null)
+    {
+        var caller = new Mock<IDataverseUserClient>(MockBehavior.Strict);
+        if (invoiceCore is not null)
+        {
+            var body = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].ToDictionary(
+                l => $"_{l.Column}_value", l => l.CoreEntity == invoiceCore ? Core.ToString("D") : null);
+            caller.Setup(c => c.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_invoices({FiledInvoice:D})?$select=", StringComparison.Ordinal)),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(body)));
+        }
+
+        return caller.Object;
+    }
+
+    /// <summary>A create of <paramref name="table"/> naming <paramref name="core"/>'s <see cref="Core"/> through
+    /// <paramref name="column"/>; an approval or a correction also names <see cref="FiledInvoice"/>.</summary>
+    private static DataverseWriteItemMapper.MappedItem RowFor(string table, string column, string core)
+    {
+        if (!IsCreatedWithItsInvoice(table))
+            return Binding((column, core));
+
+        var body = new Dictionary<string, object?>
+        {
+            [$"{column}@odata.bind"] = $"/{core}s({Core:D})",
+            ["sprk_invoice@odata.bind"] = $"/sprk_invoices({FiledInvoice:D})",
+        };
+        return new DataverseWriteItemMapper.MappedItem(JsonSerializer.Serialize(body), [column, "sprk_invoice"])
+        {
+            Lookups =
+            [
+                new DataverseWriteItemMapper.MappedLookup(column, core, core + "s", Core),
+                new DataverseWriteItemMapper.MappedLookup("sprk_invoice", "sprk_invoice", "sprk_invoices", FiledInvoice),
+            ],
+        };
+    }
 
     private static DataverseWriteItemMapper.MappedItem Binding(params (string Column, string Table)[] lookups)
     {
@@ -59,10 +101,16 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
         Record((table, id, columns) => new Entity(table, id) { [columns[0]] = name, [columns[1]] = number });
 
     private static Task<PreWriteResult> Run(string table, DataverseWriteItemMapper.MappedItem item,
-        InvoiceFamilyCoreRecordGuard.RecordLookup? records, InvoiceFamilyCoreRecordGuard.RecordTypeLookup? recordTypes) =>
-        RecordTableRules.InvoiceFamilyRule.Check(new PreWriteRow(Caller(), table, item, records, recordTypes), CancellationToken.None);
+        InvoiceFamilyCoreRecordGuard.RecordLookup? records, InvoiceFamilyCoreRecordGuard.RecordTypeLookup? recordTypes,
+        IDataverseUserClient? caller = null) =>
+        RecordTableRules.InvoiceFamilyRule.Check(new PreWriteRow(caller ?? Caller(), table, item, records, recordTypes), CancellationToken.None);
 
     // ── Must fire: every family table, every core lookup, gets all five ─────────────────────────────────────────────
+
+    /// <summary>Task 045g rule 3b at create: an approval and a correction are created with their invoice (here, one of the same
+    /// core record, <see cref="RowFor"/>); a create naming a core record only is refused before any derive
+    /// (<see cref="ApprovalAndCorrectionRows"/>).</summary>
+    private static bool IsCreatedWithItsInvoice(string table) => table is "sprk_invoiceapproval" or "sprk_invoicecorrection";
 
     public static TheoryData<string, string, string> FamilyRows()
     {
@@ -77,11 +125,36 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
         return rows;
     }
 
+    public static TheoryData<string, string, string> ApprovalAndCorrectionRows()
+    {
+        var rows = new TheoryData<string, string, string>();
+        foreach (var (table, lookups) in InvoiceFamilyCoreRecordGuard.CoreRecordLookups.Where(t => IsCreatedWithItsInvoice(t.Key)))
+        {
+            foreach (var (column, core) in lookups)
+                rows.Add(table, column, core);
+        }
+
+        return rows;
+    }
+
+    [Theory]
+    [MemberData(nameof(ApprovalAndCorrectionRows))]
+    public async Task AnApprovalOrCorrectionNamingACoreRecordAndNoInvoice_IsRefusedInvoiceRequired_AndNothingIsDerived(
+        string table, string column, string core)
+    {
+        var result = await Run(table, Binding((column, core)), NamedRecord(), CatalogNamingNumber());
+
+        result.Refusal!.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceRequiredCode);
+        result.Refusal.IsUndecided.Should().BeFalse();
+        result.AdditionalColumns.Should().BeEmpty();
+        _reads.Should().BeEmpty("refused before the derive reads anything");
+    }
+
     [Theory]
     [MemberData(nameof(FamilyRows))]
     public async Task AnAdmittedRow_GetsTheFiveResolverFieldsOfTheRecordItNames(string table, string column, string core)
     {
-        var result = await Run(table, Binding((column, core)), NamedRecord(), CatalogNamingNumber());
+        var result = await Run(table, RowFor(table, column, core), NamedRecord(), CatalogNamingNumber(), Caller(core));
 
         result.Refusal.Should().BeNull();
         result.AdditionalColumns.Should().HaveCount(5);
@@ -166,7 +239,7 @@ public class RecordTableRulesInvoiceFamilyDeriveTests
     public async Task ARecordWithABlankNameOrNumber_IsAdmitted_WithTheTypeIdAndUrl_AndTheBlankOneCleared(
         string table, string column, string core, string? name, string? number)
     {
-        var result = await Run(table, Binding((column, core)), NamedRecord(name, number), CatalogNamingNumber());
+        var result = await Run(table, RowFor(table, column, core), NamedRecord(name, number), CatalogNamingNumber(), Caller(core));
 
         result.Refusal.Should().BeNull("a blank name or number is never resolver_fields_incomplete on the generic path");
         result.AdditionalColumns.Should().HaveCount(5);

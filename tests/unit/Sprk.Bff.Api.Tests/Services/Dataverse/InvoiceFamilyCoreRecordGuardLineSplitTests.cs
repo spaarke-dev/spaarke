@@ -280,7 +280,7 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
             "sprk_invoice", InvoiceId, ProjectLookup(), app.Object, writeIsImpersonated: true);
 
         impersonated!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
-        second!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        second!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
     }
 
     // ── #2081 fix round 2: check-then-act. The write itself is update-only, and a vanished row is a refusal ─────────────
@@ -326,23 +326,28 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
     public void IsUpdateOnlyTarget_IsEveryInvoiceFamilyTable_AndNoOther(string table, bool expected) =>
         InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(table).Should().Be(expected);
 
-    // ── The detach, move, re-attach hint (#2081 follow-up): a stable code plus a fixed sentence, no user data ─────────
+    // ── The return-and-resubmit hint (task 045g, EB-D-231): a stable code plus a fixed sentence, no user data ─────────
 
     private const string HintFragment =
-        "To move an invoice that has lines, or a line of one, detach each line (clear its invoice), move the invoice, move each line to the same matter, project or work assignment, "
-        + "then re-attach the lines to the invoice.";
+        "A wrongly filed invoice is not moved: it is returned to the firm and resubmitted on the right matter, project or work assignment.";
 
     [Fact]
-    public async Task TheLineMismatchRefusals_CarryTheDetachMoveReattachHint_AndTheStableCode()
+    public async Task TheCoreRecordFixedAndLineMismatchRefusals_CarryTheReturnAndResubmitHint_AndTheStableCode()
     {
         var invoiceMoved = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
             StoredInvoiceUnderMatter([Line(InvoiceId, ("sprk_matter", "sprk_matter", MatterId))]).Object);
 
-        invoiceMoved!.RefusalCode.Should().Be("invoice_family_line_invoice_core_record_mismatch");
-        invoiceMoved.Reason.Should().Contain("Nothing was written.").And.EndWith(HintFragment);
+        invoiceMoved!.RefusalCode.Should().Be("invoice_family_invoice_core_record_fixed");
+        invoiceMoved.Reason.Should().Be(
+            "An invoice's matter, project or work assignment cannot change after the invoice is created. Nothing was written. " + HintFragment);
         InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(invoiceMoved.RefusalCode!).Should().Be(
+            "The invoice-family core-record rule refused this write (invoice_family_invoice_core_record_fixed); "
+            + "nothing was written. " + HintFragment);
+        InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode).Should().Be(
             "The invoice-family core-record rule refused this write (invoice_family_line_invoice_core_record_mismatch); "
             + "nothing was written. " + HintFragment);
+        InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(InvoiceFamilyCoreRecordGuard.LineInvoiceClearedCode).Should().Be(
+            "The invoice-family core-record rule refused this write (invoice_family_line_invoice_cleared); nothing was written.");
     }
 
     [Fact]
@@ -353,18 +358,26 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
     }
 
     [Fact]
-    public async Task GenericUpdate_AnInvoiceUnderAMatterGivenAProjectToo_IsRefusedMultiple()
+    public async Task GenericUpdate_AnInvoiceUnderAMatterGivenAProjectToo_OrItsMatterCleared_IsRefusedCoreRecordFixed()
     {
-        var result = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
+        // Task 045g rule 1: an update that would leave an invoice under two core records, or under none, changes its core record.
+        var second = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
             new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", ProjectId) },
             StoredInvoiceUnderMatter().Object);
+        var cleared = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId,
+            new Dictionary<string, object?> { ["sprk_matter"] = null },
+            StoredInvoiceUnderMatter().Object);
 
-        result!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode, "the stored matter stays");
+        second!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        second.Reason.Should().EndWith(InvoiceFamilyCoreRecordGuard.ReturnAndResubmitHint);
+        cleared!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        cleared.Reason.Should().Be(second.Reason, "fixed text");
     }
 
     [Fact]
-    public async Task GenericUpdate_AnInvoiceMovedToAProject_IsRefusedWhileALineStaysOnTheMatter_AndAllowedWithNoSuchLine()
+    public async Task GenericUpdate_AnInvoiceMovedToAProject_IsRefusedCoreRecordFixed_WhereverItsLinesAre()
     {
+        // Task 045g rule 1 (EB-D-231): an invoice's core record is fixed at create, with lines left behind, lines that follow, or none.
         var split = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
             StoredInvoiceUnderMatter([Line(InvoiceId, ("sprk_matter", "sprk_matter", MatterId))]).Object);
         var matching = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
@@ -372,9 +385,9 @@ public class InvoiceFamilyCoreRecordGuardLineSplitTests
         var noLines = await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync("sprk_invoice", InvoiceId, MoveToProject(),
             StoredInvoiceUnderMatter().Object);
 
-        split!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
-        matching.Should().BeNull();
-        noLines.Should().BeNull();
+        split!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        matching!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        noLines!.RefusalCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
     }
 
     [Fact]
