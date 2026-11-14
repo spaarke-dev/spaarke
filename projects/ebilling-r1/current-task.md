@@ -1,12 +1,30 @@
 # Current Task State
 
-> **Last Updated:** 2026-11-14, about 06:00Z. Session `ebilling-r1`, Claude Desktop, the only writer to this worktree.
+> **Last Updated:** 2026-11-14, about 09:30Z. Session `ebilling-r1`, Claude Desktop, the only writer to this worktree.
 > Older detail is in `notes/handoff-history/current-task-2026-11-13a.md`.
+
+## NOW (checkpoint, 2026-11-14 ~09:30Z) — read this first
+
+- **#2822 MERGED** into master at 7da54c00a3, on the owner's go. uac-r2, word-add-in-r1 and spa-r4 got the SHA. It reaches dev with uac-r2's NEXT dev BFF deploy, which needs the owner's go in uac-r2's session.
+- **#2830 (095g) is OPEN**, work → master, head d825808b7d, not bound.
+  - uac-r2 APPROVED the merged head; ontology-r1's light check found nothing ontology-owned.
+  - CI was not yet checked. Merging needs the owner's go.
+- **IN PROGRESS: the live dev write.** Owner, typed here: "Yes run script and leave Spaarke untyped". The uac-r2 before-notice is SENT, and the `-WhatIf` dry run was OK: it would set LAWFIRM on 'Law Firm' 11aad4fa-8f96-f111-b8db-0022482fb5a7.
+  - **Next:**
+    1. Run `pwsh -NoProfile -File scripts/ebilling/Set-EbillingLawFirmTypeCode.ps1` for real.
+    2. Set `sprk_organization` 67577f8c-4301-f111-8407-7ced8d1dc988 (Morrison Foerster LLP), `sprk_organizationtype` → 11aad4fa-8f96-f111-b8db-0022482fb5a7. Leave Spaarke Inc and the other untyped org alone.
+    3. Read both back.
+    4. Send uac-r2 the after-notice and tell word-add-in-r1 the seeding is done.
+    5. Record the run in the 095g notes, in a "Dev seeding" section.
+- **New owner decision, NOT yet logged:** "Yes create decision record for procedure changes" (ontology-r1's K4).
+  - Log it as EB-D-238: a per-record Procedure change (assign/pin/exclude/change/remove, 089 writes) writes a Decision Record.
+  - Then add a task row and send the design to ontology-r1 first, since it owns the Decision Record writers.
+- **095f part 2:** ontology-r1 wants the design first (EB-D-236 Decision Record note).
 
 ## Quick recovery
 
 - **Branch:** `work/ebilling-r1`.
-- **Local HEAD:** `f6f8a16f3a` plus this notes commit; pushed. **PR #2822** (work → master) is open, not bound; ontology-r1 and uac-r2 were asked to review it (both approvals gate the merge).
+- **Local HEAD:** d825808b7d, pushed. #2822 is merged; #2830 is open.
 - **Owner mode:** "continue with open work items that are available", plus a testing checklist (`notes/owner-testing-checklist.md`, committed).
 
 ## Gates
