@@ -60,5 +60,22 @@ RELEASE RULE: a master merge auto-deploys the add-in. Each slice merges on its o
 2026-11-13 slices A + B1 built (implementer, sonnet), PR #2789 (branch feat/invoice-firm-required, worktree C:\wt134): 022a2dbae6, 34cf710390, review fixes eb5a4a5b39. One adversarial pass (opus): F1 Refresh left the saved bar's link on the save-time record; F1 a blocked pop-up was sr-only; F2 duplicate logical-name map; plus one link on a no-firm correction, a malformed-firm-id gate, and two ungated banner suites (from #2533) now gated. Scoped re-check clean. Known limits: K4 one-render double link after a record change; K2 a correction prefill with a malformed firm id leaves Submit disabled with no explanation. Gated jest 114 suites / 1767 tests pass; lint clean; build exit 0; tsc 68 baseline errors (none in changed files). Note: the local build's dev-certs step installed the Office Add-in Developer CA into the machine trust store (owner told).
 rework: fix-round-1 task 134
 2026-11-13 095e follow-up (#2815, a67bc60367): ebilling shipped the banner firm as a top-level `firmName` string (contract §11), not `firm {id,name}`. The B1 reader now reads `firmName` tolerantly. The pane also adds `firm_name_unreadable` as a transient outcome and new `firm_invalid` wording (that code now also means "a firm is required"). Client-only; fail-before 7 tests; 354/354 invoice tests pass.
-2026-11-13 slice B2 (#2820, stacked on #2815) uses ebilling's 095f contract (bb28870b76). Deviation from step B2's "not before their master SHA is on dev": the release order is reversed, on purpose, and ebilling agreed. A pre-095f BFF ignores `correctionNote`: `FromEmailSubmissionRequest` has no unmapped-member rule, and there is no global one. A 095f BFF refuses any Correction without a note. So the pane deploys first, and 095f waits for our live-SHA message. Fail-before: 25 of 29 tests; 383/383 pass. Known limits: field-keyed 400s read generically; the control-character check is slightly stricter than .NET for a trailing U+0085.</notes>
+2026-11-13 slice B2 (#2820, stacked on #2815) uses ebilling's 095f contract (bb28870b76). Deviation from step B2's "not before their master SHA is on dev": the release order is reversed, on purpose, and ebilling agreed. A pre-095f BFF ignores `correctionNote`: `FromEmailSubmissionRequest` has no unmapped-member rule, and there is no global one. A 095f BFF refuses any Correction without a note. So the pane deploys first, and 095f waits for our live-SHA message. Fail-before: 25 of 29 tests; 383/383 pass. Known limits: field-keyed 400s read generically; the control-character check is slightly stricter than .NET for a trailing U+0085.
+2026-11-14 slice C: draft PR #2829 (bebc8e047c), against ebilling's 095g "as built" contract (367e5b2876).
+- Scope decision: the pane only ADDS a firm. The body is exactly {add}, with no remove, replace or clear, so uac-r2 condition (b) holds by construction. On slots_full the pane shows the sentence plus Open in Spaarke.
+- Reviews: uac-r2's pane review passed. One adversarial review (opus) found 7 F-class findings, all fixed with tests that fail without each fix:
+  - the pre-confirm text promised access;
+  - focus management;
+  - an unknown 5xx said "Nothing was changed";
+  - a stale select marker;
+  - the list-404 sentence;
+  - two test gaps.
+- Also fixed, from the known limits:
+  - K1: a stale firmId is cleared;
+  - K2: an add in flight disables Submit and the mode switch;
+  - K4: the search is capped by code points.
+- Remaining known limits:
+  - K4: closing the pending view drops its Retry (the L4 job finishes the pass);
+  - K4: the list Retry can double-send (dedup absorbs it).
+- Merge is held until 095g is on the dev BFF and the type code is seeded, then the owner's go.</notes>
 </task>
