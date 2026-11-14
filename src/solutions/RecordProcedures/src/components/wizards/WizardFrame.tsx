@@ -53,6 +53,9 @@ export interface WizardNav {
   onNavigate: (dir: 'prev' | 'next') => void;
 }
 
+/** Said when Finish is reached with a plan that makes no call (it cannot be, since Confirm holds Finish off; this is the backstop). */
+export const EMPTY_PLAN_LINE = 'Nothing was saved: this change has nothing to send. Go back and choose again.';
+
 /** The step order of the shell, for the dynamic "New values" step. */
 const STEP_ORDER = ['review', 'mode', 'values', 'impact', 'confirm'];
 
@@ -82,6 +85,8 @@ export interface WizardFrameProps {
   /** The first step ("Procedure" / "Rule"): the row as the server describes it. */
   reviewLabel: string;
   reviewStep: React.ReactNode;
+  /** Task 084d-5b: false holds Next on the first step (the Assign wizard until a Procedure is chosen). Absent: the user may always go on. */
+  reviewCanAdvance?: boolean;
   /** The second step: the choices. */
   modeStep: React.ReactNode;
   /** True when the choice differs from now and its inputs are complete: the user may go on. */
@@ -259,6 +264,8 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
     const p = live.current;
     // A read-only wizard has no Finish; should one ever be reached, it writes nothing.
     if (p.readOnly) throw new Error(READ_ONLY_LINE);
+    // A plan with no call is no change: never report it as a success (084d-5b review, F1).
+    if (p.plan.steps.length === 0) throw new Error(EMPTY_PLAN_LINE);
     saving.current = true;
     let run: PlanRun;
     try {
@@ -305,7 +312,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
   }, []);
 
   // ── Steps ────────────────────────────────────────────────────────────────
-  const review: IWizardStepConfig = { id: 'review', label: props.reviewLabel, renderContent: () => live.current.reviewStep, canAdvance: () => true };
+  const review: IWizardStepConfig = { id: 'review', label: props.reviewLabel, renderContent: () => live.current.reviewStep, canAdvance: () => live.current.reviewCanAdvance !== false };
   const readOnlySteps: IWizardStepConfig[] = [
     review,
     {
@@ -379,7 +386,7 @@ export const WizardFrame: React.FC<WizardFrameProps> = props => {
       id: 'confirm',
       label: 'Confirm',
       renderContent: () => <ConfirmStep rows={live.current.confirmRows} uncheckedClose={uncheckedCloseRef.current} />,
-      canAdvance: () => !staleRef.current,
+      canAdvance: () => !staleRef.current && live.current.plan.steps.length > 0,
     },
   ];
 

@@ -735,11 +735,24 @@ describe('reads', () => {
   it('the READ modules have no 089 route, no write verb and no Dataverse write call (control: the scan sees one)', () => {
     const root = path.join(__dirname, '..');
     const files = ['services/recordProceduresApi.ts', 'services/firmChoices.ts', 'services/model.ts', 'components/ProcedureList.tsx', 'components/RuleList.tsx', 'components/rowOpen.ts'];
+    // 084d-5b review (F3): the read helper `raceTimeout` lives in services/readRace.ts, so a READ module that names `/overrides` (the route, or
+    // the write client's module './overridesApi') is caught again.
     const forbidden = /procedure-assignments|rule-overrides|removal-preview|\/overrides|method:\s*['"](POST|PUT|PATCH|DELETE)['"]|\.(createRecord|updateRecord|deleteRecord)\(/;
     for (const f of files) expect([f, forbidden.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false]);
     expect(forbidden.test("fetch(url, { method: 'POST' })")).toBe(true);
     expect(forbidden.test('/matters/1/procedure-assignments')).toBe(true);
     expect(forbidden.test('webApi.createRecord(x)')).toBe(true);
+    expect(forbidden.test('`${base}/overrides/${id}`')).toBe(true);
+    expect(forbidden.test("'/api/finance/matters/1/overrides'")).toBe(true);
+    // Must fire: a READ module that imports the write client (a value or a type), however it is spelled.
+    expect(forbidden.test("import { createOverridesApi } from './overridesApi';")).toBe(true);
+    expect(forbidden.test("import type { OverridesApi } from '../services/overridesApi';")).toBe(true);
+    // Must not fire: the neutral read helpers, and the other read modules.
+    expect(forbidden.test("import { raceTimeout, READ_TIMEOUT_MS } from './readRace';")).toBe(false);
+    expect(forbidden.test("import { raceTimeout } from './readRace'; import { toFailure } from './recordProceduresApi';")).toBe(false);
+    // The files it scans really do not import the write client, and the race helpers are in the neutral module.
+    expect(fs.readFileSync(path.join(root, 'services/recordProceduresApi.ts'), 'utf8')).toContain("from './readRace'");
+    expect(fs.readFileSync(path.join(root, 'services/overridesApi.ts'), 'utf8')).not.toMatch(/export (async )?function raceTimeout/);
   });
 
   it('no Xrm read of the Procedure, override or rule tables (only sprk_invoice and sprk_organization are read)', () => {

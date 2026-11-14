@@ -15,6 +15,10 @@
  * taken with the row the wizard opens on, like the rest of the snapshot, and kept when a partial save hands the wizard the re-read row (B2).
  * It only disables: the write routes still decide every write.
  *
+ * Task 084d-5b: the Procedures list header has "Assign Procedure", rendered only when the same answers allow a create (`allowedSteps(...).create`,
+ * both answers saying `assignOrExclude`); otherwise it is absent, not disabled. The panel decides; the Assign wizard reads no permission. It is
+ * opened with the lists' own query, and a save re-reads both lists silently, as the other wizards' saves do.
+ *
  * The panel imports shared components only through `@spaarke/ui-components` (MetricCardRow, StatusBadge) and Fluent v9 tokens, so the host's
  * light/dark theme (resolved in `main.tsx`) is the only thing that decides colours (ADR-021).
  */
@@ -77,6 +81,7 @@ import { ProcedureList } from './ProcedureList';
 import { RuleList } from './RuleList';
 import { ProcedureWizard } from './wizards/ProcedureWizard';
 import { RuleWizard } from './wizards/RuleWizard';
+import { AssignProcedureWizard } from './wizards/AssignProcedureWizard';
 import type { ChangeOutcome } from './wizards/WizardFrame';
 
 const useStyles = makeStyles({
@@ -94,6 +99,7 @@ const useStyles = makeStyles({
   firm: { minWidth: '240px' },
   centered: { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: tokens.spacingVerticalXL },
   muted: { color: tokens.colorNeutralForeground3 },
+  listHeader: { display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: tokens.spacingHorizontalS },
 });
 
 export interface ProceduresPanelProps {
@@ -134,7 +140,9 @@ const RETRYABLE: ReadonlySet<PanelFailureKind> = new Set(['signin', 'unavailable
  */
 type OpenRow =
   | { kind: 'procedure'; key: string; row: ProcedureItem; gaps: GapView[]; date: string; allowed: AllowedSteps; query: ProceduresQuery }
-  | { kind: 'rule'; key: string; row: RuleItem; allowed: AllowedSteps; query: ProceduresQuery };
+  | { kind: 'rule'; key: string; row: RuleItem; allowed: AllowedSteps; query: ProceduresQuery }
+  /** Task 084d-5b: the Assign wizard, with the query the lists were read with. */
+  | { kind: 'assign'; key: 'assign'; query: ProceduresQuery };
 
 const allowedOf = (procedures: RecordProceduresView, rules: RecordRulesInForceView): AllowedSteps => allowedSteps(procedures.permissions, rules.permissions);
 
@@ -202,7 +210,8 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
           if (procedures.ok && rules.ok) {
             setLoad({ state: 'ready', procedures: procedures.value, rules: rules.value });
             const cur = openRef.current;
-            if (outcome !== 'partial' || !cur) return false;
+            // The Assign wizard's plan is one call, so it never has a partial save to hand a re-read row to.
+            if (outcome !== 'partial' || !cur || cur.kind === 'assign') return false;
             // The open wizard keeps what it was allowed (084g fix round 1, review B2): a re-read that allowed less would turn it read-only and
             // reset it, losing the partial-save message. The routes still refuse a retry they would not allow.
             const allowed = cur.allowed;
@@ -391,7 +400,22 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         onChanged={refresh}
         onClose={closeWizard}
       />
+    ) : open?.kind === 'assign' ? (
+      <AssignProcedureWizard
+        core={core}
+        recordId={recordId}
+        record={record}
+        query={open.query}
+        listsApi={api}
+        api={overrides}
+        dryRunApi={dryRun}
+        onChanged={refresh}
+        onClose={closeWizard}
+      />
     ) : null;
+  const openAssign = () => {
+    if (readyLoad) setOpen({ kind: 'assign', key: 'assign', query: queryOf(readyLoad.procedures) });
+  };
 
   const renderBody = (): React.ReactNode => {
     if (kind && STANDALONE.has(kind)) {
@@ -500,6 +524,14 @@ export const ProceduresPanel: React.FC<ProceduresPanelProps> = ({ core, table, r
         {tab === 'procedures' ? (
           <>
             <MetricCardRow layout="wide" ariaLabel="Filter Procedures" cards={procedureCards} />
+            {/* 084d-5b: present only when both answers allow a create; never shown disabled. */}
+            {allowedOf(pv, rv).create && (
+              <div className={s.listHeader} data-testid="procedure-list-header">
+                <Button appearance="primary" onClick={openAssign} data-testid="assign-procedure">
+                  Assign Procedure
+                </Button>
+              </div>
+            )}
             <ProcedureList
               procedures={shownProcedures}
               gaps={pv.gaps}

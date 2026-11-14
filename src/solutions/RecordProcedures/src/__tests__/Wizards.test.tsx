@@ -583,10 +583,15 @@ describe('the Change choice belongs to the rule wizard, and nothing here dry-run
 
   it('the only writes in the page are in overridesApi.ts, and they are the routes of the task (control: the scan sees one); dryRunApi.ts POSTs the dry run only', () => {
     const root = path.join(__dirname, '..');
-    const write = /method:\s*['"](POST|PUT|PATCH|DELETE)['"]/g;
+    // No `g` flag (084d-5b review): a global regex keeps `lastIndex` between `.test()` calls, so a file after a match could be skipped.
+    const write = /method:\s*['"](POST|PUT|PATCH|DELETE)['"]/;
+    const filesWithWrites = (files: readonly string[], read: (f: string) => string): string[] => files.filter(f => write.test(read(f)));
+    // Must-fire control: two files scanned in sequence; the first matches late, the second early. A stateful regex reports only the first.
+    const late = `${'x'.repeat(200)}fetch(u, { method: 'POST' })`;
+    const early = "fetch(u, { method: 'DELETE' })";
+    expect(filesWithWrites(['late.ts', 'early.ts', 'none.ts'], f => ({ 'late.ts': late, 'early.ts': early, 'none.ts': 'const a = 1;' })[f]!)).toEqual(['late.ts', 'early.ts']);
     const walk = (dir: string): string[] => fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap(e => (e.isDirectory() ? (e.name === '__tests__' ? [] : walk(path.join(dir, e.name))) : [path.join(dir, e.name)]));
-    const withWrites = walk('.').filter(f => /\.(ts|tsx)$/.test(f) && write.test(fs.readFileSync(path.join(root, f), 'utf8')));
-    write.lastIndex = 0;
+    const withWrites = filesWithWrites(walk('.').filter(f => /\.(ts|tsx)$/.test(f)), f => fs.readFileSync(path.join(root, f), 'utf8'));
     // 084d-4: the dry run is a POST that writes nothing (084d-2a); its module names that one route and no other.
     expect(withWrites.map(f => f.replace(/\\/g, '/'))).toEqual(['services/dryRunApi.ts', 'services/overridesApi.ts']);
     const dry = fs.readFileSync(path.join(root, 'services/dryRunApi.ts'), 'utf8');
@@ -684,7 +689,7 @@ describe('theme', () => {
     const root = path.join(__dirname, '..');
     const forms = fs.readdirSync(path.join(root, 'components/wizards/ruleForms')).map(f => `components/wizards/ruleForms/${f}`);
     expect(forms.length).toBeGreaterThan(14);
-    for (const f of ['components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx', 'components/rowOpen.ts', ...forms]) {
+    for (const f of ['components/wizards/steps.tsx', 'components/wizards/WizardFrame.tsx', 'components/wizards/ProcedureWizard.tsx', 'components/wizards/RuleWizard.tsx', 'components/wizards/AssignProcedureWizard.tsx', 'components/rowOpen.ts', ...forms]) {
       expect([f, colour.test(fs.readFileSync(path.join(root, f), 'utf8'))]).toEqual([f, false]);
     }
     expect(colour.test('color: #fff;')).toBe(true);

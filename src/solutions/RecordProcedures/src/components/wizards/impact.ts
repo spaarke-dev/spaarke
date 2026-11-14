@@ -13,7 +13,8 @@
 import type { GapView, ProcedureItem, RuleItem } from '../../services/recordProceduresApi';
 import { procedureState, ruleBadges, versionLabel } from '../../services/model';
 import { CODE_DRY_RUN_UNAVAILABLE, type DryRunAffected, type DryRunView } from '../../services/dryRunApi';
-import { CODE_TIMED_OUT, failureText, type WriteFailure } from '../../services/overridesApi';
+import { failureText, type WriteFailure } from '../../services/overridesApi';
+import { CODE_TIMED_OUT } from '../../services/readRace';
 
 /** One row that changes between Now and After. A side is null when the row is not listed on it. */
 export interface ImpactChange {
