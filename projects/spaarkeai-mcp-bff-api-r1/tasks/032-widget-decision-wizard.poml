@@ -4,7 +4,7 @@
     <title>Widget Decision wizard over MCP shims</title>
     <phase>C Widget</phase>
     <gate>after 023, 024 and 031</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include frontend; modifies .ts/.tsx in the shared lib and the widget</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -175,7 +175,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named in these criteria; anything beyond that needs a one-line justification in the task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>FR-13 live acceptance (a licensed dev-tenant user resolves one Work Item of each lookup-bearing type) and FR-15's 'appears on the written Decision Record' are verified live in 042. Inline frames are about 640 px tall (design §9.4).</notes>
+  <notes>FR-13 live acceptance (a licensed dev-tenant user resolves one Work Item of each lookup-bearing type) and FR-15's 'appears on the written Decision Record' are verified live in 042. Inline frames are about 640 px tall (design §9.4).
+Completion (2026-11-14): shipped as in projects/spaarkeai-mcp-bff-api-r1/notes/task-032-notes.md. Widget jest 14 suites / 305 pass, tsc clean, build OK at 1.53 MB (aim 1 MB, ceiling 3 MB); shared DecisionWizard + Worklist suites 25 / 482 pass unchanged (+9 seam tests). Task 031 review items a to e done here. Display chain read as fullscreen granted -> dialog, refused -> master-detail, too narrow -> openLink (owner to confirm; decisions.md). The POML ui-tests need a local MCP Apps basic-host, which was not available: not run, live acceptance stays with 042.
+rework: none task 032</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
