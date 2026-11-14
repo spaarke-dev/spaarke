@@ -121,6 +121,8 @@ export interface DecisionItemReady {
   openItemsLeft: number | null;
   /** Go to the next open item; undefined when there is none. */
   onNextOpenItem?: () => void;
+  /** Optional seam (FR-15): Confirm shows an optional "because" box. Absent or false: none, as before. */
+  collectBecause?: boolean;
 }
 
 /** What the dialog shows for the current item: its steps once loaded, else a single Loading / Unavailable step. */
@@ -138,6 +140,11 @@ export interface DecisionItemWizardProps {
   onClose: () => void;
   uiScale?: number;
   today: Date;
+  /**
+   * Optional seam: render in the page, with no modal envelope (the shell's `embedded` mode), for a host whose frame cannot hold a
+   * dialog (the MCP widget's master-detail fallback). Absent or false: the SprkModal wizard, as before.
+   */
+  embedded?: boolean;
 }
 
 const useStyles = makeStyles({
@@ -233,6 +240,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   onClose,
   uiScale,
   today,
+  embedded,
 }) => {
   const styles = useStyles();
   const ready = view.status === 'ready' ? view.ready : null;
@@ -497,6 +505,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         openRecord: ready.openRecord ?? null,
         openItemsLeft: ready.openItemsLeft,
         today,
+        collectBecause: ready.collectBecause,
       }
     : null;
 
@@ -533,6 +542,7 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
         showSkippedSteps
         dismiss="explicit"
         uiScale={uiScale}
+        embedded={embedded}
         nav={nav}
         statusBar={statusBar}
         footer={

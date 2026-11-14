@@ -37,6 +37,10 @@ export interface DecisionWizardHostProps {
   openLookup?: DecisionOpenLookup;
   /** Default open-record-in-a-modal for the subject link (D-182); a launch may bring its own. */
   openRecord?: DecisionOpenRecord;
+  /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: none (the Console). */
+  collectBecause?: boolean;
+  /** Optional seam: render the wizard in place, with no modal envelope, for a frame too small for a dialog. Absent or false: SprkModal. */
+  embedded?: boolean;
 }
 
 interface ActiveLaunch {
@@ -56,6 +60,8 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
   lookup,
   openLookup,
   openRecord,
+  collectBecause,
+  embedded,
 }) => {
   const [active, setActive] = React.useState<ActiveLaunch | null>(null);
   const activeRef = React.useRef<ActiveLaunch | null>(null);
@@ -108,6 +114,8 @@ export const DecisionWizardHost: React.FC<DecisionWizardHostProps> = ({
       onClose={close}
       onRecorded={event => request.onRecorded?.({ signalId: event.signalId, alsoResolved: event.alsoResolved })}
       uiScale={uiScale}
+      collectBecause={collectBecause}
+      embedded={embedded}
     />
   );
 };

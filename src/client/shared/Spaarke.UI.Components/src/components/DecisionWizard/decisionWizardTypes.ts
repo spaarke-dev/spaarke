@@ -339,6 +339,11 @@ export interface DecisionLookupRequest {
   query: string;
   /** The item's core record, for scoping (the matter's budgets). Null for a Not filed item. */
   core: { recordType: string; recordId: string } | null;
+  /**
+   * The Signal the wizard is deciding. Optional seam: a host whose search is scoped by the Work Item rather than by the core record
+   * (the MCP widget's `spaarke_search_decision_lookup` takes a signal id) reads it; the Console's search ignores it.
+   */
+  signalId?: string;
 }
 
 export type DecisionLookupSearch = (request: DecisionLookupRequest) => Promise<ILookupItem[]>;

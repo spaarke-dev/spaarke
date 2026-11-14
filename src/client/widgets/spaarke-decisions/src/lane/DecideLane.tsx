@@ -74,6 +74,29 @@ export interface DecideLaneProps {
   doneToday?: number;
   /** "Now" for ages; tests inject a fixed date. Defaults to the time the lane was read. */
   today?: Date;
+  /**
+   * Read the lane again, in place (task 032). A change of this number (the wizard recorded a decision, so the row has left the lane) makes
+   * a new read WITHOUT the loading state: the rows stay where they are until the answer replaces them, the filter and the notice are kept,
+   * and a review under way is trimmed to what is still in the lane. Absent or unchanged: nothing is read again.
+   */
+  reloadToken?: number;
+  /** The lane as last read (`null` while it loads or after a failed read), so the wizard can open on the lane as the user saw it. */
+  onData?: (data: WorklistData | null) => void;
+  /**
+   * Asked before a row is opened or a review step is taken (task 032): false when a decision is already open (one at a time, and the
+   * open one is never replaced). The lane then says so and leaves the review where it was, so its "n of N" never names an item that
+   * is not the one in front of the user. Absent: always allowed.
+   */
+  canOpenWizard?: () => boolean;
+}
+
+/** What the lane says when a row is opened, or a review step taken, while a decision is already open. */
+export const WIZARD_OPEN_NOTICE = 'Finish or close the open decision before opening another.';
+
+/** A notice and its number: the same words twice are two announcements (`key={id}` makes the second a new alert). */
+interface Notice {
+  text: string;
+  id: number;
 }
 
 type LoadState =
@@ -139,39 +162,83 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
   onOpenWizard,
   doneToday,
   today: todayProp,
+  reloadToken,
+  onData,
+  canOpenWizard,
 }) => {
   const styles = useStyles();
   const [load, setLoad] = React.useState<LoadState>({ status: 'loading' });
   const [attempt, setAttempt] = React.useState(0);
   const [filter, setFilter] = React.useState<LaneFilterKey>('all');
   const [review, setReview] = React.useState<Review | null>(null);
-  const [notice, setNotice] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<Notice | null>(null);
+  const noticeSeq = React.useRef(0);
+  /** Shows a notice. Each call is a new alert, so the same words again are announced again (`setNotice(null)` then the same text batches into one render). */
+  const showNotice = React.useCallback((text: string) => {
+    noticeSeq.current += 1;
+    setNotice({ text, id: noticeSeq.current });
+  }, []);
 
-  // The whole lane is read before it is shown, so the counts are the lane's. A newer read (Try again, a new service) ignores an older answer.
+  const latestOnData = React.useRef(onData);
+  latestOnData.current = onData;
+
+  // What the previous read was for: a changed `reloadToken` on the same service is an in-place re-read; anything else is a new read.
+  const lastRead = React.useRef<{ service: WorklistService; reloadToken: number } | null>(null);
+  // Counts the reads that are NEW (a new service, Try again): work started under an older count (a billing link still opening) must not
+  // act on the lane of a newer one.
+  const readEpoch = React.useRef(0);
+
+  // The whole lane is read before it is shown, so the counts are the lane's. A newer read (Try again, a new service, a reload) ignores an
+  // older answer.
+  const token = reloadToken ?? 0; // absent and 0 are the same token: leaving it out is not a change
   React.useEffect(() => {
     let current = true;
-    setLoad({ status: 'loading' });
-    // A new service (or Try again) is a new read of the lane: a walk or a notice from the old one may name ids that are not in it.
-    setReview(null);
-    setNotice(null);
+    const previous = lastRead.current;
+    const inPlace = previous !== null && previous.service === service && previous.reloadToken !== token;
+    lastRead.current = { service, reloadToken: token };
+
+    if (!inPlace) {
+      readEpoch.current += 1;
+      setLoad({ status: 'loading' });
+      latestOnData.current?.(null);
+      // A new service (or Try again) is a new read of the lane: a walk, a notice or a filter from the old one may name ids or cards that
+      // are not in it.
+      setReview(null);
+      setNotice(null);
+      setFilter('all');
+    }
     service.read('lanes').then(
       data => {
-        if (current) setLoad({ status: 'ready', data });
-      },
-      (err: unknown) => {
-        if (current) {
-          setLoad({
-            status: 'error',
-            message: messageOf(err),
-            httpStatus: err instanceof WorklistRequestError ? err.httpStatus : null,
+        if (!current) return;
+        setLoad({ status: 'ready', data });
+        latestOnData.current?.(data);
+        if (inPlace) {
+          // A review under way keeps its place among the items that are still in the lane (the one just decided has left it).
+          const present = new Set(data.Decide.flatMap(group => group.items.map(item => item.signalId)));
+          setReview(walk => {
+            if (!walk) return walk;
+            const ids = walk.ids.filter(id => present.has(id));
+            if (ids.length === 0) return null;
+            const at = ids.indexOf(walk.ids[walk.index]);
+            return { ids, index: at >= 0 ? at : Math.min(walk.index, ids.length - 1) };
           });
         }
+      },
+      (err: unknown) => {
+        if (!current) return;
+        // A lane that cannot be read again after a decision cannot be trusted to show what is left, so it is not left on screen.
+        setLoad({
+          status: 'error',
+          message: messageOf(err),
+          httpStatus: err instanceof WorklistRequestError ? err.httpStatus : null,
+        });
+        latestOnData.current?.(null);
       }
     );
     return () => {
       current = false;
     };
-  }, [service, attempt]);
+  }, [service, attempt, token]);
 
   const data = load.status === 'ready' ? load.data : null;
   const today = React.useMemo(() => todayProp ?? new Date(), [todayProp, data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -207,11 +274,19 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     setNotice(null);
   };
 
+  /** True when a decision may be opened now. When one is already open the lane says so and moves nothing (not the review either). */
+  const mayOpenWizard = (): boolean => {
+    if (!canOpenWizard || canOpenWizard()) return true;
+    showNotice(WIZARD_OPEN_NOTICE);
+    return false;
+  };
+
   const openItem = (event: OpenItemEvent) => {
     // A billing row has no decide action; the panel's line is replaced for it, and this is the second guard.
     if (billingIds.has(event.itemId)) return;
     const index = reviewable.indexOf(event.itemId);
     if (index < 0) return;
+    if (!mayOpenWizard()) return;
     setNotice(null);
     // While a review is under way the label follows the row that was opened, so "n of N" always names the item in front of the user.
     if (review) setReview({ ids: reviewable, index });
@@ -219,10 +294,11 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
   };
 
   const startReview = () => {
+    if (!mayOpenWizard()) return;
     setNotice(null);
     if (reviewable.length === 0) {
       setReview(null);
-      setNotice('Nothing in this view can be reviewed here. Invoice decisions are decided in Invoice Review.');
+      showNotice('Nothing in this view can be reviewed here. Invoice decisions are decided in Invoice Review.');
       return;
     }
     setReview({ ids: reviewable, index: 0 });
@@ -233,11 +309,14 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     if (!review) return;
     const index = Math.min(review.ids.length - 1, Math.max(0, review.index + delta));
     if (index === review.index) return;
+    if (!mayOpenWizard()) return;
     setReview({ ids: review.ids, index });
     raise(review.ids, index, coreOf(review.ids[index]));
   };
 
   const openBillingLink = async (url: string) => {
+    // The lane this link was clicked in: if a newer read has replaced it (a new service), a late failure is not about this lane.
+    const epoch = readEpoch.current;
     setNotice(null);
     let opened = false;
     try {
@@ -245,7 +324,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     } catch {
       opened = false;
     }
-    if (!opened) setNotice(INVOICE_REVIEW_FAILED);
+    if (!opened && readEpoch.current === epoch) showNotice(INVOICE_REVIEW_FAILED);
   };
 
   const renderItem = (item: WorklistItem): React.ReactNode => {
@@ -332,16 +411,21 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     notice || review ? (
       <div className={styles.belowHeader}>
         {notice && (
-          <div role="alert" data-testid="decide-lane-notice">
+          // `key`: the same words again are a new alert, so a repeat is announced again.
+          <div role="alert" key={notice.id} data-testid="decide-lane-notice">
             <MessageBar intent="warning">
-              <MessageBarBody>{notice}</MessageBarBody>
+              <MessageBarBody>{notice.text}</MessageBarBody>
             </MessageBar>
           </div>
         )}
         {review && (
           <div className={styles.reviewBar} role="group" aria-label="Review" data-testid="decide-review-bar">
             <Text weight="semibold">Reviewing</Text>
-            <Text role="status" aria-live="polite" data-testid="decide-review-position">{`${review.index + 1} of ${review.ids.length}`}</Text>
+            <Text
+              role="status"
+              aria-live="polite"
+              data-testid="decide-review-position"
+            >{`${review.index + 1} of ${review.ids.length}`}</Text>
             <span className={styles.spacer} />
             <Button
               size="small"

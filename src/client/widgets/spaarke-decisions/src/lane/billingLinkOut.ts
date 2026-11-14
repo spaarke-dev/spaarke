@@ -51,3 +51,15 @@ export function buildBillingLinkOut(
   const { pageInput } = buildInvoiceReviewLaunch({ invoiceId: target.invoiceId, lineId: target.lineId ?? null });
   return `${base}/main.aspx?pagetype=webresource&webresourceName=${encodeURIComponent(pageInput.webresourceName)}&data=${encodeURIComponent(pageInput.data)}`;
 }
+
+/** The Console's web resource (`DecisionsTextSummary.ConsoleWebResource`): it has no launch parameter for one Work Item today. */
+export const CONSOLE_WEB_RESOURCE = 'sprk_spaarkeai';
+
+/**
+ * The link to the Console itself (task 032, the last display fallback): the page where the same Work Item is in the user's Decide lane.
+ * The same text link the server's own fallback summary uses; `null` when there is no usable base.
+ */
+export function buildConsoleLinkOut(consoleBaseUrl: string | null | undefined): string | null {
+  const base = normalizeConsoleBaseUrl(consoleBaseUrl);
+  return base ? `${base}/main.aspx?pagetype=webresource&webresourceName=${CONSOLE_WEB_RESOURCE}` : null;
+}

@@ -75,6 +75,10 @@ export interface DecisionWizardProps {
   uiScale?: number;
   /** "Now" for ages and due states; tests inject a fixed date. */
   today?: Date;
+  /** Optional seam (FR-15): Confirm shows an optional "because" box and the review carries it. Absent or false: none, as before. */
+  collectBecause?: boolean;
+  /** Optional seam: render in the page with no modal envelope (a frame too small for a dialog). Absent or false: the modal wizard. */
+  embedded?: boolean;
 }
 
 type Loaded =
@@ -120,6 +124,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   onRecorded,
   uiScale,
   today: todayProp,
+  collectBecause,
+  embedded,
 }) => {
   const today = React.useMemo(() => todayProp ?? new Date(), [todayProp]);
 
@@ -367,6 +373,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
               core: readyItem.core
                 ? { recordType: readyItem.core.recordType, recordId: readyItem.core.recordId }
                 : null,
+              signalId: readyItem.row.signalId,
             })
         : null,
     [lookup, readyItem]
@@ -417,6 +424,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         openRecord: openRecord ?? null,
         openItemsLeft,
         onNextOpenItem: nextOpenIndex >= 0 ? () => setIndex(nextOpenIndex) : undefined,
+        collectBecause,
       },
     };
   } else if (state?.status === 'error') {
@@ -433,6 +441,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       onClose={requestClose}
       uiScale={uiScale}
       today={today}
+      embedded={embedded}
     />
   );
 
