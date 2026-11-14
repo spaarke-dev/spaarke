@@ -4,7 +4,7 @@
     <title>Remaining email composer hosts: templates, AI drafting and attachment upload (ComposeWorkspace, TrackingFieldTrio, CommunicationPage, CommunicationActions)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>after 186 merges</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,6 +98,7 @@
     <criterion testable="true">All existing tests in the touched packages pass; tsc clean in touched files; no new client-lint violations.</criterion>
   </acceptance-criteria>
   <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <completion>Done 2026-11-13: PR #2812 merged to master (cfa97d718b). Known limits: memo email passes no regarding ({!entity.field} blank); TrackingFieldTrio/CommunicationPage have no jest runner. Notes: notes/task-188-notes.md. rework: fix-round-1 task 188</completion>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
