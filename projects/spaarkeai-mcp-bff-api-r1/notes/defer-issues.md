@@ -124,6 +124,35 @@ Log only the failure code and correlation id (or remove the April-era diagnostic
 
 ---
 
+### ISS-007 — MCP route: Host/Origin validation per the MCP transport requirements
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owner decision |
+| **Urgency** | next-round (decide before task 042's live run) |
+| **Filed** | 2026-11-14 |
+| **Source** | Task 025 conformance run (`--spec-version 2026-07-28 --suite all`) and its adversarial review |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/2835 |
+
+**Description**
+
+The MCP transport requirements for 2026-07-28 ask servers to validate the `Host`/`Origin` of incoming requests. `/mcp/legal-operations` does not enforce this (`AllowedHosts` is `*`; no host or origin filter on the route). The conformance suite's DNS-rebinding scenario fails on it, and task 025 baselined that one check so the rest of the suite can gate. Risk is low: every call needs a valid bearer token, there are no ambient credentials, and CORS is an allow-list. Concrete failure: NFR-09's conformance run stays green only with this check excused.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/Mcp/McpEndpoints.cs` (route mapping)
+- `tests/integration/Mcp.Conformance.Host/conformance/conformance-baseline.yml` (the baselined check)
+
+**Suggested fix**
+
+Owner decision first (validate on `/mcp/*`, against which allow-list). Copilot and Cowork call server-to-server, so their `Host`/`Origin` behaviour must be observed live (task 042) before a rejection rule ships; then remove the baseline entry.
+
+**Estimated effort**: 2–4 hours plus a live check
+**Blockers**: owner decision; task 042 observation
+**Related**: NFR-09, task 025
+
+---
+
 ### ISS-004 — The decision commit does not require a prior plan read, although the spec says it must
 
 | Field | Value |
