@@ -54,13 +54,18 @@ function contextOf(item: DecisionWizardItem): TemplateContext {
   };
 }
 
+/** The parameter kinds whose starting value the plan can send (`defaultValue`). */
+const SERVER_DEFAULT_KINDS: ReadonlySet<string> = new Set(['Choice', 'Boolean', 'Text', 'TextArea']);
+
 function defaultsFor(action: DecisionAction, context: TemplateContext): Record<string, string> {
   const out: Record<string, string> = {};
   for (const parameter of action.parameters) {
     // Task 167 (D-193): a starting value the server computed for the parameter (Create budget's currency, from the matter's business
     // unit): data from the plan, never a template. It is offered, not chosen: the user can change it, and it is not a choice.
     // Task 168 (D-194): a yes/no's fixed default (Assign Task's Send email notification is ticked).
-    if ((parameter.kind === 'Choice' || parameter.kind === 'Boolean') && parameter.defaultValue) {
+    // Task 192 (D-224): a Text or TextArea's starting value from the server (the budget inquiry's standard Subject and Message) is
+    // data from the plan too, and it replaces the client's generic template below, so the user starts from the owner-approved text.
+    if (SERVER_DEFAULT_KINDS.has(parameter.kind) && parameter.defaultValue) {
       out[parameter.code] = parameter.defaultValue;
       continue;
     }

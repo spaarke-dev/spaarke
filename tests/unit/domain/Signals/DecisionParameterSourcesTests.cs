@@ -50,6 +50,12 @@ public class DecisionParameterSourcesTests
         /// <summary>When set, the caller's read of the matter throws it (a transport fault).</summary>
         public Exception? MatterFault { get; set; }
 
+        /// <summary>Task 192: the caller's <c>WhoAmI()</c> and their own <c>systemusers(id)</c> row (the budget inquiry's closing name); by default unreadable.</summary>
+        public DataverseUserResponse WhoAmIResponse { get; set; } = DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
+        public DataverseUserResponse SystemUserResponse { get; set; } = DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no");
+        public Exception? WhoAmIFault { get; set; }
+        public Exception? SystemUserFault { get; set; }
+
         public List<string> MatterGets => Gets.Where(IsMatterRead).ToList();
 
         private static bool IsMatterRead(string path) => path.StartsWith("sprk_matters(", StringComparison.Ordinal);
@@ -59,6 +65,10 @@ public class DecisionParameterSourcesTests
             Gets.Add(relativePath);
             if (IsMatterRead(relativePath))
                 return MatterFault is { } fault ? Task.FromException<DataverseUserResponse>(fault) : Task.FromResult(MatterResponse);
+            if (relativePath == "WhoAmI()")
+                return WhoAmIFault is { } whoFault ? Task.FromException<DataverseUserResponse>(whoFault) : Task.FromResult(WhoAmIResponse);
+            if (relativePath.StartsWith("systemusers(", StringComparison.Ordinal))
+                return SystemUserFault is { } userFault ? Task.FromException<DataverseUserResponse>(userFault) : Task.FromResult(SystemUserResponse);
             return Task.FromResult(Response);
         }
 
@@ -717,7 +727,7 @@ public class DecisionParameterSourcesTests
         var user = new FakeUser();
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
 
-        var facts = await Build(user, entities).ForPlanAsync(Http(), PlanOf("revise-budget", "approve-variance", "send-budget-inquiry"), MatterId, CancellationToken.None);
+        var facts = await Build(user, entities).ForPlanAsync(Http(), PlanOf("revise-budget", "approve-variance", "send-reminder"), MatterId, CancellationToken.None);
 
         facts.OptionsBySource.Should().BeEmpty();
         facts.DefaultsBySource.Should().BeEmpty();
@@ -735,5 +745,176 @@ public class DecisionParameterSourcesTests
 
         facts.DefaultsBySource.Should().BeEmpty();
         entities.Verify(e => e.RetrieveAsync("sprk_matter", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The budget inquiry's default text (task 192, D-224)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    private static readonly Guid CallerId = Guid.Parse("dddddddd-0000-0000-0000-000000000001");
+
+    private const string InquiryMatterPath = "sprk_matters(22222222-0000-0000-0000-000000000001)?$select=sprk_mattername,sprk_matternumber";
+
+    private const string ExpectedSubject = "Budget inquiry: MTR-00042 Acme v. Beta";
+
+    // The owner-approved wording (D-224, 2026-11-14), written out here on purpose: the test pins the text, not the code that builds it.
+    private const string ExpectedBody =
+        "Hello,\n\n"
+        + "We received notice of a fee or scope change on Acme v. Beta (MTR-00042). The matter's budget has not been revised to reflect it.\n\n"
+        + "Please send us a revised budget estimate, or confirm that the change does not affect the current budget.\n\n"
+        + "Thank you,\n"
+        + "Dana Whitfield";
+
+    private static DataverseUserResponse Row(object row) => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(row));
+
+    /// <summary>A caller who can read the matter and whose own name reads back; each test then breaks one read.</summary>
+    private static FakeUser InquiryUser(string? name = "Acme v. Beta", string? number = "MTR-00042", string? fullName = "Dana Whitfield") =>
+        new()
+        {
+            MatterResponse = Row(new { sprk_mattername = name, sprk_matternumber = number }),
+            WhoAmIResponse = Row(new { UserId = CallerId }),
+            SystemUserResponse = Row(new { fullname = fullName }),
+        };
+
+    private static Task<DecisionParameterFacts> InquiryFactsAsync(
+        FakeUser user, Guid? matterId = null, ILogger<DecisionParameterSources>? logger = null, Mock<IGenericEntityService>? entities = null) =>
+        Build(user, entities ?? new Mock<IGenericEntityService>(MockBehavior.Strict), logger: logger)
+            .ForPlanAsync(Http(), PlanOf("send-budget-inquiry", "approve-variance"), matterId ?? MatterId, CancellationToken.None);
+
+    [Fact]
+    public async Task ForPlan_BudgetInquiry_ReturnsTheApprovedSubjectAndMessage_ReadAsTheCaller_D224()
+    {
+        var user = InquiryUser();
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+
+        var facts = await InquiryFactsAsync(user, entities: entities);
+
+        facts.DefaultsBySource[DecisionParameterSources.BudgetInquirySubjectDefault].Should().Be(ExpectedSubject);
+        facts.DefaultsBySource[DecisionParameterSources.BudgetInquiryBodyDefault].Should().Be(ExpectedBody);
+        facts.OptionsBySource.Should().BeEmpty();
+        // As the caller only: the matter, who they are, their own name. Never an app-only read (the strict mock throws on any call).
+        user.Gets.Should().Equal(InquiryMatterPath, "WhoAmI()", $"systemusers({CallerId:D})?$select=fullname");
+        entities.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ForPlan_BudgetInquiry_TheMessageIsPlainTextWithLineBreaks_AndNoMarkup_D224()
+    {
+        var facts = await InquiryFactsAsync(InquiryUser());
+
+        var body = facts.DefaultsBySource[DecisionParameterSources.BudgetInquiryBodyDefault];
+
+        body.Split('\n').Should().HaveCount(8);
+        body.Should().NotContain("\r").And.NotContain("<");
+        body.Should().EndWith("Thank you,\nDana Whitfield");
+    }
+
+    [Fact]
+    public async Task ForPlan_BudgetInquiry_WhenTheCallersNameCannotBeRead_EndsThankYouWithNoNameLine_AndKeepsTheSubject_D224()
+    {
+        // Every way the name read can go wrong: refused, not found, an empty name, WhoAmI refused, a thrown fault.
+        var broken = new Action<FakeUser>[]
+        {
+            u => u.SystemUserResponse = DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "no read on systemuser"),
+            u => u.SystemUserResponse = DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "none"),
+            u => u.SystemUserResponse = Row(new { fullname = "   " }),
+            u => u.SystemUserResponse = Row(new { fullname = (string?)null }),
+            u => u.WhoAmIResponse = DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "no identity"),
+            u => u.WhoAmIResponse = Row(new { UserId = Guid.Empty }),
+            u => u.WhoAmIFault = new TimeoutException("no answer"),
+            u => u.SystemUserFault = new HttpRequestException("503"),
+        };
+        foreach (var breakIt in broken)
+        {
+            var user = InquiryUser();
+            breakIt(user);
+
+            var facts = await InquiryFactsAsync(user);
+
+            facts.DefaultsBySource[DecisionParameterSources.BudgetInquirySubjectDefault].Should().Be(ExpectedSubject);
+            var body = facts.DefaultsBySource[DecisionParameterSources.BudgetInquiryBodyDefault];
+            body.Should().Be(ExpectedBody[..ExpectedBody.LastIndexOf("\nDana Whitfield", StringComparison.Ordinal)]);
+            body.Should().EndWith("Thank you,", "no name line, and nothing after the comma");
+        }
+    }
+
+    [Fact]
+    public async Task ForPlan_BudgetInquiry_WhenTheMatterCannotBeRead_HasNoDefault_AndTheReadStillSucceeds_D224()
+    {
+        // Denied, not found, a service error and a thrown transport fault: the plan read still answers, with nothing to prefill.
+        var broken = new Action<FakeUser>[]
+        {
+            u => u.MatterResponse = DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "no read"),
+            u => u.MatterResponse = DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "not visible"),
+            u => u.MatterResponse = DataverseUserResponse.Fail(503, DataverseUserClientErrorCodes.ServiceError, "down"),
+            u => u.MatterFault = new TimeoutException("no answer"),
+            u => u.MatterResponse = Row(new { sprk_mattername = (string?)null, sprk_matternumber = (string?)"  " }),
+        };
+        foreach (var breakIt in broken)
+        {
+            var user = InquiryUser();
+            breakIt(user);
+
+            var facts = await InquiryFactsAsync(user);
+
+            facts.DefaultsBySource.Should().BeEmpty();
+            user.Gets.Should().NotContain("WhoAmI()", "the caller's name is not read for a text that cannot be built");
+        }
+    }
+
+    [Fact]
+    public async Task ForPlan_BudgetInquiry_LogsAWarning_NeverTheMatterOrPersonName_D224()
+    {
+        var logger = new CapturingLogger();
+        var nameless = InquiryUser();
+        nameless.SystemUserResponse = DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "no read on systemuser");
+        var denied = InquiryUser();
+        denied.MatterResponse = DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "no read");
+
+        await InquiryFactsAsync(nameless, logger: logger);
+        await InquiryFactsAsync(denied, logger: logger);
+        await InquiryFactsAsync(InquiryUser(), logger: logger);
+
+        logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning, "a read that failed is a Warning");
+        logger.Entries.Should().OnlyContain(e => e.Level == LogLevel.Warning, "nothing else is logged above Warning for a default that could not be built");
+        logger.Entries.Select(e => e.Message).Should().NotContain(m => m.Contains("Acme") || m.Contains("MTR-00042") || m.Contains("Dana"));
+    }
+
+    [Fact]
+    public async Task ForPlan_BudgetInquiry_ForACoreThatIsNotAMatter_HasNoDefault_AndReadsNothing_D224()
+    {
+        var user = InquiryUser();
+
+        var facts = await Build(user, new Mock<IGenericEntityService>(MockBehavior.Strict))
+            .ForPlanAsync(Http(), PlanOf("send-budget-inquiry"), matterId: null, CancellationToken.None);
+
+        facts.DefaultsBySource.Should().BeEmpty();
+        user.Gets.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ForPlan_AReminderPlan_GetsNoSubjectOrMessageDefault_AndReadsNothing_MustNotFire_D224()
+    {
+        var user = InquiryUser();
+
+        var facts = await Build(user, new Mock<IGenericEntityService>(MockBehavior.Strict))
+            .ForPlanAsync(Http(), PlanOf("send-reminder"), MatterId, CancellationToken.None);
+
+        facts.DefaultsBySource.Should().BeEmpty();
+        user.Gets.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Acme v. Beta", null, "Budget inquiry: Acme v. Beta", "on Acme v. Beta.")]
+    [InlineData(null, "MTR-00042", "Budget inquiry: MTR-00042", "on MTR-00042.")]
+    [InlineData("  Acme\r\n v.   Beta ", " MTR-00042 ", ExpectedSubject, "on Acme v. Beta (MTR-00042).")]
+    public async Task ForPlan_BudgetInquiry_AMatterWithOnlyOneOfNameOrNumber_ShowsThatOne_AndABreakInANameNeverBreaksALine_D224(
+        string? name, string? number, string subject, string matterPhrase)
+    {
+        var facts = await InquiryFactsAsync(InquiryUser(name, number));
+
+        facts.DefaultsBySource[DecisionParameterSources.BudgetInquirySubjectDefault].Should().Be(subject);
+        facts.DefaultsBySource[DecisionParameterSources.BudgetInquiryBodyDefault].Should().Contain(matterPhrase);
+        facts.DefaultsBySource[DecisionParameterSources.BudgetInquiryBodyDefault].Split('\n').Should().HaveCount(8);
     }
 }

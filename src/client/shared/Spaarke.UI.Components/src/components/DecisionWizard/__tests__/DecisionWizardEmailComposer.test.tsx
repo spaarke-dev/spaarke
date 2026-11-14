@@ -24,6 +24,22 @@ import { DecisionWizard } from '../DecisionWizard';
 import { PATH_B_ID, matterCore, pathBItem, pathBPlan, sendInquiry } from '../__fixtures__/decisionWizardFixtures';
 import { makeLoader, makeService, renderWizard } from './decisionTestKit';
 
+/** Task 192 (D-224): the props every EmailComposer mount received, so a test can pin what the step does NOT pass it. */
+const mockComposerProps: Array<Record<string, unknown>> = [];
+jest.mock('../../EmailComposer/EmailComposer', () => {
+  // jest.mock factories cannot reference imports, so react is required here
+  const react = require('react') as typeof import('react');
+  const actual = jest.requireActual(
+    '../../EmailComposer/EmailComposer'
+  ) as typeof import('../../EmailComposer/EmailComposer');
+  const Spy = react.forwardRef<unknown, Record<string, unknown>>((props, ref) => {
+    mockComposerProps.push(props);
+    return react.createElement(actual.EmailComposer, { ...props, ref } as never);
+  });
+  Spy.displayName = 'SpyEmailComposer';
+  return { ...actual, EmailComposer: Spy };
+});
+
 const click = (element: Element) => fireEvent.click(element);
 const button = (name: RegExp) => screen.getByRole('button', { name });
 
@@ -512,5 +528,115 @@ describe('message step in the EmailComposer (task 160)', () => {
     expect(within(step).getByTestId('field-to')).toBeInTheDocument();
     expect(within(step).getByTestId('field-subject')).toBeInTheDocument();
     expect(within(step).getByTestId('field-body')).toBeInTheDocument();
+  });
+});
+
+/** Task 192 (D-224): the owner-approved text the plan route sends as the budget inquiry's starting Subject and Message. */
+const DEFAULT_SUBJECT = 'Budget inquiry: MTR-00042 Acme v. Beta';
+const DEFAULT_BODY = [
+  'Hello,',
+  '',
+  "We received notice of a fee or scope change on Acme v. Beta (MTR-00042). The matter's budget has not been revised to reflect it.",
+  '',
+  'Please send us a revised budget estimate, or confirm that the change does not affect the current budget.',
+  '',
+  'Thank you,',
+  'Dana Whitfield',
+].join('\n');
+
+/** The inquiry as the plan route returns it now: Subject and Message carry the server's default (`defaultValue`). */
+const inquiryWithDefaults = (): DecisionAction => {
+  const base = composerInquiry([LEAD]);
+  return {
+    ...base,
+    parameters: base.parameters.map(p =>
+      p.code === 'subject'
+        ? { ...p, defaultValue: DEFAULT_SUBJECT }
+        : p.code === 'body'
+          ? { ...p, defaultValue: DEFAULT_BODY }
+          : p
+    ),
+  };
+};
+
+describe('message step starts from the server default text (task 192, D-224)', () => {
+  const subjectBox = (step: HTMLElement) => within(step).getByRole('textbox', { name: 'Subject' }) as HTMLInputElement;
+  const bodyBox = (step: HTMLElement) =>
+    within(step).getByRole('textbox', { name: 'Message body' }) as HTMLTextAreaElement;
+
+  it('opens with the default Subject and Message, line breaks kept, instead of the generic template', async () => {
+    setup(planWith(inquiryWithDefaults()));
+    const step = await toInquiry();
+
+    expect(subjectBox(step).value).toBe(DEFAULT_SUBJECT);
+    expect(bodyBox(step).value).toBe(DEFAULT_BODY);
+    expect(bodyBox(step).value.split('\n')).toHaveLength(8);
+    expect(button(/^next$/i)).toBeEnabled();
+  });
+
+  it('an untouched default is committed as plain text with its line breaks', async () => {
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    const review = await recordAfterInquiry(service);
+
+    expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values).toEqual({
+      to: LEAD.email,
+      subject: DEFAULT_SUBJECT,
+      body: DEFAULT_BODY,
+    });
+  }, 30000);
+
+  it("the user's edit is committed instead of the default", async () => {
+    const { service } = setup(planWith(inquiryWithDefaults()));
+    const step = await toInquiry();
+
+    fireEvent.change(subjectBox(step), { target: { value: 'Budget question' } });
+    fireEvent.change(bodyBox(step), { target: { value: `${DEFAULT_BODY}\n\nP.S. Please reply by Friday.` } });
+
+    const review = await recordAfterInquiry(service);
+    expect(review.actions.find(a => a.code === 'send-budget-inquiry')?.values).toEqual({
+      to: LEAD.email,
+      subject: 'Budget question',
+      body: `${DEFAULT_BODY}\n\nP.S. Please reply by Friday.`,
+    });
+  }, 30000);
+
+  it('a default is a starting value, not a choice: opening and leaving the step asks nothing', async () => {
+    const { onClose } = setup(planWith(inquiryWithDefaults()));
+    await toInquiry();
+
+    click(button(/^close$/i));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Discard unrecorded choices?')).toBeNull();
+  });
+
+  it('must-not-fire: a Subject and Message with no server default keep the generic templated start', async () => {
+    setup(planWith(composerInquiry([LEAD])));
+    const step = await toInquiry();
+
+    expect(subjectBox(step).value).not.toBe(DEFAULT_SUBJECT);
+    expect(subjectBox(step).value).not.toBe('');
+    expect(bodyBox(step).value).not.toBe(DEFAULT_BODY);
+  });
+
+  it('stays compose-only: the composer gets no template picker, no AI draft and a fetch that refuses (D-224)', async () => {
+    mockComposerProps.length = 0;
+    setup(planWith(inquiryWithDefaults()));
+    const step = await toInquiry();
+
+    expect(within(step).queryByRole('button', { name: /template/i })).toBeNull();
+    expect(within(step).queryByRole('button', { name: /draft with ai/i })).toBeNull();
+    expect(mockComposerProps.length).toBeGreaterThan(0);
+    for (const props of mockComposerProps) {
+      expect(props.onListEmailTemplates).toBeUndefined();
+      expect(props.onRenderEmailTemplate).toBeUndefined();
+      expect(props.onDraftWithAi).toBeUndefined();
+      expect(props.composeOnly).toBe(true);
+    }
+    await expect((mockComposerProps[0].authenticatedFetch as () => Promise<unknown>)()).rejects.toThrow(
+      'never sends from the composer'
+    );
   });
 });

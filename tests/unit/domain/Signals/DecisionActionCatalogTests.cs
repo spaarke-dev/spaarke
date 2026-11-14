@@ -1039,9 +1039,57 @@ public class DecisionActionCatalogTests
     [Fact]
     public void NoOtherActionDeclaresADefaultSourceOrANotBefore_MustNotFire_D193()
     {
+        // Task 192 (D-224): send-budget-inquiry's own Subject and Message are the only other declared sources.
         DecisionActionCatalog.All.Where(a => a.Code != "create-budget")
-            .SelectMany(a => a.Parameters)
-            .Should().OnlyContain(p => p.DefaultSource == null && p.NotBefore == null);
+            .SelectMany(a => a.Parameters.Select(p => (Action: a.Code, Parameter: p)))
+            .Where(x => !(x.Action == "send-budget-inquiry" && x.Parameter.Code is "subject" or "body"))
+            .Should().OnlyContain(x => x.Parameter.DefaultSource == null && x.Parameter.NotBefore == null);
+    }
+
+    [Fact]
+    public void SendBudgetInquiry_DeclaresTheDefaultSubjectAndMessageSources_AndSendReminderDeclaresNone_D224()
+    {
+        DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
+        Param(inquiry, "subject").DefaultSource.Should().Be(DecisionParameterSources.BudgetInquirySubjectDefault);
+        Param(inquiry, "body").DefaultSource.Should().Be(DecisionParameterSources.BudgetInquiryBodyDefault);
+        Param(inquiry, "subject").Kind.Should().Be(DecisionParameterKind.Text);
+        Param(inquiry, "body").Kind.Should().Be(DecisionParameterKind.TextArea);
+        inquiry.Parameters.Where(p => p.Code is not ("subject" or "body")).Should().OnlyContain(p => p.DefaultSource == null && p.DefaultValue == null);
+
+        // The shared To/Subject/Message array is not changed: send-reminder keeps no default (must not fire).
+        DecisionActionCatalog.TryGet("send-reminder", out var reminder).Should().BeTrue();
+        reminder.Parameters.Should().OnlyContain(p => p.DefaultSource == null && p.DefaultValue == null);
+        DecisionActionDto.From(reminder, isRecommended: false, parameterFacts: new DecisionParameterFacts(
+                new Dictionary<string, IReadOnlyList<DecisionParameterOption>>(),
+                new Dictionary<string, string>
+                {
+                    [DecisionParameterSources.BudgetInquirySubjectDefault] = "x",
+                    [DecisionParameterSources.BudgetInquiryBodyDefault] = "y",
+                }))
+            .Parameters.Should().OnlyContain(p => p.DefaultValue == null);
+    }
+
+    [Fact]
+    public void ThePlanDto_CarriesTheBudgetInquirysResolvedSubjectAndMessage_AsTheirDefaults_D224()
+    {
+        DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
+        var facts = new DecisionParameterFacts(
+            new Dictionary<string, IReadOnlyList<DecisionParameterOption>>(),
+            new Dictionary<string, string>
+            {
+                [DecisionParameterSources.BudgetInquirySubjectDefault] = "Budget inquiry: MTR-1 Acme",
+                [DecisionParameterSources.BudgetInquiryBodyDefault] = "Hello,\n\nThank you,",
+            });
+
+        var dto = DecisionActionDto.From(inquiry, isRecommended: true, parameterFacts: facts);
+
+        dto.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().Be("Budget inquiry: MTR-1 Acme");
+        dto.Parameters.Single(p => p.Code == "body").DefaultValue.Should().Be("Hello,\n\nThank you,");
+        dto.Parameters.Where(p => p.Code is not ("subject" or "body")).Should().OnlyContain(p => p.DefaultValue == null);
+
+        // A default that could not be built is absent: the subject and message have no default and stay empty for the user.
+        var none = DecisionActionDto.From(inquiry, isRecommended: true, parameterFacts: DecisionParameterFacts.None);
+        none.Parameters.Should().OnlyContain(p => p.DefaultValue == null);
     }
 
     [Fact]
@@ -1161,6 +1209,87 @@ public class DecisionActionCatalogTests
         { CallBase = false };
         sources.Setup(s => s.ForPlanAsync(It.IsAny<HttpContext>(), It.IsAny<ResolvedDecisionPlan>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(facts);
         return sources;
+    }
+
+    /// <summary>Task 192 (D-224): the REAL resolver over the caller's own reads of the matter, WhoAmI and their systemuser row.</summary>
+    private static DecisionParameterSources RealSources(DataverseUserResponse matter, DataverseUserResponse? systemUser = null)
+    {
+        var caller = Guid.Parse("dddddddd-0000-0000-0000-000000000001");
+        var user = new Mock<IDataverseUserClient>();
+        user.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(matter);
+        user.Setup(u => u.GetAsync("WhoAmI()", It.IsAny<CancellationToken>())).ReturnsAsync(Ok(new { UserId = caller }));
+        user.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("systemusers(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(systemUser ?? Ok(new { fullname = "Dana Whitfield" }));
+        return new DecisionParameterSources(
+            user.Object, new Mock<IGenericEntityService>().Object, new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>().Object,
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            new Mock<Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalAccessOptions>>().Object,
+            NullLogger<DecisionParameterSources>.Instance);
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_StartsWithTheApprovedSubjectAndMessage_AndSendReminderWithNone_D224()
+    {
+        var (users, _) = UsersWithBudgets();
+        var sources = RealSources(Ok(new { sprk_mattername = "Acme v. Beta", sprk_matternumber = "MTR-00042" }));
+
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(1)), sources: sources);
+
+        var inquiry = body.Actions.Single(a => a.Code == "send-budget-inquiry");
+        inquiry.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().Be("Budget inquiry: MTR-00042 Acme v. Beta");
+        inquiry.Parameters.Single(p => p.Code == "body").DefaultValue.Should().Be(
+            "Hello,\n\n"
+            + "We received notice of a fee or scope change on Acme v. Beta (MTR-00042). The matter's budget has not been revised to reflect it.\n\n"
+            + "Please send us a revised budget estimate, or confirm that the change does not affect the current budget.\n\n"
+            + "Thank you,\nDana Whitfield");
+        inquiry.Parameters.Single(p => p.Code == "to").DefaultValue.Should().BeNull("To is the task-160 pre-fill (PrefillTo), not a default");
+        body.Actions.Where(a => a.Code != "send-budget-inquiry").SelectMany(a => a.Parameters).Should().OnlyContain(p => p.DefaultValue == null);
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_WhenTheMatterReadFails_StillAnswers200_WithNoSubjectOrMessageDefault_D224()
+    {
+        foreach (var matter in new[]
+                 {
+                     Fail(403, DataverseUserClientErrorCodes.AccessDenied),
+                     Fail(404, DataverseUserClientErrorCodes.NotFound),
+                     Fail(503, DataverseUserClientErrorCodes.ServiceError),
+                 })
+        {
+            var (users, _) = UsersWithBudgets();
+
+            var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(1)), sources: RealSources(matter));
+
+            var inquiry = body.Actions.Single(a => a.Code == "send-budget-inquiry");
+            inquiry.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().BeNull();
+            inquiry.Parameters.Single(p => p.Code == "body").DefaultValue.Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_WhenTheCallersNameCannotBeRead_StillAnswers200_AndTheMessageEndsThankYou_D224()
+    {
+        var (users, _) = UsersWithBudgets();
+        var sources = RealSources(
+            Ok(new { sprk_mattername = "Acme v. Beta", sprk_matternumber = "MTR-00042" }),
+            Fail(403, DataverseUserClientErrorCodes.AccessDenied));
+
+        var body = await PlanRouteAsync(Access(users, budgets: new AppBudgets(1)), sources: sources);
+
+        var inquiry = body.Actions.Single(a => a.Code == "send-budget-inquiry");
+        inquiry.Parameters.Single(p => p.Code == "subject").DefaultValue.Should().Be("Budget inquiry: MTR-00042 Acme v. Beta");
+        inquiry.Parameters.Single(p => p.Code == "body").DefaultValue.Should().EndWith("Thank you,");
+    }
+
+    [Fact]
+    public async Task ThePlanRoute_BudgetInquiry_ForACoreThatIsNotAMatter_HasNoSubjectOrMessageDefault_D224()
+    {
+        var (users, _) = UsersWithBudgets();
+        var sources = RealSources(Ok(new { sprk_mattername = "Acme v. Beta", sprk_matternumber = "MTR-00042" }));
+
+        var body = await PlanRouteAsync(Access(users, coreTable: "sprk_project", coreSet: "sprk_projects", budgets: new AppBudgets(1)), sources: sources);
+
+        body.Actions.Single(a => a.Code == "send-budget-inquiry").Parameters.Should().OnlyContain(p => p.DefaultValue == null);
     }
 
     private static void CallerBudgetsReadTimes(Mock<IDataverseUserClient> mock, Times times) =>
