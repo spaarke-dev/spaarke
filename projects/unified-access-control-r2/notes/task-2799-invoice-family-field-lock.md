@@ -141,11 +141,27 @@ no locked column, and a run with no person (C2/C3 app-only), keeps its single wr
 An unknown record answers exactly as one the person may not use (NFR-01): Dataverse's 403 and 404 are both `Denied`.
 On the OBO paths a failed WhoAmI keeps the path's existing client-failure answer.
 
+### Known limits decided by the main session (review 1, 2026-11-13)
+
+- **AppendTo is asked on every record a locked lookup names, including one it already names.** Stricter than "only a
+  newly named record", fails closed, and is what Dataverse itself asked of the person's own PATCH before the split (a PATCH
+  that sets a lookup asks AppendTo on its target whether or not the value changed). Not changed.
+- **The probe's 404 retry timing** (`CallerRecordAccessProbe`, existing behaviour, hard to reach). Not changed.
+- **Key forms (review 1 F3).** A locked key is written as the app only in a form the 045g guard reads as that column
+  (`InvoiceFamilyCoreRecordGuard.ColumnOfKey`: the logical name or `{navigation}@odata.bind`). The guard compares both
+  parts **without regard to case** (it lower-cases the column and matches the `@odata.bind` suffix with `OrdinalIgnoreCase`),
+  so `SPRK_Invoice@odata.bind` is the guard's `sprk_invoice` and is checked, not refused; following the guard was the brief's
+  rule. Dataverse's own navigation names are case-sensitive, so such a key would fail at Dataverse (after the person's
+  write on a mixed write: partly saved, never success). `_sprk_invoice_value`, `sprk_invoice@foo` and any key that
+  `NormalizeColumn` maps to a locked column but the guard does not are Denied, nothing written.
+
 ### K-1 — a mixed write is two requests (known limit)
 
 A write that sets locked and other columns is two requests: the other columns as the person (their own privileges and
 field security apply), then the locked columns as the app. If the second fails after the first landed, the other
-columns stay saved. The answer is never success: each path returns its error answer with fixed text saying the change
+columns stay saved. The second is not the request's to cancel (`CancellationToken.None` once the first landed; review 1
+F1). On C3's Optimistic mode the first carries the row-version precondition; the second cannot (the first changed the
+version), so the window is the same. The answer is never success: each path returns its error answer with fixed text saying the change
 was only partly saved (`invoice_family_locked_write_partly_saved`; no exception text), and a Warning is logged with the
 table, the record id and the TraceId. Covered by `InvoiceFamilyLockedWriteTests` (helper), `InvoiceFamilyGenericUpdatePathTests`
 (C1-C3) and `SecureChildOwnershipAiToolTests` (C4-C6). Same shape as `ProjectMatterFiling`'s `OtherColumnsSaved`.
@@ -253,3 +269,27 @@ P2a/P2b are TypeScript edits, not type-checked; syntactically valid.
 - `tests/integration/auth/UnifiedAccessControl/ChildRecordContainerResolutionTests.cs` (comment only, ~line 2004): the
   work-assignment/invoice filing-loop row pair is now described as one the model-driven app could store before the lock.
   No test code changed.
+
+## 8. Review 1 fixes (2026-11-13)
+
+Four findings, each fixed in its own commit on `fix/2799-invoice-family-field-lock` (local; not pushed).
+
+| # | Finding | Fix | Tests |
+|---|---|---|---|
+| F1 | The application's second write used the request's token, so a client disconnect or playbook timeout after the person's write landed turned an allowed write into a partly-saved one | `UpdateExistingSplitAsync` and `PatchAsCallerAsync` send the application's write with `CancellationToken.None` once the person's write landed (precedent: the after-write steps, `FieldMappingEndpoints` `restamper.AfterWriteAsync(..., CancellationToken.None)`, `OwnedChildWrite` `AfterReparentAsync`). A locked-only write (nothing landed yet) keeps the request's token | `InvoiceFamilyLockedWriteTests`: the request is cancelled when the person's write lands; the app write still runs (helper and OBO) |
+| F2 | `InvoiceFamilyFieldLockGuardTests` cleared a whole method once it called the split, so a direct caller write added beside it was unseen | New ratchet `SplitMembers_DirectCallerWrites_AreRatcheted`: each member that calls the split is pinned to its count of direct caller-identity write calls (`IsCallerIdentityWrite`, per IL call site), with a reason. C1 `ApplyMappingsToChildRecordsAsync` 1, C2 `UpdateAsync` 1, C3 `PatchAsync` 1 (each the non-family branch: `IsUpdateOnlyTarget` false, the same keys `LockedColumns` comes from); C4 `RefileAsync`, C5 `UpdateAsync`, C6 `ExecuteChatAsync` 0. More = NEW, fewer = STALE, unpinned split member = NEW, pin on a non-split member = STALE | Control `SplitMemberRatchet_MustFireAndMustNotFire`: fixture `InvoiceFamilyCallerWriteControlSplitPlusDirect` (split + a direct `PatchAsync`) fires; the split alone at its pin does not |
+| F3 | The split decided "locked" with `NormalizeColumn` (any `@…`, `_x_value`); the guard decides on `ColumnOfKey` (logical name or `…@odata.bind`). A key the guard never decided on could be written as the app | `CheckPersonMayWriteAsync` reads each locked key with the guard's own `ColumnOfKey` (made `internal`); a key that normalizes to a locked column but is not the guard's column is Denied, nothing written or asked. The guard is case-insensitive, so a differently cased bind is followed as the guard reads it (§4) | `_sprk_invoice_value`, `sprk_invoice@foo`, `sprk_invoice@odata.bind@odata.bind` → Denied, nothing written or asked; OBO `_sprk_matter_value` → Denied; `sprk_invoice`, `sprk_Invoice@odata.bind`, `SPRK_Invoice@odata.bind` → checked, written by the app |
+| F4 | C3's Optimistic mode adds `versionnumber` to the fields; the split put it with the person's columns, so a locked-only write sent a person write of the version alone | `UpdateExistingSplitAsync(expectedVersion)`; `DataverseUpdateHandler` passes the version it read. Person part = the version alone → no person write; one app write of the locked columns via `IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync` (If-Match `W/"version"`, never creates; 404 → the guard's not-found code). Its `DBConcurrencyException` is now a concurrency conflict in `IsConcurrencyException` (retried, then the path's existing "Optimistic concurrency update failed after N attempts"). Otherwise the person's write carries the version as before, then the app's (K-1). No person write → never "partly saved" | Helper: version-only → one conditional app write on 42, no person write; mismatch → `DBConcurrencyException`, nothing written; a fault → propagates, not partly saved; mixed → person write carries `versionnumber`, then app. C3 (`InvoiceFamilyGenericUpdatePathTests.LockedWriteConcurrency.cs`): the same three through the real handler, the mismatch retried twice then refused |
+
+**Perturbations** (each on a committed tree, compiling, reverted with `git checkout`; working tree clean afterwards):
+
+| # | Perturbation | Failed |
+|---|---|---|
+| P-F1 | `InvoiceFamilyLockedWrite.cs` back to 9bf53be69f (the request's token on the app write) | 2 (helper + OBO cancellation tests) |
+| P-F2 | `DataverseUpdateHandler.PatchAsync`: a second impersonated `UpdateExistingRecordFieldsAsync` in the family branch, beside the split | 1 (the new ratchet: NEW, 2 vs pinned 1). The pre-existing whole-method guard and `CoreRecordPairUpdateCheckGuardTests` stayed green, which is the gap F2 closes |
+| P-F3 | `CheckPersonMayWriteAsync` back to `NormalizeColumn` | 4 (3 key-form theory cases + the OBO case) |
+| P-F4a | the handler no longer passes `expectedVersion` | 2 (C3 version-only and mismatch) |
+| P-F4b | the helper's version-only branch disabled | 5 (3 helper + 2 C3) |
+| P-F4c | `IsConcurrencyException` without `DBConcurrencyException` | 1 (C3 mismatch: no retry, raw exception) |
+
+**Gates** (HEAD cbd496b2d4). `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings. Full `tests/Spaarke.ArchTests`: 2554 passed, 0 failed, 0 skipped (was 2552; +2 = the F2 ratchet and its control). `Sprk.Bff.Api.Tests` filtered to the helper, C1-C6 paths, field mapping, the update handler, Update Record, child records, the chat update tool, the 045g guard and every `*Concurrency*` class: 2381 passed, 0 failed, 0 skipped. Helper `InvoiceFamilyLockedWriteTests` 42 → 53.
