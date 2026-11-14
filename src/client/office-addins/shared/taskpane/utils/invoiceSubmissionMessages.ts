@@ -254,7 +254,8 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   OFFICE_015: f => `Too many saves in a short time. ${NOTHING} ${tryAgain(f)}`,
   'ebilling.disabled': `Invoice submission is turned off in Spaarke. ${NOTHING}`,
   // §2 firm fields
-  'ebilling.submission.firm_invalid': `The chosen firm isn't an active firm in Spaarke. ${NOTHING}`,
+  // 095e (2026-11-13): covers both "a firm is required" and "the firm is not active".
+  'ebilling.submission.firm_invalid': `Spaarke didn't accept the firm for this invoice. Choose an active firm linked to this record. ${NOTHING}`,
   'ebilling.submission.firm_not_linked': `The chosen firm isn't linked to this record. ${NOTHING}`,
   'ebilling.submission.firm_invoice_number_required': `Enter the firm's invoice number. ${NOTHING}`,
   // §6 handler refusals
@@ -353,6 +354,10 @@ export const INVOICE_OUTCOME_MESSAGES: Readonly<Record<string, Entry>> = {
     'The submission changed in Spaarke while the invoice was being processed, so it was not processed. Submit it again.',
   'ebilling.submission.row_version_missing':
     "Spaarke couldn't confirm the submission's latest version, so the invoice was not processed. Submit it again.",
+  // 095e (2026-11-13, EB-D-226): the firm record's name couldn't be read to name the invoice. The job retries, then
+  // stores this on the last attempt; nothing was written; a re-attempt is allowed (EB-D-160).
+  'ebilling.submission.firm_name_unreadable':
+    "Spaarke couldn't read the firm's name, so the invoice was not processed. Submit it again.",
   // ebilling task 191 (2026-11-01): the AI reading and line coding. The first two are permanent; the job retries the
   // other three and stores the code on its last attempt, so a later re-submission can work.
   'ai.invoice.read.not_configured':

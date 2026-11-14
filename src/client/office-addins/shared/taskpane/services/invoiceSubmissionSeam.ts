@@ -215,8 +215,8 @@ export interface InvoicePreviousSubmission {
   submittedBy: string | null;
   isCorrection: boolean;
   /**
-   * The firm the invoice was submitted for, when the server says (a `firm: { id, name }` on the §11 body; absent from
-   * the server today, so absent is the common case). Absent or null: the banner does not name a firm.
+   * The firm the invoice was submitted for, when the server says (the top-level `firmName` string on the §11 body, 095e;
+   * null on the wire when the attempt has no firm). Absent or null: the banner does not name a firm.
    */
   firmName?: string | null;
 }

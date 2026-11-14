@@ -740,10 +740,10 @@ function readPreviousSubmission(json: Record<string, unknown> | null): InvoicePr
   const by =
     json.submittedBy && typeof json.submittedBy === 'object' ? (json.submittedBy as Record<string, unknown>) : null;
   const submittedBy = stringOrUndefined(by?.name)?.trim() || null;
-  // The firm is read tolerantly (the server may not send it yet): a missing, null or malformed `firm`, or one with a
-  // blank name, adds nothing, and never makes the body unreadable.
-  const firm = json.firm && typeof json.firm === 'object' ? (json.firm as Record<string, unknown>) : null;
-  const firmName = stringOrUndefined(firm?.name)?.trim() || null;
+  // `firmName` (§11, 095e) is a top-level string next to `firmId`; null when the attempt has no firm or the firm has no
+  // name. It is read tolerantly: an absent, null, non-string or blank value adds nothing, and never makes the body
+  // unreadable.
+  const firmName = stringOrUndefined(json.firmName)?.trim() || null;
   return {
     submissionId,
     statusUrl: `${SUBMISSIONS_BY_EMAIL_ROUTE}/${encodeURIComponent(cleanGuid(submissionId))}`,
