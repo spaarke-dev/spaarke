@@ -17,6 +17,7 @@ jest.mock('@spaarke/ui-components', () => ({
   SendEmailPage: () => null,
   searchUsersAndContacts: jest.fn().mockResolvedValue([]),
   createXrmDataService: () => ({}),
+  createXrmEmailComposeHandlers: () => ({}),
   resolveInitialInvoiceRecord: () => undefined,
   cleanGuid: (id: string) => id.replace(/[{}]/g, '').toLowerCase(),
   // Same seam as the real walker: the frame's `Xrm` (jest.setup.ts installs it on `global`).

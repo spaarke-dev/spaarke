@@ -123,6 +123,11 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.64 (ontology task 188, owner D-219 Q3, 2026-11-13):
+ * - The Email Members dialog shows the same composer features as the Console's Send Email dialog: the template picker
+ *   (`onListEmailTemplates` + `onRenderEmailTemplate`) and AI draft (`onDraftWithAi`) join the local-file upload it
+ *   already had, all from the ONE `getEmailHandlers()` instance. A host that omits those handlers hides the feature.
+ *
  * v1.0.63 (task 196, unified-access-control-r2, owner 2026-11-12):
  * - "Email members" emails the record's people as Manage Access lists them, not only its `sprk_assigned*` role
  *   contacts: role contacts + contacts with an active grant (`fetchExistingGrants`) + users the record is shared with
@@ -1712,7 +1717,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.63 • Built 2026-11-12',
+      versionText: 'v1.0.64 • Built 2026-11-13',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
@@ -1918,6 +1923,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     onLookupRecord: this.getEmailHandlers().onLookupRecord,
                     onAddRelationship: this.getEmailHandlers().onAddRelationship,
                     onResolveShareLink: this.getEmailHandlers().onResolveShareLink,
+                    // Task 188 (D-219 Q3): the same feature set as the Console's Send Email dialog — template picker
+                    // (list + render), AI draft. Attachments ride onUploadLocalAttachment above. All from the ONE
+                    // getEmailHandlers() instance; omitting any of these silently hides the feature.
+                    onListEmailTemplates: this.getEmailHandlers().onListEmailTemplates,
+                    onRenderEmailTemplate: this.getEmailHandlers().onRenderEmailTemplate,
+                    onDraftWithAi: this.getEmailHandlers().onDraftWithAi,
                     onSent: () => {
                       this.isSendEmailDialogOpen = false;
                       this.renderControl();

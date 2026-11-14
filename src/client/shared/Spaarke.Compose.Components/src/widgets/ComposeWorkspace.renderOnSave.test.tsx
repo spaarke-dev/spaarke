@@ -213,6 +213,8 @@ jest.mock('@spaarke/ui-components', () => ({
   createXrmNavigationService: () => ({ openLookup: jest.fn() }),
   createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
   SendEmailDialog: () => null,
+  // Task 188: ComposeWorkspace builds the memo-email composer handlers from this factory.
+  createXrmEmailComposeHandlers: () => ({}),
   SprkModal: () => null,
   RichFilePreviewDialog: () => null,
   // FR-02 (task 030): ComposeWorkspace now mounts <ComposeSaveNameDialog/> (a FormModal preset) for
