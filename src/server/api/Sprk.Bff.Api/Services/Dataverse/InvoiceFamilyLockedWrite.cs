@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 
@@ -39,6 +40,18 @@ internal static class InvoiceFamilyLockedWrite
     /// <summary>The refusal code when the person may not write the locked columns (no Write or Append on the row, or no
     /// AppendTo on a record a locked lookup names, or that record does not exist). Nothing is written.</summary>
     public const string LockedWriteDeniedCode = "invoice_family_locked_write_denied";
+
+    /// <summary>
+    /// The error code when a mixed write was only partly saved: the other columns were written as the person, then the
+    /// application's write of the locked columns failed (decision 3 of the #2799 chunk-3 brief, K-1 in the task notes). Never
+    /// success; logged at Warning with the record and the trace id.
+    /// </summary>
+    public const string LockedWritePartlySavedCode = "invoice_family_locked_write_partly_saved";
+
+    /// <summary>The fixed answer for <see cref="LockedWritePartlySavedCode"/>: it names no record and echoes no fault.</summary>
+    public const string PartlySavedMessage =
+        "The change was only partly saved: the record's other changes were saved, but what it is filed under was not. "
+        + "Reload it and try again (" + LockedWritePartlySavedCode + ").";
 
     /// <summary>One locked column: the table, the lookup column, and the one table it names.</summary>
     internal readonly record struct LockedColumn(string Table, string Column, string TargetTable);
@@ -233,7 +246,10 @@ internal static class InvoiceFamilyLockedWrite
     /// denied → <see cref="LockedWriteDeniedCode"/>. Allowed → the other columns as the person (a refusal or fault there is
     /// theirs, as before, and nothing locked is written), then the locked columns as the application.</item>
     /// </list>
-    /// A row gone at either write answers as the guard's write does (<paramref name="notFoundAsReadFailed"/>).
+    /// A row gone at either write answers as the guard's write does (<paramref name="notFoundAsReadFailed"/>), except that once
+    /// the person's write of the other columns has landed, ANY failure of the application's write (a fault, a row gone, a
+    /// cancellation) is <see cref="LockedWritePartlySavedCode"/>, logged at Warning with the record and
+    /// <paramref name="traceId"/> (the current trace when null) — never success, and no fault text in the answer (K-1).
     /// </summary>
     internal static async Task<string?> UpdateExistingSplitAsync(
         IFieldMappingDataverseService records,
@@ -243,11 +259,14 @@ internal static class InvoiceFamilyLockedWrite
         Guid? impersonateSystemUserId,
         bool notFoundAsReadFailed,
         RightsQuestion rightsOf,
-        CancellationToken ct)
+        ILogger logger,
+        CancellationToken ct,
+        string? traceId = null)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(fields);
         ArgumentNullException.ThrowIfNull(rightsOf);
+        ArgumentNullException.ThrowIfNull(logger);
 
         var (locked, rest) = Split(entityLogicalName, fields);
         if (locked.Count == 0 || impersonateSystemUserId is null)
@@ -265,17 +284,189 @@ internal static class InvoiceFamilyLockedWrite
                 return LockedWriteDeniedCode;
         }
 
-        if (rest.Count > 0
-            && await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+        if (rest.Count == 0)
+        {
+            return await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                    records, entityLogicalName, recordId, locked, impersonateSystemUserId: null, notFoundAsReadFailed, ct)
+                .ConfigureAwait(false);
+        }
+
+        if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
                     records, entityLogicalName, recordId, rest, impersonateSystemUserId, notFoundAsReadFailed, ct)
                 .ConfigureAwait(false) is { } gone)
         {
             return gone;
         }
 
-        return await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
-                records, entityLogicalName, recordId, locked, impersonateSystemUserId: null, notFoundAsReadFailed, ct)
-            .ConfigureAwait(false);
+        // The person's write landed: from here a failure is "partly saved", never success (K-1).
+        try
+        {
+            if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+                        records, entityLogicalName, recordId, locked, impersonateSystemUserId: null, notFoundAsReadFailed, ct)
+                    .ConfigureAwait(false) is null)
+            {
+                return null;
+            }
+
+            LogPartlySaved(logger, entityLogicalName, recordId, traceId, fault: null);
+        }
+        catch (Exception ex)
+        {
+            LogPartlySaved(logger, entityLogicalName, recordId, traceId, ex);
+        }
+
+        return LockedWritePartlySavedCode;
+    }
+
+    /// <summary>
+    /// The generic update paths' refusal on their existing "throw" contract: <see cref="PartlySavedMessage"/> for
+    /// <see cref="LockedWritePartlySavedCode"/>, otherwise the guard's code-only refusal
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.RefusalException"/>).
+    /// </summary>
+    internal static RecordOwnerUnresolvedException RefusalException(string entityLogicalName, string refusalCode) =>
+        refusalCode == LockedWritePartlySavedCode
+            ? new RecordOwnerUnresolvedException(entityLogicalName, refusalCode, PartlySavedMessage)
+            : InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, refusalCode);
+
+    private static void LogPartlySaved(ILogger logger, string table, Guid recordId, string? traceId, Exception? fault) =>
+        logger.LogWarning(
+            "[INVOICE-FAMILY-LOCK] {Table} {RecordId}: the other columns were written as the person, but the application's write of "
+            + "the locked columns failed ({Fault}); answered {Code}. TraceId={TraceId}",
+            table, recordId, fault?.GetType().Name ?? "record not found", LockedWritePartlySavedCode,
+            traceId ?? System.Diagnostics.Activity.Current?.TraceId.ToString());
+
+    // ── The OBO paths (C4-C6): the person's own token ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The rights question asked under the person's OWN token (the OBO paths): <c>RetrievePrincipalAccess</c> naming
+    /// <paramref name="me"/> (from <c>WhoAmI</c> under that token, so it cannot name anyone else). A 403 or 404 is Dataverse's
+    /// "no" (<see cref="AccessRights.None"/>: a record that does not exist answers as one they may not use); a success that
+    /// carries no rights, and any other status (throttled, 5xx, no token, a transport fault), is no answer (<see langword="null"/>).
+    /// </summary>
+    internal static RightsQuestion RightsOfCaller(IDataverseUserClient user, Guid me)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        return async (entitySet, recordId, ct) =>
+        {
+            var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{entitySet}({recordId:D})\"}}");
+            var access = await user.GetAsync(
+                    $"systemusers({me:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}", ct)
+                .ConfigureAwait(false);
+            if (access.IsSuccess)
+            {
+                return access.Body is { } body
+                       && body.TryGetProperty("AccessRights", out var value)
+                       && value.ValueKind == JsonValueKind.String
+                    ? DataverseAccessRightsMapper.FromAccessRightsString(value.GetString())
+                    : null;
+            }
+
+            return access.StatusCode is 403 or 404 ? AccessRights.None : null;
+        };
+    }
+
+    /// <summary>What <see cref="PatchAsCallerAsync"/> did.</summary>
+    internal enum CallerPatchKind
+    {
+        /// <summary>Written (as before when the body holds no locked column).</summary>
+        Written,
+
+        /// <summary>The person's own PATCH (or the <c>WhoAmI</c> it needed) failed at Dataverse: their own error. Nothing locked written.</summary>
+        ClientFailure,
+
+        /// <summary><see cref="LockedWriteCheck.Denied"/>. Nothing written.</summary>
+        Denied,
+
+        /// <summary><see cref="LockedWriteCheck.Unavailable"/>, or no application writer here. Nothing written.</summary>
+        Unavailable,
+
+        /// <summary>The other columns were written as the person; the application's write of the locked ones failed (K-1).</summary>
+        PartlySaved,
+    }
+
+    /// <summary>The answer of <see cref="PatchAsCallerAsync"/>; <see cref="ClientFailure"/> with <see cref="CallerPatchKind.ClientFailure"/>.</summary>
+    internal sealed record CallerPatch(CallerPatchKind Kind, DataverseUserResponse? ClientFailure = null)
+    {
+        public static readonly CallerPatch Written = new(CallerPatchKind.Written);
+    }
+
+    /// <summary>
+    /// The OBO paths' PATCH of <paramref name="table"/>(<paramref name="recordId"/>) (C4-C6). A body with no locked column:
+    /// exactly the person's own PATCH as before (<c>{entitySet}({id})</c>, the body unchanged). Otherwise: <c>WhoAmI</c> and
+    /// <see cref="CheckPersonMayWriteAsync"/> under the person's token (<see cref="RightsOfCaller"/>); then the other columns
+    /// as the person (their PATCH), then the locked ones as the application (update-only). Nothing is written on a refusal.
+    /// A failure of the application's write after the person's landed is <see cref="CallerPatchKind.PartlySaved"/>, logged at
+    /// Warning with the record and <paramref name="traceId"/>; with nothing else written, a row gone there is
+    /// <see cref="CallerPatchKind.Denied"/> (the one answer) and a fault <see cref="CallerPatchKind.Unavailable"/>.
+    /// </summary>
+    internal static async Task<CallerPatch> PatchAsCallerAsync(
+        IDataverseUserClient user,
+        IFieldMappingDataverseService? appOnly,
+        string table,
+        string entitySet,
+        Guid recordId,
+        string jsonBody,
+        ILogger logger,
+        string? traceId,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(logger);
+        var path = $"{entitySet}({recordId:D})";
+        var (locked, restBody) = LockedColumnsOf(table).Count == 0 ? (new Dictionary<string, object?>(), jsonBody) : SplitBody(table, jsonBody);
+        if (locked.Count == 0)
+        {
+            var patch = await user.PatchAsync(path, jsonBody, ct).ConfigureAwait(false);
+            return patch.IsSuccess ? CallerPatch.Written : new CallerPatch(CallerPatchKind.ClientFailure, patch);
+        }
+
+        if (appOnly is null)
+        {
+            logger.LogWarning("[INVOICE-FAMILY-LOCK] {Table} {RecordId}: no application writer for the locked columns here; nothing written.",
+                table, recordId);
+            return new CallerPatch(CallerPatchKind.Unavailable);
+        }
+
+        var me = await CallerWriteAuthorization.WhoAmIAsync(user, ct).ConfigureAwait(false);
+        if (me.Failure is { } whoAmIFailure)
+            return new CallerPatch(CallerPatchKind.ClientFailure, whoAmIFailure);
+
+        switch (await CheckPersonMayWriteAsync(table, recordId, locked, RightsOfCaller(user, me.SystemUserId), ct).ConfigureAwait(false))
+        {
+            case LockedWriteCheck.Unavailable:
+                return new CallerPatch(CallerPatchKind.Unavailable);
+            case LockedWriteCheck.Denied:
+                return new CallerPatch(CallerPatchKind.Denied);
+        }
+
+        if (restBody is not null)
+        {
+            var patch = await user.PatchAsync(path, restBody, ct).ConfigureAwait(false);
+            if (!patch.IsSuccess)
+                return new CallerPatch(CallerPatchKind.ClientFailure, patch);
+        }
+
+        try
+        {
+            await appOnly.UpdateExistingRecordFieldsAsync(table, recordId, locked, impersonateSystemUserId: null, ct).ConfigureAwait(false);
+            return CallerPatch.Written;
+        }
+        catch (Exception ex) when (restBody is not null)
+        {
+            LogPartlySaved(logger, table, recordId, traceId, ex);
+            return new CallerPatch(CallerPatchKind.PartlySaved);
+        }
+        catch (KeyNotFoundException)
+        {
+            return new CallerPatch(CallerPatchKind.Denied);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "[INVOICE-FAMILY-LOCK] {Table} {RecordId}: the application's write of the locked columns failed; "
+                                  + "nothing was written. TraceId={TraceId}",
+                table, recordId, traceId ?? System.Diagnostics.Activity.Current?.TraceId.ToString());
+            return new CallerPatch(CallerPatchKind.Unavailable);
+        }
     }
 
     /// <summary>

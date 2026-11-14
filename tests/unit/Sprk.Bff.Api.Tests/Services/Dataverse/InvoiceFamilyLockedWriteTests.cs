@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
@@ -67,7 +68,8 @@ public class InvoiceFamilyLockedWriteTests
     private static Task<string?> Write(
         Mock<IFieldMappingDataverseService> records, string table, Guid id, Dictionary<string, object?> fields, Guid? asPerson, Rights rights) =>
         InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
-            records.Object, table, id, fields, asPerson, notFoundAsReadFailed: asPerson is not null, rights.Question, CancellationToken.None);
+            records.Object, table, id, fields, asPerson, notFoundAsReadFailed: asPerson is not null, rights.Question,
+            NullLogger.Instance, CancellationToken.None);
 
     // ── The locked set ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -222,7 +224,7 @@ public class InvoiceFamilyLockedWriteTests
 
         var code = await InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
             records.Object, "sprk_invoice", InvoiceId, new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) },
-            Person, notFoundAsReadFailed: true, RightsOfPrincipal(probe: null, Person), CancellationToken.None);
+            Person, notFoundAsReadFailed: true, RightsOfPrincipal(probe: null, Person), NullLogger.Instance, CancellationToken.None);
 
         code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
         writes.Should().BeEmpty();
@@ -399,5 +401,271 @@ public class InvoiceFamilyLockedWriteTests
 
         (await RightsOfPrincipal(probe.Object, Person)("sprk_invoices", InvoiceId, CancellationToken.None))
             .Should().Be(AccessRights.Write);
+    }
+
+    // ── Decision 3 (K-1): the application's write fails after the person's landed — never success ─────────────────────
+
+    /// <summary>A recorder whose application write (no impersonation) fails as <paramref name="fault"/>; the person's lands.</summary>
+    private static (Mock<IFieldMappingDataverseService> Records, List<Guid?> Writes) AppWriteFails(Exception fault)
+    {
+        var writes = new List<Guid?>();
+        var records = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
+        records.Setup(r => r.UpdateExistingRecordFieldsAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, Guid, Dictionary<string, object?>, Guid?, CancellationToken>((_, _, _, asWho, _) =>
+            {
+                writes.Add(asWho);
+                return asWho is null ? Task.FromException(fault) : Task.CompletedTask;
+            });
+        return (records, writes);
+    }
+
+    [Theory]
+    [InlineData("fault")]
+    [InlineData("gone")]
+    public async Task MixedWrite_ApplicationWriteFailsAfterThePersons_IsPartlySaved_NeverSuccess_LoggedWithTheRecord(string how)
+    {
+        var (records, writes) = AppWriteFails(how == "gone" ? new KeyNotFoundException() : new HttpRequestException("secret detail"));
+        var rights = new Rights().On("sprk_invoices", InvoiceId, RowRights).On("sprk_matters", MatterId, TargetRights);
+        var logger = new CapturingLogger();
+
+        var code = await InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
+            records.Object, "sprk_invoice", InvoiceId,
+            new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId), ["sprk_name"] = "n" },
+            Person, notFoundAsReadFailed: true, rights.Question, logger, CancellationToken.None, traceId: "trace-1");
+
+        code.Should().Be(LockedWritePartlySavedCode);
+        writes.Should().Equal(Person, null);
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning).Subject;
+        warning.Message.Should().Contain(InvoiceId.ToString()).And.Contain("trace-1").And.NotContain("secret detail");
+        RefusalException("sprk_invoice", code!).Message.Should().Be(PartlySavedMessage).And.NotContain("secret detail");
+    }
+
+    [Fact]
+    public async Task LockedOnlyWrite_ApplicationWriteFaults_PropagatesAsBefore_NothingElseWritten()
+    {
+        var (records, writes) = AppWriteFails(new HttpRequestException("boom"));
+        var rights = new Rights().On("sprk_invoices", InvoiceId, RowRights).On("sprk_matters", MatterId, TargetRights);
+
+        var act = () => Write(records, "sprk_invoice", InvoiceId,
+            new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) }, Person, rights);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+        writes.Should().Equal(new Guid?[] { null });
+    }
+
+    [Fact]
+    public void RefusalException_ForAGuardCode_IsTheGuardsCodeOnlyRefusal()
+    {
+        RefusalException("sprk_invoice", LockedWriteDeniedCode).Message
+            .Should().Be(InvoiceFamilyCoreRecordGuard.CodeOnlyRefusalMessage(LockedWriteDeniedCode));
+    }
+
+    // ── The OBO paths: RightsOfCaller and PatchAsCallerAsync ─────────────────────────────────────────────────────────
+
+    /// <summary>A person's own Dataverse client: WhoAmI, RetrievePrincipalAccess answers per record, and every PATCH recorded.</summary>
+    internal sealed class PersonClient : IDataverseUserClient
+    {
+        private readonly Dictionary<Guid, DataverseUserResponse> _access = new();
+        public List<(string Path, string Body)> Patches { get; } = new();
+        public DataverseUserResponse PatchAnswer { get; set; } = DataverseUserResponse.Ok(204, null);
+        public int AccessAsked { get; private set; }
+
+        public PersonClient Rights(Guid id, string rights)
+        {
+            _access[id] = DataverseUserResponse.Ok(200, JsonDocument.Parse($"{{\"AccessRights\":\"{rights}\"}}").RootElement.Clone());
+            return this;
+        }
+
+        public PersonClient Status(Guid id, int status)
+        {
+            _access[id] = DataverseUserResponse.Fail(status, "E", "e");
+            return this;
+        }
+
+        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+        {
+            if (relativePath == "WhoAmI()")
+                return Task.FromResult(DataverseUserResponse.Ok(200, JsonDocument.Parse($"{{\"UserId\":\"{Person}\"}}").RootElement.Clone()));
+
+            AccessAsked++;
+            relativePath.Should().StartWith($"systemusers({Person:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess");
+            var target = Uri.UnescapeDataString(relativePath);
+            var answer = _access.FirstOrDefault(a => target.Contains(a.Key.ToString("D"), StringComparison.Ordinal));
+            return Task.FromResult(answer.Value ?? DataverseUserResponse.Fail(404, "NotFound", "not found"));
+        }
+
+        public Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken)
+        {
+            Patches.Add((relativePath, jsonBody));
+            return Task.FromResult(PatchAnswer);
+        }
+
+        public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, bool preferRepresentation, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+    }
+
+    private static readonly string LockedAndOtherBody =
+        $"{{\"sprk_Matter@odata.bind\":\"/sprk_matters({MatterId})\",\"sprk_name\":\"n\"}}";
+
+    private static Task<CallerPatch> PatchAsCaller(PersonClient person, Mock<IFieldMappingDataverseService>? app, string body,
+        string table = "sprk_invoice", Guid? id = null, CapturingLogger? logger = null) =>
+        PatchAsCallerAsync(person, app?.Object, table, table + "s", id ?? InvoiceId, body, logger ?? new CapturingLogger(), "trace-1",
+            CancellationToken.None);
+
+    [Fact]
+    public async Task Caller_NoLockedColumn_IsTheirOwnSinglePatch_Unchanged_NothingAsked()
+    {
+        var person = new PersonClient();
+        const string body = "{\"sprk_name\":\"n\",\"sprk_amount\":1}";
+
+        var answer = await PatchAsCaller(person, app: null, body);
+
+        answer.Kind.Should().Be(CallerPatchKind.Written);
+        person.Patches.Should().Equal(($"sprk_invoices({InvoiceId:D})", body));
+        person.AccessAsked.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Caller_NoLockedColumn_TheirOwnFailureIsTheirs()
+    {
+        var failure = DataverseUserResponse.Fail(403, "AccessDenied", "no");
+        var person = new PersonClient { PatchAnswer = failure };
+
+        var answer = await PatchAsCaller(person, app: null, "{\"sprk_name\":\"n\"}");
+
+        answer.Should().Be(new CallerPatch(CallerPatchKind.ClientFailure, failure));
+    }
+
+    [Fact]
+    public async Task Caller_Allowed_OtherColumnsAsThePerson_ThenLockedAsTheApplication()
+    {
+        var person = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Rights(MatterId, "ReadAccess, AppendToAccess");
+        var (app, writes) = Records();
+
+        var answer = await PatchAsCaller(person, app, LockedAndOtherBody);
+
+        answer.Kind.Should().Be(CallerPatchKind.Written);
+        person.Patches.Should().Equal(($"sprk_invoices({InvoiceId:D})", "{\"sprk_name\":\"n\"}"));
+        writes.Should().ContainSingle();
+        writes[0].As.Should().BeNull("the application writes the locked column");
+        writes[0].Fields.Keys.Should().BeEquivalentTo("sprk_Matter@odata.bind");
+    }
+
+    [Theory]
+    [InlineData("ReadAccess, AppendAccess", "ReadAccess, AppendToAccess")] // no Write on the row
+    [InlineData("ReadAccess, WriteAccess", "ReadAccess, AppendToAccess")]  // no Append on the row
+    [InlineData("ReadAccess, WriteAccess, AppendAccess", "ReadAccess")]    // no AppendTo on the new core record
+    public async Task Caller_LacksARight_IsDenied_NothingWritten(string onRow, string onMatter)
+    {
+        var person = new PersonClient().Rights(InvoiceId, onRow).Rights(MatterId, onMatter);
+        var (app, writes) = Records();
+
+        (await PatchAsCaller(person, app, LockedAndOtherBody)).Kind.Should().Be(CallerPatchKind.Denied);
+
+        person.Patches.Should().BeEmpty();
+        writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Caller_LacksAppendToOnTheNewInvoice_IsDenied_NothingWritten()
+    {
+        var person = new PersonClient().Rights(LineId, "ReadAccess, WriteAccess, AppendAccess").Rights(InvoiceId, "ReadAccess");
+        var (app, writes) = Records();
+
+        (await PatchAsCaller(person, app, $"{{\"sprk_Invoice@odata.bind\":\"/sprk_invoices({InvoiceId})\"}}", "sprk_billingevent", LineId))
+            .Kind.Should().Be(CallerPatchKind.Denied);
+
+        person.Patches.Should().BeEmpty();
+        writes.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(429)]
+    [InlineData(503)]
+    [InlineData(0)]
+    public async Task Caller_ProbeUnanswered_IsUnavailable_NothingWritten(int status)
+    {
+        var person = new PersonClient().Status(InvoiceId, status);
+        var (app, writes) = Records();
+
+        (await PatchAsCaller(person, app, LockedAndOtherBody)).Kind.Should().Be(CallerPatchKind.Unavailable);
+
+        person.Patches.Should().BeEmpty();
+        writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Caller_NoApplicationWriter_IsUnavailable_NothingWrittenOrAsked()
+    {
+        var person = new PersonClient();
+
+        (await PatchAsCaller(person, app: null, LockedAndOtherBody)).Kind.Should().Be(CallerPatchKind.Unavailable);
+
+        person.Patches.Should().BeEmpty();
+        person.AccessAsked.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Caller_UnknownRecord_AnswersExactlyAsARecordTheyMayNotUse()
+    {
+        var unknown = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess"); // UnknownId: 404
+        var forbidden = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Status(UnknownId, 403);
+        var (app, writes) = Records();
+        var body = $"{{\"sprk_Matter@odata.bind\":\"/sprk_matters({UnknownId})\"}}";
+
+        var a = await PatchAsCaller(unknown, app, body);
+        var b = await PatchAsCaller(forbidden, app, body);
+
+        a.Should().Be(b);
+        a.Kind.Should().Be(CallerPatchKind.Denied);
+        writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Caller_ApplicationWriteFailsAfterThePersons_IsPartlySaved_LoggedWithTheRecord()
+    {
+        var person = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Rights(MatterId, "AppendToAccess");
+        var (app, _) = AppWriteFails(new HttpRequestException("secret detail"));
+        var logger = new CapturingLogger();
+
+        var answer = await PatchAsCaller(person, app, LockedAndOtherBody, logger: logger);
+
+        answer.Kind.Should().Be(CallerPatchKind.PartlySaved);
+        person.Patches.Should().ContainSingle();
+        var warning = logger.Entries.Should().ContainSingle(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning).Subject;
+        warning.Message.Should().Contain(InvoiceId.ToString()).And.Contain("trace-1").And.NotContain("secret detail");
+    }
+
+    [Fact]
+    public async Task Caller_LockedOnly_ApplicationWriteFindsTheRowGone_IsDenied_NothingWritten()
+    {
+        var person = new PersonClient().Rights(InvoiceId, "ReadAccess, WriteAccess, AppendAccess").Rights(MatterId, "AppendToAccess");
+        var (app, _) = AppWriteFails(new KeyNotFoundException());
+
+        (await PatchAsCaller(person, app, $"{{\"sprk_Matter@odata.bind\":\"/sprk_matters({MatterId})\"}}"))
+            .Kind.Should().Be(CallerPatchKind.Denied);
+
+        person.Patches.Should().BeEmpty();
+    }
+
+    /// <summary>Every log entry, formatted.</summary>
+    internal sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

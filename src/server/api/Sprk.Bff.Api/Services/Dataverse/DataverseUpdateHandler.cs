@@ -19,6 +19,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? _shares;
     private readonly Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? _readAsPerson;
     private readonly Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? _directOwner;
+    private readonly Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? _lockedWriteProbe;
 
     /// <param name="children">#2091: the ONE step after a re-file (<see cref="Sprk.Bff.Api.Services.Access.SecureChildReconciler.AfterRefileAsync"/>).
     /// REQUIRED: without it a re-file into a Secure record would silently leave the row business-unit readable. Scoped, like
@@ -34,6 +35,9 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     /// <param name="directOwner">fm task 054 piece 3b: the step that returns an unfiled Direct message to the Direct team
     /// (<see cref="Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep.AfterReparentAsync"/>). Registered by
     /// CommunicationModule; absent, an unfiled communication keeps its owner.</param>
+    /// <param name="lockedWriteProbe">#2799: the rights question a person's write of a locked invoice-family column is checked
+    /// with, naming that person (<see cref="InvoiceFamilyLockedWrite.RightsOfPrincipal"/>). Optional: without it such a write is
+    /// unanswered (<see cref="InvoiceFamilyCoreRecordGuard.ReadFailedCode"/>) and nothing is written (fail closed).</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
@@ -44,9 +48,11 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
         Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? shares = null,
         Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? readAsPerson = null,
-        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null)
+        Sprk.Bff.Api.Services.Communication.Access.DirectMessageOwnerStep? directOwner = null,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe? lockedWriteProbe = null)
     {
         _directOwner = directOwner;
+        _lockedWriteProbe = lockedWriteProbe;
         _children = children ?? throw new ArgumentNullException(nameof(children));
         _shares = shares;
         _readAsPerson = readAsPerson;
@@ -313,11 +319,15 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     {
         if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(entityLogicalName))
         {
-            if (await InvoiceFamilyCoreRecordGuard.UpdateExistingAsync(
+            // #2799 (uac-r2): on a person's run, a locked invoice-family column is checked AS THAT PERSON (the probe, naming
+            // them) and written AS THE APP; a run with no person, or a write with no locked column, keeps its single write.
+            if (await InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
                     _fieldMappingService, entityLogicalName, recordId, fields, impersonateSystemUserId,
-                    notFoundAsReadFailed: impersonateSystemUserId is not null, ct) is { } gone)
+                    notFoundAsReadFailed: impersonateSystemUserId is not null,
+                    InvoiceFamilyLockedWrite.RightsOfPrincipal(_lockedWriteProbe, impersonateSystemUserId ?? Guid.Empty),
+                    _logger, ct) is { } gone)
             {
-                throw InvoiceFamilyCoreRecordGuard.RefusalException(entityLogicalName, gone);
+                throw InvoiceFamilyLockedWrite.RefusalException(entityLogicalName, gone);
             }
 
             return;
