@@ -731,7 +731,9 @@ public class RecordOwnerAssignmentCensusTests
             "(ResolveOwnerOverAsync, the create's step 7), fill-only: a team-owned row, a registry ownership exception, a " +
             "secure-flagged root (flag not an explicit false; task 144 provisions it), a refusal, or — on an ownership-parent " +
             "table only — an owner in another business unit leaves it unchanged (a leaf row, which nothing inherits access " +
-            "through, is moved); one conditional update, then the owner-change eviction."),
+            "through, is moved); one conditional update, then the owner-change eviction. Task 052b: its one production caller is " +
+            "the scheduled repair pass (RecordRepairPassJob, which writes no owner itself; RecordRepairReachabilityTests); a " +
+            "contact's team is the resolver's customer-unit answer (the binder's lookup, composed into the resolver)."),
         new OwnerWriteEntry("RecordCreationService.cs", "IsolatedCreateFields", 1, OwnerWriteKind.Root,
             "Task 013: a work assignment / project (a root) filed under a secure record, created INTO isolation by the unified " +
             "create — owned by the named team SecureRootFilingGate.PlanCreateAsync resolves (the service's isolated create, which " +
@@ -825,6 +827,32 @@ public class RecordOwnerAssignmentCensusTests
             "The owner-write census does not match the source (unified-access-control-r2 task 146 r2). A child's owner is "
             + "IRecordOwnershipResolver's answer — no writer computes a team itself. Route the new write through the resolver "
             + "(or classify it with its reason), then list it:\n" + string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// Field-mapping-server-write-path-r1 task 052b (UAC-r2 round 130 rule): the scheduled repair pass changes an owner only
+    /// through Repair mode, whose owner write is censused above and takes the resolver's answer. The job itself writes no owner
+    /// and asks no owner question of its own, so there is no second owner decision.
+    /// </summary>
+    [Fact(DisplayName = "Task 052b: the repair pass writes no owner and decides no owner itself")]
+    public void TheRepairPass_WritesNoOwner_AndDecidesNoOwner()
+    {
+        var files = ServerFiles();
+        Assert.True(files.ContainsKey("RecordRepairPassJob.cs"), "the repair pass moved; re-point this test");
+        var job = new Dictionary<string, string> { ["RecordRepairPassJob.cs"] = files["RecordRepairPassJob.cs"] };
+
+        Assert.Empty(ScanOwnerWrites(job));
+        Assert.DoesNotMatch(ResolverCall, job["RecordRepairPassJob.cs"]);
+        Assert.DoesNotMatch(ForgedResolution, job["RecordRepairPassJob.cs"]);
+        // Must fire: the same scan finds an owner write added to the job.
+        var seeded = SourceScan.CodeText(new[]
+        {
+            "public sealed class RecordRepairPassJob",
+            "{",
+            "    private void OwnRow(Entity row, Guid t) { row[\"ownerid\"] = new EntityReference(\"team\", t); }",
+            "}",
+        });
+        Assert.Single(ScanOwnerWrites(new Dictionary<string, string> { ["RecordRepairPassJob.cs"] = seeded }));
     }
 
     // UAC task 183: an OrdinaryReown owner write is not a resolver answer — its team is the caller's — so it is allowed only

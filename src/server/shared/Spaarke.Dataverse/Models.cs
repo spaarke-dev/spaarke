@@ -979,6 +979,16 @@ public sealed record ColumnMetadata(
     IReadOnlyList<int>? OptionValues = null);
 
 /// <summary>
+/// A one-to-many relationship of a table along which an Assign (an <c>ownerid</c> write) cascades to the child rows
+/// (<see cref="IGenericEntityService.GetAssignCascadesAsync"/>).
+/// </summary>
+/// <param name="SchemaName">The relationship's schema name.</param>
+/// <param name="ReferencingEntity">The child table (logical name).</param>
+/// <param name="Assign">The relationship's Assign cascade as its metadata states it (<c>Cascade</c>, <c>Active</c>,
+/// <c>UserOwned</c>, ...); <c>null</c> when the metadata does not state it.</param>
+public sealed record AssignCascadeRelationship(string SchemaName, string ReferencingEntity, string? Assign);
+
+/// <summary>
 /// Analysis entity model (sprk_analysis)
 /// </summary>
 public class AnalysisEntity

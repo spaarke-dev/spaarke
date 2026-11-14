@@ -10,3 +10,6 @@
 export * from '../../../../client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter';
 export { cleanGuid } from '../../../../client/shared/Spaarke.UI.Components/src/utils/guid';
 export { getXrm } from '../../../../client/shared/Spaarke.UI.Components/src/utils/xrmContext';
+// The ONE regarding-record-URL rule (task 045f) and the modal sizes `sidePaneService` reads — both dependency-free.
+export * from '../../../../client/shared/Spaarke.UI.Components/src/utils/safeRegardingRecordUrl';
+export { OOB_MODAL_SIZES } from '../../../../client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes';

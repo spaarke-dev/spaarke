@@ -432,6 +432,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
             var payload = Untyped(PairOnly(WizardWorkAssignment(OrdinaryMatter)));
             payload["sprk_RegardingInvoice@odata.bind"] = $"/sprk_invoices({id:D})";
             payload["sprk_regardingrecordid"] = id.ToString("D");
+            // The wizard's resolver fields name the chosen record (task 045f: the URL names the pair's record).
+            payload["sprk_regardingrecordurl"] = $"https://org/main.aspx?etn=sprk_invoice&id={id:D}";
             return payload;
         }
     }

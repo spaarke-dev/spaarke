@@ -73,6 +73,89 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     private readonly Mock<IFieldMappingDataverseService> _writes = new();
 
+    /// <summary>
+    /// Task 045d: the reads the app-only resolver-field derive makes, answered for every world (registered when a path runs,
+    /// after the world's own setups; each matches only the derive's own query): the core table's active
+    /// <c>sprk_recordtype_ref</c> row (<see cref="CatalogRowOf"/>, naming <c>{table}number</c>), and a core record read for its
+    /// name and number (<c>Record {id}</c>, <c>N-{id}</c>). A test scripts another answer with <see cref="_catalogAnswer"/> or
+    /// <see cref="_recordAnswer"/>; <see cref="_deriveReads"/> journals each derive read.
+    /// </summary>
+    private void AnswerDeriveReads(IGenericEntityService app)
+    {
+        if (app is not IMocked<IGenericEntityService> mocked)
+            return;
+        var mock = mocked.Mock;
+        mock.Setup(a => a.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_recordtype_ref"), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression q, CancellationToken _) =>
+            {
+                var table = (string)q.Criteria.Conditions.Single(c => c.AttributeName == "sprk_recordlogicalname").Values[0];
+                _deriveReads.Add("catalog:" + table);
+                return Task.FromResult(new EntityCollection(_catalogAnswer(table) is { } row ? [row] : []));
+            });
+        mock.Setup(a => a.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.Is<string[]>(c => c.Length == 2 && c[1].EndsWith("number", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+            {
+                _deriveReads.Add($"record:{table}");
+                return Task.FromResult(_recordAnswer(table, id, columns)!);
+            });
+    }
+
+    private readonly List<string> _deriveReads = [];
+
+    private Func<string, Entity?> _catalogAnswer = table =>
+        new Entity("sprk_recordtype_ref", CatalogRowOf(table)) { [RegardingRecordType.RecordNumberFieldColumn] = table + "number" };
+
+    private Func<string, Guid, string[], Entity?> _recordAnswer = (table, id, columns) => new Entity(table, id)
+    {
+        [columns[0]] = $"Record {id.ToString("N")[..6]}",
+        [columns[1]] = $"N-{id.ToString("N")[..6]}",
+    };
+
+    /// <summary>
+    /// Task 045d fix rounds 3-4: the person's query — the push's caller, or the person a playbook run acts as on the two
+    /// handlers (their display read of the record the row will name). It answers the selected columns of
+    /// <see cref="_recordAnswer"/> (journalled as that record's read), no row when that answers null, 403 when
+    /// <see cref="_callerMayNotRead"/>, or <see cref="_callerFault"/>. Null when <see cref="_noCallerQuery"/>.
+    /// </summary>
+    private Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery? CallerQuery()
+    {
+        if (_noCallerQuery)
+            return null;
+        var query = new Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(MockBehavior.Strict);
+        query.Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, string? odata, Guid _, CancellationToken _) =>
+            {
+                var select = Regex.Match(odata!, @"\$select=([^&]+)").Groups[1].Value.Split(',');
+                var filter = Regex.Match(odata!, @"\$filter=(\w+)id eq ([0-9a-fA-F-]{36})");
+                var table = filter.Groups[1].Value;
+                _deriveReads.Add($"record:{table}");
+                if (_callerFault is { } fault)
+                    throw fault;
+                if (_callerMayNotRead)
+                    throw new HttpRequestException("denied", null, System.Net.HttpStatusCode.Forbidden);
+                IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>> rows =
+                    (_personAnswer ?? _recordAnswer)(table, Guid.Parse(filter.Groups[2].Value), select) is { } row
+                        ? [select.ToDictionary(c => c, c => System.Text.Json.JsonSerializer.SerializeToElement(row.GetAttributeValue<string>(c)))]
+                        : [];
+                return Task.FromResult(rows);
+            });
+        return query.Object;
+    }
+
+    private bool _callerMayNotRead;
+
+    private Exception? _callerFault;
+
+    private bool _noCallerQuery;
+
+    /// <summary>What the person's query answers, when it differs from the app's read (<see cref="_recordAnswer"/>).</summary>
+    private Func<string, Guid, string[], Entity?>? _personAnswer;
+
+    /// <summary>Task 045d: the harness catalog's fixed row id for a core table.</summary>
+    private static Guid CatalogRowOf(string table) =>
+        new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("catalog:" + table)));
+
     /// <summary>The app-only reader: a stored invoice filed under a matter (with no lines).</summary>
     private static Mock<IGenericEntityService> InvoiceUnderAMatter()
     {
@@ -96,7 +179,11 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// <summary>Neither the upsert nor the update-only write was sent: nothing was created or changed.</summary>
     private void NothingWritten() => Sent().Should().BeEmpty();
 
-    /// <summary>One write of the row, UPDATE-ONLY (If-Match: *): an invoice or line (#2081) and every other table alike.</summary>
+    /// <summary>
+    /// One write of the row, UPDATE-ONLY (If-Match: *), never the upsert. The guard's update-only branch (a family table,
+    /// <c>InvoiceFamilyCoreRecordGuard.UpdateExistingAsync</c>) and the generic one send the same call; they differ in how a row
+    /// gone by then is answered, which <c>AFamilyRowDeletedAfterTheGuard_IsRefusedByTheUpdateOnlyWrite_WithTheGuardsCode</c> pins.
+    /// </summary>
     private void WrittenOnce(string table, Guid id)
     {
         var sent = Sent().Where(w => w.Table == table && w.Id == id).ToList();
@@ -107,10 +194,20 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
     // ── The output orchestrator: DataverseUpdateHandler ────────────────────────────────────────────────────────────
 
-    private DataverseUpdateHandler Handler(IGenericEntityService app) =>
-        new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
+    private DataverseUpdateHandler Handler(IGenericEntityService app)
+    {
+        AnswerDeriveReads(app);
+        // Fix round 5: a run as a person reads the derived name and number with the person's query, which names the record's
+        // entity set from metadata through this same service.
+        if (app is IMocked<IGenericEntityService> mocked)
+        {
+            mocked.Mock.Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string t, CancellationToken _) => EntitySetNameFixtures.SetOf(t));
+        }
+        return new(_writes.Object, app, new StampWorld().Restamper, new RecordOwnershipResolverDouble(),
             SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
-            SecureChildReconcilerFixtures.OverEmptyWorld());
+            SecureChildReconcilerFixtures.OverEmptyWorld(), readAsPerson: CallerQuery());
+    }
 
     [Fact]
     public async Task DataverseUpdateHandler_AnInvoiceGivenASecondCoreRecord_IsRefusedWithTheGuardsCode_AndNothingIsWritten()
@@ -159,6 +256,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         Mock.Get(app)
             .Setup(a => a.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string table, CancellationToken _) => EntitySetNameFixtures.SetOf(table));
+        AnswerDeriveReads(app);
         return new(_writes.Object,
             new ServiceCollection()
                 .AddSingleton(app)

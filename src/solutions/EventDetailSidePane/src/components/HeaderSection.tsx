@@ -35,7 +35,7 @@ import { IEventRecord } from "../types/EventRecord";
 import { loadEventHeader, updateEventName } from "../services/eventService";
 import {
   closeSidePane,
-  navigateToParentRecord,
+  openParentRecord,
   openEventRecord,
 } from "../services/sidePaneService";
 
@@ -242,8 +242,13 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
   const handleParentClick = React.useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      if (event?.sprk_regardingrecordurl) {
-        navigateToParentRecord(event.sprk_regardingrecordurl);
+      if (event) {
+        // Opens only a same-origin record URL: the stored one, else the one built from the row's regarding pair.
+        void openParentRecord(
+          event.sprk_regardingrecordurl,
+          event._sprk_regardingrecordtype_value,
+          event.sprk_regardingrecordid
+        );
       }
     },
     [event]
@@ -366,7 +371,7 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
     event["_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue"] ||
     "Unknown Type";
   const parentName = event.sprk_regardingrecordname;
-  const parentUrl = event.sprk_regardingrecordurl;
+  const hasParent = Boolean(event.sprk_regardingrecordurl) || Boolean(event.sprk_regardingrecordid && event._sprk_regardingrecordtype_value);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render Header
@@ -445,7 +450,7 @@ export const HeaderSection: React.FC<IHeaderSectionProps> = ({
             >
               Open
             </Button>
-            {parentUrl && (
+            {hasParent && (
               <Button
                 appearance="subtle"
                 icon={<ArrowExportRegular />}

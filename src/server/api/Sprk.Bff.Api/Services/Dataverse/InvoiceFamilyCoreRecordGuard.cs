@@ -108,6 +108,20 @@ public static class InvoiceFamilyCoreRecordGuard
     /// </summary>
     public const string WorkAssignmentCycleCode = "invoice_family_work_assignment_cycle";
 
+    /// <summary>
+    /// Task 045e (owner, 2026-11-13, #2772 "Refuse it"): the write's regarding pair (<c>sprk_regardingrecordid</c> and its record
+    /// type) names a record other than the row's core record — the core lookup as it will be after the write (the value written
+    /// in the same request, else the stored one). The pair describes the core record (045d); it is never corrected from the
+    /// write, so a write that disagrees writes nothing. <see cref="CheckRegardingPairAgreesAsync"/>.
+    /// </summary>
+    public const string RegardingPairCoreRecordMismatchCode = "invoice_family_regarding_pair_core_record_mismatch";
+
+    /// <summary>The reason of <see cref="RegardingPairCoreRecordMismatchCode"/>: fixed text, naming no record.</summary>
+    internal const string RegardingPairCoreRecordMismatchReason =
+        "The regarding record (sprk_regardingrecordid and its record type) must name this row's own matter, project or work "
+        + "assignment (for an external identifier filed under an invoice only, that invoice); this write names another record. "
+        + "To move the row, change its core-record lookup and the server writes the regarding record. Nothing was written.";
+
     /// <summary><c>sprk_workassignment.sprk_regardinginvoice</c> (lookup to <c>sprk_invoice</c>): the invoice a work assignment
     /// is filed under (<c>SecureRootInheritance.IntermediateFilingColumns</c>).</summary>
     public const string WorkAssignmentInvoiceColumn = "sprk_regardinginvoice";
@@ -381,8 +395,9 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <summary>
     /// DEF-022 (#2056; unified-access-control-r2 direction): the guard for the generic update paths that do not write
     /// through <c>OwnedChildWrite</c> — the playbook update (<c>UpdateRecordActionCore</c>), the output orchestrator
-    /// (<c>DataverseUpdateHandler</c>) and the field-mapping push. For an update of <c>sprk_invoice</c> or
-    /// <c>sprk_billingevent</c> whose patch sets or clears a guarded lookup (<see cref="GuardedLookups"/>), the stored
+    /// (<c>DataverseUpdateHandler</c>) and the field-mapping push. For an update of any invoice-family table (H1, 2026-11-13:
+    /// all six, not <c>sprk_invoice</c> and <c>sprk_billingevent</c> only) the stored row is read first and a missing row is
+    /// refused; for one whose patch sets or clears a guarded lookup (<see cref="GuardedLookups"/>), the stored
     /// lookups are read with <paramref name="appOnly"/>, overlaid with the patch, and decided by
     /// <see cref="CheckWriteAsync"/> — including D-96's line check when an invoice's core lookup is written. The other
     /// invoice (superseded, or a line's) is read the same way. Null when the write may proceed (or is not checked here).
@@ -409,6 +424,240 @@ public static class InvoiceFamilyCoreRecordGuard
             : decided;
     }
 
+    /// <summary>
+    /// Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): the app-only update half — the playbook update, the output
+    /// orchestrator and the field-mapping push. For an update of an invoice-family row whose patch sets or clears one of the
+    /// row's own core lookups (<see cref="ColumnsToRead"/>), the stored lookups are read with <paramref name="appOnly"/>,
+    /// overlaid with the patch, decided by <see cref="Check(string, Func{string, object?})"/>, and the resolver fields of the
+    /// record the row will name are derived (<see cref="DeriveGenericResolverFieldsAsync"/>). The path writes them in
+    /// the same write (<see cref="InvoiceFamilyCoreRecord.ResolverFields"/>, <see cref="InvoiceFamilyResolverFields.ToGenericFields"/>),
+    /// or answers a refusal through the refusal form it uses for <see cref="CheckGenericUpdateAsync"/>.
+    /// Null when nothing is derived: a table outside the family, a patch that moves no core lookup, a stored row that does not
+    /// exist (the path answers it as any missing row), or a patch that leaves the row naming the record it already names
+    /// (the same table and id: the row keeps the fields it has, as the pair planner keeps a pair that does not move).
+    /// A row <see cref="Check(string, Func{string, object?})"/> refuses here is refused with its code: the path's guard ran
+    /// before this and admitted it, so the row changed in between, and the write must not move the core with stale fields.
+    /// </summary>
+    /// <param name="patch">As <see cref="CheckGenericUpdateAsync"/>'s: a column → <see cref="EntityReference"/> or null, or a
+    /// <c>{navigation}@odata.bind</c> → <c>/{set}({id})</c> or null.</param>
+    /// <param name="appOnly">The path's app-only reader of the stored row and the catalog row; null fails closed
+    /// (<see cref="ReadFailedCode"/>) when a derive is due.</param>
+    /// <param name="records">The reader of the regarded record's name and number, as the path reads display values: the push's
+    /// caller, or the person a handler's run acts as (<c>OwnedChildWrite.CallerDisplayRecords</c>). Required, so no path falls
+    /// back to an app-only read of them.</param>
+    /// <param name="writeIsImpersonated">As <see cref="CheckGenericUpdateAsync"/>'s: a record not found is answered
+    /// <see cref="ReadFailedCode"/>, the path's answer for a missing record when the write runs as a user.</param>
+    public static async Task<InvoiceFamilyCoreRecord?> DeriveForGenericUpdateAsync(
+        string entityLogicalName,
+        Guid recordId,
+        IEnumerable<KeyValuePair<string, object?>> patch,
+        IGenericEntityService? appOnly,
+        RecordLookup records,
+        CancellationToken ct = default,
+        bool writeIsImpersonated = false)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(patch);
+        var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (ColumnsToRead(entity) is not { } coreColumns)
+            return null;
+
+        var targets = CoreRecordLookups[entity].Select(l => (l.Column, Table: l.CoreEntity)).ToList();
+        if (IsExternalIdentifier(entity))
+            targets.Add((ExternalIdentifierInvoiceColumn, InvoiceEntity));
+        var change = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in patch)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var column = ColumnOfKey(key);
+            var target = targets.FirstOrDefault(t => string.Equals(t.Column, column, StringComparison.OrdinalIgnoreCase));
+            if (target.Column is null)
+                continue;
+
+            change[target.Column] = value is string bind && IsBindKey(key) && TryParseBind(bind, out var id)
+                ? new EntityReference(target.Table, id)
+                : value;
+        }
+
+        if (change.Count == 0)
+            return null;
+
+        InvoiceFamilyCoreRecord derived;
+        if (appOnly is null)
+        {
+            derived = InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
+                $"What this {entity} is filed under cannot be read here; nothing was written.");
+        }
+        else
+        {
+            // The stored row: derived from only when it exists. A row that does not exist is left to the path, which answers it
+            // as it answers any missing row (the guard before this, or the update-only write after it); a read that faults
+            // fails closed.
+            Entity? stored;
+            try
+            {
+                stored = await appOnly.RetrieveAsync(entity, recordId, coreColumns.ToArray(), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                if (IsRecordNotFound(ex))
+                    return null;
+                return InvoiceFamilyCoreRecord.Refused(entity, ReadFailedCode,
+                    $"What this {entity} is filed under could not be read ({ex.GetType().Name}); nothing was written.");
+            }
+
+            if (stored is null)
+                return null;
+
+            var decided = Check(entity, column =>
+                change.TryGetValue(column, out var changed) ? changed
+                : stored.Attributes.TryGetValue(column, out var kept) ? kept
+                : null);
+            if (decided.IsRefused)
+                return NotFoundAs(decided, writeIsImpersonated);
+            if (NamesTheSameRecord(decided, Check(entity, column => stored.Attributes.TryGetValue(column, out var kept) ? kept : null)))
+                return null;
+
+            derived = await DeriveGenericResolverFieldsAsync(decided, records, AppOnlyRecordTypes(appOnly), ct).ConfigureAwait(false);
+        }
+
+        return NotFoundAs(derived, writeIsImpersonated);
+    }
+
+    /// <summary>
+    /// True when <paramref name="after"/> and <paramref name="before"/> are both decided and name the same record (table and
+    /// id): a write that re-names the record a row already names moves nothing, so nothing is derived for it. Pure.
+    /// </summary>
+    public static bool NamesTheSameRecord(InvoiceFamilyCoreRecord after, InvoiceFamilyCoreRecord before)
+    {
+        ArgumentNullException.ThrowIfNull(after);
+        ArgumentNullException.ThrowIfNull(before);
+        return !after.IsRefused && !before.IsRefused
+               && after.Regarding is { } next && before.Regarding is { } kept
+               && string.Equals(next.LogicalName, kept.LogicalName, StringComparison.OrdinalIgnoreCase)
+               && next.Id == kept.Id;
+    }
+
+    /// <summary>
+    /// Task 045e (owner, 2026-11-13, #2772 "Refuse it"; FR-23 amended for the invoice family): the ONE agreement check between
+    /// an invoice-family row's regarding pair and its core record, asked by every generic writer of a family row — the create
+    /// (step 5½) and the caller update paths through <c>OwnedChildWrite.DecideInvoiceFamilyAsync</c>, and the playbook update, the
+    /// output orchestrator and the field-mapping push through <see cref="CheckGenericUpdateAsync"/>. Null when the write may
+    /// proceed; otherwise the refusal, and nothing is written.
+    /// <list type="bullet">
+    /// <item>Only the halves the write sends are checked; a write that sends neither is not checked and reads nothing.</item>
+    /// <item>The id agrees when it is the id of <paramref name="after"/>'s record. The type agrees when it is the active
+    /// record-type catalog row of that record's table (the row the server's derive writes), read through
+    /// <paramref name="recordTypes"/>; the catalog is read only when the id (if sent) agrees.</item>
+    /// <item>A half that names no record (a clear, a blank) disagrees on an update: the row would be left without the pair of its
+    /// core record. On a create it is not checked: the server writes the pair from the core record (step 5½).</item>
+    /// <item>An update that moves the core record (writes a core lookup, and the row then names another record than it did) is
+    /// not checked when <paramref name="aCoreMoveIsChecked"/> is false: the caller (the app-only gate,
+    /// <see cref="KeepRegardingPairAgreeingAsync"/>) removes the pair, and 045d's derive writes the one of the record the row
+    /// will name. The caller update paths run the derive BEFORE this check, so they pass true: the pair as it will be written
+    /// (the derived one, or the one sent when the derive found nothing to move) must name the record the row will name. An
+    /// update that re-names the record the row already names is checked like any other.</item>
+    /// <item>A row that names no single core record after the write is refused with the guard's own answer for it.</item>
+    /// <item>Fail closed: no catalog reader, or a catalog read that faults, is <see cref="ReadFailedCode"/> (the fault's own
+    /// text stays out of the reason); a core table with no active catalog row is <see cref="ResolverFieldsIncompleteCode"/>.
+    /// The caller's own cancellation is rethrown.</item>
+    /// </list>
+    /// </summary>
+    /// <param name="entityLogicalName">The table written.</param>
+    /// <param name="writtenColumns">The columns (or <c>{nav}@odata.bind</c> keys) the write sets or clears.</param>
+    /// <param name="pair">What the write sends of the pair (<see cref="RegardingPairWrite"/>).</param>
+    /// <param name="after"><see cref="Check(string, Func{string, object?})"/> on the row as it will be after the write.</param>
+    /// <param name="before"><see cref="Check(string, Func{string, object?})"/> on the stored row; null on a create.</param>
+    /// <param name="recordTypes">The APP-ONLY catalog reader (the row of a table); null fails closed when the type is checked.</param>
+    /// <param name="aCoreMoveIsChecked">True on a path whose derive has already run (the caller update paths).</param>
+    public static async Task<InvoiceFamilyCoreRecord?> CheckRegardingPairAgreesAsync(
+        string entityLogicalName,
+        IEnumerable<string> writtenColumns,
+        RegardingPairWrite pair,
+        InvoiceFamilyCoreRecord after,
+        InvoiceFamilyCoreRecord? before,
+        RecordTypeLookup? recordTypes,
+        CancellationToken ct = default,
+        bool aCoreMoveIsChecked = false)
+    {
+        ArgumentNullException.ThrowIfNull(writtenColumns);
+        ArgumentNullException.ThrowIfNull(after);
+        if (!pair.DecidesAnything || ColumnsToRead(entityLogicalName) is not { } coreColumns)
+            return null;
+
+        // A row that will name no single core record is refused with the guard's own answer — never exempted as a move.
+        if (after.IsRefused)
+            return after;
+
+        var create = before is null;
+        if (!create && !aCoreMoveIsChecked
+            && writtenColumns.Select(ColumnOfKey).Any(c => coreColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+            && !NamesTheSameRecord(after, before!))
+        {
+            return null; // the core record moves: 045d's derive writes the pair of the record the row will name
+        }
+        if (after.Regarding is not { } regarding || pair.Unreadable)
+            return Disagrees(after);
+
+        if (pair.SetsId && !(create && string.IsNullOrWhiteSpace(pair.IdText))
+            && !(Guid.TryParse(pair.IdText?.Trim(), out var id) && id == regarding.Id))
+        {
+            return Disagrees(after);
+        }
+
+        if (pair.SetsType && !(create && pair.TypeId is null))
+        {
+            if (pair.TypeId is not { } typeId || typeId == Guid.Empty)
+                return Disagrees(after);
+            if (recordTypes is null)
+            {
+                return after.Refuse(ReadFailedCode,
+                    $"The record-type row for {regarding.LogicalName} cannot be read here; nothing was written.");
+            }
+
+            Entity? catalogRow;
+            try
+            {
+                catalogRow = await recordTypes(regarding.LogicalName, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return after.Refuse(ReadFailedCode,
+                    $"The record-type row for {regarding.LogicalName} could not be read ({ex.GetType().Name}); nothing was written.");
+            }
+
+            if (catalogRow is null || catalogRow.Id == Guid.Empty)
+            {
+                return after.Refuse(ResolverFieldsIncompleteCode,
+                    $"{regarding.LogicalName} has no active sprk_recordtype_ref row, so the regarding record's type cannot be checked. "
+                    + "Nothing was written.");
+            }
+
+            if (catalogRow.Id != typeId)
+                return Disagrees(after);
+        }
+
+        // Fix round 3 (ebilling-r1, 2026-11-13): a record URL an update sends names the same record — its etn and id, decided
+        // without a read, after the pair's own halves. A clear names no other record; on a create the derive writes the URL.
+        if (pair.SetsUrl && !create && !string.IsNullOrWhiteSpace(pair.UrlText)
+            && !RegardingPairWrite.UrlNamesRecord(pair.UrlText, regarding.LogicalName, regarding.Id))
+        {
+            return Disagrees(after);
+        }
+
+        return null;
+
+        static InvoiceFamilyCoreRecord Disagrees(InvoiceFamilyCoreRecord decided) =>
+            decided.Refuse(RegardingPairCoreRecordMismatchCode, RegardingPairCoreRecordMismatchReason);
+    }
+
+    /// <summary>A record not found, answered <see cref="ReadFailedCode"/> when the write runs as a user (#2081 fix round 2).</summary>
+    private static InvoiceFamilyCoreRecord NotFoundAs(InvoiceFamilyCoreRecord derived, bool writeIsImpersonated) =>
+        writeIsImpersonated && derived is { RefusalCode: RecordNotFoundCode }
+            ? derived.Refuse(ReadFailedCode, $"What this {derived.EntityLogicalName} is filed under could not be read; nothing was written.")
+            : derived;
+
     private static async Task<InvoiceFamilyCoreRecord?> CheckGenericUpdateCoreAsync(
         string entityLogicalName,
         Guid recordId,
@@ -418,7 +667,9 @@ public static class InvoiceFamilyCoreRecordGuard
     {
         ArgumentNullException.ThrowIfNull(patch);
         var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (!IsInvoice(entity) && !IsLine(entity))
+        // H1 (ebilling-r1 + unified-access-control-r2 agreed 2026-11-13): every invoice-family table, not the invoice and the
+        // line only — the same rule (one core record; D-96 for an invoice) and the same stored-row read before deciding.
+        if (!CoreRecordLookups.ContainsKey(entity))
             return null;
 
         var guarded = GuardedLookups(entity)!;
@@ -439,7 +690,7 @@ public static class InvoiceFamilyCoreRecordGuard
 
         // #2081 (ebilling-r1 follow-up to uac-r2's 026 review): these paths PATCH with no If-Match, which is an UPSERT, so a
         // stale or deleted id would CREATE an orphan row (no core record, owned by the app instead of the root's team). The
-        // stored row is therefore read for EVERY write of an invoice or line, whether or not the patch touches a guarded
+        // stored row is therefore read for EVERY write of a family row (H1), whether or not the patch touches a guarded
         // lookup, and a missing row is refused. No reader, or a read that faults, fails closed.
         if (appOnly is null)
         {
@@ -463,6 +714,8 @@ public static class InvoiceFamilyCoreRecordGuard
         if (stored is null)
             return InvoiceFamilyCoreRecord.Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written.");
 
+        // Task 045e: the regarding pair is decided later, on the payload as it will be written (after the pair planner), by
+        // KeepRegardingPairAgreeingAsync — the path's derive step calls it — not here on the payload as sent.
         if (change.Count == 0)
             return null; // the row exists and the patch moves no guarded lookup: nothing more to decide
 
@@ -501,6 +754,168 @@ public static class InvoiceFamilyCoreRecordGuard
     }
 
     /// <summary>
+    /// Task 045e (fix round 1, K1/K2/F2): the app-only update paths' regarding-pair gate, on the payload as it will be written —
+    /// after the 045b planner (so a pair the planner writes is decided too) and before 045d's derive and the write. Every
+    /// app-only path (playbook update, output orchestrator, field-mapping push) reaches it through its derive step
+    /// (<c>OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync</c>), whose refusal form it answers through.
+    /// <list type="bullet">
+    /// <item>A payload that sends no pair or resolver column, or a table outside the family: unchanged, nothing read.</item>
+    /// <item>A payload that moves the row's core record (writes a core lookup, and the row then names another record than its
+    /// stored one): every pair and resolver column is REMOVED, so only 045d's derive writes them — the pair of the record the
+    /// row will name. A derive that then finds nothing to derive (the core was already moved) leaves the stored pair.</item>
+    /// <item>Otherwise <see cref="CheckRegardingPairAgreesAsync"/> on the stored row (read app-only) overlaid with the payload;
+    /// when it admits a pair id, the id is written as the core record's id in canonical form (lower-case "D"), whatever text
+    /// was sent, so the D-68 alternate key never takes another spelling of the same id.</item>
+    /// <item>Fail closed: no reader, a read that faults, or a missing row writes nothing (the guard's codes).</item>
+    /// </list>
+    /// </summary>
+    public static async Task<(Dictionary<string, object?> Payload, InvoiceFamilyCoreRecord? Refusal)> KeepRegardingPairAgreeingAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> payload,
+        IGenericEntityService? appOnly,
+        CancellationToken ct,
+        bool writeIsImpersonated = false)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        var entity = entityLogicalName?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (!CoreRecordLookups.ContainsKey(entity)
+            || !payload.Keys.Any(k => !string.IsNullOrWhiteSpace(k)
+                                      && Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns
+                                          .Contains(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(k))))
+        {
+            return (payload, null);
+        }
+
+        if (appOnly is null)
+            return (payload, Refused(entity, ReadFailedCode, $"What this {entity} is filed under cannot be read here; nothing was written."));
+
+        var guarded = GuardedLookups(entity)!;
+        Entity? stored;
+        try
+        {
+            stored = await appOnly.RetrieveAsync(entity, recordId, guarded.Select(g => g.Column).ToArray(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return (payload, IsRecordNotFound(ex)
+                ? NotFoundAs(Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written."), writeIsImpersonated)
+                : Refused(entity, ReadFailedCode, $"What this {entity} is filed under could not be read ({ex.GetType().Name}); nothing was written."));
+        }
+
+        if (stored is null)
+            return (payload, NotFoundAs(Refused(entity, RecordNotFoundCode, $"{entity}({recordId:D}) does not exist; nothing was written."), writeIsImpersonated));
+
+        var change = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in payload)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+                continue;
+            var target = guarded.FirstOrDefault(g => string.Equals(g.Column, ColumnOfKey(key), StringComparison.OrdinalIgnoreCase));
+            if (target.Column is not null)
+            {
+                change[target.Column] = value is string bind && IsBindKey(key) && TryParseBind(bind, out var id)
+                    ? new EntityReference(target.Table, id)
+                    : value;
+            }
+        }
+
+        var before = Check(entity, column => stored.Attributes.TryGetValue(column, out var kept) ? kept : null);
+        var after = Check(entity, column =>
+            change.TryGetValue(column, out var changed) ? changed
+            : stored.Attributes.TryGetValue(column, out var kept) ? kept
+            : null);
+
+        if (ColumnsToRead(entity) is { } coreColumns
+            && change.Keys.Any(c => coreColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
+            && !after.IsRefused && !NamesTheSameRecord(after, before))
+        {
+            // K1: the core record moves, so the pair and its display are the derive's alone.
+            var dropped = new Dictionary<string, object?>(payload.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in payload)
+            {
+                if (!Sprk.Bff.Api.Services.Dataverse.FieldMapping.CreateTimeFieldMapping.RegardingPairAndResolverColumns
+                        .Contains(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key)))
+                {
+                    dropped[key] = value;
+                }
+            }
+
+            return (dropped, null);
+        }
+
+        var pair = RegardingPairWrite.Of(entity, payload);
+        if (!pair.DecidesAnything)
+            return (payload, null); // a name or number only: decided by no read here (known limit)
+
+        var disagrees = await CheckRegardingPairAgreesAsync(entity, change.Keys, pair, after, before, AppOnlyRecordTypes(appOnly), ct)
+            .ConfigureAwait(false);
+        if (disagrees is not null)
+            return (payload, disagrees);
+
+        return (WithCanonicalPairId(payload, after), null);
+
+        static InvoiceFamilyCoreRecord Refused(string table, string code, string reason) =>
+            InvoiceFamilyCoreRecord.Refused(table, code, reason);
+    }
+
+    /// <summary>
+    /// Task 045e (fix round 1, F2): <paramref name="payload"/> with every text value under the pair id column replaced by
+    /// <paramref name="admitted"/>'s record id in canonical form (lower-case "D"). Call only after
+    /// <see cref="CheckRegardingPairAgreesAsync"/> admitted the pair, so the text named that same id. Fix round 4: a sent record
+    /// URL (admitted, so it named that same record) is written in canonical form too (<see cref="CanonicalRecordUrl"/>).
+    /// </summary>
+    internal static Dictionary<string, object?> WithCanonicalPairId(Dictionary<string, object?> payload, InvoiceFamilyCoreRecord admitted)
+    {
+        if (admitted.Regarding is not { } regarding)
+            return payload;
+        var canonical = CanonicalPairId(regarding.Id);
+        var canonicalUrl = CanonicalRecordUrl(regarding.LogicalName, regarding.Id);
+        var written = new Dictionary<string, object?>(payload, payload.Comparer);
+        foreach (var key in payload.Keys)
+        {
+            var column = Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key);
+            // Every value the pair view reads as an id (OwnedChildWrite.PairChangeOf): text, a Guid, or a JSON string (fix round 3).
+            if (string.Equals(column, Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairIdColumn, StringComparison.Ordinal)
+                && payload[key] switch
+                {
+                    string text => !string.IsNullOrWhiteSpace(text),
+                    Guid => true,
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => !string.IsNullOrWhiteSpace(element.GetString()),
+                    _ => false,
+                })
+            {
+                written[key] = canonical;
+            }
+            else if (string.Equals(column, RegardingPairWrite.RecordUrlColumn, StringComparison.OrdinalIgnoreCase)
+                && payload[key] switch
+                {
+                    string text => !string.IsNullOrWhiteSpace(text),
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } element => !string.IsNullOrWhiteSpace(element.GetString()),
+                    _ => false,
+                })
+            {
+                written[key] = canonicalUrl;
+            }
+        }
+
+        return written;
+    }
+
+    /// <summary>
+    /// Task 045e (fix round 4): a record URL as the server writes it — <c>RegardingRecordType.BuildRecordUrl</c> of the table
+    /// (lower case) and the canonical id (<see cref="CanonicalPairId"/>), the form 045d's derive writes.
+    /// </summary>
+    public static string CanonicalRecordUrl(string table, Guid id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(table);
+        return RegardingRecordType.BuildRecordUrl(table.Trim().ToLowerInvariant(), CanonicalPairId(id));
+    }
+
+    /// <summary>Task 045e: a pair id as the server writes it — lower-case "D", the form 045d's derive writes.</summary>
+    public static string CanonicalPairId(Guid id) => id.ToString("D").ToLowerInvariant();
+
+    /// <summary>
     /// The refusal text the generic update paths surface (task 026 fix-round-2): the stable code and a fixed sentence, never
     /// <see cref="InvoiceFamilyCoreRecord.Reason"/> — those paths read the stored row and the other invoice as the APP, so
     /// the reason can name a record or core record the caller has not read.
@@ -521,11 +936,12 @@ public static class InvoiceFamilyCoreRecordGuard
 
     /// <summary>
     /// True for the tables the generic update paths write UPDATE-ONLY (<c>If-Match: *</c>): the guard checked that the row
-    /// exists, and the write itself must not re-create it if it was deleted since (#2081 fix round 2). Only the two tables
-    /// <see cref="CheckGenericUpdateAsync"/> covers; every other table keeps its write unchanged.
+    /// exists, and the write itself must not re-create it if it was deleted since (#2081 fix round 2). The tables
+    /// <see cref="CheckGenericUpdateAsync"/> covers: every invoice-family table (H1, 2026-11-13); every other table keeps its
+    /// write unchanged.
     /// </summary>
     public static bool IsUpdateOnlyTarget(string entityLogicalName) =>
-        !string.IsNullOrWhiteSpace(entityLogicalName) && (IsInvoice(entityLogicalName) || IsLine(entityLogicalName));
+        !string.IsNullOrWhiteSpace(entityLogicalName) && CoreRecordLookups.ContainsKey(entityLogicalName.Trim());
 
     /// <summary>
     /// The update-only write of an invoice or line. Null when written. A row that is gone now (the platform refused the
@@ -734,11 +1150,77 @@ public static class InvoiceFamilyCoreRecordGuard
     /// <param name="decided">The result of <see cref="Check(Entity)"/>; a refusal is returned unchanged.</param>
     /// <param name="records">Reads the regarded record's name and number.</param>
     /// <param name="recordTypes">Reads the record-type row (pass <c>ICommunicationDataverseService.QueryRecordTypeRefAsync</c>).</param>
-    public static async Task<InvoiceFamilyCoreRecord> DeriveResolverFieldsAsync(
+    public static Task<InvoiceFamilyCoreRecord> DeriveResolverFieldsAsync(
         InvoiceFamilyCoreRecord decided,
         IGenericEntityService records,
         RecordTypeLookup recordTypes,
         CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        return DeriveAsync(decided, AppOnlyRecords(records), recordTypes, displayOptional: false, ct);
+    }
+
+    /// <summary>
+    /// Reads the regarded record's <paramref name="columns"/> (task 045d: the generic writers pass their own reader — app-only on
+    /// the create and the app-only updates, the caller's on a caller update). <c>null</c>, or a fault that is a record-not-found,
+    /// is <see cref="RecordNotFoundCode"/>; any other fault is <see cref="ReadFailedCode"/>.
+    /// </summary>
+    public delegate Task<Entity?> RecordLookup(string entityLogicalName, Guid id, string[] columns, CancellationToken ct);
+
+    /// <summary>
+    /// Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): the GENERIC writers' derive — the create's pre-write rule,
+    /// the caller update planner and the app-only update paths. The same reads and the same refusals as
+    /// <see cref="DeriveResolverFieldsAsync(InvoiceFamilyCoreRecord, IGenericEntityService, RecordTypeLookup, CancellationToken)"/>
+    /// (no active catalog row, or one naming no number column, is <see cref="ResolverFieldsIncompleteCode"/>; a missing record is
+    /// <see cref="RecordNotFoundCode"/>; a read fault is <see cref="ReadFailedCode"/>), except that the row takes what the
+    /// record has: the type, the id and the URL always, the name and the number when the record has them
+    /// (<see cref="InvoiceFamilyResolverFields.ToGenericFields"/>). A blank name or number is never a refusal here. The
+    /// submission writers keep the strict overload (all five or a refusal).
+    /// </summary>
+    public static Task<InvoiceFamilyCoreRecord> DeriveGenericResolverFieldsAsync(
+        InvoiceFamilyCoreRecord decided,
+        RecordLookup records,
+        RecordTypeLookup recordTypes,
+        CancellationToken ct = default) =>
+        DeriveAsync(decided, records, recordTypes, displayOptional: true, ct);
+
+    /// <summary>An app-only <see cref="RecordLookup"/> over <paramref name="records"/>.</summary>
+    public static RecordLookup AppOnlyRecords(IGenericEntityService records)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        return async (table, id, columns, token) => await records.RetrieveAsync(table, id, columns, token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 045d: an app-only <see cref="RecordTypeLookup"/> over <paramref name="records"/> — the table's active
+    /// <c>sprk_recordtype_ref</c> row, the same query as <c>ICommunicationDataverseService.QueryRecordTypeRefAsync</c>, for the
+    /// app-only update paths whose only reader is the <see cref="IGenericEntityService"/>.
+    /// </summary>
+    public static RecordTypeLookup AppOnlyRecordTypes(IGenericEntityService records)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        return async (table, token) =>
+        {
+            var query = new QueryExpression(RecordTypeEntity)
+            {
+                ColumnSet = new ColumnSet(RecordTypeEntity + "id", "sprk_recorddisplayname", RegardingRecordType.RecordNumberFieldColumn),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition("sprk_recordlogicalname", ConditionOperator.Equal, table);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            var rows = await records.RetrieveMultipleAsync(query, token).ConfigureAwait(false);
+            return rows.Entities.Count > 0 ? rows.Entities[0] : null;
+        };
+    }
+
+    private const string RecordTypeEntity = "sprk_recordtype_ref";
+
+    private static async Task<InvoiceFamilyCoreRecord> DeriveAsync(
+        InvoiceFamilyCoreRecord decided,
+        RecordLookup records,
+        RecordTypeLookup recordTypes,
+        bool displayOptional,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(decided);
         ArgumentNullException.ThrowIfNull(records);
@@ -755,8 +1237,9 @@ public static class InvoiceFamilyCoreRecordGuard
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // The generic writers' reason can reach a response (a 500's detail): the fault's own text stays out of it there.
             return decided.Refuse(ReadFailedCode,
-                $"The record-type row for {regarding.LogicalName} could not be read ({ex.Message}); nothing was written.");
+                $"The record-type row for {regarding.LogicalName} could not be read ({(displayOptional ? ex.GetType().Name : ex.Message)}); nothing was written.");
         }
 
         var nameField = RegardingRecordType.GetPrimaryNameField(regarding.LogicalName);
@@ -774,15 +1257,14 @@ public static class InvoiceFamilyCoreRecordGuard
         Entity? row;
         try
         {
-            row = await records.RetrieveAsync(regarding.LogicalName, regarding.Id, [nameField, numberField], ct)
-                .ConfigureAwait(false);
+            row = await records(regarding.LogicalName, regarding.Id, [nameField, numberField], ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             return IsRecordNotFound(ex)
                 ? decided.Refuse(RecordNotFoundCode, $"{regarding.LogicalName}({regarding.Id:D}) does not exist; nothing was written.")
                 : decided.Refuse(ReadFailedCode,
-                    $"{regarding.LogicalName}({regarding.Id:D}) could not be read ({ex.Message}); nothing was written.");
+                    $"{regarding.LogicalName}({regarding.Id:D}) could not be read ({(displayOptional ? ex.GetType().Name : ex.Message)}); nothing was written.");
         }
 
         if (row is null)
@@ -790,8 +1272,10 @@ public static class InvoiceFamilyCoreRecordGuard
             return decided.Refuse(RecordNotFoundCode, $"{regarding.LogicalName}({regarding.Id:D}) does not exist; nothing was written.");
         }
 
-        var fields = BuildResolverFields(regarding, recordType.Id, row.GetAttributeValue<string>(nameField),
-            row.GetAttributeValue<string>(numberField));
+        var fields = displayOptional
+            ? BuildGenericResolverFields(regarding, recordType.Id, row.GetAttributeValue<string>(nameField), row.GetAttributeValue<string>(numberField))
+            : BuildResolverFields(regarding, recordType.Id, row.GetAttributeValue<string>(nameField),
+                row.GetAttributeValue<string>(numberField));
         return fields is null
             ? decided.Refuse(ResolverFieldsIncompleteCode,
                 $"{regarding.LogicalName}({regarding.Id:D}) has no {(string.IsNullOrWhiteSpace(row.GetAttributeValue<string>(nameField)) ? nameField : numberField)}, "
@@ -818,6 +1302,28 @@ public static class InvoiceFamilyCoreRecordGuard
             trimmedName.Length > RegardingRecordNameMaxLength ? trimmedName[..RegardingRecordNameMaxLength] : trimmedName,
             RegardingRecordType.BuildRecordUrl(regarding.LogicalName.ToLowerInvariant(), id),
             number.Trim());
+    }
+
+    /// <summary>
+    /// Task 045d (owner, 2026-11-12, option (b)): the generic writers' fields — what the record has. The type, the id and the URL
+    /// always; the name (cut to 100) and the number when the record has them, otherwise <see cref="string.Empty"/>, which
+    /// <see cref="InvoiceFamilyResolverFields.ToGenericFields"/> writes as a clear. Null only for an empty type or record id. Pure.
+    /// </summary>
+    internal static InvoiceFamilyResolverFields? BuildGenericResolverFields(
+        EntityReference regarding, Guid recordTypeId, string? name, string? number)
+    {
+        ArgumentNullException.ThrowIfNull(regarding);
+        if (recordTypeId == Guid.Empty || regarding.Id == Guid.Empty)
+            return null;
+
+        var id = regarding.Id.ToString("D").ToLowerInvariant();
+        var trimmedName = name?.Trim() ?? string.Empty;
+        return new InvoiceFamilyResolverFields(
+            recordTypeId,
+            id,
+            trimmedName.Length > RegardingRecordNameMaxLength ? trimmedName[..RegardingRecordNameMaxLength] : trimmedName,
+            RegardingRecordType.BuildRecordUrl(regarding.LogicalName.ToLowerInvariant(), id),
+            number?.Trim() ?? string.Empty);
     }
 
     private static bool IsExternalIdentifier(string entity) =>
@@ -920,4 +1426,175 @@ public sealed record InvoiceFamilyResolverFields(
         ["sprk_regardingrecordurl"] = RecordUrl,
         ["sprk_regardingrecordnumber"] = RecordNumber,
     };
+
+    /// <summary>
+    /// Task 045d (owner, 2026-11-12, option (b)): the five columns as the GENERIC writers write them — a blank name or number is
+    /// written as null (a clear), so a row moved to a record without one never keeps the previous record's. The submission
+    /// writers use <see cref="ToFields"/>, whose fields are never blank.
+    /// </summary>
+    public Dictionary<string, object?> ToGenericFields() => new(StringComparer.OrdinalIgnoreCase)
+    {
+        [CoreAncestorResolver.RegardingRecordTypeColumn] = new EntityReference("sprk_recordtype_ref", RecordTypeId),
+        [CoreAncestorResolver.RegardingRecordIdColumn] = RecordId,
+        ["sprk_regardingrecordname"] = string.IsNullOrWhiteSpace(RecordName) ? null : RecordName,
+        ["sprk_regardingrecordurl"] = RecordUrl,
+        ["sprk_regardingrecordnumber"] = string.IsNullOrWhiteSpace(RecordNumber) ? null : RecordNumber,
+    };
+}
+
+/// <summary>
+/// Task 045e: what a write sends of the ADR-024 regarding pair — whether it sets each half, and to what — for
+/// <see cref="InvoiceFamilyCoreRecordGuard.CheckRegardingPairAgreesAsync"/>. Read from the path's own payload shape:
+/// <see cref="Of(string, IEnumerable{KeyValuePair{string, object?}})"/> for a Web API dictionary (the app-only paths), and
+/// <c>OwnedChildWrite.PairWriteOf</c> for a mapped item (the create and the caller paths).
+/// </summary>
+/// <param name="SetsId">The write sets or clears <c>sprk_regardingrecordid</c>.</param>
+/// <param name="IdText">The id it writes (null for a clear).</param>
+/// <param name="SetsType">The write binds or clears the record type.</param>
+/// <param name="TypeId">The catalog row it binds (null for a clear).</param>
+/// <param name="Unreadable">A pair value that is neither a clear nor readable as an id or a bind: it names no record.</param>
+public readonly record struct RegardingPairWrite(bool SetsId, string? IdText, bool SetsType, Guid? TypeId, bool Unreadable)
+{
+    /// <summary>The write sends either half of the pair.</summary>
+    public bool SetsEither => SetsId || SetsType;
+
+    /// <summary>Task 045e (fix round 3): the write sends <c>sprk_regardingrecordurl</c>.</summary>
+    public bool SetsUrl { get; init; }
+
+    /// <summary>The URL text it writes (null for a clear; a non-text value as its text, which names no record).</summary>
+    public string? UrlText { get; init; }
+
+    /// <summary>The write sends something the agreement check decides: either half of the pair, or the record URL.</summary>
+    public bool DecidesAnything => SetsEither || SetsUrl;
+
+    /// <summary>The pair a Web API dictionary sends (a type as a <c>{nav}@odata.bind</c> path or a reference; null clears).</summary>
+    public static RegardingPairWrite Of(string entityLogicalName, IEnumerable<KeyValuePair<string, object?>> payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        var pairs = payload as IReadOnlyCollection<KeyValuePair<string, object?>> ?? payload.ToList();
+        var change = OwnedChildWrite.PairChangeOf(entityLogicalName, pairs);
+        var written = new RegardingPairWrite(change.SetsId, change.IdText, change.SetsType, change.TypeId, change.Unreadable);
+        foreach (var (key, value) in pairs)
+        {
+            if (string.IsNullOrWhiteSpace(key)
+                || !string.Equals(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn(key), RecordUrlColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            written = written with
+            {
+                SetsUrl = true,
+                UrlText = value switch
+                {
+                    null => null,
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined } => null,
+                    System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } e => e.GetString(),
+                    _ => value.ToString(),
+                },
+            };
+        }
+
+        return written;
+    }
+
+    /// <summary>The record URL column (ADR-024 display column).</summary>
+    public const string RecordUrlColumn = "sprk_regardingrecordurl";
+
+    /// <summary>
+    /// Task 045e (fix round 3): whether a record URL names <paramref name="table"/>'s record <paramref name="id"/> — read from
+    /// its <c>etn</c> (any case) and <c>id</c> (as an id: any case, braces allowed) query parameters, so the server's relative
+    /// form (<c>RegardingRecordType.BuildRecordUrl</c>) and a client's absolute form with an app id both read alike. A URL
+    /// without exactly one of each, or whose id is not an id, names no record: false.
+    /// </summary>
+    public static bool UrlNamesRecord(string? url, string table, Guid id) =>
+        TryReadRecordUrl(url, out var named, out var namedId)
+        && string.Equals(named, table?.Trim(), StringComparison.OrdinalIgnoreCase)
+        && namedId == id;
+
+    /// <summary>
+    /// Task 045e (fix round 4): the table and record a record URL names, read as <see cref="UrlNamesRecord"/> reads them (exactly
+    /// one non-blank <c>etn</c>, exactly one <c>id</c> that parses as an id); false when it names no record.
+    /// </summary>
+    public static bool TryReadRecordUrl(string? url, out string table, out Guid id)
+    {
+        table = string.Empty;
+        id = Guid.Empty;
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+        var start = url.IndexOf('?');
+        if (start < 0)
+            return false;
+        var query = url[(start + 1)..];
+        var fragment = query.IndexOf('#');
+        if (fragment >= 0)
+            query = query[..fragment];
+
+        string? etn = null, idText = null;
+        int etns = 0, ids = 0;
+        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var equals = part.IndexOf('=');
+            var name = Uri.UnescapeDataString(equals < 0 ? part : part[..equals]).Trim();
+            var value = equals < 0 ? string.Empty : Uri.UnescapeDataString(part[(equals + 1)..].Replace('+', ' ')).Trim();
+            if (string.Equals(name, "etn", StringComparison.OrdinalIgnoreCase))
+            {
+                etns++;
+                etn = value;
+            }
+            else if (string.Equals(name, "id", StringComparison.OrdinalIgnoreCase))
+            {
+                ids++;
+                idText = value;
+            }
+        }
+
+        if (etns != 1 || ids != 1 || string.IsNullOrWhiteSpace(etn) || !Guid.TryParse(idText, out var named))
+            return false;
+        table = etn;
+        id = named;
+        return true;
+    }
+
+    /// <summary>
+    /// Task 045f: the reason code a write path refuses with when a regarding record URL it would store does not name the record
+    /// the row's regarding pair names after the write (every pair table outside the invoice family; the family keeps
+    /// <see cref="InvoiceFamilyCoreRecordGuard.RegardingPairCoreRecordMismatchCode"/>).
+    /// </summary>
+    public const string RecordUrlMismatchCode = "regarding_record_url_mismatch";
+
+    /// <summary>The words of <see cref="RecordUrlMismatchCode"/>: fixed text that names no record.</summary>
+    public const string RecordUrlMismatchReason =
+        "the regarding record URL does not name the record this row is regarding";
+
+    /// <summary>
+    /// Task 045f: whether <paramref name="url"/> names the record a row's regarding pair names — <paramref name="pairTable"/>'s
+    /// record <paramref name="pairId"/> — read as <see cref="TryReadRecordUrl"/> reads it (its <c>etn</c> any case, its
+    /// <c>id</c> any case or braced). When it does, <paramref name="canonical"/> is the URL as the server writes it
+    /// (<see cref="InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl"/>: the table lower case, the id lower-case "D"); its scheme,
+    /// host and other parameters are not kept. A pair with an id and no type names no table, so only the id is compared and
+    /// the URL's own <c>etn</c> is kept, when it is a logical name. Pure: no read.
+    /// </summary>
+    public static bool TryAdmitRecordUrl(string? url, string? pairTable, Guid pairId, out string canonical)
+    {
+        canonical = string.Empty;
+        if (pairId == Guid.Empty || !TryReadRecordUrl(url, out var named, out var namedId) || namedId != pairId)
+            return false;
+        if (pairTable is not null)
+        {
+            if (!string.Equals(named, pairTable.Trim(), StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        else if (!IsLogicalName(named))
+        {
+            return false;
+        }
+
+        canonical = InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(pairTable ?? named, pairId);
+        return true;
+
+        static bool IsLogicalName(string text) =>
+            text.Length is > 0 and <= 64 && (char.IsAsciiLetterLower(text[0]) || char.IsAsciiLetterUpper(text[0]))
+            && text.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+    }
 }
