@@ -241,3 +241,15 @@ P2a/P2b are TypeScript edits, not type-checked; syntactically valid.
 
 **Gates.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings. New ArchTests 8/8. Full
 `tests/Spaarke.ArchTests`: 2552 passed, 0 failed, 0 skipped (HEAD 7853e50750). Pester 8/8 (new), 19/19 (AccessMarker).
+
+## 7. Docs (chunk 6)
+
+- `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: new invariant registry row I-24 (the 24 link columns are written
+  only by the BFF application user; check as the person, write as the app). Owner `InvoiceFamilyLockedWrite`; enforced by
+  field security, `InvoiceFamilyFieldLockGuardTests` and the client detector; K-1 noted.
+- `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`: new "Invoice-family links: field security" step after the message-access
+  columns step (the guide's closest field-security step; it had no invoice-family section). Order: BFF, web resources (p4a),
+  dry run, `-BffWritesInvoiceFamilyLinksAsApp -Apply` (owner go), `-Verify`.
+- `tests/integration/auth/UnifiedAccessControl/ChildRecordContainerResolutionTests.cs` (comment only, ~line 2004): the
+  work-assignment/invoice filing-loop row pair is now described as one the model-driven app could store before the lock.
+  No test code changed.
