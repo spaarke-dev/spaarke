@@ -45,7 +45,7 @@ export interface McpRoute {
   /** A path pattern whose `:name` segments bind to `McpRequest.params`, for example `/api/v1/signals/:signalId/decision-plan`. */
   path: string;
   tool: string;
-  /** Builds the tool arguments. Default: the path params, then the query, then the body object, merged in that order. */
+  /** Builds the tool arguments. Default: the body object, then the query, then the path params, merged in that order (the path identifier always wins). */
   args?: (request: McpRequest) => Record<string, unknown>;
 }
 
@@ -151,19 +151,25 @@ export function createMcpFetch(callTool: CallServerTool, routes: readonly McpRou
 
   return async (address, init) => {
     const method = (init?.method ?? 'GET').toUpperCase();
-    const url = new URL(address, PARSE_BASE);
 
+    // An address that cannot be parsed, or a path segment with a malformed percent escape, is a bad request, not an exception.
+    let url: URL;
     let matched: { route: McpRoute; params: Record<string, string> } | null = null;
-    for (const entry of compiled) {
-      if (entry.route.method !== method) continue;
-      const m = entry.regex.exec(url.pathname);
-      if (!m) continue;
-      const params: Record<string, string> = {};
-      entry.names.forEach((name, i) => {
-        params[name] = decodeURIComponent(m[i + 1]);
-      });
-      matched = { route: entry.route, params };
-      break;
+    try {
+      url = new URL(address, PARSE_BASE);
+      for (const entry of compiled) {
+        if (entry.route.method !== method) continue;
+        const m = entry.regex.exec(url.pathname);
+        if (!m) continue;
+        const params: Record<string, string> = {};
+        entry.names.forEach((name, i) => {
+          params[name] = decodeURIComponent(m[i + 1]);
+        });
+        matched = { route: entry.route, params };
+        break;
+      }
+    } catch {
+      return problem(400, ShimReason.BadRequest, 'The request address is not valid.');
     }
     if (!matched) {
       return problem(404, ShimReason.RouteUnmapped, `No tool is mapped to ${method} ${url.pathname}.`);
@@ -179,9 +185,15 @@ export function createMcpFetch(callTool: CallServerTool, routes: readonly McpRou
       query[key] = value;
     });
     const request: McpRequest = { method, path: url.pathname, params: matched.params, query, body: body.body };
-    const args = matched.route.args
-      ? matched.route.args(request)
-      : { ...request.params, ...query, ...(isRecord(request.body) ? request.body : {}) };
+    let args: Record<string, unknown>;
+    try {
+      // Default: body, then query, then the path params LAST, so a body member can never override the identifier in the path.
+      args = matched.route.args
+        ? matched.route.args(request)
+        : { ...(isRecord(request.body) ? request.body : {}), ...query, ...request.params };
+    } catch {
+      return problem(400, ShimReason.BadRequest, 'The request could not be turned into a tool call.');
+    }
 
     let result: McpToolResult;
     try {
@@ -191,6 +203,9 @@ export function createMcpFetch(callTool: CallServerTool, routes: readonly McpRou
       return problem(502, ShimReason.HostCallFailed, reason);
     }
 
+    if (!isRecord(result)) {
+      return problem(502, ShimReason.UnreadableResult, 'The tool answered without a readable result.');
+    }
     if (result.isError === true) return errorResponse(result);
 
     const success = successBody(result);

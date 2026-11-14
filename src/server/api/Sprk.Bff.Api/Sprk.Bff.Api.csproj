@@ -271,10 +271,10 @@
        Condition=Exists keeps a local `dotnet build` without the widget built working: nothing is embedded and resources/read then
        answers an error (never stale html). publish-bff-artifact.yml builds the widget first, so a published artifact always embeds it. -->
   <ItemGroup>
-    <EmbeddedResource Include="..\..\..\client\widgets\spaarke-decisions\dist\index.html"
+    <EmbeddedResource Include="../../../client/widgets/spaarke-decisions/dist/index.html"
                       LogicalName="Sprk.Bff.Api.Widgets.decisions.html"
-                      Link="Api\Mcp\LegalOperations\decisions-widget.html"
-                      Condition="Exists('..\..\..\client\widgets\spaarke-decisions\dist\index.html')" />
+                      Link="Api/Mcp/LegalOperations/decisions-widget.html"
+                      Condition="Exists('../../../client/widgets/spaarke-decisions/dist/index.html')" />
   </ItemGroup>
 
   <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at

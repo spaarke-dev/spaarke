@@ -110,6 +110,19 @@ jobs:
       - name: Publish
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -o ./publish --no-build
 
+      # The csproj embeds the widget only when dist/index.html exists (Condition=Exists), so a skipped or failed-open widget build would
+      # otherwise publish an artifact that serves an error for ui://spaarke/decisions.html. Fail here instead. The logical name is stored
+      # as UTF-8 in the assembly's manifest-resource table, so a byte search of the published dll finds it.
+      - name: Verify the decisions widget is embedded in the published BFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -aq "Sprk.Bff.Api.Widgets.decisions.html" ./publish/Sprk.Bff.Api.dll; then
+            echo "::error::The published Sprk.Bff.Api.dll does not embed the decisions widget (Sprk.Bff.Api.Widgets.decisions.html). The widget build step did not produce src/client/widgets/spaarke-decisions/dist/index.html."
+            exit 1
+          fi
+          echo "Decisions widget is embedded."
+
       - name: Compute build identifiers (buildId + sha)
         id: build-id
         shell: bash

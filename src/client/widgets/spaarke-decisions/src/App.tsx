@@ -8,7 +8,6 @@ import { hostThemeName, themeFromHostContext } from './theme/hostTheme';
 
 const useStyles = makeStyles({
   root: {
-    minHeight: '100vh',
     padding: tokens.spacingHorizontalL,
     display: 'flex',
     flexDirection: 'column',

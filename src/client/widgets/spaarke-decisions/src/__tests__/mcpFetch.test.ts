@@ -154,6 +154,60 @@ describe('createMcpFetch: requests it cannot serve', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('answers 400 widget.bad_request for a malformed percent escape in the path, instead of throwing', async () => {
+    const { fetch, calls } = harness({ structuredContent: {} });
+
+    const response = await fetch('/api/v1/signals/%E0%A4%A/decision-plan');
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).reasonCode).toBe(ShimReason.BadRequest);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("answers 400 widget.bad_request when a route's argument builder throws, and calls no tool", async () => {
+    const calls: string[] = [];
+    const routes: McpRoute[] = [
+      {
+        method: 'GET',
+        path: '/api/v1/boom',
+        tool: 'demo_boom',
+        args: () => {
+          throw new Error('cannot build');
+        },
+      },
+    ];
+    const shim = createMcpFetch(async name => {
+      calls.push(name);
+      return { structuredContent: {} };
+    }, routes);
+
+    const response = await shim('/api/v1/boom');
+
+    expect(response.status).toBe(400);
+    expect((await response.json()).reasonCode).toBe(ShimReason.BadRequest);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('answers 502 widget.unreadable_result when the host returns no result object', async () => {
+    const shim = createMcpFetch(async () => undefined as unknown as McpToolResult, ROUTES);
+
+    const response = await shim('/api/v1/signals/abc/decision-plan');
+
+    expect(response.status).toBe(502);
+    expect((await response.json()).reasonCode).toBe(ShimReason.UnreadableResult);
+  });
+
+  it('lets the path identifier win over a body or query member of the same name', async () => {
+    const { fetch, calls } = harness({ structuredContent: { ok: true } });
+
+    await fetch('/api/v1/signals/real-id/decision?signalId=from-query', {
+      method: 'POST',
+      body: JSON.stringify({ signalId: 'from-body', confirm: true }),
+    });
+
+    expect(calls[0].args).toEqual({ signalId: 'real-id', confirm: true });
+  });
+
   it('turns a rejected host call into a 502 Response instead of throwing', async () => {
     const { fetch } = harness(new Error('The host is not connected.'));
 
