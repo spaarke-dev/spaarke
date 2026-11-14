@@ -292,5 +292,10 @@ public sealed class McpHostContractTests
             ],
             "FR-01: tools/list returns exactly the v1 tools; the paging tool is spaarke_list_decision_page (task 022)");
         names.Should().HaveCount(5);
+
+        // tools/list is judged per tool policy for THIS caller (the SDK filter hides a tool the caller may not call), so a sixth tool behind a
+        // stricter policy (e.g. SystemAdmin) would be invisible above. The catalog is the unfiltered set of the area.
+        factory.Services.GetRequiredService<McpToolCatalog>().ToolsFor(McpEndpoints.LegalOperationsArea).Select(t => t.ProtocolTool.Name)
+            .Should().BeEquivalentTo(names, "the area's catalog holds exactly the five v1 tools, whatever the caller may see");
     }
 }

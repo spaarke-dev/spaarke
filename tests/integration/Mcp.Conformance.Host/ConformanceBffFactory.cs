@@ -79,7 +79,11 @@ internal sealed class ConformanceBffFactory : McpProgramHostFactory
         {
             app.Use(async (context, nextMiddleware) =>
             {
-                if (context.Connection.LocalPort == injectedPort && !context.Request.Headers.ContainsKey("Authorization"))
+                // Only the MCP route gets a token: every other route on the injected port (the BFF's REST surface) keeps the auth it would
+                // have anywhere else, so a request that has none is a 401 there as well.
+                if (context.Connection.LocalPort == injectedPort
+                    && context.Request.Path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase)
+                    && !context.Request.Headers.ContainsKey("Authorization"))
                 {
                     context.Request.Headers.Authorization = "Bearer " + McpProgramHostFactory.MintToken(Guid.NewGuid());
                 }

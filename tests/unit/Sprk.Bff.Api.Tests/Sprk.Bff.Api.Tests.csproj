@@ -65,6 +65,11 @@
     <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
     <ProjectReference Include="..\..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- spaarkeai-mcp-bff-api-r1 task 025: the test-only console host (tests/integration/Mcp.Conformance.Host) reuses this assembly's internal
+         MCP doubles (DecisionToolsTestHost, FiveToolCapability, DecideLaneSeed) for its measure mode (the "measure" argument). Nothing under src/ is involved. -->
+    <InternalsVisibleTo Include="Mcp.Conformance.Host" />
+  </ItemGroup>
 
   <!--
     CICD-084 (2026-06-26) — KEEP-path relocation per ADR-038 §2 path #5 (endpoint contract).

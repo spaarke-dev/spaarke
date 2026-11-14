@@ -49,6 +49,158 @@ internal static class PlanAndLookupToolSupport
             StructuredContent = JsonSerializer.SerializeToElement(body, body.GetType(), Json),
         };
 
+    // ---- the bound on the row (FR-05, FR-11: every tool result < 64 KiB) -----------------------------------------------------------
+    //
+    // COMPONENT JUSTIFICATION (CLAUDE.md section 11), added inside this existing file.
+    //   Existing: WorklistItemSummary.Clip (the list tools' text clip) and the REST worklist row, which has no cap on evidenceRefs or sentence.
+    //   Extension: the REST row must stay byte-for-byte unchanged (FR-09), so the bound cannot go in Services/Signals or the route; it is
+    //     applied to the copy the MCP tool returns, reusing Clip.
+    //   Cost of doing nothing: about 100 evidence lines (about 350 result bytes each) take spaarke_get_decision_plan past 64 KiB and the host
+    //     drops the result, so the wizard cannot open that item from Copilot at all.
+
+    /// <summary>The most evidence lines the plan tool returns (a rule's witnesses are a handful today).</summary>
+    internal const int MaxEvidenceLines = 100;
+
+    /// <summary>
+    /// The most the <c>evidenceRefs</c> string may take IN THE RESULT: its JSON-escaped length, since it is a JSON array stored as a string
+    /// and every quote in it is escaped again. 20,000 leaves the largest plan the closed catalog can build (28.7 KB, measured) and the rest of
+    /// the row (about 5 KB at its caps) well under 64 KiB with more than 10 KB to spare. Lines are kept in stored order until the next would pass it.
+    /// </summary>
+    internal const int EvidenceBudgetBytes = 20_000;
+
+    /// <summary>Per evidence line: the longest string member (JSON bytes), the most members kept, the longest member name and the
+    /// largest nested value kept. With these, one line is at most about 7 KB, so the first line always fits <see cref="EvidenceBudgetBytes"/>.</summary>
+    internal const int EvidenceFieldBytes = 400;
+    internal const int EvidenceMaxMembers = 16;
+    internal const int EvidenceMaxNameBytes = 64;
+
+    /// <summary>The row's clipped free text, as default-encoded JSON bytes. A 2,000-character rule sentence (the stored maximum) fits unchanged
+    /// unless it carries hundreds of escaped characters.</summary>
+    internal const int RowTitleBytes = 240;
+    internal const int RowSubjectNameBytes = 240;
+    internal const int RowRuleShortNameBytes = 120;
+    internal const int RowSentenceBytes = 4_000;
+    internal const int RowShortTextBytes = 80;
+
+    /// <summary>What <see cref="BoundRow"/> did: the row to return, how many evidence lines were stored, and whether any were left out.</summary>
+    internal readonly record struct BoundedRow(WorklistItemRow? Row, int EvidenceTotal, bool EvidenceTruncated);
+
+    /// <summary>
+    /// <paramref name="row"/> as the plan tool returns it: every free-text member clipped (with an ellipsis, <see cref="WorklistItemSummary.Clip"/>)
+    /// and <c>evidenceRefs</c> cut to at most <see cref="MaxEvidenceLines"/> lines and <see cref="EvidenceBudgetBytes"/>. A row inside every bound
+    /// is returned unchanged (same text, same evidence string, byte for byte as the REST row), so only an oversized row differs from the REST route.
+    /// The caller reports <see cref="BoundedRow.EvidenceTotal"/> and <see cref="BoundedRow.EvidenceTruncated"/> so the omission is never silent.
+    /// </summary>
+    internal static BoundedRow BoundRow(WorklistItemRow? row)
+    {
+        if (row is null)
+        {
+            return new BoundedRow(null, 0, false);
+        }
+
+        var (evidence, total, truncated) = BoundEvidence(row.EvidenceRefs);
+        var bounded = row with
+        {
+            Status = WorklistItemSummary.Clip(row.Status, RowShortTextBytes),
+            Title = WorklistItemSummary.Clip(row.Title, RowTitleBytes),
+            SubjectName = WorklistItemSummary.Clip(row.SubjectName, RowSubjectNameBytes),
+            RuleShortName = WorklistItemSummary.Clip(row.RuleShortName, RowRuleShortNameBytes),
+            WorkType = WorklistItemSummary.Clip(row.WorkType, RowShortTextBytes),
+            PastDueWording = WorklistItemSummary.Clip(row.PastDueWording, RowShortTextBytes)!,
+            DueDate = WorklistItemSummary.Clip(row.DueDate, RowShortTextBytes),
+            EvidenceRefs = evidence,
+            Sentence = WorklistItemSummary.Clip(row.Sentence, RowSentenceBytes),
+        };
+        return new BoundedRow(bounded, total, truncated);
+    }
+
+    private static (string? Evidence, int Total, bool Truncated) BoundEvidence(string? evidenceRefs)
+    {
+        if (evidenceRefs is null)
+        {
+            return (null, 0, false);
+        }
+
+        JsonArray? lines;
+        try
+        {
+            lines = JsonNode.Parse(evidenceRefs) as JsonArray;
+        }
+        catch (JsonException)
+        {
+            lines = null;
+        }
+
+        if (lines is null)
+        {
+            // Not an array: the REST route does not produce this (it returns null); keep it only while it fits.
+            return EncodedBytes(evidenceRefs) <= EvidenceBudgetBytes ? (evidenceRefs, 0, false) : (null, 0, true);
+        }
+
+        var kept = new JsonArray();
+        var changed = false;
+        var used = 2; // "[" and "]"
+        foreach (var node in lines)
+        {
+            var line = BoundEvidenceLine(node, out var lineChanged);
+            var size = EncodedBytes(line?.ToJsonString() ?? "null") + (kept.Count > 0 ? 1 : 0);
+            if (kept.Count >= MaxEvidenceLines || used + size > EvidenceBudgetBytes)
+            {
+                break;
+            }
+
+            kept.Add(line);
+            used += size;
+            changed |= lineChanged;
+        }
+
+        if (kept.Count == lines.Count && !changed)
+        {
+            return (evidenceRefs, lines.Count, false); // inside every bound: the stored string, untouched
+        }
+
+        return (kept.ToJsonString(), lines.Count, kept.Count < lines.Count);
+    }
+
+    /// <summary>One evidence line with every string member clipped, nested values over the same size and members past the limits dropped.</summary>
+    private static JsonNode? BoundEvidenceLine(JsonNode? node, out bool changed)
+    {
+        changed = false;
+        if (node is not JsonObject source)
+        {
+            return node is JsonValue ? node.DeepClone() : null;
+        }
+
+        var line = new JsonObject();
+        foreach (var (name, value) in source)
+        {
+            if (line.Count >= EvidenceMaxMembers || EncodedBytes(name) > EvidenceMaxNameBytes)
+            {
+                changed = true;
+                continue;
+            }
+
+            if (value is JsonValue scalar && scalar.TryGetValue<string>(out var text))
+            {
+                var clipped = WorklistItemSummary.Clip(text, EvidenceFieldBytes);
+                changed |= clipped != text;
+                line[name] = clipped;
+            }
+            else if (value is null || value is JsonValue || EncodedBytes(value.ToJsonString()) <= EvidenceFieldBytes)
+            {
+                line[name] = value?.DeepClone();
+            }
+            else
+            {
+                changed = true;
+            }
+        }
+
+        return line;
+    }
+
+    private static int EncodedBytes(string text) => JsonEncodedText.Encode(text).EncodedUtf8Bytes.Length;
+
     /// <summary>The <c>{ reasonCode, message }</c> of a part of the plan result that failed after the plan itself was returned.</summary>
     internal sealed record PartError(string ReasonCode, string Message)
     {
@@ -61,11 +213,16 @@ internal static class PlanAndLookupToolSupport
     /// worklist row as the REST worklist writes it; null when the item is no longer in the caller's Decide or Do lane.
     /// <see cref="SuppressionError"/> and <see cref="RowError"/> are set (and the member is null) when that part could not be read; the
     /// plan, and the plan-read stamp, stand regardless.
+    /// <para><see cref="Row"/> is the REST row bounded by <see cref="BoundRow"/> (text clipped with an ellipsis, evidence lines capped):
+    /// <see cref="EvidenceTotal"/> is how many evidence lines the item stores and <see cref="EvidenceTruncated"/> is true when
+    /// <c>row.evidenceRefs</c> holds fewer of them. Both are always present (0 and false when there is no row or no evidence).</para>
     /// </summary>
     internal sealed record PlanBody(
         DecisionPlanResponse Plan,
         SuppressionResponse? Suppression,
         WorklistItemRow? Row,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PartError? SuppressionError = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PartError? RowError = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] PartError? RowError = null,
+        int EvidenceTotal = 0,
+        bool EvidenceTruncated = false);
 }

@@ -312,6 +312,61 @@ internal sealed record DecideLaneSeed(
     /// <summary>The one extra privileged item <see cref="Build"/> adds past page 1 (Charlie matter, item 10: Console row 145).</summary>
     public const int LatePrivilegedIndexInC = 10;
 
+    /// <summary>
+    /// The 200-item lane at its WORST for result size (task 025 fix round): 50 distinct matters of 4 items, the longest text in every member a row or
+    /// a core record carries (400 characters, every one escaped on the wire, so each clip budget is reached and exceeded), a non-null 2,000-character
+    /// rule sentence, a billing item (with its invoice line) in every 5th row and a privileged item in every 7th. Items rank across all four
+    /// severities and both priorities. <c>ConsoleOrder</c> is the seeding order (a size seed, not an order seed).
+    /// </summary>
+    public static DecideLaneSeed BuildWorstCase()
+    {
+        var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        string Heavy(int characters) => string.Concat(Enumerable.Repeat("\"é", characters / 2));
+        var extras = new Dictionary<Guid, WorklistItemExtras>();
+        var privileged = new HashSet<Guid>();
+        var order = new List<Guid>();
+        var groups = new List<WorklistGroup>();
+        var global = 0;
+        for (var m = 0; m < 50; m++)
+        {
+            var core = new WorklistCoreRecord("sprk_matter", Guid.NewGuid(), Heavy(400), Heavy(400) + $" {m:D2}", Heavy(400));
+            var items = new List<WorklistItemRow>();
+            for (var n = 0; n < 4; n++, global++)
+            {
+                var id = Guid.NewGuid();
+                var billing = global % 5 == 0;
+                var row = new WorklistItemRow(
+                    SignalId: id,
+                    Lane: "Decide",
+                    Status: "Active",
+                    Title: Heavy(400),
+                    SubjectName: Heavy(400),
+                    RuleShortName: Heavy(400),
+                    WorkType: billing ? null : WorkTypeCycle[global % 5],
+                    PastDueWording: "late",
+                    RaisedOn: start.AddMinutes(global),
+                    DueDate: "2026-12-31",
+                    EvidenceRefs: null,
+                    PolicyVersionId: Guid.NewGuid(),
+                    Sentence: Heavy(2_000),
+                    InvoiceReview: billing ? new WorklistInvoiceReview(Guid.NewGuid(), n % 2 == 0 ? Guid.NewGuid() : null) : null);
+                items.Add(row);
+                extras[id] = new WorklistItemExtras(new RankKey(global % 4, global % 3 == 0, start.AddMinutes(global)), WorkItemPrivilegeSources.None);
+                order.Add(id);
+                if (global % 7 == 3)
+                {
+                    privileged.Add(id);
+                }
+            }
+
+            groups.Add(new WorklistGroup(core, false, items));
+        }
+
+        var doRow = new WorklistItemRow(
+            Guid.NewGuid(), "Do", "Active", "Do title", "Do subject", "Do reason", "chaseReply", "late", start, null, null, null);
+        return new DecideLaneSeed(groups, extras, privileged, [new WorklistGroup(groups[0].Core, false, [doRow])], order, groups[0].Core!.RecordId, Guid.Empty);
+    }
+
     /// <param name="latePrivileged">Also flags item <see cref="LatePrivilegedIndexInC"/> of C (a row past page 1; privilege is derived per page, so the first page cannot count it).</param>
     public static DecideLaneSeed Build(bool latePrivileged = false)
     {

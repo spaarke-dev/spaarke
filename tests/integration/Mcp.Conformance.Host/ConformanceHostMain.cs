@@ -6,11 +6,17 @@ namespace Spaarke.Mcp.ConformanceHost;
 /// TESTS ONLY (spaarkeai-mcp-bff-api-r1 task 025). Starts <see cref="ConformanceBffFactory"/> and waits to be stopped.
 /// Usage: <c>dotnet run --project tests/integration/Mcp.Conformance.Host --no-build -- [injectedPort] [directPort]</c> (defaults 5081, 5082).
 /// Prints one line when the server is up: <c>READY &lt;injected url&gt; &lt;direct url&gt;</c>. Stops on Ctrl+C / SIGTERM.
+/// With <c>--measure</c> it starts no server for the conformance suite: it runs <see cref="MeasureMode"/> (per-tool latency and largest result size) and exits.
 /// </summary>
 internal static class ConformanceHostMain
 {
     private static async Task<int> Main(string[] args)
     {
+        if (args.Contains("--measure"))
+        {
+            return await MeasureMode.RunAsync(); // latency and result-size measurement, not a server (see MeasureMode)
+        }
+
         var injected = args.Length > 0 ? int.Parse(args[0], System.Globalization.CultureInfo.InvariantCulture) : 5081;
         var direct = args.Length > 1 ? int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 5082;
 

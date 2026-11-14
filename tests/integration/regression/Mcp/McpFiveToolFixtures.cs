@@ -15,19 +15,53 @@ namespace Sprk.Bff.Api.Tests.Regression.Mcp;
 /// plausible size: the 200-item lane of <see cref="DecideLaneSeed"/> (the 022 double, whose list and paging reads run the PRODUCTION
 /// <see cref="DecideLanePaging"/>), the LARGEST plan the closed action catalog can produce, 25 lookup candidates (the route's cap), and
 /// a commit result that names all 200 Signals. The Signal the plan is read for carries <see cref="EvidenceRefsJson"/> in its worklist row,
-/// which is what makes <c>spaarke_get_decision_plan</c> unbounded by anything the tool does (the row's <c>evidenceRefs</c> has no cap).
+/// which is the input <c>spaarke_get_decision_plan</c> bounds (the stored row's <c>evidenceRefs</c> has no cap; the tool's result does).
 /// </summary>
 internal sealed class FiveToolCapability : IDecisionCapability
 {
     private readonly DecideLaneDouble _lane;
 
-    public FiveToolCapability(DecideLaneSeed seed, int evidenceLines = 0)
+    private readonly bool _maxLengthRow;
+
+    /// <param name="maxLengthRow">The target item's row carries the longest text every member can hold (escape-heavy, so each clip budget is
+    /// reached) and its evidence lines are the longest the shape can write: the worst case of <c>spaarke_get_decision_plan</c>.</param>
+    public FiveToolCapability(DecideLaneSeed seed, int evidenceLines = 0, bool maxLengthRow = false)
     {
         Seed = seed;
         _lane = new DecideLaneDouble(seed);
+        _maxLengthRow = maxLengthRow;
         TargetSignalId = seed.ConsoleOrder[20]; // an ordinary visible item of the Alpha matter
-        EvidenceRefsJson = evidenceLines == 0 ? null : EvidenceLines(evidenceLines);
+        EvidenceRefsJson = evidenceLines == 0 ? null : maxLengthRow ? MaxLengthEvidenceLines(evidenceLines) : EvidenceLines(evidenceLines);
     }
+
+    /// <summary>
+    /// <paramref name="count"/> evidence lines at their worst: every string member 1,500 characters of quote-and-accent text (each is escaped
+    /// in the stored string and again in the result), 16 members, a nested value and a long member name beyond what the tool keeps.
+    /// </summary>
+    public static string MaxLengthEvidenceLines(int count) => JsonSerializer.Serialize(
+        Enumerable.Range(0, count).Select(i => new Dictionary<string, object?>
+        {
+            ["kind"] = HeavyText(1_500),
+            ["ref"] = HeavyText(1_500),
+            ["tier"] = HeavyText(1_500),
+            ["confidence"] = 0.92,
+            ["text"] = HeavyText(1_500),
+            ["source"] = HeavyText(1_500),
+            ["asOf"] = HeavyText(1_500),
+            ["clause"] = HeavyText(1_500),
+            ["withheld"] = false,
+            ["detail"] = new { a = HeavyText(1_500) },
+            ["x01"] = HeavyText(1_500),
+            ["x02"] = HeavyText(1_500),
+            ["x03"] = HeavyText(1_500),
+            ["x04"] = HeavyText(1_500),
+            ["x05"] = HeavyText(1_500),
+            ["x06"] = HeavyText(1_500),
+            [new string('n', 100)] = "a name past the limit",
+        }));
+
+    /// <summary>Text whose every character is escaped on the wire: a quote and an accent alternate (2 and 6 bytes), so any byte budget is reached early.</summary>
+    public static string HeavyText(int characters) => string.Concat(Enumerable.Repeat("\"é", characters / 2));
 
     public DecideLaneSeed Seed { get; }
 
@@ -61,7 +95,19 @@ internal sealed class FiveToolCapability : IDecisionCapability
         }
 
         WorklistItemRow Carry(WorklistItemRow row) =>
-            row.SignalId == TargetSignalId ? row with { EvidenceRefs = EvidenceRefsJson, Sentence = new string('s', 2000) } : row;
+            row.SignalId != TargetSignalId ? row
+            : _maxLengthRow
+                ? row with
+                {
+                    EvidenceRefs = EvidenceRefsJson,
+                    Sentence = HeavyText(2_000), // the stored maximum: 2,000 characters, every one escaped
+                    Title = HeavyText(400),
+                    SubjectName = HeavyText(400),
+                    RuleShortName = HeavyText(400),
+                    WorkType = HeavyText(400),
+                    DueDate = HeavyText(400),
+                }
+                : row with { EvidenceRefs = EvidenceRefsJson, Sentence = new string('s', 2000) };
 
         return read with
         {
@@ -122,4 +168,7 @@ internal static class McpResult
 
     /// <summary>UTF-8 bytes of the JSON-RPC <c>result</c> of the call (<c>content</c> and <c>structuredContent</c>): what a host counts against its inline cap.</summary>
     public static int Bytes(JsonElement result) => Encoding.UTF8.GetByteCount(result.GetRawText());
+
+    /// <summary>True when the call answered <c>isError</c>: a size test of an error result would measure nothing, so every size test checks this first.</summary>
+    public static bool IsError(JsonElement result) => result.TryGetProperty("isError", out var e) && e.GetBoolean();
 }

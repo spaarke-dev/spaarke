@@ -24,7 +24,9 @@ namespace Sprk.Bff.Api.Api.Mcp.LegalOperations.Decisions;
 /// opens without the dismissal count (<c>suppressionFailed</c>).</para>
 /// <para><b>The full row.</b> No route returns one Work Item's full row, so it is found in the caller's own worklist read
 /// (<see cref="IDecisionCapability.ListDecideAsync"/>, the read the Console's lane makes), not by a new read path. See
-/// <c>notes/task-023-notes.md</c> for the cost and the follow-up.</para>
+/// <c>notes/task-023-notes.md</c> for the cost and the follow-up. The row is bounded for the 64 KiB result limit
+/// (<see cref="PlanAndLookupToolSupport.BoundRow"/>: clipped text, at most 100 evidence lines and 20,000 bytes of them, with
+/// <c>evidenceTotal</c> and <c>evidenceTruncated</c> beside it); a row inside the bounds equals the REST row.</para>
 /// <para><b>Placement justification (CLAUDE.md section 10; .claude/constraints/bff-extensions.md).</b> A thin adapter inside the BFF over
 /// the decision capability the REST route also calls (spec "Placement Justification"); no package, no AI-internal type, no background
 /// work, no DI registration (the catalog finds the class by attribute). Component justification (section 11): existing = the REST
@@ -95,16 +97,26 @@ internal sealed class GetDecisionPlanTool : McpToolDefinition
         var lanes = await decisions.ListDecideAsync(http!.User, cancellationToken);
         var rowError = DecisionResultMapper.ToToolError(lanes);
 
+        // FR-05 / FR-11: the row is the one member of the result no catalog or route bounds (evidenceRefs and the rule sentence have no cap),
+        // so it is bounded here, for the MCP result only; the REST routes still return the stored row.
+        var row = PlanAndLookupToolSupport.BoundRow(rowError == null ? FindRow(lanes, signalId) : null);
         var body = new PlanAndLookupToolSupport.PlanBody(
             plan.Plan!,
             suppressionError == null ? suppression.Suppression : null,
-            rowError == null ? FindRow(lanes, signalId) : null,
+            row.Row,
             suppressionError == null ? null : PlanAndLookupToolSupport.PartError.From(suppressionError),
-            rowError == null ? null : PlanAndLookupToolSupport.PartError.From(rowError));
+            rowError == null ? null : PlanAndLookupToolSupport.PartError.From(rowError),
+            row.EvidenceTotal,
+            row.EvidenceTruncated);
 
         // Counts only (ADR-015): no title, subject, matter or party name.
-        return PlanAndLookupToolSupport.Success(
-            $"Decision plan loaded: {plan.Plan!.Actions.Count} action(s), {plan.Plan.NextSteps.Count} next step(s).", body);
+        var summary = $"Decision plan loaded: {plan.Plan!.Actions.Count} action(s), {plan.Plan.NextSteps.Count} next step(s).";
+        if (row.EvidenceTruncated)
+        {
+            summary += $" The item stores {row.EvidenceTotal} evidence line(s); the first ones are returned.";
+        }
+
+        return PlanAndLookupToolSupport.Success(summary, body);
     }
 
     private static WorklistItemRow? FindRow(SignalReadResult lanes, Guid signalId) =>

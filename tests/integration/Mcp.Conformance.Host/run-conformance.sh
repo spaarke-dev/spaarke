@@ -5,17 +5,19 @@
 #   bash tests/integration/Mcp.Conformance.Host/run-conformance.sh --no-build # host already built
 #
 # Exit code = the conformance CLI's: 0 when every failing check is in conformance/conformance-baseline.yml and no baselined check
-# passes; 1 on a regression or a stale baseline entry. Results (checks.json per scenario) land in $OUT (default conformance-results/).
+# passes; 1 on a regression or a stale baseline entry. Results (checks.json per scenario) and the host log (host.log) land in $OUT; the default
+# is a new temp directory ($RUNNER_TEMP when set), never the repository. The folder is printed at the end.
 # Needs: .NET SDK 10, Node 20+. Pass MCP_SKIP_WIDGET=1 to leave the widget unbuilt (the resources/read caching check then fails).
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 host_dir="$repo/tests/integration/Mcp.Conformance.Host"
 conf_dir="$host_dir/conformance"
-out="${OUT:-$repo/conformance-results}"
+out="${OUT:-$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/mcp-conformance-XXXXXX")}"
+mkdir -p "$out"
 injected_port="${MCP_CONFORMANCE_PORT:-5081}"
 direct_port="${MCP_CONFORMANCE_DIRECT_PORT:-5082}"
-log="${TMPDIR:-/tmp}/mcp-conformance-host.log"
+log="$out/host.log"
 
 build=1
 [[ "${1:-}" == "--no-build" ]] && build=0
@@ -41,7 +43,7 @@ for _ in $(seq 1 120); do
 done
 grep -q '^READY ' "$log" || { echo "The conformance host was not ready after 120 s:"; tail -40 "$log"; exit 2; }
 
-mkdir -p "$out"
+
 set +e
 (cd "$conf_dir" && npx conformance server \
   --url "http://127.0.0.1:${injected_port}/mcp/legal-operations" \
@@ -51,5 +53,5 @@ set +e
   -o "$out")
 status=$?
 set -e
-echo "conformance exit code: $status"
+echo "conformance exit code: $status (results and host log: $out)"
 exit "$status"
