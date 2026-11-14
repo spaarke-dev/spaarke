@@ -20,6 +20,8 @@
  *   dialog does). A plain-text value (the wizards' pre-filled bodies) is opened as paragraphs; that conversion is not an
  *   edit: the value keeps the plain-text body until the user changes its text. A rich-text body is sent as HTML, whose
  *   paragraphs keep the line breaks.
+ * - A file still uploading when the step closes (Back, or a restart) is uploaded again when the step opens, because the
+ *   composer drops an upload result that arrives after it closed.
  * - `headerContent` renders above the composer (the Summarize Files wizard's "short summary" toggle).
  *
  * Fluent v9 tokens only (ADR-021). No Xrm: the host injects the compose handlers (ADR-012).
@@ -119,15 +121,46 @@ function signature(email: IComposedEmail): string {
   ]);
 }
 
+/** Text as the rich-text editor shows it: runs of spaces and tabs collapse, line ends are trimmed. */
+function visibleText(text: string): string {
+  return text
+    .replace(/\u00a0/g, ' ')
+    .split('\n')
+    .map(line => line.replace(/[ \t]+/g, ' ').trim())
+    .join('\n')
+    .trim();
+}
+
+/** Elements a plain paragraph is written with: anything else (bold, a link, a list...) is formatting. */
+const PLAIN_ELEMENTS = new Set(['P', 'BR', 'SPAN', 'DIV']);
+
+/** True when a rich-text body carries formatting: an element other than paragraphs, breaks and spans, or a style. */
+function hasFormatting(html: string): boolean {
+  if (!/</.test(html)) return false;
+  // DOMParser builds an inert document: nothing in the markup runs.
+  const body = new DOMParser().parseFromString(html, 'text/html').body;
+  return Array.from(body.querySelectorAll('*')).some(el => {
+    if (!PLAIN_ELEMENTS.has(el.tagName)) return true;
+    const style = (el.getAttribute('style') ?? '').replace(/white-space\s*:\s*pre-wrap\s*;?/gi, '').trim();
+    return style !== '';
+  });
+}
+
 /**
- * A plain-text body opened as rich-text paragraphs is still that plain text while its text is unchanged (the rich-text
- * editor may re-serialise the paragraphs; that is not an edit), so the composer's state keeps the plain-text body.
+ * A plain-text body opened as rich-text paragraphs is still that plain text while its visible text is unchanged and it
+ * has no formatting (the editor re-serialises the paragraphs and collapses spacing; that is not an edit), so the
+ * composer's state keeps the plain-text body. Formatting added to the same text is an edit.
  */
 function keepPlainBody(next: IComposedEmail, previous: IComposedEmail): IComposedEmail {
-  if (previous.bodyFormat !== 'PlainText' || next.bodyFormat !== 'HTML') return next;
-  const sameText = toPlainText(next.body, 'HTML') === toPlainText(plainTextToHtml(previous.body), 'HTML');
+  if (previous.bodyFormat !== 'PlainText' || next.bodyFormat !== 'HTML' || hasFormatting(next.body)) return next;
+  const asShown = (html: string) => visibleText(toPlainText(html, 'HTML'));
+  const sameText = asShown(next.body) === asShown(plainTextToHtml(previous.body));
   return sameText ? { ...next, body: previous.body, bodyFormat: 'PlainText' } : next;
 }
+
+/** A local file whose upload had not finished when the composer closed: the composer drops a result it gets after that. */
+const isStrandedUpload = (a: IAttachmentItem): boolean =>
+  a.source === 'local' && !!a.file && !a.documentId && a.selected !== false;
 
 /** Restored attachments keep their inclusion: the composer reads an unset `selected` on a compose as "not attached". */
 function restoredAttachments(items: readonly IAttachmentItem[]): IAttachmentItem[] {
@@ -185,6 +218,60 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
     onChangeRef.current(next);
   }, []);
 
+  // An upload still running when the step closed (Back, or a restart from a host change) finished into a composer that
+  // was gone, so the attachment never got its document. Upload it again here, then restart the composer with the result.
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const uploading = React.useRef(new Set<string>());
+  const [uploadError, setUploadError] = React.useState<string>();
+  const upload = composeHandlers?.onUploadLocalAttachment;
+  React.useEffect(() => {
+    if (!upload) return;
+    for (const item of shown.current.attachments.filter(isStrandedUpload)) {
+      if (uploading.current.has(item.id)) continue;
+      uploading.current.add(item.id);
+      const settle = (patch: (a: IAttachmentItem) => IAttachmentItem | null) => {
+        uploading.current.delete(item.id);
+        if (!mountedRef.current) return; // the next opening of the step tries again
+        const current = shown.current;
+        if (!current.attachments.some(a => a.id === item.id)) return; // removed meanwhile
+        const next: IComposedEmail = {
+          ...current,
+          attachments: current.attachments.flatMap(a => {
+            if (a.id !== item.id) return [a];
+            const patched = patch(a);
+            return patched ? [patched] : [];
+          }),
+        };
+        shown.current = next;
+        onChangeRef.current(next);
+        setGeneration(g => g + 1);
+      };
+      upload(item.file as File)
+        .then(res =>
+          settle(a => ({
+            ...a,
+            documentId: res.documentId,
+            driveItemId: res.driveItemId ?? a.driveItemId,
+            linkUrl: res.linkUrl ?? a.linkUrl,
+          }))
+        )
+        .catch((err: unknown) => {
+          if (mountedRef.current) {
+            setUploadError(
+              `Could not attach ${item.fileName}: ${err instanceof Error ? err.message : 'upload failed'}.`
+            );
+          }
+          settle(() => null);
+        });
+    }
+  }, [generation, upload]);
+
   const pending = pendingAttachments(value);
   const handlers = composeHandlers ?? {};
 
@@ -228,6 +315,11 @@ export const SendEmailFollowOnStep: React.FC<ISendEmailFollowOnStepProps> = ({
         onRenderEmailTemplate={handlers.onRenderEmailTemplate}
         onDraftWithAi={handlers.onDraftWithAi}
       />
+      {uploadError ? (
+        <MessageBar intent="error" data-testid="attachment-upload-error">
+          <MessageBarBody>{uploadError}</MessageBarBody>
+        </MessageBar>
+      ) : null}
       {pending.length > 0 ? (
         <MessageBar intent="warning" data-testid="attachments-pending">
           <MessageBarBody>

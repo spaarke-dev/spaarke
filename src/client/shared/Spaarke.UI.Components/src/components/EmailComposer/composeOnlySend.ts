@@ -129,6 +129,11 @@ export interface ISendComposedEmailOptions {
   bffBaseUrl?: string;
   /** The host's record-link resolver for documents the user chose to link (same handler the composer uses). */
   onResolveShareLink?: (documentId: string) => Promise<string | null>;
+  /**
+   * Ask the BFF to archive the .eml even when the email is filed to no record. Defaults to the composer's own default (on);
+   * a send filed to a record is archived either way. Summarize Files passes `false`: its email has no record.
+   */
+  archiveToSpe?: boolean;
 }
 
 export interface ISendComposedEmailResult {
@@ -171,6 +176,7 @@ export async function sendComposedEmail(
       mount: 'inline',
       authenticatedFetch: options.authenticatedFetch,
       associations: options.associations,
+      archiveToSpe: options.archiveToSpe,
     }),
     to: email.to,
     cc: email.cc,

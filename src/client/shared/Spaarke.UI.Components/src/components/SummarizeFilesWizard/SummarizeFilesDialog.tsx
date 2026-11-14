@@ -232,6 +232,9 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   // ── Send Email state ──────────────────────────────────────────────────
   // Task 182 (D-219): the whole composed email — From, To/Cc/Bcc, subject, body, attachments.
   const [email, setEmail] = React.useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
+  // The Send Email pre-fill runs once per opening: clearing the subject to retype it must not reset the subject and body
+  // (and lose a template or AI draft).
+  const emailPrefilledRef = React.useRef(false);
 
   // ── Create Project state ──────────────────────────────────────────────
   const [projectFormValues, setProjectFormValues] = React.useState<ICreateProjectFormState>({ ...EMPTY_PROJECT_FORM });
@@ -248,6 +251,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       setSelectedActions([]);
       setIncludeShortSummary(false);
       setEmail(EMPTY_COMPOSED_EMAIL);
+      emailPrefilledRef.current = false;
       setProjectFormValues({ ...EMPTY_PROJECT_FORM });
       setProjectFormValid(false);
     }
@@ -453,7 +457,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
 
   // ── Pre-fill email fields when send-email is selected ─────────────────
   React.useEffect(() => {
-    if (selectedActions.includes('send-email') && summarizeResult && !email.subject) {
+    if (selectedActions.includes('send-email') && summarizeResult && !email.subject && !emailPrefilledRef.current) {
+      emailPrefilledRef.current = true;
       setEmail(prev => ({
         ...prev,
         subject: buildSummaryEmailSubject(),
@@ -498,6 +503,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       } else {
         const emailResult = await sendComposedEmail(currentEmail, {
           associations: [],
+          // A summary is filed to no record; as before, its .eml is not archived.
+          archiveToSpe: false,
           authenticatedFetch,
           bffBaseUrl,
           onResolveShareLink: emailComposeHandlers?.onResolveShareLink,

@@ -155,6 +155,24 @@ describe('SendEmailFollowOnStep: the shared EmailComposer, compose-only (task 18
     expect(last.subject).toBe('Edited subject');
   });
 
+  it('the real editor collapsing repeated, leading or trailing spaces and tabs in a pre-fill is not an edit', async () => {
+    const spaced: IComposedEmail = {
+      ...COMPOSED,
+      body: ['Name:  Acme   Corp', '  - item', 'a\ttab', 'Hello ', 'World'].join('\n'),
+    };
+    const onValue = jest.fn();
+    renderWithProviders(<Host initial={spaced} onValue={onValue} />);
+    await waitFor(() => expect(bodyText()).toContain('World'));
+    await act(async () => Promise.resolve());
+    expect(onValue).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Subject' }), { target: { value: 'Edited subject' } });
+    await waitFor(() => expect(onValue).toHaveBeenCalled());
+    const last = onValue.mock.calls[onValue.mock.calls.length - 1][0] as IComposedEmail;
+    expect(last.bodyFormat).toBe('PlainText');
+    expect(last.body).toBe(spaced.body);
+  });
+
   it('lifts the whole email, including the From choice, Bcc and attachments', async () => {
     const onValue = jest.fn();
     renderWithProviders(<Host initial={{ ...COMPOSED, sendMode: 'sharedMailbox' }} onValue={onValue} />);
@@ -282,6 +300,23 @@ describe('sendComposedEmail: the Finish send through the composer request path (
       { associations: association, authenticatedFetch: fetch as unknown as AuthenticatedFetchFn }
     );
     expect(bodyOf(fetch).sendMode).toBe('SharedMailbox');
+  });
+
+  it('archives like the Send Email dialog by default; a record-less send (Summarize Files) can opt out', async () => {
+    const fetch = okFetch();
+    await sendComposedEmail(COMPOSED, {
+      associations: association,
+      authenticatedFetch: fetch as unknown as AuthenticatedFetchFn,
+    });
+    expect(bodyOf(fetch).archiveToSpe).toBe(true);
+
+    const noArchive = okFetch();
+    await sendComposedEmail(COMPOSED, {
+      associations: [],
+      authenticatedFetch: noArchive as unknown as AuthenticatedFetchFn,
+      archiveToSpe: false,
+    });
+    expect(bodyOf(noArchive).archiveToSpe).toBe(false);
   });
 
   it('a failed send is a warning, never a throw (the record stays)', async () => {

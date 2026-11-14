@@ -216,6 +216,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
   // -- Send Email state (task 182: the whole composed email — From, To/Cc/Bcc, subject, body, attachments) --
   const [email, setEmail] = React.useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
+  // The Send Email pre-fill runs once per opening: clearing the subject to retype it must not reset the subject and body
+  // (and lose a template or AI draft).
+  const emailPrefilledRef = React.useRef(false);
 
   // -- SPE container ID --
   const [speContainerId, setSpeContainerId] = React.useState('');
@@ -264,6 +267,7 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
       setCreateEventPriority(100000001);
       setCreateEventDescription('');
       setEmail(EMPTY_COMPOSED_EMAIL);
+      emailPrefilledRef.current = false;
     }
     // Intentionally depends on `open` only — re-running on every `config` change
     // would clobber in-progress wizard state. The initial-association seed is read
@@ -539,9 +543,10 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({
 
   // -- Email pre-fill when send-email is selected --
   React.useEffect(() => {
-    if (selectedActions.includes('send-email') && !email.subject) {
+    if (selectedActions.includes('send-email') && !email.subject && !emailPrefilledRef.current) {
       const entityName = config.getEntityName?.() ?? '';
       if (entityName) {
+        emailPrefilledRef.current = true;
         const subject = config.buildEmailSubject ? config.buildEmailSubject(entityName) : `New Record: ${entityName}`;
 
         const fields = config.getFormFields?.() ?? {};
