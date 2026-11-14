@@ -399,3 +399,8 @@ shared/taskpane/components/__tests__/SaveFlow.invoiceTaskTypes.test.tsx
 # and its banner), green but never listed until now.
 shared/taskpane/services/__tests__/invoicePreviousSubmission.test.ts
 shared/taskpane/components/views/__tests__/InvoiceView.previousSubmission.test.tsx
+# Task 134 slice B2 (2026-11-13): the correction note (ebilling 095f) - required on a Correction, absent on New, resent on Retry.
+shared/taskpane/components/views/__tests__/InvoiceView.correctionNote.test.tsx
+shared/taskpane/services/__tests__/invoiceSubmissionSeam.correctionNote.test.ts
+shared/taskpane/services/__tests__/invoiceSubmissionService.correctionNote.test.ts
+shared/taskpane/utils/__tests__/invoiceSubmissionMessages.correctionNote.test.ts
