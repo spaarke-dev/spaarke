@@ -5,7 +5,7 @@
 
 ## NOW (checkpoint, 2026-11-14 ~09:30Z) — read this first
 
-- **#2822 MERGED** into master at 7da54c00a3, on the owner's go. uac-r2, word-add-in-r1 and spa-r4 got the SHA. It reaches dev with uac-r2's NEXT dev BFF deploy, which needs the owner's go in uac-r2's session.
+- **#2822 MERGED** (7da54c00a3) and **LIVE on the dev BFF** since about 15:19Z: 5a9b687a0b = master 2747977f47 + mcp spike, deployed by uac-r2. word-add-in-r1 was told. Owner checklist section D (095e/095f) is now testable on dev. `sprk_recordprocedures` is NOT deployed; that is task 112.
 - **#2830 (095g) is OPEN**, work → master, head d825808b7d, not bound.
   - uac-r2 APPROVED the merged head; ontology-r1's light check found nothing ontology-owned.
   - CI was not yet checked. Merging needs the owner's go.
