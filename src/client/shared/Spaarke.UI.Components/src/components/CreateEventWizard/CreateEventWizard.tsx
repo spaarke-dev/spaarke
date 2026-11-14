@@ -377,6 +377,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
         renderContent: _wizardFiles => (
           <CreateEventStep
             dataService={dataService}
+            navigationService={navigationService}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             initialFormValues={formValues}

@@ -667,8 +667,8 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
               description: context.followOn.createEventDescription,
               regardingRecordId: matterId,
               regardingRecordName: matterName,
-              assignedToId: '',
-              assignedToName: '',
+              assignedToId: context.followOn.createEventAssignedToId,
+              assignedToName: context.followOn.createEventAssignedToName,
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_matter');
             if (eventResult.warnings.length > 0) result.warnings.push(...eventResult.warnings);

@@ -413,6 +413,39 @@ describe('CreateAnalysisWizardWidget', () => {
     expect(sentBody.body).toBe('Mapped body from profile');
   });
 
+  it('Create To Do follow-on: Assigned To opens the Dataverse side pane over active contacts (ontology 180, D-219)', async () => {
+    const navigationService = buildNavigationService([
+      { id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' },
+    ]);
+    renderWidget(buildData({ navigationService }));
+
+    skipAssociateTo();
+    await selectExistingDocument();
+    clickPrimary('Next');
+    fireEvent.change(screen.getByLabelText('Analysis name'), { target: { value: 'MSA Review' } });
+    clickPrimary('Next');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Create To Do/i }));
+    clickPrimary('Next');
+
+    // A side-pane field: a Select button, no inline contact search.
+    const select = await screen.findByRole('button', { name: 'Select Assigned To' });
+    expect(screen.queryByPlaceholderText('Search contacts...')).not.toBeInTheDocument();
+
+    (navigationService.openLookup as jest.Mock).mockClear();
+    (navigationService.openLookup as jest.Mock).mockResolvedValue([
+      { id: 'contact-1', name: 'Alex Contact', entityType: 'contact' },
+    ]);
+    fireEvent.click(select);
+
+    await screen.findByRole('button', { name: 'Clear Assigned To' });
+    expect(navigationService.openLookup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityType: 'contact',
+        filters: [expect.objectContaining({ entityLogicalName: 'contact' })],
+      })
+    );
+  });
+
   it('ADR-021: renders correctly under both light and dark Fluent themes', () => {
     const { unmount } = renderWidget(buildData(), 'light');
     expect(screen.getAllByText('Associate To').length).toBeGreaterThan(0);
