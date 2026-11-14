@@ -1,7 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { webDarkTheme, webLightTheme } from '@fluentui/react-components';
 import { App } from '../App';
 import { DISCONNECTED, McpHostContext, type McpHostConnection } from '../mcp/mcpHostContext';
+import { CONSOLE_BASE, INVOICE, MATTERS, installResponseStandIn, pagingHost, row } from './laneFixtures';
+
+installResponseStandIn();
 
 function renderWith(connection: Partial<McpHostConnection>) {
   const value: McpHostConnection = { ...DISCONNECTED, ...connection };
@@ -73,10 +76,33 @@ describe('App shell states', () => {
     expect(screen.getByText('Connecting to the host')).toBeInTheDocument();
   });
 
-  it('shows the placeholder once connected', () => {
-    renderWith({ isConnected: true, hostContext: { theme: 'light' } });
-    expect(screen.getByRole('heading', { name: 'Decide' })).toBeInTheDocument();
-    expect(screen.getByText(/need your decision/)).toBeInTheDocument();
+  it('shows the Decide lane once connected, read through the host', async () => {
+    const host = pagingHost([row(1, { core: MATTERS.a.id, workType: 'chaseReply' })]);
+    renderWith({ isConnected: true, hostContext: { theme: 'light' }, callTool: host.callTool });
+    expect(await screen.findByRole('heading', { name: 'Decide' })).toBeInTheDocument();
+    expect(screen.getByText('Items that need your decision')).toBeInTheDocument();
+    expect(host.calls.map(c => c.name)).toEqual(['spaarke_list_decision_page']);
+  });
+
+  it('builds a billing link from the base the host delivered with spaarke_show_decisions, and the host opens it', async () => {
+    const host = pagingHost([
+      row(1, { core: MATTERS.a.id, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } }),
+    ]);
+    const openLink = jest.fn(async () => true);
+    renderWith({
+      isConnected: true,
+      hostContext: { theme: 'light' },
+      callTool: host.callTool,
+      openLink,
+      toolResult: { consoleBaseUrl: CONSOLE_BASE },
+    });
+    const finding = await screen.findByTestId('billing-finding');
+    const link = within(finding).getByTestId('billing-finding-link');
+    expect(link.getAttribute('href')).toBe(
+      `${CONSOLE_BASE}/main.aspx?pagetype=webresource&webresourceName=sprk_invoicereviewpage&data=invoiceId%3D${INVOICE}`
+    );
+    fireEvent.click(link);
+    await waitFor(() => expect(openLink).toHaveBeenCalledWith(link.getAttribute('href')));
   });
 
   it('tells the user when the connection failed', () => {
