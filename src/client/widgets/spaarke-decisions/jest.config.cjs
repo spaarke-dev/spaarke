@@ -18,6 +18,7 @@ module.exports = {
   moduleNameMapper: {
     '^@spaarke/ui-components/(.*)$': '<rootDir>/../../shared/Spaarke.UI.Components/src/$1',
     '^@fluentui/react-components$': '<rootDir>/node_modules/@fluentui/react-components',
+    '^@fluentui/react-icons$': '<rootDir>/node_modules/@fluentui/react-icons',
     '^react$': '<rootDir>/node_modules/react',
     '^react-dom$': '<rootDir>/node_modules/react-dom',
     '^react-dom/client$': '<rootDir>/node_modules/react-dom/client',

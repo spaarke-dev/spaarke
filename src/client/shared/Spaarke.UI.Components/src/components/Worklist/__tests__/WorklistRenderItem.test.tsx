@@ -3,6 +3,7 @@
  *  - with no `renderItem`, every item is the standard `IssueLine` (every existing host is unchanged);
  *  - with it, a node replaces that item's line, and `null` / `undefined` keeps the standard line for that item;
  *  - the lane panel passes it to every card, and the counts and the start button do not depend on it.
+ *  - `belowHeader` renders directly under the lane header, before the cards and the list; absent renders nothing extra.
  */
 
 import '@testing-library/jest-dom';
@@ -82,4 +83,33 @@ describe('WorklistLanePanel renderItem seam', () => {
     expect(screen.getByTestId('lane-start-Decide')).toBeEnabled();
     window.localStorage.clear();
   });
+
+  it('belowHeader renders after the header and before the cards and the list; absent adds nothing', () => {
+    window.localStorage.setItem('spaarke.worklist.laneOpen', JSON.stringify({ Decide: true }));
+    const view = buildLaneView(data.Decide, 'Decide', 'all');
+    const props = {
+      lane: 'Decide' as const,
+      view,
+      today: TODAY,
+      onSelectKey: () => undefined,
+      onOpenItem: () => undefined,
+      onStart: () => undefined,
+    };
+    const { rerender } = renderThemed(<WorklistLanePanel {...props} belowHeader={<div data-testid="below" />} />);
+    const below = screen.getByTestId('below');
+    const start = screen.getByTestId('lane-start-Decide');
+    const region = screen.getByTestId('lane-region-Decide');
+    expect(start.compareDocumentPosition(below) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(below.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(below.compareDocumentPosition(screen.getAllByTestId('issue-line')[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <WorklistLanePanel {...props} />
+      </FluentProvider>
+    );
+    expect(screen.queryByTestId('below')).not.toBeInTheDocument();
+    window.localStorage.clear();
+  });
 });
+

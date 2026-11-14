@@ -25,7 +25,8 @@
       "react/*": ["node_modules/@types/react/*"],
       "react-dom": ["node_modules/@types/react-dom"],
       "react-dom/*": ["node_modules/@types/react-dom/*"],
-      "@fluentui/react-components": ["node_modules/@fluentui/react-components"]
+      "@fluentui/react-components": ["node_modules/@fluentui/react-components"],
+      "@fluentui/react-icons": ["node_modules/@fluentui/react-icons"]
     }
   },
   "include": ["src"]

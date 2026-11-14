@@ -41,6 +41,8 @@ export interface WorklistLanePanelProps {
   aggregateRow?: React.ReactNode;
   /** Optional per-item seam, passed to each `MatterCard` (see `MatterCardProps.renderItem`); absent keeps every item a standard line. */
   renderItem?: (item: WorklistItem) => React.ReactNode;
+  /** Optional content rendered directly under the lane header, before the cards and the list; absent renders nothing. */
+  belowHeader?: React.ReactNode;
 }
 
 const LANE_COPY: Record<WorklistLane, { heading: string; subtitle: string; start: string; empty: string }> = {
@@ -80,6 +82,7 @@ export const WorklistLanePanel: React.FC<WorklistLanePanelProps> = ({
   onStart,
   aggregateRow,
   renderItem,
+  belowHeader,
 }) => {
   const styles = useStyles();
   const [open, setOpen] = useLaneOpen(lane);
@@ -141,6 +144,8 @@ export const WorklistLanePanel: React.FC<WorklistLanePanelProps> = ({
           {copy.start}
         </Button>
       </div>
+
+      {belowHeader}
 
       {total > 0 && <MetricCardRow layout="wide" ariaLabel={`${copy.heading} filters`} cards={cards} />}
 

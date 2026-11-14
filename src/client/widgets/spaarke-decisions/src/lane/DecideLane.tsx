@@ -48,8 +48,11 @@ import { buildBillingLinkOut } from './billingLinkOut';
 export interface OpenWizardEvent {
   /** The Work Item's Signal id. */
   signalId: string;
-  /** The row's core record (matter, ...); `null` for a Not filed card. */
-  core: OpenItemEvent['core'];
+  /**
+   * The row's core record id; `null` for a Not filed card. No record type: the paged read carries none (the widget's `CORE_RECORD_TYPE`
+   * is an internal placeholder, not a Dataverse logical name), so the event claims none until the page carries the real one.
+   */
+  core: { recordId: string } | null;
   /** The non-billing Work Items of the view, in the order shown, whole lane across every page: the wizard's browse set. */
   visibleList: readonly string[];
   /** 1-based place of `signalId` in `visibleList`. */
@@ -88,6 +91,7 @@ const useStyles = makeStyles({
   center: { display: 'flex', justifyContent: 'center', padding: tokens.spacingVerticalXXL },
   heading: { display: 'flex', flexDirection: 'column' },
   muted: { color: tokens.colorNeutralForeground3 },
+  belowHeader: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalS },
   reviewBar: {
     display: 'flex',
     alignItems: 'center',
@@ -114,6 +118,14 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalS,
   },
   headline: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  reason: {
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: tokens.colorNeutralForeground3,
+  },
   timing: { flexShrink: 0, color: tokens.colorNeutralForeground3 },
 });
 
@@ -139,6 +151,9 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
   React.useEffect(() => {
     let current = true;
     setLoad({ status: 'loading' });
+    // A new service (or Try again) is a new read of the lane: a walk or a notice from the old one may name ids that are not in it.
+    setReview(null);
+    setNotice(null);
     service.read('lanes').then(
       data => {
         if (current) setLoad({ status: 'ready', data });
@@ -172,18 +187,16 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
   );
 
   const raise = React.useCallback(
-    (ids: readonly string[], index: number, core: OpenItemEvent['core']) => {
+    (ids: readonly string[], index: number, core: OpenWizardEvent['core']) => {
       onOpenWizard?.({ signalId: ids[index], core, visibleList: ids, position: index + 1, total: ids.length });
     },
     [onOpenWizard]
   );
 
   const coreOf = React.useCallback(
-    (signalId: string): OpenItemEvent['core'] => {
+    (signalId: string): OpenWizardEvent['core'] => {
       const group = view.groups.find(g => g.items.some(i => i.signalId === signalId));
-      return group?.group.core
-        ? { recordType: group.group.core.recordType, recordId: group.group.core.recordId }
-        : null;
+      return group?.group.core ? { recordId: group.group.core.recordId } : null;
     },
     [view.groups]
   );
@@ -202,7 +215,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     setNotice(null);
     // While a review is under way the label follows the row that was opened, so "n of N" always names the item in front of the user.
     if (review) setReview({ ids: reviewable, index });
-    raise(reviewable, index, event.core);
+    raise(reviewable, index, event.core ? { recordId: event.core.recordId } : null);
   };
 
   const startReview = () => {
@@ -244,6 +257,11 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
         <Text className={styles.headline} size={300} title={line.headline}>
           {line.headline}
         </Text>
+        {line.ruleShortName && (
+          <Caption1 className={styles.reason} data-testid="billing-finding-reason">
+            {line.ruleShortName}
+          </Caption1>
+        )}
         <Badge appearance="tint" color="informative" size="small" data-testid="billing-finding-label">
           Finding
         </Badge>
@@ -253,6 +271,7 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
         {href ? (
           <Link
             href={href}
+            aria-label={`Open in Invoice Review: ${line.headline}`}
             data-testid="billing-finding-link"
             onClick={event => {
               // The widget never navigates itself: the host opens the page.
@@ -306,14 +325,51 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
     );
   }
 
+  // Directly under the lane header, so the walk's controls and the failure notice are in reach however long the list is (a long
+  // lane has up to thousands of rows below). The notice is an alert (announced when it appears); the live region of the review bar is
+  // the position label alone, so stepping announces "n of N" and the buttons are not re-read.
+  const belowHeader =
+    notice || review ? (
+      <div className={styles.belowHeader}>
+        {notice && (
+          <div role="alert" data-testid="decide-lane-notice">
+            <MessageBar intent="warning">
+              <MessageBarBody>{notice}</MessageBarBody>
+            </MessageBar>
+          </div>
+        )}
+        {review && (
+          <div className={styles.reviewBar} role="group" aria-label="Review" data-testid="decide-review-bar">
+            <Text weight="semibold">Reviewing</Text>
+            <Text role="status" aria-live="polite" data-testid="decide-review-position">{`${review.index + 1} of ${review.ids.length}`}</Text>
+            <span className={styles.spacer} />
+            <Button
+              size="small"
+              disabled={review.index === 0}
+              onClick={() => stepReview(-1)}
+              data-testid="decide-review-previous"
+            >
+              Previous
+            </Button>
+            <Button
+              size="small"
+              appearance="primary"
+              disabled={review.index >= review.ids.length - 1}
+              onClick={() => stepReview(1)}
+              data-testid="decide-review-next"
+            >
+              Next
+            </Button>
+            <Button size="small" appearance="subtle" onClick={() => setReview(null)} data-testid="decide-review-stop">
+              Stop review
+            </Button>
+          </div>
+        )}
+      </div>
+    ) : undefined;
+
   return (
     <div className={styles.root} data-testid="decide-lane">
-      {notice && (
-        <MessageBar intent="warning" data-testid="decide-lane-notice">
-          <MessageBarBody>{notice}</MessageBarBody>
-        </MessageBar>
-      )}
-
       <WorklistLanePanel
         lane="Decide"
         view={view}
@@ -323,35 +379,8 @@ export const DecideLane: React.FC<DecideLaneProps> = ({
         onOpenItem={openItem}
         onStart={startReview}
         renderItem={renderItem}
+        belowHeader={belowHeader}
       />
-
-      {review && (
-        <div className={styles.reviewBar} role="status" aria-label="Review" data-testid="decide-review-bar">
-          <Text weight="semibold">Reviewing</Text>
-          <Text data-testid="decide-review-position">{`${review.index + 1} of ${review.ids.length}`}</Text>
-          <span className={styles.spacer} />
-          <Button
-            size="small"
-            disabled={review.index === 0}
-            onClick={() => stepReview(-1)}
-            data-testid="decide-review-previous"
-          >
-            Previous
-          </Button>
-          <Button
-            size="small"
-            appearance="primary"
-            disabled={review.index >= review.ids.length - 1}
-            onClick={() => stepReview(1)}
-            data-testid="decide-review-next"
-          >
-            Next
-          </Button>
-          <Button size="small" appearance="subtle" onClick={() => setReview(null)} data-testid="decide-review-stop">
-            Stop review
-          </Button>
-        </div>
-      )}
     </div>
   );
 };

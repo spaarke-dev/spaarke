@@ -14,6 +14,8 @@
  *
  * What the slim page does not carry: a core record's type (it names each core once, by name and number). The lane's headings need only
  * the name and number; the type is the placeholder `CORE_RECORD_TYPE`, so `groupKey` stays unique per core and no heading says a type.
+ * The placeholder exists only because the shared parser requires a `recordType`; it is NOT a Dataverse logical name and must never leave the
+ * lane (`DecideLane` emits `{ recordId }` only, until the page carries the real type).
  */
 import type { ResponseFetchFn } from '@spaarke/ui-components/utils/fetchTypes';
 import { createMcpFetch, ShimReason, type CallServerTool, type McpRoute } from '../mcp/mcpFetch';
@@ -27,7 +29,7 @@ export const WORKLIST_ROUTE = '/api/v1/signals/worklist';
 /** An internal route (never sent anywhere): one page of the lane, `?cursor=` the previous page's `nextCursor`. */
 const PAGE_ROUTE = '/api/v1/decision-lane/page';
 
-/** The record type used for every core record: the slim page names no type (see the file header). */
+/** An internal placeholder for the shared parser, used for every core record: the slim page names no type. Not a logical name; never emitted. */
 export const CORE_RECORD_TYPE = 'core';
 
 /** A lane longer than this is refused rather than followed: 100 pages is 5,000 Work Items, far past any real lane. */

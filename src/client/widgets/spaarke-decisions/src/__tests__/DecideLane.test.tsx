@@ -13,6 +13,8 @@
  *  - negative: a billing row with no usable invoice id, or with no console base, has no link and no decide action
  *  - loading, empty and error states; an isError result shows the server's message
  */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { createWorklistService } from '@spaarke/ui-components/components/Worklist/worklistService';
@@ -104,20 +106,19 @@ function seventyItems(): SlimRow[] {
   return rows;
 }
 
-/** What `spaarke_show_decisions` reports per category for the same rows (the BFF's `DecideLaneCategories`, restated for the test). */
-function showDecisionsCategories(rows: readonly SlimRow[]): Record<string, number> {
-  const count = (pick: (r: SlimRow) => boolean) => rows.filter(pick).length;
-  const plain = (r: SlimRow) => !r.invoiceReview;
-  const types = ['askOutsideCounsel', 'approveOrRebudget', 'chaseReply'];
-  return {
-    All: rows.length,
-    'Invoice decisions': count(r => !plain(r)),
-    'Ask outside counsel': count(r => plain(r) && r.workType === 'askOutsideCounsel'),
-    'Approve or rebudget': count(r => plain(r) && r.workType === 'approveOrRebudget'),
-    'Chase a reply': count(r => plain(r) && r.workType === 'chaseReply'),
-    Other: count(r => plain(r) && !types.includes(r.workType ?? '')),
-  };
+/**
+ * Task 022's shared corpus: for each case, the Decide lane's items and the cards the BFF's `spaarke_show_decisions` reports (key, label,
+ * count, in display order). The widget's cards must equal the same expectations, so the two partitions cannot drift apart. The
+ * partition is NOT restated here.
+ */
+interface ParityCase {
+  name: string;
+  items: Array<{ lane: string; workType: string | null; invoiceReview: { invoiceId: string; lineId?: string } | null }>;
+  expected: Array<{ key: string; label: string; count: number }>;
 }
+const PARITY_CASES: ParityCase[] = JSON.parse(
+  readFileSync(resolve(__dirname, '../../../../../../tests/fixtures/decide-lane-category-parity/cases.json'), 'utf8')
+).cases;
 
 describe('the lane renders the Console lane', () => {
   it("shows the header 'Decide', the count and the subtitle", async () => {
@@ -129,20 +130,18 @@ describe('the lane renders the Console lane', () => {
   });
 
   it('shows a card per category with the counts spaarke_show_decisions reports for the same data, and the oldest age', async () => {
-    const rows = seventyItems();
-    renderLane(pagingHost(rows).callTool);
+    renderLane(pagingHost(seventyItems()).callTool);
     await ready();
 
     // Hand-checked: A has 17 ask, 7 approve, 4 chase and the 2 billing items; B 10 chase, 10 ask, 5 other; C 10 approve, 5 ask.
-    const expected = showDecisionsCategories(rows);
-    expect(expected).toEqual({
+    const expected: Record<string, number> = {
       All: 70,
       'Invoice decisions': 2,
       'Ask outside counsel': 32,
       'Approve or rebudget': 17,
       'Chase a reply': 14,
       Other: 5,
-    });
+    };
 
     const labels = cardLabels();
     expect(labels).toHaveLength(6);
@@ -158,6 +157,37 @@ describe('the lane renders the Console lane', () => {
       .reduce((n, [, c]) => n + c, 0);
     expect(typeSum).toBe(70);
   });
+
+  it.each(PARITY_CASES.map(c => [c.name, c] as const))(
+    'cards equal the shared parity corpus (task 022): %s',
+    async (_name, parityCase) => {
+      const rows = parityCase.items
+        .filter(item => item.lane === 'Decide') // the paging tool reads the Decide lane
+        .map((item, n) =>
+          row(n + 1, {
+            core: A,
+            ...(item.workType ? { workType: item.workType } : {}),
+            ...(item.invoiceReview ? { invoiceReview: item.invoiceReview } : {}),
+          })
+        );
+      renderLane(pagingHost(rows).callTool);
+      await ready();
+
+      const allCount = parityCase.expected.find(e => e.key === 'all')!.count;
+      expect(screen.getByTestId('lane-count-Decide')).toHaveTextContent(String(allCount));
+      if (allCount === 0) {
+        // An empty lane shows no cards: every expected count is zero.
+        expect(parityCase.expected.every(e => e.count === 0)).toBe(true);
+        expect(within(lane()).queryByRole('group', { name: 'Decide filters' })).not.toBeInTheDocument();
+        return;
+      }
+      const labels = cardLabels();
+      expect(labels).toHaveLength(parityCase.expected.length);
+      parityCase.expected.forEach((expectedCard, i) => {
+        expect(labels[i]).toMatch(new RegExp(`^${expectedCard.label}, ${expectedCard.count} Decide items?`));
+      });
+    }
+  );
 
   it('groups rows by matter, in the order read, with the reason and the age on each row', async () => {
     renderLane(pagingHost(seventyItems()).callTool);
@@ -222,7 +252,9 @@ describe('a non-billing row opens the wizard (task 032 consumes the event)', () 
     expect(onOpenWizard).toHaveBeenCalledTimes(1);
     const event = onOpenWizard.mock.calls[0][0];
     expect(event.signalId).toBe(rows[40].signalId);
-    expect(event.core).toMatchObject({ recordId: B });
+    // The paged read carries no record type, so the event names none (and not the shared parser's placeholder).
+    expect(event.core).toEqual({ recordId: B });
+    expect(event.core).not.toHaveProperty('recordType');
     const nonBilling = rows.filter(r => !r.invoiceReview).map(r => r.signalId);
     expect(event.visibleList).toEqual(nonBilling);
     expect(event.total).toBe(68);
@@ -519,5 +551,165 @@ describe('loading, empty and error states', () => {
     renderLane(() => Promise.reject(new Error('host went away')));
     expect(await screen.findByTestId('decide-lane-error')).toHaveTextContent('The worklist could not be read.');
     expect(screen.queryByTestId('lane-empty-Decide')).not.toBeInTheDocument();
+  });
+});
+
+describe('the review bar and the failure notice are in reach (review finding F1)', () => {
+  const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+  const follows = (a: Element, b: Element) => (a.compareDocumentPosition(b) & FOLLOWING) !== 0;
+
+  it('puts the review bar directly under the lane header: before the cards and every row, in DOM and tab order', async () => {
+    renderLane(pagingHost(seventyItems()).callTool);
+    await ready();
+    startReview();
+
+    const bar = screen.getByTestId('decide-review-bar');
+    expect(lane()).toContainElement(bar);
+    expect(follows(screen.getByTestId('lane-start-Decide'), bar)).toBe(true); // after the header
+    expect(follows(bar, within(lane()).getByRole('group', { name: 'Decide filters' }))).toBe(true);
+    expect(follows(bar, screen.getByTestId('lane-region-Decide'))).toBe(true);
+    expect(follows(bar, lines()[0])).toBe(true);
+
+    // Tab order is DOM order here (no tabindex): the bar's controls come before the first row's button.
+    const tabbables = Array.from(lane().querySelectorAll<HTMLElement>('button, a[href]'));
+    const firstRow = tabbables.indexOf(lines()[0]);
+    for (const id of ['decide-review-previous', 'decide-review-next', 'decide-review-stop']) {
+      expect(tabbables.indexOf(screen.getByTestId(id))).toBeLessThan(firstRow);
+    }
+  });
+
+  it('keeps the live region on the position label only, not around the buttons', async () => {
+    renderLane(pagingHost(seventyItems()).callTool);
+    await ready();
+    startReview();
+
+    const bar = screen.getByTestId('decide-review-bar');
+    const label = screen.getByTestId('decide-review-position');
+    expect(label).toHaveAttribute('role', 'status');
+    expect(label).toHaveAttribute('aria-live', 'polite');
+    expect(bar).not.toHaveAttribute('role', 'status');
+    expect(within(bar).getAllByRole('status')).toEqual([label]);
+    for (const id of ['decide-review-previous', 'decide-review-next', 'decide-review-stop']) {
+      expect(screen.getByTestId(id).closest('[role="status"]')).toBeNull();
+    }
+  });
+
+  it('shows a failure notice as an alert directly under the header, before the cards and the rows', async () => {
+    const rows = [
+      row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } }),
+      row(2, { core: A, workType: 'chaseReply' }),
+    ];
+    const { openLink } = renderLane(pagingHost(rows).callTool);
+    await ready();
+    openLink.mockResolvedValueOnce(false);
+    fireEvent.click(within(lane()).getByTestId('billing-finding-link'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Invoice Review could not be opened');
+    expect(alert).toBe(screen.getByTestId('decide-lane-notice'));
+    expect(lane()).toContainElement(alert);
+    expect(follows(screen.getByTestId('lane-start-Decide'), alert)).toBe(true);
+    expect(follows(alert, within(lane()).getByRole('group', { name: 'Decide filters' }))).toBe(true);
+    expect(follows(alert, screen.getByTestId('lane-region-Decide'))).toBe(true);
+  });
+
+  it('announces the "nothing to review here" notice as an alert too', async () => {
+    renderLane(
+      pagingHost([row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } })]).callTool
+    );
+    await ready();
+    fireEvent.click(card('Invoice decisions'));
+    startReview();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invoice decisions are decided in Invoice Review');
+  });
+});
+
+describe('the wizard event carries the core record id only (review finding F4)', () => {
+  it('a row and every review step name { recordId } with no recordType; a Not filed row names null', async () => {
+    const rows = [
+      row(1, { core: A, workType: 'chaseReply' }),
+      row(2, { core: B, workType: 'chaseReply' }),
+      row(3, { workType: 'chaseReply' }), // no core: Not filed
+    ];
+    const { onOpenWizard } = renderLane(pagingHost(rows).callTool);
+    await ready();
+
+    startReview();
+    fireEvent.click(screen.getByTestId('decide-review-next'));
+    fireEvent.click(screen.getByTestId('decide-review-next'));
+    fireEvent.click(lines().find(l => l.getAttribute('data-signal-id') === rows[1].signalId)!);
+
+    expect(onOpenWizard.mock.calls.map(([e]) => e.core)).toEqual([
+      { recordId: A },
+      { recordId: B },
+      null,
+      { recordId: B },
+    ]);
+    for (const [event] of onOpenWizard.mock.calls) {
+      expect(event.core === null || !('recordType' in event.core)).toBe(true);
+    }
+  });
+});
+
+describe('a billing row shows its reason and a link a screen reader can tell apart (review finding F1)', () => {
+  it('renders the rule short name as the reason and names the link after the row', async () => {
+    const rows = [
+      row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } }),
+      row(2, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: guid('b', 2) } }),
+    ];
+    renderLane(pagingHost(rows).callTool);
+    await ready();
+
+    const [first, second] = within(lane()).getAllByTestId('billing-finding');
+    expect(within(first).getByTestId('billing-finding-reason')).toHaveTextContent('Rule 1');
+    expect(within(second).getByTestId('billing-finding-reason')).toHaveTextContent('Rule 2');
+    const firstLink = within(first).getByRole('link', { name: 'Open in Invoice Review: Subject 1' });
+    const secondLink = within(second).getByRole('link', { name: 'Open in Invoice Review: Subject 2' });
+    expect(firstLink).not.toBe(secondLink);
+  });
+
+  it('shows no reason element when the rule has no short name', async () => {
+    const noRule = { ...row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } }) };
+    delete noRule.ruleShortName;
+    renderLane(pagingHost([noRule]).callTool);
+    await ready();
+    expect(within(lane()).queryByTestId('billing-finding-reason')).not.toBeInTheDocument();
+  });
+});
+
+describe('a new service starts a new lane (review finding K4)', () => {
+  const treeFor = (service: ReturnType<typeof createWorklistService>) => (
+    <FluentProvider theme={webLightTheme}>
+      <DecideLane service={service} consoleBaseUrl={CONSOLE_BASE} openLink={async () => true} today={TODAY} />
+    </FluentProvider>
+  );
+  const serviceOver = (rows: SlimRow[]) =>
+    createWorklistService({ fetch: createDecideLaneFetch(pagingHost(rows).callTool), baseUrl: '' });
+
+  it('drops a review in progress, so no stale ids survive', async () => {
+    const first = [row(1, { core: A, workType: 'chaseReply' }), row(2, { core: A, workType: 'chaseReply' })];
+    const second = [row(11, { core: B, workType: 'chaseReply' })];
+    const { rerender } = render(treeFor(serviceOver(first)));
+    await ready();
+    startReview();
+    expect(screen.getByTestId('decide-review-position')).toHaveTextContent('1 of 2');
+
+    rerender(treeFor(serviceOver(second)));
+    await ready();
+    expect(screen.queryByTestId('decide-review-bar')).not.toBeInTheDocument();
+    expect(lineIds()).toEqual([second[0].signalId]);
+  });
+
+  it('drops a notice from the old lane', async () => {
+    const billingOnly = [row(1, { core: A, workType: 'approveOrRebudget', invoiceReview: { invoiceId: INVOICE } })];
+    const { rerender } = render(treeFor(serviceOver(billingOnly)));
+    await ready();
+    fireEvent.click(card('Invoice decisions'));
+    startReview();
+    expect(screen.getByTestId('decide-lane-notice')).toBeInTheDocument();
+
+    rerender(treeFor(serviceOver([row(5, { core: B, workType: 'chaseReply' })])));
+    await ready();
+    expect(screen.queryByTestId('decide-lane-notice')).not.toBeInTheDocument();
   });
 });
