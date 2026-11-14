@@ -36,7 +36,7 @@
 ## Next actions (in order)
 
 1. **Gates green**: commit the notes, then push work.
-2. **Merge origin/master into work.** It brings:
+2. DONE (cdde3d69b4 + follow-ups merged; 084d ✅; provisioning-r1 Pester 81/81). **Merge origin/master into work.** It brings:
    - #2798 (ISS-021, `3ae2a63362`);
    - #2790 (fm 052b and 045d-f, `4f9e77e9c0`);
    - later #2819 (fm 045g).
