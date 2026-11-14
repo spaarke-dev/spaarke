@@ -149,3 +149,95 @@ columns stay saved. The answer is never success: each path returns its error ans
 was only partly saved (`invoice_family_locked_write_partly_saved`; no exception text), and a Warning is logged with the
 table, the record id and the TraceId. Covered by `InvoiceFamilyLockedWriteTests` (helper), `InvoiceFamilyGenericUpdatePathTests`
 (C1-C3) and `SecureChildOwnershipAiToolTests` (C4-C6). Same shape as `ProjectMatterFiling`'s `OtherColumnsSaved`.
+
+## 5. The lock script and the client-write detector (chunk 4)
+
+**Target, not a new engine.** `scripts/Set-DocumentPointerFieldSecurity.ps1` gains `-Target InvoiceFamilyLinks`;
+`scripts/Set-InvoiceFamilyFieldSecurity.ps1` is its named entry point (dry run default, `-Apply`, `-Verify`; default solution
+SpaarkeMaster). Reason: that engine is already "the ONE mechanism" for task 133's two profiles and carries the
+named-entry-point precedent (Narrowing, AccessMarker, ReportCatalog). It already handles multi-table `Pairs`, the p1-p7
+preconditions, secure-then-grant-at-once and the revert. A separate script would fork its helpers.
+
+**The one list.** `scripts/common/InvoiceFamilyLockedColumns.psd1` (6 tables, entity sets, 24 columns). The engine target,
+the detector and the ArchTest read it; the ArchTest pins it both ways to `InvoiceFamilyLockedWrite.LockedColumns` and
+`EntitySets` (§6).
+
+**Preconditions for this target.**
+- p1/p2/p3/p6/p7 unchanged: profiles exist and are in the solution; Readers on every business unit's default team
+  (`-Verify` fails otherwise); Writers on the BFF application users only; family tables are root components; columns exist.
+- **p4a (new, fail closed):** reads each family table's ManyToOne navigation names (FAIL if none can be read), then scans
+  every DEPLOYED web resource (types 1 and 3) with `scripts/common/Find-ClientInvoiceFamilyWrite.ps1`. Each hit is a FAIL
+  naming the web resource, table and shape. Dry run reports; `-Apply` refuses with nothing written.
+- **p4b (new):** `-BffWritesInvoiceFamilyLinksAsApp`, the operator's confirmation that the BFF with chunks 1-3 is deployed;
+  required with `-Apply` (same shape as the AccessMarker target's confirmation switch).
+- **p5 is informational for this target.** The configuration-table check exists for the pointer targets, where config rows
+  name client-written columns. Here config rows (field mappings) drive BFF split writers, which write as the application,
+  so there is nothing to refuse. Flagged for confirmation.
+
+**Detector** (`scripts/common/Find-ClientInvoiceFamilyWrite.ps1`, next to `Find-ClientPointerWrite.ps1`). Table-scoped: a
+hit needs a family table AND a locked column of THAT table. Shapes: (a) `createRecord`/`updateRecord` with a literal family
+table name or a variable bound to one, payload taken from the call's top-level arguments; (b) `fetch` / XHR with
+`POST|PATCH|PUT` and a family entity-set path segment; (c) `$batch` request lines. Payload rules: a key equal to a locked
+column (with or without `@odata.bind`, any case) is a hit; a non-literal payload, a spread or a computed key is a hit
+(fail closed). `@odata.bind` VALUES that merely point at a family row (an event's `sprk_Invoice@odata.bind`) are not
+writes of the family table. Known limits (file header): entity names chosen at run time from data, object-key bindings
+built elsewhere, and form-script `setValue` on family forms (not table-attributable from the script text). Once locked,
+the secured column refuses all three at run time; the detector is pre-lock evidence, not the enforcement.
+
+**Dev, read-only (2026-11-13, spaarkedev1; operator az CLI identity; nothing written).**
+- Dry run: exit 0, "DRY RUN complete — nothing was written". p1 OK (both profiles, in SpaarkeMaster); p6 OK (all 6
+  tables root components, behavior 0); p2 OK (Readers on all 6 business units' default teams); p3 OK (both BFF
+  application users are Writers); p5 INFO; p7 OK (24 of 24 columns exist); navigation names equal the column names on
+  all 6 tables; p4b INFO. **p4a FAIL x3**, as expected: `sprk_creatematterwizard` (updateRecord sets
+  `sprk_Matter@odata.bind` on sprk_invoice), `sprk_spaarkeai` (same shape; the deployed copy has one such write, the
+  committed bundle two), `sprk_createinvoicewizard` (createRecord on sprk_invoice with a payload variable, fail closed).
+  Would secure 24 columns and add 48 field permissions.
+- `-Verify`: exit 1, 75 FAIL = the 3 p4a findings + 72 MISSING (24 columns not secured, 48 grants absent). p1, p2, p3,
+  p6, p7 OK. Expected: nothing is locked until the owner-approved `-Apply`, after the three web resources are rebuilt
+  from 045g source and deployed.
+
+**Tests.** `tests/scripts/Set-InvoiceFamilyFieldSecurity.Tests.ps1` (Pester, mocked Dataverse, the harness of
+`Set-AccessMarkerFieldSecurity.Tests.ps1`): 8/8 pass. The list is 24 columns on 6 tables; dry run reports a stale bundle
+and writes nothing; `-Apply` refuses with nothing written (must fire); refuses without the confirmation switch; `-Apply`
+with only an sprk_event write secures and grants all 24 and publishes the 6 tables (must not fire); `-Verify` fails
+unlocked, passes locked, fails when a default team lacks Readers. Regression: `Set-AccessMarkerFieldSecurity.Tests.ps1`
+19/19.
+
+## 6. The ArchTests (chunk 5)
+
+`tests/Spaarke.ArchTests/InvoiceFamilyFieldLockGuardTests.cs`: three guards, each with must-fire and must-not-fire controls.
+
+1. **One list, both ways.** The psd1's tables, columns and entity sets equal `InvoiceFamilyLockedWrite.LockedColumns` /
+   `EntitySets` (24 columns, 6 tables asserted); the engine, entry point and detector read the psd1 (no inline copy).
+2. **No client writes.** Scans `src/client`, `src/solutions` and the committed bundles under
+   `src/dataverse/solutions/**/WebResources/**` through the PowerShell detector (one implementation; the test runs it
+   through pwsh, as the pointer parity test already does). **Ratchet baseline** (hits per file; more hits = NEW, fewer =
+   STALE, both fail), reason "stale committed bundle; removed when rebuilt from 045g source":
+   `SpaarkeMaster/WebResources/sprk_creatematterwizard` 1, `sprk_spaarkeai` 2, `sprk_createinvoicewizard` 1. Source
+   (`src/client`, `src/solutions`) has zero hits. Detector controls: 19 write cases fire (incl. the seeded
+   `updateRecord("sprk_invoice", id, {"sprk_Matter@odata.bind": ...})`); 15 read or other-table cases do not (incl. the
+   same column on sprk_event).
+3. **No caller-identity bypass.** Reuses `CoreRecordPairUpdateCheckGuardTests`' IL scan and per-source-member
+   classification (used, not modified). A source member that calls a caller-identity write
+   (`IDataverseUserClient.PatchAsync`, `IFieldMappingDataverseService.UpdateRecordFieldsAsync` /
+   `UpdateExistingRecordFieldsAsync`, `InvoiceFamilyCoreRecordGuard.UpdateExistingAsync`) must also go through
+   `InvoiceFamilyLockedWrite` (`PatchAsCallerAsync` / `UpdateExistingSplitAsync`) or sit on a closed list of members that
+   cannot carry a locked column (20 entries, each with its reason). Non-vacuity: the C1-C6 members from §4 are found.
+   Fixtures: patch bypass, impersonated bypass and guard bypass fire; through-the-split and another PATCH API do not.
+
+**Perturbations** (each on a committed tree, compiling, reverted with `git checkout`; working tree clean afterwards):
+
+| # | Perturbation | Failed |
+|---|---|---|
+| P1a | drop `sprk_supersedesinvoice` from the psd1 | 3 (set equality, list control, detector control) |
+| P1b | add `sprk_name` to sprk_invoice in the psd1 | 3 (same three) |
+| P2a | seeded `updateRecord("sprk_invoice", id, {"sprk_Matter@odata.bind": ...})` in `TodoRegardingUpdateBuilder.ts` | 1 (ratchet NEW) |
+| P2b | the same write on `sprk_event` | 0 (must not fire) |
+| P2c | committed `sprk_createinvoicewizard`: `createRecord("sprk_invoice", c)` to `"sprk_event"` | 1 (ratchet STALE) |
+| P3 | `OwnedChildWrite`: new member calling `user.PatchAsync` on `sprk_invoices` | 1 here (+1 in the CoreRecordPair guard) |
+| P3b | new member calling `InvoiceFamilyCoreRecordGuard.UpdateExistingAsync` with the person | 1 |
+
+P2a/P2b are TypeScript edits, not type-checked; syntactically valid.
+
+**Gates.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors, 0 warnings. New ArchTests 8/8. Full
+`tests/Spaarke.ArchTests`: 2552 passed, 0 failed, 0 skipped (HEAD 7853e50750). Pester 8/8 (new), 19/19 (AccessMarker).
