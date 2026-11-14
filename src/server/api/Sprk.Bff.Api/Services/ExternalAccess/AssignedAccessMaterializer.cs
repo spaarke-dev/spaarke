@@ -1154,16 +1154,18 @@ public sealed class AssignedAccessMaterializer
         }
 
         // ── A grant (contact or organization) ──
-        if (flags.IsRestricted)
+        if (target.Kind == TargetKind.OrganizationGrant)
+        {
+            // The ONE organization rule (task 095g): the firm-assign route refuses on exactly these reasons.
+            if (OrganizationGrantSkipReason(flags) is { } organizationSkip)
+            {
+                await SkipAsync(organizationSkip).ConfigureAwait(false);
+                return;
+            }
+        }
+        else if (flags.IsRestricted)
         {
             await SkipAsync(AssignedAccessReason.Restricted).ConfigureAwait(false);
-            return;
-        }
-
-        if (target.Kind == TargetKind.OrganizationGrant && flags.IsDirectOnly)
-        {
-            await SkipAsync(flags.IsSecure ? AssignedAccessReason.OrganizationOnSecure : AssignedAccessReason.OrganizationOnLimited)
-                .ConfigureAwait(false);
             return;
         }
 
@@ -1857,6 +1859,25 @@ public sealed class AssignedAccessMaterializer
             InternalShareEndpoints.ShareEligibility.ExternalOnRestricted => Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId),
             _ => Target.Skip(AssignedAccessReason.Ineligible, user.SystemUserId),
         };
+    }
+
+    /// <summary>
+    /// Why an ORGANIZATION grant is not written on a record with these effective flags, or <c>null</c> when the flags allow one: Restricted
+    /// (<see cref="AssignedAccessReason.Restricted"/>), then Secure (<see cref="AssignedAccessReason.OrganizationOnSecure"/>), then Limited
+    /// (<see cref="AssignedAccessReason.OrganizationOnLimited"/>). The ONE definition: this class's organization grant and the firm-assign
+    /// route's refusal (ebilling-r1 task 095g) both call it, so they cannot drift.
+    /// </summary>
+    /// <remarks>Flag reasons only. The record's own state (<see cref="RootRecordFlags.IsInactive"/>) is deliberately NOT read here: the
+    /// materializer skips an inactive record before it reaches this rule, and the route allows an inactive record (EB-D-233). An unreadable
+    /// flag set never reaches it either (both callers stop on it first).</remarks>
+    internal static string? OrganizationGrantSkipReason(RootRecordFlags flags)
+    {
+        // An organization's people are external, so the share writers' one Restricted predicate bars it (uac-r2 condition 2).
+        if (InternalShareEndpoints.IsBarredOnRestricted(isExternal: true, rootIsRestricted: flags.IsRestricted))
+            return AssignedAccessReason.Restricted;
+        if (flags.IsDirectOnly)
+            return flags.IsSecure ? AssignedAccessReason.OrganizationOnSecure : AssignedAccessReason.OrganizationOnLimited;
+        return null;
     }
 
     private static string? KnownGrantRemovalCause(Target target, RootRecordFlags flags)
