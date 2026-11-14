@@ -4,7 +4,7 @@
     <title>MCP caller-path verification (option C)</title>
     <phase>B MCP host and tools</phase>
     <gate>after 020, 021, 023 and 024; must finish before 025</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include auth and integration-test, and the task adds files under tests/** (root CLAUDE.md §8): code-review and adr-check run regardless</rigor-reason>
     <model-tier>opus</model-tier>
