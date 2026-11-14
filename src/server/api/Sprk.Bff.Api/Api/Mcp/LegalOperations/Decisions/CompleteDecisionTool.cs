@@ -81,7 +81,8 @@ public sealed class CompleteDecisionTool : McpToolDefinition
     {
         var result = await decisions.CommitAsync(accessor.HttpContext, signalId, review, ct);
 
-        if (DecisionResultMapper.ToToolError(result) is { } error)
+        var error = DecisionResultMapper.ToToolError(result);
+        if (error != null)
         {
             return McpToolResults.FromError(error);
         }

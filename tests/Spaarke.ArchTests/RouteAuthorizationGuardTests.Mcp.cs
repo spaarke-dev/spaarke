@@ -787,11 +787,12 @@ public partial class RouteAuthorizationGuardTests
     {
         static HashSet<string> Seen(params Type[] types) => types.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
 
-        // MUST NOT FIRE: the text saw it, the ledger lists it, bare [Authorize], a PublicContracts parameter. The real BFF has no
-        // tool yet, so the real cross-check is empty too.
+        // MUST NOT FIRE: the text saw it, the ledger lists it, bare [Authorize], a PublicContracts parameter. The real BFF's tools, with the
+        // names the source rule found (the ledger's), are clean too.
         var sanctioned = typeof(McpReflectionSanctionedTool);
         Assert.Empty(McpToolReflectionViolations(new[] { sanctioned }, Seen(sanctioned), new[] { McpReflectionEntry(sanctioned) }));
-        Assert.Empty(McpToolReflectionViolations(typeof(McpToolDefinition).Assembly.GetTypes(), new HashSet<string>(), McpTools));
+        Assert.Empty(McpToolReflectionViolations(
+            typeof(McpToolDefinition).Assembly.GetTypes(), McpTools.Select(t => t.Class).ToHashSet(StringComparer.Ordinal), McpTools));
 
         // MUST FIRE, one cause each.
         Fires(McpToolReflectionViolations(new[] { sanctioned }, new HashSet<string>(), new[] { McpReflectionEntry(sanctioned) }),
