@@ -97,7 +97,12 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
   // the mock has no matter or work assignment rows, so those answer an empty list)
   const eventsByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events/);
   if (method === 'GET' && eventsByRoot) {
-    return delay(collection(MOCK_EVENTS[eventsByRoot[1]] ?? []) as unknown as T);
+    // `canCreateTask` is on the event lists only (R4 task 008).
+    return delay({
+      ...collection(MOCK_EVENTS[eventsByRoot[1]] ?? []),
+      canCreate: true,
+      canCreateTask: true,
+    } as unknown as T);
   }
 
   // GET /api/v1/external/projects/:id/contacts
@@ -112,8 +117,8 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(collection(MOCK_ORGANIZATIONS[orgsByProject[1]] ?? []) as unknown as T);
   }
 
-  // POST /api/v1/external/projects/:id/events (create event)
-  const createEvent = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/events$/);
+  // POST /api/v1/external/{projects|matters|workassignments}/:id/events (create event; `eventType: "task"` = a Task)
+  const createEvent = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events$/);
   if (method === 'POST' && createEvent) {
     const body = options.body ? JSON.parse(options.body as string) : {};
     const newEvent = {
@@ -123,6 +128,7 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
       sprk_status: body.sprk_status ?? 659490001, // Open (statuscode) — the BFF default
       _sprk_regardingproject_value: createEvent[1], // sprk_event's project lookup (it has no sprk_projectid)
       createdon: new Date().toISOString(),
+      isTask: body.eventType === 'task', // the BFF's flag (task 008); an untyped event is not a task
     };
     return delay(newEvent as unknown as T, 600);
   }

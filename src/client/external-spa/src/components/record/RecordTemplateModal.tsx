@@ -9,7 +9,7 @@
  * entity name. Each section id renders through `sections/` (`renderRecordSection`); an action whose flow has its own
  * dialogs or notices (Download, Delete request, Submit invoice) is an action host in `actions/`, mounted in the record's
  * content for every action id the config lists (toolbar or section), which offers or withdraws its action. The create
- * actions (Upload, New message, Add event) are offered by the section that owns the list and its dialog (`offerAction`);
+ * actions (Upload, New message, Add task, Add event) are offered by the section that owns the list and its dialog (`offerAction`);
  * that section renders the dialog (a `FormModal`) itself, so the dialog is a React descendant of this modal (FR-03, task
  * 004).
  *
@@ -422,8 +422,8 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   };
 
   // The modal's own actions: Refresh (hidden while an operation holds the view, so its result is never replaced) and Copy
-  // link. An action with a host, or one a section offers (Upload, New message, Add event: task 004), is shown while its
-  // owner offers it; the rest are hidden, not disabled.
+  // link. An action with a host, or one a section offers (Upload, New message, Add task, Add event: tasks 004 / 011), is
+  // shown while its owner offers it; the rest are hidden, not disabled.
   const handlers: Partial<Record<RecordToolbarActionId, () => void | Promise<void>>> = {
     ...(holdNavigation ? {} : { refresh: handleRefresh }),
     copyLink: handleCopyLink,
@@ -431,15 +431,17 @@ export const RecordTemplateModal: React.FC<RecordTemplateModalProps> = ({
   // Every action this record's config lists, in the toolbar or in a section's header (task 009).
   const actionIds = recordActionIdsOf(config);
   // Task 006 (FR-06 / FR-07): the rights the record's lists reported with their create offers. A create action is shown
-  // only when its list offers it AND reported its right as `true` (`isCreateActionOffered`); the header's "Your access"
-  // and the sections' read-only lines are derived from the same answers (recordAccess.ts), never from the entity type.
-  // A section's right without an action of the template's (the invoice Files list's Upload) counts for "Your access" and
-  // its own section's line, and adds no action.
+  // only when its list offers it AND reported its right as `true` (`isCreateActionOffered`); the sections' read-only lines
+  // are derived from the same answers (recordAccess.ts), never from the entity type. A section's right without an action
+  // of the template's (the invoice Files list's Upload) counts for its own section's line, and adds no action.
   const createRights = createRightsOf(actionIds, hostActions, sectionRights);
   // The record's route root (its read description's documents root) tells `recordAccessFactsOf` whether `/me` has a level
-  // for it, and whether that level is an answer or only the fail-safe guess (no entry for the project).
+  // for it (task 011: `projects` for a project, `records` for a matter or work assignment), and whether that level is an
+  // answer or only the fail-safe guess (no entry for the project). "Your access" is that level and nothing else, and it
+  // is display only: a level DECIDES writes only for a project caller without `writeAccessPerRecord` (the lists decide
+  // the rest; Add task follows `canCreateTask`), and a `writeAccessPerRecord` caller sees no level line.
   const accessFacts = recordAccessFactsOf(detail.documentsRoot, id ?? '', callerContext);
-  const yourAccess = yourAccessOf(accessFacts, createRights);
+  const yourAccess = yourAccessOf(accessFacts);
   // One descriptor per action, wherever it shows (the toolbar or a section's header): the same visibility rule for both.
   const actionOf = (actionId: RecordToolbarActionId): RecordCommandBarAction => {
     const Icon = RECORD_ACTION_ICONS[actionId];

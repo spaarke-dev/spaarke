@@ -721,8 +721,8 @@ describe('sections', () => {
     await within(within(dialog).getByTestId('record-detail-documents')).findByText('No Documents');
     expect(within(dialog).getByText('No invoices for this record.')).toBeTruthy();
     await within(dialog).findByText(/No events yet/);
-    // Task 009: events only, so no task list and no to-do read.
-    expect(within(dialog).queryByText('No tasks yet')).toBeNull();
+    // Task 011: a Task list next to the events (a Task is an event of type Task); still no to-do read.
+    await within(dialog).findByText('No tasks yet');
     expect(bffApiCall.mock.calls.some(call => String(call[0]).endsWith('/todos'))).toBe(false);
   });
 

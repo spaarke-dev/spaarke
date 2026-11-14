@@ -131,6 +131,11 @@ export interface ODataEvent extends CreatorStamps {
    * returns `_sprk_regardingproject_value`.
    */
   _sprk_regardingproject_value?: string | null;
+  /**
+   * `true` when the event is of the Task type (R4 task 008): the BFF reads the type server-side and sends only this
+   * boolean. The record's Tasks list shows these; every other event is an Event. Absent (an older BFF) is "not a task".
+   */
+  isTask?: boolean;
 }
 
 /**
@@ -201,6 +206,11 @@ interface ODataCollectionResponse<T> {
    * may still omit it: absent is "not said", never "can".
    */
   canCreate?: boolean;
+  /**
+   * The event lists only (R4 task 008): whether the caller may create a Task-typed event here (`canCreate` and the Task
+   * type's own right). Omitted on every other list, and by a BFF that predates it: absent is "not said", never "can".
+   */
+  canCreateTask?: boolean;
 }
 
 /**
@@ -214,6 +224,8 @@ export interface ListResult<T> {
   truncated: boolean;
   /** The BFF's `canCreate` for the record the list is scoped to, when it wrote one (task 036 fix round 1); else absent. */
   canCreate?: boolean | null;
+  /** The event lists' `canCreateTask` (task 008), when the BFF wrote one; else absent (hide "Add task"). */
+  canCreateTask?: boolean | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +310,7 @@ async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {
     truncated: response.truncated === true,
     // Only when the BFF said (task 036 fix round 1): a missing member stays absent, never read as "cannot".
     ...(typeof response.canCreate === 'boolean' ? { canCreate: response.canCreate } : {}),
+    ...(typeof response.canCreateTask === 'boolean' ? { canCreateTask: response.canCreateTask } : {}),
   };
 }
 
@@ -582,6 +595,11 @@ export interface CreateEventPayload {
   /** Optional status — Draft (1) or Open (659490001) only, written to `statuscode`; omit it to create the event Open (task 097 review F9). */
   sprk_status?: number;
   /**
+   * The event's type, from the BFF's closed set: only `"task"` (R4 task 008). Omit it for an untyped event (Add event); any
+   * other value is refused with 400. Sent by "Add task" only.
+   */
+  eventType?: 'task';
+  /**
    * OData binding to associate the event with a project. The navigation property is the
    * PascalCase SchemaName sprk_RegardingProject (metadata-verified, R5 task 002 — sprk_event
    * has no "sprk_projectid" lookup; its project lookup is sprk_regardingproject).
@@ -594,8 +612,9 @@ export interface CreateEventPayload {
  * Create an Event regarding a project, matter or work assignment: `POST /api/v1/external/{root}/{id}/events`
  * (spaarke-SPA-external-access-platform-r4 task 006, FR-06; the matter and work-assignment routes are task 002's).
  *
- * The server takes the parent from the ROUTE only (`CreateExternalEventRequest` has `sprk_name`, `sprk_duedate` and
- * `sprk_status`, and no regarding member), so a matter or work-assignment event sends the payload as given. The project
+ * The server takes the parent from the ROUTE only (`CreateExternalEventRequest` has `sprk_name`, `sprk_duedate`,
+ * `sprk_status` and, since task 008, the optional `eventType` ("task" only), and no regarding member), so a matter or
+ * work-assignment event sends the payload as given. "Add task" sends `eventType: "task"`; "Add event" sends none. The project
  * route keeps the body it has always been sent, the project bind included (the server skips that member), byte for byte.
  *
  * @param root      Which kind of record `recordId` is

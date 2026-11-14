@@ -38,10 +38,9 @@ vi.mock('@azure/msal-react', () => ({
 import { ApiError } from '../src/types';
 import { RecordTemplateModal } from '../src/components/record/RecordTemplateModal';
 import { RECORD_TEMPLATES } from '../src/components/record/recordTemplates';
-import { RECORD_ACCESS_TEXT } from '../src/components/record/recordAccess';
 import type { RecordSectionContext, RecordSectionId } from '../src/components/record/recordTemplate.types';
 import type { CreateActionOffer } from '../src/components/createAction';
-import { EventsCalendar } from '../src/components/EventsCalendar';
+import { EventsCalendar, createBusyReporters } from '../src/components/EventsCalendar';
 import { RecordMessages } from '../src/components/detail/RecordMessages';
 import { RecordSectionCard } from '../src/components/record/sections/RecordSectionCard';
 import { installLayout, uninstallLayout } from './jsdomLayout';
@@ -88,7 +87,10 @@ const RECORDS = {
 type RecordKey = keyof typeof RECORDS;
 
 /** One list's answer: rows and `canCreate` (absent = the BFF said nothing), a thrown failure, or a read that never ends. */
-type ListAnswer = { value: Array<Record<string, unknown>>; canCreate?: boolean } | { throws: ApiError } | 'pending';
+type ListAnswer =
+  | { value: Array<Record<string, unknown>>; canCreate?: boolean; canCreateTask?: boolean }
+  | { throws: ApiError }
+  | 'pending';
 
 interface Net {
   documents: ListAnswer;
@@ -103,6 +105,12 @@ interface Net {
 const may = (rows: Array<Record<string, unknown>> = []): ListAnswer => ({ value: rows, canCreate: true });
 const mayNot = (rows: Array<Record<string, unknown>> = []): ListAnswer => ({ value: rows, canCreate: false });
 const silent = (rows: Array<Record<string, unknown>> = []): ListAnswer => ({ value: rows });
+/** An event list that also says the caller may create a Task (task 008 canCreateTask). */
+const mayTask = (rows: Array<Record<string, unknown>> = []): ListAnswer => ({
+  value: rows,
+  canCreate: true,
+  canCreateTask: true,
+});
 const fails: ListAnswer = { throws: new ApiError(500, JSON.stringify({ status: 500, title: 'broken' })) };
 
 const all = (a: ListAnswer): Pick<Net, 'documents' | 'messages' | 'events'> => ({
@@ -282,7 +290,7 @@ describe.each(['matter', 'wa'] as const)('%s: the toolbar follows each list canC
     ['a partner (no writeAccessPerRecord)', meOf()],
     ['a per-record caller', meOf({ writeAccessPerRecord: true })],
   ])(
-    'Create holder (every list canCreate: true), %s: Upload, New message and Add event are offered, each in its own section; "Can contribute"; no read-only line',
+    'Create holder (every list canCreate: true), %s: Upload, New message and Add event are offered, each in its own section; /me has no level for the record, so "Your access" shows nothing (never "Can contribute"); no read-only line',
     async (_caller, me) => {
       installNet(key, { ...all(may()), me });
       const dialog = await openRecord(key);
@@ -295,7 +303,7 @@ describe.each(['matter', 'wa'] as const)('%s: the toolbar follows each list canC
         messages: ['newMessage'],
         tasksEvents: ['addEvent'],
       });
-      expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute);
+      expect(within(dialog).queryByTestId('record-template-access')).toBeNull();
       expect(noteOf(dialog, 'documents')).toBeNull();
       expect(noteOf(dialog, 'messages')).toBeNull();
       expect(noteOf(dialog, 'tasksEvents')).toBeNull();
@@ -306,19 +314,21 @@ describe.each(['matter', 'wa'] as const)('%s: the toolbar follows each list canC
   );
 
   it(
-    'View-only (every list canCreate: false): only Refresh and Copy link; nothing disabled; "Read only"; each section says why (no grant level named for a per-record caller)',
+    'View-only (every list canCreate: false): only Refresh and Copy link; nothing disabled; no "Your access" (no /me level, no "Read only" guess); each section says why (no grant level named for a per-record caller)',
     async () => {
       installNet(key, { ...all(mayNot()), me: meOf({ writeAccessPerRecord: true }) });
       const dialog = await openRecord(key);
 
-      // "Read only" needs every list to have answered `false`, so the hidden assertions below run after all four.
-      await waitFor(() => expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.readOnly));
+      // Every list has answered once its line is there, so the hidden assertions below run after all of them.
+      await waitFor(() => expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events, but not add one.'));
+      await waitFor(() => expect(noteOf(dialog, 'messages')).not.toBeNull());
+      await waitFor(() => expect(noteOf(dialog, 'documents')).not.toBeNull());
       expect(actionsOf(dialog)).toEqual(READ_ONLY_TOOLBAR);
       expect(sectionActionsOf(dialog)).toEqual({});
       expectNoDisabledCreateControl(dialog);
       expect(noteOf(dialog, 'documents')).toBe('You can view these documents, but not upload to this record.');
       expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.');
-      expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events, but not add one.');
+      expect(within(dialog).queryByTestId('record-template-access')).toBeNull();
       expect(within(dialog).queryByText(/Collaborate/)).toBeNull();
     },
     SLOW
@@ -332,11 +342,12 @@ describe.each(['matter', 'wa'] as const)('%s: the toolbar follows each list canC
       installNet(key, { ...all(mayNot()), me: meOf() });
       const dialog = await openRecord(key);
 
-      await waitFor(() => expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.readOnly));
+      await waitFor(() => expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events, but not add one.'));
+      await waitFor(() => expect(noteOf(dialog, 'messages')).not.toBeNull());
       expect(actionsOf(dialog)).toEqual(READ_ONLY_TOOLBAR);
       expect(noteOf(dialog, 'documents')).toBe('You can view these documents, but not upload to this record.');
       expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.');
-      expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events, but not add one.');
+      expect(within(dialog).queryByTestId('record-template-access')).toBeNull();
       expect(within(dialog).queryByText(/Collaborate/)).toBeNull();
     },
     SLOW
@@ -357,7 +368,7 @@ describe.each(['matter', 'wa'] as const)('%s: the toolbar follows each list canC
       await waitFor(() => expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events, but not add one.'));
       expect(noteOf(dialog, 'documents')).toBe('You can view these documents, but not upload to this record.');
       expect(noteOf(dialog, 'messages')).toBeNull();
-      expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute);
+      expect(yourAccess(dialog)).toBeNull();
     },
     SLOW
   );
@@ -429,13 +440,13 @@ describe('fail closed: no answer = not offered, nothing said', () => {
       expect(actionsOf(dialog)).not.toContain('addEvent');
       // Not known is not "read-only": the section says nothing about events.
       expect(noteOf(dialog, 'tasksEvents')).toBeNull();
-      expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute);
+      expect(yourAccess(dialog)).toBeNull();
     },
     SLOW
   );
 
   it(
-    '"Read only" needs every list to have said no: one unknown list leaves the header empty, and only the answered section explains',
+    'one unknown list leaves the header empty (it never carried a "Read only" guess), and only the answered section explains',
     async () => {
       installNet('matter', {
         documents: mayNot(),
@@ -611,7 +622,7 @@ describe('project: "Your access" is the /me level; a create needs the level and 
   );
 
   it(
-    'a per-record caller on a project: the level is not theirs to show; the lists decide and the header says "Can contribute"',
+    'a per-record caller on a project (uac-r2 A2): no "Your access" line (the composed READ level would contradict the creates), and the level never decides a write action: the lists do, so every create is still offered',
     async () => {
       installNet('project', {
         ...all(may()),
@@ -620,7 +631,8 @@ describe('project: "Your access" is the /me level; a create needs the level and 
       const dialog = await openRecord('project');
 
       await waitFor(() => expect(actionsOf(dialog)).toEqual(ALL_CREATE));
-      expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute);
+      expect(yourAccess(dialog)).toBeNull();
+      expect(within(dialog).queryByTestId('record-template-access')).toBeNull();
     },
     SLOW
   );
@@ -857,7 +869,7 @@ describe('each gate holds on its own', () => {
 
 describe('invoice: the Files list counts for "Your access" without a toolbar action', () => {
   it(
-    'Files may upload, the thread may not: header "Can contribute" (not "Read only"), the thread line is neutral, no toolbar Upload',
+    'Files may upload, the thread may not: no "Your access" (/me has no level for an invoice), the thread line is neutral, no toolbar Upload',
     async () => {
       // A partner (no writeAccessPerRecord): /me has no level for an invoice, so the thread's "no" names no grant level.
       installNet('invoice', { ...all(may()), messages: mayNot(), me: meOf() });
@@ -865,7 +877,7 @@ describe('invoice: the Files list counts for "Your access" without a toolbar act
 
       await waitFor(() => expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.'));
       await within(dialog).findByRole('button', { name: /^upload document/i });
-      await waitFor(() => expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute));
+      expect(yourAccess(dialog)).toBeNull();
       expect(noteOf(dialog, 'files')).toBeNull();
       expect(actionsOf(dialog)).toEqual(READ_ONLY_TOOLBAR);
     },
@@ -883,20 +895,22 @@ describe('invoice: the Files list counts for "Your access" without a toolbar act
       );
       await waitFor(() => expect(actionsOf(dialog)).toEqual(['refresh', 'copyLink', 'newMessage']));
       expect(within(dialog).queryByRole('button', { name: /^upload/i, hidden: true })).toBeNull();
-      expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute);
+      expect(yourAccess(dialog)).toBeNull();
     },
     SLOW
   );
 
   it(
-    'both say no: "Read only", and both lines',
+    'both say no: both lines, and still no "Your access" (never "Read only")',
     async () => {
       installNet('invoice', { ...all(mayNot()), me: meOf() });
       const dialog = await openRecord('invoice');
 
-      await waitFor(() => expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.readOnly));
-      expect(noteOf(dialog, 'files')).toBe('You can view these files, but not upload to this record.');
-      expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.');
+      await waitFor(() =>
+        expect(noteOf(dialog, 'files')).toBe('You can view these files, but not upload to this record.')
+      );
+      await waitFor(() => expect(noteOf(dialog, 'messages')).toBe('You can read this thread, but not post to it.'));
+      expect(yourAccess(dialog)).toBeNull();
       expectNoDisabledCreateControl(dialog);
     },
     SLOW
@@ -946,7 +960,9 @@ describe('paging to another record', () => {
       const B = guid(202);
       const release: Array<() => void> = [];
       bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-        if (path === '/api/v1/external/me') return meOf();
+        // /me lists a level for matter A only (task 011): B has none, so B must not inherit A's label while it loads.
+        if (path === '/api/v1/external/me')
+          return meOf({ records: [{ recordType: 'matter', recordId: A, accessLevel: 'Collaborate' }] });
         if (path.endsWith('/api/dataverse/fetch')) {
           const body = String(options?.body);
           const id = body.includes(B) ? B : A;
@@ -984,7 +1000,7 @@ describe('paging to another record', () => {
       const dialog = await screen.findByRole('dialog');
       await within(dialog).findByTestId('record-detail-fields');
       await waitFor(() => expect(actionsOf(dialog)).toEqual(ALL_CREATE));
-      expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute);
+      await waitFor(() => expect(yourAccess(dialog)).toBe('Collaborate'));
 
       fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
       await waitFor(() => expect(release.length).toBe(3));
@@ -999,8 +1015,685 @@ describe('paging to another record', () => {
       // B answers: its own rights now show.
       await act(async () => release.forEach(r => r()));
       await waitFor(() => expect(actionsOf(dialog)).toEqual(ALL_CREATE));
-      expect(yourAccess(dialog)).toBe(RECORD_ACCESS_TEXT.canContribute);
+      // B is not in /me: its answers decide the actions, and "Your access" stays empty (not A's "Collaborate").
+      expect(within(dialog).queryByTestId('record-template-access')).toBeNull();
     },
     SLOW
   );
+});
+
+// ---------------------------------------------------------------------------
+// Task 011: "Your access" is the caller's /me level (matters and work assignments: /me `records`, task 008)
+// ---------------------------------------------------------------------------
+
+/** `/me` with one `records` entry for the record under test (override the type or id to build a near miss). */
+const recordsMe = (
+  key: 'matter' | 'wa',
+  accessLevel: string,
+  extra: Record<string, unknown> = {},
+  entry: { recordType?: string; recordId?: string } = {}
+): Record<string, unknown> =>
+  meOf({
+    ...extra,
+    records: [
+      {
+        recordType: entry.recordType ?? (key === 'matter' ? 'matter' : 'workassignment'),
+        recordId: entry.recordId ?? RECORDS[key].id,
+        accessLevel,
+      },
+    ],
+  });
+
+describe.each(['matter', 'wa'] as const)('%s: "Your access" is the /me records level (task 011)', key => {
+  it.each([
+    ['ViewOnly', 'View Only'],
+    ['Collaborate', 'Collaborate'],
+    ['FullAccess', 'Full Access'],
+  ])(
+    'a partner whose /me lists %s sees "%s" (must fire)',
+    async (level, label) => {
+      installNet(key, { ...all(may()), me: recordsMe(key, level) });
+      const dialog = await openRecord(key);
+
+      await waitFor(() => expect(yourAccess(dialog)).toBe(label));
+      expect(within(dialog).queryByText(/Can contribute|Read only/)).toBeNull();
+    },
+    SLOW
+  );
+
+  it.each([
+    ['/me lists no records (a BFF that predates them)', meOf()],
+    ['/me lists another record only', recordsMe(key, 'Collaborate', {}, { recordId: guid(999) })],
+    [
+      'the id is listed under the other record type',
+      recordsMe(key, 'Collaborate', {}, { recordType: key === 'matter' ? 'workassignment' : 'matter' }),
+    ],
+    ['the level is one the SPA does not know', recordsMe(key, 'Owner')],
+  ])(
+    'a record /me does not list shows no value, whatever the lists say: %s (must-not-fire)',
+    async (_name, me) => {
+      installNet(key, { ...all(may()), me });
+      const dialog = await openRecord(key);
+
+      // The lists have answered once their actions are there; the header must still be empty.
+      await waitFor(() => expect(actionsOf(dialog)).toEqual(ALL_CREATE));
+      await settle(200);
+      expect(within(dialog).queryByTestId('record-template-access')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'uac-r2 A2, a writeAccessPerRecord caller whose /me level is "View Only": no level line, and the level never hides a write action the lists allow',
+    async () => {
+      installNet(key, { ...all(may()), me: recordsMe(key, 'ViewOnly', { writeAccessPerRecord: true }) });
+      const dialog = await openRecord(key);
+
+      await waitFor(() => expect(actionsOf(dialog)).toEqual(ALL_CREATE));
+      expect(yourAccess(dialog)).toBeNull();
+      expect(within(dialog).queryByText('View Only')).toBeNull();
+      expect(noteOf(dialog, 'documents')).toBeNull();
+      expect(noteOf(dialog, 'tasksEvents')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'uac-r2 A2, and the mirror: a writeAccessPerRecord caller whose /me level is "Full Access" is offered nothing the lists refuse, sees no level line, and the read-only line is neutral',
+    async () => {
+      installNet(key, { ...all(mayNot()), me: recordsMe(key, 'FullAccess', { writeAccessPerRecord: true }) });
+      const dialog = await openRecord(key);
+
+      await waitFor(() => expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events, but not add one.'));
+      await waitFor(() => expect(noteOf(dialog, 'documents')).not.toBeNull());
+      expect(yourAccess(dialog)).toBeNull();
+      expect(within(dialog).queryByText('Full Access')).toBeNull();
+      expect(actionsOf(dialog)).toEqual(READ_ONLY_TOOLBAR);
+      expect(noteOf(dialog, 'documents')).toBe('You can view these documents, but not upload to this record.');
+      expectNoDisabledCreateControl(dialog);
+    },
+    SLOW
+  );
+
+  it(
+    'a partner labelled "View Only" whose lists say no: the read-only lines name the level that is needed',
+    async () => {
+      installNet(key, { ...all(mayNot()), me: recordsMe(key, 'ViewOnly') });
+      const dialog = await openRecord(key);
+
+      await waitFor(() => expect(yourAccess(dialog)).toBe('View Only'));
+      await waitFor(() =>
+        expect(noteOf(dialog, 'documents')).toBe('You can view these documents. Uploading needs Collaborate access.')
+      );
+      expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events. Adding one needs Collaborate access.');
+      expect(actionsOf(dialog)).toEqual(READ_ONLY_TOOLBAR);
+    },
+    SLOW
+  );
+
+  it(
+    'a partner labelled "Collaborate" whose lists say no (a role ceiling) is not told to ask for Collaborate',
+    async () => {
+      installNet(key, { ...all(mayNot()), me: recordsMe(key, 'Collaborate') });
+      const dialog = await openRecord(key);
+
+      await waitFor(() => expect(yourAccess(dialog)).toBe('Collaborate'));
+      await waitFor(() => expect(noteOf(dialog, 'documents')).not.toBeNull());
+      expect(noteOf(dialog, 'documents')).toBe('You can view these documents, but not upload to this record.');
+      expect(actionsOf(dialog)).toEqual(READ_ONLY_TOOLBAR);
+    },
+    SLOW
+  );
+
+  it(
+    'the label does not decide on a matter or work assignment: a "View Only" label with lists that say yes still offers them',
+    async () => {
+      // The lists are the POST's own decision (task 002); /me's matter level is for display only.
+      installNet(key, { ...all(may()), me: recordsMe(key, 'ViewOnly') });
+      const dialog = await openRecord(key);
+
+      await waitFor(() => expect(actionsOf(dialog)).toEqual(ALL_CREATE));
+      expect(yourAccess(dialog)).toBe('View Only');
+    },
+    SLOW
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task 011: Tasks are events of type Task: "Add task", the Tasks / Events groups, "Add event" without a type
+// ---------------------------------------------------------------------------
+
+const groupOf = (dialog: HTMLElement, kind: 'tasks' | 'events'): HTMLElement =>
+  within(dialog).getByTestId(`events-group-${kind}`);
+const task = (n: number, name: string, stamps: Record<string, unknown> = {}): Record<string, unknown> =>
+  event(n, name, { isTask: true, ...stamps });
+
+/** What the BFF answers a create: the created row, `isTask` true exactly for a typed "task" (task 008). */
+const createdRow = (_path: string, body: Record<string, unknown>): unknown => ({
+  ...event(9, String(body.sprk_name)),
+  isTask: body.eventType === 'task',
+});
+
+describe.each(['matter', 'wa', 'project'] as const)(
+  '%s: Tasks & events lists tasks and events apart (task 011)',
+  key => {
+    const me = (): Record<string, unknown> =>
+      key === 'project'
+        ? meOf({ projects: [{ projectId: RECORDS.project.id, accessLevel: 'Collaborate' }] })
+        : meOf({ writeAccessPerRecord: true });
+
+    it(
+      'rows the BFF flags isTask are the Tasks; every other row is an Event',
+      async () => {
+        installNet(key, {
+          ...all(may()),
+          events: mayTask([
+            event(1, 'Hearing'),
+            task(2, 'Draft memo'),
+            event(3, 'Filing deadline'),
+            task(4, 'Send notice'),
+          ]),
+          me: me(),
+        });
+        const dialog = await openRecord(key);
+
+        await within(dialog).findByText('Draft memo');
+        expect(
+          within(groupOf(dialog, 'tasks'))
+            .getAllByText(/Draft memo|Send notice|Hearing|Filing deadline/)
+            .map(e => e.textContent)
+        ).toEqual(['Draft memo', 'Send notice']);
+        expect(
+          within(groupOf(dialog, 'events'))
+            .getAllByText(/Draft memo|Send notice|Hearing|Filing deadline/)
+            .map(e => e.textContent)
+        ).toEqual(['Hearing', 'Filing deadline']);
+      },
+      SLOW
+    );
+
+    it(
+      'Add task is offered (in the Tasks & events header, before Add event) only when the list says canCreateTask: true (must fire)',
+      async () => {
+        installNet(key, { ...all(may()), events: mayTask(), me: me() });
+        const dialog = await openRecord(key);
+
+        await waitFor(() => expect(sectionActionsOf(dialog).tasksEvents).toEqual(['addTask', 'addEvent']));
+        expect(toolbarOf(dialog)).not.toContain('addTask');
+      },
+      SLOW
+    );
+
+    it.each([
+      ['canCreateTask: false', { value: [], canCreate: true, canCreateTask: false } as ListAnswer],
+      ['canCreateTask omitted (unknown)', may()],
+      [
+        'canCreate: false even with canCreateTask: true',
+        { value: [], canCreate: false, canCreateTask: true } as ListAnswer,
+      ],
+      ['the list failed', fails],
+      ['the list never answers', 'pending' as const],
+    ])(
+      'Add task is hidden, not disabled, when the list says %s (must-not-fire)',
+      async (_name, events) => {
+        installNet(key, { ...all(may()), events, me: me() });
+        const dialog = await openRecord(key);
+        // Documents and Messages have answered once their actions are there; the event list is then settled or never will be.
+        await waitFor(() => expect(actionsOf(dialog)).toContain('upload'));
+        await settle(300);
+
+        expect(actionsOf(dialog)).not.toContain('addTask');
+        expect(within(dialog).queryByRole('button', { name: /^add task/i, hidden: true })).toBeNull();
+        expect(within(dialog).queryByRole('button', { name: /^create task/i, hidden: true })).toBeNull();
+      },
+      SLOW
+    );
+
+    it(
+      'Add task posts eventType "task" to the record route, and the new task lands under Tasks (not Events)',
+      async () => {
+        installNet(key, {
+          ...all(may()),
+          events: mayTask([event(1, 'Hearing')]),
+          me: me(),
+          onCreateEvent: createdRow,
+        });
+        const dialog = await openRecord(key);
+        await within(dialog).findByText('Hearing');
+        const child = await openFromSection(dialog, 'Add task', 'Create Task', 'tasksEvents');
+        fireEvent.change(within(child).getByPlaceholderText('Enter task title'), { target: { value: 'Draft memo' } });
+        fireEvent.click(within(child).getByRole('button', { name: 'Create Task' }));
+
+        await waitFor(() => expect(within(groupOf(dialog, 'tasks')).getByText('Draft memo')).toBeTruthy());
+        expect(within(groupOf(dialog, 'events')).queryByText('Draft memo')).toBeNull();
+        expect(within(groupOf(dialog, 'events')).getByText('Hearing')).toBeTruthy();
+
+        const posts = postsTo(/\/events$/);
+        expect(posts.map(p => p[0])).toEqual([`/api/v1/external/${RECORDS[key].root}/${RECORDS[key].id}/events`]);
+        expect(posts[0][1].eventType).toBe('task');
+        expect(posts[0][1].sprk_name).toBe('Draft memo');
+      },
+      SLOW
+    );
+
+    it(
+      'Add event sends NO eventType, and the new event lands under Events (not Tasks)',
+      async () => {
+        installNet(key, {
+          ...all(may()),
+          events: mayTask([task(1, 'Existing task')]),
+          me: me(),
+          onCreateEvent: createdRow,
+        });
+        const dialog = await openRecord(key);
+        await within(dialog).findByText('Existing task');
+        const child = await openFromSection(dialog, 'Add event', 'Create Event', 'tasksEvents');
+        fireEvent.change(within(child).getByPlaceholderText('Enter event title'), { target: { value: 'Hearing' } });
+        fireEvent.click(within(child).getByRole('button', { name: 'Create Event' }));
+
+        await waitFor(() => expect(within(groupOf(dialog, 'events')).getByText('Hearing')).toBeTruthy());
+        expect(within(groupOf(dialog, 'tasks')).queryByText('Hearing')).toBeNull();
+        expect(within(groupOf(dialog, 'tasks')).getByText('Existing task')).toBeTruthy();
+
+        const posts = postsTo(/\/events$/);
+        expect(posts).toHaveLength(1);
+        expect('eventType' in posts[0][1]).toBe(false);
+      },
+      SLOW
+    );
+
+    it(
+      'neither create dialog has the old Type select (it was never sent)',
+      async () => {
+        installNet(key, { ...all(may()), events: mayTask(), me: me() });
+        const dialog = await openRecord(key);
+
+        for (const [action, title] of [
+          ['Add task', 'Create Task'],
+          ['Add event', 'Create Event'],
+        ] as const) {
+          const child = await openFromSection(dialog, action, title, 'tasksEvents');
+          expect(within(child).queryByRole('combobox')).toBeNull();
+          expect(within(child).queryByText('Type')).toBeNull();
+          expect(within(child).queryByText(/Meeting|Deadline|Milestone|Reminder|Filing/)).toBeNull();
+          fireEvent.click(within(child).getByRole('button', { name: 'Cancel' }));
+          await waitFor(() => expect(screen.queryByRole('dialog', { name: title })).toBeNull());
+          await settle(100);
+        }
+      },
+      SLOW
+    );
+
+    it(
+      'a 403 on Add task shows the error in the dialog and adds no task',
+      async () => {
+        installNet(key, {
+          ...all(may()),
+          events: mayTask(),
+          me: me(),
+          onCreateEvent: () => {
+            throw new ApiError(403, 'Forbidden');
+          },
+        });
+        const dialog = await openRecord(key);
+        const child = await openFromSection(dialog, 'Add task', 'Create Task', 'tasksEvents');
+        fireEvent.change(within(child).getByPlaceholderText('Enter task title'), { target: { value: 'Refused' } });
+        fireEvent.click(within(child).getByRole('button', { name: 'Create Task' }));
+
+        expect(await within(child).findByText('Failed to create task: Forbidden')).toBeTruthy();
+        expect(within(dialog).queryByText('Refused')).toBeNull();
+      },
+      SLOW
+    );
+
+    it(
+      'both empty states point at the section action above, never the toolbar or a to-do',
+      async () => {
+        installNet(key, { ...all(may()), events: mayTask(), me: me() });
+        const dialog = await openRecord(key);
+        await waitFor(() => expect(sectionActionsOf(dialog).tasksEvents).toEqual(['addTask', 'addEvent']));
+
+        const tasks =
+          (await within(groupOf(dialog, 'tasks')).findByText(/^No tasks have been added/)).textContent ?? '';
+        const events =
+          (await within(groupOf(dialog, 'events')).findByText(/^No events have been added/)).textContent ?? '';
+        expect(tasks).toContain('Use Add task above');
+        expect(events).toContain('Use Add event above');
+        for (const text of [tasks, events]) expect(/toolbar|to-?do/i.test(text)).toBe(false);
+      },
+      SLOW
+    );
+
+    it(
+      'a read-only caller sees the groups and no create control; the Tasks group says so plainly',
+      async () => {
+        installNet(key, {
+          ...all(mayNot()),
+          events: mayNot([event(1, 'Hearing'), task(2, 'Draft memo')]),
+          me: me(),
+        });
+        const dialog = await openRecord(key);
+
+        await within(dialog).findByText('Draft memo');
+        expect(within(groupOf(dialog, 'tasks')).getByText('Draft memo')).toBeTruthy();
+        expect(within(groupOf(dialog, 'events')).getByText('Hearing')).toBeTruthy();
+        await waitFor(() => expect(noteOf(dialog, 'tasksEvents')).toBe('You can view these events, but not add one.'));
+        expectNoDisabledCreateControl(dialog);
+      },
+      SLOW
+    );
+
+    it(
+      'delete-own names what the row is: "Delete task X" on a task, "Delete event X" on an event',
+      async () => {
+        installNet(key, {
+          ...all(mayNot()),
+          events: mayNot([
+            event(1, 'My hearing', { _sprk_createdbycontact_value: ME }),
+            task(2, 'My memo', { _sprk_createdbycontact_value: ME }),
+            task(3, 'Their memo', { _sprk_createdbycontact_value: SOMEONE }),
+          ]),
+          me: me(),
+        });
+        const dialog = await openRecord(key);
+
+        await within(dialog).findByText('My memo');
+        expect(within(groupOf(dialog, 'tasks')).getByRole('button', { name: 'Delete task My memo' })).toBeTruthy();
+        expect(within(groupOf(dialog, 'events')).getByRole('button', { name: 'Delete event My hearing' })).toBeTruthy();
+        expect(within(dialog).queryByRole('button', { name: /Their memo/ })).toBeNull();
+      },
+      SLOW
+    );
+  }
+);
+
+describe('project: Add task needs the /me level too (task 011)', () => {
+  it(
+    'a View Only project caller whose list says canCreateTask: true is offered neither Add task nor Add event',
+    async () => {
+      installNet('project', {
+        ...all(may()),
+        events: mayTask(),
+        me: meOf({ projects: [{ projectId: RECORDS.project.id, accessLevel: 'ViewOnly' }] }),
+      });
+      const dialog = await openRecord('project');
+
+      await waitFor(() => expect(yourAccess(dialog)).toBe('View Only'));
+      await waitFor(() => expect(noteOf(dialog, 'tasksEvents')).not.toBeNull());
+      expect(sectionActionsOf(dialog).tasksEvents ?? []).toEqual([]);
+    },
+    SLOW
+  );
+
+  it(
+    'a Collaborate project caller whose list says canCreateTask: false is offered Add event only',
+    async () => {
+      installNet('project', {
+        ...all(may()),
+        events: { value: [], canCreate: true, canCreateTask: false },
+        me: meOf({ projects: [{ projectId: RECORDS.project.id, accessLevel: 'Collaborate' }] }),
+      });
+      const dialog = await openRecord('project');
+
+      await waitFor(() => expect(sectionActionsOf(dialog).tasksEvents).toEqual(['addEvent']));
+      await settle(200);
+      expect(sectionActionsOf(dialog).tasksEvents).toEqual(['addEvent']);
+    },
+    SLOW
+  );
+
+  it(
+    'a per-record project caller (/me level "View Only", no level line) follows the list alone: Add task is offered on canCreateTask: true (A2)',
+    async () => {
+      installNet('project', {
+        ...all(may()),
+        events: mayTask(),
+        me: meOf({
+          writeAccessPerRecord: true,
+          projects: [{ projectId: RECORDS.project.id, accessLevel: 'ViewOnly' }],
+        }),
+      });
+      const dialog = await openRecord('project');
+
+      await waitFor(() => expect(sectionActionsOf(dialog).tasksEvents).toEqual(['addTask', 'addEvent']));
+      expect(yourAccess(dialog)).toBeNull();
+    },
+    SLOW
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task 011: the hold covers BOTH create dialogs (the per-list busy hold of task 004, restored for two kinds)
+// ---------------------------------------------------------------------------
+
+describe('EventsCalendar: the busy hold follows whichever create is in flight (task 011)', () => {
+  const MATTER = RECORDS.matter.id;
+
+  /** A list that answers `mayTask`, and creates that wait until released. */
+  function installHeldCreates(): { release: () => void } {
+    let release: () => void = () => undefined;
+    bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
+      if ((options?.method ?? 'GET') === 'POST') {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+        return createdRow(path, JSON.parse(String(options?.body)));
+      }
+      return { value: [], canCreate: true, canCreateTask: true };
+    });
+    return { release: () => release() };
+  }
+
+  it.each([
+    ['Create Task', 'Enter task title', 'task'],
+    ['Create Event', 'Enter event title', 'event'],
+  ] as const)(
+    '%s in flight holds the host until it settles; idle again afterwards',
+    async (button, placeholder, kind) => {
+      const held = installHeldCreates();
+      const onBusyChange = vi.fn();
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <EventsCalendar projectId={MATTER} root="matters" writeAccessPerRecord onBusyChange={onBusyChange} />
+        </FluentProvider>
+      );
+      fireEvent.click(await screen.findByRole('button', { name: button }));
+      const child = await screen.findByRole('dialog', { name: button });
+      await settle(350);
+      fireEvent.change(within(child).getByPlaceholderText(placeholder), { target: { value: 'Held' } });
+      fireEvent.click(within(child).getByRole('button', { name: button }));
+
+      await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(true));
+      // Still posting: the host has not been released.
+      await settle(100);
+      expect(onBusyChange).toHaveBeenLastCalledWith(true);
+
+      await act(async () => held.release());
+      await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
+      const group = screen.getByTestId(kind === 'task' ? 'events-group-tasks' : 'events-group-events');
+      await waitFor(() => expect(within(group).getByText('Held')).toBeTruthy());
+    },
+    SLOW
+  );
+
+  it(
+    'the list unmounting mid-post releases the hold (never left on)',
+    async () => {
+      installHeldCreates();
+      const onBusyChange = vi.fn();
+      const view = render(
+        <FluentProvider theme={webLightTheme}>
+          <EventsCalendar projectId={MATTER} root="matters" writeAccessPerRecord onBusyChange={onBusyChange} />
+        </FluentProvider>
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'Create Task' }));
+      const child = await screen.findByRole('dialog', { name: 'Create Task' });
+      await settle(350);
+      fireEvent.change(within(child).getByPlaceholderText('Enter task title'), { target: { value: 'Held' } });
+      fireEvent.click(within(child).getByRole('button', { name: 'Create Task' }));
+      await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(true));
+
+      view.unmount();
+      expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    },
+    SLOW
+  );
+
+  it(
+    'outside the record template the list keeps its own buttons: "Create Task" only on canCreateTask: true, "Create Event" on canCreate',
+    async () => {
+      bffApiCall.mockImplementation(async () => ({ value: [], canCreate: true }));
+      const withoutTask = render(
+        <FluentProvider theme={webLightTheme}>
+          <EventsCalendar projectId={MATTER} root="matters" writeAccessPerRecord />
+        </FluentProvider>
+      );
+      expect(await screen.findByRole('button', { name: 'Create Event' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Create Task' })).toBeNull();
+      withoutTask.unmount();
+
+      bffApiCall.mockImplementation(async () => ({ value: [], canCreate: true, canCreateTask: true }));
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <EventsCalendar projectId={MATTER} root="matters" writeAccessPerRecord />
+        </FluentProvider>
+      );
+      expect(await screen.findByRole('button', { name: 'Create Task' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Create Event' })).toBeTruthy();
+    },
+    SLOW
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task 011 review round 1 (F1): a truncated list keeps the group's own create button
+// ---------------------------------------------------------------------------
+
+describe("EventsCalendar outside the template: a truncated list keeps each group's own create button (review round 1)", () => {
+  const MATTER = RECORDS.matter.id;
+
+  const renderList = (answer: Record<string, unknown>): ReturnType<typeof render> => {
+    bffApiCall.mockImplementation(async () => answer);
+    return render(
+      <FluentProvider theme={webLightTheme}>
+        <EventsCalendar projectId={MATTER} root="matters" writeAccessPerRecord />
+      </FluentProvider>
+    );
+  };
+
+  it(
+    'empty Tasks group in a truncated list: "Create Task" stays on canCreateTask true, the empty-state text goes',
+    async () => {
+      renderList({ value: [event(1, 'Plain event')], truncated: true, canCreate: true, canCreateTask: true });
+      expect(await screen.findByRole('button', { name: 'Create Task' })).toBeTruthy();
+      const tasks = screen.getByTestId('events-group-tasks');
+      expect(within(tasks).getByText('Tasks')).toBeTruthy();
+      expect(within(tasks).queryByText('No tasks yet')).toBeNull();
+      expect(screen.getByTestId('truncated-list-notice')).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'empty Tasks group in a truncated list: no "Create Task" and no group at all on canCreateTask false (must-not-fire)',
+    async () => {
+      renderList({ value: [event(1, 'Plain event')], truncated: true, canCreate: true, canCreateTask: false });
+      await screen.findByText('Plain event');
+      expect(screen.queryByRole('button', { name: 'Create Task' })).toBeNull();
+      expect(screen.queryByTestId('events-group-tasks')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Create Event' })).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'empty Events group in a truncated list: "Create Event" stays on canCreate true',
+    async () => {
+      renderList({ value: [task(1, 'A task')], truncated: true, canCreate: true, canCreateTask: true });
+      expect(await screen.findByRole('button', { name: 'Create Event' })).toBeTruthy();
+      const events = screen.getByTestId('events-group-events');
+      expect(within(events).queryByText('No events yet')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'empty Events group in a truncated list: no "Create Event" and no group on canCreate false (must-not-fire)',
+    async () => {
+      renderList({ value: [task(1, 'A task')], truncated: true, canCreate: false, canCreateTask: true });
+      await screen.findByText('A task');
+      expect(screen.queryByRole('button', { name: 'Create Event' })).toBeNull();
+      expect(screen.queryByTestId('events-group-events')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    '0 rows and truncated (the invoice-hiding fault): both create buttons stay when the caller may create, with no empty-state claim',
+    async () => {
+      renderList({ value: [], truncated: true, canCreate: true, canCreateTask: true });
+      expect(await screen.findByRole('button', { name: 'Create Event' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Create Task' })).toBeTruthy();
+      expect(screen.queryByText('No events yet')).toBeNull();
+      expect(screen.queryByText('No tasks yet')).toBeNull();
+      expect(screen.getByTestId('truncated-list-notice')).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    '0 rows and truncated, a caller who may not create: nothing but the notice (must-not-fire)',
+    async () => {
+      renderList({ value: [], truncated: true, canCreate: false });
+      await screen.findByTestId('truncated-list-notice');
+      expect(screen.queryByRole('button', { name: /^Create / })).toBeNull();
+      expect(screen.queryByTestId('events-group-tasks')).toBeNull();
+      expect(screen.queryByTestId('events-group-events')).toBeNull();
+    },
+    SLOW
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task 011 review round 1 (F2): the combiner behind the two-dialog busy hold
+// ---------------------------------------------------------------------------
+
+describe('createBusyReporters: the host is busy while EITHER dialog is posting (review round 1)', () => {
+  it('overlap: task true, event true, event false -> still true; task false -> false', () => {
+    const report = vi.fn();
+    const reporters = createBusyReporters(report);
+
+    reporters.task(true);
+    expect(report).toHaveBeenLastCalledWith(true);
+    reporters.event(true);
+    reporters.event(false);
+    expect(report).toHaveBeenLastCalledWith(true);
+    reporters.task(false);
+    expect(report).toHaveBeenLastCalledWith(false);
+  });
+
+  it('the mirror: event true, task true, task false -> still true; event false -> false', () => {
+    const report = vi.fn();
+    const reporters = createBusyReporters(report);
+
+    reporters.event(true);
+    reporters.task(true);
+    reporters.task(false);
+    expect(report).toHaveBeenLastCalledWith(true);
+    reporters.event(false);
+    expect(report).toHaveBeenLastCalledWith(false);
+  });
+
+  it('a repeated value from one dialog reports nothing; a lone dialog going idle reports false (must-not-fire pair)', () => {
+    const report = vi.fn();
+    const reporters = createBusyReporters(report);
+
+    reporters.event(false);
+    expect(report).not.toHaveBeenCalled();
+    reporters.event(true);
+    reporters.event(true);
+    expect(report).toHaveBeenCalledTimes(1);
+    reporters.event(false);
+    expect(report).toHaveBeenLastCalledWith(false);
+  });
 });

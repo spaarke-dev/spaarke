@@ -4,7 +4,7 @@
     <title>SPA: Manage Access labels on every record; Tasks = events of type Task ("Add task"); Add event without the unsent type select (owner E2E rework, D-6)</title>
     <phase>1 Record template and actions (post-E2E rework)</phase>
     <gate>after 008 (BFF fields) and 009 (section actions)</gate>
-    <status>open</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>.tsx files</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -42,6 +42,8 @@
     <criterion testable="true">Add task sends eventType "task" and the new item appears under Tasks; Add event sends no type and appears under Events.</criterion>
   </acceptance-criteria>
 
+  <notes>Manage Access labels from /me (matter/WA records, projects), no Can contribute; label hidden for writeAccessPerRecord callers (main-session decision, review K4); D-11 one label map. Tasks = isTask events, Add task on canCreateTask (eventType task), Add event untyped; unsent type select removed; two-dialog busy hold restored; shared icon map addTodo to addTask (Spaarke.UI.Components 3.0.0). Review: 1 adversarial pass, round 1 fixed F1 (truncated list hid create buttons), F2 (busy-hold proof, stale comments). Detail: notes/task-011-notes.md.
+rework: fix-round-1 task 011</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>

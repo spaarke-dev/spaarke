@@ -116,3 +116,10 @@ Also for the rework: the empty states still say "Use Add event in the toolbar" a
 - Browser checks carried from earlier tasks: 004 ui-tests + D-8 #2704 (child opened &lt; 250 ms aria-hidden); 006
   ui-tests in light/dark; 007 ui-tests + #2658 aria-hidden after Submit invoice from a **grid-opened** record (steps in
   `notes/task-007-notes.md` fix round 1). Teams host per POML step 6 (Teams package itself is not redeployed: task 058).
+
+## FYI from ebilling-r1 (2026-11-13): 095e at work/ebilling-r1 7953d052d9 (not on master)
+
+- **No firm, no invoice (EB-D-223).** This now applies on every channel; the from-email channel is the newly refused one.
+- **Invoice name (EB-D-226).** Names now come from the firm record, as "{firm} - {number}".
+- **For the retest.** Once 095e reaches master and dev, expect the new invoice names in the SPA's invoice lists and detail views.
+- **SPA.** No change needed.

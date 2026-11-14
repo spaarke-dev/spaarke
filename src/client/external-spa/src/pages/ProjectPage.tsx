@@ -29,6 +29,7 @@ import {
 import { getProjectById, ODataProject } from '../api/web-api-client';
 import { ApiError } from '../types';
 import { AccessLevel } from '../types';
+import { ACCESS_LEVEL_LABELS } from '../components/record/recordAccess';
 import {
   PageContainer,
   NavigationBar,
@@ -170,17 +171,9 @@ function getStatusColor(
   }
 }
 
+/** The Manage Access label of a level: the SPA's one label map (task 011, D-11). */
 function getAccessLevelLabel(value: number): string {
-  switch (value) {
-    case 100000000:
-      return 'View Only';
-    case 100000001:
-      return 'Collaborate';
-    case 100000002:
-      return 'Full Access';
-    default:
-      return 'Unknown';
-  }
+  return ACCESS_LEVEL_LABELS[value as AccessLevel] ?? 'Unknown';
 }
 
 function getAccessLevelColor(

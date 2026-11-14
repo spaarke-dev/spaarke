@@ -13,6 +13,11 @@ export const MOCK_USER: ExternalUserContextResponse = {
     { projectId: 'mock-project-001', accessLevel: 'Collaborate' },
     { projectId: 'mock-project-002', accessLevel: 'ViewOnly' },
   ],
+  // R4 task 008: matters and work assignments, with the levels Manage Access shows.
+  records: [
+    { recordType: 'matter', recordId: 'mock-matter-001', accessLevel: 'Collaborate' },
+    { recordType: 'workassignment', recordId: 'mock-wa-001', accessLevel: 'ViewOnly' },
+  ],
 };
 
 export const MOCK_PROJECTS: ODataProject[] = [
@@ -89,6 +94,15 @@ export const MOCK_EVENTS: Record<string, ODataEvent[]> = {
       sprk_status: 659490001, // Open (statuscode)
       _sprk_regardingproject_value: 'mock-project-001',
       createdon: '2026-01-10T09:00:00Z',
+    },
+    {
+      sprk_eventid: 'evt-006',
+      sprk_name: 'Send comments on draft SPA',
+      sprk_duedate: '2026-04-01',
+      sprk_status: 659490001, // Open (statuscode)
+      _sprk_regardingproject_value: 'mock-project-001',
+      createdon: '2026-01-12T09:00:00Z',
+      isTask: true, // an event of type Task (R4 task 008)
     },
     {
       sprk_eventid: 'evt-004',

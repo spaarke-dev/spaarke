@@ -6,8 +6,8 @@
  *
  * | Type             | Left (66%)                       | Right (34%)              | Toolbar                                  | Section actions                                           |
  * |------------------|----------------------------------|--------------------------|------------------------------------------|-----------------------------------------------------------|
- * | Matter, Project  | Information, Documents, Invoices | Messages, Tasks & events | Refresh, Copy link                       | Documents: Upload; Invoices: Submit invoice; Messages: New message; Tasks & events: Add event |
- * | Work assignment  | Information, Documents           | Messages, Tasks & events | Refresh, Submit invoice, Copy link       | Documents: Upload; Messages: New message; Tasks & events: Add event |
+ * | Matter, Project  | Information, Documents, Invoices | Messages, Tasks & events | Refresh, Copy link                       | Documents: Upload; Invoices: Submit invoice; Messages: New message; Tasks & events: Add task, Add event |
+ * | Work assignment  | Information, Documents           | Messages, Tasks & events | Refresh, Submit invoice, Copy link       | Documents: Upload; Messages: New message; Tasks & events: Add task, Add event |
  * | Invoice          | Information, Files               | Messages                 | Refresh, Copy link                       | Messages: New message (Files keeps its own Upload)        |
  * | Service request  | Information, Documents           | Messages                 | Refresh, Copy link, Delete request       | Documents: Upload; Messages: New message                  |
  * | Document         | Information, Preview             | —                        | Refresh, Download, Copy link             | —                                                         |
@@ -33,7 +33,7 @@ import type { RecordTemplateConfig, RecordToolbarActionId } from './recordTempla
 const ROOT_SECTION_ACTIONS: NonNullable<RecordTemplateConfig['sectionActions']> = {
   documents: ['upload'],
   messages: ['newMessage'],
-  tasksEvents: ['addEvent'],
+  tasksEvents: ['addTask', 'addEvent'],
 };
 const INVOICING_ROOT_TOOLBAR: readonly RecordToolbarActionId[] = ['refresh', 'copyLink'];
 const INVOICING_ROOT_SECTION_ACTIONS: NonNullable<RecordTemplateConfig['sectionActions']> = {
@@ -144,6 +144,7 @@ export const RECORD_ACTION_TEXT: Readonly<Record<RecordToolbarActionId, { label:
   refresh: { label: 'Refresh', tooltip: 'Refresh' },
   upload: { label: 'Upload', tooltip: 'Upload documents' },
   newMessage: { label: 'New message', tooltip: 'New message' },
+  addTask: { label: 'Add task', tooltip: 'Add task' },
   addEvent: { label: 'Add event', tooltip: 'Add event' },
   submitInvoice: { label: 'Submit invoice', tooltip: 'Submit invoice' },
   copyLink: { label: 'Copy link', tooltip: 'Copy link' },

@@ -168,12 +168,12 @@ describe('RECORD_TEMPLATES', () => {
     // the type's own actions. Task 010: Submit invoice is in the Invoices section's header on a Matter and a Project; a
     // Work assignment has no Invoices section, so it stays in that type's header.
     const root = ['refresh', 'copyLink'];
-    const rootSections = { documents: ['upload'], messages: ['newMessage'], tasksEvents: ['addEvent'] };
+    const rootSections = { documents: ['upload'], messages: ['newMessage'], tasksEvents: ['addTask', 'addEvent'] };
     const invoicingSections = {
       documents: ['upload'],
       invoices: ['submitInvoice'],
       messages: ['newMessage'],
-      tasksEvents: ['addEvent'],
+      tasksEvents: ['addTask', 'addEvent'],
     };
     const shape = Object.fromEntries(
       Object.entries(RECORD_TEMPLATES).map(([entity, c]) => [
@@ -235,7 +235,7 @@ describe('RECORD_TEMPLATES', () => {
     });
     // No create action is left in any record header, and no section action names a section the record does not show.
     for (const c of Object.values(RECORD_TEMPLATES)) {
-      for (const id of ['upload', 'newMessage', 'addEvent']) expect(c.toolbar).not.toContain(id);
+      for (const id of ['upload', 'newMessage', 'addTask', 'addEvent']) expect(c.toolbar).not.toContain(id);
       // Task 010: a type with an Invoices section lists Submit invoice there, never in its header too.
       if (c.left.includes('invoices')) {
         expect(c.toolbar).not.toContain('submitInvoice');

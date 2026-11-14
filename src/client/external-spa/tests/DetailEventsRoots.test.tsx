@@ -196,10 +196,12 @@ afterEach(() => {
 
 const STATIC_EMPTY = 'No events or tasks to show for this record yet.';
 
-/** Task 009: no task list and no to-do control or read anywhere on the record. */
-function expectNoTaskList(dialog: HTMLElement): void {
-  expect(within(dialog).queryByText('No tasks yet')).toBeNull();
-  expect(within(dialog).queryByRole('button', { name: /add to-do|create new task|add task/i })).toBeNull();
+/**
+ * Task 009: no to-do control or read anywhere on the record. Task 011: Tasks are events of type Task, so the section has a
+ * Tasks group; what stays gone is the old to-do list's controls and its route.
+ */
+function expectNoTodoSurface(dialog: HTMLElement): void {
+  expect(within(dialog).queryByRole('button', { name: /add to-do|create new task/i })).toBeNull();
   expect(listCalls('todos')).toEqual([]);
 }
 
@@ -257,7 +259,7 @@ describe.each([
       expect(within(dialog).queryByText(STATIC_EMPTY)).toBeNull();
       expect(within(dialog).queryByTestId('record-detail-events-unavailable')).toBeNull();
       expect(listCalls('events')).toEqual([`/api/v1/external/${root}/${id}/events`]);
-      expectNoTaskList(dialog);
+      expectNoTodoSurface(dialog);
       // Never the project's routes for these records.
       expect(bffApiCall.mock.calls.some(c => String(c[0]).includes('/projects/'))).toBe(false);
     },
@@ -276,7 +278,7 @@ describe.each([
       // The record template's entry point (the section header) and the list's own button.
       expect(within(dialog).queryByRole('button', { name: 'Add event' })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
-      expectNoTaskList(dialog);
+      expectNoTodoSurface(dialog);
       // Nothing is written to the list (the id-filtered record fetch is also a POST, so only the list routes count).
       const writes = bffApiCall.mock.calls.filter(
         c => (c[1] as RequestInit | undefined)?.method === 'POST' && /\/(events|todos)$/.test(String(c[0]))
@@ -297,7 +299,7 @@ describe.each([
       const noun = key === 'matter' ? 'matter' : 'work assignment';
       expect(within(section).getByText(`No events have been added to this ${noun} yet.`)).toBeTruthy();
       expect(within(dialog).queryByText(STATIC_EMPTY)).toBeNull();
-      expectNoTaskList(dialog);
+      expectNoTodoSurface(dialog);
     },
     SLOW
   );
@@ -482,7 +484,7 @@ describe('the other detail views', () => {
       // Nothing offered here: /me has no level for this project and its list sends no canCreate (task 006, fail closed).
       expect(within(dialog).queryByRole('button', { name: /add event/i })).toBeNull();
       expect(within(dialog).queryByRole('button', { name: /create event/i })).toBeNull();
-      expectNoTaskList(dialog);
+      expectNoTodoSurface(dialog);
     },
     SLOW
   );
@@ -493,7 +495,7 @@ describe('the other detail views', () => {
       installNet('project', { events: empty });
       const dialog = await openDetail('project');
       await within(dialog).findByText('No events have been added to this project yet.');
-      expectNoTaskList(dialog);
+      expectNoTodoSurface(dialog);
     },
     SLOW
   );

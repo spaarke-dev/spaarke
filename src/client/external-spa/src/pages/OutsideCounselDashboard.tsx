@@ -70,6 +70,8 @@ import type { ODataProject, ODataDocument, ODataEvent } from '../api/web-api-cli
 import { PageContainer } from '../components/PageContainer';
 import { SectionCard } from '../components/SectionCard';
 import { TruncatedListNotice } from '../components/TruncatedListNotice';
+import { ACCESS_LEVEL_LABELS } from '../components/record/recordAccess';
+import { AccessLevel } from '../types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -288,17 +290,17 @@ interface NotificationItem {
 // ---------------------------------------------------------------------------
 
 function formatAccessLevel(raw: string): string {
-  switch (raw) {
-    case 'ViewOnly':
-      return 'View Only';
-    case 'Collaborate':
-      return 'Collaborate';
-    case 'FullAccess':
-      return 'Full Access';
-    default:
-      return raw;
-  }
+  // `/me` level string -> the SPA's one label map (task 011, D-11); anything else is shown as it came.
+  return Object.prototype.hasOwnProperty.call(LEVEL_OF_ME_LABEL, raw)
+    ? ACCESS_LEVEL_LABELS[LEVEL_OF_ME_LABEL[raw]]
+    : raw;
 }
+
+const LEVEL_OF_ME_LABEL: Readonly<Record<string, AccessLevel>> = {
+  ViewOnly: AccessLevel.ViewOnly,
+  Collaborate: AccessLevel.Collaborate,
+  FullAccess: AccessLevel.FullAccess,
+};
 
 function formatRelativeDate(isoDate: string | null | undefined): string {
   if (!isoDate) return '—';
@@ -371,8 +373,8 @@ function buildProjectColumns(
       renderHeaderCell: () => 'Access Level',
       renderCell: item => {
         let cls = styles.accessBadgeViewOnly;
-        if (item.accessLevel === 'Collaborate') cls = styles.accessBadgeCollaborate;
-        if (item.accessLevel === 'Full Access') cls = styles.accessBadgeFullAccess;
+        if (item.accessLevel === ACCESS_LEVEL_LABELS[AccessLevel.Collaborate]) cls = styles.accessBadgeCollaborate;
+        if (item.accessLevel === ACCESS_LEVEL_LABELS[AccessLevel.FullAccess]) cls = styles.accessBadgeFullAccess;
         return (
           <TableCellLayout>
             <Badge className={cls} appearance="filled" size="medium" shape="rounded">

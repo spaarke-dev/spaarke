@@ -252,7 +252,7 @@ describe('RecordCommandBar', () => {
         refresh: Icons.ArrowClockwise20Regular,
         upload: Icons.ArrowUpload20Regular,
         newMessage: Icons.ChatAdd20Regular,
-        addTodo: Icons.TaskListAdd20Regular,
+        addTask: Icons.TaskListAdd20Regular,
         addEvent: Icons.CalendarAdd20Regular,
         submitInvoice: Icons.ReceiptAdd20Regular,
         copyLink: Icons.Link20Regular,
