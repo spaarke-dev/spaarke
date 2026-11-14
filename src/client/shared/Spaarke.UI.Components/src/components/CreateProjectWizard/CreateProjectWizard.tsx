@@ -751,8 +751,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               description: context.followOn.createEventDescription,
               regardingRecordId: projectId,
               regardingRecordName: projectName,
-              assignedToId: '',
-              assignedToName: '',
+              assignedToId: context.followOn.createEventAssignedToId,
+              assignedToName: context.followOn.createEventAssignedToName,
             };
             const eventResult = await eventService.createEvent(eventFormValues, 'sprk_project');
             if (eventResult.warnings.length > 0) warnings.push(...eventResult.warnings);

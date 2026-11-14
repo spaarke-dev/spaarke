@@ -50,6 +50,7 @@ import {
   type ICommunicationAssociation,
   searchUsersAndContacts,
   createXrmDataService,
+  createXrmEmailComposeHandlers,
   resolveInitialInvoiceRecord,
   cleanGuid,
   getXrm,
@@ -572,6 +573,14 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     })();
   }, [communicationId]);
 
+  // Task 188 (D-219 Q3): templates, AI drafting and local-file attachments, like the Console's Send Email dialog.
+  // ONE factory instance, taken only for the four feature handlers — the recipient/record lookups above are this
+  // PCF's own inline copies (the factory's header notes the PCF keeps them). A handler left out hides its feature.
+  const composeFeatureHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+    [bffBaseUrl]
+  );
+
   // Compose/reply/replyAll/forward pre-fill derived from the loaded record (pure helper).
   const composerProps = React.useMemo<ISendEmailPageProps | null>(() => {
     if (!composerMode) return null;
@@ -591,6 +600,10 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       recordLookupCatalog: RECORD_LOOKUP_CATALOG,
       onLookupRecord: handleLookupRecord,
       onAddRelationship: handleAddRelationship,
+      onListEmailTemplates: composeFeatureHandlers.onListEmailTemplates,
+      onRenderEmailTemplate: composeFeatureHandlers.onRenderEmailTemplate,
+      onDraftWithAi: composeFeatureHandlers.onDraftWithAi,
+      onUploadLocalAttachment: composeFeatureHandlers.onUploadLocalAttachment,
       // Reply / Reply All / Forward inherit the parent's filed associations (owner UAT 2026-07-24);
       // '+ New' (compose) starts with none.
       associations: composerMode === 'compose' ? undefined : parentAssociations,
@@ -617,6 +630,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     handleLookupRecipients,
     handleLookupRecord,
     handleAddRelationship,
+    composeFeatureHandlers,
     sourceAttachments,
     parentAssociations,
     sourceIsInternalOnly,

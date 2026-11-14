@@ -7,7 +7,14 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
-import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
+import {
+  OOB_MODAL_SIZES,
+  cleanGuid,
+  getXrm,
+  readSameOriginRecordTarget,
+  resolveRegardingPairTable,
+  safeRegardingRecordUrl,
+} from '@spaarke/ui-components';
 
 /**
  * Xrm.App.sidePanes type definition (subset needed)
@@ -145,9 +152,14 @@ export function openEventRecord(eventId: string): void {
 // Navigate to Parent Record
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function navigateToParentRecord(url: string): boolean {
+/**
+ * Navigate to a parent record. Only a same-origin record URL is opened; any other value is refused
+ * (nothing is navigated) and the URL passed on is rebuilt in the canonical form.
+ */
+export function navigateToParentRecord(storedUrl: string): boolean {
+  const url = safeRegardingRecordUrl(storedUrl);
   if (!url) {
-    console.warn("[SidePaneService] Cannot navigate - URL is empty");
+    console.warn("[SidePaneService] Cannot navigate - not a same-origin record URL");
     return false;
   }
 
@@ -172,4 +184,38 @@ export function navigateToParentRecord(url: string): boolean {
     console.error("[SidePaneService] Error navigating to parent:", error);
     return false;
   }
+}
+
+/**
+ * The URL the Parent button may open: the stored regarding record URL when it is a same-origin record URL
+ * that names the row's regarding record; otherwise the URL built from the row's pair (the record type's table and the
+ * record id); otherwise `null` (do not navigate).
+ */
+export async function resolveParentRecordUrl(
+  storedUrl: string | null | undefined,
+  recordTypeId: string | null | undefined,
+  recordId: string | null | undefined
+): Promise<string | null> {
+  const stored = readSameOriginRecordTarget(storedUrl);
+  const pairId = cleanGuid(recordId);
+  // The stored value is a record URL that names the pair's record (or there is no pair to compare): no lookup needed.
+  if (stored && (!pairId || stored.entityId === pairId)) {
+    return safeRegardingRecordUrl(storedUrl);
+  }
+  const table = pairId ? await resolveRegardingPairTable(getXrm()?.WebApi, recordTypeId) : null;
+  return safeRegardingRecordUrl(storedUrl, table, pairId);
+}
+
+/** Open the parent record named by the row's stored URL / pair. Returns false when nothing was opened. */
+export async function openParentRecord(
+  storedUrl: string | null | undefined,
+  recordTypeId: string | null | undefined,
+  recordId: string | null | undefined
+): Promise<boolean> {
+  const url = await resolveParentRecordUrl(storedUrl, recordTypeId, recordId);
+  if (!url) {
+    console.warn("[SidePaneService] Cannot navigate - no parent record URL could be resolved");
+    return false;
+  }
+  return navigateToParentRecord(url);
 }

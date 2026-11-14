@@ -568,10 +568,14 @@ internal sealed partial class RecordCreationService
         warnings.RemoveAll(w => w.Column is { } column && removed.Contains(column));
         warnings.Add(warning);
 
-        if (rule.PreWriteRules.Count > 0
-            && await RunPreWriteRulesAsync(table, rule, user, stripped, noun, ct).ConfigureAwait(false) is { } preWriteRefusal)
+        if (rule.PreWriteRules.Count > 0)
         {
-            return (preWriteRefusal, item, mappedValues);
+            var preWrite = await RunPreWriteRulesAsync(table, rule, user, stripped, noun, ct).ConfigureAwait(false);
+            if (preWrite.Refusal is { } preWriteRefusal)
+                return (preWriteRefusal, item, mappedValues);
+
+            // Task 045d: the row is rebuilt from the caller's values, so the columns the rules derive are set on it again.
+            stripped = OwnedChildWrite.WithColumnsSet(table, stripped, preWrite.Columns);
         }
 
         return (null, stripped, kept);

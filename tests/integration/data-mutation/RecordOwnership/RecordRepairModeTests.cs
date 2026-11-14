@@ -394,7 +394,8 @@ public sealed partial class RecordRepairModeTests
         typeof(RecordCreationService).GetMethod(nameof(RecordCreationService.RepairAsync),
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetParameters().Select(p => p.ParameterType)
-            .Should().Equal([typeof(string), typeof(Guid), typeof(CancellationToken)], "no caller client, token or principal");
+            .Should().Equal([typeof(string), typeof(Guid), typeof(CancellationToken), typeof(RecordRepairPassContext)],
+                "no caller client, token or principal (task 052b: only the pass's own rule and metadata cache)");
 
         var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
         await _world.RepairAsync("sprk_event", id);
@@ -578,10 +579,75 @@ public sealed partial class RecordRepairModeTests
         outcome.OwnerRefusal!.Code.Should().Be(RecordCreationRefusal.OwnerUnavailableCode);
         outcome.OwnerRefusal.Detail.Should().NotContain("SECRET");
         outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
-            && f.ReasonCode == RecordRepairReason.MappingFilingUndecided);
+            && f.ReasonCode == RecordRepairReason.MappingFilingUnavailable, "task 052b review F2-a: a fault, not an answer");
         _world.Writes.Should().BeEmpty("an undecided filing could be a secure one");
         _world.Directory.Row("sprk_event", id).GetAttributeValue<EntityReference>("ownerid")
             .Should().Be(new EntityReference("systemuser", RepairWorld.PersonInChild));
+        outcome.NeedsRetry.Should().BeTrue();
+    }
+
+    // ── Task 052b (review F2-a): a fault is asked again; an answer is not ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task AnOwnerResolverFault_OnARowWhoseOwnerIsKept_IsAskedAgain()
+    {
+        // A team-owned row keeps its owner, so no owner refusal is reported; the fault deciding its filing (which gates the
+        // mapping) must still make the row retryable, or the pass's watermark would pass it for good.
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null,
+            owner: new EntityReference("team", Directory.ChildTeam));
+        _world.ResolverFault = new InvalidOperationException("Test: resolver faulted.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.OwnerRefusal.Should().BeNull("the owner is kept, not refused");
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUnavailable);
+        outcome.NeedsRetry.Should().BeTrue("a fault, not an answer");
+        _world.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AThreadReadThatFaults_BeforeTheFilingIsKnown_MapsNothing_AndIsAskedAgain()
+    {
+        // Review F4: the fault comes before the row's filing is decided (its thread's parents could not be read), so whether
+        // the row is filed — and under what — is unknown. Nothing is mapped and the row is asked again; never "unfiled".
+        var id = _world.TeamOwnedCommunicationInAThread();
+        _world.ThreadReadFault = new TimeoutException("Test: thread read timed out.");
+
+        var outcome = await _world.RepairAsync("sprk_communication", id);
+
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUnavailable);
+        outcome.Fields.Should().NotContain(f => f.Part == RecordRepairPart.Mapping && f.State == RecordRepairFieldState.Repaired);
+        outcome.NeedsRetry.Should().BeTrue("a fault, not an answer");
+        _world.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASourceReadThatFaults_IsAskedAgain()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null);
+        _world.SourceReadFault = new InvalidOperationException("Test: source read faulted.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingSourceUnreadable);
+        outcome.NeedsRetry.Should().BeTrue("the mapping was not applied because of a fault");
+    }
+
+    [Fact]
+    public async Task AFiledRowTheResolverRefuses_IsAnAnswer_NotAskedAgain()
+    {
+        var id = _world.EventUnderTheMatter(clientName: null, practiceArea: null, priority: null,
+            owner: new EntityReference("team", Directory.ChildTeam));
+        _world.ResolverAnswer = RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "Test: no owner.");
+
+        var outcome = await _world.RepairAsync("sprk_event", id);
+
+        outcome.Fields.Should().Contain(f => f.Part == RecordRepairPart.Mapping
+            && f.ReasonCode == RecordRepairReason.MappingFilingUndecided);
+        outcome.NeedsRetry.Should().BeFalse("a deterministic refusal stays an answer");
     }
 
     [Theory]
@@ -1401,6 +1467,30 @@ internal sealed partial class RepairWorld
     /// <summary>Task 052a: every table whose column metadata the service read, in order.</summary>
     public List<string> ColumnMetadataReads { get; } = [];
 
+    /// <summary>Task 052b (review F1-a): per table, the relationships that cascade on Assign (none by default).</summary>
+    public Dictionary<string, IReadOnlyList<AssignCascadeRelationship>> AssignCascades { get; } = [];
+
+    /// <summary>Task 052b (review F1-a): per table, the fault reading its relationship metadata throws.</summary>
+    public Dictionary<string, Exception> AssignCascadeFaults { get; } = [];
+
+    /// <summary>Task 052b (review F1-a): every table whose relationship metadata the service read, in order.</summary>
+    public List<string> AssignCascadeReads { get; } = [];
+
+    /// <summary>Task 052b (review F4): when set, a read of a communication thread throws it.</summary>
+    public Exception? ThreadReadFault { get; set; }
+
+    /// <summary>Task 052b (review F4): a communication in a thread, owned by the child unit's team (its owner is kept).</summary>
+    public Guid TeamOwnedCommunicationInAThread()
+    {
+        var id = Guid.NewGuid();
+        Directory.WithRecord("sprk_communication", id, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new Dictionary<string, object>
+            {
+                [RecordThreadFiling.ThreadColumn] = new EntityReference(RecordThreadFiling.ThreadTable, Guid.NewGuid()),
+            });
+        return id;
+    }
+
     /// <summary>Task 052a: the column lists the service asked of mapping sources (the system principal's app-only read).</summary>
     public List<(string Table, string[] Columns)> SourceReads { get; } = [];
 
@@ -1782,7 +1872,7 @@ internal sealed partial class RepairWorld
             .GetRequiredService<IServiceScopeFactory>();
 
         return new RecordCreationService(
-            new CapturingResolver(Directory.Resolver(), OwnerContexts, () => ResolverFault, () => ResolverAnswer), appOnly.Object, entities,
+            new CapturingResolver(Directory.Resolver(customerContactOwner: CustomerContactOwner), OwnerContexts, () => ResolverFault, () => ResolverAnswer), appOnly.Object, entities,
             SecureRootFilingGateFixtures.Over(entities),
             new CoreAncestorRestamper(_stamps.Service, _stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(ShareWorld, new FakeRecordShareTable()),
@@ -1799,7 +1889,10 @@ internal sealed partial class RepairWorld
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(Directory.Answer(query)));
+            .Returns((QueryExpression query, CancellationToken _) =>
+                ThreadReadFault is { } threadFault && query.EntityName == RecordThreadFiling.ThreadTable
+                    ? Task.FromException<EntityCollection>(threadFault)
+                    : Task.FromResult(Directory.Answer(query)));
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(Read(table, id, columns)));
@@ -1828,6 +1921,15 @@ internal sealed partial class RepairWorld
         entities
             .Setup(e => e.GetColumnMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns((string table, CancellationToken _) => ColumnMetadataOf(table));
+        entities
+            .Setup(e => e.GetAssignCascadesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, CancellationToken _) =>
+            {
+                AssignCascadeReads.Add(table);
+                return AssignCascadeFaults.TryGetValue(table, out var fault)
+                    ? Task.FromException<IReadOnlyList<AssignCascadeRelationship>>(fault)
+                    : Task.FromResult(AssignCascades.GetValueOrDefault(table) ?? Array.Empty<AssignCascadeRelationship>());
+            });
         return entities.Object;
     }
 

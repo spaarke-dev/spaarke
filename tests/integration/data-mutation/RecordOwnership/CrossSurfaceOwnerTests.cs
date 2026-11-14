@@ -522,9 +522,31 @@ internal sealed class CreateWorld
             SecureRootFilingGateFixtures.Over(Entities()),
             new CoreAncestorRestamper(stamps.Service, stamps.Resolver, NullLogger<CoreAncestorRestamper>.Instance),
             SecureChildShareWorld.SynchronizerOver(SecureChildShareWorld.Standard, new FakeRecordShareTable()),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            new ServiceCollection().AddSingleton(RecordTypeCatalog()).BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
             new Mock<IMembershipEventPublisher>().Object, Log);
     }
+
+    /// <summary>
+    /// Field mapping task 045d: the app-only record-type catalog an invoice-family create reads at step 5½ (the resolver
+    /// fields of its core record) — one active row per table, naming the table's number column, as the live catalog does for
+    /// a core table. The matter's row is <see cref="MatterType"/>, the row the directory and the caller already hold.
+    /// </summary>
+    private static ICommunicationDataverseService RecordTypeCatalog()
+    {
+        var catalog = new Mock<ICommunicationDataverseService>(MockBehavior.Strict);
+        catalog
+            .Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string table, CancellationToken _) =>
+                new Entity("sprk_recordtype_ref", table == "sprk_matter" ? MatterType : CatalogRowOf(table))
+                {
+                    [RegardingRecordType.RecordNumberFieldColumn] = table + "number",
+                });
+        return catalog.Object;
+    }
+
+    /// <summary>A fixed catalog row id per table other than the matter.</summary>
+    private static Guid CatalogRowOf(string table) =>
+        new(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("catalog:" + table)));
 
     /// <summary>Task 039: every line the unified create logged (level and formatted message), for the FR-38 log assertions.</summary>
     public CapturingLog<RecordCreationService> Log { get; } = new();

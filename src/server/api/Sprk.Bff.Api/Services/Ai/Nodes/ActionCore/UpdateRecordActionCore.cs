@@ -247,10 +247,15 @@ internal sealed class UpdateRecordActionCore
         if (InvoiceFamilyCoreRecordGuard.GuardedLookups(input.EntityLogicalName) is not null)
         {
             using var familyScope = _scopeFactory.CreateScope();
+            var guardEntities = familyScope.ServiceProvider.GetService<IGenericEntityService>();
             if (await InvoiceFamilyCoreRecordGuard.CheckGenericUpdateAsync(
                     input.EntityLogicalName, input.RecordId, updatePayload,
-                    familyScope.ServiceProvider.GetService<IGenericEntityService>(), cancellationToken,
-                    writeIsImpersonated: input.ImpersonateSystemUserId is not null).ConfigureAwait(false)
+                    guardEntities, cancellationToken,
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null,
+                    // Task 045g: on a person's run, a refusal of rules 1-3 is decided on the rows as that person reads them.
+                    asPerson: OwnedChildWrite.PersonRowReader(
+                        familyScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
+                        guardEntities, input.ImpersonateSystemUserId)).ConfigureAwait(false)
                 is { RefusalCode: { } familyCode })
             {
                 // Code only: the guard read as the app, so its reason can name records the caller has not read.
@@ -260,18 +265,44 @@ internal sealed class UpdateRecordActionCore
 
         // Task 045b (owner decision 4 of 2026-11-04; rulings Q2, Q4, Q7): the ADR-024 pair is kept whole and in step (the update
         // planner, with the app-only reader this core already uses for the invoice-family guard) BEFORE the filing gate below and
-        // the write, so they see the pair as it will be written. It adds no check (UAC-r2, 2026-11-07). A failed read refuses.
-        if (OwnedChildWrite.RegardingPairPlannerApplies(input.EntityLogicalName, updatePayload))
+        // the write, so they see the pair as it will be written. The planner adds no check (UAC-r2, 2026-11-07); the same call then
+        // decides a sent regarding record URL (task 045f; on a person's run, on the row as that person reads it). A failed read
+        // refuses.
+        if (OwnedChildWrite.RegardingPairWriteApplies(input.EntityLogicalName, updatePayload)) // task 045f: a record URL too
         {
             using var pairScope = _scopeFactory.CreateScope();
             var pairEntities = pairScope.ServiceProvider.GetService<IGenericEntityService>();
+            var personQuery = pairScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>();
             updatePayload = await OwnedChildWrite.KeepRegardingPairWholeAppOnlyAsync(
                     pairEntities, input.EntityLogicalName, input.RecordId,
                     updatePayload, "UpdateRecord", _logger, cancellationToken,
-                    movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(
-                        pairScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
-                        pairEntities, input.ImpersonateSystemUserId))
+                    movedDisplayRecord: OwnedChildWrite.MovedDisplayReader(personQuery, pairEntities, input.ImpersonateSystemUserId),
+                    storedRowAsPerson: OwnedChildWrite.PersonStoredRowReader(
+                        personQuery, pairEntities, input.ImpersonateSystemUserId, input.EntityLogicalName, input.RecordId))
                 .ConfigureAwait(false);
+        }
+
+        // Task 045d (owner ruling Q8 (a); owner, 2026-11-12, option (b)): an invoice-family row whose own core lookup this update
+        // sets or clears takes the resolver fields of the record it will name, in this same PATCH (after the pair planner so they
+        // win). The stored row and the catalog are read app-only; the name and number as the planner reads a moved pair's
+        // display (MovedDisplayReader): as the person the run acts as, cleared when they may not read it, and cleared with no
+        // person (never derived app-only). A derive that cannot be done is refused as the guard above refuses: its code only.
+        if (InvoiceFamilyCoreRecordGuard.ColumnsToRead(input.EntityLogicalName) is not null)
+        {
+            using var familyFieldsScope = _scopeFactory.CreateScope();
+            var familyEntities = familyFieldsScope.ServiceProvider.GetService<IGenericEntityService>();
+            var familyFields = await OwnedChildWrite.KeepInvoiceFamilyResolverFieldsAppOnlyAsync(
+                    familyEntities, input.EntityLogicalName, input.RecordId,
+                    updatePayload, "UpdateRecord",
+                    OwnedChildWrite.MovedDisplayReader(
+                        familyFieldsScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(),
+                        familyEntities, input.ImpersonateSystemUserId),
+                    _logger, cancellationToken,
+                    writeIsImpersonated: input.ImpersonateSystemUserId is not null)
+                .ConfigureAwait(false);
+            if (familyFields.RefusalCode is { } derivedCode)
+                throw InvoiceFamilyCoreRecordGuard.RefusalException(input.EntityLogicalName, derivedCode);
+            updatePayload = familyFields.Payload;
         }
 
         async Task Patch(CancellationToken ct)

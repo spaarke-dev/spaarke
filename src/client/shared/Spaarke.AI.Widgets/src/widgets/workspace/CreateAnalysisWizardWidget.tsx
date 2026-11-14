@@ -493,6 +493,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
 
   const webApiAdapter = useMemo(() => (dataService ? buildWebApiAdapter(dataService) : null), [dataService]);
   const searchUsers = data?.searchUsers ?? EMPTY_SEARCH;
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- same guarded read as every `data?.` above: a registry mount can pass no widget data at runtime
   const emailComposeHandlers = data?.emailComposeHandlers;
   const searchAssignees = data?.searchAssignees ?? data?.searchUsers ?? EMPTY_SEARCH;
 
@@ -584,6 +585,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           dataService ? (
             <AddTodoFollowOnStep
               dataService={dataService}
+              navigationService={navigationService}
               formValues={todoFormRef.current}
               onFormValuesChange={setTodoForm}
               onSearchAssignees={handleSearchAssignees}
@@ -593,7 +595,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           ),
       },
     ],
-    [dataService, searchUsers, handleSearchAssignees, emailComposeHandlers]
+    [dataService, navigationService, searchUsers, handleSearchAssignees, emailComposeHandlers]
   );
 
   // ── Wizard config ────────────────────────────────────────────────────────

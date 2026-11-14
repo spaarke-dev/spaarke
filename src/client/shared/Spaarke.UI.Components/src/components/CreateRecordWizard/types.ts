@@ -206,6 +206,10 @@ export interface ICreateEventFollowOnState {
   createEventPriority: number;
   /** Description free text (optional). Maps to sprk_description. */
   createEventDescription: string;
+  /** Assigned To contact GUID (optional; '' = no assignee). Bound as the event's Assigned To contact lookup. */
+  createEventAssignedToId: string;
+  /** Assigned To contact display name. */
+  createEventAssignedToName: string;
 }
 
 /** State collected from the optional follow-on steps. */
@@ -397,8 +401,9 @@ export interface ICreateRecordWizardConfig {
   /**
    * Host navigation service. When supplied, the Assign Work follow-on step opens the
    * Dataverse side pane for its lookups (Matter Type, Practice Area, Assigned
-   * Attorney / Paralegal / Outside Counsel) instead of the inline search fields
-   * (owner D-219, 2026-11-12). Omitted: the step renders the inline fields as before.
+   * Attorney / Paralegal / Outside Counsel), and so does the Create Event follow-on
+   * (Event Type, Assigned To), instead of the inline search fields
+   * (owner D-219, 2026-11-12). Omitted: the steps render the inline fields as before.
    * Separate from the services inside `associateToStep` / `existingRecordPicker`.
    */
   navigationService?: INavigationService;

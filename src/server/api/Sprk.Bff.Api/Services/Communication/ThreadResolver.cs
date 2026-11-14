@@ -2100,7 +2100,7 @@ public sealed class ThreadResolver : IThreadResolver
                     er.Id.ToString(),
                     string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName,
                     string.IsNullOrWhiteSpace(recordName) ? er.Name : recordName,
-                    recordUrl);
+                    AnchorUrlOf(recordUrl, string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName, er.Id));
             }
         }
 
@@ -2214,13 +2214,20 @@ public sealed class ThreadResolver : IThreadResolver
                     er.Id.ToString(),
                     string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName,
                     string.IsNullOrWhiteSpace(recordName) ? er.Name : recordName,
-                    recordUrl);
+                    AnchorUrlOf(recordUrl, string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName, er.Id));
             }
         }
         return null;
     }
 
     private sealed record RegardingAnchor(string RecordId, string RecordType, string? RecordName, string? RecordUrl);
+
+    /// <summary>
+    /// Task 045f: an anchor's record url — the url of the record its typed regarding lookup names, never the row's stored text,
+    /// which can describe another record; none when the row carries none.
+    /// </summary>
+    private static string? AnchorUrlOf(string? storedUrl, string table, Guid id) =>
+        string.IsNullOrWhiteSpace(storedUrl) ? null : Sprk.Bff.Api.Services.Dataverse.InvoiceFamilyCoreRecordGuard.CanonicalRecordUrl(table, id);
 
     /// <summary>How a thread's denormalized <c>sprk_regardingrecordid</c> stands against its typed regarding lookups.</summary>
     internal enum ThreadPairAgreement
