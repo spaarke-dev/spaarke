@@ -420,6 +420,14 @@ public sealed class CoreRecordFirmAssignmentService
                 }
 
                 current = again.Record!;
+
+                // Review 1 (F1): the record changed, so its flags may have too. An add is decided again from the effective flags before the
+                // second write (a clear never is: a revoke is never blocked by flags).
+                if (add is not null && await EligibilityRefusalAsync(logical, record.RecordId, ct).ConfigureAwait(false) is { } againEligibility)
+                {
+                    return againEligibility;
+                }
+
                 var replan = FirmSlotPlan.Decide(current.Slot1, current.Slot2, add, remove);
                 if (PlanRefusal(replan, current, confirmRevoke) is { } replanRefusal)
                 {

@@ -1028,6 +1028,53 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.World.WriteAttempts.Should().Be(1);
     }
 
+    [Fact(DisplayName = "095g concurrency (review 1 F1): a record made Restricted between the check and the write refuses the add on the re-plan (409 record_restricted, nothing written)")]
+    public async Task Mismatch_RecordBecameRestricted_Is409()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.World.BeforeWrite = attempt =>
+        {
+            if (attempt == 1)
+            {
+                // Another writer restricts the record: its flags change and its version moves, its slots do not.
+                host.World.Harness.Participations.Flags[MatterId] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+                host.World.BumpVersion(MatterId);
+            }
+        };
+
+        var response = await host.AssignAsync(new { add = FirmA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ErrorCode(response)).Should().Be(CoreRecordFirmCodes.RecordRestricted);
+        host.World.WriteAttempts.Should().Be(1, "the second write is never attempted");
+        host.World.Writes.Should().BeEmpty();
+        host.World.SlotsOf(MatterId).Should().Be((null, null));
+        host.World.Harness.Store.RootReads.Should().Be(0, "no access pass runs");
+    }
+
+    [Fact(DisplayName = "095g concurrency (review 1 F1) control: a clear on a record made Restricted between the check and the write is still applied (a revoke is never blocked by flags)")]
+    public async Task Mismatch_RecordBecameRestricted_ClearIsApplied()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.World.Matter(MatterId, slot1: FirmA);
+        host.World.BeforeWrite = attempt =>
+        {
+            if (attempt == 1)
+            {
+                host.World.Harness.Participations.Flags[MatterId] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+                host.World.BumpVersion(MatterId);
+            }
+        };
+
+        var response = await host.AssignAsync(new { remove = FirmA, confirmRevoke = FirmA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.WriteAttempts.Should().Be(2);
+        host.World.SlotsOf(MatterId).Should().Be((null, null));
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // GET /api/finance/firms
     // ═══════════════════════════════════════════════════════════════════════════
