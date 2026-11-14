@@ -5,10 +5,13 @@
  * inquiry: the commit route sends at Record decision). It hides the Send button, the From row (switcher and static text) and the
  * External / Internal Only tags, and the composer's own `send()` and `saveDraft()` refuse with no network call.
  *
+ * Task 182 adds `composeOnlyShowsFrom` (default off): the create wizards' Send Email step shows the From switcher while
+ * still never sending itself.
+ *
  * Must-not-fire: a default mount and `SendEmailDialog` (which sets `hostOwnsChrome` and keeps Send) are unchanged.
  */
 import * as React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { EmailComposer } from '../EmailComposer';
@@ -53,6 +56,24 @@ describe('EmailComposer composeOnly (task 160)', () => {
 
     expect(screen.queryByRole('button', { name: 'From mailbox' })).toBeNull();
     expect(screen.queryByRole('button', { name: /send/i })).toBeNull();
+  });
+
+  it('task 182: composeOnlyShowsFrom shows the From switcher (both mailboxes) and still no Send or tags', async () => {
+    renderComposer({ composeOnly: true, composeOnlyShowsFrom: true, hostOwnsChrome: true });
+
+    const from = screen.getByRole('group', { name: 'From' });
+    expect(within(from).queryByRole('button', { name: /^send/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^send/i })).toBeNull();
+    expect(screen.queryByRole('radiogroup', { name: 'Who can see this message' })).toBeNull();
+    fireEvent.click(within(from).getByRole('button', { name: 'From mailbox' }));
+    expect(await screen.findByRole('menuitemradio', { name: 'My mailbox' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: 'Spaarke shared mailbox' })).toBeInTheDocument();
+  });
+
+  it('task 182 must-not-fire: composeOnlyShowsFrom={false} keeps the From row hidden', () => {
+    renderComposer({ composeOnly: true, composeOnlyShowsFrom: false });
+
+    expect(screen.queryByRole('group', { name: 'From' })).toBeNull();
   });
 
   it('send() refuses with no network call', async () => {

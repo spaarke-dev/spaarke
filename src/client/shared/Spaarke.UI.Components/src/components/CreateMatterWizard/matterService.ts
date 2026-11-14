@@ -36,6 +36,8 @@ import type {
 import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
 import { createRecordViaBffWithWarnings } from '../../utils/adapters/bffChildWriteAdapter';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
+import { sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -89,7 +91,8 @@ export interface IDraftSummaryInput {
 export interface IFollowOnActions {
   assignCounsel?: IAssignCounselInput;
   draftSummary?: IDraftSummaryInput;
-  sendEmail?: { to: string; subject: string; body: string };
+  /** Task 182 (D-219): the composed email, sent with `sendComposedEmail` and the new matter as the association. */
+  sendEmail?: { email: IComposedEmail; onResolveShareLink?: (documentId: string) => Promise<string | null> };
 }
 
 // ---------------------------------------------------------------------------
@@ -393,14 +396,14 @@ export class MatterService {
     }
 
     if (followOnActions.sendEmail) {
-      const emailResult = await this._entityService.sendEmail({
-        to: followOnActions.sendEmail.to,
-        subject: followOnActions.sendEmail.subject,
-        body: followOnActions.sendEmail.body,
+      const emailResult = await sendComposedEmail(followOnActions.sendEmail.email, {
         associations: [{ entityType: 'sprk_matter', entityId: matterId, entityName: form.matterName.trim() }],
+        authenticatedFetch: this._authenticatedFetch,
+        bffBaseUrl: this._bffBaseUrl,
+        onResolveShareLink: followOnActions.sendEmail.onResolveShareLink,
       });
       if (!emailResult.success) {
-        warnings.push(emailResult.warning ?? 'Failed to create email activity. Please send manually.');
+        warnings.push(emailResult.warning ?? 'The email was not sent. Send it from the matter.');
       }
     }
 

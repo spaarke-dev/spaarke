@@ -62,6 +62,8 @@ import type { AuthenticatedFetchFn } from '../../services/EntityCreationService'
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
+import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -99,6 +101,11 @@ export interface IWorkAssignmentWizardDialogProps {
    * If provided, the success screen "View Record" button will use this.
    */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /**
    * When `embedded={true}`, the wizard relies on the Dataverse modal chrome
    * for the title bar and close button. Default: false.
@@ -143,6 +150,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   bffBaseUrl,
   containerId,
   navigationService,
+  emailComposeHandlers,
   embedded,
   uiScale,
   resolveSpeContainerId,
@@ -163,18 +171,14 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   const [assignWorkState, setAssignWorkState] = React.useState<IAssignWorkState>(EMPTY_ASSIGN_WORK_STATE);
   const [followOnEventState, setFollowOnEventState] =
     React.useState<ICreateFollowOnEventState>(EMPTY_FOLLOW_ON_EVENT_STATE);
-  const [emailTo, setEmailTo] = React.useState('');
-  const [emailSubject, setEmailSubject] = React.useState('');
-  const [emailBody, setEmailBody] = React.useState('');
+  // Task 182 (D-219): the whole composed email — From, To/Cc/Bcc, subject, body, attachments.
+  const [email, setEmail] = React.useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
 
   // Pre-fill values from selected record (loaded asynchronously)
   const [prefillValues, setPrefillValues] = React.useState<Partial<ICreateWorkAssignmentFormState> | undefined>(
     undefined
   );
   const [isPrefilling, setIsPrefilling] = React.useState(false);
-
-  // Email CC state
-  const [emailCc, setEmailCc] = React.useState('');
 
   // -- canAdvance tracking via refs ------------------------------------------
   const selectWorkValidRef = React.useRef(false);
@@ -192,14 +196,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   assignWorkStateRef.current = assignWorkState;
   const followOnEventStateRef = React.useRef(followOnEventState);
   followOnEventStateRef.current = followOnEventState;
-  const emailToRef = React.useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = React.useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = React.useRef(emailBody);
-  emailBodyRef.current = emailBody;
-  const emailCcRef = React.useRef(emailCc);
-  emailCcRef.current = emailCc;
+  const emailRef = React.useRef(email);
+  emailRef.current = email;
 
   // Refs for pre-fill state (stale closure prevention in renderContent)
   const isPrefillRef = React.useRef(isPrefilling);
@@ -272,10 +270,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       setSelectedActions([]);
       setAssignWorkState(EMPTY_ASSIGN_WORK_STATE);
       setFollowOnEventState(EMPTY_FOLLOW_ON_EVENT_STATE);
-      setEmailTo('');
-      setEmailCc('');
-      setEmailSubject('');
-      setEmailBody('');
+      setEmail(EMPTY_COMPOSED_EMAIL);
       autoEmailRef.current = null;
       setPrefillValues(undefined);
       setIsPrefilling(false);
@@ -379,9 +374,13 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       const auto = autoEmailRef.current;
       if (auto && values.name) {
         const next = buildEmailPrefill({ ...formStateRef.current, ...values });
-        if (emailBodyRef.current === auto.body) {
-          setEmailBody(next.body);
-          if (emailSubjectRef.current === auto.subject) setEmailSubject(next.subject);
+        if (emailRef.current.body === auto.body) {
+          setEmail(prev => ({
+            ...prev,
+            body: next.body,
+            bodyFormat: 'PlainText',
+            subject: prev.subject === auto.subject ? next.subject : prev.subject,
+          }));
           autoEmailRef.current = next;
         }
       }
@@ -429,22 +428,14 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         label: 'Send Email',
         description: 'Send an email notification about this work assignment.',
         icon: <MailRegular />,
-        canAdvance: () =>
-          emailToRef.current.trim() !== '' &&
-          emailSubjectRef.current.trim() !== '' &&
-          emailBodyRef.current.trim() !== '',
+        canAdvance: () => isComposedEmailReady(emailRef.current),
         renderStep: () => (
           <SendEmailFollowOnStep
             title="Send Email"
-            emailTo={emailToRef.current}
-            onEmailToChange={setEmailTo}
-            emailCc={emailCcRef.current}
-            onEmailCcChange={setEmailCc}
-            emailSubject={emailSubjectRef.current}
-            onEmailSubjectChange={setEmailSubject}
-            emailBody={emailBodyRef.current}
-            onEmailBodyChange={setEmailBody}
-            onSearchUsers={handleSearchUsers}
+            value={emailRef.current}
+            onChange={setEmail}
+            composeHandlers={emailComposeHandlers}
+            onSearchRecipients={handleSearchUsers}
           />
         ),
       },
@@ -475,6 +466,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       handleFollowOnEventValid,
       handleSearchUsers,
       navigationService,
+      emailComposeHandlers,
     ]
   );
 
@@ -486,19 +478,20 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     if (selectedActions.includes('send-email') && !autoEmailRef.current && formStateRef.current.name) {
       const prefill = buildEmailPrefill(formStateRef.current);
       autoEmailRef.current = prefill;
-      setEmailSubject(prefill.subject);
-      setEmailBody(prefill.body);
+      setEmail(prev => ({ ...prev, subject: prefill.subject, body: prefill.body, bodyFormat: 'PlainText' }));
 
-      // Auto-CC the current user
-      if (!emailCc) {
+      // Auto-CC the current user (unless the person already has a Cc)
+      if (emailRef.current.cc.length === 0) {
         resolveCurrentUserEmail(dataService)
-          .then(email => {
-            if (email) setEmailCc(email);
+          .then(address => {
+            if (address) {
+              setEmail(prev => (prev.cc.length > 0 ? prev : { ...prev, cc: [{ email: address, resolved: false }] }));
+            }
           })
           .catch(() => {});
       }
     }
-  }, [selectedActions, emailCc, dataService]);
+  }, [selectedActions, dataService]);
 
   // -- Build base steps ------------------------------------------------------
   const steps = React.useMemo<IWizardStepConfig[]>(
@@ -636,10 +629,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       const emailResult = await service.sendEmail(
         waId,
         form.name,
-        emailToRef.current,
-        emailSubjectRef.current,
-        emailBodyRef.current,
-        emailCcRef.current
+        emailRef.current,
+        emailComposeHandlers?.onResolveShareLink
       );
       if (!emailResult.success && emailResult.warning) {
         warnings.push(emailResult.warning);
@@ -691,7 +682,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       ),
       warnings: hasWarnings ? warnings : undefined,
     };
-  }, [onClose, onComplete, navigationService]);
+  }, [onClose, onComplete, navigationService, emailComposeHandlers]);
 
   // -- Determine finishing label based on whether files exist -----------------
   const hasFiles = uploadedFiles.length > 0;

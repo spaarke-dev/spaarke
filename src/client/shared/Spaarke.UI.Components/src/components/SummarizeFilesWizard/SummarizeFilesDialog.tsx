@@ -40,7 +40,6 @@ import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 import { streamSummarize } from './summarizeService';
 import type { AuthenticatedFetchFn } from './summarizeService';
-import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 import type { ISummarizeResult, SummarizeStatus } from './summarizeTypes';
 import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
@@ -49,6 +48,8 @@ import { ProjectService, saysProjectNotCreated } from '../CreateProjectWizard/pr
 import { provisionSecureProject, type IProvisionProjectResult } from '../CreateProjectWizard/provisioningService';
 import { SecureProvisioningOutcome } from '../CreateProjectWizard/SecureProvisioningOutcome';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
+import { EMPTY_COMPOSED_EMAIL, isComposedEmailReady, sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // Local follow-on identifiers + email template builders
@@ -92,6 +93,11 @@ export interface ISummarizeFilesDialogProps {
   dataService?: IDataService;
   /** Navigation service for opening entity records. */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** Authenticated fetch function for BFF API calls. */
   authenticatedFetch?: AuthenticatedFetchFn;
   /** Base URL for the BFF API. */
@@ -184,6 +190,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   onClose,
   dataService,
   navigationService,
+  emailComposeHandlers,
   authenticatedFetch,
   bffBaseUrl,
   embedded,
@@ -223,9 +230,11 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   const [includeShortSummary, setIncludeShortSummary] = React.useState(false);
 
   // ── Send Email state ──────────────────────────────────────────────────
-  const [emailTo, setEmailTo] = React.useState('');
-  const [emailSubject, setEmailSubject] = React.useState('');
-  const [emailBody, setEmailBody] = React.useState('');
+  // Task 182 (D-219): the whole composed email — From, To/Cc/Bcc, subject, body, attachments.
+  const [email, setEmail] = React.useState<IComposedEmail>(EMPTY_COMPOSED_EMAIL);
+  // The Send Email pre-fill runs once per opening: clearing the subject to retype it must not reset the subject and body
+  // (and lose a template or AI draft).
+  const emailPrefilledRef = React.useRef(false);
 
   // ── Create Project state ──────────────────────────────────────────────
   const [projectFormValues, setProjectFormValues] = React.useState<ICreateProjectFormState>({ ...EMPTY_PROJECT_FORM });
@@ -241,9 +250,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       setProgressEvents([]);
       setSelectedActions([]);
       setIncludeShortSummary(false);
-      setEmailTo('');
-      setEmailSubject('');
-      setEmailBody('');
+      setEmail(EMPTY_COMPOSED_EMAIL);
+      emailPrefilledRef.current = false;
       setProjectFormValues({ ...EMPTY_PROJECT_FORM });
       setProjectFormValid(false);
     }
@@ -270,12 +278,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   includeShortSummaryRef.current = includeShortSummary;
   const fileStateRef = React.useRef(fileState);
   fileStateRef.current = fileState;
-  const emailToRef = React.useRef(emailTo);
-  emailToRef.current = emailTo;
-  const emailSubjectRef = React.useRef(emailSubject);
-  emailSubjectRef.current = emailSubject;
-  const emailBodyRef = React.useRef(emailBody);
-  emailBodyRef.current = emailBody;
+  const emailRef = React.useRef(email);
+  emailRef.current = email;
   const projectFormValuesRef = React.useRef(projectFormValues);
   projectFormValuesRef.current = projectFormValues;
   const projectFormValidRef = React.useRef(projectFormValid);
@@ -379,10 +383,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         description: 'Compose and send an email with the file summary.',
         icon: <MailRegular fontSize={28} />,
         isSkippable: true,
-        canAdvance: () =>
-          emailToRef.current.trim() !== '' &&
-          emailSubjectRef.current.trim() !== '' &&
-          emailBodyRef.current.trim() !== '',
+        canAdvance: () => isComposedEmailReady(emailRef.current),
         renderSelectedExtra: () => (
           <Checkbox
             checked={includeShortSummary}
@@ -393,15 +394,11 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         renderStep: () => (
           <SendEmailFollowOnStep
             title="Send Email"
-            subtitle="Compose an email with the file summary. It will be sent via the system."
-            infoNote="This email will be sent via the BFF communication endpoint."
-            emailTo={emailToRef.current}
-            onEmailToChange={setEmailTo}
-            emailSubject={emailSubjectRef.current}
-            onEmailSubjectChange={setEmailSubject}
-            emailBody={emailBodyRef.current}
-            onEmailBodyChange={setEmailBody}
-            onSearchUsers={handleSearchUsers}
+            subtitle="Compose an email with the file summary. It is sent when you finish the wizard, from the mailbox chosen in From."
+            value={emailRef.current}
+            onChange={setEmail}
+            composeHandlers={emailComposeHandlers}
+            onSearchRecipients={handleSearchUsers}
             headerContent={
               <Checkbox
                 checked={includeShortSummaryRef.current}
@@ -447,21 +444,40 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         ),
       },
     ],
-    [dataService, navigationService, authenticatedFetch, bffBaseUrl, handleSearchUsers, includeShortSummary]
+    [
+      dataService,
+      navigationService,
+      authenticatedFetch,
+      bffBaseUrl,
+      handleSearchUsers,
+      includeShortSummary,
+      emailComposeHandlers,
+    ]
   );
 
   // ── Pre-fill email fields when send-email is selected ─────────────────
   React.useEffect(() => {
-    if (selectedActions.includes('send-email') && summarizeResult && !emailSubject) {
-      setEmailSubject(buildSummaryEmailSubject());
-      setEmailBody(buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary));
+    if (selectedActions.includes('send-email') && summarizeResult && !email.subject && !emailPrefilledRef.current) {
+      emailPrefilledRef.current = true;
+      setEmail(prev => ({
+        ...prev,
+        subject: buildSummaryEmailSubject(),
+        body: buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary),
+        bodyFormat: 'PlainText',
+      }));
     }
-  }, [selectedActions, summarizeResult, emailSubject, includeShortSummary]);
+  }, [selectedActions, summarizeResult, email.subject, includeShortSummary]);
 
   // ── Update email body when short summary toggle changes ───────────────
   React.useEffect(() => {
     if (selectedActions.includes('send-email') && summarizeResult) {
-      setEmailBody(buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary));
+      // The step restarts its composer from this body when it is open (task 182). The body is plain text, even when
+      // the user had switched the composer to rich text: read as HTML, its line breaks would collapse.
+      setEmail(prev => ({
+        ...prev,
+        body: buildSummaryEmailBody(summarizeResult.summary, summarizeResult.shortSummary, includeShortSummary),
+        bodyFormat: 'PlainText',
+      }));
     }
     // Only re-run when the toggle changes, not on every render
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -470,9 +486,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   // ── handleFinish ──────────────────────────────────────────────────────
   const handleFinish = React.useCallback(async (): Promise<IWizardSuccessConfig> => {
     const currentSelectedActions = selectedActionsRef.current;
-    const currentEmailTo = emailToRef.current;
-    const currentEmailSubject = emailSubjectRef.current;
-    const currentEmailBody = emailBodyRef.current;
+    const currentEmail = emailRef.current;
     const currentProjectFormValues = projectFormValuesRef.current;
 
     const completedActions: string[] = [];
@@ -482,36 +496,28 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     // Task 133: a provisioning failure the same caller can finish is shown with its "Try securing again" action.
     let retryableProvisioning: IProvisionProjectResult | undefined;
 
-    // ── Send Email via canonical sendCommunication() (ADR-045) ─────────
-    // Task 060 (W6): replaced the prior inline BFF send fetch with the typed
-    // wrapper so this follow-on shares the single canonical send path +
-    // ProblemDetails error contract (ADR-019). `bodyFormat: 'text'` maps to
-    // the BFF `PlainText` enum inside the wrapper.
-    if (currentSelectedActions.includes('send-email') && currentEmailTo.trim()) {
-      try {
-        if (!authenticatedFetch) {
-          throw new Error(
-            '[SummarizeFilesDialog] authenticatedFetch is required — unauthenticated BFF calls are not permitted.'
-          );
+    // ── Send Email via the composer's request path (task 182, D-219) ────
+    // `sendComposedEmail` is EmailComposer's own send path (mapStateToSendRequest → sendCommunication, ADR-045):
+    // the chosen From, To, Cc, Bcc, attachments and body format. No record is created for a summary, so the email
+    // carries no association (as before).
+    if (currentSelectedActions.includes('send-email') && currentEmail.to.length > 0) {
+      if (!authenticatedFetch) {
+        // No record exists for a summary, so there is nowhere else to send it from.
+        warnings.push('The email was not sent: this page has no connection to the Spaarke email service.');
+      } else {
+        const emailResult = await sendComposedEmail(currentEmail, {
+          associations: [],
+          // A summary is filed to no record; as before, its .eml is not archived.
+          archiveToSpe: false,
+          authenticatedFetch,
+          bffBaseUrl,
+          onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
+        });
+        if (emailResult.success) {
+          completedActions.push('Email sent');
+        } else {
+          warnings.push(emailResult.warning ?? 'Email failed.');
         }
-        await sendCommunication(
-          {
-            to: currentEmailTo
-              .split(/[;,]/)
-              .map((a: string) => a.trim())
-              .filter(Boolean),
-            subject: currentEmailSubject,
-            body: currentEmailBody,
-            bodyFormat: 'text',
-            sendMode: 'sharedMailbox',
-          },
-          { authenticatedFetch, bffBaseUrl }
-        );
-        completedActions.push('Email sent');
-      } catch (err) {
-        const detail =
-          err instanceof SendCommunicationError ? err.detail : err instanceof Error ? err.message : 'Unknown error';
-        warnings.push(`Email failed: ${detail}`);
       }
     }
 
@@ -638,7 +644,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       ),
       warnings,
     };
-  }, [dataService, navigationService, authenticatedFetch, bffBaseUrl, onClose]);
+  }, [dataService, navigationService, authenticatedFetch, bffBaseUrl, onClose, emailComposeHandlers]);
 
   // ── Step configurations ───────────────────────────────────────────────
 

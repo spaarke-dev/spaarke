@@ -36,7 +36,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
-import { CreateTodoWizard, thinScrollbarDescendantStyle } from "@spaarke/ui-components";
+import { CreateTodoWizard, createXrmEmailComposeHandlers, thinScrollbarDescendantStyle } from "@spaarke/ui-components";
 import type { Orientation, ToolbarAction } from "@spaarke/ui-components";
 import {
   createXrmDataService,
@@ -636,6 +636,11 @@ function LaunchCreateTodoWizardHost(): React.ReactElement | null {
     () => (isCreateTodoLaunch ? createXrmNavigationService() : null),
     [isCreateTodoLaunch],
   );
+  // Send Email step (task 182, D-219): recipient pane, record lookup, upload, templates, AI draft.
+  const emailComposeHandlers = React.useMemo(
+    () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl || undefined }),
+    [bffBaseUrl],
+  );
 
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
     const webApi = getWebApi();
@@ -667,6 +672,7 @@ function LaunchCreateTodoWizardHost(): React.ReactElement | null {
       onClose={handleClose}
       dataService={dataService}
       navigationService={navigationService}
+      emailComposeHandlers={emailComposeHandlers}
       initialRegarding={createTodoContext?.initialRegarding}
       authenticatedFetch={authenticatedFetch}
       bffBaseUrl={bffBaseUrl}

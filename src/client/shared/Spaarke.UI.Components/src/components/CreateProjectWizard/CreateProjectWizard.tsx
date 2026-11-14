@@ -49,6 +49,8 @@ import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignm
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AssociationResult } from '../AssociateToStep/types';
 import { fileProjectUnderMatter } from '../../utils/adapters/bffChildWriteAdapter';
+import { EMAIL_NOT_SENT_NO_SERVER, sendComposedEmail } from '../EmailComposer/composeOnlySend';
+import type { IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // ---------------------------------------------------------------------------
 // Association wiring helpers
@@ -196,6 +198,11 @@ export interface ICreateProjectWizardProps {
   uploadService?: IUploadService;
   /** Optional INavigationService for opening records after creation. */
   navigationService?: INavigationService;
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host).
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
   /** When true, hides the title bar (Dataverse modal provides chrome). */
   embedded?: boolean;
   /**
@@ -331,6 +338,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   dataService,
   uploadService: _uploadService,
   navigationService,
+  emailComposeHandlers,
   embedded,
   uiScale,
   authenticatedFetch: authFetch,
@@ -540,6 +548,9 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
 
       // Assign Work follow-on: lookups open the Dataverse side pane (owner D-219).
       navigationService,
+
+      // Send Email follow-on: the host's composer handlers (task 182, D-219).
+      emailComposeHandlers,
 
       getAssignWorkDefaults: () => ({
         // Projects don't have a matterTypeId; seed practice area from the project form
@@ -885,17 +896,19 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 3. Send email (if selected) — the sent message is recorded against the project, so it is held back too.
-        const wantsEmail = context.selectedActions.includes('send-email') && !!context.followOn.emailTo.trim();
+        const wantsEmail = context.selectedActions.includes('send-email') && context.followOn.email.to.length > 0;
         if (secureBlocked && wantsEmail) skippedForSecure.push('the email');
         if (!secureBlocked && wantsEmail && authFetch && bffBaseUrl) {
-          const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
-          const emailResult = await emailService.sendEmail({
-            to: context.followOn.emailTo,
-            subject: context.followOn.emailSubject,
-            body: context.followOn.emailBody,
+          // Task 182 (D-219): the composer's request path (From, To, Cc, Bcc, attachments), filed under the project.
+          const emailResult = await sendComposedEmail(context.followOn.email, {
             associations: [{ entityType: 'sprk_project', entityId: projectId, entityName: projectName }],
+            authenticatedFetch: authFetch,
+            bffBaseUrl,
+            onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
           });
           if (!emailResult.success && emailResult.warning) warnings.push(emailResult.warning);
+        } else if (!secureBlocked && wantsEmail) {
+          warnings.push(EMAIL_NOT_SENT_NO_SERVER);
         }
 
         // Surface a provisioning refusal as the designed state the service classified, VERBATIM.
@@ -1000,6 +1013,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       authFetch,
       bffBaseUrl,
       navigationService,
+      emailComposeHandlers,
       resolveSpeContainerId,
       webApiAdapter,
       handoffFiles,

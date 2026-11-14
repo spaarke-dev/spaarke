@@ -16,6 +16,7 @@ import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 import type { AssociationResult, EntityTypeOption } from '../AssociateToStep/types';
 import type { INavigationService, IDataService } from '../../types/serviceInterfaces';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
+import type { IComposedEmail, IEmailComposeHandlers } from '../EmailComposer/composeOnlySend';
 
 // Re-export for convenience
 export type { AssociationResult, EntityTypeOption };
@@ -219,6 +220,12 @@ export interface IFollowOnState extends IAssignWorkFollowOnState, ICreateEventFo
   emailSubject: string;
   /** Email body text. */
   emailBody: string;
+  /**
+   * The whole composed email (task 182, D-219): From, To, Cc, Bcc, subject, body, attachments. The entity's onFinish
+   * sends it with `sendComposedEmail` and the created record as the association. `emailTo` / `emailSubject` /
+   * `emailBody` above are derived from it.
+   */
+  email: IComposedEmail;
 }
 
 // ---------------------------------------------------------------------------
@@ -455,6 +462,13 @@ export interface ICreateRecordWizardConfig {
    * `CreateProjectWizard`) — fully backward compatible, opt-in only.
    */
   followOnCards?: FollowOnCardConfig[];
+
+  /**
+   * Host-built email composer handlers for the Send Email follow-on (task 182, D-219): recipient side pane, record
+   * lookup, file upload, template picker and AI draft (`createXrmEmailComposeHandlers` in a Dataverse host). A missing
+   * handler hides its feature in the step.
+   */
+  emailComposeHandlers?: IEmailComposeHandlers;
 }
 
 // ---------------------------------------------------------------------------
