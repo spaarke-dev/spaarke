@@ -89,6 +89,21 @@ jobs:
 
       # r3AnalyzersAsErrors: this build runs with Directory.Build.props' TreatWarningsAsErrors=true; reaching the
       # next step proves the gate passed (a failed step stops the job).
+      # spaarkeai-mcp-bff-api-r1 task 030 (FR-12, NFR-03): the Spaarke decisions MCP App widget is ONE html file embedded in the BFF
+      # (Sprk.Bff.Api.csproj, EmbeddedResource Condition=Exists). It must be built BEFORE `dotnet build`, or the artifact ships without
+      # it and resources/read for ui://spaarke/decisions.html answers an error. `npm run build` type-checks, builds, and then runs
+      # scripts/check-bundle-size.mjs, which fails this job above 3 MB (warns above 1 MB) or when the page is not self-contained.
+      - name: Setup Node (widget build)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Build the Spaarke decisions widget (size gate: fails above 3 MB)
+        working-directory: src/client/widgets/spaarke-decisions
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
       - name: Build
         run: dotnet build ${{ env.API_PROJECT }} -c Release --no-restore
 
