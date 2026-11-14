@@ -326,3 +326,28 @@ Q5 and the per-person scope of `ClassifyEligibility` are clarifications of uac-r
   - **Dev data, read 2026-11-14.** There is one type row, "Law Firm". Of the active organizations, 3 have that type and 3 have no type. Two of the untyped ones are assigned firms today: one appears on 6 matters, and one is the customer's own organization, as firm 2 on 2 matters. Neither would be offered for a new add until its type is set. Existing assignments are not affected, because a clear does not check the type. Setting a type is a live data write and needs the owner's OK.
 - **Q8, Q9, Q10 → as recommended (EB-D-235).**
 - **No owner questions remain open.** Build per the design with uac-r2's R1 and R2. uac-r2 was told that Q2 changed.
+
+## uac-r2 on the owner answers (2026-11-14): approval stands, plus conditions for Q2 and Q3
+
+R1, R2 and the Limited / Secure / Restricted / No Access refusals stand, whatever the record's state.
+
+**Q2 (inactive record) conditions:**
+1. **No promise of access.** The materializer keeps skipping the organization grant on an inactive record; 095g must not change that.
+   - An add to an inactive record writes the slot and grants nothing. The L4 job grants within about 5 minutes once the record is active again.
+   - The 200 is `access.state = "applied"` with `granted: []`.
+   - The R2 notice reads "<firm>'s people will get access to this record when it is active again." It never says they have access now.
+2. **Keep the one-rule theory exact.** Step 2's refusals come from `OrganizationGrantSkipReason(RootRecordFlags)`, the flag-based reasons only. Record state stays out of that function, or is a separate argument the route ignores. The 32-combination theory still proves that the route and the materializer agree on every flag reason.
+3. **Tests:**
+   - Inactive Standard record: the slot is written, no organization grant, state `applied` with an empty `granted`.
+   - Inactive Secure or Restricted record: refused, the same as active.
+   - Reactivation then grants (a materializer-level test is enough).
+
+**Q3 conditions:**
+- Match the Law Firm type by its stable code, never by id or name.
+- `not_a_law_firm` is checked server-side, on add only. The active-organization check stays alongside it.
+- A clear removes any firm.
+- **If the type code is missing on an environment, the add and the list fail closed with 503**, never "every organization counts".
+
+uac-r2: "Go ahead and build."
+
+**Test-file note (ontology-r1, #2822 review):** `BillingCodePatternTests` reads `src/solutions/RuleReview/src/services/ruleTypes.ts`. That file is tracked; the review's 1/2990 failure came from a partial export. Not a defect.
