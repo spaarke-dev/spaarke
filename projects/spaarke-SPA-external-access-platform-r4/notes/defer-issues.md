@@ -251,3 +251,13 @@ answered AND `canCreate` is not false. The status toggle is excluded (no server 
 **Why deferred.** Found by task 009; outside its scope.
 
 **Fix shape.** Wire each control to its destination (Tasks after task 011) or hide it. Add a test.
+
+## D-16 — Shared DataGrid: failed command handler and failed bulk delete are silent (#2823)
+
+**Where.** `Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx`: the `invokeItem` handler catch and the `performBulkDelete` catch. Both are older than R4 and recorded in the client-lint suppression baseline. Task 010 part 3 touched the file, so the CI rule reported them.
+
+**Effect.** If a delete is refused, the confirm dialog closes, the rows stay, and the user sees no message. Other failed commands are also silent.
+
+**Why deferred.** It needs a new user-visible error surface in the shared grid. That is outside R4 scope.
+
+**Fix shape.** Add an error surface to the grid (an inline MessageBar or an `onCommandError` prop) and route both catches to it. Add tests, then prune the suppressions.

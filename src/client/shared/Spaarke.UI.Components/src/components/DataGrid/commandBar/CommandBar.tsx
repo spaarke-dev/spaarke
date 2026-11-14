@@ -465,7 +465,7 @@ export const CommandBar: React.FC<CommandBarProps> = props => {
         try {
           await item.hostCommand.onInvoke();
         } catch (err) {
-          // eslint-disable-next-line no-console
+          // eslint-disable-next-line no-console, no-restricted-syntax -- documented DataGridHostCommand contract: the host owns its command's errors and their UI; the grid only logs so one bad command cannot break the toolbar
           console.error(`[CommandBar] Host command "${item.id}" threw:`, err);
         }
         return;
