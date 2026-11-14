@@ -60,9 +60,19 @@ public partial class RouteAuthorizationGuardTests
             + "tool runs). It takes no record id; each tool reads as the caller through the seam McpTools names."),
     };
 
-    // No production tool yet: tasks 022-024 add spaarke_show_decisions, spaarke_get_decision_plan, spaarke_search_decision_lookup and
+    // Tasks 022-024 add spaarke_show_decisions, spaarke_list_decision_page, spaarke_get_decision_plan, spaarke_search_decision_lookup and
     // spaarke_complete_decision, each with its entry here, in the diff that adds the tool.
-    private static readonly IReadOnlyList<McpTool> McpTools = Array.Empty<McpTool>();
+    private static readonly IReadOnlyList<McpTool> McpTools = new[]
+    {
+        // ── task 022 ──
+        new McpTool("ShowDecisionsTool", "", "IDecisionCapability",
+            "spaarke_show_decisions (FR-03/FR-04, model-visible, read-only): the caller's Decide lane through ListDecideAsync and "
+            + "ListDecidePageAsync with IHttpContextAccessor.HttpContext's User; privileged rows reduced to a count before the model sees them."),
+        new McpTool("ListDecisionPageTool", "", "IDecisionCapability",
+            "spaarke_list_decision_page (FR-05, app-only, read-only): one page of the caller's Decide lane through ListDecidePageAsync "
+            + "with IHttpContextAccessor.HttpContext's User; the cursor is the only input."),
+        // ── end task 022 ──
+    };
 
     private static readonly Regex McpToolClass = new(
         @"(?<attrs>(?:\[[^\[\]]*\]\s*)+)(?:(?:public|internal|private|protected|sealed|static|partial|file)\s+)*class\s+(?<name>[A-Za-z_]\w*)",
@@ -779,11 +789,12 @@ public partial class RouteAuthorizationGuardTests
     {
         static HashSet<string> Seen(params Type[] types) => types.Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
 
-        // MUST NOT FIRE: the text saw it, the ledger lists it, bare [Authorize], a PublicContracts parameter. The real BFF has no
-        // tool yet, so the real cross-check is empty too.
+        // MUST NOT FIRE: the text saw it, the ledger lists it, bare [Authorize], a PublicContracts parameter. The real BFF's tools are
+        // the ledger's classes (RealMcpToolViolations proves the text rule finds exactly those), so the real cross-check is empty.
         var sanctioned = typeof(McpReflectionSanctionedTool);
         Assert.Empty(McpToolReflectionViolations(new[] { sanctioned }, Seen(sanctioned), new[] { McpReflectionEntry(sanctioned) }));
-        Assert.Empty(McpToolReflectionViolations(typeof(McpToolDefinition).Assembly.GetTypes(), new HashSet<string>(), McpTools));
+        Assert.Empty(McpToolReflectionViolations(
+            typeof(McpToolDefinition).Assembly.GetTypes(), McpTools.Select(t => t.Class).ToHashSet(StringComparer.Ordinal), McpTools));
 
         // MUST FIRE, one cause each.
         Fires(McpToolReflectionViolations(new[] { sanctioned }, new HashSet<string>(), new[] { McpReflectionEntry(sanctioned) }),
