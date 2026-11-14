@@ -372,6 +372,7 @@ public sealed class CoreRecordFirmEndpointContractTests
         var response = await host.AssignAsync(new { remove = FirmA, confirmRevoke = FirmA });
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await ReasonCode(response)).Should().Be(Uniform404);
         host.ShouldHaveDoneNothing();
     }
 
@@ -498,27 +499,33 @@ public sealed class CoreRecordFirmEndpointContractTests
 
     public static IEnumerable<object[]> FlagRefusals() => new[]
     {
-        new object[] { "N5 Restricted", new RootRecordFlags(IsSecure: false, IsRestricted: true), CoreRecordFirmCodes.RecordRestricted },
-        new object[] { "N6 Secure", new RootRecordFlags(IsSecure: true, IsRestricted: false), CoreRecordFirmCodes.RecordSecure },
-        new object[] { "N9 Limited", new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true), CoreRecordFirmCodes.RecordLimited },
-        new object[] { "Secure and Restricted", new RootRecordFlags(IsSecure: true, IsRestricted: true), CoreRecordFirmCodes.RecordRestricted },
-        new object[] { "Q2 inactive Secure", new RootRecordFlags(IsSecure: true, IsRestricted: false, IsInactive: true), CoreRecordFirmCodes.RecordSecure },
-        new object[] { "Q2 inactive Restricted", new RootRecordFlags(IsSecure: false, IsRestricted: true, IsInactive: true), CoreRecordFirmCodes.RecordRestricted },
+        new object[] { "N5 Restricted", new RootRecordFlags(IsSecure: false, IsRestricted: true), CoreRecordFirmCodes.RecordRestricted, false },
+        new object[] { "N6 Secure", new RootRecordFlags(IsSecure: true, IsRestricted: false), CoreRecordFirmCodes.RecordSecure, false },
+        new object[] { "N9 Limited", new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true), CoreRecordFirmCodes.RecordLimited, false },
+        new object[] { "Secure and Restricted", new RootRecordFlags(IsSecure: true, IsRestricted: true), CoreRecordFirmCodes.RecordRestricted, false },
+        new object[] { "Q2 inactive Secure", new RootRecordFlags(IsSecure: true, IsRestricted: false, IsInactive: true), CoreRecordFirmCodes.RecordSecure, false },
+        new object[] { "Q2 inactive Restricted", new RootRecordFlags(IsSecure: false, IsRestricted: true, IsInactive: true), CoreRecordFirmCodes.RecordRestricted, false },
+
+        // uac-r2 review: a REPLACE adds a firm too, so it is refused the same way (the old firm stays, nothing is revoked).
+        new object[] { "N6 Secure, replace", new RootRecordFlags(IsSecure: true, IsRestricted: false), CoreRecordFirmCodes.RecordSecure, true },
     };
 
-    [Theory(DisplayName = "095g N5, N6, N9 and Q2: a Restricted, Secure or Limited record refuses an add with 409 and its code, active or inactive (must fire)")]
+    [Theory(DisplayName = "095g N5, N6, N9 and Q2: a Restricted, Secure or Limited record refuses an add (or a replace) with 409 and its code, active or inactive (must fire)")]
     [MemberData(nameof(FlagRefusals))]
-    public async Task Add_OnAFlaggedRecord_Is409(string name, RootRecordFlags flags, string code)
+    public async Task Add_OnAFlaggedRecord_Is409(string name, RootRecordFlags flags, string code, bool replace)
     {
         await using var host = await Host.StartAsync();
         host.GrantEverything();
-        host.World.Matter(MatterId, flags: flags, active: !flags.IsInactive);
+        host.World.Matter(MatterId, slot1: replace ? FirmA : null, flags: flags, active: !flags.IsInactive);
 
-        var response = await host.AssignAsync(new { add = FirmA });
+        var response = replace
+            ? await host.AssignAsync(new { add = FirmC, remove = FirmA, confirmRevoke = FirmA })
+            : await host.AssignAsync(new { add = FirmA });
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict, name);
         (await ErrorCode(response)).Should().Be(code);
         host.ShouldHaveDoneNothing();
+        host.World.SlotsOf(MatterId).Should().Be((replace ? FirmA : (Guid?)null, (Guid?)null));
     }
 
     [Fact(DisplayName = "095g N5-N9 control: the same add on a Standard record is applied (must not fire)")]
@@ -1230,6 +1237,7 @@ public sealed class CoreRecordFirmEndpointContractTests
         (await ErrorCode(response)).Should().Be(CoreRecordFirmCodes.RecordChanged);
         host.World.WriteAttempts.Should().Be(2);
         host.World.Writes.Should().BeEmpty();
+        host.World.Harness.Store.RootReads.Should().Be(0, "no access pass runs on a refusal");
     }
 
     [Fact(DisplayName = "095g concurrency: a concurrent writer that already added the same firm makes the re-plan a no-op (200, changed false)")]
@@ -1380,6 +1388,7 @@ public sealed class CoreRecordFirmEndpointContractTests
         var response = await host.ListAsync("");
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await ErrorCode(response)).Should().Be(Unavailable);
         host.World.Entities.Invocations.Should().BeEmpty();
     }
 
