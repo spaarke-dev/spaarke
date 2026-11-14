@@ -57,6 +57,8 @@ export default defineConfig({
     sourcemap: false,
     assetsInlineLimit: 100000000,
     minify: true,
+    // No modulepreload polyfill: it carries a fetch() call, and a single-file page has no preload links to fetch.
+    modulePreload: false,
     rollupOptions: { output: { manualChunks: undefined } },
   },
   base: './',
