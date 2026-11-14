@@ -4,7 +4,7 @@
     <title>Widget scaffold, BFF embedding and CI size gate</title>
     <phase>C Widget</phase>
     <gate>after 003 (Size budget) and 021</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include frontend and bff-api; new .ts/.tsx files, a BFF resource handler (.cs) and CI changes</rigor-reason>
     <model-tier>sonnet</model-tier>

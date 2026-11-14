@@ -89,11 +89,39 @@ jobs:
 
       # r3AnalyzersAsErrors: this build runs with Directory.Build.props' TreatWarningsAsErrors=true; reaching the
       # next step proves the gate passed (a failed step stops the job).
+      # spaarkeai-mcp-bff-api-r1 task 030 (FR-12, NFR-03): the Spaarke decisions MCP App widget is ONE html file embedded in the BFF
+      # (Sprk.Bff.Api.csproj, EmbeddedResource Condition=Exists). It must be built BEFORE `dotnet build`, or the artifact ships without
+      # it and resources/read for ui://spaarke/decisions.html answers an error. `npm run build` type-checks, builds, and then runs
+      # scripts/check-bundle-size.mjs, which fails this job above 3 MB (warns above 1 MB) or when the page is not self-contained.
+      - name: Setup Node (widget build)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Build the Spaarke decisions widget (size gate: fails above 3 MB)
+        working-directory: src/client/widgets/spaarke-decisions
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
+
       - name: Build
         run: dotnet build ${{ env.API_PROJECT }} -c Release --no-restore
 
       - name: Publish
         run: dotnet publish ${{ env.API_PROJECT }} -c Release -o ./publish --no-build
+
+      # The csproj embeds the widget only when dist/index.html exists (Condition=Exists), so a skipped or failed-open widget build would
+      # otherwise publish an artifact that serves an error for ui://spaarke/decisions.html. Fail here instead. The logical name is stored
+      # as UTF-8 in the assembly's manifest-resource table, so a byte search of the published dll finds it.
+      - name: Verify the decisions widget is embedded in the published BFF
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -aq "Sprk.Bff.Api.Widgets.decisions.html" ./publish/Sprk.Bff.Api.dll; then
+            echo "::error::The published Sprk.Bff.Api.dll does not embed the decisions widget (Sprk.Bff.Api.Widgets.decisions.html). The widget build step did not produce src/client/widgets/spaarke-decisions/dist/index.html."
+            exit 1
+          fi
+          echo "Decisions widget is embedded."
 
       - name: Compute build identifiers (buildId + sha)
         id: build-id

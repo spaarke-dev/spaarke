@@ -266,6 +266,17 @@
     <EmbeddedResource Include="Services\Signals\Schemas\*.json" />
   </ItemGroup>
 
+  <!-- spaarkeai-mcp-bff-api-r1 task 030 (FR-12, NFR-03): the Spaarke decisions MCP App widget, ONE self-contained html file built by
+       src/client/widgets/spaarke-decisions (npm run build), served by DecisionsWidgetResource as ui://spaarke/decisions.html.
+       Condition=Exists keeps a local `dotnet build` without the widget built working: nothing is embedded and resources/read then
+       answers an error (never stale html). publish-bff-artifact.yml builds the widget first, so a published artifact always embeds it. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../../client/widgets/spaarke-decisions/dist/index.html"
+                      LogicalName="Sprk.Bff.Api.Widgets.decisions.html"
+                      Link="Api/Mcp/LegalOperations/decisions-widget.html"
+                      Condition="Exists('../../../client/widgets/spaarke-decisions/dist/index.html')" />
+  </ItemGroup>
+
   <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at
        config/secure-record-owner-role.json — LINKED (not copied) so the NFR-05 census (scheduled job + manual gate)
        reads the same bytes as scripts/Set-SecureRecordOwnerRolePrivileges.ps1 and the setup guide. -->
