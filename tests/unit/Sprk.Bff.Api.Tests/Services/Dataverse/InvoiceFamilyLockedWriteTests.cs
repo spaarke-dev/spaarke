@@ -511,6 +511,86 @@ public class InvoiceFamilyLockedWriteTests
         writes.Should().Equal(new Guid?[] { null });
     }
 
+    // ── Review 1 (F4): optimistic concurrency — the row version is not a person's column ─────────────────────────────────
+
+    /// <summary><see cref="Records"/> plus the conditional application write, recorded with its version (or failing as <paramref name="fault"/>).</summary>
+    private static (Mock<IFieldMappingDataverseService> Records, List<(Dictionary<string, object?> Fields, Guid? As)> Writes,
+        List<(Dictionary<string, object?> Fields, long Version)> Conditional) RecordsWithVersion(Exception? fault = null)
+    {
+        var (records, writes) = Records();
+        var conditional = new List<(Dictionary<string, object?>, long)>();
+        records.Setup(r => r.UpdateRecordFieldsIfUnchangedAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
+            .Returns<string, Guid, Dictionary<string, object?>, long, CancellationToken>((_, _, fields, version, _) =>
+            {
+                conditional.Add((new Dictionary<string, object?>(fields), version));
+                return fault is null ? Task.CompletedTask : Task.FromException(fault);
+            });
+        return (records, writes, conditional);
+    }
+
+    private static Task<string?> WriteOnVersion(Mock<IFieldMappingDataverseService> records, Dictionary<string, object?> fields, long version) =>
+        InvoiceFamilyLockedWrite.UpdateExistingSplitAsync(
+            records.Object, "sprk_invoice", InvoiceId, fields, Person, notFoundAsReadFailed: true,
+            new Rights().On("sprk_invoices", InvoiceId, RowRights).On("sprk_matters", MatterId, TargetRights).Question,
+            NullLogger.Instance, CancellationToken.None, expectedVersion: version);
+
+    [Fact]
+    public async Task Optimistic_PersonsPartIsTheVersionAlone_NoPersonWrite_OneApplicationWriteOnThatVersion()
+    {
+        var (records, writes, conditional) = RecordsWithVersion();
+
+        var code = await WriteOnVersion(records,
+            new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId), [RowVersionColumn] = 42L }, 42L);
+
+        code.Should().BeNull();
+        writes.Should().BeEmpty("a write of the row version alone is no write of the person's");
+        conditional.Should().ContainSingle();
+        conditional[0].Version.Should().Be(42L);
+        conditional[0].Fields.Keys.Should().BeEquivalentTo("sprk_matter");
+    }
+
+    [Fact]
+    public async Task Optimistic_VersionOnly_RowChangedSince_IsTheConflict_NothingWritten()
+    {
+        var (records, writes, _) = RecordsWithVersion(new System.Data.DBConcurrencyException("changed"));
+
+        var act = () => WriteOnVersion(records,
+            new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId), [RowVersionColumn] = 42L }, 42L);
+
+        await act.Should().ThrowAsync<System.Data.DBConcurrencyException>();
+        writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Optimistic_VersionOnly_ApplicationWriteFaults_IsNeverPartlySaved()
+    {
+        var (records, writes, _) = RecordsWithVersion(new HttpRequestException("boom"));
+
+        var act = () => WriteOnVersion(records,
+            new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId), [RowVersionColumn] = 42L }, 42L);
+
+        await act.Should().ThrowAsync<HttpRequestException>("nothing else was saved, so the answer is not \"partly saved\"");
+        writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Optimistic_PersonsPartHasOtherColumns_ThePersonsWriteCarriesTheVersion_ThenTheApplications()
+    {
+        var (records, writes, conditional) = RecordsWithVersion();
+
+        var code = await WriteOnVersion(records,
+            new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId), ["sprk_name"] = "n", [RowVersionColumn] = 42L }, 42L);
+
+        code.Should().BeNull();
+        conditional.Should().BeEmpty();
+        writes.Should().HaveCount(2);
+        writes[0].As.Should().Be(Person);
+        writes[0].Fields.Should().Contain(RowVersionColumn, 42L).And.ContainKey("sprk_name").And.HaveCount(2);
+        writes[1].As.Should().BeNull();
+        writes[1].Fields.Keys.Should().BeEquivalentTo("sprk_matter");
+    }
+
     // ── Review 1 (F1): once the person's write landed, the request cannot cancel the application's ─────────────────────
 
     /// <summary>

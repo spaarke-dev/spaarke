@@ -314,8 +314,11 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     /// update-only as well: an unknown id is refused, nothing is written, and a person's answer uses the "not found or could
     /// not be read" wording (<see cref="RecordNotFoundRefusal"/>).
     /// </summary>
+    /// <param name="expectedVersion">#2799 review 1 (F4): the Optimistic update's row version (also in <paramref name="fields"/>
+    /// as <c>versionnumber</c>), so a split whose person part is only that version sends one application write on it.</param>
     private async Task PatchAsync(
-        string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct, Guid? impersonateSystemUserId)
+        string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct, Guid? impersonateSystemUserId,
+        long? expectedVersion = null)
     {
         if (InvoiceFamilyCoreRecordGuard.IsUpdateOnlyTarget(entityLogicalName))
         {
@@ -325,7 +328,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                     _fieldMappingService, entityLogicalName, recordId, fields, impersonateSystemUserId,
                     notFoundAsReadFailed: impersonateSystemUserId is not null,
                     InvoiceFamilyLockedWrite.RightsOfPrincipal(_lockedWriteProbe, impersonateSystemUserId ?? Guid.Empty),
-                    _logger, ct) is { } gone)
+                    _logger, ct, expectedVersion: expectedVersion) is { } gone)
             {
                 throw InvoiceFamilyLockedWrite.RefusalException(entityLogicalName, gone);
             }
@@ -418,7 +421,7 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
                 };
 
                 // 3. Update with version check
-                await PatchAsync(entityLogicalName, recordId, fieldsWithVersion, ct, impersonateSystemUserId);
+                await PatchAsync(entityLogicalName, recordId, fieldsWithVersion, ct, impersonateSystemUserId, expectedVersion: currentVersion);
 
                 _logger.LogInformation(
                     "Updated {EntityType} {RecordId} with optimistic concurrency (version {Version}, {FieldCount} fields)",
@@ -516,7 +519,10 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // - 0x80060883: ConcurrencyVersionNotProvided
         var message = ex.Message;
 
-        return message.Contains("0x80060882", StringComparison.OrdinalIgnoreCase) ||
+        // #2799 review 1 (F4): the conditional application write of a locked invoice-family column throws the typed conflict
+        // (IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync, HTTP 412).
+        return ex is System.Data.DBConcurrencyException ||
+               message.Contains("0x80060882", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("0x80060883", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("ConcurrencyVersionMismatch", StringComparison.OrdinalIgnoreCase) ||
                message.Contains("ConcurrencyVersionNotProvided", StringComparison.OrdinalIgnoreCase) ||

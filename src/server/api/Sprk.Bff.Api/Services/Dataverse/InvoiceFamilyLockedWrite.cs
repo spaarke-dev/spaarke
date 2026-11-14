@@ -53,6 +53,9 @@ internal static class InvoiceFamilyLockedWrite
         "The change was only partly saved: the record's other changes were saved, but what it is filed under was not. "
         + "Reload it and try again (" + LockedWritePartlySavedCode + ").";
 
+    /// <summary>The row-version column an Optimistic update adds to its fields (<c>DataverseUpdateHandler</c>; review 1 F4).</summary>
+    internal const string RowVersionColumn = "versionnumber";
+
     /// <summary>One locked column: the table, the lookup column, and the one table it names.</summary>
     internal readonly record struct LockedColumn(string Table, string Column, string TargetTable);
 
@@ -253,6 +256,13 @@ internal static class InvoiceFamilyLockedWrite
     /// the person's write of the other columns has landed, ANY failure of the application's write (a fault, a row gone, a
     /// cancellation) is <see cref="LockedWritePartlySavedCode"/>, logged at Warning with the record and
     /// <paramref name="traceId"/> (the current trace when null) — never success, and no fault text in the answer (K-1).
+    /// <para><b>Optimistic concurrency</b> (<paramref name="expectedVersion"/>, review 1 F4): the caller's
+    /// <see cref="RowVersionColumn"/> stays in <paramref name="fields"/>, so the single write and the person's write carry it as
+    /// before. When the person's part holds nothing but it, no person write is sent: the application's write of the locked
+    /// columns is the one write and carries the precondition
+    /// (<see cref="IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync"/>; a row changed since throws its
+    /// <see cref="System.Data.DBConcurrencyException"/>, the path's own conflict). Otherwise the person's write carries the
+    /// precondition and the application's follows (K-1).</para>
     /// </summary>
     internal static async Task<string?> UpdateExistingSplitAsync(
         IFieldMappingDataverseService records,
@@ -264,7 +274,8 @@ internal static class InvoiceFamilyLockedWrite
         RightsQuestion rightsOf,
         ILogger logger,
         CancellationToken ct,
-        string? traceId = null)
+        string? traceId = null,
+        long? expectedVersion = null)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(fields);
@@ -285,6 +296,20 @@ internal static class InvoiceFamilyLockedWrite
                 return InvoiceFamilyCoreRecordGuard.ReadFailedCode;
             case LockedWriteCheck.Denied:
                 return LockedWriteDeniedCode;
+        }
+
+        if (expectedVersion is { } version && rest.Keys.All(k => k == RowVersionColumn))
+        {
+            // Review 1 (F4): the person's part is the row version alone — one application write, on that version.
+            try
+            {
+                await records.UpdateRecordFieldsIfUnchangedAsync(entityLogicalName, recordId, locked, version, ct).ConfigureAwait(false);
+                return null;
+            }
+            catch (KeyNotFoundException)
+            {
+                return notFoundAsReadFailed ? InvoiceFamilyCoreRecordGuard.ReadFailedCode : InvoiceFamilyCoreRecordGuard.RecordNotFoundCode;
+            }
         }
 
         if (rest.Count == 0)
