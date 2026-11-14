@@ -56,6 +56,7 @@ public sealed class ProcedureDryRunPlanningContractTests
         nameof(IGenericEntityService.RetrieveMultipleAsync), nameof(IGenericEntityService.GetEntitySetNameAsync),
         nameof(IGenericEntityService.GetLookupNavigationAsync), nameof(IGenericEntityService.GetColumnMetadataAsync),
         nameof(IGenericEntityService.GetCollectionNavigationAsync), nameof(IGenericEntityService.GetCurrentIdentityIdAsync),
+        nameof(IGenericEntityService.GetAssignCascadesAsync),
     };
 
     [Fact(DisplayName = "084d-1 F1: every member of IGenericEntityService is classified as a read or a write")]
