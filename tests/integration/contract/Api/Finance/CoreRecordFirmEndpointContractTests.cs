@@ -255,6 +255,36 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.World.SlotsOf(MatterId).Should().Be((null, null));
     }
 
+    [Fact(DisplayName = "095g uac-r2 R1 (review 1 F4): a replace {add, remove, confirmRevoke} with Write only is the uniform 404 - the add in it needs Append (must fire)")]
+    public async Task Replace_WithWriteOnly_IsUniform404()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.World.Matter(MatterId, slot1: FirmA);
+        host.Access.Grant(MatterSet, MatterId, AccessRights.Read | AccessRights.Write);
+
+        var response = await host.AssignAsync(new { add = FirmC, remove = FirmA, confirmRevoke = FirmA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await ReasonCode(response)).Should().Be(Uniform404);
+        host.ShouldHaveDoneNothing();
+        host.World.SlotsOf(MatterId).Should().Be((FirmA, null));
+    }
+
+    [Fact(DisplayName = "095g uac-r2 R1 (review 1 F4) control: the same replace with Write and Append is applied (must not fire)")]
+    public async Task Replace_WithWriteAndAppend_IsApplied()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.World.Matter(MatterId, slot1: FirmA);
+        host.Access.Grant(MatterSet, MatterId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
+
+        var response = await host.AssignAsync(new { add = FirmC, remove = FirmA, confirmRevoke = FirmA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.SlotsOf(MatterId).Should().Be((FirmC, null));
+    }
+
     [Fact(DisplayName = "095g: a clear without Write is the uniform 404 (must fire)")]
     public async Task Clear_WithoutWrite_IsUniform404()
     {
@@ -542,6 +572,13 @@ public sealed class CoreRecordFirmEndpointContractTests
             {
                 row.Reason.Should().Be(AssignedAccessReason.RootInactive);
                 world.Harness.Grants.ActiveRowsOf(MatterId, organizationId: FirmA).Should().BeEmpty();
+
+                // Review 1: the inactive skip must not hide a flag refusal. The same firm on the same flags with the record ACTIVE is granted.
+                var activeCopy = new FirmWorld();
+                activeCopy.Matter(MatterId, slot1: FirmA, flags: flags with { IsInactive = false });
+                await activeCopy.Harness.SyncAsync(ExternalGrantRootType.Matter, MatterId);
+                activeCopy.Harness.Store.RowsOf(MatterId, FirmA).Should().ContainSingle()
+                    .Which.State.Should().Be(AssignedAccessState.Granted, "the route admitted the add, so the flags alone must allow the grant");
             }
             else
             {
@@ -952,6 +989,43 @@ public sealed class CoreRecordFirmEndpointContractTests
         repeat.StatusCode.Should().Be(HttpStatusCode.OK);
         (await Json(repeat))["changed"]!.GetValue<bool>().Should().BeFalse();
         host.World.Writes.Count.Should().Be(writes);
+    }
+
+    [Fact(DisplayName = "095g (review 1 F4): a replace of a firm held in BOTH slots leaves (new, empty), revokes the old firm once and grants the new one")]
+    public async Task Replace_FirmInBothSlots_LeavesNewAndEmpty()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.World.Matter(MatterId, slot1: FirmA, slot2: FirmA);
+        (await host.World.Harness.SyncAsync(ExternalGrantRootType.Matter, MatterId)).Complete.Should().BeTrue();
+        host.World.Harness.Grants.ActiveRowsOf(MatterId, organizationId: FirmA).Should().ContainSingle("one grant for the firm, however many slots hold it");
+
+        var response = await host.AssignAsync(new { add = FirmC, remove = FirmA, confirmRevoke = FirmA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.SlotsOf(MatterId).Should().Be((FirmC, null));
+        var json = await Json(response);
+        json["access"]!["revoked"]!.AsArray().Select(g => g!["firmId"]!.GetValue<Guid>()).Should().Equal(FirmA);
+        json["access"]!["granted"]!.AsArray().Select(g => g!["firmId"]!.GetValue<Guid>()).Should().Equal(FirmC);
+        host.World.Harness.Grants.ActiveRowsOf(MatterId, organizationId: FirmA).Should().BeEmpty();
+        host.World.Harness.Grants.ActiveRowsOf(MatterId, organizationId: FirmC).Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "095g (review 1 F4): a clear of a firm held in BOTH slots empties both and revokes the firm once")]
+    public async Task Clear_FirmInBothSlots_EmptiesBoth()
+    {
+        await using var host = await Host.StartAsync();
+        host.GrantEverything();
+        host.World.Matter(MatterId, slot1: FirmA, slot2: FirmA);
+        (await host.World.Harness.SyncAsync(ExternalGrantRootType.Matter, MatterId)).Complete.Should().BeTrue();
+        host.World.Harness.Grants.ActiveRowsOf(MatterId, organizationId: FirmA).Should().ContainSingle();
+
+        var response = await host.AssignAsync(new { remove = FirmA, confirmRevoke = FirmA });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.World.SlotsOf(MatterId).Should().Be((null, null));
+        (await Json(response))["access"]!["revoked"]!.AsArray().Select(g => g!["firmId"]!.GetValue<Guid>()).Should().Equal(FirmA);
+        host.World.Harness.Grants.ActiveRowsOf(MatterId, organizationId: FirmA).Should().BeEmpty();
     }
 
     [Fact(DisplayName = "095g positive: an incomplete inline access pass answers pending; the slot write stands and the notice is still given")]
