@@ -307,7 +307,7 @@ internal static class InvoiceFamilyLockedWrite
             return state;
 
         var needed = targets.Count > 0 ? AccessRights.Write | AccessRights.Append : AccessRights.Write;
-        var onRow =await rightsOf(rowSet, recordId, ct).ConfigureAwait(false);
+        var onRow = await rightsOf(rowSet, recordId, ct).ConfigureAwait(false);
         if (onRow is not { } rowRights)
             return LockedWriteCheck.Unavailable;
         if ((rowRights & needed) != needed)
