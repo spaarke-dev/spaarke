@@ -48,7 +48,13 @@ internal sealed class DecisionToolsTestHost : IAsyncDisposable
 
     public CapturingLoggerProvider Logs { get; }
 
-    public static async Task<DecisionToolsTestHost> StartAsync(IDecisionCapability capability)
+    public static Task<DecisionToolsTestHost> StartAsync(IDecisionCapability capability) => StartAsync(capability, lookup: null);
+
+    /// <summary>
+    /// With <paramref name="lookup"/> set (task 025), the host serves ALL FIVE production tools (the two list tools, plan, lookup and
+    /// complete) over the same module-boundary doubles; without it, the two list tools only, as before.
+    /// </summary>
+    public static async Task<DecisionToolsTestHost> StartAsync(IDecisionCapability capability, IDecisionLookupSearch? lookup)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, 0));
@@ -76,7 +82,16 @@ internal sealed class DecisionToolsTestHost : IAsyncDisposable
             });
         builder.Services.AddAuthorization();
         builder.Services.AddRateLimitingModule();
-        builder.Services.AddMcpModule(builder.Configuration, new[] { typeof(ShowDecisionsTool), typeof(ListDecisionPageTool) });
+        if (lookup is not null)
+        {
+            builder.Services.AddSingleton(lookup);
+        }
+
+        builder.Services.AddMcpModule(
+            builder.Configuration,
+            lookup is null
+                ? new[] { typeof(ShowDecisionsTool), typeof(ListDecisionPageTool) }
+                : [typeof(ShowDecisionsTool), typeof(ListDecisionPageTool), typeof(GetDecisionPlanTool), typeof(SearchDecisionLookupTool), typeof(CompleteDecisionTool)]);
 
         var app = builder.Build();
         app.UseAuthentication();

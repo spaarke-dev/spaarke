@@ -3,7 +3,8 @@
 // WHAT RUNS: the production AddMcpModule / MapMcpEndpoints / RateLimitingModule on a real Kestrel listener (McpTestHost) behind a real
 // JwtBearer scheme, with probe tools (McpTestHost.cs) in this assembly. The real BFF host (CustomWebAppFactory) is booted once per
 // kill-switch state to prove the registration cannot abort startup and the route refuses an anonymous caller there too.
-// NOT HERE: per-tool policies, A10 (CIAM / home-directory token) refusals and the tools/list exact set (tasks 021, 025).
+// The exact five-tool tools/list (task 025) runs through the REAL BFF host (McpProgramHostFactory), the last test below.
+// NOT HERE: per-tool policies and A10 (CIAM / home-directory token) refusals (task 021, tests/integration/auth/Mcp).
 
 using System.Net;
 using System.Text;
@@ -250,5 +251,46 @@ public sealed class McpHostContractTests
         using var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    // ---- FR-01 (task 025): tools/list through the REAL BFF host is exactly the five v1 tools --------------------------------------
+
+    /// <summary>
+    /// The production-DI proof (task 010 K1, task 025): <see cref="McpProgramHostFactory"/> boots <c>Program</c>, so the five tools below
+    /// come from <c>AddMcpModule</c>'s real scan of the BFF assembly, not from a test's own type list. A sixth tool, a missing one, or a
+    /// renamed one fails here. The probe tools of <see cref="McpTestHost"/> live in the TEST assembly, which that scan never reads, so
+    /// their absence is part of the assertion.
+    /// </summary>
+    [Fact]
+    public async Task RealBffHost_ToolsList_WhenEnabledWithAValidToken_IsExactlyTheFiveV1Tools()
+    {
+        using var factory = new McpProgramHostFactory();
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Post, McpEndpoints.LegalOperationsRoute)
+        {
+            Content = new StringContent("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""", Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        request.Headers.Authorization = new("Bearer", McpProgramHostFactory.MintToken(CallerOne));
+
+        using var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        (factory.Services.GetRequiredService<McpToolCatalog>() is NullMcpToolCatalog).Should().BeFalse("MCP is switched on in this host");
+        var json = string.Join("\n", body.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.StartsWith("data:", StringComparison.Ordinal)).Select(l => l[5..].TrimStart()));
+        using var doc = JsonDocument.Parse(body.TrimStart().StartsWith('{') ? body : json);
+        var names = doc.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
+        names.Should().BeEquivalentTo(
+            [
+                "spaarke_show_decisions",
+                "spaarke_list_decision_page",
+                "spaarke_get_decision_plan",
+                "spaarke_search_decision_lookup",
+                "spaarke_complete_decision",
+            ],
+            "FR-01: tools/list returns exactly the v1 tools; the paging tool is spaarke_list_decision_page (task 022)");
+        names.Should().HaveCount(5);
     }
 }
