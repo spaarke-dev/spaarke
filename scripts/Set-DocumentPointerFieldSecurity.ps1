@@ -128,8 +128,8 @@
       (b) IMMEDIATELY grant the reader profile read=4, then the writer profile read=4 create=4 update=4 (retried while
           the platform propagates the secured state, 0x8004f508). If a grant fails, the column is REVERTED to unsecured
           and the run stops — a secured column with no reader permission reads EMPTY for every non-administrator;
-      (c) report any OTHER profile that can create or update the column (FAIL); list System Administrator holders
-          (full field access by platform rule, informational);
+      (c) report any OTHER profile that can create or update the column (FAIL); count System Administrator holders
+          (full field access by platform rule, informational; their names only with -ListSystemAdministrators);
       (d) publish the target's tables.
 
     LIVE ORDER (DocumentPointers): deploy the BFF that attaches files server-side → deploy the clients (code pages, PCFs,
@@ -191,6 +191,11 @@
 .PARAMETER Verify
     Read-only check with a pass/fail exit code (1 names each gap). Cannot be combined with -Apply.
 
+.PARAMETER ListSystemAdministrators
+    Every target: print the NAMES of the System Administrator role holders (users and teams) in the informational
+    section. Without it only their counts are printed (#2799 review 2: a run's output is shared in notes and tickets, and
+    names people; an operator who needs the list asks for it).
+
 .EXAMPLE
     .\Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com `
         -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
@@ -234,7 +239,8 @@ param(
     [switch]$BffOmitsMarkersFromCallerCreates,
     [switch]$BffWritesInvoiceFamilyLinksAsApp,
     [switch]$Apply,
-    [switch]$Verify
+    [switch]$Verify,
+    [switch]$ListSystemAdministrators
 )
 
 $ErrorActionPreference = 'Stop'
@@ -837,11 +843,20 @@ foreach ($pairToLock in $Pairs) {
 }
 
 Write-Host "`nInformational: System Administrator role holders (full field access by platform rule)"
+# #2799 review 2 (R2-3): counts by default — a run's output is pasted into notes and tickets, and names would put people
+# there. -ListSystemAdministrators prints the names for an operator who needs them.
+$sysAdminUsers = [System.Collections.Generic.List[object]]::new()
+$sysAdminTeams = [System.Collections.Generic.List[object]]::new()
 foreach ($role in @((Invoke-DvGet "roles?`$select=roleid&`$filter=name eq 'System Administrator'").value)) {
-    foreach ($u in @((Invoke-DvGet "roles($($role.roleid))/systemuserroles_association?`$select=fullname,applicationid,isdisabled").value | Where-Object { -not $_.isdisabled })) {
-        Report 'INFO' ("user '{0}'{1}" -f $u.fullname, $(if ($u.applicationid) { ' (application user)' } else { '' }))
-    }
-    foreach ($tm in @((Invoke-DvGet "roles($($role.roleid))/teamroles_association?`$select=name").value)) { Report 'INFO' "TEAM '$($tm.name)' — every member" }
+    foreach ($u in @((Invoke-DvGet "roles($($role.roleid))/systemuserroles_association?`$select=fullname,applicationid,isdisabled").value | Where-Object { -not $_.isdisabled })) { $sysAdminUsers.Add($u) }
+    foreach ($tm in @((Invoke-DvGet "roles($($role.roleid))/teamroles_association?`$select=name").value)) { $sysAdminTeams.Add($tm) }
+}
+$sysAdminApps = @($sysAdminUsers | Where-Object { $_.applicationid }).Count
+Report 'INFO' ("{0} enabled user(s) ({1} application user(s)) and {2} team(s) hold System Administrator{3}" -f `
+        $sysAdminUsers.Count, $sysAdminApps, $sysAdminTeams.Count, $(if ($ListSystemAdministrators) { '' } else { ' — names not printed; pass -ListSystemAdministrators to list them' }))
+if ($ListSystemAdministrators) {
+    foreach ($u in $sysAdminUsers) { Report 'INFO' ("user '{0}'{1}" -f $u.fullname, $(if ($u.applicationid) { ' (application user)' } else { '' })) }
+    foreach ($tm in $sysAdminTeams) { Report 'INFO' "TEAM '$($tm.name)' — every member" }
 }
 
 # ── (d) PUBLISH ─────────────────────────────────────────────────────────────────────────────────────────────

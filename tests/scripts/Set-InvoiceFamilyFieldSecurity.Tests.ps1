@@ -38,6 +38,14 @@ BeforeAll {
             WebResources = @($WebResources)
             # Review 2: a column's navigation property name when it is not the column's own ('table.column' -> name).
             NavNames = @{}
+            # Review 2: the System Administrator role's holders (enabled users, application users, teams).
+            SysAdminUsers = @(
+                [pscustomobject]@{ fullname = 'Alice Admin'; applicationid = $null; isdisabled = $false }
+                [pscustomobject]@{ fullname = 'Bob Admin'; applicationid = $null; isdisabled = $false }
+                [pscustomobject]@{ fullname = 'Retired Admin'; applicationid = $null; isdisabled = $true }
+                [pscustomobject]@{ fullname = 'Spaarke BFF App'; applicationid = $script:BffAppId; isdisabled = $false }
+            )
+            SysAdminTeams = @([pscustomobject]@{ name = 'Platform Ops Team' })
         }
         foreach ($p in $script:Pairs) {
             $world.Secured[$p] = $locked
@@ -130,6 +138,9 @@ Describe 'Set-InvoiceFamilyFieldSecurity.ps1 (mocked Dataverse)' {
                 if ($Matches[1] -eq $w.BffAppId) { return @{ value = @([pscustomobject]@{ systemuserid = $ids.BffUser; fullname = 'BFF' }) } }
                 return @{ value = @() }
             }
+            if ($u -match "/roles\?.*name eq 'System Administrator'") { return @{ value = @([pscustomobject]@{ roleid = 'sysadmin-role' }) } }
+            if ($u -match '/roles\(sysadmin-role\)/systemuserroles_association\?') { return @{ value = @($w.SysAdminUsers) } }
+            if ($u -match '/roles\(sysadmin-role\)/teamroles_association\?') { return @{ value = @($w.SysAdminTeams) } }
             if ($u -match '/roles\?') { return @{ value = @() } }
             if ($u -match "/EntityDefinitions\(LogicalName='([^']+)'\)/ManyToOneRelationships\?") {
                 $t = $Matches[1]
@@ -274,6 +285,29 @@ Describe 'Set-InvoiceFamilyFieldSecurity.ps1 (mocked Dataverse)' {
             $r.Output | Should -Not -Match '\(p4a\) \S+ binds as'
             $r.Output | Should -Match 'PASS: '
             $r.ExitCode | Should -Be 0
+        }
+    }
+
+    Context 'System Administrator holders (review 2, R2-3)' {
+        It 'prints only their counts by default, never a name' {
+            Reset-World 'Locked' -WebResources @('var x = 1;')
+            $r = Invoke-Script @{ Verify = $true }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match 'INFO\s+3 enabled user\(s\) \(1 application user\(s\)\) and 1 team\(s\) hold System Administrator — names not printed; pass -ListSystemAdministrators to list them'
+            foreach ($name in 'Alice Admin', 'Bob Admin', 'Retired Admin', 'Spaarke BFF App', 'Platform Ops Team') {
+                $r.Output | Should -Not -Match ([regex]::Escape($name))
+            }
+        }
+
+        It 'prints the enabled holders by name with -ListSystemAdministrators (through the named entry point)' {
+            Reset-World 'Locked' -WebResources @('var x = 1;')
+            $r = Invoke-Script @{ Verify = $true; ListSystemAdministrators = $true }
+            $r.ExitCode | Should -Be 0
+            $r.Output | Should -Match "INFO\s+user 'Alice Admin'"
+            $r.Output | Should -Match "INFO\s+user 'Spaarke BFF App' \(application user\)"
+            $r.Output | Should -Match "INFO\s+TEAM 'Platform Ops Team' — every member"
+            $r.Output | Should -Not -Match 'Retired Admin'
+            $r.Output | Should -Not -Match 'names not printed'
         }
     }
 }

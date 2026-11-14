@@ -43,6 +43,9 @@
 .PARAMETER Verify
     Read-only check with a pass/fail exit code (1 names each gap). Cannot be combined with -Apply.
 
+.PARAMETER ListSystemAdministrators
+    Print the names of the System Administrator role holders; without it the run prints their counts only.
+
 .EXAMPLE
     .\Set-InvoiceFamilyFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com `
         -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c
@@ -64,7 +67,8 @@ param(
     [string]$SolutionUniqueName = 'SpaarkeMaster',
     [switch]$BffWritesInvoiceFamilyLinksAsApp,
     [switch]$Apply,
-    [switch]$Verify
+    [switch]$Verify,
+    [switch]$ListSystemAdministrators
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,6 +82,7 @@ $arguments = @{
 if ($BffWritesInvoiceFamilyLinksAsApp) { $arguments.BffWritesInvoiceFamilyLinksAsApp = $true }
 if ($Apply) { $arguments.Apply = $true }
 if ($Verify) { $arguments.Verify = $true }
+if ($ListSystemAdministrators) { $arguments.ListSystemAdministrators = $true }
 
 & $engine @arguments
 exit $LASTEXITCODE
