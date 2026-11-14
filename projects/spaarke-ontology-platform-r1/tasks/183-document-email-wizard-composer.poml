@@ -4,7 +4,7 @@
     <title>DocumentEmailWizard uses the shared EmailComposer (SemanticSearchControl PCF and DocumentRelationshipViewer hosts)</title>
     <phase>12 Create-wizard lookups and composer (UAT round 4)</phase>
     <gate>after 182 (shared compose helper)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared client code (.ts/.tsx) used by several wizards.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -108,6 +108,7 @@
     <criterion testable="true">All existing tests in the touched folders pass unchanged unless a criterion above names the change; tsc clean; no new ESLint errors in touched files.</criterion>
   </acceptance-criteria>
   <notes> Source: projects/spaarke-ontology-platform-r1/notes/create-wizard-lookup-composer-review.md (Fable review 2026-11-12) and UAT round 4 findings F-R4-2 / F-R4-3 (notes/uat-v4-log.md).</notes>
+  <completion>Done 2026-11-14: PR #2824 merged to master (ab75d18874). Review F1 SemanticSearchControl PCF bundled React 19 jsx-runtime (alias added, as CommunicationActions), F1 401 wording (retryLabel, record only when associations), F3 new guard pcfBundleReactRuntime.guard.test.ts in tier-1 (no baseline). Client-lint fix 2f3d7f795b. Known limits: unconfirmed send leaves Send enabled; 35 MB total checked by BFF only; DI-154. Notes: notes/task-183-notes.md. rework: fix-round-1 task 183</completion>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
