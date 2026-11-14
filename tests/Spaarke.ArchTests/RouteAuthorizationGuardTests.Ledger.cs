@@ -478,7 +478,7 @@ public partial class RouteAuthorizationGuardTests
             + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
             + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
             + "decision id are derived server-side, never taken from the request. From task 095d-1b, POST /api/finance/invoices/{invoiceId}/firm "
-            + "(Set firm on a held no-firm invoice): Write on the invoice in the path (ebilling.invoice.assign_firm, uniform 404), then Read and "
+            + "(Set firm on a held no-firm invoice): Write and Append on the invoice in the path, which holds the firm lookup (ebilling.invoice.assign_firm, uniform 404), then Read and "
             + "AppendTo on the body's firm (read, finance.attach_invoice: 403; no firm is the 400 before any rights query), as the caller, fail "
             + "closed; the kill switch runs after them. InvoiceAssignFirmService then asks, as the caller, AppendTo on the core record and Write on "
             + "the firm_missing Signal's subject, and the firm's link to the core record; the submission, the number and the decision id are "

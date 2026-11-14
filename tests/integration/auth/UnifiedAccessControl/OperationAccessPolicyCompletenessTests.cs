@@ -253,7 +253,7 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.submit_invoice", AccessRights.Read | AccessRights.AppendTo)] // ebilling-r1 task 044: rows are attached TO the core record
     [InlineData("ebilling.invoice.decide", AccessRights.Write)] // ebilling-r1 task 100, D-77: deciding a line is a Write on its invoice
     [InlineData("ebilling.record.override", AccessRights.Write | AccessRights.AppendTo)] // ebilling-r1 task 089b: an override changes the record and its row is attached TO it
-    [InlineData("ebilling.invoice.assign_firm", AccessRights.Write)] // ebilling-r1 task 095d-1b: setting the firm is a Write on the invoice; the firm is asked separately
+    [InlineData("ebilling.invoice.assign_firm", AccessRights.Write | AccessRights.Append)] // ebilling-r1 task 095d-1b: setting the firm is a Write on the invoice, plus Append because the invoice holds the firm lookup (uac-r2 #2822 F4); the firm is asked separately
     [InlineData("event.attach_regarding", AccessRights.AppendTo)] // task 159: the regarding record is attached TO
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
     [InlineData("memory.pin_matter", AccessRights.AppendTo)] // task 166: a matter pin ATTACHES content to the matter
