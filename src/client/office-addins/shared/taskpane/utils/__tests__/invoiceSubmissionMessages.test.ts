@@ -17,6 +17,8 @@ import {
   FIRM_MISSING_CODE,
   REPLACED_BY_CORRECTION_CODE,
   describeAcceptedOutcome,
+  NO_FIRM_LINKED_MESSAGE,
+  CORRECTION_NO_FIRM_MESSAGE,
   isRetryableSubmissionRefusal,
   PERMANENT_SUBMISSION_CODES,
 } from '../invoiceSubmissionMessages';
@@ -415,6 +417,29 @@ describe('invoice submission messages — task 094', () => {
     expect(describeSubmissionRefusal({ kind: 'refused', status: 409, code: 'x.new', filingKept: true })).toBe(
       `${GENERIC_SUBMISSION_MESSAGE} ${FILING_KEPT_MESSAGE}`
     );
+  });
+});
+
+describe('the no-firm sentences (task 134, owner ruling 2026-11-13: never an invoice without a firm)', () => {
+  it('must-fire: the no-firm-linked and no-firm-correction sentences are the owner-approved wording, exactly', () => {
+    expect(NO_FIRM_LINKED_MESSAGE).toBe(
+      'No firm is linked to this record. Add a firm to the record in Spaarke, then submit.'
+    );
+    expect(CORRECTION_NO_FIRM_MESSAGE).toBe(
+      'This invoice has no firm. Set its firm in Spaarke, then submit the correction.'
+    );
+  });
+
+  it('must-not-fire: neither sentence promises a reviewer will add the firm (the old held-for-firm wording is gone)', () => {
+    for (const sentence of [NO_FIRM_LINKED_MESSAGE, CORRECTION_NO_FIRM_MESSAGE]) {
+      expect(sentence).not.toMatch(/held until a reviewer/i);
+    }
+  });
+
+  it('must-not-fire: firm_invalid keeps its sentence for a CHOSEN firm', () => {
+    expect(
+      describeSubmissionRefusal({ kind: 'refused', status: 400, code: 'ebilling.submission.firm_invalid' })
+    ).toMatch(/^The chosen firm isn't an active firm in Spaarke./);
   });
 });
 

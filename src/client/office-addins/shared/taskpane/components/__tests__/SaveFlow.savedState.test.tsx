@@ -299,6 +299,69 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
     expect(created.document.title).toBe('Brief — copy');
   });
 
+  // Task 134 (slice A2): the confirmation bar's "Filed to <record>" also opens that RECORD (View Document opens the
+  // document). Same launcher, same gate (ORG_URL + a way to open a tab); never rendered dead.
+  describe('the filed-to record opens in Spaarke (task 134, slice A2)', () => {
+    const matterUrl = `${ORG}/main.aspx?appname=sprk_MatterManagement&etn=sprk_matter&id=${MATTER.id}&pagetype=entityrecord&navbar=off`;
+
+    it('must-fire: after a create filed to a record, "Open in Spaarke" opens that record', async () => {
+      fileToMatter();
+      renderWord();
+      await saveAndWaitForSavedState();
+
+      fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
+
+      expect(screen.getByTestId('saved-bar-open-filed-record')).toHaveTextContent('Open in Spaarke');
+      expect(openBrowserWindow()).toHaveBeenCalledTimes(1);
+      expect(openBrowserWindow()).toHaveBeenCalledWith(matterUrl);
+    });
+
+    it('must-fire: after a VERSION save of a resolved document, it opens the record the document is filed to', async () => {
+      const identity: DocumentIdentityState = {
+        kind: 'resolved',
+        documentId: SAVED_ID,
+        documentName: 'Brief',
+        fileName: 'Brief.docx',
+        relatedRecord: {
+          entityType: 'sprk_matter',
+          id: MATTER.id,
+          name: 'PAT-1',
+          displayName: 'Gamma Merger',
+          number: 'PAT-1',
+        },
+      };
+      renderWord({ documentIdentity: identity, resolvedDocumentId: SAVED_ID });
+      saveResponses.push(accepted());
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await screen.findByText('New version saved to Spaarke');
+
+      fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
+
+      expect(openBrowserWindow()).toHaveBeenCalledWith(matterUrl);
+    });
+
+    it('must-not-fire: a save filed to no record offers no record link', async () => {
+      renderWord();
+      await saveAndWaitForSavedState();
+
+      expect(screen.getByText('Not filed to a record.')).toBeInTheDocument();
+      expect(screen.queryByTestId('saved-bar-open-filed-record')).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['the host cannot open a tab', { canOpenRecord: false }, ORG],
+      ['ORG_URL is empty', {}, ''],
+    ])('must-not-fire: when %s, no record link is rendered', async (_case, props, orgUrl) => {
+      process.env.ORG_URL = orgUrl;
+      fileToMatter();
+      renderWord(props);
+      await saveAndWaitForSavedState();
+
+      expect(screen.getByText('Gamma Merger')).toBeInTheDocument();
+      expect(screen.queryByTestId('saved-bar-open-filed-record')).not.toBeInTheDocument();
+    });
+  });
+
   // Task 094 (AC3): the real content-change SUBSCRIPTION lives in `SaveView` (covered by
   // `WordAdapter.documentChangeDetection.test.ts` + `SaveView.documentChangeDetection.test.tsx`).
   // SaveFlow's own responsibility — pinned here directly via the lifted, controlled `savedState` — is
@@ -381,6 +444,108 @@ describe('SaveFlow — the saved state keeps the form (task 088)', () => {
     await screen.findByText('Delta Co');
     expect(screen.getByText('Brief (final)')).toBeInTheDocument();
     expect(screen.queryByText('Gamma Merger')).not.toBeInTheDocument();
+  });
+
+  // Task 134 review F1: Refresh rewrites "Filed to" from the re-read record, so the link beside it must follow.
+  describe('Refresh keeps "Open in Spaarke" on the record "Filed to" names (task 134 review F1)', () => {
+    const NEW_PROJECT_ID = '4a7b2c9d-1e3f-4a5b-8c6d-7e8f9a0b1c2d';
+    const projectUrl = `${ORG}/main.aspx?appname=sprk_MatterManagement&etn=sprk_project&id=${NEW_PROJECT_ID}&pagetype=entityrecord&navbar=off`;
+    const matterUrl = `${ORG}/main.aspx?appname=sprk_MatterManagement&etn=sprk_matter&id=${MATTER.id}&pagetype=entityrecord&navbar=off`;
+
+    const rerenderWith = (view: ReturnType<typeof renderWord>, identity: DocumentIdentityState, retry: () => void) =>
+      view.rerender(
+        <FluentProvider theme={webLightTheme}>
+          <SaveFlow
+            hostType="word"
+            itemId="https://contoso.sharepoint.com/Brief.docx"
+            itemName="Brief.docx"
+            canProvideDocumentName
+            canOpenRecord
+            canDetectDocumentChanges
+            captureDocumentContent={jest.fn().mockResolvedValue('UEsDBBQ=')}
+            getAccessToken={jest.fn().mockResolvedValue('token')}
+            apiBaseUrl="https://bff"
+            onRetryDocumentIdentity={retry}
+            documentIdentity={identity}
+          />
+        </FluentProvider>
+      );
+    type ResolvedIdentity = Extract<DocumentIdentityState, { kind: 'resolved' }>;
+    const identityFiledTo = (relatedRecord: ResolvedIdentity['relatedRecord']): DocumentIdentityState => ({
+      kind: 'resolved',
+      documentId: SAVED_ID,
+      documentName: 'Brief',
+      fileName: 'Brief.docx',
+      relatedRecord,
+    });
+
+    it('must-fire: save filed to Matter A, re-filed to a Project in Spaarke, Refresh: the link opens the Project, not Matter A', async () => {
+      fileToMatter();
+      const retry = jest.fn();
+      const view = renderWord({ onRetryDocumentIdentity: retry });
+      await saveAndWaitForSavedState();
+      fireEvent.click(screen.getByRole('button', { name: 'Stub: profile' }));
+
+      rerenderWith(
+        view,
+        identityFiledTo({
+          entityType: 'sprk_project',
+          id: NEW_PROJECT_ID,
+          name: 'PRJ-2',
+          displayName: 'Project Two',
+          number: 'PRJ-2',
+        }),
+        retry
+      );
+      await screen.findByText('Project Two');
+
+      fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
+      expect(openBrowserWindow()).toHaveBeenCalledTimes(1);
+      expect(openBrowserWindow()).toHaveBeenCalledWith(projectUrl);
+      expect(openBrowserWindow()).not.toHaveBeenCalledWith(matterUrl);
+    });
+
+    it('must-fire: Refresh finding the document filed to nothing removes the link with the "Filed to" text', async () => {
+      fileToMatter();
+      const retry = jest.fn();
+      const view = renderWord({ onRetryDocumentIdentity: retry });
+      await saveAndWaitForSavedState();
+      expect(screen.getByTestId('saved-bar-open-filed-record')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Stub: profile' }));
+
+      rerenderWith(view, identityFiledTo(null), retry);
+
+      await screen.findByText('Not filed to a record.');
+      expect(screen.queryByTestId('saved-bar-open-filed-record')).not.toBeInTheDocument();
+    });
+  });
+
+  // Task 134 review F1: a blocked pop-up is said where a sighted user looks, not only to the sr-only live region.
+  describe('a blocked pop-up from the filed-to link is visible (task 134 review F1)', () => {
+    it('shows the reason beside the link (outside the sr-only live region) and clears it on a successful open', async () => {
+      const isSetSupported = Office.context.requirements.isSetSupported as unknown as jest.Mock;
+      isSetSupported.mockReturnValue(false); // Office on the web: the click falls back to window.open
+      const openSpy = jest.spyOn(window, 'open').mockReturnValue(null);
+      jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        fileToMatter();
+        renderWord();
+        await saveAndWaitForSavedState();
+
+        fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
+
+        const visible = (await screen.findAllByText(/blocked the new window/)).filter(el => !el.closest('.sr-only'));
+        expect(visible).toHaveLength(1);
+        expect(visible[0]).toBe(screen.getByTestId('saved-bar-open-filed-record-error'));
+
+        openSpy.mockReturnValue({} as Window);
+        fireEvent.click(screen.getByTestId('saved-bar-open-filed-record'));
+        expect(screen.queryByTestId('saved-bar-open-filed-record-error')).not.toBeInTheDocument();
+      } finally {
+        openSpy.mockRestore();
+        isSetSupported.mockReturnValue(true); // jest.setup.js's default
+      }
+    });
   });
 
   it('a refused version save (OFFICE_009) still offers "Save as new document", which leaves the saved state for a create', async () => {

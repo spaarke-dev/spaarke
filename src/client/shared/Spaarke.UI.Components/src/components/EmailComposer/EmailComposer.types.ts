@@ -397,6 +397,8 @@ export interface IEmailComposerProps {
   // — Pre-fill (compose mode) —
   initialTo?: string[];
   initialCc?: string[];
+  /** Task 190 (D-222): starting Bcc, so a host that commits Bcc (the decision wizard's inquiry step) restores it when the composer remounts. */
+  initialBcc?: string[];
   initialSubject?: string;
   initialBody?: string;
   initialBodyFormat?: EmailComposerBodyFormat;

@@ -12,6 +12,7 @@ import {
   buildReview,
   deriveRecordClass,
   dismissalValid,
+  draftFromReview,
   emptyDraft,
   excludedActionCodes,
   excludedBy,
@@ -91,6 +92,35 @@ describe('derived record class (R-2)', () => {
     const derived = deriveRecordClass(doPlan, d);
     expect(derived.recordClass).toBe('Judgement');
     expect(derived.why).toContain('Next step');
+  });
+});
+
+describe('task 191 fix round 1: draftFromReview shows a stored review', () => {
+  it('gives back the choices and values the review was built from (a rebuild is the same review)', () => {
+    let d = emptyDraft(ID);
+    d = take(d, 'send-budget-inquiry');
+    d = withValue(d, actionScope('send-budget-inquiry'), 'to', 'a@b.example');
+    d = take(d, 'revise-budget');
+    d = withValue(d, actionScope('revise-budget'), 'budget', BUDGET_A.id);
+    d = withValue(d, actionScope('revise-budget'), 'amount', '250,000.50');
+    d = withValue(d, actionScope('revise-budget'), 'reason', 'Appeal added');
+    d = skip(d, 'approve-variance');
+    const review = buildReview(pathBPlan, d);
+
+    const shown = draftFromReview(pathBPlan, review);
+
+    expect(shown.reviewId).toBe(ID);
+    expect(shown.decisions[actionScope('approve-variance')]).toBe('skipped');
+    expect(shown.values[actionScope('revise-budget')]).toMatchObject({ amount: '250000.5', reason: 'Appeal added' });
+    expect(buildReview(pathBPlan, shown)).toEqual(review);
+  });
+
+  it('a dismissal comes back as its reason and detail', () => {
+    let d = emptyDraft(ID);
+    for (const a of pathBPlan.actions) d = skip(d, a.code);
+    d = withDismissal(d, 'other', 'wrong');
+    const shown = draftFromReview(pathBPlan, buildReview(pathBPlan, d));
+    expect([shown.dismissalCode, shown.dismissalDetail]).toEqual(['other', 'wrong']);
   });
 });
 

@@ -394,3 +394,8 @@ shared/taskpane/services/__tests__/invoiceSubmissionService.test.ts
 shared/taskpane/utils/__tests__/invoiceSubmissionMessages.test.ts
 shared/taskpane/components/views/__tests__/InvoiceView.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.invoiceTaskTypes.test.tsx
+
+# Task 134 review (2026-11-13): the Invoice tab's already-submitted banner (the previous-submission read, its polling
+# and its banner), green but never listed until now.
+shared/taskpane/services/__tests__/invoicePreviousSubmission.test.ts
+shared/taskpane/components/views/__tests__/InvoiceView.previousSubmission.test.tsx

@@ -941,6 +941,18 @@ ResultJson's `provisioningTargets.environments[]`) but never stops the others. D
 the BFF reconciling that environment — deliberately. (Before 2026-10-01's third fix round the job scanned only its
 own environment and this was a recorded gap.)
 
+**Only the rows this BFF serves (#2761, 2026-11-13).** A registry row whose `sprk_appservicename` names ANOTHER App
+Service is a customer stamp. That stamp's own BFF reconciles it as its own `Dataverse:ServiceUrl`, so this BFF skips it.
+Its identity has no application user there (D-12/D-13 stamp isolation), and before the fix the row faulted every run
+with WhoAmI 403 `0x80072560`. A row with a blank `sprk_appservicename` (dev, demo and legacy rows) is reconciled as
+above. The BFF's own name is the App Service's `WEBSITE_SITE_NAME`, compared case-insensitively. Off App Service the
+name is unknown, and every row that names an App Service is skipped. Each run logs the skipped rows by App Service name
+(`[ID-LINK-RECON] Skipped … served by another BFF`) and records their count in
+`provisioningTargets.registryRowsServedByAnotherBff`. A Ready row that has a `sprk_customerid` but no App Service name
+is reconciled here and logged as a warning: a stamp row looks like that when provisioning's registry write failed
+(REGISTRY-STALE; recover with `/provision-environment` Step 6a). **Limit:** if a stamp's App Service is renamed or
+removed while its row still names the old one, no BFF reconciles that environment until the row is corrected.
+
 **Every one of those environments needs the Dataverse prerequisite below** — an environment without it is
 reported by every run as a failed environment, and registration links there deny `binding_column_missing`.
 
