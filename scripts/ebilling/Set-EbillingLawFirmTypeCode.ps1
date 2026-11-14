@@ -9,6 +9,7 @@
 
     What it does:
       1  Reads the active type rows that already carry the code. Exactly one: nothing to do (skipped, no write). More than one: ESCALATION.
+         None, but an INACTIVE row carries it: ESCALATION (the code is unique across all rows, so it cannot be set on another one).
       2  Otherwise finds the type row to mark: by -TypeId when given, else by its name (-TypeName, default "Law Firm", exact match, active
          rows only). None, or more than one by name: ESCALATION.
       3  A row that already carries a DIFFERENT non-empty code is never overwritten: ESCALATION.
@@ -88,6 +89,14 @@ try {
         Write-Host "  '$($coded[0].$NameColumn)' ($($coded[0].$IdColumn)) already carries $LawFirmTypeCode - nothing to do." -ForegroundColor Yellow
     }
     else {
+        # 1b. The code is unique across ALL type rows (an alternate key), inactive ones included, so an inactive row holding it would make
+        #     the write below fail on the duplicate key. Stop before writing instead (review 1).
+        $inactiveCoded = Get-TypeRows "$CodeColumn eq '$(Format-OData $LawFirmTypeCode)' and statecode ne 0"
+        if ($inactiveCoded.Count -gt 0) {
+            $names = ($inactiveCoded | ForEach-Object { "'$($_.$NameColumn)' ($($_.$IdColumn))" }) -join ', '
+            throw [EscalationException]::new("No active type row carries the code $LawFirmTypeCode, but the inactive type row(s) $names do. The code is unique across all type rows, so it cannot be set on another row. Owner decision needed: reactivate that row, or clear its code, then re-run (this script changes neither).")
+        }
+
         # 2. The row to mark.
         if ($TypeId -ne [guid]::Empty) {
             $candidates = Get-TypeRows "$IdColumn eq $TypeId and statecode eq 0"
@@ -135,7 +144,7 @@ catch [EscalationException] {
 catch {
     Write-Host ""
     Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Re-run the script: it is idempotent." -ForegroundColor Red
+    Write-Host "A re-run is safe (it never writes twice), but it stops the same way until the cause above is fixed. A duplicate-key answer means another type row already holds the code." -ForegroundColor Red
     exit 1
 }
 

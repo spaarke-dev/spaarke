@@ -1302,6 +1302,27 @@ public sealed class CoreRecordFirmEndpointContractTests
         match.Groups["code"].Value.Should().Be(LawFirmOrganizationType.Code);
     }
 
+    [Fact(DisplayName = "095g review 1 (F1, script): before it writes, the seeding script looks for an INACTIVE type row holding the code and stops with an escalation")]
+    public void SeedingScript_EscalatesOnAnInactiveRowHoldingTheCode()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot(), "scripts", "ebilling", "Set-EbillingLawFirmTypeCode.ps1"));
+
+        // The code is unique across all type rows, so an inactive holder would fail the write on the duplicate key.
+        var lookup = Regex.Match(
+            script,
+            @"^\s*\$(?<var>\w+) = Get-TypeRows ""\$CodeColumn eq '\$\(Format-OData \$LawFirmTypeCode\)' and statecode ne 0""\s*$",
+            RegexOptions.Multiline);
+        lookup.Success.Should().BeTrue("the script reads the inactive type rows that carry the code");
+
+        var escalation = Regex.Match(
+            script.Substring(lookup.Index),
+            @"if \(\$" + lookup.Groups["var"].Value + @"\.Count -gt 0\) \{[\s\S]{0,400}?throw \[EscalationException\]");
+        escalation.Success.Should().BeTrue("finding one stops the script with an escalation (exit 2, nothing written)");
+
+        var patch = script.IndexOf("-Method PATCH", StringComparison.Ordinal);
+        patch.Should().BeGreaterThan(lookup.Index + escalation.Index, "the check comes before the write");
+    }
+
     [Fact(DisplayName = "095g: the two operation keys - an add needs Write and Append, a clear Write only")]
     public void OperationKeys_StateR1()
     {
