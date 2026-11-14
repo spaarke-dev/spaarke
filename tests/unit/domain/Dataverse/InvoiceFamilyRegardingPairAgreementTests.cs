@@ -627,12 +627,37 @@ public class InvoiceFamilyRegardingPairAgreementTests
 
     private static IDataverseUserClient NoCallerRead() => new Mock<IDataverseUserClient>(MockBehavior.Strict).Object;
 
-    /// <summary>A create item binding <paramref name="column"/> to <see cref="Core"/>, plus the pair halves given.</summary>
+    /// <summary>The invoice an approval or a correction is created with (task 045g rule 3b at create).</summary>
+    private static readonly Guid FiledInvoice = Guid.Parse("a045e000-0000-4000-8000-0000000000b1");
+
+    private static bool IsCreatedWithItsInvoice(string table) => table is "sprk_invoiceapproval" or "sprk_invoicecorrection";
+
+    /// <summary>The caller, who reads <see cref="FiledInvoice"/> as filed under <paramref name="core"/>'s <see cref="Core"/> (the
+    /// invoice an approval or a correction is compared with, task 045g rule 2), and is asked nothing else.</summary>
+    private static IDataverseUserClient CallerReadingTheInvoiceUnder(string core)
+    {
+        var caller = new Mock<IDataverseUserClient>(MockBehavior.Strict);
+        var body = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].ToDictionary(
+            l => $"_{l.Column}_value", l => l.CoreEntity == core ? Core.ToString("D") : null);
+        caller.Setup(c => c.GetAsync(It.Is<string>(p => p.StartsWith($"sprk_invoices({FiledInvoice:D})?$select=", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(body)));
+        return caller.Object;
+    }
+
+    /// <summary>A create item binding <paramref name="column"/> to <see cref="Core"/>, plus the pair halves given; an approval or
+    /// a correction also binds <see cref="FiledInvoice"/>.</summary>
     private static DataverseWriteItemMapper.MappedItem CreateItem(string table, string column, string core, Guid? pairId, Guid? pairType)
     {
         var body = new Dictionary<string, object?> { [$"{column}@odata.bind"] = $"/{core}s({Core:D})" };
         var columns = new List<string> { column };
         var lookups = new List<DataverseWriteItemMapper.MappedLookup> { new(column, core, core + "s", Core) };
+        if (IsCreatedWithItsInvoice(table))
+        {
+            body["sprk_invoice@odata.bind"] = $"/sprk_invoices({FiledInvoice:D})";
+            columns.Add("sprk_invoice");
+            lookups.Add(new("sprk_invoice", "sprk_invoice", "sprk_invoices", FiledInvoice));
+        }
         if (pairId is { } id)
         {
             body["sprk_regardingrecordid"] = id.ToString("D");
@@ -661,8 +686,12 @@ public class InvoiceFamilyRegardingPairAgreementTests
         return Task.FromResult<Entity?>(new Entity("sprk_recordtype_ref", CatalogRow) { [RegardingRecordType.RecordNumberFieldColumn] = table + "number" });
     };
 
+    /// <summary>The create's rule; an approval or a correction is created with an invoice of its own core record, read as the
+    /// caller (task 045g).</summary>
     private Task<PreWriteResult> Create(string table, DataverseWriteItemMapper.MappedItem item) =>
-        RecordTableRules.InvoiceFamilyRule.Check(new PreWriteRow(NoCallerRead(), table, item, NamedRecord(), NumberedCatalog()),
+        RecordTableRules.InvoiceFamilyRule.Check(
+            new PreWriteRow(IsCreatedWithItsInvoice(table) ? CallerReadingTheInvoiceUnder(item.Lookups[0].RelatedTable) : NoCallerRead(),
+                table, item, NamedRecord(), NumberedCatalog()),
             CancellationToken.None);
 
     /// <summary>Every family table with its first core lookup (the rule is registered on all six).</summary>

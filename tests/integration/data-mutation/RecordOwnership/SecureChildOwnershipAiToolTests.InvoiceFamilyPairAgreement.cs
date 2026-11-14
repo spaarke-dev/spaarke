@@ -173,8 +173,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
     // ── A write that moves the core lookup: the derived pair is written; naming the same record is no move ──────────
 
-    [Fact(DisplayName = "045e (core move): PATCH moving an invoice to a project with a pair naming another record writes the derived pair")]
-    public async Task ChildRefile_AnInvoiceMovedToAProject_WithADisagreeingPair_IsWrittenWithTheDerivedPair()
+    [Fact(DisplayName = "045g rule 1: PATCH moving an invoice to a project with a pair naming another record is the core-record-fixed refusal")]
+    public async Task ChildRefile_AnInvoiceMovedToAProject_WithADisagreeingPair_IsRefusedCoreRecordFixed()
     {
         InvoiceOnTheMatter_MovingToTheProject();
         var sent = MoveGuardInvoiceToTheProject();
@@ -183,9 +183,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
 
         var result = await RefileChild("sprk_invoice", GuardInvoice, sent);
 
-        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
-        ShouldCarryTheFiveOf(BodyOf(_user.Patches.Should().ContainSingle().Subject.Body), "sprk_project", OrdinaryProject,
-            "sprk_regardingrecordtype");
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        _user.Patches.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "045e (core move): PATCH binding an invoice's matter to the matter it names, with a pair naming another, is refused")]
@@ -292,10 +292,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
         };
     }
 
-    [Theory(DisplayName = "045e (D-96 first): PATCH moving an invoice while a line stays behind, with a pair sent, is the line refusal")]
+    [Theory(DisplayName = "045g rule 1 first: PATCH moving an invoice while a line stays behind, with a pair sent, is the core-record-fixed refusal")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ChildRefile_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedLineMismatch(bool agrees)
+    public async Task ChildRefile_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedCoreRecordFixed(bool agrees)
     {
         InvoiceMovingToTheProject_WithALineLeftBehind(deriveSeesTheMoveDone: !agrees);
         var sent = MoveGuardInvoiceToTheProject();
@@ -309,15 +309,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
         var result = await RefileChild("sprk_invoice", GuardInvoice, sent);
 
         Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode);
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
         _user.Patches.Should().BeEmpty();
         _world.Assignments.Should().BeEmpty();
     }
 
-    [Theory(DisplayName = "045e (D-96 first): the chat tool moving an invoice while a line stays behind, with a pair sent, is the line refusal")]
+    [Theory(DisplayName = "045g rule 1 first: the chat tool moving an invoice while a line stays behind, with a pair sent, is the core-record-fixed refusal")]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task UpdateRecordTool_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedLineMismatch(bool agrees)
+    public async Task UpdateRecordTool_AnInvoiceMovedWhileALineStaysBehind_WithAPairSent_IsRefusedCoreRecordFixed(bool agrees)
     {
         InvoiceMovingToTheProject_WithALineLeftBehind(deriveSeesTheMoveDone: !agrees);
 
@@ -327,7 +327,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
             agrees ? PairTypeItem(ScriptedUserClient.CatalogTypeIdOf("sprk_project")) : PairTypeItem(RecordTypeMatter));
 
         result.Success.Should().BeFalse();
-        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.LineInvoiceCoreRecordMismatchCode, result.ErrorMessage);
+        result.ErrorCode.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode, result.ErrorMessage);
         _user.Patches.Should().BeEmpty();
     }
 

@@ -1308,12 +1308,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _shareTable.Seed("sprk_todo", todoOfEvent, DataversePrincipalRef.User(Sharee), CollaborateMask);
     }
 
-    /// <summary>Every table re-filed through <c>PATCH /api/v1/child-records/{table}/{id}</c>, with its matter lookup.</summary>
+    /// <summary>
+    /// Every table moved through <c>PATCH /api/v1/child-records/{table}/{id}</c>, with its matter lookup. An invoice is on the
+    /// route but never moved (task 045g rule 1, owner EB-D-231): its cases are <see cref="ChildRefile_AnInvoice_IsNeverMovedUnderAnotherMatter_AndKeepsItsOwnerAndShares"/>.
+    /// </summary>
     public static TheoryData<string, string, string> CensusRefileTablesUnderAMatter => new()
     {
         { "sprk_todo", "sprk_RegardingMatter", "sprk_regardingmatter" },
         { "sprk_memo", "sprk_RegardingMatter", "sprk_regardingmatter" },
-        { "sprk_invoice", "sprk_Matter", "sprk_matter" },
         { "sprk_reportcard", "sprk_RegardingMatter", "sprk_regardingmatter" },
         { "sprk_analysis", "sprk_RegardingMatter", "sprk_regardingmatter" },
     };
@@ -1321,8 +1323,31 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [Fact]
     public void TheRefileTheory_CoversEveryRefileTable()
     {
-        CensusRefileTablesUnderAMatter.Select(row => (string)row[0]).Should()
+        CensusRefileTablesUnderAMatter.Select(row => (string)row[0]).Append("sprk_invoice").Should()
             .BeEquivalentTo(ChildRecordEndpoints.RefileTables, "a table added to the re-file route gets its cases");
+    }
+
+    [Theory]
+    [InlineData("into a secure matter")]
+    [InlineData("out of a secure matter")]
+    [InlineData("under a matter the caller cannot append to")]
+    public async Task ChildRefile_AnInvoice_IsNeverMovedUnderAnotherMatter_AndKeepsItsOwnerAndShares(string move)
+    {
+        var row = Guid.Parse("a2470000-0000-4000-8000-00000000000a");
+        var (from, to) = move == "out of a secure matter" ? (SecureMatter, OrdinaryMatter) : (OrdinaryMatter, SecureMatter);
+        _user.RowValues[row] = new Dictionary<string, object?> { ["_sprk_matter_value"] = from.ToString("D") };
+        _world.WithRecord("sprk_invoice", row, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", from) });
+        if (move == "under a matter the caller cannot append to")
+            _user.NoAppendTo.Add(SecureMatter);
+
+        var result = await RefileChild("sprk_invoice", row, new() { ["sprk_Matter@odata.bind"] = $"/sprk_matters({to:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        Detail(result).Should().NotContain(to.ToString("D")).And.NotContain(from.ToString("D"));
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
     }
 
     [Theory]

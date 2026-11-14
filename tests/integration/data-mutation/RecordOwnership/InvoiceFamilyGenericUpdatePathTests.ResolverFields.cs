@@ -14,7 +14,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// invoice-family row's own core lookup carries, in the same write, the resolver fields of the record the row will name, read
 /// app-only: the type, the id and the URL always, the name and the number when the record has them. A derive that cannot be
 /// done is answered as each path answers the invoice-family guard (its code only); a write that moves no core lookup reads
-/// nothing for it. Driven through the real paths (<see cref="RunAsync"/>).
+/// nothing for it. Driven through the real paths (<see cref="RunAsync"/>). Task 045g (owner, EB-D-231): an invoice's core record
+/// is fixed at create, so the derive is driven on an approval with no invoice; an invoice move is refused and derives nothing.
 /// </summary>
 public partial class InvoiceFamilyGenericUpdatePathTests
 {
@@ -52,35 +53,47 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     /// </summary>
     private static string? ShownOn(GenericPath path, string? value) => path == GenericPath.FieldMappingPush ? value : null;
 
-    // ── Must fire: the core lookup moves, the resolver fields follow it in the same write ───────────────────────────
+    private const string Approval = "sprk_invoiceapproval";
+
+    /// <summary>
+    /// Task 045g: the derive's subject on these paths. An invoice's core record is fixed at create (rule 1), so the moving row
+    /// is an approval filed under <see cref="Matter"/> with no invoice, moved to <see cref="OtherMatter"/>.
+    /// </summary>
+    private Task<PathOutcome> MoveTheApprovalAsync(
+        GenericPath path, IGenericEntityService? app = null, IReadOnlyDictionary<string, object?>? plain = null, Guid? playbookActsAs = null) =>
+        RunAsync(path, Approval, FamilyRow, Lookups(("sprk_regardingmatter", MatterRef(OtherMatter))), plain ?? NoPlain,
+            app ?? FamilyRowUnderAMatter(Approval).Object, playbookActsAs);
+
+    // ── Task 045g rule 1: an invoice's core record never moves, so nothing is ever derived for an invoice ─────────────
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
     [InlineData(GenericPath.FieldMappingPush)]
-    public async Task AnInvoiceMovedToAnotherMatter_IsWrittenWithThatMattersResolverFields(GenericPath path)
+    public async Task AnInvoiceMovedToAnotherMatter_IsRefusedCoreRecordFixed_AndNothingIsDerived(GenericPath path)
     {
         var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain,
             WorldWithLines(OtherMatter).Object);
 
-        outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
-            ShownOn(path, RecordName(OtherMatter)), ShownOn(path, RecordNumber(OtherMatter)));
-        _deriveReads.Should().Equal("catalog:sprk_matter", "record:sprk_matter");
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        _deriveReads.Should().BeEmpty("an invoice's resolver fields are never derived for a move");
+        NothingWritten();
     }
+
+    // ── Must fire: the core lookup moves, the resolver fields follow it in the same write ───────────────────────────
 
     [Theory]
     [InlineData(GenericPath.PlaybookUpdate)]
     [InlineData(GenericPath.OutputOrchestrator)]
-    public async Task AnInvoiceWithNoLines_MovedFromItsMatterToAProject_IsWrittenWithTheProjectsResolverFields(GenericPath path)
+    public async Task AnApprovalMovedFromItsMatterToAProject_IsWrittenWithTheProjectsResolverFields(GenericPath path)
     {
         // A core-table switch (the push cannot clear the matter, so it is not run on it).
-        var outcome = await RunAsync(path, "sprk_invoice", Invoice,
-            Lookups(("sprk_matter", null), ("sprk_project", new EntityReference("sprk_project", Project))), NoPlain,
-            InvoiceUnderAMatter().Object);
+        var outcome = await RunAsync(path, Approval, FamilyRow,
+            Lookups(("sprk_regardingmatter", null), ("sprk_regardingproject", new EntityReference("sprk_project", Project))), NoPlain,
+            FamilyRowUnderAMatter(Approval).Object);
 
         outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_project", Project,
+        ShouldCarryTheResolverFieldsOf(SentPayload(Approval, FamilyRow), "sprk_RegardingRecordType", "sprk_project", Project,
             ShownOn(path, RecordName(Project)), ShownOn(path, RecordNumber(Project)));
     }
 
@@ -91,7 +104,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.OutputOrchestrator, "no number")]
     [InlineData(GenericPath.FieldMappingPush, "no name")]
     [InlineData(GenericPath.FieldMappingPush, "no number")]
-    public async Task AnInvoiceMovedToAMatterWithABlankNameOrNumber_IsWritten_WithTheTypeIdAndUrl_AndTheBlankOneCleared(GenericPath path, string gap)
+    public async Task AnApprovalMovedToAMatterWithABlankNameOrNumber_IsWritten_WithTheTypeIdAndUrl_AndTheBlankOneCleared(GenericPath path, string gap)
     {
         // Owner, 2026-11-12, option (b): the row takes what the record has; a blank is never a refusal on the generic path.
         _recordAnswer = (table, id, columns) => new Entity(table, id)
@@ -102,11 +115,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
 
         // Fix round 5: the handlers run as a person who may read the matter, so their row tests the blank one alone (with no
         // person both would be cleared whatever the matter holds); the push reads as its caller either way.
-        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain,
-            WorldWithLines(OtherMatter).Object, playbookActsAs: Caller);
+        var outcome = await MoveTheApprovalAsync(path, playbookActsAs: Caller);
 
         outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
+        ShouldCarryTheResolverFieldsOf(SentPayload(Approval, FamilyRow), "sprk_RegardingRecordType", "sprk_matter", OtherMatter,
             gap == "no name" ? null : "Acme v Beta", gap == "no number" ? null : "MAT-000077");
     }
 
@@ -142,8 +154,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
                 break;
         }
 
-        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain,
-            WorldWithLines(OtherMatter).Object);
+        var outcome = await MoveTheApprovalAsync(path);
 
         outcome.Code.Should().Be(failure switch
         {
@@ -162,8 +173,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     {
         _recordAnswer = (_, _, _) => null;
 
-        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain,
-            WorldWithLines(OtherMatter).Object, playbookActsAs: Caller);
+        var outcome = await MoveTheApprovalAsync(path, playbookActsAs: Caller);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode, "a run as a person never tells found from not-found");
         NothingWritten();
@@ -179,11 +189,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         // the id.
         _callerMayNotRead = true;
 
-        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
-            NoPlain, WorldWithLines(OtherMatter).Object);
+        var outcome = await MoveTheApprovalAsync(GenericPath.FieldMappingPush);
 
         outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
+        ShouldCarryTheResolverFieldsOf(SentPayload(Approval, FamilyRow), "sprk_RegardingRecordType", "sprk_matter", OtherMatter,
             name: null, number: null);
     }
 
@@ -196,12 +205,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     {
         _callerMayNotRead = true;
 
-        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow,
-            Lookups(("sprk_regardingmatter", MatterRef(OtherMatter))), NoPlain, FamilyRowUnderAMatter("sprk_invoiceapproval").Object,
-            playbookActsAs: Caller);
+        var outcome = await MoveTheApprovalAsync(path, playbookActsAs: Caller);
 
         outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoiceapproval", FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
+        ShouldCarryTheResolverFieldsOf(SentPayload(Approval, FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
             OtherMatter, name: null, number: null);
     }
 
@@ -212,12 +219,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     {
         _personAnswer = (table, id, columns) => new Entity(table, id) { [columns[0]] = "As the person sees it", [columns[1]] = "P-1" };
 
-        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow,
-            Lookups(("sprk_regardingmatter", MatterRef(OtherMatter))), NoPlain, FamilyRowUnderAMatter("sprk_invoiceapproval").Object,
-            playbookActsAs: Caller);
+        var outcome = await MoveTheApprovalAsync(path, playbookActsAs: Caller);
 
         outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoiceapproval", FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
+        ShouldCarryTheResolverFieldsOf(SentPayload(Approval, FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
             OtherMatter, "As the person sees it", "P-1");
     }
 
@@ -238,7 +243,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     public async Task AWriteThatReNamesTheMatterTheRowAlreadyNames_LeavesItsNameAndNumberUntouched(GenericPath path, string runAs)
     {
         // The pair planner keeps a pair that does not move (045b rule 4); so does the derive. Before, a run that could not read
-        // the matter (no person, or a caller with append but no read) wrote its name and number null on every re-run.
+        // the matter (no person, or a caller with append but no read) wrote its name and number null on every re-run. Task 045g:
+        // an invoice naming the matter it already names is not a change of its core record (rule 1 does not fire).
         _callerMayNotRead = runAs == "a caller who may not read it";
 
         var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(Matter))), NoPlain,
@@ -259,24 +265,51 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task ARowGivenASecondCoreRecordAfterTheGuard_IsRefusedByTheDerive_AndNothingIsWritten(GenericPath path)
     {
-        // The guard reads the stored invoice under one matter and admits the move; by the derive's own read (the core lookups
+        // The guard reads the stored approval under one matter and admits the move; by the derive's own read (the core lookups
         // only) it is also filed under a project, which the derive's Check refuses. The path answers that code; it does not
         // move the core with stale resolver fields.
         var app = new Mock<IGenericEntityService>();
         app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
-        app.Setup(a => a.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+        app.Setup(a => a.RetrieveAsync(Approval, FamilyRow, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
             {
-                var row = new Entity(table, id) { ["sprk_matter"] = MatterRef(Matter) };
-                if (columns.Length == 3 && columns.Contains("sprk_project") && !columns.Contains(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn))
-                    row["sprk_project"] = new EntityReference("sprk_project", Project); // the derive's read, after the change
+                var row = new Entity(table, id) { ["sprk_regardingmatter"] = MatterRef(Matter) };
+                if (columns.Length == 3 && columns.Contains("sprk_regardingproject"))
+                    row["sprk_regardingproject"] = new EntityReference("sprk_project", Project); // the derive's read, after the change
                 return Task.FromResult(row);
             });
 
-        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, app.Object);
+        var outcome = await MoveTheApprovalAsync(path, app.Object);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.MultipleCoreRecordsCode);
+        NoGuid(outcome);
+        NothingWritten();
+    }
+
+    [Theory]
+    [InlineData(GenericPath.PlaybookUpdate)]
+    [InlineData(GenericPath.OutputOrchestrator)]
+    [InlineData(GenericPath.FieldMappingPush)]
+    public async Task AnInvoiceWhoseCoreRecordChangesAfterTheGuard_IsRefusedCoreRecordFixedByTheDerive_AndNothingIsWritten(GenericPath path)
+    {
+        // Task 045g rule 1 on the derive's own read: the guard reads the stored invoice under the matter the write names (no
+        // change of core record); by the derive's read (the core lookups only) it is under another matter, so the write would
+        // move it. The derive refuses it as the guard would, never derives it.
+        var app = new Mock<IGenericEntityService>();
+        app.Setup(a => a.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        app.Setup(a => a.RetrieveAsync("sprk_invoice", Invoice, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) =>
+                Task.FromResult(new Entity(table, id)
+                {
+                    ["sprk_matter"] = columns.Contains(InvoiceFamilyCoreRecordGuard.SupersedesInvoiceColumn) ? MatterRef(OtherMatter) : MatterRef(Matter),
+                }));
+
+        var outcome = await RunAsync(path, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))), NoPlain, app.Object);
+
+        outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.InvoiceCoreRecordFixedCode);
+        _deriveReads.Should().BeEmpty();
         NoGuid(outcome);
         NothingWritten();
     }
@@ -293,8 +326,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         else
             _callerFault = new TimeoutException("socket 10.0.0.8 timed out");
 
-        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
-            NoPlain, WorldWithLines(OtherMatter).Object);
+        var outcome = await MoveTheApprovalAsync(GenericPath.FieldMappingPush);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.ReadFailedCode);
         outcome.Message.Should().NotContain("10.0.0.8");
@@ -307,8 +339,7 @@ public partial class InvoiceFamilyGenericUpdatePathTests
         _callerMayNotRead = true;
         _recordAnswer = (_, _, _) => null; // the app's exists-check finds no matter
 
-        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
-            NoPlain, WorldWithLines(OtherMatter).Object);
+        var outcome = await MoveTheApprovalAsync(GenericPath.FieldMappingPush);
 
         outcome.Code.Should().Be(InvoiceFamilyCoreRecordGuard.RecordNotFoundCode);
         NothingWritten();
@@ -320,11 +351,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
     [InlineData(GenericPath.FieldMappingPush)]
     public async Task AnApprovalMovedToAnotherMatter_IsWrittenWithThatMattersResolverFields(GenericPath path)
     {
-        var outcome = await RunAsync(path, "sprk_invoiceapproval", FamilyRow,
-            Lookups(("sprk_regardingmatter", MatterRef(OtherMatter))), NoPlain, FamilyRowUnderAMatter("sprk_invoiceapproval").Object);
+        var outcome = await MoveTheApprovalAsync(path);
 
         outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoiceapproval", FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
+        ShouldCarryTheResolverFieldsOf(SentPayload(Approval, FamilyRow), "sprk_RegardingRecordType", "sprk_matter",
             OtherMatter, ShownOn(path, RecordName(OtherMatter)), ShownOn(path, RecordNumber(OtherMatter)));
     }
 
@@ -353,11 +383,10 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             ["sprk_regardingrecordnumber"] = "PUSHED-1",
         };
 
-        var outcome = await RunAsync(GenericPath.FieldMappingPush, "sprk_invoice", Invoice, Lookups(("sprk_matter", MatterRef(OtherMatter))),
-            pushed, WorldWithLines(OtherMatter).Object);
+        var outcome = await MoveTheApprovalAsync(GenericPath.FieldMappingPush, plain: pushed);
 
         outcome.Code.Should().BeNull(outcome.Message);
-        ShouldCarryTheResolverFieldsOf(SentPayload("sprk_invoice", Invoice), "sprk_regardingrecordtype", "sprk_matter", OtherMatter,
+        ShouldCarryTheResolverFieldsOf(SentPayload(Approval, FamilyRow), "sprk_RegardingRecordType", "sprk_matter", OtherMatter,
             RecordName(OtherMatter), RecordNumber(OtherMatter));
     }
 
@@ -371,8 +400,8 @@ public partial class InvoiceFamilyGenericUpdatePathTests
             throw new OperationCanceledException(cancel.Token);
         };
 
-        var act = () => Handler(WorldWithLines(OtherMatter).Object).UpdateAsync(
-            "sprk_invoice", Invoice, new Dictionary<string, object?> { ["sprk_matter"] = MatterRef(OtherMatter) },
+        var act = () => Handler(FamilyRowUnderAMatter(Approval).Object).UpdateAsync(
+            Approval, FamilyRow, new Dictionary<string, object?> { ["sprk_regardingmatter"] = MatterRef(OtherMatter) },
             Sprk.Bff.Api.Services.Ai.ConcurrencyMode.None, maxRetries: 1, cancel.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
