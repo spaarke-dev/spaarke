@@ -4,7 +4,7 @@
     <title>Widget Decide lane over MCP shims</title>
     <phase>C Widget</phase>
     <gate>after 022 and 030</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include frontend; modifies .ts/.tsx in the shared lib and the widget</rigor-reason>
     <model-tier>sonnet</model-tier>

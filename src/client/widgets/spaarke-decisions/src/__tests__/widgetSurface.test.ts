@@ -40,7 +40,16 @@ describe('widget source surface', () => {
   it('scans the real source files (not an empty set)', () => {
     const names = files.map(label);
     expect(names).toEqual(
-      expect.arrayContaining(['main.tsx', 'App.tsx', 'mcp/mcpFetch.ts', 'mcp/mcpHost.ts', 'theme/hostTheme.ts'])
+      expect.arrayContaining([
+        'main.tsx',
+        'App.tsx',
+        'mcp/mcpFetch.ts',
+        'mcp/mcpHost.ts',
+        'theme/hostTheme.ts',
+        'lane/DecideLane.tsx',
+        'lane/decideLaneFetch.ts',
+        'lane/billingLinkOut.ts',
+      ])
     );
   });
 
