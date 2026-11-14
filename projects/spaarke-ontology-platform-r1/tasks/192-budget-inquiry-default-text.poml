@@ -4,7 +4,7 @@
     <title>Send budget inquiry opens with a standard default subject and message (D-224)</title>
     <phase>11 UAT (budget inquiry follow-up, D-224)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies .cs and possibly .tsx code files.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,6 +94,7 @@ Thank you,
   <escalation>
     <trigger>If the inquiry code has no existing read of the matter's name and number and a new Dataverse read path is needed, STOP and report options (root CLAUDE.md §6).</trigger>
   </escalation>
+  <completion>Done 2026-11-14: PR #2825 merged to master (b60232073c). Owner-approved default text via DefaultSource; templatedDrafts.ts no longer overrides a server text default (POML deviation, needed). Known limits: K1 secure-matter name in default (not new exposure; old template already named it), K4 second matter read, K2 generic fallback when default unbuildable. Notes: notes/task-192-notes.md. rework: none task 192</completion>
   <execution>
     <protocol>Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute for the pre-execution checklist. Work in a fresh worktree from origin/master; PR to master.</protocol>
   </execution>
