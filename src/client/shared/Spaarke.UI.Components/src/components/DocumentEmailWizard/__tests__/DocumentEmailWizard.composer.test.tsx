@@ -361,6 +361,66 @@ describe('DocumentEmailWizard — Compose step is the shared composer (task 183)
     });
   });
 
+  describe('an expired sign-in (the composer stays open)', () => {
+    const expiredFetch = () =>
+      jest.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        headers: { get: () => 'application/json' },
+        json: async () => ({ title: 'Unauthorized', status: 401 }),
+      });
+
+    it('says to select Send, not to send it from the record, with a parent record', async () => {
+      renderWizard({ authenticatedFetch: expiredFetch() as never });
+      lift({ to: [addressed('client@acme.example')] });
+      const failure = await mockShell.props!.onFinish().then(
+        () => undefined,
+        (err: Error) => err
+      );
+      expect(failure!.message).toBe(
+        'The email was not sent. Your sign-in had expired. Sign in again, then select Send to send it.'
+      );
+    });
+
+    it('says the same when the wizard has no parent record', async () => {
+      renderWizard({
+        authenticatedFetch: expiredFetch() as never,
+        parentEntityType: undefined,
+        parentEntityId: undefined,
+      });
+      lift({ to: [addressed('client@acme.example')] });
+      const failure = await mockShell.props!.onFinish().then(
+        () => undefined,
+        (err: Error) => err
+      );
+      expect(failure!.message).toMatch(/select Send to send it\.$/);
+      expect(failure!.message).not.toMatch(/record/);
+    });
+
+    it('an unconfirmed send with no parent record says to check Sent Items only', async () => {
+      const unconfirmed = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new Error('Unexpected end of JSON input');
+        },
+      });
+      renderWizard({
+        authenticatedFetch: unconfirmed as never,
+        parentEntityType: undefined,
+        parentEntityId: undefined,
+      });
+      lift({ to: [addressed('client@acme.example')] });
+      const failure = await mockShell.props!.onFinish().then(
+        () => undefined,
+        (err: Error) => err
+      );
+      expect(failure!.message).toMatch(/^The email may have been sent/);
+      expect(failure!.message).toMatch(/Check your Sent Items before sending it again\./);
+      expect(failure!.message).not.toMatch(/record/);
+    });
+  });
+
   describe('a host with no authenticated fetch', () => {
     it('shows a visible warning, cannot finish and sends nothing', async () => {
       renderWizard({ authenticatedFetch: undefined as never });

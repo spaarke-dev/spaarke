@@ -426,6 +426,9 @@ export function buildInitialEmail(
   };
 }
 
+/** Label of the wizard's Finish button; a sign-in failure names it as the button that sends again. */
+const FINISH_LABEL = 'Send';
+
 /** Shown when the host gave the wizard no authenticated fetch: the email cannot be sent, so the step says so. */
 const NO_EMAIL_SERVICE_MESSAGE =
   'This page has no connection to the Spaarke email service, so the email cannot be sent from here.';
@@ -610,6 +613,8 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       onResolveShareLink: emailComposeHandlers?.onResolveShareLink,
       // As before: no archive request of its own (a send filed to a record is archived either way).
       archiveToSpe: false,
+      // The composer stays open after a failed send; the wizard's own Finish button sends it again.
+      retryLabel: FINISH_LABEL,
     });
     if (!result.success) {
       throw new Error(result.warning ?? 'The email was not sent.');
@@ -977,7 +982,7 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       onClose={onClose}
       onFinish={handleFinish}
       finishingLabel="Sending…"
-      finishLabel="Send"
+      finishLabel={FINISH_LABEL}
       embedded={embedded}
       hideTitle={embedded}
       // Named size; when omitted WizardShell uses its `wizard` default.

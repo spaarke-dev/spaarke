@@ -1016,6 +1016,13 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx jest --ci src/utils/__tests__/xrmCapabilityUsage.guard.test.ts
 
+      # Added 2026-11-14 by ontology task 183 (fix round 1). Reads the COMMITTED src/client/pcf/*/Solution bundles (no build): a PCF
+      # that declares the platform React library must not carry React 19's jsx-runtime (`react.transitional.element`), which
+      # React 16 rejects at render time. Same install, same job, a few seconds more.
+      - name: PCF bundle React-runtime guard (no React 19 jsx-runtime under the platform React library)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/utils/__tests__/pcfBundleReactRuntime.guard.test.ts
+
   # ──────────────────────────────────────────────────────────────────────────
   # Job 7 — format-changed-cs (BLOCKING)
   #
