@@ -1,8 +1,8 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -381,15 +381,17 @@ public class FromEmailSubmissionServiceTests
         RefusedBeforeAnyWrite(world);
     }
 
-    // ── task 095c-2: no firm (owner 2026-11-03), accepted only once the tracking-scope key is Active (P2) ─────────────────
+    // ── task 095e (EB-D-223): a submission that names no firm is refused, in every tracking-scope phase ─────────────────
 
-    [Theory(DisplayName = "095c-2 (seed-proof, the P0/P1 refusal): no firm before the scope key is Active is 400 firm_invalid 'A firm is required.', before any write and with no firm read")]
-    [InlineData("New")]
-    [InlineData("Correction")]
-    public async Task NoFirm_BeforeTheScopeKeyIsActive_Is400FirmInvalid_BeforeAnyWrite(string mode)
+    [Theory(DisplayName = "095e (EB-D-223, seed-proof): no firm is 400 firm_invalid 'A firm is required.' in every phase, before any write and with no firm read")]
+    [InlineData("New", false)]
+    [InlineData("Correction", false)]
+    [InlineData("New", true)]
+    [InlineData("Correction", true)]
+    public async Task NoFirm_Is400FirmInvalid_BeforeAnyWrite_InEveryPhase(string mode, bool scopeKeyActive)
     {
         var (world, probe) = CorrectionWorld(CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()));
-        world.ScopeKeyActive(false);
+        world.ScopeKeyActive(scopeKeyActive);
         var input = (mode == "New" ? W.Input() : Correction()) with { FirmId = null };
 
         var outcome = await RunCorrection(world, probe, input);
@@ -398,11 +400,26 @@ public class FromEmailSubmissionServiceTests
         RefusedBeforeAnyWrite(world);
         world.Intake.Entities.Verify(e => e.RetrieveAsync("sprk_organization", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never(), "there is no firm to read");
-        world.Intake.Allocator.Verify(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>()), Times.Once());
+        world.Communications.Verify(c => c.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never(), "the refusal comes before the email's communication is read");
+        world.Intake.Allocator.Verify(a => a.NumbersSubmissionsWithoutFirmAsync(It.IsAny<CancellationToken>()), Times.Never(),
+            "the refusal no longer depends on the tracking-scope phase");
     }
 
-    [Fact(DisplayName = "095c-2 review F1 (seed-proof, the replay precedes the phase gate): a retry of a no-firm submission that a P2 instance accepted, landing on an instance not in P2, gets the replayed 202 and makes no save or submit")]
-    public async Task NoFirm_RetryOfAnAcceptedSubmission_OnANonP2Instance_IsReplayedNotRefused()
+    [Fact(DisplayName = "095e (must-not-fire): with a firm, the submission is accepted as before, in the phase where no firm is refused")]
+    public async Task WithAFirm_IsSubmitted_AsBefore()
+    {
+        var world = new W();
+        world.ScopeKeyActive();
+
+        var outcome = await Run(world);
+
+        outcome.Receipt.Should().NotBeNull();
+        world.Operation.Submits.Should().ContainSingle().Which.FirmId.Should().Be(W.FirmId);
+    }
+
+    [Fact(DisplayName = "095e (must-not-fire, the replay precedes the no-firm refusal): a retry of a no-firm submission accepted before EB-D-223 gets the replayed 202 and makes no save or submit")]
+    public async Task NoFirm_RetryOfAnAcceptedSubmission_IsReplayedNotRefused()
     {
         var world = new W();
         world.ScopeKeyActive(false);
@@ -421,21 +438,6 @@ public class FromEmailSubmissionServiceTests
             "the phase gate comes after the replay, so a stale cache cannot refuse an accepted submission");
     }
 
-    [Fact(DisplayName = "095c-2: mode New with no firm, once the scope key is Active, is submitted with no firm; no firm is read or linked")]
-    public async Task NoFirm_New_InP2_IsSubmittedWithNoFirm()
-    {
-        var world = new W();
-        world.ScopeKeyActive();
-
-        var outcome = await Run(world, W.Input() with { FirmId = null });
-
-        outcome.Receipt.Should().NotBeNull();
-        var submit = world.Operation.Submits.Should().ContainSingle().Subject;
-        (submit.FirmId, submit.Mode, submit.ResubmissionOf).Should().Be(((Guid?)null, "New", (Guid?)null));
-        world.Intake.Entities.Verify(e => e.RetrieveAsync("sprk_organization", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
-            Times.Never(), "there is no firm to check");
-    }
-
     [Fact(DisplayName = "095c-2: a sent firm is still checked when the scope key is Active (not linked: 403 firm_not_linked)")]
     public async Task ASentFirm_InP2_IsStillChecked()
     {
@@ -447,8 +449,8 @@ public class FromEmailSubmissionServiceTests
         RefusedBeforeAnyWrite(world);
     }
 
-    [Fact(DisplayName = "095c-2: a Correction of a no-firm invoice, sent with no firm, keeps the null firm and names the replaced invoice's submission")]
-    public async Task NoFirm_CorrectionOfANoFirmInvoice_InP2_KeepsTheNullFirm()
+    [Fact(DisplayName = "095e (EB-D-223): a Correction of a no-firm invoice, sent with no firm, is 400 firm_invalid; nothing is saved or submitted")]
+    public async Task NoFirm_CorrectionOfANoFirmInvoice_IsRefused()
     {
         var (world, probe) = CorrectionWorld(CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()));
         world.Intake.PriorSubmissions.Clear();
@@ -457,9 +459,9 @@ public class FromEmailSubmissionServiceTests
 
         var outcome = await RunCorrection(world, probe, Correction() with { FirmId = null });
 
-        outcome.Receipt.Should().NotBeNull();
-        var submit = world.Operation.Submits.Should().ContainSingle().Subject;
-        (submit.FirmId, submit.ResubmissionOf).Should().Be(((Guid?)null, CorrectionSeed.OldSubmissionId));
+        (outcome.Status, outcome.ErrorCode).Should().Be((400, "ebilling.submission.firm_invalid"));
+        RefusedBeforeAnyWrite(world);
+        world.Operation.Submits.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "095c-2 (must fire): a Correction of a no-firm invoice that sends a firm is 409 different_firm, before the save")]

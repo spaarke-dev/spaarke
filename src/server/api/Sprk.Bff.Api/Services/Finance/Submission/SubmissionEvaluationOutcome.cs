@@ -435,6 +435,14 @@ public sealed record SubmissionEvaluationOutcome
     /// </summary>
     public IReadOnlyList<StagedSourceCopy> StagedFiles { get; init; } = [];
 
+    /// <summary>
+    /// EB-D-226 (task 095e): the name of the firm record (<c>sprk_organization</c>) the submission names, read once by the persister before
+    /// any write and carried here so the invoice's <c>sprk_name</c>, its stored <c>invoiceName</c> and the Signals' subject name all use it
+    /// (<see cref="InvoiceSubmissionPersister.InvoiceNameFor"/>). Null when the submission has no firm (the AI issuer name is then used), or
+    /// on a path that did not read it (the preflight, which only checks the rejection's shape).
+    /// </summary>
+    public string? FirmRecordName { get; init; }
+
     internal static SubmissionEvaluationOutcome Failed(Guid submissionId, string reasonCode, SubmissionSnapshot? submission = null,
         ExtractedInvoice? read = null) =>
         new() { Kind = SubmissionEvaluationKind.Failed, SubmissionId = submissionId, ReasonCode = reasonCode, Submission = submission, Read = read };
