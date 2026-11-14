@@ -173,6 +173,50 @@ export interface InvoiceFirmOption {
 /** The firms linked to a core record (contract §8; `invoiceSubmissionService.loadInvoiceFirms`). */
 export type LoadInvoiceFirms = (target: InvoiceSubmissionTarget) => Promise<InvoiceFirmOption[]>;
 
+/** One page of the law firms a record can be given (ebilling 095g `GET /api/finance/firms`). */
+export interface LawFirmPage {
+  items: InvoiceFirmOption[];
+  page: number;
+  /** True while the server has a later page (the list then loads it as the user scrolls: ADR-051). */
+  hasMore: boolean;
+}
+
+/** `listLawFirms`'s arguments: `search` is trimmed and capped at 100 characters, and omitted when blank. */
+export interface ListLawFirmsArgs {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * Lists the active law firms a record can be given (`invoiceSubmissionService.listLawFirms`). Any failure THROWS with a
+ * sentence for the user, as {@link LoadInvoiceFirms} does.
+ */
+export type ListLawFirms = (args: ListLawFirmsArgs, signal?: AbortSignal) => Promise<LawFirmPage>;
+
+/**
+ * What became of one add-a-firm request (ebilling 095g `POST /api/finance/core-records/{type}/{id}/firms`, the add alone).
+ * - `added`: the 200. `changed: false` means the firm was already on the record. `firms` is the record's firm list
+ *   after the write, or null when the server could not read it back (the view then reloads it). `accessState`
+ *   `pending` means the slots stand and the access pass did not finish: resending the same request finishes it.
+ *   `notice` is the server's plain sentence about who gets access (null when it has none);
+ * - `refused`: nothing was written; `message` is the pane's sentence for the code (never the server's `detail`), and
+ *   `code` is `errorCode ?? reasonCode` (undefined when the server sent neither).
+ */
+export type AddFirmOutcome =
+  | {
+      kind: 'added';
+      changed: boolean;
+      firms: InvoiceFirmOption[] | null;
+      accessState: 'applied' | 'pending';
+      recordActive: boolean;
+      notice: string | null;
+    }
+  | { kind: 'refused'; status: number; code: string | undefined; message: string };
+
+/** Adds one firm to a core record. The pane only ever ADDS: it never removes, replaces or clears a firm. */
+export type AddFirmToRecord = (target: InvoiceSubmissionTarget, firmId: string) => Promise<AddFirmOutcome>;
+
 /**
  * What a correction of an invoice must keep, and whether it can be made (contract §10, ebilling 097e). A correction is
  * sent with the invoice's own firm, core record and firm invoice number; `canCorrect` is the intake's own guard.

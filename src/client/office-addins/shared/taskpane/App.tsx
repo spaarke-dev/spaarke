@@ -16,14 +16,20 @@ import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
 import { InvoiceView } from './components/views/InvoiceView';
 import {
+  addFirmToRecord,
   createInvoiceSubmitHandler,
   createPreviousSubmissionFollower,
   createPreviousSubmissionLoader,
   hostAdapterInvoiceEmailSource,
+  listLawFirms,
   loadCorrectionPrefill,
   loadInvoiceFirms,
 } from './services/invoiceSubmissionService';
-import { invoiceFiledRecord, type InvoiceSubmissionTarget } from './services/invoiceSubmissionSeam';
+import {
+  invoiceFiledRecord,
+  type InvoiceSubmissionTarget,
+  type ListLawFirmsArgs,
+} from './services/invoiceSubmissionSeam';
 import type { InitialAction } from './initialAction';
 import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
@@ -692,6 +698,18 @@ export const App: React.FC<AppProps> = ({
       loadInvoiceFirms(target, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
   );
+  // Task 134 slice C (ebilling 095g): list the law firms a record can be given, and add one. The add alone: the pane
+  // never removes a firm.
+  const listLawFirmsForRecord = useCallback(
+    (args: ListLawFirmsArgs, signal?: AbortSignal) =>
+      listLawFirms(args, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }, signal),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
+  const addFirmToCoreRecord = useCallback(
+    (target: InvoiceSubmissionTarget, firmId: string) =>
+      addFirmToRecord(target, firmId, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
+    [apiBaseUrl, getInvoiceAccessToken]
+  );
   const loadPrefill = useCallback(
     (invoiceId: string) => loadCorrectionPrefill(invoiceId, { apiBaseUrl, getAccessToken: getInvoiceAccessToken }),
     [apiBaseUrl, getInvoiceAccessToken]
@@ -934,6 +952,8 @@ export const App: React.FC<AppProps> = ({
             getAccessToken={getInvoiceAccessToken}
             onSubmit={submitInvoice}
             loadFirms={loadFirms}
+            listLawFirms={listLawFirmsForRecord}
+            addFirmToRecord={addFirmToCoreRecord}
             correctionAvailable
             loadCorrectionPrefill={loadPrefill}
             onBusyChange={setInvoiceBusy}
