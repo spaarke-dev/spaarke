@@ -4,7 +4,7 @@
     <title>Value / code corrections, structured capture, re-evaluation</title>
     <phase>4 Review and approval (WP4) — wave W4-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Corrections rewrite extracted facts, re-run rule evaluation and become AI training labels (D-64); a wrong label, an out-of-set code or a stale finding corrupts both the bill and the calibration data.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -268,13 +268,24 @@ public sealed class ProcedureAssignmentServiceTests
             H.Ownership.Invocations.Where(i => i.Method.Name == nameof(IRecordOwnershipResolver.ResolveOwnerAsync))
                 .Select(i => (RecordOwnershipContext)i.Arguments[0]).ToList();
 
-        public Guid Procedure(int status = ProcedureEntity.StatusActive)
+        /// <summary>A Procedure; Billing-area unless <paramref name="area"/> says otherwise (0 leaves the Area empty); <paramref name="state"/> sets statecode when given (1 = deactivated in Dataverse).</summary>
+        public Guid Procedure(int status = ProcedureEntity.StatusActive, int area = RuleDomains.PolicyDomainBilling, int? state = null)
         {
             var p = new Entity("sprk_procedure", Guid.NewGuid())
             {
                 ["sprk_name"] = "Acme OCG",
                 ["sprk_status"] = new OptionSetValue(status),
             };
+            if (area != 0)
+            {
+                p[ProcedureEntity.AreaColumn] = new OptionSetValue(area);
+            }
+
+            if (state is { } statecode)
+            {
+                p["statecode"] = new OptionSetValue(statecode);
+            }
+
             H.Seed(p);
             return p.Id;
         }
@@ -491,6 +502,100 @@ public sealed class ProcedureAssignmentServiceTests
         missing.StatusCode.Should().Be(404);
         missing.ErrorCode.Should().Be("assignment.procedure_not_found");
         w.H.Transactions.Should().BeEmpty();
+    }
+
+    /// <summary>A Procedure Area that is not Billing (the Ontology area of O-24).</summary>
+    private const int OtherArea = RuleDomains.PolicyDomainBilling + 1;
+
+    [Theory(DisplayName = "EB-D-228 must-fire: a Procedure whose Area is not Billing (or empty) is 409 assignment.procedure_not_billing in every mode, and writes nothing")]
+    [InlineData(OtherArea, null)]
+    [InlineData(OtherArea, "Pinned")]
+    [InlineData(OtherArea, "Excluded")]
+    [InlineData(0, null)]
+    public async Task Assign_AProcedureOfAnotherArea_Is409NotBilling_AndWritesNothing(int area, string? mode)
+    {
+        var w = new World();
+        var procedure = w.Procedure(area: area);
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
+
+        var refused = await w.Service().AssignProcedureAsync(
+            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, default);
+
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(ProcedureAssignmentService.CodeProcedureNotBilling);
+        refused.Detail.Should().Be(ProcedureAssignmentService.NotBillingDetail);
+        w.H.Transactions.Should().BeEmpty();
+        w.OwnerContexts.Should().BeEmpty("the area refuses before the owner question");
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "EB-D-228 must-not-fire: a Billing Procedure is assigned, also when its only versions are Drafts (ahead of publication) or it has none")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Assign_ABillingProcedure_IsAccepted_EvenWithOnlyDraftVersions(bool draftOnly)
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        if (draftOnly)
+        {
+            w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusDraft);
+            w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusDraft);
+        }
+
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.Rows.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_procedure").Id.Should().Be(procedure);
+    }
+
+    [Theory(DisplayName = "EB-D-232 must-fire: a Procedure deactivated in Dataverse (Status Active, statecode 1) is 409 assignment.procedure_inactive in every mode, and writes nothing")]
+    [InlineData(null)]
+    [InlineData("Pinned")]
+    [InlineData("Excluded")]
+    public async Task Assign_ADeactivatedProcedure_Is409Inactive_AndWritesNothing(string? mode)
+    {
+        var w = new World();
+        var procedure = w.Procedure(state: 1);
+        var version = w.ProcedureVersion(procedure, ProcedureEntity.VersionStatusActive);
+
+        var refused = await w.Service().AssignProcedureAsync(
+            Matter, MatterId, new(procedure, mode, mode == "Pinned" ? version : null, null), CallerOid, default);
+
+        refused.StatusCode.Should().Be(409);
+        refused.ErrorCode.Should().Be(ProcedureAssignmentService.CodeProcedureInactive);
+        refused.Detail.Should().Be("A deactivated Procedure cannot be assigned, pinned or excluded.");
+        w.H.Transactions.Should().BeEmpty();
+        w.OwnerContexts.Should().BeEmpty("the state refuses before the owner question");
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "EB-D-232 must-not-fire: an Active Procedure (statecode 0, or none read) is assigned")]
+    [InlineData(0)]
+    [InlineData(null)]
+    public async Task Assign_AnActiveProcedure_IsAccepted(int? state)
+    {
+        var w = new World();
+        var procedure = w.Procedure(state: state);
+
+        var outcome = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+
+        outcome.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.Rows.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("sprk_procedure").Id.Should().Be(procedure);
+    }
+
+    [Fact(DisplayName = "EB-D-232: removing an existing assignment to a Procedure since deactivated still succeeds (remove does not go through the assign refusal)")]
+    public async Task Remove_AnAssignmentToADeactivatedProcedure_StillSucceeds()
+    {
+        var w = new World();
+        var procedure = w.Procedure();
+        var assigned = await w.Service().AssignProcedureAsync(Matter, MatterId, new(procedure, null, null, null), CallerOid, default);
+        assigned.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.H.Row("sprk_procedure", procedure)["statecode"] = new OptionSetValue(1);
+
+        var removed = await w.Service().RemoveAsync(Matter, MatterId, assigned.Value!.Id, Token, default);
+
+        removed.Kind.Should().Be(RuleSetOutcomeKind.Done);
+        w.Rows.Should().BeEmpty();
     }
 
     [Fact]
@@ -823,6 +928,15 @@ public sealed class ProcedureAssignmentServiceTests
         // Stage 3 is one transaction: the Exclude row, the version and the conditional switch-on.
         w.H.Transactions.Should().HaveCount(3);
         w.H.Transactions[2].Select(r => r.GetType()).Should().Equal(typeof(CreateRequest), typeof(CreateRequest), typeof(UpdateRequest));
+        // The ORDER is the contract (ontology-r1, 084d-3 K-2): Dataverse stamps createdon per statement, so the Exclude row must be
+        // created before the version for the resolver's createdon >= episode-start test to admit the version. A reorder to
+        // [version, Exclude] would make the real read fault while the dry run (one rig stamp per write) still showed the change.
+        w.H.Transactions[2].Select(r => r switch
+        {
+            CreateRequest c => c.Target.LogicalName,
+            UpdateRequest u => u.Target.LogicalName,
+            _ => r.GetType().Name,
+        }).Should().Equal(Assignment, "sprk_policyversion", "sprk_policy");
         ((UpdateRequest)w.H.Transactions[2][2]).ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
 
         // The base rule is untouched.
@@ -1055,6 +1169,53 @@ public sealed class ProcedureAssignmentServiceTests
         w.H.Transactions.Should().BeEmpty();
         w.H.Writes.Should().BeEmpty();
         w.Rows.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "EB-D-232 must-fire: a rule of a Procedure deactivated in Dataverse (Status Active, statecode 1) is 409 rule_not_in_force, as a Retired one's is, and writes nothing; statecode 0 (or none) is changed (must not fire)")]
+    [InlineData(1, false)]
+    [InlineData(0, true)]
+    [InlineData(null, true)]
+    public async Task Change_ARuleOfADeactivatedProcedure_Is409RuleNotInForce(int? state, bool changes)
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(state: state));
+
+        var outcome = await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        if (changes)
+        {
+            outcome.Kind.Should().Be(RuleSetOutcomeKind.Done, outcome.Detail);
+            return;
+        }
+
+        outcome.StatusCode.Should().Be(409);
+        outcome.ErrorCode.Should().Be("assignment.rule_not_in_force");
+        w.H.Transactions.Should().BeEmpty();
+        w.H.Writes.Should().BeEmpty();
+        w.Rows.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "EB-D-232 must-fire: the owning-Procedure read of a rule change selects statecode (without it a deactivated owner reads as active)")]
+    public async Task Change_TheOwningProcedureRead_SelectsStatecode()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(state: 1));
+
+        await w.Service().ChangeRuleAsync(Matter, MatterId, Change(policy), CallerOid, Token, default);
+
+        w.H.Queries.Single(q => q.EntityName == "sprk_procedure").ColumnSet.Columns.Should().Contain("statecode");
+    }
+
+    [Fact(DisplayName = "EB-D-232 (scope): Exclude still accepts a rule of a deactivated Procedure, as it does a retired one's")]
+    public async Task Exclude_StillAcceptsARuleOfADeactivatedProcedure()
+    {
+        var w = new World();
+        var policy = w.Rule();
+        OwnedBy(w, policy, w.Procedure(state: 1));
+
+        (await w.Service().ExcludeRuleAsync(Matter, MatterId, new(policy, "x", null), CallerOid, default)).Kind.Should().Be(RuleSetOutcomeKind.Done);
     }
 
     [Fact(DisplayName = "089c pass 2 F1: a rule of a set with no Procedure keeps its behaviour (changed), and the Procedure is not read")]
@@ -2219,7 +2380,14 @@ public sealed class ProcedureAssignmentServiceTests
     {
         var w = new World();
         var policy = w.Rule();
-        var finding = w.Signal(policy, w.Invoice(matter: MatterId));
+        var invoice = w.Invoice(matter: MatterId);
+        var finding = w.Signal(policy, invoice, line: w.Line(invoice));
+        // ebilling-r1 084d-3 review round 1 (F3-1): a record directly under the matter with an In Review invoice, so the close selects the
+        // children (ChildrensInReviewInvoicesAsync returns early with no child): the children's invoice read and the override read of the
+        // child's chain (the change's own Exclude row on the matter is the override row that decides the child's invoice) both run.
+        var child = WorkAssignmentUnder(w, Matter, MatterId);
+        var childInvoice = InvoiceOn(w, WorkAssignmentTable, child);
+        var childFinding = w.Signal(policy, childInvoice);
         using var cts = new CancellationTokenSource();
         var readsBefore = -1;
         w.H.TransactionCommitsButAnswersUnknown = requests =>
@@ -2244,6 +2412,39 @@ public sealed class ProcedureAssignmentServiceTests
         // The read-back (the version row) and the close's Signal reads; the caller-scoped count after them keeps the request's token.
         after.Where(r => r.First.EntityName is "sprk_policyversion" or "sprk_signal")
             .Should().OnlyContain(r => !r.Second.CanBeCanceled, "the read-back and the close run on CancellationToken.None");
+
+        // ebilling-r1 084d-3 (ontology-r1 O-K3): the close's selection is shared with the dry run, which passes ITS request token into it
+        // (SelectBaseFindingsAsync and its readers take an optional token since 084d-2b fix round 1). The write never does: every read of the
+        // close's selection (the In Review invoices, their lines, and the records directly under this one) runs on CancellationToken.None. The
+        // close ends with its last Signal read; the caller-scoped count after it keeps the request's token (must-not-fire: the guard tells them apart).
+        var closeEnds = after.FindLastIndex(r => r.First.EntityName == "sprk_signal");
+        closeEnds.Should().BeGreaterThan(0, "the close selected the base rule's findings");
+        var close = after.Take(closeEnds + 1).ToList();
+        var selectionTables = new[]
+        {
+            "sprk_invoice", "sprk_billingevent", "sprk_matter", "sprk_project", "sprk_workassignment",
+            "sprk_procedureassignment", "sprk_ruleset", "sprk_policy", "sprk_policyversion",
+        };
+        foreach (var table in new[] { "sprk_invoice", "sprk_billingevent" })
+        {
+            close.Should().Contain(r => r.First.EntityName == table, $"the close's selection reads {table}");
+        }
+
+        close.Should().Contain(r => r.First.EntityName == "sprk_project" || r.First.EntityName == "sprk_workassignment",
+            "the close's selection reads the records directly under the matter");
+        // Premises (084d-3 review round 1, F3-1): the children's In Review invoice read and the override read of the child's chain ran inside
+        // the close's window. Without them the token assertion below is vacuous for those two reads.
+        static bool Names(QueryExpression q, string attribute, Guid id) => q.Criteria.Conditions.Concat(q.Criteria.Filters.SelectMany(f => f.Conditions))
+            .Any(c => c.AttributeName == attribute && c.Values.Contains(id));
+        var childInvoiceColumn = InvoiceFamilyCoreRecordGuard.CoreRecordLookups["sprk_invoice"].Single(l => l.CoreEntity == WorkAssignmentTable).Column;
+        close.Any(r => r.First.EntityName == "sprk_invoice" && Names(r.First, childInvoiceColumn, child))
+            .Should().BeTrue("the close read the children's In Review invoices");
+        close.Any(r => r.First.EntityName == "sprk_procedureassignment" && Names(r.First, WorkAssignmentTable, child))
+            .Should().BeTrue("the close read the override rows on the child's chain (ProcedureResolver.ReadOverridesAsync)");
+        w.StatusOf(childFinding).Should().Be(SignalWriter.SignalStatusResolved, "the child's invoice was kept by the override read, so its finding closed");
+        close.Where(r => selectionTables.Contains(r.First.EntityName))
+            .Should().OnlyContain(r => !r.Second.CanBeCanceled, "the request's token never reaches the write's selection reads");
+        after.Skip(closeEnds + 1).Should().Contain(r => r.Second == cts.Token, "the caller-scoped count after the close keeps the request's token");
     }
 
     [Fact(DisplayName = "089c: an unknown override, or another record's, is 404 assignment.override_not_found and nothing is written")]

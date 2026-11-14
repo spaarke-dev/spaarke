@@ -120,10 +120,14 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
 
     // ── Helpers ──
 
+    /// <summary>Task 095f: the note every Correction request carries unless a test says otherwise (a Correction without one is refused).</summary>
+    private const string CorrectionNoteText = "The firm re-issued the invoice with the corrected rate.";
+
     private static FromEmailSubmissionRequest Request(
         EmailMetadata? email = null, List<FromEmailMark>? marks = null, Guid? firm = null, string? number = "1001",
-        string mode = "New", Guid? invoiceId = null) => new()
+        string mode = "New", Guid? invoiceId = null, string? correctionNote = null) => new()
         {
+            CorrectionNote = correctionNote ?? (mode == "Correction" ? CorrectionNoteText : null),
             TargetEntity = new FromEmailTargetEntity { EntityType = "Matter", EntityId = W.MatterId },
             Email = email ?? W.Email(),
             Marks = marks ?? new List<FromEmailMark> { W.Mark(W.Invoice, "Invoice"), W.Mark(W.Timesheet, "Supporting") },
@@ -342,6 +346,12 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         { Mutate(r => r with { Mode = "new" }), "mode" },
         { Mutate(r => r with { InvoiceId = Guid.NewGuid() }), "invoiceId" },
         { Mutate(r => r with { Mode = "Correction" }), "invoiceId" },
+        // 095f (EB-D-225): a New submission carries no note; a Correction's note is at most 2000 characters and has no control character.
+        { Mutate(r => r with { CorrectionNote = "why" }), "correctionNote" },
+        { Mutate(r => r with { CorrectionNote = "" }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = new string('n', 2001) }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = "bell\u0007here" }), "correctionNote" },
+        { Mutate(r => r with { Mode = "Correction", InvoiceId = Guid.NewGuid(), CorrectionNote = "nul\u0000here" }), "correctionNote" },
         // 095 review F4: a null attachment entry is the body-shape 400, never a 500.
         { Mutate(r => r with { Email = r.Email! with { Attachments = new List<AttachmentReference> { W.Invoice, null!, W.Timesheet } } }), "email.attachments[1]" },
         // 095 review F1: an attached email (message/*) marked to be saved cannot be kept byte-for-byte in the .eml.
@@ -575,11 +585,18 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         return node.ToJsonString();
     }
 
-    [Theory(DisplayName = "095c-2 (P0/P1): mode New with firmId null or absent, before the scope key is Active, is 400 firm_invalid 'A firm is required.'; no firm right is asked and nothing is written")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NoFirm_BeforeTheScopeKeyIsActive_Is400FirmInvalid(bool absent)
+    [Theory(DisplayName = "095e (EB-D-223, seed-proof): mode New with firmId null or absent is 400 firm_invalid 'A firm is required.' in every tracking-scope phase; no firm right is asked and nothing is written")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task NoFirm_Is400FirmInvalid_InEveryPhase(bool absent, bool scopeKeyActive)
     {
+        if (scopeKeyActive)
+        {
+            _world.ScopeKeyActive();
+        }
+
         var response = await PostAsync(NoFirmJson(absent));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -591,60 +608,55 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         NothingWritten();
     }
 
-    [Theory(DisplayName = "095c-2 (P2): mode New with firmId null or absent, once the scope key is Active, is 202; the submission has no firm")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NoFirm_InP2_Is202_AndSubmittedWithNoFirm(bool absent)
+    [Fact(DisplayName = "095e (must-not-fire): the same request with a firm is accepted (202) as before, in the phase where no firm is refused")]
+    public async Task WithAFirm_Is202_AsBefore()
     {
         _world.ScopeKeyActive();
 
-        var body = await Accepted(await PostAsync(NoFirmJson(absent)));
+        var body = await Accepted(await PostAsync(Request()));
 
-        body.GetProperty("submissionId").GetGuid().Should().Be(FromEmailSubmissionKey.SubmissionIdFor(K(), 1), "K has no firm: the same ids as with one");
-        _world.Operation.Submits.Should().ContainSingle().Which.FirmId.Should().BeNull();
-        _access.Calls.Should().NotContain(c => c.Set == FinanceAuthorizationFilter.VendorOrganizationEntitySet,
-            "with no firm there is no firm record to authorize");
+        body.GetProperty("submissionId").GetGuid().Should().Be(FromEmailSubmissionKey.SubmissionIdFor(K(), 1));
+        _world.Operation.Submits.Should().ContainSingle().Which.FirmId.Should().Be(W.FirmId);
     }
 
-    [Fact(DisplayName = "095c-2 (idempotency): with one X-Idempotency-Key, firmId null and firmId absent are the same request (the cached 202)")]
-    public async Task NoFirm_NullAndAbsent_AreTheSameCachedRequest()
+    [Fact(DisplayName = "095e (idempotency): with one X-Idempotency-Key, firmId null and firmId absent are both the 400 firm_invalid; the refusal is not cached and writes nothing")]
+    public async Task NoFirm_NullAndAbsent_AreBothRefused_AndNotCached()
     {
         _world.ScopeKeyActive();
-        var first = await Accepted(await PostAsync(NoFirmJson(absent: false), idempotencyKey: "no-firm-1"));
-
+        var first = await PostAsync(NoFirmJson(absent: false), idempotencyKey: "no-firm-1");
         var second = await PostAsync(NoFirmJson(absent: true), idempotencyKey: "no-firm-1");
 
-        (await Accepted(second)).ToString().Should().Be(first.ToString());
-        second.Headers.GetValues("X-Idempotency-Status").Should().Equal("cached");
-        _world.Save.Requests.Should().ContainSingle("the cached answer never reaches the handler");
+        (first.StatusCode, second.StatusCode).Should().Be((HttpStatusCode.BadRequest, HttpStatusCode.BadRequest));
+        (await CodeAsync(first)).Should().Be("ebilling.submission.firm_invalid");
+        (await CodeAsync(second)).Should().Be("ebilling.submission.firm_invalid");
+        NothingWritten();
     }
 
-    [Fact(DisplayName = "095c-2 (idempotency): the same header on a request that sends a firm is not the no-firm request's cached answer; it is the handler's 409")]
-    public async Task NoFirm_TheSameHeaderWithAFirm_IsNotTheCachedAnswer()
+    [Fact(DisplayName = "095e (idempotency, must-not-fire): a refused no-firm request does not poison its header; the same header with a firm is accepted")]
+    public async Task NoFirm_TheSameHeaderWithAFirm_IsAccepted_AfterTheRefusal()
     {
         _world.ScopeKeyActive();
-        await Accepted(await PostAsync(NoFirmJson(absent: false), idempotencyKey: "no-firm-2"));
+        (await PostAsync(NoFirmJson(absent: false), idempotencyKey: "no-firm-2")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
         var second = await PostAsync(Request(), idempotencyKey: "no-firm-2");
 
-        second.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        second.Headers.GetValues("X-Idempotency-Status").Should().NotContain("cached");
-        (await CodeAsync(second)).Should().Be("ebilling.submission.document_already_submitted", "the same K with another firm detail (contract section 5)");
-        _world.Operation.Submits.Should().ContainSingle();
+        await Accepted(second);
+        _world.Operation.Submits.Should().ContainSingle().Which.FirmId.Should().Be(W.FirmId);
     }
 
-    [Fact(DisplayName = "095c-2: a Correction of a no-firm invoice sent with no firm is 202, keeping the null firm and naming the replaced invoice's submission")]
-    public async Task NoFirm_CorrectionOfANoFirmInvoice_Is202()
+    [Fact(DisplayName = "095e (EB-D-223): a Correction of a no-firm invoice sent with no firm is 400 firm_invalid; nothing is written (a held invoice is cleared by Set firm, not by a no-firm correction)")]
+    public async Task NoFirm_CorrectionOfANoFirmInvoice_Is400FirmInvalid()
     {
         CorrectionSeed.Seed(_world.Intake, CorrectionSeed.WithoutFirm(CorrectionSeed.Invoice()), CorrectionSeed.WithoutFirm(CorrectionSeed.Submission()));
         _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
         _world.ScopeKeyActive();
 
-        await Accepted(await PostAsync(NoFirmJson(absent: true,
-            Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId))));
+        var response = await PostAsync(NoFirmJson(absent: true,
+            Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId)));
 
-        var submit = _world.Operation.Submits.Should().ContainSingle().Subject;
-        (submit.FirmId, submit.ResubmissionOf).Should().Be(((Guid?)null, CorrectionSeed.OldSubmissionId));
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await CodeAsync(response)).Should().Be("ebilling.submission.firm_invalid");
+        NothingWritten();
     }
 
     [Fact(DisplayName = "095c-2 (must fire): a Correction of a no-firm invoice that sends a firm is 409 correction_not_allowed, reason different_firm")]
@@ -661,6 +673,65 @@ public sealed class InvoiceSubmissionFromEmailContractTests : IAsyncLifetime
         body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_not_allowed");
         body.GetProperty("reason").GetString().Should().Be("different_firm");
         NothingWritten();
+    }
+
+    // ── the correction note (task 095f, EB-D-225; contract section 2) ──
+
+    private string CorrectionJson(string? note, bool omit = false)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(
+            Request(number: CorrectionSeed.Number, mode: "Correction", invoiceId: CorrectionSeed.OldInvoiceId) with { CorrectionNote = note }, Json))!.AsObject();
+        if (omit)
+        {
+            node.Remove("correctionNote");
+        }
+
+        return node.ToJsonString();
+    }
+
+    [Theory(DisplayName = "095f (EB-D-225, seed-proof): a Correction with no note (absent, null, empty or blank) is 400 ebilling.submission.correction_note_required; nothing is written")]
+    [InlineData(null, true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("  \t\r\n ", false)]
+    public async Task Correction_WithoutANote_Is400CorrectionNoteRequired(string? note, bool omit)
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var response = await PostAsync(CorrectionJson(note, omit));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await BodyAsync(response);
+        body.GetProperty("errorCode").GetString().Should().Be("ebilling.submission.correction_note_required");
+        body.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace();
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "095f (must-not-fire): a Correction with a note is 202 and the operation is handed the trimmed note")]
+    public async Task Correction_WithANote_Is202_AndTheOperationGetsTheTrimmedNote()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        await Accepted(await PostAsync(CorrectionJson("  Rate corrected after the firm's credit note.\r\nSee email.  ")));
+
+        _world.Operation.Submits.Should().ContainSingle().Which.CorrectionNote.Should().Be("Rate corrected after the firm's credit note.\r\nSee email.");
+    }
+
+    [Fact(DisplayName = "095f (idempotency): an X-Idempotency-Key reused with another note is not answered from the first request's cached 202")]
+    public async Task Correction_SameKeyAnotherNote_ReachesTheHandler()
+    {
+        CorrectionSeed.Seed(_world.Intake);
+        _probe.Rights[CorrectionSeed.OldInvoiceId] = AccessRights.Read | AccessRights.Write;
+
+        var first = await PostAsync(CorrectionJson("first note"), idempotencyKey: "note-1");
+        var second = await PostAsync(CorrectionJson("second note"), idempotencyKey: "note-1");
+
+        first.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        second.StatusCode.Should().Be(HttpStatusCode.Accepted, "the handler answers it from the attempt of K (the note is not compared)");
+        second.Headers.GetValues("X-Idempotency-Status").Should().NotContain("cached", "the binding differs, so the cached answer is not used");
+        _world.Operation.Submits.Should().ContainSingle("the second request is a replay of K, never a second attempt");
     }
 
     // ── a Correction (task 097b, EB-D-179; contract section 6, changed 2026-10-30) ──

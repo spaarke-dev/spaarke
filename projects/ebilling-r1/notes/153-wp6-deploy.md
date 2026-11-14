@@ -55,3 +55,7 @@
 - **Rollback copy:** `%TEMP%\BillingExportRibbons-rollback-20261103233623` (the effective ribbon XML and the stored rows).
 - **Email to AP is in the FORM ribbon.** The effective ribbon before the apply already had the 4 form buttons (Email to AP, Download CSV, Download JSON, Mark Sent to AP) in `Mscrm.Form.sprk_billingexport.MainTab.Actions`. The owner's screenshots were of the "Active Billing Exports" grid view, where these buttons are not placed by design. To see Email to AP, open the batch record.
 - **Still to do:** `Deploy-EbillingFormsViews.ps1` (the legacy CSV/JSON Document fields off the form) needs its own go, after the master PR.
+
+## Operator notes: legacy invoices (EB-D-231)
+
+- A legacy invoice with no core record, or with two, cannot be filed through the BFF. An operator must correct its core record directly in Dataverse, and the BFF then refuses any further change of its core record.

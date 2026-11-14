@@ -1565,22 +1565,18 @@ public class InvoiceSubmissionService
     /// order: the firm is active, the core record's fields derive (013), the firm is one of the record's assigned law firms (D-106 / D-110), and
     /// an owner team resolves. Reads only; nothing is written.
     /// </summary>
-    /// <remarks>Task 095c-2: a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null) reaches here only from
-    /// <see cref="DecideForFromEmailAsync"/> (<paramref name="noFirmAllowed"/>; <see cref="ValidateFields"/> refuses it on every other entry).
-    /// It has no firm to check, so the active-firm and firm-link checks are skipped; the record's fields and the owner are decided as for any
-    /// submission. Any other caller with a null firm is a defect and throws before anything is read.</remarks>
+    /// <remarks>EB-D-223 (task 095e): every entry names a firm. <see cref="ValidateFields"/> refuses a null firm first, so a null firm reaching
+    /// here is a defect and throws before anything is read.</remarks>
     private async Task<IntakeDecision> DecideAsync(
-        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null,
-        bool noFirmAllowed = false)
+        InvoiceSubmissionRequest request, CallerPrincipal? spaCaller, CancellationToken ct, Guid? requesterSystemUserId = null)
     {
         var core = request.CoreRecord;
-        if (request.FirmId is null && !noFirmAllowed)
+        if (request.FirmId is not { } firm)
         {
-            throw new InvalidOperationException("Only the from-email intake submits without a firm (ValidateFields refuses it on every other entry).");
+            throw new InvalidOperationException("A submission names a firm (ValidateFields refuses a null firm on every entry).");
         }
 
-        // Task 095c-2: no firm (from-email only, above): nothing to check here.
-        switch (request.FirmId is { } firmToCheck ? await IsActiveFirmAsync(firmToCheck, ct) : true)
+        switch (await IsActiveFirmAsync(firm, ct))
         {
             case null:
                 return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
@@ -1609,23 +1605,19 @@ public class InvoiceSubmissionService
         // before the owner is resolved and long before any write; the same codes whichever route called. The order matters: the link reader
         // cannot tell a record that is not returned (deleted, not found) from a fault, so both come back unreadable, and asking it first would
         // answer a deleted record 503 "try again shortly". The detail names no firm and no record.
-        // Task 095c-2: a request with no firm (from-email only, above) has no link to check, so this step is skipped for it.
-        if (request.FirmId is { } firmToLink)
+        switch (await CheckFirmLinkAsync(core, firm, ct))
         {
-            switch (await CheckFirmLinkAsync(core, firmToLink, ct))
-            {
-                case InvoiceFirmLink.Linked:
-                    break;
-                case InvoiceFirmLink.NotLinked:
-                    _logger.LogInformation(
-                        "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
-                        firmToLink, core.EntityLogicalName, core.RecordId, request.Channel);
-                    return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
-                        "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."));
-                default:
-                    return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
-                        "The firm could not be checked right now. Try again shortly."));
-            }
+            case InvoiceFirmLink.Linked:
+                break;
+            case InvoiceFirmLink.NotLinked:
+                _logger.LogInformation(
+                    "Invoice submission refused: firm {FirmId} is not linked to {Entity} {RecordId} ({Channel})",
+                    firm, core.EntityLogicalName, core.RecordId, request.Channel);
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status403Forbidden, InvoiceSubmissionErrors.FirmNotLinked,
+                    "The firm you chose is not linked to this record, so an invoice cannot be submitted for it."));
+            default:
+                return new(InvoiceSubmissionOutcome.Refused(StatusCodes.Status503ServiceUnavailable, InvoiceSubmissionErrors.FirmUnverifiable,
+                    "The firm could not be checked right now. Try again shortly."));
         }
 
         // UAC 194b R3b-2: the submission's question is built from the row as written so far (RecordOwnershipContext.ForChild: its core
@@ -1651,9 +1643,8 @@ public class InvoiceSubmissionService
     /// the firm active, the core record's fields, the firm link D-106, the owner), with the submission's creator person the caller's own
     /// <paramref name="callerSystemUserId"/> (OP-5; every generation, whoever made an earlier one). Reads only. The answer: a refusal, or the
     /// submission row (core lookup, owner and creator person set) and its resolver fields.
-    /// <para>Task 095c-2: the one entry that accepts a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null): the firm checks
-    /// are skipped and the record and owner are decided as usual. Whether a no-firm submission may be numbered at all (the tracking-scope phase)
-    /// is the from-email route's check before anything is saved (<see cref="CanSubmitWithoutFirmAsync"/>), and the allocator's on create.</para>
+    /// <para>EB-D-223 (task 095e): a request with no firm (<see cref="InvoiceSubmissionRequest.FirmId"/> null) is refused here like on every
+    /// other entry (<see cref="ValidateFields"/>, 400 firm_invalid); the from-email route refuses it earlier, after the replay of K.</para>
     /// </summary>
     internal async Task<(InvoiceSubmissionOutcome? Refusal, Entity? Row, InvoiceFamilyResolverFields? ResolverFields)> DecideForFromEmailAsync(
         InvoiceSubmissionRequest request, Guid callerSystemUserId, CancellationToken ct)
@@ -1664,21 +1655,14 @@ public class InvoiceSubmissionService
             throw new ArgumentException("A from-email submission is internal and names its caller's systemuser.", nameof(request));
         }
 
-        if (ValidateFields(request, noFirmAllowed: true) is { } invalid)
+        if (ValidateFields(request) is { } invalid)
         {
             return (invalid, null, null);
         }
 
-        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId, noFirmAllowed: true);
+        var decision = await DecideAsync(request, spaCaller: null, ct, callerSystemUserId);
         return (decision.Refusal, decision.Row, decision.ResolverFields);
     }
-
-    /// <summary>
-    /// Task 095c-2: whether a submission with no firm may be taken now: only once this environment's tracking-scope key is Active (phase P2,
-    /// <see cref="ITrackingNumberAllocator.NumbersSubmissionsWithoutFirmAsync"/>). The from-email route asks it before it saves or files
-    /// anything, and answers 400 <see cref="InvoiceSubmissionErrors.FirmInvalid"/> "A firm is required." while it is false (P0, P1).
-    /// </summary>
-    internal virtual Task<bool> CanSubmitWithoutFirmAsync(CancellationToken ct) => _allocator.NumbersSubmissionsWithoutFirmAsync(ct);
 
     // ── ebilling-r1 task 097b: a Correction (model 9.1 "Existing invoice", EB-D-179) ──
 
@@ -1940,9 +1924,8 @@ public class InvoiceSubmissionService
 
     /// <summary>The checks of the request's own fields every entry runs first: the number (D-91), its length, the PO, the firm and record ids.</summary>
     /// <param name="request">The request.</param>
-    /// <param name="noFirmAllowed">Task 095c-2: true only for <see cref="DecideForFromEmailAsync"/>, where a null firm means "no firm". Every
-    /// other entry refuses a null firm as it refuses the empty id. The empty id is refused on every entry.</param>
-    private static InvoiceSubmissionOutcome? ValidateFields(InvoiceSubmissionRequest request, bool noFirmAllowed = false)
+    /// <remarks>EB-D-223 (task 095e): a null firm and the empty id are refused on every entry.</remarks>
+    private static InvoiceSubmissionOutcome? ValidateFields(InvoiceSubmissionRequest request)
     {
         // D-91 first: the number is required, so a request without one never costs an upload.
         var number = request.FirmInvoiceNumber?.Trim();
@@ -1964,7 +1947,7 @@ public class InvoiceSubmissionService
                 $"The PO number may be at most {MaxPoNumberLength} characters.");
         }
 
-        if (request.FirmId == Guid.Empty || (request.FirmId is null && !noFirmAllowed))
+        if (request.FirmId is null || request.FirmId == Guid.Empty)
         {
             return InvoiceSubmissionOutcome.Refused(StatusCodes.Status400BadRequest, InvoiceSubmissionErrors.FirmInvalid, "A firm is required.");
         }
@@ -2238,15 +2221,22 @@ public class InvoiceSubmissionService
             SubmissionId = submissionId,
         };
 
-    internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId) => new()
+    internal static JobContract BuildJob(Guid jobId, Guid submissionId, string? correlationId, string? correctionNote = null) => new()
     {
         JobId = jobId,
         JobType = JobType,
         SubjectId = submissionId.ToString(),
         CorrelationId = correlationId ?? string.Empty,
         IdempotencyKey = submissionId.ToString(),
-        Payload = JsonSerializer.SerializeToDocument(new { submissionId }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
+        // Task 095f (EB-D-225): a from-email Correction's note rides the payload (the submission row has no column for it); every other job's
+        // payload is exactly what it was.
+        Payload = JsonSerializer.SerializeToDocument(
+            new InvoiceSubmissionJobPayload(submissionId, string.IsNullOrWhiteSpace(correctionNote) ? null : correctionNote),
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }),
     };
+
+    /// <summary>The processing job's payload as written (<see cref="BuildJob"/>); the handler reads it as <c>InvoiceSubmissionProcessingPayload</c>.</summary>
+    private sealed record InvoiceSubmissionJobPayload(Guid SubmissionId, string? CorrectionNote);
 
     /// <summary>
     /// The display name of the uploaded PDF (<c>sprk_storedfile.sprk_name</c>): the tracking number when given (the job, which writes the

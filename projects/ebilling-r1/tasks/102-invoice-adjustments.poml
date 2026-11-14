@@ -4,7 +4,7 @@
     <title>Invoice-level adjustments</title>
     <phase>4 Review and approval (WP4) — wave W4-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Small write path over 016's calculator and 100's route conventions; the negative-total invariant is enforced and tested by 016.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -283,6 +283,7 @@ internal sealed class FromEmailWorld
         public bool Available = true;
         public readonly List<FromEmailSubmitInput> Submits = new();
         public readonly List<(Guid Submission, Guid Job)> Requeues = new();
+        public readonly List<string?> RequeueNotes = new();
         /// <summary>What each attempt recorded about its source (the .eml and the Invoice part's SHA-256).</summary>
         public readonly Dictionary<Guid, FromEmailAttemptSource> Sources = new();
 
@@ -321,11 +322,12 @@ internal sealed class FromEmailWorld
             return Task.FromResult(FromEmailSubmitResult.Received(tracking));
         }
 
-        public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, CancellationToken ct)
+        public Task<bool> RequeueAsync(Guid submissionId, Guid jobId, string? correlationId, string? correctionNote, CancellationToken ct)
         {
             lock (Requeues)
             {
                 Requeues.Add((submissionId, jobId));
+                RequeueNotes.Add(correctionNote);
             }
 
             return Task.FromResult(Requeued);

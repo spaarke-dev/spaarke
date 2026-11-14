@@ -4,7 +4,7 @@
     <title>089c follow-ups: close stale base-rule Signals as Superseded on a rule change; a descriptive error for record-scoped rule sets; edit rights for Billing Administrator</title>
     <phase>3 Rules (follow-up to 089c; owner 2026-11-04)</phase>
     <gate>owner decided 2026-11-04 in the main session: STOP option (b); "a more descriptive error is important/useful to the user; also so can be tracked"; "provide edit rights as required". Then (fix round): item 2 "Approve (A)+(B) on all 9 routes"; the role "Add to role file + apply on dev" (the owner applies it on dev)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what a rule change closes after its commit, the answer of an auth-gated route family, and possibly a security role source; tags include auth.</rigor-reason>
     <model-tier>sonnet</model-tier>

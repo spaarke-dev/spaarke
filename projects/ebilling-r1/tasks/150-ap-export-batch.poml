@@ -4,7 +4,7 @@
     <title>AP export batch (CSV + JSON, D-56 default mapping, snapshot)</title>
     <phase>6 Export and index (WP6) — wave W6-1</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves invoices to Sent to AP and hands a payment file to AP; a double export or a wrong selection is a double-payment risk (FR-41); concurrency and authorization must be proven.</rigor-reason>
     <model-tier>sonnet</model-tier>

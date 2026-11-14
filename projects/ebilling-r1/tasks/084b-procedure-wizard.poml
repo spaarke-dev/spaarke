@@ -4,7 +4,7 @@
     <title>Procedures on the record (B2): the Procedure wizard (follow latest, pin, exclude here, remove) and rule Exclude, on 089's routes</title>
     <phase>3 Rules (WP3) — Procedure model (EB-D-148, EB-D-217)</phase>
     <gate>084a merged into work.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend code (.tsx) that writes overrides through BFF routes.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -1012,11 +1012,43 @@ internal sealed class SecureChildShareWorld
         };
     }
 
-    /// <summary>Dataverse LIKE: <c>%</c> any run, <c>_</c> one character, case-insensitive.</summary>
-    private static bool Like(string text, string pattern) =>
-        System.Text.RegularExpressions.Regex.IsMatch(text,
-            "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("%", ".*").Replace("_", ".") + "$",
+    /// <summary>
+    /// Dataverse LIKE: <c>%</c> any run, <c>_</c> one character, <c>[...]</c> one character of the set (so <c>[%]</c> is a literal
+    /// <c>%</c>, as Dataverse and SQL escape a wildcard; 084d-5a), case-insensitive. An unclosed <c>[</c> is a literal.
+    /// </summary>
+    private static bool Like(string text, string pattern)
+    {
+        var regex = new System.Text.StringBuilder("^");
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            var c = pattern[i];
+            var close = c == '[' && i + 2 < pattern.Length ? pattern.IndexOf(']', i + 2) : -1;
+            if (c == '%')
+            {
+                regex.Append(".*");
+            }
+            else if (c == '_')
+            {
+                regex.Append('.');
+            }
+            else if (close > i)
+            {
+                var set = pattern.Substring(i + 1, close - i - 1);
+                var negated = set.StartsWith('^');
+                regex.Append('[').Append(negated ? "^" : string.Empty)
+                    .Append(System.Text.RegularExpressions.Regex.Escape(negated ? set[1..] : set).Replace("]", "\\]").Replace("-", "\\-"))
+                    .Append(']');
+                i = close;
+            }
+            else
+            {
+                regex.Append(System.Text.RegularExpressions.Regex.Escape(c.ToString()));
+            }
+        }
+
+        return System.Text.RegularExpressions.Regex.IsMatch(text, regex.Append('$').ToString(),
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+    }
 
     private static bool Same(object? actual, object? expected) => (actual, expected) switch
     {

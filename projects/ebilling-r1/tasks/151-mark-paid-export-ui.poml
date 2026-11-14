@@ -4,7 +4,7 @@
     <title>Mark Paid and export UI</title>
     <phase>6 Export and index (WP6) — wave W6-2</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One small transition endpoint through the existing lifecycle service plus a UI over 150's endpoints; the surface choice is escalated before building.</rigor-reason>
     <model-tier>sonnet</model-tier>

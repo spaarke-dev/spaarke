@@ -238,9 +238,54 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
     /// <summary>A deterministic id: the first 16 bytes of the key's SHA-256 (as <c>DecisionRecordWriter.IdOf</c>). Part D's decision id uses it too.</summary>
     internal static Guid IdOf(string key) => new(SHA256.HashData(Encoding.UTF8.GetBytes(key)).AsSpan(0, 16));
 
-    /// <summary>The invoice's <c>sprk_name</c> (<see cref="InvoiceReviewService.BuildInvoiceName"/>), also the Signals' subject display name.</summary>
-    internal static string InvoiceNameFor(SubmissionEvaluationOutcome outcome) => InvoiceReviewService.BuildInvoiceName(
-        outcome.Read!.Header.FirmName.Value, outcome.Submission!.FirmInvoiceNumber, outcome.Read.Header.InvoiceDate.Value?.ToDateTime(TimeOnly.MinValue));
+    /// <summary>
+    /// The invoice's <c>sprk_name</c> (<see cref="InvoiceReviewService.BuildInvoiceName"/>), also the Signals' subject display name. EB-D-226
+    /// (task 095e): "{firm record name} - {invoice number}" from the firm on the invoice (<see cref="SubmissionEvaluationOutcome.FirmRecordName"/>,
+    /// read once by <see cref="PersistCoreAsync"/> before any write); the AI issuer name read off the PDF is used only when the submission has no
+    /// firm (an invoice held for a firm, kept by EB-D-223). A firm submission whose name was not read (the preflight, a test) also falls back
+    /// to the issuer here; the persist path never does, it fails closed instead.
+    /// </summary>
+    internal static string InvoiceNameFor(SubmissionEvaluationOutcome outcome)
+    {
+        var vendor = outcome.Submission!.FirmId is not null && outcome.FirmRecordName is { } firmName
+            ? firmName
+            : outcome.Read!.Header.FirmName.Value;
+        return InvoiceReviewService.BuildInvoiceName(
+            vendor, outcome.Submission.FirmInvoiceNumber, outcome.Read!.Header.InvoiceDate.Value?.ToDateTime(TimeOnly.MinValue));
+    }
+
+    /// <summary>EB-D-226 (task 095e): the firm record's name could not be read (a fault, no row, or no name); nothing was written, the job retries.</summary>
+    internal const string FirmNameUnreadableCode = "ebilling.submission.firm_name_unreadable";
+
+    /// <summary>
+    /// EB-D-226 (task 095e): the name of the firm record the invoice is filed for, read app-only (the same name column the other readers use:
+    /// <see cref="Sprk.Bff.Api.Services.Communication.RegardingNameFields.PrimaryNameField"/>). Null when it could not be read: a fault, no row, or a blank name. The caller
+    /// refuses to write (Retry) rather than name the invoice from the issuer.
+    /// </summary>
+    private async Task<string?> ReadFirmNameAsync(Guid firmId, Guid submissionId, CancellationToken ct)
+    {
+        try
+        {
+            var nameColumn = Sprk.Bff.Api.Services.Communication.RegardingNameFields.PrimaryNameField(OrganizationEntityName);
+            var row = nameColumn is null ? null : await _entities.RetrieveAsync(OrganizationEntityName, firmId, [nameColumn], ct).ConfigureAwait(false);
+            var name = nameColumn is null ? null : row?.GetAttributeValue<string>(nameColumn);
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                _logger.LogWarning("Invoice submission {SubmissionId}: the firm's name could not be read (no row or no name); nothing persisted, retry", submissionId);
+                return null;
+            }
+
+            return name;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Invoice submission {SubmissionId}: the firm's name could not be read ({Fault}); nothing persisted, retry",
+                submissionId, ex.GetType().Name);
+            return null;
+        }
+    }
+
+    private const string OrganizationEntityName = "sprk_organization";
 
     /// <summary>A line's <c>sprk_name</c>: the tracking number and the 1-based line number, also the Signals' subject display name.</summary>
     internal static string LineNameFor(string trackingNumber, int lineIndex) =>
@@ -484,6 +529,19 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
             return Result(SubmissionPersistStatus.Refused, submissionId, owner.RefusalCode ?? OwnerUnresolvedCode);
         }
 
+        // EB-D-226 (task 095e): the invoice is named from the firm on it, read once here, before any write, and carried on the outcome so the
+        // invoice's name, its stored invoiceName and the Signals' subject name agree. A fault fails closed (Retry, nothing written); it never
+        // falls back to the issuer name read off the PDF. A submission with no firm (an invoice held for a firm) keeps the issuer name.
+        if (outcome.Submission!.FirmId is { } namedFirm)
+        {
+            if (await ReadFirmNameAsync(namedFirm, submissionId, ct).ConfigureAwait(false) is not { } firmRecordName)
+            {
+                return Result(SubmissionPersistStatus.Retry, submissionId, FirmNameUnreadableCode);
+            }
+
+            outcome = outcome with { FirmRecordName = firmRecordName };
+        }
+
         // ── The upload's file (task 092; model 9.1 step 4): the blob the intake staged, found by its deterministic name ──
         // The job runs in another process than the intake, so the stage's answer is read back from the blob (its recorded hash and length;
         // the flip after the commit recomputes the hash by streaming). No usable blob: no invoice (nothing written yet).
@@ -544,6 +602,13 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         var correlation = Cap(correlationId ?? current.GetAttributeValue<string>(SubmissionCorrelationId));
         var lines = BuildLines(outcome, invoiceId, core, resolverFields, owner, correlation);
         FillInvoice(invoice, outcome, resolverFields, owner, correlation);
+        if (outcome.Submission.ResubmissionOfSubmissionId is not null && InvoiceCorrectionNote.Check(outcome.CorrectionNote).Value is null)
+        {
+            // Task 095f review F2: a Correction with no usable note (a payload queued before the note existed). It still persists.
+            _logger.LogWarning("Invoice submission {SubmissionId}: a Correction (it replaces another submission) carries no correction note; the invoice is saved without one",
+                submissionId);
+        }
+
         if (submitter is { } creator)
         {
             RecordCreatorPerson.Stamp(invoice, creator);
@@ -1615,6 +1680,14 @@ public sealed class InvoiceSubmissionPersister : IInvoiceSubmissionPersister
         invoice[InvoiceReviewService.InvName] = InvoiceNameFor(outcome);
         invoice[InvoiceReviewService.InvInvoiceNumber] = snapshot.FirmInvoiceNumber;
         invoice[InvoiceReviewService.InvTrackingNumber] = snapshot.TrackingNumber;
+
+        // Task 095f (EB-D-225): a from-email Correction's note, in this same create. Only a submission that names the one it replaces carries
+        // one, and only a note that passes the column's rule is written (never truncated). A New invoice and every other channel never name the
+        // column, so an environment that has not added it yet still persists them (a Correction there fails closed in this create).
+        if (snapshot.ResubmissionOfSubmissionId is not null && InvoiceCorrectionNote.Check(outcome.CorrectionNote).Value is { } correctionNote)
+        {
+            invoice[InvoiceCorrectionNote.Column] = correctionNote;
+        }
 
         // Task 095c-3: no firm, no lookup (never the empty id, never a placeholder): the invoice is created with no firm and held FirmMissing.
         if (snapshot.FirmId is { } firmId)

@@ -384,6 +384,24 @@ public partial class RouteAuthorizationGuardTests
             + ".../overrides/{overrideId}/removal-preview (record filter, Admin()) and DELETE .../overrides/{overrideId} (record filter, "
             + "Admin() plus Write on sprk_policy); both removal routes then carry RequireReadOnTheOverridesSubject (the caller's Read on "
             + "the stored row's Procedure or rule; unreadable is the 404 a missing row gets), after the eBilling kill switch (review K2)."),
+        new GovernedFile("Api/Finance/RecordProcedureEndpoints.cs", Scope.RouteLevelGate,
+            "GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures and .../rules-in-force (ebilling-r1 task 084, EB-D-218) -- "
+            + "the Procedures a core record is subject to and the rules in force on it for a firm and a date; the core table is fixed per literal "
+            + "route chain. Step 0 on the group (RequireInternalFinanceCaller). Each route carries AddFinanceAuthorizationFilter(\"finance.read\", the "
+            + "core record set, recordId, UniformNotFound): Read on the route record as the caller, fail closed, unknown and unreadable the same "
+            + "404; the eBilling kill switch runs after it. RecordProcedureReadService then reads the rows once, app-only, and makes ONE batched "
+            + "CallerRecordAccessProbe check that the caller can Read EVERY row the answer exposes (chain records, Procedures, versions, rule sets, "
+            + "policies, override rows, firms, creators); an unreadable row, an unanswered rights question or a faulted read is 503 "
+            + "procedures.unavailable with no list. Reads only. Task 084d-2a adds POST .../procedures/dry-run (the same chain, nothing written): "
+            + "ONE AddFinanceAuthorizationFilter on the route record asking finance.read and ebilling.record.override (uniform 404), then a "
+            + "second AddFinanceAuthorizationFilter (403) with the planned writes' own subject Read and privileges (DryRunTargets, built from the "
+            + "write routes' AssignChecks / ExcludeChecks / ChangeChecks / RemoveChecks), the kill switch, then "
+            + "RequireReadOnTheDryRunsOverridesSubject for a removal or a replaced override; the service's one batched check covers Now and After. "
+            + "Task 084d-5a adds GET /api/finance/{matters|projects|workassignments}/{recordId}/procedures/assignable (EB-D-227..230, nothing "
+            + "written): the dry run's record filter (finance.read and ebilling.record.override, uniform 404), then a second "
+            + "AddFinanceAuthorizationFilter (403) with the assign write's privileges (AssignableTargets = AssignOrExcludePrivileges, Admin()), the "
+            + "kill switch; the service's one batched check covers Now, the planned After and every refused own row (503 procedures.unavailable), "
+            + "on the tooMany path too."),
         new GovernedFile("Api/Finance/InvoiceAdjustmentEndpoints.cs", Scope.RouteLevelGate,
             "GET /api/finance/invoices/{invoiceId}/adjustment-rules, POST .../adjustments and DELETE .../adjustments/{lineId} (ebilling-r1 task 102, "
             + "FR-32) -- the invoice-level adjustments. Every route carries AddFinanceAuthorizationFilter on sprk_invoices(invoiceId) as the caller, fail "
@@ -460,7 +478,7 @@ public partial class RouteAuthorizationGuardTests
             + "it. Approve additionally resolves the caller's eligibility LIVE from the invoice's core record inside InvoiceApprovalService on every "
             + "call (403 ebilling.approver.not_eligible, nothing written); the stored eligible-approver set never grants. The decider and the "
             + "decision id are derived server-side, never taken from the request. From task 095d-1b, POST /api/finance/invoices/{invoiceId}/firm "
-            + "(Set firm on a held no-firm invoice): Write on the invoice in the path (ebilling.invoice.assign_firm, uniform 404), then Read and "
+            + "(Set firm on a held no-firm invoice): Write and Append on the invoice in the path, which holds the firm lookup (ebilling.invoice.assign_firm, uniform 404), then Read and "
             + "AppendTo on the body's firm (read, finance.attach_invoice: 403; no firm is the 400 before any rights query), as the caller, fail "
             + "closed; the kill switch runs after them. InvoiceAssignFirmService then asks, as the caller, AppendTo on the core record and Write on "
             + "the firm_missing Signal's subject, and the firm's link to the core record; the submission, the number and the decision id are "
@@ -1197,7 +1215,12 @@ public partial class RouteAuthorizationGuardTests
     // /api/v1/external/ebilling/invoices/{invoiceId}/outcome and GET /api/v1/external/ebilling/submissions/{submissionId}/outcome on the
     // external collaboration group. Classified by GovernedFiles (GroupGated: AddFirmOutcomeAuthorizationFilter, credited above);
     // .RequireEbillingEnabled is already in NotAuthorizationForms.
-    private const int ExpectedEndpointFileCount = 152;
+    //
+    // 152 -> 153 (2026-11-12, ebilling-r1 task 084, EB-D-218). Net +1: Api/Finance/RecordProcedureEndpoints.cs ADDED -- GET
+    // /api/finance/{matters|projects|workassignments}/{recordId}/procedures and .../rules-in-force. Classified by GovernedFiles
+    // (RouteLevelGate: step 0 on the group, then AddFinanceAuthorizationFilter("finance.read") on the route record as the caller);
+    // .RequireEbillingEnabled is already in NotAuthorizationForms.
+    private const int ExpectedEndpointFileCount = 153;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1274,6 +1297,11 @@ public partial class RouteAuthorizationGuardTests
             + "CallerReadCheck.CheckAsync with AuthorizationService (:364); denied is the same 404 assignment.override_not_found a missing "
             + "row gets, also when there is no row at all and the filter answers it itself (:359, :375; review K1, pass 2), an unparseable id, a read fault or an unanswered question 403 system_failure (:339, :351, :376) "
             + "(ebilling-r1 089c)."),
+        new CreditedForm("RequireReadOnTheDryRunsOverridesSubject", "Api/Finance/ProcedureAssignmentEndpoints.cs",
+            "The dry run's removal step (ebilling-r1 084d-2a): for a body that removes or replaces an override it calls "
+            + "RefuseUnlessCallerReadsOverridesSubjectAsync, the same body RequireReadOnTheOverridesSubject runs (ProcedureAssignmentEndpoints.cs:537): "
+            + "the stored row read app-only, the caller's own Read on its Procedure or rule, the same 404 assignment.override_not_found and 403 "
+            + "system_failure; an unparseable record id is 403 system_failure (ProcedureAssignmentEndpoints.cs:534)."),
         new CreditedForm("AddStoredFileAccessFilter", "Api/Finance/StoredFileEndpoints.cs",
             "StoredFileAccessFilter decides before the handler: step 0 via FinanceAuthorizationFilter.EvaluateStepZeroAsync "
             + "(StoredFileEndpoints.cs:241, 403), then RetrievePrincipalAccess as the caller over OBO via "

@@ -127,6 +127,7 @@ public static class FinanceModule
         // and exclude a rule for one core record; 089c adds change rule and remove. Concrete (ADR-010). Scoped: it holds the scoped ownership
         // resolver. Unconditional (flag rule above); the routes carry the kill switch.
         services.AddScoped<ProcedureAssignmentService>();
+        services.AddScoped<RecordProcedureReadService>(); // ebilling-r1 task 084: the caller-read lists of a record's Procedures and rules in force
 
         // Rule drafting job (ebilling-r1 task 075, FR-27): ADR-004 IJobHandler, the same shape as the other Finance handlers. Reads the rule
         // set's source document, asks IInvoiceAi.DraftRulesAsync (which has its Null peer, so AI-off is a clear Poisoned outcome, not a

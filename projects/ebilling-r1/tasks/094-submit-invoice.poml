@@ -4,7 +4,7 @@
     <title>Submit Invoice from a source Document: all-or-nothing steps 1-6, file first (A), copy rule (B), 050a re-file retired</title>
     <phase>3 Procedures and files (WP3, EB-D-148) — wave W3-E</phase>
     <gate>blocked until 086, 090 and 098 are done</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the invoice write path and an authorized BFF route (tags bff-api, auth); secure-record isolation and an undo of committed rows; deps on 3 tasks.</rigor-reason>
     <model-tier>opus</model-tier>
