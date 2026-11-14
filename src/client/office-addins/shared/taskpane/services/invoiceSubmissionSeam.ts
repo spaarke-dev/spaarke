@@ -120,6 +120,11 @@ export interface InvoiceSubmissionInput {
   poNumber: string | null;
   mode: 'New' | 'Correction';
   invoiceId: string | null;
+  /**
+   * Why the invoice is corrected (contract §2, 095f): trimmed, 1-2000 characters. Present on a Correction ONLY; a New
+   * input never carries the property (the server refuses a note on New).
+   */
+  correctionNote?: string;
 }
 
 /** One user action. A Retry of the same action reuses `actionId` (the contract's `X-Idempotency-Key` rule). */
@@ -446,13 +451,50 @@ export function normalizeFirmInvoiceNumber(raw: string): string | null {
   return trimmed.length >= 1 && trimmed.length <= FIRM_INVOICE_NUMBER_MAX ? trimmed : null;
 }
 
+/** The contract's `correctionNote` bound (095f): at most 2000 characters after trimming. */
+export const CORRECTION_NOTE_MAX = 2000;
+
+/** What is wrong with a correction note (the contract's three refusals, 095f). */
+export type CorrectionNoteProblem = 'blank' | 'too-long' | 'control-characters';
+
+/** The sentence for each {@link CorrectionNoteProblem}; the view shows the last two next to the field. */
+export const CORRECTION_NOTE_PROBLEM_MESSAGES: Readonly<Record<CorrectionNoteProblem, string>> = {
+  blank: 'Enter a correction note saying why the invoice is corrected.',
+  'too-long': `The correction note can be at most ${CORRECTION_NOTE_MAX} characters.`,
+  'control-characters': 'The correction note has a character that cannot be sent. Remove it.',
+};
+
+/** A control character the contract refuses: any Unicode control character except a line break (\n, \r) or a tab. */
+function hasDisallowedControlCharacter(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code === 0x09 || code === 0x0a || code === 0x0d) continue;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return true;
+  }
+  return false;
+}
+
+/**
+ * Checks a correction note as the server will: trimmed first, then blank / over 2000 characters / a control character
+ * other than \n, \r or \t. Surrounding whitespace never counts toward the length (the server trims it too).
+ */
+export function correctionNoteProblem(raw: string): CorrectionNoteProblem | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return 'blank';
+  if (trimmed.length > CORRECTION_NOTE_MAX) return 'too-long';
+  if (hasDisallowedControlCharacter(trimmed)) return 'control-characters';
+  return null;
+}
+
 /** Why {@link buildInvoiceSubmissionInput} refuses a blank firm (never shown: the view keeps Submit disabled first). */
 export const NO_FIRM_REFUSAL = 'An invoice cannot be submitted without a firm.';
 
 /**
  * Builds the seam input. GUIDs are canonicalized (ADR-044); a blank PO number is null. A blank firm is REFUSED (throws
  * {@link NO_FIRM_REFUSAL}): an invoice is never submitted without a firm, so the input never carries a null or empty
- * `firmId`.
+ * `firmId`. A Correction also needs a note ({@link correctionNoteProblem}): it is refused (throws the problem's sentence)
+ * when blank, over 2000 characters or with a disallowed control character, and the input carries it trimmed. A New
+ * invoice never carries a note, whatever is passed.
  */
 export function buildInvoiceSubmissionInput(args: {
   target: InvoiceSubmissionTarget;
@@ -463,10 +505,17 @@ export function buildInvoiceSubmissionInput(args: {
   poNumber: string;
   mode: 'New' | 'Correction';
   invoiceId?: string | null;
+  correctionNote?: string;
 }): InvoiceSubmissionInput {
   const po = args.poNumber.trim();
   const firmId = cleanGuid(args.firmId);
   if (!firmId) throw new Error(NO_FIRM_REFUSAL);
+  let correctionNote: string | undefined;
+  if (args.mode === 'Correction') {
+    const problem = correctionNoteProblem(args.correctionNote ?? '');
+    if (problem) throw new Error(CORRECTION_NOTE_PROBLEM_MESSAGES[problem]);
+    correctionNote = (args.correctionNote ?? '').trim();
+  }
   return {
     targetEntity: { entityType: args.target.entityType, entityId: cleanGuid(args.target.entityId) },
     marks: toSubmissionMarks(args.attachments, args.marking),
@@ -475,5 +524,6 @@ export function buildInvoiceSubmissionInput(args: {
     poNumber: po.length > 0 ? po : null,
     mode: args.mode,
     invoiceId: args.mode === 'Correction' && args.invoiceId ? cleanGuid(args.invoiceId) : null,
+    ...(correctionNote !== undefined ? { correctionNote } : {}),
   };
 }

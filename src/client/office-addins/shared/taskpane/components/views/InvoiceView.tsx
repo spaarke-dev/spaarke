@@ -12,6 +12,7 @@ import {
   Select,
   Spinner,
   Text,
+  Textarea,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
@@ -25,6 +26,7 @@ import { fetchRelatedCandidates, type RelatedCandidate } from '../../services/co
 import {
   INVOICE_CORE_RECORD_TYPES,
   buildInvoiceSubmissionInput,
+  correctionNoteProblem,
   normalizeFirmInvoiceNumber,
   toInvoiceMarkingAttachments,
   applyMarkingBudget,
@@ -33,6 +35,8 @@ import {
   filedUnderRecord,
   describeSubmittedLine,
   previousSubmissionTitle,
+  CORRECTION_NOTE_MAX,
+  CORRECTION_NOTE_PROBLEM_MESSAGES,
   FIRM_INVOICE_NUMBER_MAX,
   LOGICAL_NAME_BY_CORE_TYPE,
   NO_FIRM_REFUSAL,
@@ -279,6 +283,8 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
   const [firmId, setFirmId] = useState('');
   const [firmInvoiceNumber, setFirmInvoiceNumber] = useState('');
   const [poNumber, setPoNumber] = useState('');
+  /** Why the invoice is corrected (a correction only; contract §2, 095f). Sent trimmed, and again on every Retry. */
+  const [correctionNote, setCorrectionNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<InvoiceSubmissionOutcome | null>(null);
   /** Set between the server's 202 and the submission's final status. */
@@ -498,7 +504,14 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     lastAttemptRef.current = null;
     setOutcome(prev => (prev?.kind === 'retryable' ? null : prev));
     setRetryableInARow(0);
-  }, [coreRecord, invoice, mode, correctionChosen, firmId, firmInvoiceNumber, poNumber, marking]);
+  }, [coreRecord, invoice, mode, correctionChosen, firmId, firmInvoiceNumber, poNumber, correctionNote, marking]);
+
+  // The note belongs to the correction it was typed for: leaving correction mode, or choosing another invoice, drops it
+  // (as the other correction fields reset). Keyed on the invoice id, so a prefill reload keeps what was typed.
+  const invoiceId = invoice?.id ?? null;
+  useEffect(() => {
+    setCorrectionNote('');
+  }, [invoiceId, mode, correctionChosen]);
 
   // A refusal describes the invoice it was for: choosing another invoice or another kind of submission drops it, so it
   // never shows under the new choice. (A result the server accepted locks these choices until Done.)
@@ -590,12 +603,16 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
         cleanGuid(correction.firm.id).length > 0 &&
         normalizeFirmInvoiceNumber(correction.firmInvoiceNumber) !== null;
 
+  // A correction needs a note (contract §2, 095f): blank, over 2000 characters or a control character blocks Submit.
+  const correctionNoteCheck = correctionNoteProblem(correctionNote);
+
   const canSubmit =
     onSubmit !== undefined &&
     formActive &&
     load.status === 'ready' &&
     detailsReady &&
     !poTooLong &&
+    (correction === null || correctionNoteCheck === null) &&
     markingCheck.ok &&
     overBudget.length === 0 &&
     !locked;
@@ -665,6 +682,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
           poNumber,
           mode: 'Correction',
           invoiceId: correction.invoiceId,
+          correctionNote,
         });
       } else {
         if (!coreRecord || !isCoreRecordType(coreRecord.entityType) || !firmReady) return;
@@ -713,6 +731,7 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
       setFirmsReload(n => n + 1);
       setFirmInvoiceNumber('');
       setPoNumber('');
+      setCorrectionNote('');
       setRetryableInARow(0);
       if (load.status === 'ready') setMarking(defaultInvoiceMarking(load.attachments, 'new'));
       setFormKey(k => k + 1);
@@ -1157,9 +1176,39 @@ export const InvoiceView: React.FC<InvoiceViewProps> = ({
     );
   };
 
+  // Required, multi-line: why the invoice is corrected. The counter is on the TRIMMED length, as the server counts it.
+  const renderCorrectionNote = () => {
+    const shownProblem =
+      correctionNoteCheck === 'too-long' || correctionNoteCheck === 'control-characters' ? correctionNoteCheck : null;
+    return (
+      <div className={styles.section}>
+        <Field
+          label="Correction note"
+          required
+          hint="Why this invoice is corrected."
+          {...(shownProblem
+            ? { validationState: 'error' as const, validationMessage: CORRECTION_NOTE_PROBLEM_MESSAGES[shownProblem] }
+            : {})}
+        >
+          <Textarea
+            value={correctionNote}
+            onChange={(_, d) => setCorrectionNote(d.value)}
+            rows={4}
+            resize="vertical"
+            disabled={locked}
+          />
+        </Field>
+        <Text size={200} className={styles.note} data-testid="invoice-correction-note-count">
+          {`${correctionNote.trim().length} / ${CORRECTION_NOTE_MAX}`}
+        </Text>
+      </div>
+    );
+  };
+
   const renderSubmissionForm = () => (
     <>
       {correction ? renderCorrectionDetails(correction) : renderNewInvoiceDetails()}
+      {correction && renderCorrectionNote()}
 
       <Field
         label="PO number"

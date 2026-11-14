@@ -258,6 +258,8 @@ export const SUBMISSION_ERROR_MESSAGES: Readonly<Record<string, Entry>> = {
   'ebilling.submission.firm_invalid': `Spaarke didn't accept the firm for this invoice. Choose an active firm linked to this record. ${NOTHING}`,
   'ebilling.submission.firm_not_linked': `The chosen firm isn't linked to this record. ${NOTHING}`,
   'ebilling.submission.firm_invoice_number_required': `Enter the firm's invoice number. ${NOTHING}`,
+  // 095f (2026-11-13, EB-D-225): a Correction needs a note saying why (also a still-Received retry that carries none).
+  'ebilling.submission.correction_note_required': `Enter a correction note saying why the invoice is corrected. ${NOTHING}`,
   // §6 handler refusals
   'ebilling.submission.marks_invalid': fromReasons(
     MARKS_INVALID_REASON_MESSAGES,

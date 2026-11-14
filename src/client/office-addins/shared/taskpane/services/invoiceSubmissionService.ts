@@ -98,6 +98,8 @@ export interface InvoiceFromEmailRequestBody {
   poNumber: string | null;
   mode: 'New' | 'Correction';
   invoiceId: string | null;
+  /** 095f: the trimmed note of a Correction. The property is absent on a New invoice (the server refuses it there). */
+  correctionNote?: string;
 }
 
 /** The §3 202 body. */
@@ -363,6 +365,9 @@ export function buildInvoiceFromEmailBody(
     poNumber: input.poNumber,
     mode: input.mode,
     invoiceId: input.mode === 'Correction' ? input.invoiceId : null,
+    ...(input.mode === 'Correction' && input.correctionNote !== undefined
+      ? { correctionNote: input.correctionNote }
+      : {}),
   };
 }
 
