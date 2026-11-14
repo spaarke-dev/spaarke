@@ -157,6 +157,8 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("ebilling.invoice.decide")] // ebilling-r1 task 100: literal in AddFinanceAuthorizationFilter("…") (InvoiceLineReviewEndpoints' decide routes)
     [InlineData("ebilling.record.override")] // ebilling-r1 task 089b; since 084g the Operation = "…" initializer in ProcedureAssignmentEndpoints.RecordWriteCheck
     [InlineData("ebilling.invoice.assign_firm")] // ebilling-r1 task 095d-1b: literal in AddFinanceAuthorizationFilter("…") (InvoiceApprovalEndpoints' Set firm)
+    [InlineData("ebilling.record.assign_firm")] // ebilling-r1 task 095g: Operation = "…" initializer in CoreRecordFirmEndpoints.ResolveAssignTargets (add / replace)
+    [InlineData("ebilling.record.remove_firm")] // ebilling-r1 task 095g: Operation = "…" initializer in CoreRecordFirmEndpoints.ResolveAssignTargets (clear)
     [InlineData("event.attach_regarding")] // task 159: literal in AddRecordRouteAccessAuthorizationFilter("…") (EventEndpoints POST /)
     [InlineData("entity.associate_document")]
     [InlineData("memory.pin_matter")] // task 166: HasRequiredRights(rights, PinMatterOperation) const indirection
@@ -254,6 +256,8 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("ebilling.invoice.decide", AccessRights.Write)] // ebilling-r1 task 100, D-77: deciding a line is a Write on its invoice
     [InlineData("ebilling.record.override", AccessRights.Write | AccessRights.AppendTo)] // ebilling-r1 task 089b: an override changes the record and its row is attached TO it
     [InlineData("ebilling.invoice.assign_firm", AccessRights.Write)] // ebilling-r1 task 095d-1b: setting the firm is a Write on the invoice; the firm is asked separately
+    [InlineData("ebilling.record.assign_firm", AccessRights.Write | AccessRights.Append)] // ebilling-r1 task 095g (uac-r2 R1): the record HOLDS the firm lookup
+    [InlineData("ebilling.record.remove_firm", AccessRights.Write)] // ebilling-r1 task 095g: a clear sets nothing to attach
     [InlineData("event.attach_regarding", AccessRights.AppendTo)] // task 159: the regarding record is attached TO
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
     [InlineData("memory.pin_matter", AccessRights.AppendTo)] // task 166: a matter pin ATTACHES content to the matter
@@ -283,6 +287,8 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("finance.submit_invoice")] // ebilling-r1 task 044
     [InlineData("ebilling.invoice.decide")] // ebilling-r1 task 100
     [InlineData("ebilling.invoice.assign_firm")] // ebilling-r1 task 095d-1b
+    [InlineData("ebilling.record.assign_firm")] // ebilling-r1 task 095g
+    [InlineData("ebilling.record.remove_firm")] // ebilling-r1 task 095g
     [InlineData("event.attach_regarding")] // task 159
     [InlineData("entity.associate_document")]
     [InlineData("memory.pin_matter")] // task 166

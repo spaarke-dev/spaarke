@@ -1248,6 +1248,10 @@ public class ExternalDocumentNarrowingGuardTests
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::FlipToServableAsync"] =
             "Writes only sprk_filestatus (StoredFileSchema.Status, Servable) on sprk_storedfile, a literal key, under the row's own " +
             "version (UpdateIfRowVersionMatchesAsync); never a document.",
+        // ebilling-r1 task 095g: the firm-assign route's one slot writer, on a matter, project or work assignment only.
+        ["Sprk.Bff.Api.Services.Finance.CoreRecordFirmAssignmentService::WriteAsync"] =
+            "Writes only sprk_assignedlawfirm1 / sprk_assignedlawfirm2 (Slot1Column / Slot2Column, an organization reference or DBNull) on " +
+            "sprk_matter, sprk_project or sprk_workassignment (InvoiceCoreRecord.EntityLogicalName), under the version just read; never a document.",
         // ebilling-r1 task 094 (uac-r2 re-check (b)): the submission undo withdraws the invoice's file rows before their blobs go. Task 116
         // moved the write into the shared WithdrawRowsAsync (WithdrawForUndoAsync, and ReplaceForCallerAsync for a version's earlier file).
         ["Sprk.Bff.Api.Services.Finance.Files.StoredFileService::WithdrawRowsAsync"] =

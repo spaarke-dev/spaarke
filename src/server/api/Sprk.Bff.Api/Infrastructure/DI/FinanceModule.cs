@@ -233,6 +233,11 @@ public static class FinanceModule
         // allocator (095d-1a), the number columns' only writer. Unconditional (flag rule above); the route reads the kill switch.
         services.AddScoped<InvoiceAssignFirmService>();
 
+        // Assign a firm to a core record from the Outlook pane (ebilling-r1 task 095g, EB-D-224): the one writer of the record's assigned
+        // law-firm slots for that route, which then runs the Assigned-To owner (AssignedAccessMaterializer, ExternalAccessModule) inline.
+        // Concrete (ADR-010), scoped like its scoped dependencies. Unconditional (flag rule above); the routes read the kill switch.
+        services.AddScoped<CoreRecordFirmAssignmentService>();
+
         // Reject and Return to Firm of an invoice (ebilling-r1 task 104, FR-36): concrete (ADR-010), scoped like the approval service it follows.
         services.AddScoped<InvoiceRejectReturnService>();
 

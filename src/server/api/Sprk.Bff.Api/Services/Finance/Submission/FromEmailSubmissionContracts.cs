@@ -385,7 +385,16 @@ internal static class FromEmailSubmissionKey
 public sealed record InvoiceSubmissionFromEmailAccepted(Guid SubmissionId, Guid JobId, string TrackingNumber, string StatusUrl, Guid EmlDocumentId);
 
 /// <summary>One firm of a core record (contract section 8).</summary>
-public sealed record CoreRecordFirm(Guid FirmId, string Name);
+public sealed record CoreRecordFirm(Guid FirmId, string Name)
+{
+    /// <summary>The section 8 order: name (ordinal, ignore case), then id. The ONE definition: the section 8 GET and the firm-assign route's
+    /// <c>firms</c> (ebilling-r1 task 095g) both use it.</summary>
+    internal static IReadOnlyList<CoreRecordFirm> Ordered(IEnumerable<(Guid FirmId, string Name)> firms) => firms
+        .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+        .ThenBy(f => f.FirmId)
+        .Select(f => new CoreRecordFirm(f.FirmId, f.Name))
+        .ToList();
+}
 
 /// <summary>The 200 body of <c>GET /api/finance/invoices/{invoiceId}/correction-prefill</c> (ebilling-r1 task 097e; contract section 10).</summary>
 /// <param name="InvoiceId">The invoice asked about.</param>
