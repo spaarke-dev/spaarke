@@ -860,7 +860,7 @@ MetricCardMatrix renders 5 cards
 
 **Finance Dependency**: Finance cannot configure KPI cards until this deploys.
 
-**Reference**: See [`C:\code_files\spaarke-wt-matter-performance-KPI-r1\docs\architecture\visualhost-field-pivot-enhancement.md`](../../../spaarke-wt-matter-performance-KPI-r1/docs/architecture/visualhost-field-pivot-enhancement.md)
+**Reference**: See [`projects/x-matter-performance-KPI-r1/notes/visualhost-field-pivot-enhancement.md`](../../projects/x-matter-performance-KPI-r1/notes/visualhost-field-pivot-enhancement.md)
 
 ---
 

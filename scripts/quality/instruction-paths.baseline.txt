@@ -5,8 +5,6 @@
 .claude/adr/ADR-032-bff-nullobject-kill-switch.md|docs/adr/ADR-030-bff-nullobject-kill-switch.md
 .claude/adr/ADR-033-streaming-chat-tool-side-channel.md|src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs
 .claude/adr/ADR-048-communication-participant-index.md|scripts/Deploy-CommunicationParticipantSchema.ps1
-.claude/constraints/bff-extensions.md|docs/adr/ADR-013-bff-ai-architecture.md
-.claude/constraints/bff-extensions.md|docs/guides/bff-deploy-coordination.md
 .claude/constraints/provisioning.md|scripts/provisioning-prereqs/reserved-suffixes.yaml
 .claude/FAILURE-MODES.md|infrastructure/ai-search/spaarke-knowledge-index-v2.json
 .claude/FAILURE-MODES.md|scripts/ai-search/Deploy-IndexSchemas.ps1

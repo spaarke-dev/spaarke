@@ -1883,7 +1883,7 @@ claude --chrome
 ## Related Documentation
 
 - [CI/CD Workflow Guide](ci-cd-workflow.md) - GitHub Actions, commits, PRs, deployments
-- [Code Quality Onboarding Guide](../guides/code-quality-onboarding.md) - **Future:** Quick-start guide for new developers (task 042)
+- Code Quality Onboarding Guide - **Future:** Quick-start guide for new developers (task 042)
 - [Parallel Claude Code Sessions](parallel-claude-sessions.md) - Multi-session workflow
 - [Context Recovery Procedure](context-recovery.md) - Resuming work
 - [code-review Skill](../../.claude/skills/code-review/SKILL.md) - Full skill documentation
