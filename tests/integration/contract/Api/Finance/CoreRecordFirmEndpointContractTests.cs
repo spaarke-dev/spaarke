@@ -283,6 +283,28 @@ public sealed class CoreRecordFirmEndpointContractTests
         host.ShouldHaveDoneNothing();
     }
 
+    [Fact(DisplayName = "095g review 1 F2: the one record-rights helper never counts an incomplete answer as held, even one carrying rights, in every mode")]
+    public async Task RecordRightsHelper_AFaultedAnswerIsNeverHeld()
+    {
+        var source = new FinAuth.RecordingAccessDataSource();
+        var authorization = new AuthorizationService(source, Array.Empty<IAuthorizationRule>(), NullLogger<AuthorizationService>.Instance);
+        const string operation = "ebilling.record.assign_firm";
+        source.Grant(MatterSet, MatterId, AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo);
+
+        // Control: the complete answer with the rights is held.
+        (await FinanceAuthorizationFilter.CallerRecordVerdictAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
+            .Should().Be(FinanceCheckVerdict.Allowed);
+        (await FinanceAuthorizationFilter.CallerHoldsRightsAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
+            .Should().BeTrue();
+
+        source.Fault(MatterSet, MatterId);
+
+        (await FinanceAuthorizationFilter.CallerRecordVerdictAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
+            .Should().Be(FinanceCheckVerdict.Faulted);
+        (await FinanceAuthorizationFilter.CallerHoldsRightsAsync(authorization, "user", MatterSet, MatterId, operation, "token", CancellationToken.None))
+            .Should().BeFalse("the handlers' check and the filter's check give one answer on a fault");
+    }
+
     [Fact(DisplayName = "095g N1-N4, N11, N12: every uniform 404 has the same status and the same bytes")]
     public async Task Uniform404_IsByteIdentical()
     {
